@@ -23,3 +23,7 @@ models/
 
 # Local notes, never committed
 .scratch/
+node_modules/
+dist/
+*.tsbuildinfo
+apps/desktop/src-tauri/target/

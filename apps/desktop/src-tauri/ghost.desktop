@@ -1,0 +1,10 @@
+[Desktop Entry]
+Categories={{categories}}
+Comment={{comment}}
+Exec={{exec}} {{exec_arg}}
+Icon={{icon}}
+Name=Ghost
+Terminal=false
+Type=Application
+StartupNotify=true
+X-GNOME-Autostart-enabled=true

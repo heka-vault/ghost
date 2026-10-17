@@ -1,0 +1,8 @@
+packages:
+  - packages/client-ts
+  - packages/ui
+  - apps/desktop
+  - apps/mobile
+
+allowBuilds:
+  esbuild: true

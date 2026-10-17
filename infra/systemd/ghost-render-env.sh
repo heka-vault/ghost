@@ -17,9 +17,9 @@ OUT="$OUT_DIR/env"
 KEYS=(ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN CLIPROXY_BASE_URL GITHUB_TOKEN GHOST_REPOS HF_TOKEN TYPESAFE_API_KEY OPENROUTER_API_KEY)
 
 if [[ ! -r "$SECRETS_ENV" ]]; then
-  echo "ghost-render-env: $SECRETS_ENV missing; keeping existing $OUT" >&2
-  [[ -r "$OUT" ]] && exit 0
-  exit 1
+  # No secrets store on this machine: the desktop app writes $OUT instead. Not an error.
+  echo "ghost-render-env: no $SECRETS_ENV; using $OUT as written by the app" >&2
+  exit 0
 fi
 
 set -a

@@ -1,0 +1,23 @@
+{
+  "name": "heka-ghost",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Ghost: voice assistant daemon (Python) with TypeScript desktop and mobile apps",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "gen": "pnpm --filter @ghost/client-ts gen",
+    "gen:check": "pnpm --filter @ghost/client-ts gen && git diff --exit-code -- packages/client-ts/src/schema.d.ts",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build",
+    "dev:desktop": "pnpm --filter @ghost/desktop dev",
+    "tauri": "pnpm --filter @ghost/desktop tauri"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

@@ -22,7 +22,7 @@ set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a;
 endef
 
 .PHONY: help sync test lint fmt check devices env policy run start stop wake say status api-schema restore-volumes \
-        echo-cancel echo-cancel-off service service-logs
+        echo-cancel echo-cancel-off service service-logs build-image deb deb-test
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -96,6 +96,15 @@ service: ## install ghostd.service as a user unit (does not enable it)
 	install -m 644 infra/systemd/ghostd.service $(HOME)/.config/systemd/user/
 	systemctl --user daemon-reload
 	@echo "systemctl --user enable --now ghostd   # when ready"
+
+build-image: ## build the Docker image used to produce the .debs (Tauri + Rust + uv)
+	docker build -t heka-ghost-build -f packaging/Dockerfile.build .
+
+deb: ## build heka-ghostd, heka-ghost-desktop and heka-ghost .debs into dist/deb (in Docker)
+	docker run --rm -v "$(CURDIR)":/src -v heka-ghost-build-cache:/cache -w /src heka-ghost-build packaging/build-debs.sh $(ONLY)
+
+deb-test: ## install the .debs into a clean Ubuntu 26.04 container and run ghostd check
+	docker run --rm -v "$(CURDIR)/dist/deb":/deb:ro ubuntu:26.04 bash -c 'apt-get update -qq && apt-get install -y -qq /deb/*.deb >/dev/null && ghostd --help; ghostd abilities; GHOST_GITHUB_MOCK=1 ANTHROPIC_BASE_URL=http://x ghostd check'
 
 service-logs: ## follow ghostd.service logs
 	journalctl --user -u ghostd -f

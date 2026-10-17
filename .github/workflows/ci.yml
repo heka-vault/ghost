@@ -3,17 +3,29 @@ on:
   push:
     branches: [main]
   pull_request:
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  python:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: sudo apt-get update -q && sudo apt-get install -y -q libportaudio2 libpulse0
-      - run: uv python install 3.12
-      - run: uv sync --all-packages --group dev --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q
+        with: { enable-cache: true }
+      - run: uv sync --all-packages --frozen
+      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run pytest -q -p no:cacheprovider
+      - name: openapi.json is current
+        run: uv run python -m ghost_api.export | diff -q - packages/api/openapi.json
+
+  typescript:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: generated client is current
+        run: pnpm gen:check
+      - run: pnpm typecheck
+      - run: pnpm test
