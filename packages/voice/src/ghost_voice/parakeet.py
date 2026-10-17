@@ -12,6 +12,8 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
+from ghost_voice import debug
+
 
 class ParakeetSTTService(SegmentedSTTService):
     """Transcribes each VAD-delimited segment off the event loop.
@@ -27,7 +29,6 @@ class ParakeetSTTService(SegmentedSTTService):
         quantization: str | None = "int8",
         threads: int = 4,
         sample_rate: int = 16000,
-        log_transcripts: bool = True,
         **kwargs,
     ) -> None:
         # Measured p50 is 0.16 s per command; 0.5 s leaves headroom under load.
@@ -40,23 +41,19 @@ class ParakeetSTTService(SegmentedSTTService):
         self._model_name = model
         self._quantization = quantization
         self._threads = threads
-        self._log_transcripts = log_transcripts
         self._model = None
 
-    def fork(self, *, log_transcripts: bool = True) -> ParakeetSTTService:
+    def fork(self) -> ParakeetSTTService:
         """A fresh processor sharing this instance's loaded model.
 
         A Pipecat processor belongs to one pipeline at a time, so each session and
         each passive wake listener gets its own; the 1.7 GB model is loaded once.
-        ``log_transcripts=False`` for the passive listener: what it hears is never
-        written anywhere (ADR 0010).
         """
         other = ParakeetSTTService(
             model=self._model_name,
             quantization=self._quantization,
             threads=self._threads,
             sample_rate=self.sample_rate,
-            log_transcripts=log_transcripts,
         )
         other._model = self._model
         return other
@@ -99,7 +96,7 @@ class ParakeetSTTService(SegmentedSTTService):
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
         text = (text or "").strip()
+        # Transcripts are logged only under GHOST_DEBUG_AUDIO (ghost_voice.debug).
         if text:
-            if self._log_transcripts:
-                logger.debug(f"stt: {text!r}")
+            debug.audio(f"heard: {text!r}")
             yield TranscriptionFrame(text, self._user_id, time_now_iso8601())

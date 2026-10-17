@@ -65,14 +65,19 @@ class TranscriptWakeDetector:
     async def wait(self) -> str | None:
         spoken = asyncio.ensure_future(self._listener.wait())
         manual = asyncio.ensure_future(self._manual.wait())
-        done, pending = await asyncio.wait({spoken, manual}, return_when=asyncio.FIRST_COMPLETED)
-        for t in pending:
-            t.cancel()
-        if spoken in done:
-            manual.cancel()
-            return spoken.result().remainder or None
-        await self._listener.stop()
-        return None
+        try:
+            done, _ = await asyncio.wait({spoken, manual}, return_when=asyncio.FIRST_COMPLETED)
+            if spoken in done:
+                return spoken.result().remainder or None
+            return None
+        finally:
+            # Whether a phrase matched, the file fired, or we were cancelled
+            # (Ctrl+C): release the microphone before anything else runs.
+            for t in (spoken, manual):
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(spoken, manual, return_exceptions=True)
+            await self._listener.stop()
 
     def close(self) -> None:
         self._manual.close()

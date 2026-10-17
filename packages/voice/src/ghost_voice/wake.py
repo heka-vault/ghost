@@ -17,7 +17,12 @@ from dataclasses import dataclass
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import (
+    Frame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.audio.vad_processor import VADProcessor
@@ -25,6 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.workers.runner import WorkerRunner
 
+from ghost_voice import debug
 from ghost_voice.config import VoiceSettings
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
 
@@ -94,7 +100,13 @@ class WakeMatchProcessor(FrameProcessor):
             m = match_wake(frame.text, self._phrases)
             if m:
                 await self._on_match(m)
+            else:
+                debug.audio(f"passive: no wake phrase in {frame.text!r}")
             return  # transcripts are never forwarded or kept
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            debug.audio("passive: speech started")
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            debug.audio("passive: speech stopped, transcribing")
         await self.push_frame(frame, direction)
 
 

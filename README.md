@@ -37,6 +37,11 @@ make wake            # optional, from another shell: trigger a wake by hand
 Say "Hey Ghost", or "Ghost, you there?" (`GHOST_WAKE_PHRASES` to change them). Words
 in the same breath are the first request: "hey ghost, what needs my sign-off".
 
+When Ghost does not react the way you expect, run `GHOST_DEBUG_AUDIO=1 make run`: it
+logs what Parakeet heard (also while passive), VAD starts and stops, wake matches and
+misses, barge-in decisions, and confirmation verdicts. It is off by default and logs
+only to your terminal.
+
 `make help` lists the rest (`test`, `lint`, `start`/`stop` for a background daemon,
 `restore-volumes`, `service`). Non-secret settings such as `GHOST_GITHUB_MOCK=1` go in
 `~/.config/ghost/settings.env`, which `make env` seeds and folds into the rendered file.

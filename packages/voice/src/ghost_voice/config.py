@@ -47,3 +47,8 @@ class VoiceSettings(BaseSettings):
     output_device: int | str | None = None
 
     cache_dir: Path = Path.home() / ".cache" / "ghost"
+
+    # Log transcripts, VAD and turn decisions (ghost_voice.debug). Off by default:
+    # with it off, nothing Ghost hears while passive is written anywhere.
+    debug_audio: bool = False
+    log_level: str = "INFO"  # loguru level for everything, incl. Pipecat internals

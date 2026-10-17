@@ -27,6 +27,8 @@ from pipecat.frames.frames import (
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start import BaseUserTurnStartStrategy
 
+from ghost_voice import debug
+
 
 class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
     def __init__(self, *, min_words: int = 2, **kwargs) -> None:
@@ -50,8 +52,10 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
             self._bot_speaking = False
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             if not self._bot_speaking:
+                debug.audio("turn: started by VAD")
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
+            debug.audio("turn: VAD while Ghost speaks, waiting for words")
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             return await self._on_text(frame.text)
         return ProcessFrameResult.CONTINUE
@@ -64,9 +68,11 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 return ProcessFrameResult.STOP
             return ProcessFrameResult.CONTINUE
         if self._min_words > 0 and words >= self._min_words:
+            debug.audio(f"turn: barge-in on {text!r}")
             await self.trigger_user_turn_started()
             return ProcessFrameResult.STOP
         # Too short to be a deliberate interruption while the bot talks: most
         # likely the bot's own voice. Drop it rather than queue it.
+        debug.audio(f"turn: dropped {text!r} while Ghost speaks")
         await self.trigger_reset_aggregation()
         return ProcessFrameResult.CONTINUE

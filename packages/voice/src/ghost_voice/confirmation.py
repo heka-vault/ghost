@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from ghost_voice import debug
+
 
 class ConfirmationProcessor(FrameProcessor):
     def __init__(self, gate: WriteGate, session_id: str, **kwargs) -> None:
@@ -43,12 +45,15 @@ class ConfirmationProcessor(FrameProcessor):
             self._bot_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
-        elif (
+        elif isinstance(frame, TranscriptionFrame) and self._gate.pending(self._session_id):
+            debug.audio(f"confirmation: ignored {frame.text!r}, Ghost still speaking")
+        if (
             isinstance(frame, TranscriptionFrame)
             and not self._bot_speaking
             and self._gate.pending(self._session_id)
         ):
             verdict, outcome = await self._gate.on_user_turn(self._session_id, frame.text)
+            debug.audio(f"confirmation: {verdict.name} for {frame.text!r}")
             if verdict is Verdict.AFFIRMATIVE and outcome is not None:
                 logger.info(f"executed {outcome.proposal_id}: {outcome.status}")
                 note = (

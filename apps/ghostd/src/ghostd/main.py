@@ -8,7 +8,7 @@ import sys
 
 from ghost_domain import Store, WriteGate
 from ghost_skills import load_skills
-from ghost_voice import VoiceSettings, build_session
+from ghost_voice import VoiceSettings, build_session, debug
 from ghost_voice.pipeline import Models
 from ghost_voice.wake import build_wake_listener, parse_phrases
 from loguru import logger
@@ -36,7 +36,7 @@ class Daemon:
             logger.info(f"wake phrases: {', '.join(repr(p) for p in phrases)}")
             listener = build_wake_listener(
                 self.voice,
-                stt_factory=lambda: models.stt.fork(log_transcripts=False),
+                stt_factory=models.stt.fork,
                 phrases=phrases,
             )
             return TranscriptWakeDetector(listener, manual)
@@ -89,6 +89,7 @@ class Daemon:
                 stop_task.cancel()
                 if self._stop.is_set():
                     wake_task.cancel()
+                    await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
                     break
                 if is_dictating(self.cfg.dictation_flag):
                     logger.info("wake ignored: dictation is active")
@@ -143,6 +144,14 @@ def cli(argv: list[str] | None = None) -> None:
     if cmd == "run":
         cfg = GhostdSettings()
         voice = VoiceSettings()  # type: ignore[call-arg]
+        if voice.log_level.upper() != "INFO":
+            logger.remove()
+            logger.add(
+                sys.stderr,
+                level=voice.log_level.upper(),
+                format="{time:HH:mm:ss.SSS} {level:<7} {name}: {message}",
+            )
+        debug.enable(voice.debug_audio)
         asyncio.run(Daemon(cfg, voice).run())
     elif cmd == "wake":
         (runtime_dir() / WAKE_FILE).touch()
