@@ -21,14 +21,15 @@ class FakeGate:
     def pending(self, session_id):
         return object()
 
-    async def on_user_turn(self, session_id, text, now=None):
+    async def on_user_turn(self, session_id, text, now=None, question=""):
         self.turns.append(text)
+        self.question = question
         return Verdict.NEGATIVE, None
 
 
 def processor():
     gate = FakeGate()
-    proc = ConfirmationProcessor(gate, "s1")
+    proc = ConfirmationProcessor(gate, "s1", last_assistant=lambda: "Close it?")
     pushed = []
 
     async def push_frame(frame, direction=FrameDirection.DOWNSTREAM):
@@ -58,5 +59,19 @@ async def test_transcript_after_readback_reaches_gate():
     await proc.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
     await proc.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
     await proc.process_frame(said("no"), FrameDirection.DOWNSTREAM)
-    assert gate.turns == ["no"]
+    assert gate.turns == ["no"] and gate.question == "Close it?"
     assert any(isinstance(f, LLMMessagesAppendFrame) for f in pushed)
+
+
+def test_last_assistant_text_reads_context():
+    from ghost_voice.pipeline import last_assistant_text
+    from pipecat.processors.aggregators.llm_context import LLMContext
+
+    ctx = LLMContext(
+        messages=[
+            {"role": "user", "content": "close it"},
+            {"role": "assistant", "content": [{"type": "text", "text": "Close 151?"}]},
+        ]
+    )
+    assert last_assistant_text(ctx) == "Close 151?"
+    assert last_assistant_text(LLMContext()) == ""

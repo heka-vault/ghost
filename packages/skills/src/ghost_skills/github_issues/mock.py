@@ -64,6 +64,7 @@ class MockGitHubClient:
     def __init__(self) -> None:
         self._issues: dict[tuple[str, int], dict[str, Any]] = {}
         self._comments: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        self._next_comment_id = 1000
         for repo, number, title, labels, body in _SEED:
             self._issues[(repo, number)] = {
                 "number": number,
@@ -75,7 +76,9 @@ class MockGitHubClient:
                 "comments": len(_COMMENTS.get((repo, number), [])),
                 "updated_at": "2026-10-16T09:00:00Z",
             }
-            self._comments[(repo, number)] = list(_COMMENTS.get((repo, number), []))
+            self._comments[(repo, number)] = [
+                {"id": 1 + k, **c} for k, c in enumerate(_COMMENTS.get((repo, number), []))
+            ]
 
     async def aclose(self) -> None: ...
 
@@ -136,10 +139,24 @@ class MockGitHubClient:
 
     async def create_comment(self, t: Target, body: str) -> None:
         self._issue(t)["comments"] += 1
+        self._next_comment_id += 1
         self._comments[(t.full_name, t.number)].append(
-            {"user": {"login": "operator"}, "created_at": _now(), "body": body}
+            {
+                "id": self._next_comment_id,
+                "user": {"login": "operator"},
+                "created_at": _now(),
+                "body": body,
+            }
         )
         self._touch(t)
+
+    async def delete_comment(self, t: Target, comment_id: int) -> None:
+        key = (t.full_name, t.number)
+        before = len(self._comments[key])
+        self._comments[key] = [c for c in self._comments[key] if c.get("id") != comment_id]
+        if len(self._comments[key]) != before:
+            self._issue(t)["comments"] -= 1
+            self._touch(t)
 
     async def set_state(self, t: Target, state: Literal["open", "closed"]) -> None:
         self._issue(t)["state"] = state

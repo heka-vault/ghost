@@ -35,8 +35,8 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 |---|---|
 | `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on "go to sleep" or idle timeout |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
-| `skills` | Pluggable capabilities (ADR 0006). Each skill declares its read tools and the write operations it can `prepare`. `github_issues` is the first one |
-| `domain` | The write gate (ADR 0007): proposals, confirmation checks, idempotent execution, readback, and the audit log. The only code that can execute a write |
+| `skills` | Pluggable capabilities (ADR 0006). Each skill declares its read tools and its write operations with a risk class. `github_issues` is the first one |
+| `domain` | The write gate (ADR 0007, ADR 0011): the operator's autonomy policy, proposals, confirmation classifiers (Jev or regex), idempotent execution, readback, undo, and the audit log. The only code that can execute a write |
 | SQLite | Review checkpoints, proposals, operations, operation events, optional transcripts |
 
 ## Conversation flow
@@ -48,13 +48,27 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 
 ## Writes
 
-The protocol from the original spec (section 8) stands, with one simplification. Speech-to-text runs inside our own process, so the backend observes the transcribed user turn directly. The spec's worry that a model-supplied "confirmation text" might be fabricated goes away: `domain` accepts a confirmation only from a transcript frame the pipeline produced for the current session, never from LLM output.
+Speech-to-text runs inside our own process, so the backend observes the transcribed
+user turn directly. `domain` accepts a confirmation only from a transcript frame the
+pipeline produced for the current session, never from LLM output. How much Ghost does
+without asking is the operator's call (ADR 0011):
 
-1. The LLM calls `prepare` on a skill: target, typed change set, rationale.
-2. `domain` fetches the issue, stores an immutable proposal (expires after 60 s), and returns a preview for the agent to read aloud.
-3. The next user turn must be a clear affirmative. `domain` checks the proposal, its expiry, and that the issue hasn't changed, then claims it atomically.
-4. `domain` applies each step, reads the issue back, and records success, partial, or failed. Generated comments carry a hidden marker so a retry never duplicates them.
-5. The agent speaks the verified result, not a guess.
+1. The LLM calls `change` on a skill: target, typed change set, rationale.
+2. `domain` checks the repository allowlist, then resolves the autonomy level for
+   this skill, operation, and target from `~/.config/ghost/policy.toml` (`deny`,
+   `confirm`, `announce`, `quiet`; a missing entry falls back to the operation's
+   risk class).
+3. `domain` fetches the issue and stores an immutable proposal with that snapshot.
+4. At `announce` or `quiet` the proposal is executed at once. At `confirm` it waits
+   up to 60 s for the next user turn; the classifier (Jev when configured, else the
+   regex allowlist, negation guard in both) must call it a clear yes, and the issue
+   must not have changed since the snapshot. Any other turn cancels it.
+5. Execution claims the proposal atomically, applies each step, reads the issue back,
+   and records success, partial, or failed. Generated comments carry a hidden marker
+   so a retry never duplicates them.
+6. The model gets the verified result and says what happened in a few words, or asks
+   one short question when confirmation is needed. "Undo that" reverses the last
+   executed change set within ten minutes using the stored snapshot and the marker.
 
 ## Repository layout
 
@@ -83,13 +97,13 @@ transport.input -> Parakeet STT -> ConfirmationProcessor -> user aggregator -> L
 ```
 
 `ConfirmationProcessor` sees every `TranscriptionFrame`. If the gate holds a pending
-proposal for the session, the frame's text is the confirmation evidence: a clear
-affirmative executes, anything else cancels. Transcripts that arrive while Ghost is
-still speaking are not evidence at all: the operator has not heard the whole readback,
-and the text may be Ghost's own voice. The verified outcome is appended to the
-context as a system note, so the model's next sentence describes what actually
-happened. The model's tools are the skills' read tools, one `prepare`, and
-`go_to_sleep`. There is no execute tool.
+proposal for the session, the frame's text is the confirmation evidence, judged with
+Ghost's last reply as context: a clear yes executes, anything else cancels. Transcripts
+that arrive while Ghost is still speaking are not evidence at all: the operator has
+not heard the question yet, and the text may be Ghost's own voice. The verified
+outcome is appended to the context as a system note, so the model's next sentence
+describes what actually happened. The model's tools are the skills' read tools,
+`change`, `undo`, and `go_to_sleep`. There is no tool that bypasses the gate.
 
 The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the
 install needs no compiled extension; PortAudio comes with the wheel and talks to

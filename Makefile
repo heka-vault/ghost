@@ -14,13 +14,14 @@ SHELL := /bin/bash
 
 ENV_FILE ?= $(if $(wildcard .env),.env,$(HOME)/.config/ghost/env)
 SETTINGS := $(HOME)/.config/ghost/settings.env
+POLICY := $(HOME)/.config/ghost/policy.toml
 UV ?= uv
 
 define load_env
 set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a;
 endef
 
-.PHONY: help sync test lint fmt check devices env run start stop wake restore-volumes \
+.PHONY: help sync test lint fmt check devices env policy run start stop wake restore-volumes \
         echo-cancel echo-cancel-off service service-logs
 
 help: ## list targets
@@ -39,13 +40,20 @@ lint: ## ruff check + format check
 fmt: ## ruff format
 	$(UV) run ruff format .
 
-env: ## render ~/.config/ghost/env from the secrets store; seeds settings.env on first run
+env: ## render ~/.config/ghost/env from the secrets store; seeds settings.env and policy.toml on first run
 	@if [[ ! -e "$(SETTINGS)" ]]; then \
 	  mkdir -p "$(dir $(SETTINGS))"; \
 	  printf 'GHOST_GITHUB_MOCK=1\nGHOST_INPUT_DEVICE=ghost.mic\n' > "$(SETTINGS)"; \
 	  echo "seeded $(SETTINGS) (mock GitHub, ghost.mic); edit it for non-secret settings"; \
 	fi
+	@if [[ ! -e "$(POLICY)" ]]; then \
+	  mkdir -p "$(dir $(POLICY))"; cp infra/policy.example.toml "$(POLICY)"; \
+	  echo "seeded $(POLICY); edit it to set how much Ghost may do on its own"; \
+	fi
 	infra/systemd/ghost-render-env.sh
+
+policy: ## show the autonomy level Ghost resolves for every operation
+	@$(load_env) $(UV) run ghostd check
 
 check: ## config sanity (models, endpoint, devices) using $(ENV_FILE)
 	@$(load_env) $(UV) run ghostd check

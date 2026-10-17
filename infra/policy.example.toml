@@ -1,0 +1,29 @@
+# Ghost autonomy policy (ADR 0011). Copied to ~/.config/ghost/policy.toml by `make env`.
+#
+# For each write operation, how much Ghost may do on its own:
+#   deny      not offered to the model at all
+#   confirm   Ghost asks first and waits for your spoken yes
+#   announce  Ghost does it, then says so in a few words
+#   quiet     Ghost does it and only mentions it if asked, or if it failed
+#
+# Anything you leave out falls back to the skill's suggested default for that
+# operation: low-risk ops (labels, comments) announce; close and reopen confirm.
+# Resolution order: target rule > skill rule > [defaults] > skill default.
+# Ghost never writes this file, and nothing in an issue can change it.
+# Every level still logs the write and lets you say "undo that" for ten minutes.
+
+[defaults]
+# autonomy = "confirm"        # uncomment to make everything ask unless listed below
+
+[github_issues]
+set_labels      = "announce"
+comment         = "announce"
+approve         = "announce"
+request_changes = "announce"
+close           = "confirm"
+reopen          = "confirm"
+
+# Tighter on a repository other people watch:
+# [github_issues.targets."owner/public-repo"]
+# comment = "confirm"
+# close   = "deny"

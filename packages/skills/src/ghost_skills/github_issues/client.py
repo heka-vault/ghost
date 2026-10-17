@@ -95,6 +95,11 @@ class GitHubClient:
     async def set_state(self, t: Target, state: Literal["open", "closed"]) -> None:
         await self._send("PATCH", f"/repos/{t.full_name}/issues/{t.number}", {"state": state})
 
+    async def delete_comment(self, t: Target, comment_id: int) -> None:
+        r = await self._http.delete(f"/repos/{t.full_name}/issues/comments/{comment_id}")
+        if r.status_code != 404:  # already gone is fine: idempotent
+            r.raise_for_status()
+
 
 def snapshot_of(issue: dict[str, Any]) -> Snapshot:
     return Snapshot(
@@ -128,6 +133,11 @@ class GitHubIssueWriter:
             if marker in (c.get("body") or ""):
                 return
         await self._c.create_comment(target, f"{body}\n\n{marker_comment(marker)}")
+
+    async def delete_comment(self, target: Target, marker: str) -> None:
+        for c in await self._c.list_comments(target, per_page=100):
+            if marker in (c.get("body") or "") and "id" in c:
+                await self._c.delete_comment(target, int(c["id"]))
 
     async def set_state(self, target: Target, state: Literal["open", "closed"]) -> None:
         await self._c.set_state(target, state)

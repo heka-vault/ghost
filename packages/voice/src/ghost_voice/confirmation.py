@@ -2,9 +2,12 @@
 
 Sits between STT and the user aggregator. Every TranscriptionFrame it sees is
 the pipeline's own evidence of what the operator said (ADR 0007). When a
-proposal is pending, the gate decides; on an affirmative the gate executes and
-the verified outcome is placed in the LLM context as a system note so the model
-speaks the real result.
+proposal is pending (a ``confirm``-level operation, ADR 0011), the gate's
+classifier decides; on an affirmative the gate executes and the verified outcome
+is placed in the LLM context as a system note so the model speaks the real
+result. Ghost's last reply (read from the LLM context, since TTS text never
+travels upstream) is passed along as the question being answered, so a
+classifier can read "yeah" in context.
 
 A transcript that arrives while Ghost is still talking is not confirmation
 evidence: the operator has not heard the whole readback yet, and before echo
@@ -13,6 +16,8 @@ untouched and the proposal stays pending until a turn after the readback ends.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from ghost_domain import Verdict, WriteGate
 from loguru import logger
@@ -29,11 +34,19 @@ from ghost_voice import debug
 
 
 class ConfirmationProcessor(FrameProcessor):
-    def __init__(self, gate: WriteGate, session_id: str, **kwargs) -> None:
+    def __init__(
+        self,
+        gate: WriteGate,
+        session_id: str,
+        *,
+        last_assistant: Callable[[], str] | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._gate = gate
         self._session_id = session_id
         self._bot_speaking = False
+        self._last_assistant = last_assistant or (lambda: "")
 
     @property
     def bot_speaking(self) -> bool:
@@ -52,20 +65,22 @@ class ConfirmationProcessor(FrameProcessor):
             and not self._bot_speaking
             and self._gate.pending(self._session_id)
         ):
-            verdict, outcome = await self._gate.on_user_turn(self._session_id, frame.text)
+            verdict, outcome = await self._gate.on_user_turn(
+                self._session_id, frame.text, question=self._last_assistant()
+            )
             debug.audio(f"confirmation: {verdict.name} for {frame.text!r}")
             if verdict is Verdict.AFFIRMATIVE and outcome is not None:
                 logger.info(f"executed {outcome.proposal_id}: {outcome.status}")
                 note = (
-                    "[system] The operator confirmed. Result, verified by reading the issue "
-                    f"back: {outcome.spoken()} Tell the operator exactly this."
+                    "[system] The operator said yes. Verified result: "
+                    f"{outcome.summary()} Say what happened in a few words."
                 )
             elif verdict is Verdict.NEGATIVE:
-                note = "[system] The operator declined. The proposal is cancelled. Say so briefly."
+                note = "[system] The operator said no. Nothing was changed. Acknowledge briefly."
             else:
                 note = (
-                    "[system] The pending proposal was cancelled because the operator did not "
-                    "clearly confirm. If they still want it, prepare it again."
+                    "[system] The operator did not clearly say yes, so the pending change was "
+                    "dropped. If they still want it, call change again."
                 )
             await self.push_frame(
                 LLMMessagesAppendFrame(messages=[{"role": "user", "content": note}], run_llm=False)

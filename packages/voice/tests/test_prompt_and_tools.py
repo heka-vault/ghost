@@ -3,7 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from ghost_domain import ChangeSet, RepoPolicy, SetLabels, Snapshot, Store, Target, WriteGate
+from ghost_domain import (
+    AutonomyPolicy,
+    ChangeSet,
+    RepoPolicy,
+    SetLabels,
+    Snapshot,
+    Store,
+    Target,
+    WriteGate,
+)
 from ghost_skills.base import PrepareOp, PrepareRequest, ReadTool
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.tools import register_tools
@@ -28,11 +37,19 @@ class FakeParams:
 
 
 class FakeWriter:
-    async def fetch(self, target):
-        return Snapshot(title="T", state="open", labels=("needs-signoff",), updated_at="x")
+    def __init__(self):
+        self.labels = ["needs-signoff"]
+        self.writes = []
 
-    async def set_labels(self, *a): ...
+    async def fetch(self, target):
+        return Snapshot(title="T", state="open", labels=tuple(self.labels), updated_at="x")
+
+    async def set_labels(self, target, add, remove):
+        self.writes.append(("set_labels", add, remove))
+        self.labels = [x for x in self.labels if x not in remove] + list(add)
+
     async def add_comment(self, *a, **k): ...
+    async def delete_comment(self, *a, **k): ...
     async def set_state(self, *a): ...
 
 
@@ -49,17 +66,15 @@ class FakeSkill:
 
     @property
     def prepare_ops(self):
+        issue = {"repo": {"type": "string"}, "number": {"type": "integer"}}
         return [
-            PrepareOp(
-                "flag",
-                "Flag it.",
-                {"repo": {"type": "string"}, "number": {"type": "integer"}},
-                ["repo", "number"],
-            )
+            PrepareOp("flag", "Flag it.", issue, ["repo", "number"], risk="low"),
+            PrepareOp("nuke", "Dangerous.", issue, ["repo", "number"], risk="high"),
+            PrepareOp("never", "Denied by policy.", issue, ["repo", "number"], risk="low"),
         ]
 
     async def prepare(self, operation, args):
-        if operation != "flag":
+        if operation not in {"flag", "nuke", "never"}:
             raise ValueError("bad op")
         owner, repo = args["repo"].split("/")
         return PrepareRequest(
@@ -75,7 +90,12 @@ class FakeSkill:
 @pytest.fixture
 def wired():
     llm = FakeLLM()
-    gate = WriteGate(Store(), FakeWriter(), RepoPolicy.from_csv("acme/app"))
+    gate = WriteGate(
+        Store(),
+        FakeWriter(),
+        RepoPolicy.from_csv("acme/app"),
+        autonomy=AutonomyPolicy.parse('[fake]\nnever = "deny"\n'),
+    )
     slept = []
 
     async def on_sleep():
@@ -92,9 +112,16 @@ def test_prompt_includes_fragments_and_persona():
     assert "You are Ghost" in p and "FRAG" in p and "not Claude Code" in p
 
 
-def test_only_reads_prepare_and_sleep_are_exposed(wired):
+def test_only_reads_change_undo_and_sleep_are_exposed(wired):
     _, _, schemas, _ = wired
-    assert sorted(s.name for s in schemas) == ["echo", "go_to_sleep", "prepare"]
+    assert sorted(s.name for s in schemas) == ["change", "echo", "go_to_sleep", "undo"]
+
+
+def test_denied_ops_are_not_offered(wired):
+    _, _, schemas, _ = wired
+    change = next(s for s in schemas if s.name == "change")
+    assert "fake.flag" in change.description and "fake.nuke" in change.description
+    assert "fake.never" not in change.description
 
 
 async def test_read_tool_round_trip(wired):
@@ -104,23 +131,51 @@ async def test_read_tool_round_trip(wired):
     assert p.result == {"echo": {"x": "hi"}}
 
 
-async def test_prepare_stores_proposal_and_returns_preview(wired):
-    llm, gate, _, _ = wired
-    p = FakeParams(
-        "prepare", {"skill": "fake", "operation": "flag", "args": {"repo": "acme/app", "number": 1}}
+def call(op, repo="acme/app"):
+    return FakeParams(
+        "change", {"skill": "fake", "operation": op, "args": {"repo": repo, "number": 1}}
     )
-    await llm.functions["prepare"](p)
-    assert "preview" in p.result and gate.pending("s") is not None
 
 
-async def test_prepare_rejects_disallowed_repo(wired):
+async def test_low_risk_change_is_done_at_once(wired):
     llm, gate, _, _ = wired
-    p = FakeParams(
-        "prepare",
-        {"skill": "fake", "operation": "flag", "args": {"repo": "acme/other", "number": 1}},
-    )
-    await llm.functions["prepare"](p)
+    p = call("flag")
+    await llm.functions["change"](p)
+    assert p.result["status"] == "done" and "add flagged" in p.result["result"]
+    assert "flagged" in p.result["state_now"] and gate.pending("s") is None
+
+
+async def test_high_risk_change_needs_confirmation(wired):
+    llm, gate, _, _ = wired
+    p = call("nuke")
+    await llm.functions["change"](p)
+    assert p.result["status"] == "needs_confirmation" and "add flagged" in p.result["summary"]
+    assert gate.pending("s") is not None
+
+
+async def test_denied_op_errors_even_if_called(wired):
+    llm, gate, _, _ = wired
+    p = call("never")
+    await llm.functions["change"](p)
     assert "error" in p.result and gate.pending("s") is None
+
+
+async def test_change_rejects_disallowed_repo(wired):
+    llm, gate, _, _ = wired
+    p = call("flag", repo="acme/other")
+    await llm.functions["change"](p)
+    assert "error" in p.result and gate.pending("s") is None
+
+
+async def test_undo_reverses_last_change(wired):
+    llm, gate, _, _ = wired
+    await llm.functions["change"](call("flag"))
+    u = FakeParams("undo", {})
+    await llm.functions["undo"](u)
+    assert u.result["status"] == "done" and "remove flagged" in u.result["result"]
+    u2 = FakeParams("undo", {})
+    await llm.functions["undo"](u2)
+    assert "error" in u2.result
 
 
 async def test_go_to_sleep_calls_back(wired):

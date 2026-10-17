@@ -94,6 +94,21 @@ class GhostSession:
         await self.runner.cancel()
 
 
+def last_assistant_text(context: LLMContext) -> str:
+    """Ghost's most recent reply, as plain text, for the confirmation classifier."""
+    for m in reversed(context.get_messages()):
+        if m.get("role") != "assistant":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return " ".join(
+                str(b.get("text", "")) for b in content if isinstance(b, dict) and "text" in b
+            ).strip()
+    return ""
+
+
 def build_session(
     settings: VoiceSettings,
     *,
@@ -185,7 +200,9 @@ def build_session(
         [
             transport.input(),
             models.stt.fork(),
-            ConfirmationProcessor(gate, session_id),
+            ConfirmationProcessor(
+                gate, session_id, last_assistant=lambda: last_assistant_text(context)
+            ),
             user_agg,
             llm,
             ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs),

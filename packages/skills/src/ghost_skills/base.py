@@ -3,9 +3,11 @@
 A skill declares:
 
 * ``read_tools``: typed, read-only functions the LLM may call directly.
-* ``prepare_ops``: named write operations. The LLM calls ``prepare`` with one of
+* ``prepare_ops``: named write operations. The LLM calls ``change`` with one of
   these; the skill turns the arguments into a typed ``ChangeSet`` and the domain
-  gate takes it from there. A skill never executes a write.
+  gate takes it from there, at the autonomy level the operator's policy gives
+  that operation (ADR 0011). A skill never executes a write itself. Each op
+  declares a ``risk`` class, which is only the suggested default.
 * ``prompt_fragment``: what the system prompt says about this skill.
 """
 
@@ -15,7 +17,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from ghost_domain import ChangeSet, Target
+from ghost_domain import ChangeSet, Risk, Target
 
 ToolResult = dict[str, Any]
 ToolHandler = Callable[[dict[str, Any]], Awaitable[ToolResult]]
@@ -46,6 +48,7 @@ class PrepareOp:
     description: str
     properties: dict[str, Any]
     required: list[str] = field(default_factory=list)
+    risk: Risk = "medium"  # low -> announce by default; medium/high -> confirm
 
 
 class Skill(Protocol):

@@ -54,6 +54,12 @@ class FakeWriter:
         existing.append((body, marker))
         self._touch(target)
 
+    async def delete_comment(self, target, marker) -> None:
+        self.calls.append(("delete_comment", target, marker))
+        existing = self.comments.get(target, [])
+        self.comments[target] = [(b, m) for b, m in existing if m != marker]
+        self._touch(target)
+
     async def set_state(self, target, state: Literal["open", "closed"]) -> None:
         self.calls.append(("set_state", target, state))
         self.issues[target]["state"] = state

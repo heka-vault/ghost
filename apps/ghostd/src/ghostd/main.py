@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
+from datetime import timedelta
 
-from ghost_domain import Store, WriteGate
+from ghost_domain import AutonomyPolicy, ConfirmationClassifier, RegexClassifier, Store, WriteGate
+from ghost_domain.jev import JevClassifier, JevClient
 from ghost_skills import load_skills
 from ghost_voice import VoiceSettings, build_session, debug
 from ghost_voice.pipeline import Models
@@ -69,8 +71,39 @@ class Daemon:
             logger.warning("GITHUB MOCK: issues are in-memory; nothing reaches GitHub")
         # The gate writes through the issue skill's writer and its allowlist.
         issues = next(s for s in skills if s.name == "github_issues")
-        gate = WriteGate(store, issues.writer, issues.policy)  # type: ignore[attr-defined]
+        autonomy = AutonomyPolicy.load(self.cfg.policy_path)
+        jev = build_jev(self.cfg)
+        classifier: ConfirmationClassifier = (
+            JevClassifier(
+                jev,
+                fallback=RegexClassifier(),
+                threshold=self.cfg.jev_threshold,
+                deadline=self.cfg.jev_deadline_secs,
+                on_decision=debug.audio,
+            )
+            if jev
+            else RegexClassifier()
+        )
+        gate = WriteGate(
+            store,
+            issues.writer,  # type: ignore[attr-defined]
+            issues.policy,  # type: ignore[attr-defined]
+            autonomy=autonomy,
+            classifier=classifier,
+            undo_window=timedelta(seconds=self.cfg.undo_window_secs),
+            on_decision=debug.audio,
+        )
         logger.info(f"allowed repos: {sorted(issues.policy.allowed)}")  # type: ignore[attr-defined]
+        logger.info(f"autonomy policy: {autonomy.source}")
+        for s in skills:
+            levels = autonomy.describe(s.name, {op.name: op.risk for op in s.prepare_ops})
+            logger.info(
+                f"  {s.name}: " + ", ".join(f"{op}={lv.value}" for op, lv in levels.items())
+            )
+        logger.info(
+            "confirmation classifier: "
+            + (f"jev via {jev.provider}, regex fallback" if jev else "regex")
+        )
 
         logger.info("loading models")
         models = await asyncio.to_thread(Models.load, self.voice)
@@ -100,6 +133,8 @@ class Daemon:
             ducker.restore()
             for s in skills:
                 await s.aclose()
+            if jev:
+                await jev.aclose()
             store.close()
 
     async def _conversation(
@@ -133,6 +168,15 @@ class Daemon:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
             logger.info(f"session {session.session_id} end")
+
+
+def build_jev(cfg: GhostdSettings) -> JevClient | None:
+    """A Jev client per GHOST_JEV and whichever key is present, or None for regex only."""
+    return JevClient.from_env(
+        cfg.jev,
+        {"TYPESAFE_API_KEY": cfg.typesafe_api_key, "OPENROUTER_API_KEY": cfg.openrouter_api_key},
+        timeout=max(cfg.jev_deadline_secs, 0.1),
+    )
 
 
 def cli(argv: list[str] | None = None) -> None:
@@ -175,6 +219,18 @@ def cli(argv: list[str] | None = None) -> None:
                 problems.append("GHOST_REPOS allowlist is empty")
         if not voice.anthropic_base_url:
             problems.append("ANTHROPIC_BASE_URL is not set")
+        try:
+            autonomy = AutonomyPolicy.load(cfg.policy_path)
+            print(f"autonomy policy: {autonomy.source}")
+        except ValueError as e:
+            problems.append(f"policy: {e}")
+        try:
+            jev = build_jev(cfg)
+            print(
+                "confirmation: " + (f"jev via {jev.provider} (regex fallback)" if jev else "regex")
+            )
+        except ValueError as e:
+            problems.append(str(e))
         print("\n".join(problems) if problems else "config ok")
         sys.exit(1 if problems else 0)
     else:

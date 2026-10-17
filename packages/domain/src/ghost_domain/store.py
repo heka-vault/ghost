@@ -89,6 +89,20 @@ class Store:
         ).fetchone()
         return Proposal.model_validate_json(row[0]) if row else None
 
+    def last_executed(self, session_id: str, since: datetime) -> Proposal | None:
+        """The most recent executed, not-yet-undone proposal in this session since
+        ``since``. Undo proposals themselves are skipped: undoing an undo is a new ask."""
+        rows = self._conn.execute(
+            "SELECT body FROM proposals WHERE session_id = ? AND status = ? AND created_at >= ?"
+            " ORDER BY created_at DESC LIMIT 10",
+            (session_id, ProposalStatus.EXECUTED.value, since.isoformat()),
+        ).fetchall()
+        for (body,) in rows:
+            p = Proposal.model_validate_json(body)
+            if p.undo_of is None:
+                return p.model_copy(update={"status": ProposalStatus.EXECUTED})
+        return None
+
     def set_status(self, proposal_id: str, status: ProposalStatus) -> None:
         self._conn.execute(
             "UPDATE proposals SET status = ? WHERE id = ?", (status.value, proposal_id)

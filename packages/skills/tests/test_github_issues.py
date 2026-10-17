@@ -122,3 +122,23 @@ def test_registry_requires_token_and_repos():
         load_skills(["nope"], {})
     (s,) = load_skills(["github_issues"], {"github_issues": {"token": "t", "repos": "a/b"}})
     assert s.name == "github_issues"
+
+
+@respx.mock
+async def test_writer_delete_comment_finds_marker():
+    base = "https://api.github.com/repos/acme/app/issues"
+    respx.get(f"{base}/7/comments").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": 1, "body": "unrelated"},
+                {"id": 2, "body": "mine\n\n<!-- ghost:deadbeef -->"},
+            ],
+        )
+    )
+    delete = respx.delete(f"{base}/comments/2").mock(return_value=httpx.Response(204))
+    from ghost_skills.github_issues.client import GitHubIssueWriter
+
+    w = GitHubIssueWriter(GitHubClient("t"))
+    await w.delete_comment(Target(owner="acme", repo="app", number=7), "ghost:deadbeef")
+    assert delete.called

@@ -1,4 +1,7 @@
-"""Typed proposals. The LLM can only produce these through a skill's ``prepare``."""
+"""Typed proposals. The LLM can only produce these through a skill's ``prepare``.
+
+Every step knows how to invert itself against the snapshot taken before it was
+applied, which is what makes "undo that" possible (ADR 0011)."""
 
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 PROPOSAL_TTL = timedelta(seconds=60)
+UNDO_WINDOW = timedelta(minutes=10)
 MAX_STEPS = 4
 MAX_COMMENT_CHARS = 2000
 
@@ -59,6 +63,12 @@ class SetLabels(BaseModel, frozen=True):
             parts.append("remove " + ", ".join(self.remove))
         return "labels: " + "; ".join(parts) if parts else "labels: no change"
 
+    def invert(self, before: Snapshot, marker: str) -> Step | None:
+        had = set(before.labels)
+        add = tuple(lb for lb in self.remove if lb in had)  # put back what we took off
+        remove = tuple(lb for lb in self.add if lb not in had)  # take off what we added
+        return SetLabels(add=add, remove=remove) if add or remove else None
+
 
 class AddComment(BaseModel, frozen=True):
     kind: Literal["add_comment"] = "add_comment"
@@ -66,6 +76,22 @@ class AddComment(BaseModel, frozen=True):
 
     def describe(self) -> str:
         return f"comment: {self.body}"
+
+    def invert(self, before: Snapshot, marker: str) -> Step | None:
+        return DeleteComment(marker=marker)
+
+
+class DeleteComment(BaseModel, frozen=True):
+    """Only ever produced by undo: removes the comment carrying ``marker``."""
+
+    kind: Literal["delete_comment"] = "delete_comment"
+    marker: str
+
+    def describe(self) -> str:
+        return "delete the comment I added"
+
+    def invert(self, before: Snapshot, marker: str) -> Step | None:
+        return None  # the body is gone; not undoable
 
 
 class SetState(BaseModel, frozen=True):
@@ -75,8 +101,11 @@ class SetState(BaseModel, frozen=True):
     def describe(self) -> str:
         return f"{self.state} the issue"
 
+    def invert(self, before: Snapshot, marker: str) -> Step | None:
+        return SetState(state=before.state) if before.state != self.state else None
 
-Step = Annotated[SetLabels | AddComment | SetState, Field(discriminator="kind")]
+
+Step = Annotated[SetLabels | AddComment | DeleteComment | SetState, Field(discriminator="kind")]
 
 
 class ChangeSet(BaseModel, frozen=True):
@@ -84,6 +113,11 @@ class ChangeSet(BaseModel, frozen=True):
 
     def describe(self) -> str:
         return "; ".join(s.describe() for s in self.steps)
+
+    def invert(self, before: Snapshot, marker: str) -> ChangeSet | None:
+        """The steps that put ``before`` back, last applied first. None if nothing can be."""
+        steps = [inv for st in reversed(self.steps) if (inv := st.invert(before, marker))]
+        return ChangeSet(steps=tuple(steps)) if steps else None
 
 
 class ProposalStatus(enum.StrEnum):
@@ -93,6 +127,7 @@ class ProposalStatus(enum.StrEnum):
     EXPIRED = "expired"
     STALE = "stale"
     EXECUTED = "executed"
+    UNDONE = "undone"
 
 
 class Proposal(BaseModel, frozen=True):
@@ -107,6 +142,8 @@ class Proposal(BaseModel, frozen=True):
     rationale: str
     snapshot: Snapshot
     preview: str
+    autonomy: str = "confirm"  # the level the policy resolved to; audit, not control
+    undo_of: str | None = None  # set on the proposal that reverses another
     created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime = Field(default_factory=lambda: utcnow() + PROPOSAL_TTL)
     status: ProposalStatus = ProposalStatus.PENDING
@@ -140,6 +177,17 @@ class Outcome(BaseModel, frozen=True):
                 f"It now: {_spoken_snapshot(self.readback)}."
             )
         return f"Nothing changed on {self.target}. {self.error}"
+
+    def summary(self) -> str:
+        """Terse form for the model to paraphrase after an autonomous write."""
+        if self.status == "success":
+            return f"Applied on {self.target}: {'; '.join(self.applied)}."
+        if self.status == "partial":
+            return (
+                f"Partly applied on {self.target}: {'; '.join(self.applied)}. "
+                f"Failed: {self.failed_step} ({self.error})."
+            )
+        return f"Nothing changed on {self.target}: {self.error}"
 
 
 def _spoken_snapshot(s: Snapshot | None) -> str:

@@ -37,7 +37,7 @@ async def prepare(gate, target, changes=APPROVE, session="s1"):
 async def test_prepare_writes_nothing(gate, writer, target):
     p = await prepare(gate, target)
     assert p.status is ProposalStatus.PENDING
-    assert "Say confirm" in p.preview
+    assert "add approved" in p.preview and p.autonomy == "confirm"
     assert [c[0] for c in writer.calls] == ["fetch"]
     assert writer.issues[target]["labels"] == ["needs-signoff"]
 

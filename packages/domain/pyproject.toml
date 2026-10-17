@@ -3,7 +3,7 @@ name = "ghost-domain"
 version = "0.1.0"
 description = "The write gate: proposals, spoken confirmation, execution, readback, audit"
 requires-python = ">=3.12,<3.13"
-dependencies = ["pydantic>=2.9"]
+dependencies = ["pydantic>=2.9", "httpx>=0.27"]
 
 [build-system]
 requires = ["hatchling"]

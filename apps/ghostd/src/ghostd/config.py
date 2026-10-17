@@ -22,6 +22,20 @@ class GhostdSettings(BaseSettings):
     repos: str = ""  # GHOST_REPOS: comma-separated owner/repo allowlist
     github_mock: bool = False  # GHOST_GITHUB_MOCK=1: in-memory issues, no PAT needed
 
+    # Autonomy (ADR 0011): the operator's per-operation levels. Missing file = every
+    # operation falls back to its skill's risk class (labels/comments announce, close
+    # confirms). Template: infra/policy.example.toml, seeded by `make env`.
+    policy_path: Path = Path.home() / ".config" / "ghost" / "policy.toml"
+    undo_window_secs: int = 600
+
+    # Confirmation classifier. auto: Jev when TYPESAFE_API_KEY or OPENROUTER_API_KEY is
+    # set, else the regex allowlist; on: Jev or fail at startup; off: regex only.
+    jev: str = "auto"  # auto | on | off
+    jev_threshold: float = 0.8
+    jev_deadline_secs: float = 0.3
+    typesafe_api_key: str = Field(default="", alias="TYPESAFE_API_KEY")
+    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+
     # State
     db_path: Path = Path.home() / ".local" / "share" / "ghost" / "ghost.db"
 

@@ -1,6 +1,6 @@
 # Ghost
 
-Ghost is a voice-first assistant for triaging GitHub issues. Say "Ghost" at your desk, ask what needs your sign-off, talk through the options, and approve or request changes without opening the issue tracker. Every write to GitHub is read back to you and needs a spoken "confirm" before it happens.
+Ghost is a voice-first assistant for triaging GitHub issues. Say "Ghost" at your desk, ask what needs your sign-off, talk through the options, and approve or request changes without opening the issue tracker. You decide how much it does on its own: by default it labels and comments as you ask and tells you in passing, and asks before closing anything. Say "undo that" to take the last change back.
 
 "Ghost" is the codename. The original product documents call it **VoiceTriage**.
 
@@ -46,8 +46,10 @@ only to your terminal.
 `restore-volumes`, `service`). Non-secret settings such as `GHOST_GITHUB_MOCK=1` go in
 `~/.config/ghost/settings.env`, which `make env` seeds and folds into the rendered file.
 
-Say "what needs my sign-off", talk it through, and "go to sleep" when done. Any
-change Ghost proposes is read back and only happens after you say "confirm".
+Say "what needs my sign-off", talk it through, and "go to sleep" when done. How much
+Ghost may do without asking is in `~/.config/ghost/policy.toml` (seeded by `make env`
+from `infra/policy.example.toml`): per operation, `deny`, `confirm`, `announce`, or
+`quiet`. Every write is logged and "undo that" reverses the last one for ten minutes.
 Ctrl+C stops the daemon; "go to sleep" only ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
