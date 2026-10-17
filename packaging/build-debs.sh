@@ -101,9 +101,18 @@ build_desktop() {
     && pnpm --filter @ghost/desktop exec tauri build --bundles deb 2>&1 | tail -5)
   cp "$ROOT"/apps/desktop/src-tauri/target/release/bundle/deb/*.deb "$OUT/"
   # Tauri names it after productName; keep our package naming.
-  for f in "$OUT"/Ghost_*.deb "$OUT"/ghost_*.deb; do
-    [[ -e "$f" ]] && mv -f "$f" "$OUT/heka-ghost-desktop_${VERSION}_${ARCH}.deb"
+  local target="$OUT/heka-ghost-desktop_${VERSION}_${ARCH}.deb"
+  for f in "$OUT"/Ghost_*.deb "$OUT"/ghost_*.deb "$OUT"/heka-ghost-desktop_*.deb; do
+    [[ -e "$f" && "$f" != "$target" ]] && mv -f "$f" "$target"
   done
+  [[ -e "$target" ]] || { echo "desktop .deb not produced" >&2; exit 1; }
+  # Tauri names the package after the product; the meta-package depends on the package
+  # name, so rewrite the control field and repack.
+  local work="$STAGE/heka-ghost-desktop"
+  rm -rf "$work"; dpkg-deb -R "$target" "$work"
+  sed -i -e "s/^Package: .*/Package: heka-ghost-desktop/" -e "s/^Version: .*/Version: $VERSION/" "$work/DEBIAN/control"
+  grep -q "^Depends: .*heka-ghostd" "$work/DEBIAN/control" || sed -i "s/^Depends: /Depends: heka-ghostd, /" "$work/DEBIAN/control"
+  fakeroot dpkg-deb --build --root-owner-group -Zxz "$work" "$target" >/dev/null
   echo "   $(du -h "$OUT/heka-ghost-desktop_${VERSION}_${ARCH}.deb" | cut -f1)"
 }
 
