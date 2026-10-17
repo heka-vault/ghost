@@ -40,13 +40,36 @@ JEV_MODES = ("auto", "on", "off")
 # The seven things a short operator turn can mean, shared by the confirmation
 # classifier and the intent experiment (docs/benchmarks/scripts/jev_eval.py).
 INTENTS: dict[str, str] = {
-    "affirm": "agrees to the pending action, or answers yes to the question asked",
-    "deny": "refuses, hesitates, or asks to hold off",
-    "sleep": "wants to end the conversation (go to sleep, that's all, thanks ghost)",
-    "cancel": "drops the current topic or the pending action (never mind, forget it)",
-    "repeat": "asks the assistant to say the last thing again",
-    "ask": "a new question, request, or statement for the assistant",
-    "noise": "not directed at the assistant: song lyrics, a fragment, another person",
+    "affirm": (
+        "explicitly agrees to do pending_action now: yes, yeah, yep, go ahead, do it, "
+        "that's right, sure, confirm, close it. A general wrap-up such as 'that's it', "
+        "'all done', 'we're good' or 'that'll do' is NOT affirm; it is sleep."
+    ),
+    "deny": (
+        "does not want pending_action done: no, nope, nah, don't, wait, hold on, hold off, "
+        "stop, not yet, not that one, leave it open. Anything starting with 'no' is deny."
+    ),
+    "sleep": (
+        "wants to end the conversation: go to sleep, that's all, that's it, all done, "
+        "we're done, we're good, that'll do, thanks ghost, goodnight, bye. Still sleep "
+        "when a question is pending."
+    ),
+    "cancel": (
+        "drops the current topic or proposal without answering yes or no: never mind, "
+        "forget it, scratch that, skip it, drop it, moving on, next one, ignore that."
+    ),
+    "repeat": (
+        "asks to hear the last thing again: what, say that again, repeat that, pardon, "
+        "sorry, huh, come again, one more time, didn't catch that, read that again."
+    ),
+    "ask": (
+        "a new request, question, or instruction for the assistant about issues or "
+        "anything else, including 'label it bug' or 'what time is it'."
+    ),
+    "noise": (
+        "not addressed to the assistant: song lyrics, talking to another person, a stray "
+        "fragment, a filler sound like um or oh, another assistant's name."
+    ),
 }
 
 
@@ -70,10 +93,11 @@ def confirmation_questions() -> dict[str, Any]:
         "intent": {
             "type": "choice",
             "instructions": (
-                "The assistant asked `question` about `pending_action` and the operator "
-                "replied with `utterance`. Classify what the operator meant. If the reply "
-                "does not clearly answer the question, choose the option that fits the "
-                "words, not what the assistant hoped to hear."
+                "The assistant just said `question`; `pending_action` is the change waiting "
+                "for a yes, or '(nothing pending)'. The operator then said `utterance`. "
+                "Classify what the operator meant by the words of `utterance` alone. Do not "
+                "assume agreement: only an explicit yes or go-ahead is affirm. If the words "
+                "fit a wrap-up, choose sleep; if they fit a refusal, choose deny."
             ),
             "criteria": dict(INTENTS),
         },
@@ -92,7 +116,7 @@ def confirmation_state(utterance: str, ctx: ConfirmationContext) -> dict[str, An
     return {
         "utterance": utterance,
         "question": ctx.question or f"Shall I {ctx.pending_action}?",
-        "pending_action": ctx.pending_action,
+        "pending_action": ctx.pending_action or "(nothing pending)",
     }
 
 
@@ -183,7 +207,9 @@ class JevClient:
 class JevClassifier:
     """Jev decides affirm / deny; anything else, or any doubt, defers to ``fallback``.
 
-    ``deadline`` is the whole budget including the network: speech is waiting.
+    ``deadline`` is the whole budget including the network: speech is waiting. Measured
+    from the workstation through OpenRouter: p50 160 ms, p95 280 ms
+    (docs/benchmarks/scripts/jev_eval.py), so 0.5 s rarely falls back.
     ``on_decision`` receives one line per call for the audio debug log; it is never
     given the key and is silent unless GHOST_DEBUG_AUDIO is on.
     """
@@ -195,8 +221,8 @@ class JevClassifier:
         client: JevClient,
         *,
         fallback: ConfirmationClassifier | None = None,
-        threshold: float = 0.8,
-        deadline: float = 0.3,
+        threshold: float = 0.9,
+        deadline: float = 0.5,
         on_decision: Callable[[str], None] | None = None,
     ) -> None:
         self._client = client
@@ -224,6 +250,6 @@ class JevClassifier:
             return await self._fallback.classify(utterance, context)
         if a.choice == "affirm":
             return Verdict.AFFIRMATIVE
-        if a.choice == "deny":
+        if a.choice in {"deny", "cancel"}:  # "never mind" to "close it?" is a no
             return Verdict.NEGATIVE
         return Verdict.UNCLEAR

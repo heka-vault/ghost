@@ -56,10 +56,14 @@ async def test_confident_affirm_and_deny():
     assert await JevClassifier(FakeJev(ans("affirm"))).classify("mm hm", CTX) is Verdict.AFFIRMATIVE
     assert await JevClassifier(FakeJev(ans("deny"))).classify("hmm maybe", CTX) is Verdict.NEGATIVE
     assert await JevClassifier(FakeJev(ans("ask"))).classify("what time", CTX) is Verdict.UNCLEAR
+    cancel = JevClassifier(FakeJev(ans("cancel")))
+    assert await cancel.classify("forget it", CTX) is Verdict.NEGATIVE
+    sleep = JevClassifier(FakeJev(ans("sleep")))
+    assert await sleep.classify("that's it", CTX) is Verdict.UNCLEAR
 
 
 async def test_low_confidence_defers_to_regex():
-    c = JevClassifier(FakeJev(ans("affirm", confidence=0.5)))
+    c = JevClassifier(FakeJev(ans("affirm", confidence=0.85)))  # default threshold is 0.9
     assert await c.classify("confirm", CTX) is Verdict.AFFIRMATIVE  # regex says yes
     assert await c.classify("mm hm", CTX) is Verdict.UNCLEAR  # regex says unclear
 

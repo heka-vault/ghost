@@ -31,8 +31,8 @@ class GhostdSettings(BaseSettings):
     # Confirmation classifier. auto: Jev when TYPESAFE_API_KEY or OPENROUTER_API_KEY is
     # set, else the regex allowlist; on: Jev or fail at startup; off: regex only.
     jev: str = "auto"  # auto | on | off
-    jev_threshold: float = 0.8
-    jev_deadline_secs: float = 0.3
+    jev_threshold: float = 0.9
+    jev_deadline_secs: float = 0.5
     typesafe_api_key: str = Field(default="", alias="TYPESAFE_API_KEY")
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
 
