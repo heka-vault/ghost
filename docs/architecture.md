@@ -1,6 +1,6 @@
 # Ghost architecture
 
-**Status:** planning, 2026-10-16. This replaces the deployment and stack parts of [original/technical-specification.md](original/technical-specification.md). The product behavior in [original/prd.md](original/prd.md) still applies unless an ADR says otherwise.
+**Status:** first increment under way, 2026-10-16. This replaces the deployment and stack parts of [original/technical-specification.md](original/technical-specification.md). The product behavior in [original/prd.md](original/prd.md) still applies unless an ADR says otherwise.
 
 ## Shape
 
@@ -58,24 +58,40 @@ The protocol from the original spec (section 8) stands, with one simplification.
 
 ## Repository layout
 
-Planned, not yet created:
-
 ```text
 ghost/
 ├── apps/
-│   ├── ghostd/          # desktop daemon: wake word, audio, pipeline lifecycle
+│   ├── ghostd/          # desktop daemon: wake word, ducking, pipeline lifecycle
 │   └── mobile/          # later: Expo / React Native (ADR 0005)
 ├── packages/
-│   ├── voice/           # Pipecat pipeline factory, model config
-│   ├── skills/          # skill interface + skills/github_issues
-│   └── domain/          # proposals, confirmation, audit, policy, SQLite
+│   ├── voice/           # Pipecat pipeline factory, Parakeet service, sounddevice transport
+│   ├── skills/          # skill interface + github_issues (reads, prepare, writer)
+│   └── domain/          # proposals, confirmation, gate, audit, policy, SQLite
 ├── infra/
-│   ├── systemd/         # user units
+│   ├── systemd/         # ghostd.service + env renderer
 │   └── pipewire/        # echo-cancel config
 └── docs/
 ```
 
-A `uv` workspace at the root, Python 3.12.
+A `uv` workspace at the root, Python 3.12. Import direction is strictly
+`ghostd -> voice -> skills -> domain`; `domain` imports nothing from the others.
+
+### How the gate is wired into the pipeline
+
+```text
+transport.input -> Parakeet STT -> ConfirmationProcessor -> user aggregator -> LLM -> Kokoro -> transport.output
+```
+
+`ConfirmationProcessor` sees every `TranscriptionFrame`. If the gate holds a pending
+proposal for the session, the frame's text is the confirmation evidence: a clear
+affirmative executes, anything else cancels. The verified outcome is appended to the
+context as a system note, so the model's next sentence describes what actually
+happened. The model's tools are the skills' read tools, one `prepare`, and
+`go_to_sleep`. There is no execute tool.
+
+The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the
+install needs no compiled extension; PortAudio comes with the wheel and talks to
+PipeWire through the PulseAudio shim.
 
 ## Open items
 

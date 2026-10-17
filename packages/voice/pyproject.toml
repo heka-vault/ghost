@@ -1,0 +1,28 @@
+[project]
+name = "ghost-voice"
+version = "0.1.0"
+description = "Pipecat pipeline factory: VAD, turn detection, Parakeet STT, Claude, Kokoro TTS"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "ghost-domain",
+    "ghost-skills",
+    "pipecat-ai[anthropic,kokoro,silero]>=1.12,<2",
+    "sounddevice>=0.5",
+    "onnx-asr[hub]>=0.12",
+    "onnxruntime>=1.20",
+    "numpy>=1.26",
+    "soxr>=0.5",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+]
+
+[tool.uv.sources]
+ghost-domain = { workspace = true }
+ghost-skills = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ghost_voice"]

@@ -1,0 +1,49 @@
+[project]
+name = "ghost"
+version = "0.1.0"
+description = "Ghost: a voice-first assistant that triages GitHub issues on one Linux workstation"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+dependencies = [
+    "ghostd",
+    "ghost-voice",
+    "ghost-skills",
+    "ghost-domain",
+]
+
+[tool.uv.workspace]
+members = ["apps/ghostd", "packages/voice", "packages/skills", "packages/domain"]
+
+[tool.uv.sources]
+ghostd = { workspace = true }
+ghost-voice = { workspace = true }
+ghost-skills = { workspace = true }
+ghost-domain = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "respx>=0.21",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages", "apps"]
+consider_namespace_packages = true
+
+[tool.ruff]
+extend-exclude = ["docs/benchmarks/scripts"]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true

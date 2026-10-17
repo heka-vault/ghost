@@ -16,7 +16,29 @@ It costs nothing to run beyond the LLM calls.
 
 ## Status
 
-Planning. No code yet. Start with [docs/architecture.md](docs/architecture.md) and the decisions in [docs/adr/](docs/adr/).
+First increment in progress: the `uv` workspace exists, the write gate and the GitHub
+issue skill are implemented with tests, and the desktop daemon runs the voice loop
+with a file trigger standing in for the wake word until the model is trained. Start
+with [docs/architecture.md](docs/architecture.md) and the decisions in [docs/adr/](docs/adr/).
+
+## Run it
+
+Needs Python 3.12 (via `uv`) and PipeWire with the PulseAudio shim.
+
+```bash
+uv sync --all-packages
+cp .env.example .env            # fill in the endpoint, token, PAT, and repo allowlist
+set -a; . ./.env; set +a
+uv run ghostd check             # config sanity
+uv run ghostd run               # loads models (~10 s), then waits for a wake
+uv run ghostd wake              # in another shell: simulate the wake word
+```
+
+Say "what needs my sign-off", talk it through, and "go to sleep" when done. Any
+change Ghost proposes is read back and only happens after you say "confirm".
+
+Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
+cancellation with [infra/pipewire/](infra/pipewire/).
 
 ## Docs
 
