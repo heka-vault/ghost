@@ -27,7 +27,7 @@ Needs Python 3.12 (via `uv`) and PipeWire with the PulseAudio shim.
 
 ```bash
 uv sync --all-packages
-cp .env.example .env            # fill in the endpoint, token, PAT, and repo allowlist
+cp .env.example .env            # endpoint + token; leave GHOST_GITHUB_MOCK=1 until you have a PAT
 set -a; . ./.env; set +a
 uv run ghostd check             # config sanity
 uv run ghostd run               # loads models (~10 s), then waits for a wake

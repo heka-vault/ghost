@@ -8,6 +8,7 @@ from collections.abc import AsyncGenerator
 import numpy as np
 from loguru import logger
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
@@ -28,7 +29,13 @@ class ParakeetSTTService(SegmentedSTTService):
         sample_rate: int = 16000,
         **kwargs,
     ) -> None:
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # Measured p50 is 0.16 s per command; 0.5 s leaves headroom under load.
+        kwargs.setdefault("ttfs_p99_latency", 0.5)
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=STTSettings(model=model, language=None),
+            **kwargs,
+        )
         self._model_name = model
         self._quantization = quantization
         self._threads = threads

@@ -44,10 +44,11 @@ class Ducker:
             for si in p.sink_input_list():
                 if not self._matches(si) or si.corked:
                     continue
-                saved[str(si.index)] = list(si.volume.values)
-                target = [min(v, self._level) for v in si.volume.values]
+                before = list(si.volume.values)
+                saved[str(si.index)] = before
+                target = [min(v, self._level) for v in before]
                 p.volume_set(si, pulsectl.PulseVolumeInfo(target))
-                logger.info(f"ducked {si.name!r} {si.volume.values} -> {target}")
+                logger.info(f"ducked {si.name!r} {before} -> {target}")
         if saved:
             self._state.write_text(json.dumps(saved))
 

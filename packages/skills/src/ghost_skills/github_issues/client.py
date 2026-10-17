@@ -106,9 +106,9 @@ def snapshot_of(issue: dict[str, Any]) -> Snapshot:
 
 
 class GitHubIssueWriter:
-    """Implements ``ghost_domain.IssueWriter``."""
+    """Implements ``ghost_domain.IssueWriter`` over any client with ``GitHubClient``'s surface."""
 
-    def __init__(self, client: GitHubClient) -> None:
+    def __init__(self, client: Any) -> None:
         self._c = client
 
     async def fetch(self, target: Target) -> Snapshot:

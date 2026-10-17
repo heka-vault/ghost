@@ -6,7 +6,7 @@ import asyncio
 import signal
 import sys
 
-from ghost_domain import RepoPolicy, Store, WriteGate
+from ghost_domain import Store, WriteGate
 from ghost_skills import load_skills
 from ghost_voice import VoiceSettings, build_session
 from ghost_voice.pipeline import Models
@@ -46,12 +46,20 @@ class Daemon:
         store = Store(self.cfg.db_path)
         skills = load_skills(
             self.cfg.skills,
-            {"github_issues": {"token": self.cfg.github_token, "repos": self.cfg.repos}},
+            {
+                "github_issues": {
+                    "token": self.cfg.github_token,
+                    "repos": self.cfg.repos,
+                    "mock": self.cfg.github_mock,
+                }
+            },
         )
+        if self.cfg.github_mock:
+            logger.warning("GITHUB MOCK: issues are in-memory; nothing reaches GitHub")
         # The gate writes through the issue skill's writer and its allowlist.
         issues = next(s for s in skills if s.name == "github_issues")
         gate = WriteGate(store, issues.writer, issues.policy)  # type: ignore[attr-defined]
-        logger.info(f"allowed repos: {sorted(RepoPolicy.from_csv(self.cfg.repos).allowed)}")
+        logger.info(f"allowed repos: {sorted(issues.policy.allowed)}")  # type: ignore[attr-defined]
 
         logger.info("loading models")
         models = await asyncio.to_thread(Models.load, self.voice)
@@ -129,10 +137,13 @@ def cli(argv: list[str] | None = None) -> None:
         cfg = GhostdSettings()
         voice = VoiceSettings()  # type: ignore[call-arg]
         problems = []
-        if not cfg.github_token:
-            problems.append("GITHUB_TOKEN is empty")
-        if not cfg.repos:
-            problems.append("GHOST_REPOS allowlist is empty")
+        if cfg.github_mock:
+            print("GITHUB MOCK is on")
+        else:
+            if not cfg.github_token:
+                problems.append("GITHUB_TOKEN is empty (or set GHOST_GITHUB_MOCK=1)")
+            if not cfg.repos:
+                problems.append("GHOST_REPOS allowlist is empty")
         if not voice.anthropic_base_url:
             problems.append("ANTHROPIC_BASE_URL is not set")
         print("\n".join(problems) if problems else "config ok")

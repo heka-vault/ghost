@@ -13,6 +13,7 @@ from ghost_domain import AddComment, ChangeSet, RepoPolicy, SetLabels, SetState,
 
 from ghost_skills.base import PrepareOp, PrepareRequest, ReadTool
 from ghost_skills.github_issues.client import MARKER_RE, GitHubClient, GitHubIssueWriter
+from ghost_skills.github_issues.mock import MockGitHubClient
 
 MAX_BODY_CHARS = 1200
 
@@ -22,7 +23,7 @@ class GitHubIssuesSkill:
 
     def __init__(
         self,
-        client: GitHubClient,
+        client: GitHubClient | MockGitHubClient,
         policy: RepoPolicy,
         *,
         signoff_label: str = "needs-signoff",
@@ -38,14 +39,22 @@ class GitHubIssuesSkill:
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> GitHubIssuesSkill:
-        token = config.get("token")
-        if not token:
-            raise ValueError("github_issues: 'token' is required (GITHUB_TOKEN)")
-        policy = RepoPolicy.from_csv(config.get("repos", ""))
+        client: GitHubClient
+        if config.get("mock"):
+            from ghost_skills.github_issues.mock import MOCK_REPOS, MockGitHubClient
+
+            client = MockGitHubClient()  # type: ignore[assignment]
+            policy = RepoPolicy.from_csv(config.get("repos") or MOCK_REPOS)
+        else:
+            token = config.get("token")
+            if not token:
+                raise ValueError("github_issues: 'token' is required (GITHUB_TOKEN)")
+            client = GitHubClient(token)
+            policy = RepoPolicy.from_csv(config.get("repos", ""))
         if len(policy) == 0:
             raise ValueError("github_issues: 'repos' allowlist is empty (GHOST_REPOS)")
         return cls(
-            GitHubClient(token),
+            client,
             policy,
             signoff_label=config.get("signoff_label", "needs-signoff"),
             approved_label=config.get("approved_label", "approved"),

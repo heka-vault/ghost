@@ -20,6 +20,7 @@ class GhostdSettings(BaseSettings):
     skills: list[str] = ["github_issues"]
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
     repos: str = ""  # GHOST_REPOS: comma-separated owner/repo allowlist
+    github_mock: bool = False  # GHOST_GITHUB_MOCK=1: in-memory issues, no PAT needed
 
     # State
     db_path: Path = Path.home() / ".local" / "share" / "ghost" / "ghost.db"
