@@ -1,0 +1,52 @@
+# Echo-cancelled microphone for Ghost. Rendered by install.sh into
+# ~/.config/ghost/echo-cancel.conf; do not edit the rendered copy by hand.
+#
+# This is a PipeWire *client* config, run as its own process by
+# ghost-echo-cancel.service (`pipewire -c`). Hosting the module outside the main
+# daemon means installing, updating, or removing it never restarts PipeWire, so
+# other applications keep their streams.
+#
+# Capture: the operator's microphone (@MIC@). Reference: what the speakers are
+# playing, taken from the sink @SINK@. Produces the source "ghost.mic" that
+# ghostd listens on (GHOST_INPUT_DEVICE=ghost.mic). No virtual sink is created,
+# so applications keep playing to the real output and per-stream ducking works.
+context.properties = {
+  application.name = ghost-echo-cancel
+}
+context.modules = [
+  { name = libpipewire-module-protocol-native }
+  { name = libpipewire-module-client-node }
+  { name = libpipewire-module-adapter }
+  { name = libpipewire-module-metadata }
+  { name = libpipewire-module-echo-cancel
+    args = {
+      library.name = aec/libspa-aec-webrtc
+      aec.args = {
+        webrtc.gain_control = true
+        webrtc.extended_filter = true
+        webrtc.noise_suppression = true
+        webrtc.voice_detection = false
+      }
+      monitor.mode = true
+      capture.props = {
+        node.name = ghost.mic.capture
+        node.target = "@MIC@"
+        node.passive = true
+        audio.channels = 1
+        audio.position = [ MONO ]
+      }
+      source.props = {
+        node.name = ghost.mic
+        node.description = "Ghost mic (echo cancelled)"
+        audio.channels = 1
+        audio.position = [ MONO ]
+      }
+      playback.props = {
+        node.name = ghost.ref.capture
+        node.target = "@SINK@"
+        stream.capture.sink = true
+        node.passive = true
+      }
+    }
+  }
+]

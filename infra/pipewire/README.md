@@ -1,23 +1,28 @@
 # PipeWire echo cancellation
 
-Ghost's microphone hears the speakers. Without echo cancellation the wake word
-and VAD trigger on music and on Ghost's own voice. `module-echo-cancel` (WebRTC
-AEC, shipped with PipeWire) creates a cleaned source and a virtual sink. Only
-the capture side needs to go through it: set the cleaned source as the default
-source, keep the real speakers as the default sink, and point the module's
-reference at the speakers' monitor.
+Ghost listens on `ghost.mic`, a source produced by PipeWire's WebRTC echo
+canceller. It subtracts what the speakers are playing from what the microphone
+hears, so neither Ghost's own voice nor music comes back as the operator's turn
+or as a wake word. This is the primary defence against self-interruption; the
+pipeline's word-count barge-in rule is only the backstop.
 
-Install (user scope; no root):
+The module runs in its own small PipeWire client process,
+`ghost-echo-cancel.service` (a `systemd --user` unit running `pipewire -c`),
+not inside the main daemon. Installing, updating, or removing it therefore never
+restarts PipeWire, and nothing else playing is interrupted.
 
 ```bash
-mkdir -p ~/.config/pipewire/pipewire.conf.d
-cp infra/pipewire/90-ghost-echo-cancel.conf ~/.config/pipewire/pipewire.conf.d/
-systemctl --user restart pipewire pipewire-pulse wireplumber
-pactl list sources short | grep ghost   # ghost.mic should appear
-pactl set-default-source ghost.mic
+infra/pipewire/install.sh --dry-run   # show the rendered config
+infra/pipewire/install.sh             # render, install the unit, start it, verify ghost.mic
+infra/pipewire/install.sh --uninstall
+systemctl --user status ghost-echo-cancel
 ```
 
-Edit `capture.props node.target` and `source.props` if the microphone or
-speakers change (`pactl list sources short` / `sinks short`). The reference
-sink is left as the real output so F8/F9, Spotify, and `ghostd`'s per-stream
-ducking keep working unchanged.
+Device names never go in this repository. The installer takes them from
+`GHOST_MIC_NODE` and `GHOST_SINK_NODE`, falling back to the current PipeWire
+defaults, and renders them into `~/.config/ghost/echo-cancel.conf`. Then set
+`GHOST_INPUT_DEVICE=ghost.mic` for `ghostd`. Re-run the installer after
+changing microphone or speakers.
+
+Requires `libspa-aec-webrtc` (package `pipewire-audio` or `libspa-0.2-modules`
+depending on the distribution).

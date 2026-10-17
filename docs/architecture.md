@@ -43,7 +43,7 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 
 1. **Passive.** `ghostd` feeds microphone frames to the local wake-word model only. Nothing is transcribed, stored, or sent.
 2. **Wake.** "Ghost" fires. `ghostd` plays a chime, ducks the configured music streams, and starts the pipeline.
-3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking. Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks one sentence at a time. Barge-in stops playback.
+3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking. Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks one sentence at a time. Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off.
 4. **Sleep.** "Go to sleep" or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive.
 
 ## Writes
@@ -84,14 +84,20 @@ transport.input -> Parakeet STT -> ConfirmationProcessor -> user aggregator -> L
 
 `ConfirmationProcessor` sees every `TranscriptionFrame`. If the gate holds a pending
 proposal for the session, the frame's text is the confirmation evidence: a clear
-affirmative executes, anything else cancels. The verified outcome is appended to the
+affirmative executes, anything else cancels. Transcripts that arrive while Ghost is
+still speaking are not evidence at all: the operator has not heard the whole readback,
+and the text may be Ghost's own voice. The verified outcome is appended to the
 context as a system note, so the model's next sentence describes what actually
 happened. The model's tools are the skills' read tools, one `prepare`, and
 `go_to_sleep`. There is no execute tool.
 
 The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the
 install needs no compiled extension; PortAudio comes with the wheel and talks to
-PipeWire through the PulseAudio shim.
+PipeWire through the PulseAudio shim. Ghost listens on `ghost.mic`, the output of
+PipeWire's WebRTC echo canceller running as its own user service ([infra/pipewire](../infra/pipewire/README.md)). The
+module takes the speaker sink as its reference, so what Kokoro plays is subtracted
+from what the microphone hears before VAD or STT see it. Device names are rendered
+into the user's config at install time and never committed.
 
 ## Open items
 

@@ -30,8 +30,15 @@ class VoiceSettings(BaseSettings):
     tts_model_path: Path | None = None
     tts_voices_path: Path | None = None
 
-    # Turn taking
+    # Turn taking. VAD values default to Pipecat's; raise confidence/min_volume
+    # if a noisy room still triggers turns.
+    vad_confidence: float = 0.7
+    vad_start_secs: float = 0.2
     vad_stop_secs: float = 0.2
+    vad_min_volume: float = 0.6
+    # Words the STT must hear before the operator can cut Ghost off mid-sentence.
+    # Backstop against echo; 0 disables barge-in.
+    barge_in_min_words: int = 2
     idle_timeout_secs: float = 45.0
     smart_turn_threads: int = 2
 

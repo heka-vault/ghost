@@ -37,6 +37,7 @@ from ghost_voice.parakeet import ParakeetSTTService
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.tools import register_tools
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
+from ghost_voice.turns import BargeInUserTurnStartStrategy
 
 
 @dataclass
@@ -136,9 +137,17 @@ def build_session(
     user_agg, assistant_agg = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=settings.vad_stop_secs)),
+            vad_analyzer=SileroVADAnalyzer(
+                params=VADParams(
+                    confidence=settings.vad_confidence,
+                    start_secs=settings.vad_start_secs,
+                    stop_secs=settings.vad_stop_secs,
+                    min_volume=settings.vad_min_volume,
+                )
+            ),
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=models.turn)]
+                start=[BargeInUserTurnStartStrategy(min_words=settings.barge_in_min_words)],
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=models.turn)],
             ),
             user_idle_timeout=settings.idle_timeout_secs,
         ),

@@ -1,0 +1,84 @@
+# Ghost developer entry points. Everything runs on the workstation as the operator.
+#
+#   make env          render ~/.config/ghost/env from the secrets store (+ settings.env)
+#   make run          start ghostd in the foreground (Ctrl+C stops it)
+#   make wake         simulate the wake word from another shell
+#   make stop         stop a ghostd started with `make run` or `make start`
+#   make echo-cancel  install the echo-cancelled mic service (ghost.mic)
+#
+# Secrets never live in this repo: `make run` sources $(ENV_FILE), which is the
+# rendered file by default, or ./.env if you created one from .env.example.
+
+SHELL := /bin/bash
+.DEFAULT_GOAL := help
+
+ENV_FILE ?= $(if $(wildcard .env),.env,$(HOME)/.config/ghost/env)
+SETTINGS := $(HOME)/.config/ghost/settings.env
+UV ?= uv
+
+define load_env
+set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a;
+endef
+
+.PHONY: help sync test lint fmt check devices env run start stop wake restore-volumes \
+        echo-cancel echo-cancel-off service service-logs
+
+help: ## list targets
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
+
+sync: ## install/refresh the uv workspace
+	$(UV) sync --all-packages
+
+test: ## run the test suite
+	$(UV) run pytest -q
+
+lint: ## ruff check + format check
+	$(UV) run ruff check .
+	$(UV) run ruff format --check .
+
+fmt: ## ruff format
+	$(UV) run ruff format .
+
+env: ## render ~/.config/ghost/env from the secrets store; seeds settings.env on first run
+	@if [[ ! -e "$(SETTINGS)" ]]; then \
+	  mkdir -p "$(dir $(SETTINGS))"; \
+	  printf 'GHOST_GITHUB_MOCK=1\nGHOST_INPUT_DEVICE=ghost.mic\n' > "$(SETTINGS)"; \
+	  echo "seeded $(SETTINGS) (mock GitHub, ghost.mic); edit it for non-secret settings"; \
+	fi
+	infra/systemd/ghost-render-env.sh
+
+check: ## config sanity (models, endpoint, devices) using $(ENV_FILE)
+	@$(load_env) $(UV) run ghostd check
+
+devices: ## list audio devices as PortAudio sees them
+	@$(UV) run ghostd devices
+
+run: ## start ghostd in the foreground using $(ENV_FILE); Ctrl+C stops it
+	@$(load_env) exec $(UV) run ghostd run
+
+start: ## start ghostd in the background, log to /tmp/ghostd.log
+	@$(load_env) nohup $(UV) run ghostd run > /tmp/ghostd.log 2>&1 & echo "ghostd started, log: /tmp/ghostd.log"
+
+stop: ## stop any ghostd started by make run/start (restores ducked volumes on exit)
+	@pkill -INT -f '[g]hostd run' && echo "ghostd stopping" || echo "ghostd not running"
+
+wake: ## simulate the wake word
+	@$(UV) run ghostd wake
+
+restore-volumes: ## undo music ducking if ghostd died mid-session
+	@$(UV) run ghostd restore-volumes
+
+echo-cancel: ## install + start ghost-echo-cancel.service (ghost.mic); no PipeWire restart
+	infra/pipewire/install.sh
+
+echo-cancel-off: ## stop and remove the echo-cancel service
+	infra/pipewire/install.sh --uninstall
+
+service: ## install ghostd.service as a user unit (does not enable it)
+	mkdir -p $(HOME)/.config/systemd/user
+	install -m 644 infra/systemd/ghostd.service $(HOME)/.config/systemd/user/
+	systemctl --user daemon-reload
+	@echo "systemctl --user enable --now ghostd   # when ready"
+
+service-logs: ## follow ghostd.service logs
+	journalctl --user -u ghostd -f
