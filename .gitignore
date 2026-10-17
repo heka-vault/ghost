@@ -20,3 +20,6 @@ build/
 models/
 *.onnx
 *.wav
+
+# Local notes, never committed
+.scratch/
