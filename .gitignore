@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# Local state and secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+
+# Models and audio are downloaded, not committed
+models/
+*.onnx
+*.wav
