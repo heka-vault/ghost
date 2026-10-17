@@ -2,6 +2,8 @@ import { phaseLabel } from "@ghost/ui";
 import { useGhost } from "@ghost/ui";
 import { useEffect, useRef, useState } from "react";
 
+import { inTauri, startDaemon } from "../transport";
+
 /** The session view: status, the pending-change card, the transcript, and a text input.
  *  A typed turn goes through the same pipeline, tools and gate as speech. */
 export function Chat() {
@@ -39,7 +41,15 @@ export function Chat() {
       <>
         <h1>Ghost</h1>
         <div className="panel">
-          <p>ghostd is not running. Start it with <span className="mono">systemctl --user start ghostd</span> or <span className="mono">make run</span>.</p>
+          <p>ghostd is not running.</p>
+          {inTauri ? (
+            <button className="primary" disabled={busy} onClick={() => run(startDaemon)}>
+              Start Ghost (enable the user service)
+            </button>
+          ) : (
+            <p className="muted">Start it with <span className="mono">systemctl --user enable --now ghostd</span> or <span className="mono">make run</span>.</p>
+          )}
+          {error && <p style={{ color: "var(--bad)" }}>{error}</p>}
         </div>
       </>
     );

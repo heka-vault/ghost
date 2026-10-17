@@ -1,0 +1,27 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  debs:
+    runs-on: ubuntu-24.04
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -t heka-ghost-build -f packaging/Dockerfile.build .
+      - name: build packages
+        run: docker run --rm -v "$PWD":/src -w /src heka-ghost-build packaging/build-debs.sh
+      - name: install test in a clean Ubuntu 26.04
+        run: |
+          docker run --rm -v "$PWD/dist/deb":/deb:ro ubuntu:26.04 bash -ec '
+            apt-get update -qq && apt-get install -y -qq /deb/heka-ghostd_*.deb >/dev/null
+            ghostd abilities
+            GHOST_GITHUB_MOCK=1 ANTHROPIC_BASE_URL=http://x ghostd check'
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/deb/*.deb
+          generate_release_notes: true

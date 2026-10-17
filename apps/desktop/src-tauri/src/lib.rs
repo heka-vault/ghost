@@ -54,6 +54,26 @@ async fn api_request(method: String, path: String, body: Option<String>) -> Resu
     Ok(ApiResponse { status, body: String::from_utf8_lossy(&bytes).into_owned() })
 }
 
+/// First run: enable and start the per-user service. Returns systemctl's combined output.
+#[tauri::command]
+async fn start_daemon() -> Result<String, String> {
+    let out = tokio::process::Command::new("systemctl")
+        .args(["--user", "enable", "--now", "ghostd"])
+        .output()
+        .await
+        .map_err(|e| format!("systemctl: {e}"))?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if out.status.success() {
+        Ok(text)
+    } else {
+        Err(text)
+    }
+}
+
 struct EventsRunning(Arc<AtomicBool>);
 
 /// Keep the /events WebSocket open; emit `ghost://event` per message, `ghost://closed` on
@@ -125,7 +145,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(EventsRunning(Arc::new(AtomicBool::new(false))))
-        .invoke_handler(tauri::generate_handler![api_request, events_start])
+        .invoke_handler(tauri::generate_handler![api_request, events_start, start_daemon])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Open Ghost", true, None::<&str>)?;
             let wake = MenuItem::with_id(app, "wake", "Wake", true, None::<&str>)?;

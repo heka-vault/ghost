@@ -57,3 +57,10 @@ export async function makeTransport(): Promise<Transport> {
     },
   };
 }
+
+/** Enable and start the per-user ghostd service (Tauri only). Resolves to systemctl's output. */
+export async function startDaemon(): Promise<string> {
+  if (!inTauri) throw new Error("Run `systemctl --user enable --now ghostd` in a terminal.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string>("start_daemon");
+}

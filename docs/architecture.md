@@ -80,21 +80,29 @@ without asking is the operator's call (ADR 0011):
 ```text
 ghost/
 ├── apps/
-│   ├── ghostd/          # desktop daemon: wake word, ducking, ability loading, pipeline lifecycle
-│   └── mobile/          # later: Expo / React Native (ADR 0005)
+│   ├── ghostd/          # Python daemon: wake, sessions, ability loading, control API server
+│   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, policy, audit, settings
+│   └── mobile/          # later: Expo (ADR 0005), a WebRTC transport into the same pipeline
 ├── packages/
-│   ├── voice/           # Pipecat pipeline factory, Parakeet service, sounddevice transport, slots
-│   ├── api/             # control API on a Unix socket; openapi.json is the contract for the apps
-│   └── core/            # ability API, loader, context, gate, policy, confirmation, audit, SQLite
+│   ├── core/            # Python: ability API, loader, context, gate, policy, confirmation, audit
+│   ├── voice/           # Python: Pipecat pipeline factory, Parakeet, sounddevice transport, slots
+│   ├── api/             # Python: FastAPI on the Unix socket; openapi.json is the contract
+│   ├── client-ts/       # TypeScript: GENERATED from packages/api/openapi.json (pnpm gen)
+│   └── ui/              # TypeScript: React pieces shared by desktop and mobile
 ├── abilities/
 │   └── github_issues/   # the first ability: issue reads, operations, GitHub writer, mock
+├── packaging/           # Dockerfile.build, build-debs.sh, debian/ control files and unit
 ├── infra/
-│   ├── systemd/         # ghostd.service + env renderer
+│   ├── systemd/         # ghostd.service for a checkout + env renderer
 │   └── pipewire/        # echo-cancel config
 └── docs/
 ```
 
-A `uv` workspace at the root, Python 3.12. Import direction is strictly
+Two toolchains, one root: a `uv` workspace for Python and a `pnpm` workspace for
+TypeScript. They never import each other; the only crossing is
+`packages/api/openapi.json` → `packages/client-ts`, generated and checked by CI.
+
+Python 3.12. Import direction is strictly
 `ghostd -> {voice, api} -> core` and `abilities/* -> core`; `core` imports nothing from the
 others, and nothing imports an ability by name: `ghostd` finds them through the
 `ghost.abilities` entry point group and `~/.config/ghost/abilities/`. See
@@ -137,3 +145,14 @@ into the user's config at install time and never committed.
 - Real-voice benchmark on the workstation mic, with music playing ([benchmarks](benchmarks/2026-10-16-speech-cpu.md) used synthetic clips).
 - LLM default: `claude-sonnet-5-5` with `thinking: {"type": "between_tools"}` (0.77 s to first token; see the [benchmark](benchmarks/2026-10-16-speech-cpu.md#llm-time-to-first-token)).
 - A dedicated LLM API key for Ghost, so it can be revoked on its own.
+
+## Shipping
+
+Three Debian packages, built inside `packaging/Dockerfile.build` so the host needs no
+Tauri libraries: `heka-ghostd` (a bundled Python 3.12 and venv under `/opt/ghost`, the
+`ghostd` shim, a per-user systemd unit, the PipeWire templates), `heka-ghost-desktop`
+(the Tauri app, from `tauri build --bundles deb`), and the `heka-ghost` meta-package.
+`make build-image`, `make deb`, `make deb-test`. Speech models are not in the package;
+they download on first run. Secrets are never in the package: the desktop app writes
+`~/.config/ghost/env` (0600), or the operator's vault renders it when present. Target
+is Ubuntu 26.04 amd64.
