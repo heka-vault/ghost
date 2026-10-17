@@ -48,7 +48,10 @@ async fn api_request(method: String, path: String, body: Option<String>) -> Resu
     let req = req
         .body(Full::new(Bytes::from(body.unwrap_or_default())))
         .map_err(|e| e.to_string())?;
-    let res = client.request(req).await.map_err(|e| format!("ghostd not reachable: {e}"))?;
+    let res = client.request(req).await.map_err(|e| {
+        eprintln!("ghost: {method} {path}: {e}");
+        format!("ghostd not reachable: {e}")
+    })?;
     let status = res.status().as_u16();
     let bytes = res.into_body().collect().await.map_err(|e| e.to_string())?.to_bytes();
     Ok(ApiResponse { status, body: String::from_utf8_lossy(&bytes).into_owned() })
@@ -88,6 +91,7 @@ async fn events_start(app: AppHandle, running: State<'_, EventsRunning>) -> Resu
         loop {
             match tokio::net::UnixStream::connect(socket_path()).await {
                 Ok(stream) => {
+                    eprintln!("ghost: connected to {}", socket_path().display());
                     let req = hyper::Request::builder()
                         .uri("ws://ghost/events")
                         .header("Host", "ghost")
@@ -97,16 +101,20 @@ async fn events_start(app: AppHandle, running: State<'_, EventsRunning>) -> Resu
                         .header("Sec-WebSocket-Key", tokio_tungstenite::tungstenite::handshake::client::generate_key())
                         .body(())
                         .unwrap();
-                    if let Ok((mut ws, _)) = tokio_tungstenite::client_async(req, stream).await {
-                        while let Some(Ok(msg)) = ws.next().await {
-                            if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
-                                let _ = app.emit("ghost://event", t.to_string());
-                                update_tray(&app, &t);
+                    match tokio_tungstenite::client_async(req, stream).await {
+                        Ok((mut ws, _)) => {
+                            while let Some(Ok(msg)) = ws.next().await {
+                                if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
+                                    let _ = app.emit("ghost://event", t.to_string());
+                                    update_tray(&app, &t);
+                                }
                             }
+                            eprintln!("ghost: event stream closed");
                         }
+                        Err(e) => eprintln!("ghost: websocket handshake failed: {e}"),
                     }
                 }
-                Err(_) => {}
+                Err(e) => eprintln!("ghost: cannot reach {}: {e}", socket_path().display()),
             }
             let _ = app.emit("ghost://closed", ());
             if !flag.load(Ordering::SeqCst) {

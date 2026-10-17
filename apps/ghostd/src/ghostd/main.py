@@ -60,6 +60,7 @@ class Daemon:
         self.state = DaemonState(version=VERSION, wake_mode=cfg.wake_mode)
         self.session: GhostSession | None = None
         self.gate: WriteGate | None = None
+        self._first_via = "voice"  # how the wake-time utterance arrived
         self._manual: FileWakeDetector | None = None
         self._discovered: dict = {}
 
@@ -81,6 +82,7 @@ class Daemon:
         if self.state.phase is Phase.STARTING:
             return False
         if self.session is None:
+            self._first_via = "text"
             return await self.wake(text)
         self.state.add_turn("user", text, via="text")
         await self.session.say_text(text)
@@ -296,7 +298,8 @@ class Daemon:
         self.session = session
         self.state.set_phase(Phase.LISTENING, session.session_id)
         if first_utterance:
-            self.state.add_turn("user", first_utterance)
+            self.state.add_turn("user", first_utterance, via=self._first_via)
+        self._first_via = "voice"
         logger.info(f"session {session.session_id} start")
         await events.emit("session_start", session_id=session.session_id)
         stop_task = asyncio.ensure_future(self._stop.wait())

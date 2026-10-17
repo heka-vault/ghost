@@ -27,3 +27,5 @@ node_modules/
 dist/
 *.tsbuildinfo
 apps/desktop/src-tauri/target/
+.pnpm-store/
+apps/desktop/src-tauri/gen/

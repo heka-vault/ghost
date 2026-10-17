@@ -97,7 +97,7 @@ build_daemon() {
 
 build_desktop() {
   echo "== heka-ghost-desktop: tauri build"
-  (cd "$ROOT" && pnpm install --frozen-lockfile >/dev/null && pnpm gen >/dev/null \
+  (cd "$ROOT" && pnpm install --frozen-lockfile --config.confirmModulesPurge=false >/dev/null && pnpm gen >/dev/null \
     && pnpm --filter @ghost/desktop exec tauri build --bundles deb 2>&1 | tail -5)
   cp "$ROOT"/apps/desktop/src-tauri/target/release/bundle/deb/*.deb "$OUT/"
   # Tauri names it after productName; keep our package naming.
