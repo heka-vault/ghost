@@ -86,8 +86,14 @@ def register_tools(
 
     async def change(params: FunctionCallParams) -> None:
         a = params.arguments
-        aname = str(a.get("ability") or a.get("skill"))  # "skill" for older contexts
-        op_name = str(a.get("operation"))
+        aname = str(a.get("ability") or a.get("skill") or "")  # "skill" for older contexts
+        op_name = str(a.get("operation") or "")
+        if "." in op_name:  # the model echoed "ability.operation" from the listing
+            head, _, tail = op_name.rpartition(".")
+            if head in ops:
+                aname, op_name = head, tail
+        if not aname and len(ops) == 1:
+            aname = next(iter(ops))
         op = ops.get(aname, {}).get(op_name)
         if op is None:
             await params.result_callback({"error": f"unknown operation {aname!r}.{op_name!r}"})

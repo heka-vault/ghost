@@ -35,6 +35,7 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 |---|---|
 | `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on "go to sleep" or idle timeout |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
+| `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, undo, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
 | `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, undo, and the audit log. The only code that can execute a write |
 | `abilities/*` | Installable capabilities (ADR 0012). Each contributes a prompt paragraph, read tools, write operations with a risk class and a writer, and optionally turn interceptors, pipeline processors, listeners and CLI commands. `github_issues` is the first one; third-party abilities use the same entry point |
 | SQLite | Review checkpoints, proposals, operations, operation events, optional transcripts |
@@ -44,6 +45,8 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 1. **Passive.** `ghostd` runs a short local pipeline: VAD, Parakeet, phrase matcher. A transcript without a wake phrase is dropped where it is produced. Nothing is stored or sent.
 2. **Wake.** "Hey Ghost", "Ghost, you there?" or another configured phrase (`GHOST_WAKE_PHRASES`) matches. `ghostd` plays a chime, ducks the configured music streams, and starts the pipeline. Words spoken after the phrase in the same breath become the first turn, so "hey ghost, what needs my sign-off" skips the greeting. `make wake` still triggers it by hand.
 3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking. Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks one sentence at a time. Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off.
+   A typed turn from the desktop app (`POST /session/say`) enters the same pipeline after
+   the STT stage, so it meets the same tools and the same gate as speech.
 4. **Sleep.** "Go to sleep" or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive.
 
 ## Writes
@@ -81,6 +84,7 @@ ghost/
 │   └── mobile/          # later: Expo / React Native (ADR 0005)
 ├── packages/
 │   ├── voice/           # Pipecat pipeline factory, Parakeet service, sounddevice transport, slots
+│   ├── api/             # control API on a Unix socket; openapi.json is the contract for the apps
 │   └── core/            # ability API, loader, context, gate, policy, confirmation, audit, SQLite
 ├── abilities/
 │   └── github_issues/   # the first ability: issue reads, operations, GitHub writer, mock
@@ -91,7 +95,7 @@ ghost/
 ```
 
 A `uv` workspace at the root, Python 3.12. Import direction is strictly
-`ghostd -> voice -> core` and `abilities/* -> core`; `core` imports nothing from the
+`ghostd -> {voice, api} -> core` and `abilities/* -> core`; `core` imports nothing from the
 others, and nothing imports an ability by name: `ghostd` finds them through the
 `ghost.abilities` entry point group and `~/.config/ghost/abilities/`. See
 [abilities.md](abilities.md) to write one.

@@ -39,6 +39,7 @@ from ghost_voice.intercept import InterceptorProcessor
 from ghost_voice.parakeet import ParakeetSTTService
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.sounds import ensure_thinking_sound
+from ghost_voice.tap import AssistantTap, OnPhase, OnTurn, UserTap
 from ghost_voice.thinking import ThinkingSoundProcessor, ThinkingStartFrame
 from ghost_voice.tools import register_tools
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
@@ -91,6 +92,25 @@ class GhostSession:
             self._ended.set()
             await self.runner.stop_when_done()
 
+    async def inject(self, frames: list[Any]) -> None:
+        """Queue frames into the running pipeline (a typed turn, a system note)."""
+        await self.worker.queue_frames(frames)
+
+    async def say_text(self, text: str) -> None:
+        """A typed user turn: goes through the LLM, the tools and the gate like speech."""
+        await self.inject(
+            [
+                ThinkingStartFrame(),
+                LLMMessagesAppendFrame(messages=[{"role": "user", "content": text}], run_llm=True),
+            ]
+        )
+
+    async def system_note(self, note: str) -> None:
+        """Tell the model something happened outside the conversation and have it respond."""
+        await self.inject(
+            [LLMMessagesAppendFrame(messages=[{"role": "user", "content": note}], run_llm=True)]
+        )
+
     async def cancel(self) -> None:
         self._ended.set()
         await self.runner.cancel()
@@ -133,6 +153,8 @@ def build_session(
     greeting: str | None = "Ghost. What do you need?",
     first_utterance: str | None = None,
     on_sleep: Callable[[], Awaitable[None]] | None = None,
+    on_turn: OnTurn | None = None,
+    on_phase: OnPhase | None = None,
 ) -> GhostSession:
     """Build one conversation. ``first_utterance`` is what the operator said right
     after the wake phrase; when given it is the first user turn and there is no
@@ -225,11 +247,19 @@ def build_session(
     def last_assistant() -> str:
         return last_assistant_text(context)
 
+    async def _noop_turn(role: str, text: str) -> None: ...
+
+    async def _noop_phase(phase: str) -> None: ...
+
+    on_turn = on_turn or _noop_turn
+    on_phase = on_phase or _noop_phase  # type: ignore[assignment]
+
     pipeline = Pipeline(
         assemble(
             [
                 (Slot.AUDIO_IN, transport.input()),
                 (None, models.stt.fork()),
+                (None, UserTap(on_turn, on_phase)),
                 (
                     None,
                     InterceptorProcessor(
@@ -248,7 +278,8 @@ def build_session(
                 ),
                 (Slot.BEFORE_LLM, user_agg),
                 (Slot.AFTER_LLM, llm),
-                (Slot.BEFORE_TTS, ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs)),
+                (None, ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs)),
+                (Slot.BEFORE_TTS, AssistantTap(on_turn)),
                 (Slot.AUDIO_OUT, models.tts),
                 (None, transport.output()),
                 (None, assistant_agg),

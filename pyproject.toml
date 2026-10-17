@@ -9,16 +9,18 @@ dependencies = [
     "ghostd",
     "ghost-voice",
     "ghost-core",
+    "ghost-api",
     "ghost-github-issues",
 ]
 
 [tool.uv.workspace]
-members = ["apps/ghostd", "packages/voice", "packages/core", "abilities/github_issues"]
+members = ["apps/ghostd", "packages/voice", "packages/core", "packages/api", "abilities/github_issues"]
 
 [tool.uv.sources]
 ghostd = { workspace = true }
 ghost-voice = { workspace = true }
 ghost-github-issues = { workspace = true }
+ghost-api = { workspace = true }
 ghost-core = { workspace = true }
 
 [dependency-groups]

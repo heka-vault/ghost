@@ -9,6 +9,17 @@ import sys
 from collections.abc import Sequence
 from datetime import timedelta
 
+from ghost_api import (
+    ApiServer,
+    DaemonState,
+    Deps,
+    GhostClient,
+    Phase,
+    create_app,
+    default_socket_path,
+    outcome_view,
+    pending_view,
+)
 from ghost_core import (
     AbilityError,
     AutonomyPolicy,
@@ -23,7 +34,7 @@ from ghost_core import (
     load,
 )
 from ghost_core.jev import JevClassifier, JevClient
-from ghost_voice import VoiceSettings, build_session, debug
+from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.pipeline import Models
 from ghost_voice.wake import build_wake_listener, parse_phrases
 from loguru import logger
@@ -35,17 +46,89 @@ from ghostd.wake import FileWakeDetector, TranscriptWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
+VERSION = "0.1.0"
 
 
 class Daemon:
+    """Runs the loop and implements ``ghost_api.Controller`` for the desktop app."""
+
     def __init__(self, cfg: GhostdSettings, voice: VoiceSettings) -> None:
         self.cfg = cfg
         self.voice = voice
         self.rt = runtime_dir()
         self._stop = asyncio.Event()
+        self.state = DaemonState(version=VERSION, wake_mode=cfg.wake_mode)
+        self.session: GhostSession | None = None
+        self.gate: WriteGate | None = None
+        self._manual: FileWakeDetector | None = None
+        self._discovered: dict = {}
+
+    # --- Controller (called by the API) -------------------------------------
+
+    async def wake(self, first_utterance: str | None) -> bool:
+        if self.state.phase is not Phase.PASSIVE or self._manual is None:
+            return False
+        self._manual.trigger(first_utterance)
+        return True
+
+    async def sleep(self) -> bool:
+        if self.session is None:
+            return False
+        await self.session.end()
+        return True
+
+    async def say(self, text: str) -> bool:
+        if self.state.phase is Phase.STARTING:
+            return False
+        if self.session is None:
+            return await self.wake(text)
+        self.state.add_turn("user", text, via="text")
+        await self.session.say_text(text)
+        return True
+
+    async def confirm_pending(self):
+        if self.gate is None or self.session is None or self.state.session_id is None:
+            return None
+        outcome = await self.gate.confirm_pending(self.state.session_id, source="ui")
+        if outcome is None:
+            return None
+        self.state.set_pending(None)
+        self.state.outcome(outcome_view(outcome), "ui")
+        await self.session.system_note(
+            "[system] The operator confirmed from the desktop app. Verified result: "
+            f"{outcome.summary()} Say what happened in a few words."
+        )
+        return outcome
+
+    async def cancel_pending(self) -> bool:
+        if self.gate is None or self.state.session_id is None:
+            return False
+        p = self.gate.cancel(self.state.session_id, "cancelled from the desktop app")
+        if p is None:
+            return False
+        self.state.set_pending(None)
+        if self.session:
+            await self.session.system_note(
+                "[system] The operator cancelled the pending change from the desktop app. "
+                "Nothing was changed. Acknowledge briefly."
+            )
+        return True
+
+    def reload_policy(self) -> AutonomyPolicy:
+        policy = AutonomyPolicy.load(self.cfg.policy_path)
+        if self.gate is not None:
+            self.gate.set_autonomy(policy)
+        logger.info(f"policy reloaded from {policy.source}")
+        return policy
+
+    def discovered_abilities(self) -> dict:
+        return self._discovered
+
+    # --- the loop --------------------------------------------------------------
 
     def build_wake(self, models: Models) -> WakeDetector:
         manual = FileWakeDetector(self.rt / WAKE_FILE)
+        self._manual = manual
         if self.cfg.wake_mode == "transcript":
             phrases = parse_phrases(self.cfg.wake_phrases)
             logger.info(f"wake phrases: {', '.join(repr(p) for p in phrases)}")
@@ -93,7 +176,11 @@ class Daemon:
         )
         for a in abilities:
             gate.register(a.name, a.contributions.operations)
+        self.gate = gate
+        self._discovered = discover(self.cfg.abilities_dir)
+        self.state.abilities = [a.name for a in abilities]
         events = Events(ln for a in abilities for ln in a.contributions.listeners)
+        api = await self._start_api(gate, store, abilities)
         logger.info(f"autonomy policy: {autonomy.source}")
         for line in describe_abilities(abilities, autonomy):
             logger.info(line)
@@ -105,6 +192,7 @@ class Daemon:
         logger.info("loading models")
         models = await asyncio.to_thread(Models.load, self.voice)
         logger.info("models ready")
+        self.state.set_models_ready(True)
 
         ducker = Ducker(self.cfg.duck_apps, self.cfg.duck_level, self.rt / DUCK_STATE)
         restore_from_state(self.rt / DUCK_STATE)  # undo a previous crash
@@ -113,6 +201,7 @@ class Daemon:
         try:
             while not self._stop.is_set():
                 logger.info("passive: waiting for wake word")
+                self.state.set_phase(Phase.PASSIVE)
                 wake_task = asyncio.ensure_future(wake.wait())
                 stop_task = asyncio.ensure_future(self._stop.wait())
                 await asyncio.wait({wake_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -131,11 +220,45 @@ class Daemon:
         finally:
             wake.close()
             ducker.restore()
+            if api:
+                await api.stop()
             for a in abilities:
                 await a.instance.aclose()
             if jev:
                 await jev.aclose()
             store.close()
+
+    async def _start_api(self, gate: WriteGate, store: Store, abilities) -> ApiServer | None:
+        socket_path = self.cfg.api_socket or default_socket_path()
+        deps = Deps(
+            state=self.state,
+            control=self,
+            gate=gate,
+            store=store,
+            abilities=abilities,
+            policy_path=self.cfg.policy_path,
+            settings_path=self.cfg.settings_path,
+            env_path=self.cfg.env_path,
+            vault_env_path=self.cfg.vault_env_path,
+            infra_dir=self.cfg.infra_dir,
+            cache_dir=self.voice.cache_dir,
+            input_device=self.voice.input_device,
+            output_device=self.voice.output_device,
+            stt_model=self.voice.stt_model,
+        )
+        server = ApiServer(create_app(deps), socket_path)
+        try:
+            await server.start()
+        except Exception:  # noqa: BLE001 - the voice loop must run even if the API can't
+            logger.exception("api failed to start; continuing without it")
+            return None
+        # Mirror the log into the event stream for the desktop app's log view.
+        logger.add(
+            lambda m: self.state.log(m.record["level"].name, m.record["message"]),
+            level="INFO",
+            format="{message}",
+        )
+        return server
 
     async def _conversation(
         self,
@@ -149,6 +272,17 @@ class Daemon:
         ducker.duck()
         if self.cfg.chime:
             await asyncio.to_thread(chime, True, self.voice.output_device)
+
+        async def on_turn(role: str, text: str) -> None:
+            self.state.add_turn(role, text)
+            if role == "user":
+                self._refresh_pending()
+
+        async def on_phase(phase: str) -> None:
+            self.state.set_phase(Phase(phase), self.state.session_id)
+            if phase == "listening":
+                self._refresh_pending()
+
         session = build_session(
             self.voice,
             models=models,
@@ -156,7 +290,13 @@ class Daemon:
             gate=gate,
             events=events,
             first_utterance=first_utterance,
+            on_turn=on_turn,
+            on_phase=on_phase,
         )
+        self.session = session
+        self.state.set_phase(Phase.LISTENING, session.session_id)
+        if first_utterance:
+            self.state.add_turn("user", first_utterance)
         logger.info(f"session {session.session_id} start")
         await events.emit("session_start", session_id=session.session_id)
         stop_task = asyncio.ensure_future(self._stop.wait())
@@ -174,8 +314,18 @@ class Daemon:
             if self.cfg.chime:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
+            self.session = None
             logger.info(f"session {session.session_id} end")
             await events.emit("session_end", session_id=session.session_id)
+
+    def _refresh_pending(self) -> None:
+        """Publish the pending proposal when it appears or goes away."""
+        if self.gate is None or self.state.session_id is None:
+            return
+        p = self.gate.pending(self.state.session_id)
+        view = pending_view(p) if p else None
+        if (view.id if view else None) != (self.state.pending.id if self.state.pending else None):
+            self.state.set_pending(view)
 
 
 def enabled_names(cfg: GhostdSettings, autonomy: AutonomyPolicy) -> list[str]:
@@ -253,6 +403,39 @@ async def run_ability_command(name: str, args: list[str]) -> int:
         store.close()
 
 
+def _client_command(cmd: str, args: list[str]) -> int:
+    """Talk to the running daemon over its socket; `wake` falls back to the wake file."""
+    cfg = GhostdSettings()
+    sock = cfg.api_socket or default_socket_path()
+    text = " ".join(args).strip() or None
+    if not sock.exists():
+        if cmd == "wake":
+            (runtime_dir() / WAKE_FILE).touch()
+            print("wake requested (file; daemon API not running)")
+            return 0
+        print(f"ghostd is not running (no socket at {sock})", file=sys.stderr)
+        return 1
+    client = GhostClient(sock)
+    try:
+        if cmd == "wake":
+            out = client.wake(text)
+        elif cmd == "say":
+            if not text:
+                print("usage: ghostd say <text>", file=sys.stderr)
+                return 2
+            out = client.say(text)
+        elif cmd == "sleep":
+            out = client.sleep()
+        else:
+            out = client.status()
+        import json
+
+        print(json.dumps(out, indent=2))
+        return 0 if out.get("ok", True) else 1
+    finally:
+        client.close()
+
+
 def build_jev(cfg: GhostdSettings) -> JevClient | None:
     """A Jev client per GHOST_JEV and whichever key is present, or None for regex only."""
     return JevClient.from_env(
@@ -280,9 +463,8 @@ def cli(argv: list[str] | None = None) -> None:
             )
         debug.enable(voice.debug_audio)
         asyncio.run(Daemon(cfg, voice).run())
-    elif cmd == "wake":
-        (runtime_dir() / WAKE_FILE).touch()
-        print("wake requested")
+    elif cmd in {"wake", "say", "sleep", "status"}:
+        sys.exit(_client_command(cmd, argv[1:]))
     elif cmd == "restore-volumes":
         restore_from_state(runtime_dir() / DUCK_STATE)
     elif cmd == "devices":
@@ -326,7 +508,8 @@ def cli(argv: list[str] | None = None) -> None:
         sys.exit(asyncio.run(run_ability_command(cmd, argv[1:])))
     else:
         print(
-            "usage: ghostd [run|wake|restore-volumes|devices|check|abilities|<ability> <command>]"
+            "usage: ghostd [run|wake|say <text>|sleep|status|restore-volumes|devices|check|"
+            "abilities|<ability> <command>]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)

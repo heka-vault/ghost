@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "ghost-voice",
     "ghost-core",
+    "ghost-api",
     "pulsectl>=24.12",
     "sounddevice>=0.5",
     "numpy>=1.26",
@@ -19,6 +20,7 @@ ghostd = "ghostd.main:cli"
 [tool.uv.sources]
 ghost-voice = { workspace = true }
 ghost-core = { workspace = true }
+ghost-api = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

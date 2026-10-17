@@ -32,15 +32,24 @@ class WakeDetector(Protocol):
 
 
 class FileWakeDetector:
+    """The manual trigger: the wake file, SIGUSR1, or ``trigger()`` from the control API
+    (optionally with words to treat as the first turn)."""
+
     def __init__(self, path: Path) -> None:
         self._path = path
         self._event = asyncio.Event()
+        self._text: str | None = None
         loop = asyncio.get_event_loop()
         loop.add_signal_handler(signal.SIGUSR1, self._event.set)
+
+    def trigger(self, text: str | None = None) -> None:
+        self._text = text
+        self._event.set()
 
     async def wait(self) -> str | None:
         self._path.unlink(missing_ok=True)
         self._event.clear()
+        self._text = None
         while not self._event.is_set():
             if self._path.exists():
                 self._path.unlink(missing_ok=True)
@@ -49,7 +58,8 @@ class FileWakeDetector:
                 await asyncio.wait_for(self._event.wait(), timeout=0.2)
             except TimeoutError:
                 pass
-        return None
+        text, self._text = self._text, None
+        return text
 
     def close(self) -> None:
         self._path.unlink(missing_ok=True)
@@ -69,7 +79,7 @@ class TranscriptWakeDetector:
             done, _ = await asyncio.wait({spoken, manual}, return_when=asyncio.FIRST_COMPLETED)
             if spoken in done:
                 return spoken.result().remainder or None
-            return None
+            return manual.result()
         finally:
             # Whether a phrase matched, the file fired, or we were cancelled
             # (Ctrl+C): release the microphone before anything else runs.

@@ -21,7 +21,7 @@ define load_env
 set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a;
 endef
 
-.PHONY: help sync test lint fmt check devices env policy run start stop wake restore-volumes \
+.PHONY: help sync test lint fmt check devices env policy run start stop wake say status api-schema restore-volumes \
         echo-cancel echo-cancel-off service service-logs
 
 help: ## list targets
@@ -70,8 +70,17 @@ start: ## start ghostd in the background, log to /tmp/ghostd.log
 stop: ## stop any ghostd started by make run/start (restores ducked volumes on exit)
 	@pkill -INT -f 'bin/ghostd run$$' && echo "ghostd stopping" || echo "ghostd not running"
 
-wake: ## simulate the wake word
+wake: ## simulate the wake word (through the API socket when ghostd is running)
 	@$(UV) run ghostd wake
+
+say: ## type a turn to the running Ghost: make say TEXT="what needs my sign-off"
+	@$(UV) run ghostd say "$(TEXT)"
+
+status: ## the running daemon's status as JSON
+	@$(UV) run ghostd status
+
+api-schema: ## regenerate packages/api/openapi.json from the pydantic models
+	$(UV) run python -m ghost_api.export > packages/api/openapi.json
 
 restore-volumes: ## undo music ducking if ghostd died mid-session
 	@$(UV) run ghostd restore-volumes

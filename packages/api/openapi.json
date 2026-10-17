@@ -1,0 +1,1840 @@
+{
+  "components": {
+    "schemas": {
+      "AbilityInfo": {
+        "properties": {
+          "commands": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "interceptors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Interceptors",
+            "type": "array"
+          },
+          "listeners": {
+            "default": 0,
+            "title": "Listeners",
+            "type": "integer"
+          },
+          "loaded": {
+            "title": "Loaded",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "operations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OperationInfo"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "passive": {
+            "title": "Passive",
+            "type": "boolean"
+          },
+          "read_tools": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReadToolInfo"
+            },
+            "title": "Read Tools",
+            "type": "array"
+          },
+          "slots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "description",
+          "enabled",
+          "loaded",
+          "passive"
+        ],
+        "title": "AbilityInfo",
+        "type": "object"
+      },
+      "Ack": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "Ack",
+        "type": "object"
+      },
+      "AuditEntry": {
+        "properties": {
+          "ability": {
+            "title": "Ability",
+            "type": "string"
+          },
+          "autonomy": {
+            "title": "Autonomy",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventView"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "undo_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undo Of"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "ability",
+          "operation",
+          "target",
+          "summary",
+          "autonomy",
+          "status",
+          "undo_of",
+          "created_at",
+          "events"
+        ],
+        "title": "AuditEntry",
+        "type": "object"
+      },
+      "AuditEventView": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "event": {
+            "title": "Event",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "event"
+        ],
+        "title": "AuditEventView",
+        "type": "object"
+      },
+      "AuditPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AuditPage",
+        "type": "object"
+      },
+      "DeviceInfo": {
+        "properties": {
+          "default_samplerate": {
+            "title": "Default Samplerate",
+            "type": "number"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "is_default_input": {
+            "title": "Is Default Input",
+            "type": "boolean"
+          },
+          "is_default_output": {
+            "title": "Is Default Output",
+            "type": "boolean"
+          },
+          "max_input_channels": {
+            "title": "Max Input Channels",
+            "type": "integer"
+          },
+          "max_output_channels": {
+            "title": "Max Output Channels",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "name",
+          "max_input_channels",
+          "max_output_channels",
+          "default_samplerate",
+          "is_default_input",
+          "is_default_output"
+        ],
+        "title": "DeviceInfo",
+        "type": "object"
+      },
+      "DevicesView": {
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceInfo"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "echo_cancel_active": {
+            "title": "Echo Cancel Active",
+            "type": "boolean"
+          },
+          "echo_cancel_source_present": {
+            "title": "Echo Cancel Source Present",
+            "type": "boolean"
+          },
+          "input_device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Device"
+          },
+          "output_device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Device"
+          }
+        },
+        "required": [
+          "devices",
+          "input_device",
+          "output_device",
+          "echo_cancel_active",
+          "echo_cancel_source_present"
+        ],
+        "title": "DevicesView",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LogEvent": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "const": "log",
+            "default": "log",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "message",
+          "at"
+        ],
+        "title": "LogEvent",
+        "type": "object"
+      },
+      "ModelsView": {
+        "properties": {
+          "cache_dir": {
+            "title": "Cache Dir",
+            "type": "string"
+          },
+          "kokoro_present": {
+            "title": "Kokoro Present",
+            "type": "boolean"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "stt_model": {
+            "title": "Stt Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ready",
+          "cache_dir",
+          "kokoro_present",
+          "stt_model"
+        ],
+        "title": "ModelsView",
+        "type": "object"
+      },
+      "OperationInfo": {
+        "properties": {
+          "autonomy": {
+            "title": "Autonomy",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          },
+          "required": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required",
+            "type": "array"
+          },
+          "risk": {
+            "title": "Risk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "risk",
+          "autonomy",
+          "properties",
+          "required"
+        ],
+        "title": "OperationInfo",
+        "type": "object"
+      },
+      "OutcomeEvent": {
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/OutcomeView"
+          },
+          "type": {
+            "const": "outcome",
+            "default": "outcome",
+            "title": "Type",
+            "type": "string"
+          },
+          "via": {
+            "enum": [
+              "voice",
+              "ui",
+              "autonomous",
+              "undo"
+            ],
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "via"
+        ],
+        "title": "OutcomeEvent",
+        "type": "object"
+      },
+      "OutcomeView": {
+        "properties": {
+          "applied": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Step"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "string"
+          },
+          "state_now": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Now"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "partial",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "target",
+          "status",
+          "applied",
+          "summary"
+        ],
+        "title": "OutcomeView",
+        "type": "object"
+      },
+      "PendingEvent": {
+        "properties": {
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pending"
+        ],
+        "title": "PendingEvent",
+        "type": "object"
+      },
+      "PendingProposal": {
+        "properties": {
+          "ability": {
+            "title": "Ability",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "expires_in_secs": {
+            "title": "Expires In Secs",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ability",
+          "operation",
+          "target",
+          "summary",
+          "rationale",
+          "expires_at",
+          "expires_in_secs"
+        ],
+        "title": "PendingProposal",
+        "type": "object"
+      },
+      "Phase": {
+        "enum": [
+          "starting",
+          "passive",
+          "listening",
+          "thinking",
+          "speaking"
+        ],
+        "title": "Phase",
+        "type": "string"
+      },
+      "PolicyResult": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/PolicyView"
+          },
+          "restart_required": {
+            "title": "Restart Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "policy",
+          "applied",
+          "restart_required"
+        ],
+        "title": "PolicyResult",
+        "type": "object"
+      },
+      "PolicyUpdate": {
+        "description": "Either the raw TOML, or structured fields that are rendered to TOML.",
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "passive": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passive"
+          },
+          "skills": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skills"
+          },
+          "targets": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targets"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "PolicyUpdate",
+        "type": "object"
+      },
+      "PolicyView": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "passive": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Passive",
+            "type": "array"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "skills": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Skills",
+            "type": "object"
+          },
+          "targets": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "title": "Targets",
+            "type": "object"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "exists",
+          "text",
+          "default",
+          "skills",
+          "targets",
+          "enabled",
+          "passive"
+        ],
+        "title": "PolicyView",
+        "type": "object"
+      },
+      "ReadToolInfo": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "ReadToolInfo",
+        "type": "object"
+      },
+      "SayRequest": {
+        "properties": {
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "SayRequest",
+        "type": "object"
+      },
+      "SecretState": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "set": {
+            "title": "Set",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "set"
+        ],
+        "title": "SecretState",
+        "type": "object"
+      },
+      "SettingsResult": {
+        "properties": {
+          "restart_required": {
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SettingsView"
+          }
+        },
+        "required": [
+          "settings",
+          "restart_required"
+        ],
+        "title": "SettingsResult",
+        "type": "object"
+      },
+      "SettingsUpdate": {
+        "properties": {
+          "secrets": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secrets"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Values"
+          }
+        },
+        "title": "SettingsUpdate",
+        "type": "object"
+      },
+      "SettingsView": {
+        "properties": {
+          "env_path": {
+            "title": "Env Path",
+            "type": "string"
+          },
+          "secrets": {
+            "items": {
+              "$ref": "#/components/schemas/SecretState"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
+          "settings_path": {
+            "title": "Settings Path",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Values",
+            "type": "object"
+          },
+          "vault_managed": {
+            "title": "Vault Managed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "settings_path",
+          "env_path",
+          "values",
+          "secrets",
+          "vault_managed"
+        ],
+        "title": "SettingsView",
+        "type": "object"
+      },
+      "Status": {
+        "properties": {
+          "abilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Abilities",
+            "type": "array"
+          },
+          "api_version": {
+            "default": "1",
+            "title": "Api Version",
+            "type": "string"
+          },
+          "models_ready": {
+            "title": "Models Ready",
+            "type": "boolean"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "phase": {
+            "$ref": "#/components/schemas/Phase"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "uptime_secs": {
+            "title": "Uptime Secs",
+            "type": "number"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "wake_mode": {
+            "title": "Wake Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "session_id",
+          "models_ready",
+          "uptime_secs",
+          "version",
+          "wake_mode",
+          "abilities"
+        ],
+        "title": "Status",
+        "type": "object"
+      },
+      "StatusEvent": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "type": {
+            "const": "status",
+            "default": "status",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatusEvent",
+        "type": "object"
+      },
+      "Turn": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant",
+              "system"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "via": {
+            "default": "voice",
+            "enum": [
+              "voice",
+              "text",
+              "interceptor",
+              "system"
+            ],
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "text",
+          "session_id",
+          "at"
+        ],
+        "title": "Turn",
+        "type": "object"
+      },
+      "TurnEvent": {
+        "properties": {
+          "turn": {
+            "$ref": "#/components/schemas/Turn"
+          },
+          "type": {
+            "const": "turn",
+            "default": "turn",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn"
+        ],
+        "title": "TurnEvent",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WakeRequest": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Words to treat as the first turn.",
+            "title": "Text"
+          }
+        },
+        "title": "WakeRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Local control surface for ghostd over a Unix socket. Desktop and mobile apps talk to this; the model never does. Events stream over /events.",
+    "title": "Ghost control API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/abilities": {
+      "get": {
+        "operationId": "abilities_abilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AbilityInfo"
+                  },
+                  "title": "Response Abilities Abilities Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Abilities",
+        "tags": [
+          "abilities"
+        ]
+      }
+    },
+    "/audit": {
+      "get": {
+        "operationId": "audit_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ability",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ability"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/devices": {
+      "get": {
+        "operationId": "devices_devices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevicesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Devices",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/events/schema": {
+      "get": {
+        "description": "Documents the payloads sent on the /events WebSocket. Not meant to be called.",
+        "operationId": "events_schema_events_schema_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "log": "#/components/schemas/LogEvent",
+                      "outcome": "#/components/schemas/OutcomeEvent",
+                      "pending": "#/components/schemas/PendingEvent",
+                      "status": "#/components/schemas/StatusEvent",
+                      "turn": "#/components/schemas/TurnEvent"
+                    },
+                    "propertyName": "type"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StatusEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TurnEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PendingEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OutcomeEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LogEvent"
+                    }
+                  ],
+                  "title": "Response Events Schema Events Schema Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Events Schema",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/policy": {
+      "get": {
+        "operationId": "get_policy_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Policy",
+        "tags": [
+          "policy"
+        ]
+      },
+      "put": {
+        "operationId": "put_policy_policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Policy",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/proposals/pending": {
+      "get": {
+        "operationId": "pending_proposals_pending_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PendingProposal"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Pending Proposals Pending Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pending",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/proposals/pending/cancel": {
+      "post": {
+        "operationId": "cancel_proposals_pending_cancel_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cancel",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/proposals/pending/confirm": {
+      "post": {
+        "operationId": "confirm_proposals_pending_confirm_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Confirm",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/session/say": {
+      "post": {
+        "operationId": "say_session_say_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Say",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/session/turns": {
+      "get": {
+        "operationId": "turns_session_turns_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {},
+                  "title": "Response Turns Session Turns Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Turns",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/settings": {
+      "get": {
+        "operationId": "get_settings_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "put_settings_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/setup/echo-cancel": {
+      "post": {
+        "operationId": "setup_echo_cancel_setup_echo_cancel_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "uninstall",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Uninstall",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Echo Cancel",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/setup/models": {
+      "get": {
+        "operationId": "models_setup_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/sleep": {
+      "post": {
+        "operationId": "sleep_sleep_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sleep",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/status": {
+      "get": {
+        "operationId": "get_status_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/undo": {
+      "post": {
+        "operationId": "undo_undo_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Undo",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/wake": {
+      "post": {
+        "operationId": "wake_wake_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/WakeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Req"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Wake",
+        "tags": [
+          "session"
+        ]
+      }
+    }
+  }
+}

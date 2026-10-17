@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import enum
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -144,9 +144,74 @@ class AutonomyPolicy:
             return self.default
         return RISK_DEFAULTS[risk]
 
+    @classmethod
+    def from_plain(
+        cls,
+        *,
+        default: str | None,
+        skills: Mapping[str, Mapping[str, str]],
+        targets: Mapping[str, Mapping[str, Mapping[str, str]]],
+        enabled: Sequence[str] | None,
+        passive: Sequence[str],
+    ) -> AutonomyPolicy:
+        """Build from plain strings (the API's structured update), validating levels."""
+        return cls(
+            default=_level(default, "defaults.autonomy") if default else None,
+            skills={
+                s: {op: _level(lv, f"{s}.{op}") for op, lv in ops.items()}
+                for s, ops in skills.items()
+            },
+            targets={
+                s: {
+                    t.lower(): {op: _level(lv, f"{s}.targets.{t}.{op}") for op, lv in ops.items()}
+                    for t, ops in ts.items()
+                }
+                for s, ts in targets.items()
+            },
+            enabled=tuple(enabled) if enabled is not None else None,
+            passive=tuple(passive),
+            source="<api>",
+        )
+
+    def to_toml(self) -> str:
+        """Render the file the operator owns. Shallow structure, so no TOML writer needed."""
+        lines = [
+            "# Ghost autonomy policy (ADR 0011). Edited through the desktop app or by hand.",
+            "",
+        ]
+        if self.enabled is not None or self.passive:
+            lines.append("[abilities]")
+            if self.enabled is not None:
+                lines.append(f"enabled = {_toml_list(self.enabled)}")
+            if self.passive:
+                lines.append(f"passive = {_toml_list(self.passive)}")
+            lines.append("")
+        if self.default is not None:
+            lines += ["[defaults]", f'autonomy = "{self.default.value}"', ""]
+        for skill in sorted(set(self.skills) | set(self.targets)):
+            ops = self.skills.get(skill, {})
+            lines.append(f"[{_toml_key(skill)}]")
+            for op, lv in ops.items():
+                lines.append(f'{_toml_key(op)} = "{lv.value}"')
+            lines.append("")
+            for target, tops in self.targets.get(skill, {}).items():
+                lines.append(f'[{_toml_key(skill)}.targets."{target}"]')
+                for op, lv in tops.items():
+                    lines.append(f'{_toml_key(op)} = "{lv.value}"')
+                lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
     def describe(self, skill: str, operations: Mapping[str, Risk]) -> dict[str, Autonomy]:
         """The skill-level resolution for each op; targets may still tighten it."""
         return {op: self.resolve(skill, op, risk=risk) for op, risk in operations.items()}
+
+
+def _toml_key(k: str) -> str:
+    return k if k.replace("_", "").replace("-", "").isalnum() else f'"{k}"'
+
+
+def _toml_list(items: Sequence[str]) -> str:
+    return "[" + ", ".join(f'"{i}"' for i in items) + "]"
 
 
 def _names(value: object, where: str) -> tuple[str, ...]:

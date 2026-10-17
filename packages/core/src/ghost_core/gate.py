@@ -98,6 +98,11 @@ class WriteGate:
     def autonomy(self) -> AutonomyPolicy:
         return self._autonomy
 
+    def set_autonomy(self, policy: AutonomyPolicy) -> None:
+        """Swap the operator's policy live (the file was edited through the UI)."""
+        self._autonomy = policy
+        self._log(f"gate: autonomy policy reloaded from {policy.source}")
+
     def level(self, ability: str, operation: str, target: Target | None = None) -> Autonomy:
         op = self.operation(ability, operation)
         return self._autonomy.resolve(
@@ -253,6 +258,21 @@ class WriteGate:
             self._store.event(p.id, "cancelled", {"reason": verdict.value})
             return verdict, None
         return verdict, await self._execute(p, now)
+
+    async def confirm_pending(
+        self, session_id: str, *, source: str = "ui", now: datetime | None = None
+    ) -> Outcome | None:
+        """An authenticated local action (a click in the operator's own desktop session)
+        confirms the pending proposal (ADR 0007 as amended by ADR 0013). Returns None
+        when nothing is pending."""
+        p = self.pending(session_id, now)
+        if p is None:
+            return None
+        self._store.event(
+            p.id, "user_turn", {"verdict": Verdict.AFFIRMATIVE.value, "classifier": source}
+        )
+        self._log(f"gate: {source} confirmed {p.id}")
+        return await self._execute(p, now)
 
     # --- undo ----------------------------------------------------------
 

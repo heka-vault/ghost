@@ -122,6 +122,40 @@ class Store:
                 return p.model_copy(update={"status": ProposalStatus.EXECUTED})
         return None
 
+    def list_proposals(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        ability: str | None = None,
+        status: str | None = None,
+        session_id: str | None = None,
+    ) -> tuple[list[Proposal], int]:
+        """Newest first, for the audit view. Rows from an older schema are skipped."""
+        where, args = [], []
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        if session_id:
+            where.append("session_id = ?")
+            args.append(session_id)
+        if ability:
+            where.append("json_extract(body, '$.ability') = ?")
+            args.append(ability)
+        clause = (" WHERE " + " AND ".join(where)) if where else ""
+        total = self._conn.execute(f"SELECT COUNT(*) FROM proposals{clause}", args).fetchone()[0]
+        rows = self._conn.execute(
+            f"SELECT body, status FROM proposals{clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            [*args, limit, offset],
+        ).fetchall()
+        out = []
+        for body, st in rows:
+            try:
+                out.append(load_proposal(body).model_copy(update={"status": ProposalStatus(st)}))
+            except Exception:  # noqa: BLE001
+                continue
+        return out, int(total)
+
     def set_status(self, proposal_id: str, status: ProposalStatus) -> None:
         self._conn.execute(
             "UPDATE proposals SET status = ? WHERE id = ?", (status.value, proposal_id)

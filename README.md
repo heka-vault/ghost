@@ -42,7 +42,9 @@ logs what Parakeet heard (also while passive), VAD starts and stops, wake matche
 misses, barge-in decisions, and confirmation verdicts. It is off by default and logs
 only to your terminal.
 
-`make help` lists the rest (`test`, `lint`, `start`/`stop` for a background daemon,
+While it runs, `make status` shows the daemon's state and `make say TEXT="..."` types a turn
+to it through the control socket (`$XDG_RUNTIME_DIR/ghost/api.sock`), which is what the
+desktop app uses. `make help` lists the rest (`test`, `lint`, `start`/`stop` for a background daemon,
 `restore-volumes`, `service`). Non-secret settings such as `GHOST_GITHUB_MOCK=1` go in
 `~/.config/ghost/settings.env`, which `make env` seeds and folds into the rendered file.
 

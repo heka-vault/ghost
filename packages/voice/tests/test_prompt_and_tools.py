@@ -197,6 +197,16 @@ async def test_change_rejects_disallowed_target_and_bad_args(wired):
     assert p.result == {"error": "bad name"}
 
 
+async def test_dotted_operation_name_is_tolerated(wired):
+    llm, gate, _, _, writer = wired
+    p = FakeParams("change", {"ability": "fake", "operation": "fake.flag", "args": {"name": "x"}})
+    await llm.functions["change"](p)
+    assert p.result["status"] == "done" and writer.tags == ["flagged"]
+    p = FakeParams("change", {"operation": "flag", "args": {"name": "y"}})  # ability omitted
+    await llm.functions["change"](p)
+    assert p.result["status"] == "done"
+
+
 async def test_undo_reverses_last_change(wired):
     llm, gate, _, _, writer = wired
     await llm.functions["change"](call("flag"))

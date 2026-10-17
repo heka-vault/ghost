@@ -42,6 +42,16 @@ class GhostdSettings(BaseSettings):
     # State
     db_path: Path = Path.home() / ".local" / "share" / "ghost" / "ghost.db"
 
+    # Control API (ADR 0013): a user-owned Unix socket; no TCP. The desktop app, the
+    # CLI and tests talk to it. Empty disables it.
+    api_socket: Path | None = None  # default: $XDG_RUNTIME_DIR/ghost/api.sock
+    settings_path: Path = Path.home() / ".config" / "ghost" / "settings.env"
+    env_path: Path = Path.home() / ".config" / "ghost" / "env"
+    vault_env_path: Path = Path.home() / ".config" / "heka-vault" / "ghost.env"
+    # Where the PipeWire installer and unit templates live: the repo's infra/ in a
+    # checkout, /usr/share/heka-ghost in the Debian package.
+    infra_dir: Path = Path(__file__).resolve().parents[4] / "infra"
+
     # Wake. transcript: local VAD + Parakeet while passive, looking for a phrase
     # (ADR 0010); file: `ghostd wake` / SIGUSR1 only; onnx: trained model (pending).
     # `ghostd wake` works in every mode.
