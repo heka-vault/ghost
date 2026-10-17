@@ -17,7 +17,7 @@ from loguru import logger
 
 try:
     import pulsectl
-except ImportError:  # pragma: no cover
+except (ImportError, OSError):  # pragma: no cover - no libpulse on this machine
     pulsectl = None
 
 

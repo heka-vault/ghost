@@ -11,13 +11,20 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-import sounddevice as sd
 from loguru import logger
 from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+
+
+def _sd():
+    # Imported lazily: loading sounddevice needs the PortAudio shared library,
+    # which test runners and CI boxes without audio do not have.
+    import sounddevice as sd
+
+    return sd
 
 
 class SoundDeviceTransportParams(TransportParams):
@@ -30,11 +37,12 @@ class SoundDeviceInputTransport(BaseInputTransport):
 
     def __init__(self, params: SoundDeviceTransportParams) -> None:
         super().__init__(params)
-        self._stream: sd.RawInputStream | None = None
+        self._stream = None
 
     async def setup(self, setup: FrameProcessorSetup) -> None:
         await super().setup(setup)
         blocksize = int(self.sample_rate / 100) * 2  # 20 ms
+        sd = _sd()
         self._stream = sd.RawInputStream(
             samplerate=self.sample_rate,
             blocksize=blocksize,
@@ -76,11 +84,12 @@ class SoundDeviceOutputTransport(BaseOutputTransport):
 
     def __init__(self, params: SoundDeviceTransportParams) -> None:
         super().__init__(params)
-        self._stream: sd.RawOutputStream | None = None
+        self._stream = None
         self._executor = ThreadPoolExecutor(max_workers=1)
 
     async def setup(self, setup: FrameProcessorSetup) -> None:
         await super().setup(setup)
+        sd = _sd()
         self._stream = sd.RawOutputStream(
             samplerate=self.sample_rate,
             device=self._params.output_device,
