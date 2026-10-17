@@ -11,6 +11,7 @@ from anthropic import AsyncAnthropic
 from ghost_domain import WriteGate
 from ghost_skills import Skill
 from loguru import logger
+from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -35,9 +36,13 @@ from ghost_voice.config import VoiceSettings
 from ghost_voice.confirmation import ConfirmationProcessor
 from ghost_voice.parakeet import ParakeetSTTService
 from ghost_voice.prompt import build_system_prompt
+from ghost_voice.sounds import ensure_thinking_sound
+from ghost_voice.thinking import ThinkingSoundProcessor, ThinkingStartFrame
 from ghost_voice.tools import register_tools
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
 from ghost_voice.turns import BargeInUserTurnStartStrategy
+
+TTS_SAMPLE_RATE = 24000  # Kokoro's native rate; the output transport runs at it
 
 
 @dataclass
@@ -106,10 +111,21 @@ def build_session(
     session_id = uuid.uuid4().hex
     ended = asyncio.Event()
 
+    mixer = None
+    if settings.thinking_sound:
+        sound = ensure_thinking_sound(settings.cache_dir, TTS_SAMPLE_RATE)
+        mixer = SoundfileMixer(
+            sound_files={"thinking": str(sound)},
+            default_sound="thinking",
+            volume=settings.thinking_volume,
+            mixing=False,
+        )
     transport = transport or SoundDeviceTransport(
         SoundDeviceTransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            audio_out_sample_rate=TTS_SAMPLE_RATE,
+            audio_out_mixer=mixer,
             input_device=settings.input_device,
             output_device=settings.output_device,
         )
@@ -172,6 +188,7 @@ def build_session(
             ConfirmationProcessor(gate, session_id),
             user_agg,
             llm,
+            ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs),
             models.tts,
             transport.output(),
             assistant_agg,
@@ -190,9 +207,10 @@ def build_session(
         if first_utterance:
             await worker.queue_frames(
                 [
+                    ThinkingStartFrame(),
                     LLMMessagesAppendFrame(
                         messages=[{"role": "user", "content": first_utterance}], run_llm=True
-                    )
+                    ),
                 ]
             )
         elif greeting:

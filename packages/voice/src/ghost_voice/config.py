@@ -42,6 +42,11 @@ class VoiceSettings(BaseSettings):
     idle_timeout_secs: float = 45.0
     smart_turn_threads: int = 2
 
+    # A soft loop while the model and tools are working (ghost_voice.thinking).
+    thinking_sound: bool = True
+    thinking_volume: float = 0.12
+    thinking_delay_secs: float = 0.5
+
     # Audio devices (PortAudio index or name substring; None = system default, i.e. PipeWire)
     input_device: int | str | None = None
     output_device: int | str | None = None
