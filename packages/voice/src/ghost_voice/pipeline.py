@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from anthropic import AsyncAnthropic
-from ghost_domain import WriteGate
-from ghost_skills import Skill
+from ghost_core import Events, LoadedAbility, Slot, WriteGate
 from loguru import logger
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
@@ -34,6 +34,8 @@ from pipecat.workers.runner import WorkerRunner
 
 from ghost_voice.config import VoiceSettings
 from ghost_voice.confirmation import ConfirmationProcessor
+from ghost_voice.intents import QuickIntents
+from ghost_voice.intercept import InterceptorProcessor
 from ghost_voice.parakeet import ParakeetSTTService
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.sounds import ensure_thinking_sound
@@ -109,12 +111,24 @@ def last_assistant_text(context: LLMContext) -> str:
     return ""
 
 
+def assemble(core: list[tuple[Slot | None, Any]], slots: dict[Slot, list[Any]]) -> list[Any]:
+    """Splice ability processors into the fixed pipeline. ``core`` is the ordered list of
+    Ghost's own processors, each tagged with the slot that comes right after it."""
+    out: list[Any] = []
+    for slot, proc in core:
+        out.append(proc)
+        if slot is not None:
+            out.extend(slots.get(slot, []))
+    return out
+
+
 def build_session(
     settings: VoiceSettings,
     *,
     models: Models,
-    skills: list[Skill],
+    abilities: Sequence[LoadedAbility],
     gate: WriteGate,
+    events: Events | None = None,
     transport: BaseTransport | None = None,
     greeting: str | None = "Ghost. What do you need?",
     first_utterance: str | None = None,
@@ -153,7 +167,9 @@ def build_session(
         ),
         settings=AnthropicLLMService.Settings(
             model=settings.llm_model,
-            system_instruction=build_system_prompt([s.prompt_fragment for s in skills]),
+            system_instruction=build_system_prompt(
+                [a.contributions.prompt for a in abilities if a.contributions.prompt]
+            ),
             max_tokens=settings.llm_max_tokens,
             enable_prompt_caching=True,
             thinking=AnthropicLLMService.ThinkingConfig(type=settings.llm_thinking),
@@ -169,7 +185,9 @@ def build_session(
         if session:
             await session.end()
 
-    tools = register_tools(llm, skills=skills, gate=gate, session_id=session_id, on_sleep=sleep)
+    tools = register_tools(
+        llm, abilities=abilities, gate=gate, session_id=session_id, on_sleep=sleep, events=events
+    )
     context = LLMContext(tools=tools)
 
     user_agg, assistant_agg = LLMContextAggregatorPair(
@@ -196,20 +214,47 @@ def build_session(
         logger.info(f"idle for {settings.idle_timeout_secs}s")
         await sleep()
 
+    interceptors: list[Any] = [QuickIntents()] if settings.quick_intents else []
+    for a in abilities:
+        interceptors.extend(a.contributions.interceptors)
+    slots: dict[Slot, list[Any]] = {}
+    for a in abilities:
+        for slot, factories in a.contributions.processors.items():
+            slots.setdefault(Slot(slot), []).extend(f() for f in factories)
+
+    def last_assistant() -> str:
+        return last_assistant_text(context)
+
     pipeline = Pipeline(
-        [
-            transport.input(),
-            models.stt.fork(),
-            ConfirmationProcessor(
-                gate, session_id, last_assistant=lambda: last_assistant_text(context)
-            ),
-            user_agg,
-            llm,
-            ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs),
-            models.tts,
-            transport.output(),
-            assistant_agg,
-        ]
+        assemble(
+            [
+                (Slot.AUDIO_IN, transport.input()),
+                (None, models.stt.fork()),
+                (
+                    None,
+                    InterceptorProcessor(
+                        interceptors,
+                        gate=gate,
+                        session_id=session_id,
+                        on_sleep=sleep,
+                        last_assistant=last_assistant,
+                    ),
+                ),
+                (
+                    Slot.AFTER_STT,
+                    ConfirmationProcessor(
+                        gate, session_id, last_assistant=last_assistant, events=events
+                    ),
+                ),
+                (Slot.BEFORE_LLM, user_agg),
+                (Slot.AFTER_LLM, llm),
+                (Slot.BEFORE_TTS, ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs)),
+                (Slot.AUDIO_OUT, models.tts),
+                (None, transport.output()),
+                (None, assistant_agg),
+            ],
+            slots,
+        )
     )
     worker = PipelineWorker(
         pipeline,

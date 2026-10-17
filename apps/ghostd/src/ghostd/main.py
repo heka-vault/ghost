@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import sys
+from collections.abc import Sequence
 from datetime import timedelta
 
-from ghost_domain import AutonomyPolicy, ConfirmationClassifier, RegexClassifier, Store, WriteGate
-from ghost_domain.jev import JevClassifier, JevClient
-from ghost_skills import load_skills
+from ghost_core import (
+    AbilityError,
+    AutonomyPolicy,
+    ConfirmationClassifier,
+    Events,
+    GhostContext,
+    LoadedAbility,
+    RegexClassifier,
+    Store,
+    WriteGate,
+    discover,
+    load,
+)
+from ghost_core.jev import JevClassifier, JevClient
 from ghost_voice import VoiceSettings, build_session, debug
 from ghost_voice.pipeline import Models
 from ghost_voice.wake import build_wake_listener, parse_phrases
@@ -57,21 +70,8 @@ class Daemon:
 
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         store = Store(self.cfg.db_path)
-        skills = load_skills(
-            self.cfg.skills,
-            {
-                "github_issues": {
-                    "token": self.cfg.github_token,
-                    "repos": self.cfg.repos,
-                    "mock": self.cfg.github_mock,
-                }
-            },
-        )
-        if self.cfg.github_mock:
-            logger.warning("GITHUB MOCK: issues are in-memory; nothing reaches GitHub")
-        # The gate writes through the issue skill's writer and its allowlist.
-        issues = next(s for s in skills if s.name == "github_issues")
         autonomy = AutonomyPolicy.load(self.cfg.policy_path)
+        abilities = await load_abilities(self.cfg, self.voice, store, autonomy)
         jev = build_jev(self.cfg)
         classifier: ConfirmationClassifier = (
             JevClassifier(
@@ -86,20 +86,17 @@ class Daemon:
         )
         gate = WriteGate(
             store,
-            issues.writer,  # type: ignore[attr-defined]
-            issues.policy,  # type: ignore[attr-defined]
             autonomy=autonomy,
             classifier=classifier,
             undo_window=timedelta(seconds=self.cfg.undo_window_secs),
             on_decision=debug.audio,
         )
-        logger.info(f"allowed repos: {sorted(issues.policy.allowed)}")  # type: ignore[attr-defined]
+        for a in abilities:
+            gate.register(a.name, a.contributions.operations)
+        events = Events(ln for a in abilities for ln in a.contributions.listeners)
         logger.info(f"autonomy policy: {autonomy.source}")
-        for s in skills:
-            levels = autonomy.describe(s.name, {op.name: op.risk for op in s.prepare_ops})
-            logger.info(
-                f"  {s.name}: " + ", ".join(f"{op}={lv.value}" for op, lv in levels.items())
-            )
+        for line in describe_abilities(abilities, autonomy):
+            logger.info(line)
         logger.info(
             "confirmation classifier: "
             + (f"jev via {jev.provider}, regex fallback" if jev else "regex")
@@ -127,12 +124,15 @@ class Daemon:
                 if is_dictating(self.cfg.dictation_flag):
                     logger.info("wake ignored: dictation is active")
                     continue
-                await self._conversation(models, skills, gate, ducker, wake_task.result())
+                await events.emit("wake")
+                await self._conversation(
+                    models, abilities, gate, events, ducker, wake_task.result()
+                )
         finally:
             wake.close()
             ducker.restore()
-            for s in skills:
-                await s.aclose()
+            for a in abilities:
+                await a.instance.aclose()
             if jev:
                 await jev.aclose()
             store.close()
@@ -140,8 +140,9 @@ class Daemon:
     async def _conversation(
         self,
         models: Models,
-        skills,
+        abilities: Sequence[LoadedAbility],
         gate: WriteGate,
+        events: Events,
         ducker: Ducker,
         first_utterance: str | None = None,
     ) -> None:
@@ -149,9 +150,15 @@ class Daemon:
         if self.cfg.chime:
             await asyncio.to_thread(chime, True, self.voice.output_device)
         session = build_session(
-            self.voice, models=models, skills=skills, gate=gate, first_utterance=first_utterance
+            self.voice,
+            models=models,
+            abilities=abilities,
+            gate=gate,
+            events=events,
+            first_utterance=first_utterance,
         )
         logger.info(f"session {session.session_id} start")
+        await events.emit("session_start", session_id=session.session_id)
         stop_task = asyncio.ensure_future(self._stop.wait())
         try:
             await session.start()  # type: ignore[attr-defined]
@@ -168,6 +175,82 @@ class Daemon:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
             logger.info(f"session {session.session_id} end")
+            await events.emit("session_end", session_id=session.session_id)
+
+
+def enabled_names(cfg: GhostdSettings, autonomy: AutonomyPolicy) -> list[str]:
+    return list(autonomy.enabled) if autonomy.enabled is not None else list(cfg.abilities)
+
+
+async def load_abilities(
+    cfg: GhostdSettings, voice: VoiceSettings, store: Store, autonomy: AutonomyPolicy
+) -> list[LoadedAbility]:
+    discovered = discover(cfg.abilities_dir)
+
+    def make_context(name: str) -> GhostContext:
+        return GhostContext.build(
+            name,
+            data_root=cfg.data_dir,
+            cache_root=voice.cache_dir,
+            store=store,
+            env=os.environ,
+            debug_audio=debug.audio,
+        )
+
+    return await load(
+        enabled_names(cfg, autonomy),
+        discovered=discovered,
+        make_context=make_context,
+        passive_allowed=autonomy.passive,
+    )
+
+
+def describe_abilities(abilities: Sequence[LoadedAbility], autonomy: AutonomyPolicy) -> list[str]:
+    lines = []
+    for a in abilities:
+        levels = autonomy.describe(a.name, {op.name: op.risk for op in a.contributions.operations})
+        table = ", ".join(f"{op}={lv.value}" for op, lv in levels.items()) or "read-only"
+        extras = []
+        if a.contributions.interceptors:
+            extras.append(f"{len(a.contributions.interceptors)} interceptor(s)")
+        if a.contributions.processors:
+            extras.append(f"processors in {', '.join(a.contributions.processors)}")
+        if a.contributions.listeners:
+            extras.append(f"{len(a.contributions.listeners)} listener(s)")
+        suffix = f" [{'; '.join(extras)}]" if extras else ""
+        lines.append(f"  {a.name} {a.ability.version}: {table}{suffix}")
+    return lines
+
+
+async def run_ability_command(name: str, args: list[str]) -> int:
+    """``ghostd <ability> <command> [args]``: load just that ability and dispatch."""
+    cfg = GhostdSettings()
+    voice = VoiceSettings()  # type: ignore[call-arg]
+    store = Store(cfg.db_path)
+    try:
+        [loaded] = await load(
+            [name],
+            discovered=discover(cfg.abilities_dir),
+            make_context=lambda n: GhostContext.build(
+                n, data_root=cfg.data_dir, cache_root=voice.cache_dir, store=store, env=os.environ
+            ),
+            passive_allowed=AutonomyPolicy.load(cfg.policy_path).passive,
+        )
+    except AbilityError as e:
+        print(e, file=sys.stderr)
+        return 1
+    try:
+        commands = {c.name: c for c in loaded.contributions.commands}
+        if not args or args[0] not in commands:
+            print(
+                f"{name} commands: "
+                + ", ".join(f"{c.name} ({c.description})" for c in commands.values())
+            )
+            return 2
+        return commands[args[0]].run(args[1:])
+    finally:
+        await loaded.instance.aclose()
+        store.close()
 
 
 def build_jev(cfg: GhostdSettings) -> JevClient | None:
@@ -210,31 +293,42 @@ def cli(argv: list[str] | None = None) -> None:
         cfg = GhostdSettings()
         voice = VoiceSettings()  # type: ignore[call-arg]
         problems = []
-        if cfg.github_mock:
-            print("GITHUB MOCK is on")
-        else:
-            if not cfg.github_token:
-                problems.append("GITHUB_TOKEN is empty (or set GHOST_GITHUB_MOCK=1)")
-            if not cfg.repos:
-                problems.append("GHOST_REPOS allowlist is empty")
         if not voice.anthropic_base_url:
             problems.append("ANTHROPIC_BASE_URL is not set")
+        autonomy = AutonomyPolicy()
         try:
             autonomy = AutonomyPolicy.load(cfg.policy_path)
             print(f"autonomy policy: {autonomy.source}")
         except ValueError as e:
             problems.append(f"policy: {e}")
         try:
+            abilities = asyncio.run(load_abilities(cfg, voice, Store(), autonomy))
+            print("abilities:")
+            print("\n".join(describe_abilities(abilities, autonomy)))
+        except AbilityError as e:
+            problems.append(f"ability: {e}")
+        try:
             jev = build_jev(cfg)
-            print(
-                "confirmation: " + (f"jev via {jev.provider} (regex fallback)" if jev else "regex")
-            )
+            how = f"jev via {jev.provider} (regex fallback)" if jev else "regex"
+            print(f"confirmation: {how}")
         except ValueError as e:
             problems.append(str(e))
         print("\n".join(problems) if problems else "config ok")
         sys.exit(1 if problems else 0)
+    elif cmd == "abilities":
+        cfg = GhostdSettings()
+        autonomy = AutonomyPolicy.load(cfg.policy_path)
+        enabled = set(enabled_names(cfg, autonomy))
+        for name, ab in sorted(discover(cfg.abilities_dir).items()):
+            flag = "enabled " if name in enabled else "         "
+            print(f"{flag}{name} {ab.version}: {ab.description}")
+    elif cmd in discover(GhostdSettings().abilities_dir):
+        sys.exit(asyncio.run(run_ability_command(cmd, argv[1:])))
     else:
-        print(f"usage: ghostd [run|wake|restore-volumes|devices|check]  (got {cmd!r})")
+        print(
+            "usage: ghostd [run|wake|restore-volumes|devices|check|abilities|<ability> <command>]"
+            f"  (got {cmd!r})"
+        )
         sys.exit(2)
 
 

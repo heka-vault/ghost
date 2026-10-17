@@ -12,6 +12,10 @@
 # Ghost never writes this file, and nothing in an issue can change it.
 # Every level still logs the write and lets you say "undo that" for ten minutes.
 
+[abilities]
+# enabled = ["github_issues"]   # which installed abilities to load; default is GHOST_ABILITIES
+# passive = []                  # abilities allowed to hear audio before the wake phrase
+
 [defaults]
 # autonomy = "confirm"        # uncomment to make everything ask unless listed below
 

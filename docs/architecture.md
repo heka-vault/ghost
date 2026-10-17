@@ -18,8 +18,8 @@ flowchart LR
       STT --> LLM[LLM + skill tools]
       LLM --> TTS[Kokoro<br/>local]
     end
-    LLM --> SK[Skills<br/>github_issues, ...]
-    SK --> DOM[domain<br/>proposals, confirmation,<br/>audit, policy]
+    LLM --> SK[Abilities<br/>github_issues, ...]
+    SK --> DOM[core<br/>gate, policy, audit]
     DOM --> DB[(SQLite WAL)]
   end
   LLM <-->|HTTPS| PROXY[Anthropic-compatible endpoint<br/>Claude]
@@ -35,8 +35,8 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 |---|---|
 | `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on "go to sleep" or idle timeout |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
-| `skills` | Pluggable capabilities (ADR 0006). Each skill declares its read tools and its write operations with a risk class. `github_issues` is the first one |
-| `domain` | The write gate (ADR 0007, ADR 0011): the operator's autonomy policy, proposals, confirmation classifiers (Jev or regex), idempotent execution, readback, undo, and the audit log. The only code that can execute a write |
+| `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, undo, and the audit log. The only code that can execute a write |
+| `abilities/*` | Installable capabilities (ADR 0012). Each contributes a prompt paragraph, read tools, write operations with a risk class and a writer, and optionally turn interceptors, pipeline processors, listeners and CLI commands. `github_issues` is the first one; third-party abilities use the same entry point |
 | SQLite | Review checkpoints, proposals, operations, operation events, optional transcripts |
 
 ## Conversation flow
@@ -49,23 +49,25 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 ## Writes
 
 Speech-to-text runs inside our own process, so the backend observes the transcribed
-user turn directly. `domain` accepts a confirmation only from a transcript frame the
+user turn directly. `core` accepts a confirmation only from a transcript frame the
 pipeline produced for the current session, never from LLM output. How much Ghost does
 without asking is the operator's call (ADR 0011):
 
-1. The LLM calls `change` on a skill: target, typed change set, rationale.
-2. `domain` checks the repository allowlist, then resolves the autonomy level for
-   this skill, operation, and target from `~/.config/ghost/policy.toml` (`deny`,
+1. The LLM calls `change` on an ability's operation: the operation's `prepare` turns the
+   arguments into a target and a typed change set.
+2. `core` checks the ability's own allowlist, then resolves the autonomy level for
+   this ability, operation, and target from `~/.config/ghost/policy.toml` (`deny`,
    `confirm`, `announce`, `quiet`; a missing entry falls back to the operation's
    risk class).
-3. `domain` fetches the issue and stores an immutable proposal with that snapshot.
+3. `core` fetches the target through the ability's writer and stores an immutable
+   proposal with that snapshot.
 4. At `announce` or `quiet` the proposal is executed at once. At `confirm` it waits
    up to 60 s for the next user turn; the classifier (Jev when configured, else the
    regex allowlist, negation guard in both) must call it a clear yes, and the issue
    must not have changed since the snapshot. Any other turn cancels it.
-5. Execution claims the proposal atomically, applies each step, reads the issue back,
-   and records success, partial, or failed. Generated comments carry a hidden marker
-   so a retry never duplicates them.
+5. Execution claims the proposal atomically, applies each step through the writer, reads
+   the target back, and records success, partial, or failed. Anything created carries a
+   hidden idempotency marker so a retry never duplicates it.
 6. The model gets the verified result and says what happened in a few words, or asks
    one short question when confirmation is needed. "Undo that" reverses the last
    executed change set within ten minutes using the stored snapshot and the marker.
@@ -75,12 +77,13 @@ without asking is the operator's call (ADR 0011):
 ```text
 ghost/
 ├── apps/
-│   ├── ghostd/          # desktop daemon: wake word, ducking, pipeline lifecycle
+│   ├── ghostd/          # desktop daemon: wake word, ducking, ability loading, pipeline lifecycle
 │   └── mobile/          # later: Expo / React Native (ADR 0005)
 ├── packages/
-│   ├── voice/           # Pipecat pipeline factory, Parakeet service, sounddevice transport
-│   ├── skills/          # skill interface + github_issues (reads, prepare, writer)
-│   └── domain/          # proposals, confirmation, gate, audit, policy, SQLite
+│   ├── voice/           # Pipecat pipeline factory, Parakeet service, sounddevice transport, slots
+│   └── core/            # ability API, loader, context, gate, policy, confirmation, audit, SQLite
+├── abilities/
+│   └── github_issues/   # the first ability: issue reads, operations, GitHub writer, mock
 ├── infra/
 │   ├── systemd/         # ghostd.service + env renderer
 │   └── pipewire/        # echo-cancel config
@@ -88,13 +91,24 @@ ghost/
 ```
 
 A `uv` workspace at the root, Python 3.12. Import direction is strictly
-`ghostd -> voice -> skills -> domain`; `domain` imports nothing from the others.
+`ghostd -> voice -> core` and `abilities/* -> core`; `core` imports nothing from the
+others, and nothing imports an ability by name: `ghostd` finds them through the
+`ghost.abilities` entry point group and `~/.config/ghost/abilities/`. See
+[abilities.md](abilities.md) to write one.
 
 ### How the gate is wired into the pipeline
 
 ```text
-transport.input -> Parakeet STT -> ConfirmationProcessor -> user aggregator -> LLM -> Kokoro -> transport.output
+transport.input -> [audio_in] -> Parakeet STT -> InterceptorProcessor -> ConfirmationProcessor -> [after_stt]
+  -> user aggregator -> [before_llm] -> LLM -> [after_llm] -> thinking sound -> [before_tts] -> Kokoro -> [audio_out]
+  -> transport.output
 ```
+
+The bracketed names are slots where enabled abilities' processors are spliced in, one
+fresh instance per session. `InterceptorProcessor` offers each user turn to the
+abilities' turn interceptors first (and to Ghost's own fixed intents: "go to sleep",
+"never mind" while a change is pending, "undo that"); a handled turn is spoken to or
+acted on directly and never reaches the model.
 
 `ConfirmationProcessor` sees every `TranscriptionFrame`. If the gate holds a pending
 proposal for the session, the frame's text is the confirmation evidence, judged with
@@ -102,7 +116,7 @@ Ghost's last reply as context: a clear yes executes, anything else cancels. Tran
 that arrive while Ghost is still speaking are not evidence at all: the operator has
 not heard the question yet, and the text may be Ghost's own voice. The verified
 outcome is appended to the context as a system note, so the model's next sentence
-describes what actually happened. The model's tools are the skills' read tools,
+describes what actually happened. The model's tools are the abilities' read tools,
 `change`, `undo`, and `go_to_sleep`. There is no tool that bypasses the gate.
 
 The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the

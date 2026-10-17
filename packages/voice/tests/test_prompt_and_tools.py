@@ -3,17 +3,22 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from ghost_domain import (
+from ghost_core import (
+    Ability,
     AutonomyPolicy,
+    Change,
     ChangeSet,
-    RepoPolicy,
-    SetLabels,
+    Contributions,
+    LoadedAbility,
+    Operation,
+    Prepared,
+    ReadTool,
+    SimpleInstance,
     Snapshot,
     Store,
     Target,
     WriteGate,
 )
-from ghost_skills.base import PrepareOp, PrepareRequest, ReadTool
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.tools import register_tools
 
@@ -36,75 +41,98 @@ class FakeParams:
         self.result = result
 
 
+class Doc(Target, frozen=True):
+    name: str
+
+    def key(self):
+        return f"doc:{self.name}"
+
+
+class DocSnap(Snapshot, frozen=True):
+    tags: tuple[str, ...]
+
+    def spoken(self):
+        return "tags " + (", ".join(self.tags) or "none")
+
+
+class Tag(Change, frozen=True):
+    tag: str
+
+    def describe(self):
+        return f"add {self.tag}"
+
+    def invert(self, before, marker):
+        return Untag(tag=self.tag)
+
+
+class Untag(Change, frozen=True):
+    tag: str
+
+    def describe(self):
+        return f"remove {self.tag}"
+
+
 class FakeWriter:
     def __init__(self):
-        self.labels = ["needs-signoff"]
-        self.writes = []
+        self.tags: list[str] = []
+        self.version = 0
 
     async def fetch(self, target):
-        return Snapshot(title="T", state="open", labels=tuple(self.labels), updated_at="x")
+        return DocSnap(version=str(self.version), tags=tuple(self.tags))
 
-    async def set_labels(self, target, add, remove):
-        self.writes.append(("set_labels", add, remove))
-        self.labels = [x for x in self.labels if x not in remove] + list(add)
+    async def apply(self, target, change, key):
+        match change:
+            case Tag(tag=t):
+                self.tags.append(t)
+            case Untag(tag=t):
+                self.tags.remove(t)
+        self.version += 1
 
-    async def add_comment(self, *a, **k): ...
-    async def delete_comment(self, *a, **k): ...
-    async def set_state(self, *a): ...
 
+def fake_ability(writer) -> LoadedAbility:
+    async def echo(args):
+        return {"echo": args}
 
-class FakeSkill:
-    name = "fake"
-    prompt_fragment = "FAKE FRAGMENT"
+    async def prepare(args):
+        if args.get("name") == "forbidden":
+            raise ValueError("bad name")
+        return Prepared(Doc(name=args["name"]), ChangeSet(steps=(Tag(tag="flagged"),)))
 
-    @property
-    def read_tools(self):
-        async def echo(args):
-            return {"echo": args}
-
-        return [ReadTool("echo", "Echo.", {"x": {"type": "string"}}, ["x"], echo)]
-
-    @property
-    def prepare_ops(self):
-        issue = {"repo": {"type": "string"}, "number": {"type": "integer"}}
-        return [
-            PrepareOp("flag", "Flag it.", issue, ["repo", "number"], risk="low"),
-            PrepareOp("nuke", "Dangerous.", issue, ["repo", "number"], risk="high"),
-            PrepareOp("never", "Denied by policy.", issue, ["repo", "number"], risk="low"),
-        ]
-
-    async def prepare(self, operation, args):
-        if operation not in {"flag", "nuke", "never"}:
-            raise ValueError("bad op")
-        owner, repo = args["repo"].split("/")
-        return PrepareRequest(
-            operation,
-            Target(owner=owner, repo=repo, number=int(args["number"])),
-            ChangeSet(steps=(SetLabels(add=("flagged",)),)),
-            "because",
+    def op(name, risk):
+        return Operation(
+            name,
+            f"{name}.",
+            {"name": {"type": "string"}},
+            ["name"],
+            prepare=prepare,
+            writer=writer,
+            risk=risk,
+            allowed=lambda t: t.name != "other",
         )
 
-    async def aclose(self): ...
+    c = Contributions(
+        prompt="FAKE FRAGMENT",
+        read_tools=[ReadTool("echo", "Echo.", {"x": {"type": "string"}}, ["x"], echo)],
+        operations=[op("flag", "low"), op("nuke", "high"), op("never", "low")],
+    )
+    ab = Ability("fake", "0", "", setup=None, config=None)  # type: ignore[arg-type]
+    return LoadedAbility(ab, None, SimpleInstance(c), c)
 
 
 @pytest.fixture
 def wired():
     llm = FakeLLM()
-    gate = WriteGate(
-        Store(),
-        FakeWriter(),
-        RepoPolicy.from_csv("acme/app"),
-        autonomy=AutonomyPolicy.parse('[fake]\nnever = "deny"\n'),
-    )
+    writer = FakeWriter()
+    loaded = fake_ability(writer)
+    gate = WriteGate(Store(), autonomy=AutonomyPolicy.parse('[fake]\nnever = "deny"\n'))
+    gate.register("fake", loaded.contributions.operations)
     slept = []
 
     async def on_sleep():
         slept.append(True)
 
-    schemas = register_tools(
-        llm, skills=[FakeSkill()], gate=gate, session_id="s", on_sleep=on_sleep
-    )
-    return llm, gate, schemas, slept
+    schemas = register_tools(llm, abilities=[loaded], gate=gate, session_id="s", on_sleep=on_sleep)
+    return llm, gate, schemas, slept, writer
 
 
 def test_prompt_includes_fragments_and_persona():
@@ -113,12 +141,12 @@ def test_prompt_includes_fragments_and_persona():
 
 
 def test_only_reads_change_undo_and_sleep_are_exposed(wired):
-    _, _, schemas, _ = wired
+    _, _, schemas, _, _ = wired
     assert sorted(s.name for s in schemas) == ["change", "echo", "go_to_sleep", "undo"]
 
 
 def test_denied_ops_are_not_offered(wired):
-    _, _, schemas, _ = wired
+    _, _, schemas, _, _ = wired
     change = next(s for s in schemas if s.name == "change")
     assert "fake.flag" in change.description and "fake.nuke" in change.description
     assert "fake.never" not in change.description
@@ -131,54 +159,57 @@ async def test_read_tool_round_trip(wired):
     assert p.result == {"echo": {"x": "hi"}}
 
 
-def call(op, repo="acme/app"):
-    return FakeParams(
-        "change", {"skill": "fake", "operation": op, "args": {"repo": repo, "number": 1}}
-    )
+def call(op, name="readme"):
+    return FakeParams("change", {"ability": "fake", "operation": op, "args": {"name": name}})
 
 
 async def test_low_risk_change_is_done_at_once(wired):
-    llm, gate, _, _ = wired
+    llm, gate, _, _, writer = wired
     p = call("flag")
     await llm.functions["change"](p)
     assert p.result["status"] == "done" and "add flagged" in p.result["result"]
     assert "flagged" in p.result["state_now"] and gate.pending("s") is None
+    assert writer.tags == ["flagged"]
 
 
 async def test_high_risk_change_needs_confirmation(wired):
-    llm, gate, _, _ = wired
+    llm, gate, _, _, writer = wired
     p = call("nuke")
     await llm.functions["change"](p)
     assert p.result["status"] == "needs_confirmation" and "add flagged" in p.result["summary"]
-    assert gate.pending("s") is not None
+    assert gate.pending("s") is not None and writer.tags == []
 
 
 async def test_denied_op_errors_even_if_called(wired):
-    llm, gate, _, _ = wired
+    llm, gate, _, _, _ = wired
     p = call("never")
     await llm.functions["change"](p)
     assert "error" in p.result and gate.pending("s") is None
 
 
-async def test_change_rejects_disallowed_repo(wired):
-    llm, gate, _, _ = wired
-    p = call("flag", repo="acme/other")
+async def test_change_rejects_disallowed_target_and_bad_args(wired):
+    llm, gate, _, _, _ = wired
+    p = call("flag", name="other")
     await llm.functions["change"](p)
-    assert "error" in p.result and gate.pending("s") is None
+    assert "not allowed" in p.result["error"]
+    p = call("flag", name="forbidden")
+    await llm.functions["change"](p)
+    assert p.result == {"error": "bad name"}
 
 
 async def test_undo_reverses_last_change(wired):
-    llm, gate, _, _ = wired
+    llm, gate, _, _, writer = wired
     await llm.functions["change"](call("flag"))
     u = FakeParams("undo", {})
     await llm.functions["undo"](u)
     assert u.result["status"] == "done" and "remove flagged" in u.result["result"]
+    assert writer.tags == []
     u2 = FakeParams("undo", {})
     await llm.functions["undo"](u2)
     assert "error" in u2.result
 
 
 async def test_go_to_sleep_calls_back(wired):
-    llm, _, _, slept = wired
+    llm, _, _, slept, _ = wired
     await llm.functions["go_to_sleep"](FakeParams("go_to_sleep", {}))
     assert slept == [True]

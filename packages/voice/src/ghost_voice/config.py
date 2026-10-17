@@ -43,6 +43,7 @@ class VoiceSettings(BaseSettings):
     smart_turn_threads: int = 2
 
     # A soft loop while the model and tools are working (ghost_voice.thinking).
+    quick_intents: bool = True  # exact-match sleep/cancel/undo without a model round trip
     thinking_sound: bool = True
     thinking_volume: float = 0.12
     thinking_delay_secs: float = 0.5

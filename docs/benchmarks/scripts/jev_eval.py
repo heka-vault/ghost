@@ -24,9 +24,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "packages" / "domain" / "src"))
 
-from ghost_domain.confirmation import Verdict, classify_confirmation, normalize  # noqa: E402
-from ghost_domain.confirmation import ConfirmationContext  # noqa: E402
-from ghost_domain.jev import (  # noqa: E402
+from ghost_core.confirmation import Verdict, classify_confirmation, normalize  # noqa: E402
+from ghost_core.confirmation import ConfirmationContext  # noqa: E402
+from ghost_core.jev import (  # noqa: E402
     INTENTS,
     JevClient,
     JevError,

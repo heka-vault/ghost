@@ -53,7 +53,9 @@ from `infra/policy.example.toml`): per operation, `deny`, `confirm`, `announce`,
 Ctrl+C stops the daemon; "go to sleep" only ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
-cancellation with [infra/pipewire/](infra/pipewire/).
+cancellation with [infra/pipewire/](infra/pipewire/). To teach Ghost something new,
+write an ability: a small package or a folder under `~/.config/ghost/abilities/`
+([docs/abilities.md](docs/abilities.md)). GitHub issues are the first one.
 
 ## Docs
 

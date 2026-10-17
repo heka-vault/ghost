@@ -16,11 +16,14 @@ def runtime_dir() -> Path:
 class GhostdSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GHOST_", extra="ignore")
 
-    # Skills
-    skills: list[str] = ["github_issues"]
-    github_token: str = Field(default="", alias="GITHUB_TOKEN")
-    repos: str = ""  # GHOST_REPOS: comma-separated owner/repo allowlist
-    github_mock: bool = False  # GHOST_GITHUB_MOCK=1: in-memory issues, no PAT needed
+    # Abilities (ADR 0012). Installed packages exposing the `ghost.abilities` entry
+    # point, or folders under abilities_dir. The policy file's [abilities] enabled
+    # list wins over GHOST_ABILITIES when present. Each ability reads its own
+    # settings from the environment (github_issues: GITHUB_TOKEN, GHOST_REPOS,
+    # GHOST_GITHUB_MOCK).
+    abilities: list[str] = ["github_issues"]
+    abilities_dir: Path = Path.home() / ".config" / "ghost" / "abilities"
+    data_dir: Path = Path.home() / ".local" / "share" / "ghost"
 
     # Autonomy (ADR 0011): the operator's per-operation levels. Missing file = every
     # operation falls back to its skill's risk class (labels/comments announce, close

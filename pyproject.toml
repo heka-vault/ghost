@@ -8,18 +8,18 @@ license = "MIT"
 dependencies = [
     "ghostd",
     "ghost-voice",
-    "ghost-skills",
-    "ghost-domain",
+    "ghost-core",
+    "ghost-github-issues",
 ]
 
 [tool.uv.workspace]
-members = ["apps/ghostd", "packages/voice", "packages/skills", "packages/domain"]
+members = ["apps/ghostd", "packages/voice", "packages/core", "abilities/github_issues"]
 
 [tool.uv.sources]
 ghostd = { workspace = true }
 ghost-voice = { workspace = true }
-ghost-skills = { workspace = true }
-ghost-domain = { workspace = true }
+ghost-github-issues = { workspace = true }
+ghost-core = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -32,7 +32,7 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages", "apps"]
+testpaths = ["packages", "apps", "abilities"]
 consider_namespace_packages = true
 
 [tool.ruff]

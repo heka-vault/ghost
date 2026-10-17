@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ghost_domain import Verdict, WriteGate
+from ghost_core import Events, Verdict, WriteGate
 from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -40,6 +40,7 @@ class ConfirmationProcessor(FrameProcessor):
         session_id: str,
         *,
         last_assistant: Callable[[], str] | None = None,
+        events: Events | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -47,6 +48,7 @@ class ConfirmationProcessor(FrameProcessor):
         self._session_id = session_id
         self._bot_speaking = False
         self._last_assistant = last_assistant or (lambda: "")
+        self._events = events or Events()
 
     @property
     def bot_speaking(self) -> bool:
@@ -71,6 +73,7 @@ class ConfirmationProcessor(FrameProcessor):
             debug.audio(f"confirmation: {verdict.name} for {frame.text!r}")
             if verdict is Verdict.AFFIRMATIVE and outcome is not None:
                 logger.info(f"executed {outcome.proposal_id}: {outcome.status}")
+                await self._events.emit("outcome", operation="confirmed", status=outcome.status)
                 note = (
                     "[system] The operator said yes. Verified result: "
                     f"{outcome.summary()} Say what happened in a few words."

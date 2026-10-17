@@ -1,20 +1,19 @@
-"""Bridge skills to Pipecat function calling.
+"""Bridge abilities to Pipecat function calling.
 
-Three kinds of tool reach the model: a skill's typed read tools, one shared
-``change`` that hands a typed change set to the domain gate, and ``undo``. What
-``change`` does depends on the operator's autonomy policy (ADR 0011): the write
-either happens now and the verified result comes back, or a proposal waits for
-a spoken yes. The model never applies a write itself.
+Three kinds of tool reach the model: an ability's typed read tools, one shared
+``change`` that hands a typed change set to the gate, and ``undo``. What ``change``
+does depends on the operator's autonomy policy (ADR 0011): the write either happens
+now and the verified result comes back, or a proposal waits for a spoken yes. The
+model never applies a write itself.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from ghost_domain import Autonomy, GateError, WriteGate
-from ghost_domain.policy import PolicyError
-from ghost_skills import Skill
+from ghost_core import Autonomy, Events, GateError, LoadedAbility, Operation, WriteGate
+from ghost_core.policy import PolicyError
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.services.llm_service import FunctionCallParams, LLMService
@@ -28,16 +27,17 @@ UNDO_TOOL = "undo"
 def register_tools(
     llm: LLMService,
     *,
-    skills: list[Skill],
+    abilities: Sequence[LoadedAbility],
     gate: WriteGate,
     session_id: str,
     on_sleep: OnSleep,
+    events: Events | None = None,
 ) -> list[FunctionSchema]:
     schemas: list[FunctionSchema] = []
-    by_name: dict[str, Skill] = {s.name: s for s in skills}
+    events = events or Events()
 
-    for skill in skills:
-        for tool in skill.read_tools:
+    for a in abilities:
+        for tool in a.contributions.read_tools:
             schemas.append(
                 FunctionSchema(
                     name=tool.name,
@@ -49,20 +49,20 @@ def register_tools(
             llm.register_function(tool.name, _wrap_read(tool.handler))
 
     # Operations the policy denies outright are not offered at all.
-    ops = {
-        s.name: {
+    ops: dict[str, dict[str, Operation]] = {}
+    for a in abilities:
+        offered = {
             op.name: op
-            for op in s.prepare_ops
-            if gate.level(s.name, op.name, None, op.risk) is not Autonomy.DENY
+            for op in a.contributions.operations
+            if gate.level(a.name, op.name) is not Autonomy.DENY
         }
-        for s in skills
-    }
-    ops = {k: v for k, v in ops.items() if v}
+        if offered:
+            ops[a.name] = offered
     op_lines = "\n".join(
-        f"- {sname}.{op.name}: {op.description} Args: {sorted(op.properties)}"
+        f"- {aname}.{op.name}: {op.description} Args: {sorted(op.properties)}"
         f" (required: {op.required})"
-        for sname, sops in ops.items()
-        for op in sops.values()
+        for aname, aops in ops.items()
+        for op in aops.values()
     )
     if ops:
         schemas.append(
@@ -75,35 +75,32 @@ def register_tools(
                     "Operations:\n" + op_lines
                 ),
                 properties={
-                    "skill": {"type": "string", "enum": list(ops)},
+                    "ability": {"type": "string", "enum": list(ops)},
                     "operation": {"type": "string"},
                     "args": {"type": "object", "description": "Arguments for the operation."},
                     "rationale": {"type": "string", "description": "One sentence: why."},
                 },
-                required=["skill", "operation", "args"],
+                required=["ability", "operation", "args"],
             )
         )
 
     async def change(params: FunctionCallParams) -> None:
         a = params.arguments
-        skill = by_name.get(str(a.get("skill")))
+        aname = str(a.get("ability") or a.get("skill"))  # "skill" for older contexts
         op_name = str(a.get("operation"))
-        op = ops.get(skill.name, {}).get(op_name) if skill else None
-        if skill is None or op is None:
-            await params.result_callback(
-                {"error": f"unknown operation {a.get('skill')!r}.{op_name!r}"}
-            )
+        op = ops.get(aname, {}).get(op_name)
+        if op is None:
+            await params.result_callback({"error": f"unknown operation {aname!r}.{op_name!r}"})
             return
         try:
-            req = await skill.prepare(op_name, dict(a.get("args") or {}))
+            prepared = await op.prepare(dict(a.get("args") or {}))
             sub = await gate.submit(
                 session_id=session_id,
-                skill=skill.name,
-                operation=req.operation,
-                target=req.target,
-                changes=req.changes,
-                rationale=str(a.get("rationale") or req.rationale),
-                risk=op.risk,
+                ability=aname,
+                operation=op.name,
+                target=prepared.target,
+                changes=prepared.changes,
+                rationale=str(a.get("rationale") or prepared.rationale),
             )
         except (ValueError, PolicyError, GateError) as e:
             await params.result_callback({"error": str(e)})
@@ -124,6 +121,9 @@ def register_tools(
                         else "only if asked, or if it failed"
                     ),
                 }
+            )
+            await events.emit(
+                "outcome", ability=aname, operation=op.name, status=sub.outcome.status
             )
             return
         logger.info(f"pending {sub.proposal.id}: {sub.proposal.preview}")
@@ -160,6 +160,7 @@ def register_tools(
         await params.result_callback(
             {"status": "done", "result": outcome.summary(), "state_now": _state(outcome)}
         )
+        await events.emit("outcome", operation="undo", status=outcome.status)
 
     llm.register_function(UNDO_TOOL, undo)
 
@@ -181,10 +182,7 @@ def register_tools(
 
 
 def _state(outcome) -> str:
-    s = outcome.readback
-    if s is None:
-        return "unknown"
-    return f"{s.state}, labels: {', '.join(s.labels) if s.labels else 'none'}"
+    return outcome.readback.spoken() if outcome.readback else "unknown"
 
 
 def _wrap_read(handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]):

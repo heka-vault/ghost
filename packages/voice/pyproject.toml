@@ -4,8 +4,7 @@ version = "0.1.0"
 description = "Pipecat pipeline factory: VAD, turn detection, Parakeet STT, Claude, Kokoro TTS"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "ghost-domain",
-    "ghost-skills",
+    "ghost-core",
     "pipecat-ai[anthropic,kokoro,silero]>=1.12,<2",
     "sounddevice>=0.5",
     "onnx-asr[hub]>=0.12",
@@ -17,8 +16,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-ghost-domain = { workspace = true }
-ghost-skills = { workspace = true }
+ghost-core = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

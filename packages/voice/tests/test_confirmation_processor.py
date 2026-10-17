@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from ghost_domain import Verdict
+from ghost_core import Verdict
 from ghost_voice.confirmation import ConfirmationProcessor
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
