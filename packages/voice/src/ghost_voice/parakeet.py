@@ -27,6 +27,7 @@ class ParakeetSTTService(SegmentedSTTService):
         quantization: str | None = "int8",
         threads: int = 4,
         sample_rate: int = 16000,
+        log_transcripts: bool = True,
         **kwargs,
     ) -> None:
         # Measured p50 is 0.16 s per command; 0.5 s leaves headroom under load.
@@ -39,7 +40,26 @@ class ParakeetSTTService(SegmentedSTTService):
         self._model_name = model
         self._quantization = quantization
         self._threads = threads
+        self._log_transcripts = log_transcripts
         self._model = None
+
+    def fork(self, *, log_transcripts: bool = True) -> ParakeetSTTService:
+        """A fresh processor sharing this instance's loaded model.
+
+        A Pipecat processor belongs to one pipeline at a time, so each session and
+        each passive wake listener gets its own; the 1.7 GB model is loaded once.
+        ``log_transcripts=False`` for the passive listener: what it hears is never
+        written anywhere (ADR 0010).
+        """
+        other = ParakeetSTTService(
+            model=self._model_name,
+            quantization=self._quantization,
+            threads=self._threads,
+            sample_rate=self.sample_rate,
+            log_transcripts=log_transcripts,
+        )
+        other._model = self._model
+        return other
 
     def wants_wav_segments(self) -> bool:
         return False  # raw int16 PCM
@@ -80,5 +100,6 @@ class ParakeetSTTService(SegmentedSTTService):
             await self.stop_processing_metrics()
         text = (text or "").strip()
         if text:
-            logger.debug(f"stt: {text!r}")
+            if self._log_transcripts:
+                logger.debug(f"stt: {text!r}")
             yield TranscriptionFrame(text, self._user_id, time_now_iso8601())

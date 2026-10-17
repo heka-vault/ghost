@@ -60,7 +60,7 @@ start: ## start ghostd in the background, log to /tmp/ghostd.log
 	@$(load_env) nohup $(UV) run ghostd run > /tmp/ghostd.log 2>&1 & echo "ghostd started, log: /tmp/ghostd.log"
 
 stop: ## stop any ghostd started by make run/start (restores ducked volumes on exit)
-	@pkill -INT -f '[g]hostd run' && echo "ghostd stopping" || echo "ghostd not running"
+	@pkill -INT -f 'bin/ghostd run$$' && echo "ghostd stopping" || echo "ghostd not running"
 
 wake: ## simulate the wake word
 	@$(UV) run ghostd wake

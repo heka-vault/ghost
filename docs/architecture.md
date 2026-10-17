@@ -9,7 +9,7 @@ One operator, one Linux workstation that is on 24/7 (ADR 0001). Everything runs 
 ```mermaid
 flowchart LR
   subgraph WS[Linux workstation]
-    MIC[Mic via PipeWire<br/>echo-cancelled source] --> WAKE[Wake word<br/>local ONNX, "Ghost"]
+    MIC[Mic via PipeWire<br/>echo-cancelled source] --> WAKE[Wake phrase<br/>local VAD + Parakeet, "hey ghost"]
     WAKE -->|wake| PIPE[Pipecat pipeline]
     MIC --> PIPE
     PIPE --> SPK[Speaker / music ducking]
@@ -33,7 +33,7 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 
 | Component | Responsibility |
 |---|---|
-| `ghostd` | Long-running desktop daemon. Owns the microphone, runs the wake-word model while passive, and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on "go to sleep" or idle timeout |
+| `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on "go to sleep" or idle timeout |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
 | `skills` | Pluggable capabilities (ADR 0006). Each skill declares its read tools and the write operations it can `prepare`. `github_issues` is the first one |
 | `domain` | The write gate (ADR 0007): proposals, confirmation checks, idempotent execution, readback, and the audit log. The only code that can execute a write |
@@ -41,8 +41,8 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 
 ## Conversation flow
 
-1. **Passive.** `ghostd` feeds microphone frames to the local wake-word model only. Nothing is transcribed, stored, or sent.
-2. **Wake.** "Ghost" fires. `ghostd` plays a chime, ducks the configured music streams, and starts the pipeline.
+1. **Passive.** `ghostd` runs a short local pipeline: VAD, Parakeet, phrase matcher. A transcript without a wake phrase is dropped where it is produced. Nothing is stored or sent.
+2. **Wake.** "Hey Ghost", "Ghost, you there?" or another configured phrase (`GHOST_WAKE_PHRASES`) matches. `ghostd` plays a chime, ducks the configured music streams, and starts the pipeline. Words spoken after the phrase in the same breath become the first turn, so "hey ghost, what needs my sign-off" skips the greeting. `make wake` still triggers it by hand.
 3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking. Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks one sentence at a time. Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off.
 4. **Sleep.** "Go to sleep" or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive.
 
@@ -101,7 +101,7 @@ into the user's config at install time and never committed.
 
 ## Open items
 
-- Wake word: train "Ghost" with `livekit-wakeword` and measure false wakes against music. A single short word wakes falsely more often than a two-word phrase, so compare it with "Hey Ghost" before settling (ADR 0005).
+- Wake word: the transcript matcher costs continuous local STT while passive. Measure its CPU and false wakes against music; if either is a problem, train "Hey Ghost" with `livekit-wakeword` for the `OnnxWakeDetector` (ADR 0005, ADR 0010).
 - Real-voice benchmark on the workstation mic, with music playing ([benchmarks](benchmarks/2026-10-16-speech-cpu.md) used synthetic clips).
 - LLM default: `claude-sonnet-5-5` with `thinking: {"type": "between_tools"}` (0.77 s to first token; see the [benchmark](benchmarks/2026-10-16-speech-cpu.md#llm-time-to-first-token)).
 - A dedicated LLM API key for Ghost, so it can be revoked on its own.

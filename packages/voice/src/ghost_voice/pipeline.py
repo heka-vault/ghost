@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -42,7 +42,10 @@ from ghost_voice.turns import BargeInUserTurnStartStrategy
 
 @dataclass
 class Models:
-    """Loaded once by the daemon and shared across sessions (about 3 GB)."""
+    """Loaded once by the daemon and shared across sessions (about 3 GB).
+
+    ``stt`` is a template: pipelines use ``stt.fork()`` so each gets its own
+    processor over the one loaded model."""
 
     stt: ParakeetSTTService
     tts: KokoroTTSService
@@ -94,8 +97,12 @@ def build_session(
     gate: WriteGate,
     transport: BaseTransport | None = None,
     greeting: str | None = "Ghost. What do you need?",
+    first_utterance: str | None = None,
     on_sleep: Callable[[], Awaitable[None]] | None = None,
 ) -> GhostSession:
+    """Build one conversation. ``first_utterance`` is what the operator said right
+    after the wake phrase; when given it is the first user turn and there is no
+    greeting."""
     session_id = uuid.uuid4().hex
     ended = asyncio.Event()
 
@@ -161,7 +168,7 @@ def build_session(
     pipeline = Pipeline(
         [
             transport.input(),
-            models.stt,
+            models.stt.fork(),
             ConfirmationProcessor(gate, session_id),
             user_agg,
             llm,
@@ -180,7 +187,15 @@ def build_session(
 
     async def start() -> None:
         await runner.add_workers(worker)
-        if greeting:
+        if first_utterance:
+            await worker.queue_frames(
+                [
+                    LLMMessagesAppendFrame(
+                        messages=[{"role": "user", "content": first_utterance}], run_llm=True
+                    )
+                ]
+            )
+        elif greeting:
             from pipecat.frames.frames import TTSSpeakFrame
 
             await worker.queue_frames([TTSSpeakFrame(greeting)])

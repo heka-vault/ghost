@@ -18,7 +18,7 @@ It costs nothing to run beyond the LLM calls.
 
 First increment in progress: the `uv` workspace exists, the write gate and the GitHub
 issue skill are implemented with tests, and the desktop daemon runs the voice loop
-with a file trigger standing in for the wake word until the model is trained. Start
+with a local transcript matcher as the wake phrase until a wake model is trained. Start
 with [docs/architecture.md](docs/architecture.md) and the decisions in [docs/adr/](docs/adr/).
 
 ## Run it
@@ -30,9 +30,12 @@ make sync            # uv workspace
 make echo-cancel     # echo-cancelled mic "ghost.mic" as a user service; without it Ghost hears itself
 make env             # render ~/.config/ghost/env from the secrets store (or: cp .env.example .env and fill it in)
 make check           # config sanity
-make run             # loads models (~3 s warm), then waits for a wake; Ctrl+C stops it
-make wake            # in another shell: simulate the wake word
+make run             # loads models (~3 s warm), then listens for "hey ghost"; Ctrl+C stops it
+make wake            # optional, from another shell: trigger a wake by hand
 ```
+
+Say "Hey Ghost", or "Ghost, you there?" (`GHOST_WAKE_PHRASES` to change them). Words
+in the same breath are the first request: "hey ghost, what needs my sign-off".
 
 `make help` lists the rest (`test`, `lint`, `start`/`stop` for a background daemon,
 `restore-volumes`, `service`). Non-secret settings such as `GHOST_GITHUB_MOCK=1` go in

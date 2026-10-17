@@ -10,12 +10,13 @@ from ghost_domain import Store, WriteGate
 from ghost_skills import load_skills
 from ghost_voice import VoiceSettings, build_session
 from ghost_voice.pipeline import Models
+from ghost_voice.wake import build_wake_listener, parse_phrases
 from loguru import logger
 
 from ghostd.audio import Ducker, chime, restore_from_state
 from ghostd.config import GhostdSettings, runtime_dir
 from ghostd.dictation import is_dictating
-from ghostd.wake import FileWakeDetector, WakeDetector
+from ghostd.wake import FileWakeDetector, TranscriptWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
@@ -28,9 +29,19 @@ class Daemon:
         self.rt = runtime_dir()
         self._stop = asyncio.Event()
 
-    def build_wake(self) -> WakeDetector:
+    def build_wake(self, models: Models) -> WakeDetector:
+        manual = FileWakeDetector(self.rt / WAKE_FILE)
+        if self.cfg.wake_mode == "transcript":
+            phrases = parse_phrases(self.cfg.wake_phrases)
+            logger.info(f"wake phrases: {', '.join(repr(p) for p in phrases)}")
+            listener = build_wake_listener(
+                self.voice,
+                stt_factory=lambda: models.stt.fork(log_transcripts=False),
+                phrases=phrases,
+            )
+            return TranscriptWakeDetector(listener, manual)
         if self.cfg.wake_mode == "file":
-            return FileWakeDetector(self.rt / WAKE_FILE)
+            return manual
         if self.cfg.wake_mode == "onnx":
             raise NotImplementedError(
                 "GHOST_WAKE_MODE=onnx needs the trained model adapter from the wake-word spike"
@@ -67,7 +78,7 @@ class Daemon:
 
         ducker = Ducker(self.cfg.duck_apps, self.cfg.duck_level, self.rt / DUCK_STATE)
         restore_from_state(self.rt / DUCK_STATE)  # undo a previous crash
-        wake = self.build_wake()
+        wake = self.build_wake(models)
 
         try:
             while not self._stop.is_set():
@@ -82,7 +93,7 @@ class Daemon:
                 if is_dictating(self.cfg.dictation_flag):
                     logger.info("wake ignored: dictation is active")
                     continue
-                await self._conversation(models, skills, gate, ducker)
+                await self._conversation(models, skills, gate, ducker, wake_task.result())
         finally:
             wake.close()
             ducker.restore()
@@ -90,11 +101,20 @@ class Daemon:
                 await s.aclose()
             store.close()
 
-    async def _conversation(self, models: Models, skills, gate: WriteGate, ducker: Ducker) -> None:
+    async def _conversation(
+        self,
+        models: Models,
+        skills,
+        gate: WriteGate,
+        ducker: Ducker,
+        first_utterance: str | None = None,
+    ) -> None:
         ducker.duck()
         if self.cfg.chime:
             await asyncio.to_thread(chime, True, self.voice.output_device)
-        session = build_session(self.voice, models=models, skills=skills, gate=gate)
+        session = build_session(
+            self.voice, models=models, skills=skills, gate=gate, first_utterance=first_utterance
+        )
         logger.info(f"session {session.session_id} start")
         stop_task = asyncio.ensure_future(self._stop.wait())
         try:

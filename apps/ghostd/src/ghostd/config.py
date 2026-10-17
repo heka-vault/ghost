@@ -25,8 +25,11 @@ class GhostdSettings(BaseSettings):
     # State
     db_path: Path = Path.home() / ".local" / "share" / "ghost" / "ghost.db"
 
-    # Wake
-    wake_mode: str = "file"  # file | onnx
+    # Wake. transcript: local VAD + Parakeet while passive, looking for a phrase
+    # (ADR 0010); file: `ghostd wake` / SIGUSR1 only; onnx: trained model (pending).
+    # `ghostd wake` works in every mode.
+    wake_mode: str = "transcript"  # transcript | file | onnx
+    wake_phrases: str = ""  # comma-separated; empty = ghost_voice.wake.DEFAULT_WAKE_PHRASES
     wake_model_path: Path | None = None
     wake_threshold: float = 0.5
     wake_cooldown_secs: float = 2.0

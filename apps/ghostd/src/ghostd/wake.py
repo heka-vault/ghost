@@ -1,11 +1,13 @@
 """Wake detection.
 
-Passive state: only the local wake-word model sees microphone frames. Nothing is
-transcribed, recorded, or sent (CLAUDE.md).
+Passive state: microphone frames stay on this machine. ``TranscriptWakeDetector``
+(the default, ADR 0010) runs local VAD and Parakeet and drops every transcript
+that does not contain a wake phrase. ``FileWakeDetector`` is the development
+trigger: ``ghostd wake`` (or SIGUSR1); the transcript detector honours it too.
+``OnnxWakeDetector`` will run the trained ``livekit-wakeword`` model once the
+spike produces one (ADR 0005).
 
-``FileWakeDetector`` is the development trigger: ``ghostd wake`` (or SIGUSR1).
-``OnnxWakeDetector`` runs a trained ``livekit-wakeword`` model; the model adapter
-is finished in the wake-word spike (handoff task 4, ADR 0005).
+``wait()`` returns what the operator said after the wake phrase, or ``None``.
 """
 
 from __future__ import annotations
@@ -17,12 +19,13 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
+from ghost_voice.wake import WakeListener
 from loguru import logger
 
 
 class WakeDetector(Protocol):
-    async def wait(self) -> None:
-        """Return when the wake word fires."""
+    async def wait(self) -> str | None:
+        """Return when the wake word fires, with any words spoken after it."""
         ...
 
     def close(self) -> None: ...
@@ -35,20 +38,44 @@ class FileWakeDetector:
         loop = asyncio.get_event_loop()
         loop.add_signal_handler(signal.SIGUSR1, self._event.set)
 
-    async def wait(self) -> None:
+    async def wait(self) -> str | None:
         self._path.unlink(missing_ok=True)
         self._event.clear()
         while not self._event.is_set():
             if self._path.exists():
                 self._path.unlink(missing_ok=True)
-                return
+                return None
             try:
                 await asyncio.wait_for(self._event.wait(), timeout=0.2)
             except TimeoutError:
                 pass
+        return None
 
     def close(self) -> None:
         self._path.unlink(missing_ok=True)
+
+
+class TranscriptWakeDetector:
+    """Local STT listens for a phrase; the file/SIGUSR1 trigger still works alongside."""
+
+    def __init__(self, listener: WakeListener, manual: FileWakeDetector) -> None:
+        self._listener = listener
+        self._manual = manual
+
+    async def wait(self) -> str | None:
+        spoken = asyncio.ensure_future(self._listener.wait())
+        manual = asyncio.ensure_future(self._manual.wait())
+        done, pending = await asyncio.wait({spoken, manual}, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+        if spoken in done:
+            manual.cancel()
+            return spoken.result().remainder or None
+        await self._listener.stop()
+        return None
+
+    def close(self) -> None:
+        self._manual.close()
 
 
 class WakeModel(Protocol):
@@ -76,7 +103,7 @@ class OnnxWakeDetector:
         self._paused = paused
         self._stream = None
 
-    async def wait(self) -> None:
+    async def wait(self) -> str | None:
         import sounddevice as sd
 
         loop = asyncio.get_event_loop()
@@ -105,6 +132,7 @@ class OnnxWakeDetector:
         with self._stream:
             await fired.wait()
         self._stream = None
+        return None
 
     def close(self) -> None:
         if self._stream:
