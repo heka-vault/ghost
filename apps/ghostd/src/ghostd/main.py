@@ -473,9 +473,14 @@ def cli(argv: list[str] | None = None) -> None:
         print(sd.query_devices())
     elif cmd == "check":
         cfg = GhostdSettings()
-        voice = VoiceSettings()  # type: ignore[call-arg]
         problems = []
-        if not voice.anthropic_base_url:
+        try:
+            voice = VoiceSettings()  # type: ignore[call-arg]
+        except Exception as e:  # noqa: BLE001 - pydantic-settings reports what is missing
+            missing = [str(err.get("loc", ["?"])[0]) for err in getattr(e, "errors", lambda: [])()]
+            problems.append("voice settings: missing " + ", ".join(missing or [str(e)]))
+            voice = VoiceSettings.model_construct()  # type: ignore[call-arg]
+        if not (getattr(voice, "anthropic_base_url", "") or os.environ.get("ANTHROPIC_BASE_URL")):
             problems.append("ANTHROPIC_BASE_URL is not set")
         autonomy = AutonomyPolicy()
         try:
