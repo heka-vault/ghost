@@ -66,6 +66,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
         },
         () => {
           setConnected(false);
+          // Tear this subscription down before the next one, or its listeners keep
+          // firing alongside the new ones and every event shows up twice.
+          const s = stop;
+          stop = null;
+          s?.();
           if (!cancelled) timer = setTimeout(connect, 1500);
         },
       );

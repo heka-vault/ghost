@@ -64,8 +64,11 @@ write an ability: a small package or a folder under `~/.config/ghost/abilities/`
 `apps/desktop` is a Tauri 2 app (React) that talks to the daemon over its socket: tray
 with the current phase, a chat view with a Confirm card for changes that need your okay,
 a policy editor for how much Ghost may do on its own, the audit log, abilities, and
-settings with a first-run checklist. Develop with the daemon running and
-`pnpm dev:desktop` (Vite proxies to the socket); package with `make deb`.
+settings with a first-run checklist. Nothing needs installing to work on it: run the
+daemon from the checkout (`make run`) and either `make desktop-dev` (the Tauri window
+with hot reload) or `make desktop-web` (the same UI in a browser; Vite proxies the
+socket). Both talk to whichever daemon owns the socket, packaged or not. `make deb`
+builds the installable packages.
 
 ## Docs
 

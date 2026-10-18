@@ -79,6 +79,12 @@ say: ## type a turn to the running Ghost: make say TEXT="what needs my sign-off"
 status: ## the running daemon's status as JSON
 	@$(UV) run ghostd status
 
+desktop-dev: ## the desktop app from the checkout (Vite hot reload) against whichever ghostd owns the socket; no .deb needed
+	@pnpm tauri dev
+
+desktop-web: ## the same UI in a browser at http://localhost:1420 (Vite proxies the socket); no Rust build needed
+	@pnpm dev:desktop
+
 api-schema: ## regenerate packages/api/openapi.json from the pydantic models
 	$(UV) run python -m ghost_api.export > packages/api/openapi.json
 
@@ -101,7 +107,7 @@ build-image: ## build the Docker image used to produce the .debs (Tauri + Rust +
 	docker build -t heka-ghost-build -f packaging/Dockerfile.build .
 
 deb: ## build heka-ghostd, heka-ghost-desktop and heka-ghost .debs into dist/deb (in Docker)
-	docker run --rm -v "$(CURDIR)":/src -v heka-ghost-build-cache:/cache -w /src heka-ghost-build packaging/build-debs.sh $(ONLY)
+	docker run --rm -v "$(CURDIR)":/src -v heka-ghost-build-cache:/cache -w /src -e HOST_UID=$(shell id -u) -e HOST_GID=$(shell id -g) heka-ghost-build packaging/build-debs.sh $(ONLY)
 
 deb-test: ## install the .debs into a clean Ubuntu 26.04 container and run ghostd check
 	docker run --rm -v "$(CURDIR)/dist/deb":/deb:ro ubuntu:26.04 bash -c 'apt-get update -qq && apt-get install -y -qq /deb/*.deb >/dev/null && ghostd --help; ghostd abilities; GHOST_GITHUB_MOCK=1 ANTHROPIC_BASE_URL=http://x ghostd check'

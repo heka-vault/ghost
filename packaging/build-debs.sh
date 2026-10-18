@@ -130,6 +130,16 @@ build_meta() {
   fakeroot dpkg-deb --build --root-owner-group "$root" "$OUT/heka-ghost_${VERSION}_${ARCH}.deb"
 }
 
+# When run as root in the build container, hand what we wrote back to the host user so
+# pnpm/uv on the host keep working on the same tree.
+restore_ownership() {
+  [[ -n "${HOST_UID:-}" && "$(id -u)" == 0 ]] || return 0
+  chown -R "$HOST_UID:${HOST_GID:-$HOST_UID}" "$OUT" "$STAGE" \
+    "$ROOT"/node_modules "$ROOT"/packages/*/node_modules "$ROOT"/apps/*/node_modules \
+    "$ROOT"/apps/desktop/dist "$ROOT"/apps/desktop/src-tauri/target "$ROOT"/.pnpm-store 2>/dev/null || true
+}
+trap restore_ownership EXIT
+
 case "$ONLY" in
   daemon) build_daemon ;;
   desktop) build_desktop ;;
