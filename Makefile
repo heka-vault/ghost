@@ -79,6 +79,12 @@ say: ## type a turn to the running Ghost: make say TEXT="what needs my sign-off"
 status: ## the running daemon's status as JSON
 	@$(UV) run ghostd status
 
+record: ## record a 4 s wake-phrase clip from ghost.mic and the raw mic: make record NAME=hey-ghost-1
+	@scripts/record-clip.sh "$(NAME)" $(or $(SECS),4)
+
+wake-eval: ## what Parakeet hears in .scratch/clips/*.wav and whether the wake matcher fires
+	@$(UV) run python docs/benchmarks/scripts/wake_eval.py $(CLIPS)
+
 desktop-dev: ## the desktop app from the checkout (Vite hot reload) against whichever ghostd owns the socket; no .deb needed
 	@pnpm tauri dev
 
