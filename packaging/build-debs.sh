@@ -97,9 +97,14 @@ build_daemon() {
 
 build_desktop() {
   echo "== heka-ghost-desktop: tauri build"
+  # Clear earlier bundles first: a leftover .deb from a previous build (possibly under
+  # Tauri's old product name) would otherwise be copied and overwrite the fresh one.
+  local bundle="$ROOT/apps/desktop/src-tauri/target/release/bundle/deb"
+  rm -rf "$bundle"
   (cd "$ROOT" && pnpm install --frozen-lockfile --config.confirmModulesPurge=false >/dev/null && pnpm gen >/dev/null \
     && pnpm --filter @ghost/desktop exec tauri build --bundles deb 2>&1 | tail -5)
-  cp "$ROOT"/apps/desktop/src-tauri/target/release/bundle/deb/*.deb "$OUT/"
+  rm -f "$OUT"/Ghost_*.deb "$OUT"/ghost_*.deb "$OUT"/heka-ghost-desktop_*.deb
+  cp "$bundle"/*.deb "$OUT/"
   # Tauri names it after productName; keep our package naming.
   local target="$OUT/heka-ghost-desktop_${VERSION}_${ARCH}.deb"
   for f in "$OUT"/Ghost_*.deb "$OUT"/ghost_*.deb "$OUT"/heka-ghost-desktop_*.deb; do
