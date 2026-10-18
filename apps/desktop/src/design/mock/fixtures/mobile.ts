@@ -178,7 +178,7 @@ export default function mobile(s: Scenario): MobileFixture {
     },
     pairing: {
       paired: s.configured,
-      workstation: "detroitpro-workstation",
+      workstation: "workstation",
       address: "192.168.1.20:8765",
       via: "Wi-Fi",
       pairedAt: ago(60 * 24 * 12),

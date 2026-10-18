@@ -209,7 +209,7 @@ export function timeLeft(mb: number, rate: number): string {
   return `about ${Math.ceil(s / 60)} min left`;
 }
 
-/** /home/eric/.cache/ghost → ~/.cache/ghost: paths are shown from ~, never a real home directory. */
+/** /home/you/.cache/ghost → ~/.cache/ghost: paths are shown from ~, never a real home directory. */
 export function tildify(path: string): string {
   return path.replace(/^\/home\/[^/]+(?=\/|$)/, "~").replace(/^\/root(?=\/|$)/, "~");
 }
