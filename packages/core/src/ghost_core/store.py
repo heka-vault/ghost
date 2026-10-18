@@ -6,9 +6,13 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ghost_core.codec import dump_proposal, load_proposal
 from ghost_core.models import Proposal, ProposalStatus, utcnow
+
+if TYPE_CHECKING:
+    from ghost_core.conversations.models import Compaction, Profile, TurnRecord
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS proposals (
@@ -53,6 +57,41 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (session_id, key)
 );
+
+-- Conversations (ADR 0014): the registry, the transcript, every compaction version.
+CREATE TABLE IF NOT EXISTS conversations (
+    slug            TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    aliases         TEXT NOT NULL DEFAULT '[]',
+    voice           TEXT NOT NULL,
+    speed           REAL NOT NULL DEFAULT 1.0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    last_active_at  TEXT,
+    deleted_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS turns (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation    TEXT NOT NULL REFERENCES conversations(slug),
+    session_id      TEXT NOT NULL,
+    role            TEXT NOT NULL,
+    text            TEXT NOT NULL,
+    at              TEXT NOT NULL,
+    compaction_id   TEXT,
+    hidden_by       TEXT  -- the proposal marker of a reset/delete; undo clears it
+);
+CREATE INDEX IF NOT EXISTS turns_conversation ON turns(conversation, id);
+
+CREATE TABLE IF NOT EXISTS compactions (
+    id              TEXT PRIMARY KEY,
+    conversation    TEXT NOT NULL REFERENCES conversations(slug),
+    summary         TEXT NOT NULL,
+    through_turn_id INTEGER,
+    at              TEXT NOT NULL,
+    source          TEXT NOT NULL DEFAULT 'auto'
+);
+CREATE INDEX IF NOT EXISTS compactions_conversation ON compactions(conversation, at);
 """
 
 
@@ -271,3 +310,173 @@ class Store:
             "SELECT value FROM checkpoints WHERE session_id = ? AND key = ?", (session_id, key)
         ).fetchone()
         return row[0] if row else None
+
+    # conversations (ADR 0014)
+
+    def upsert_conversation(self, p: Profile) -> None:
+        self._conn.execute(
+            "INSERT INTO conversations (slug, name, aliases, voice, speed, created_at, updated_at,"
+            " last_active_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(slug) DO UPDATE SET name = excluded.name, aliases = excluded.aliases,"
+            " voice = excluded.voice, speed = excluded.speed, updated_at = excluded.updated_at,"
+            " last_active_at = excluded.last_active_at, deleted_at = excluded.deleted_at",
+            (
+                p.slug,
+                p.name,
+                json.dumps(list(p.aliases)),
+                p.voice,
+                p.speed,
+                p.created_at.isoformat(),
+                p.updated_at.isoformat(),
+                p.last_active_at.isoformat() if p.last_active_at else None,
+                p.deleted_at.isoformat() if p.deleted_at else None,
+            ),
+        )
+
+    def get_conversation(self, slug: str, *, include_deleted: bool = False) -> Profile | None:
+        row = self._conn.execute(
+            "SELECT slug, name, aliases, voice, speed, created_at, updated_at, last_active_at,"
+            " deleted_at FROM conversations WHERE slug = ?",
+            (slug,),
+        ).fetchone()
+        if row is None:
+            return None
+        p = _profile(row)
+        if p.deleted_at is not None and not include_deleted:
+            return None
+        return p
+
+    def list_conversations(self) -> list[Profile]:
+        rows = self._conn.execute(
+            "SELECT slug, name, aliases, voice, speed, created_at, updated_at, last_active_at,"
+            " deleted_at FROM conversations WHERE deleted_at IS NULL"
+            " ORDER BY CASE WHEN slug = 'ghost' THEN 0 ELSE 1 END, lower(name)"
+        ).fetchall()
+        return [_profile(r) for r in rows]
+
+    def touch_conversation(self, slug: str) -> None:
+        self._conn.execute(
+            "UPDATE conversations SET last_active_at = ? WHERE slug = ?",
+            (utcnow().isoformat(), slug),
+        )
+
+    def add_turn(self, conversation: str, session_id: str, role: str, text: str) -> int:
+        cur = self._conn.execute(
+            "INSERT INTO turns (conversation, session_id, role, text, at) VALUES (?, ?, ?, ?, ?)",
+            (conversation, session_id, role, text, utcnow().isoformat()),
+        )
+        return int(cur.lastrowid or 0)
+
+    def recent_turns(self, conversation: str, *, limit: int, uncompacted: bool) -> list[TurnRecord]:
+        """Oldest first. ``uncompacted`` restricts to turns no summary covers yet."""
+        where = "conversation = ? AND hidden_by IS NULL"
+        if uncompacted:
+            where += " AND compaction_id IS NULL"
+        rows = self._conn.execute(
+            f"SELECT id, conversation, session_id, role, text, at, compaction_id FROM turns"
+            f" WHERE {where} ORDER BY id DESC LIMIT ?",
+            (conversation, limit),
+        ).fetchall()
+        return [_turn(r) for r in reversed(rows)]
+
+    def turn_count(self, conversation: str) -> int:
+        return int(
+            self._conn.execute(
+                "SELECT COUNT(*) FROM turns WHERE conversation = ? AND hidden_by IS NULL",
+                (conversation,),
+            ).fetchone()[0]
+        )
+
+    def last_turn_id(self, conversation: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT MAX(id) FROM turns WHERE conversation = ? AND hidden_by IS NULL",
+            (conversation,),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def mark_compacted(self, conversation: str, through_turn_id: int, compaction_id: str) -> int:
+        cur = self._conn.execute(
+            "UPDATE turns SET compaction_id = ? WHERE conversation = ? AND id <= ?"
+            " AND compaction_id IS NULL AND hidden_by IS NULL",
+            (compaction_id, conversation, through_turn_id),
+        )
+        return cur.rowcount
+
+    def tag_turns(self, conversation: str, marker: str) -> int:
+        """Hide every turn (a reset or delete). Undo calls ``untag_turns``."""
+        cur = self._conn.execute(
+            "UPDATE turns SET hidden_by = ? WHERE conversation = ? AND hidden_by IS NULL",
+            (marker, conversation),
+        )
+        return cur.rowcount
+
+    def untag_turns(self, marker: str) -> int:
+        cur = self._conn.execute("UPDATE turns SET hidden_by = NULL WHERE hidden_by = ?", (marker,))
+        return cur.rowcount
+
+    def prune_turns(self, before: datetime) -> int:
+        """Summarized or hidden turns older than ``before`` are dropped; the summary
+        stands in for them."""
+        cur = self._conn.execute(
+            "DELETE FROM turns WHERE at < ?"
+            " AND (compaction_id IS NOT NULL OR hidden_by IS NOT NULL)",
+            (before.isoformat(),),
+        )
+        return cur.rowcount
+
+    def add_compaction(self, c: Compaction) -> None:
+        self._conn.execute(
+            "INSERT INTO compactions (id, conversation, summary, through_turn_id, at, source)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (c.id, c.conversation, c.summary, c.through_turn_id, c.at.isoformat(), c.source),
+        )
+
+    def compactions(self, conversation: str, *, limit: int = 50) -> list[Compaction]:
+        from ghost_core.conversations.models import Compaction
+
+        rows = self._conn.execute(
+            "SELECT id, conversation, summary, through_turn_id, at, source FROM compactions"
+            " WHERE conversation = ? ORDER BY at DESC LIMIT ?",
+            (conversation, limit),
+        ).fetchall()
+        return [
+            Compaction(
+                id=r[0],
+                conversation=r[1],
+                summary=r[2],
+                through_turn_id=r[3],
+                at=datetime.fromisoformat(r[4]),
+                source=r[5],
+            )
+            for r in rows
+        ]
+
+
+def _profile(row) -> Profile:
+    from ghost_core.conversations.models import Profile
+
+    return Profile(
+        slug=row[0],
+        name=row[1],
+        aliases=tuple(json.loads(row[2] or "[]")),
+        voice=row[3],
+        speed=float(row[4]),
+        created_at=datetime.fromisoformat(row[5]),
+        updated_at=datetime.fromisoformat(row[6]),
+        last_active_at=datetime.fromisoformat(row[7]) if row[7] else None,
+        deleted_at=datetime.fromisoformat(row[8]) if row[8] else None,
+    )
+
+
+def _turn(row) -> TurnRecord:
+    from ghost_core.conversations.models import TurnRecord
+
+    return TurnRecord(
+        id=row[0],
+        conversation=row[1],
+        session_id=row[2],
+        role=row[3],
+        text=row[4],
+        at=datetime.fromisoformat(row[5]),
+        compaction_id=row[6],
+    )

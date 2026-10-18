@@ -141,6 +141,37 @@ class WriteGate:
             return Submission(level, proposal, None)
         return Submission(level, proposal, await self._execute(proposal))
 
+    async def apply_internal(
+        self,
+        *,
+        session_id: str,
+        ability: str,
+        operation: str,
+        target: Target,
+        changes: ChangeSet,
+        rationale: str,
+    ) -> Outcome:
+        """Ghost's own housekeeping (an automatic compaction, an edit made in the
+        desktop app by the operator): applied at once at ``quiet`` whatever the policy
+        says, still bounded, snapshotted, audited and undoable. Never reachable from a
+        model tool; the policy's ``deny`` is honoured."""
+        op = self.operation(ability, operation)
+        if not op.allowed(target):
+            raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
+        if self.level(ability, operation, target) is Autonomy.DENY:
+            raise PolicyError(f"{ability}.{operation} is not allowed on {target.scope()}")
+        proposal = await self._propose(
+            session_id=session_id,
+            ability=ability,
+            operation=operation,
+            target=target,
+            changes=changes,
+            rationale=rationale,
+            autonomy=Autonomy.QUIET,
+        )
+        self._log(f"gate: internal {ability}.{operation} on {target}")
+        return await self._execute(proposal)
+
     async def prepare(
         self,
         *,
