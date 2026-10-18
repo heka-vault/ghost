@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pydantic import TypeAdapter
 
 from ghost_api.models import (
+    ConversationEvent,
     Event,
     LogEvent,
     OutcomeEvent,
@@ -71,6 +72,7 @@ class DaemonState:
         self.models_ready = False
         self.abilities: list[str] = []
         self.pending: PendingProposal | None = None
+        self.conversation: str | None = None
         self.turns: deque[Turn] = deque(maxlen=200)
         self.bus = EventBus()
         self._started = time.monotonic()
@@ -87,6 +89,7 @@ class DaemonState:
         if phase in (Phase.PASSIVE, Phase.STARTING):
             self.session_id = None
             self.pending = None
+            self.conversation = None
             self.turns.clear()
         elif session_id is not None:
             self.session_id = session_id
@@ -103,6 +106,11 @@ class DaemonState:
         self.turns.append(turn)
         self.bus.publish(TurnEvent(turn=turn))
         return turn
+
+    def set_conversation(self, slug: str | None, changed: str | None = None) -> None:
+        self.conversation = slug if self.session_id else None
+        self.bus.publish(ConversationEvent(active=self.conversation, changed=changed))
+        self._publish_status()
 
     def set_pending(self, pending: PendingProposal | None) -> None:
         self.pending = pending

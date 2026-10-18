@@ -42,6 +42,12 @@ class GhostdSettings(BaseSettings):
     # State
     db_path: Path = Path.home() / ".local" / "share" / "ghost" / "ghost.db"
 
+    # Conversations (ADR 0014): persona.md, memory.md and notes.md per conversation live
+    # here; the transcript and the registry are in the database. Summarized turns older
+    # than the retention window are pruned daily.
+    conversations_dir: Path = Path.home() / ".local" / "share" / "ghost" / "conversations"
+    turn_retention_days: int = 90
+
     # Control API (ADR 0013): a user-owned Unix socket; no TCP. The desktop app, the
     # CLI and tests talk to it. Empty disables it.
     api_socket: Path | None = None  # default: $XDG_RUNTIME_DIR/ghost/api.sock

@@ -38,6 +38,145 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Conversations */
+        get: operations["list_conversations_conversations_get"];
+        put?: never;
+        /** Create Conversation */
+        post: operations["create_conversation_conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Conversation */
+        get: operations["get_conversation_conversations__slug__get"];
+        put?: never;
+        post?: never;
+        /** Delete Conversation */
+        delete: operations["delete_conversation_conversations__slug__delete"];
+        options?: never;
+        head?: never;
+        /** Update Conversation */
+        patch: operations["update_conversation_conversations__slug__patch"];
+        trace?: never;
+    };
+    "/conversations/{slug}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compact Conversation */
+        post: operations["compact_conversation_conversations__slug__compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}/compactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Conversation Compactions */
+        get: operations["conversation_compactions_conversations__slug__compactions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Note */
+        post: operations["add_note_conversations__slug__notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Conversation */
+        post: operations["reset_conversation_conversations__slug__reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Switch Conversation */
+        post: operations["switch_conversation_conversations__slug__switch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Conversation Turns */
+        get: operations["conversation_turns_conversations__slug__turns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/devices": {
         parameters: {
             query?: never;
@@ -281,6 +420,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/voices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Voices */
+        get: operations["voices_voices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/voices/{voice}/sample": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sample Voice */
+        post: operations["sample_voice_voices__voice__sample_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wake": {
         parameters: {
             query?: never;
@@ -406,6 +579,136 @@ export interface components {
             offset: number;
             /** Total */
             total: number;
+        };
+        /** CompactionView */
+        CompactionView: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Id */
+            id: string;
+            /** Source */
+            source: string;
+            /** Summary */
+            summary: string;
+            /** Through Turn Id */
+            through_turn_id: number | null;
+        };
+        /** ConversationCreate */
+        ConversationCreate: {
+            /**
+             * Aliases
+             * @default []
+             */
+            aliases: string[];
+            /** Name */
+            name: string;
+            /**
+             * Persona
+             * @default
+             */
+            persona: string;
+            /** Speed */
+            speed?: number | null;
+            /** Voice */
+            voice?: string | null;
+        };
+        /** ConversationDetail */
+        ConversationDetail: {
+            /** Active */
+            active: boolean;
+            /** Aliases */
+            aliases: string[];
+            /** Compactions */
+            compactions: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dir */
+            dir: string;
+            /** Is Ghost */
+            is_ghost: boolean;
+            /** Last Active At */
+            last_active_at: string | null;
+            /** Memory */
+            memory: string;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: string[];
+            /** Persona */
+            persona: string;
+            /** Slug */
+            slug: string;
+            /** Speed */
+            speed: number;
+            /** Turn Count */
+            turn_count: number;
+            /** Voice */
+            voice: string;
+        };
+        /**
+         * ConversationEvent
+         * @description The session moved to another conversation, or one was created, changed or removed.
+         */
+        ConversationEvent: {
+            /** Active */
+            active: string | null;
+            /** Changed */
+            changed?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "conversation";
+        };
+        /**
+         * ConversationUpdate
+         * @description Each field present is applied as its own audited, undoable write.
+         */
+        ConversationUpdate: {
+            /** Aliases */
+            aliases?: string[] | null;
+            /** Memory */
+            memory?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Notes */
+            notes?: string[] | null;
+            /** Persona */
+            persona?: string | null;
+            /** Speed */
+            speed?: number | null;
+            /** Voice */
+            voice?: string | null;
+        };
+        /** ConversationView */
+        ConversationView: {
+            /** Active */
+            active: boolean;
+            /** Aliases */
+            aliases: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Is Ghost */
+            is_ghost: boolean;
+            /** Last Active At */
+            last_active_at: string | null;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /** Speed */
+            speed: number;
+            /** Voice */
+            voice: string;
         };
         /** DeviceInfo */
         DeviceInfo: {
@@ -631,6 +934,16 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** SampleRequest */
+        SampleRequest: {
+            /**
+             * Speed
+             * @default 1
+             */
+            speed: number;
+            /** Text */
+            text?: string | null;
+        };
         /** SayRequest */
         SayRequest: {
             /** Text */
@@ -689,6 +1002,8 @@ export interface components {
              * @default 1
              */
             api_version: string;
+            /** Conversation */
+            conversation?: string | null;
             /** Models Ready */
             models_ready: boolean;
             pending?: components["schemas"]["PendingProposal"] | null;
@@ -743,6 +1058,27 @@ export interface components {
              */
             type: "turn";
         };
+        /** TurnView */
+        TurnView: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Compacted */
+            compacted: boolean;
+            /** Id */
+            id: number;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant" | "call" | "system";
+            /** Session Id */
+            session_id: string;
+            /** Text */
+            text: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -755,6 +1091,13 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VoiceInfo */
+        VoiceInfo: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
         };
         /** WakeRequest */
         WakeRequest: {
@@ -776,6 +1119,12 @@ export type SchemaAck = components['schemas']['Ack'];
 export type SchemaAuditEntry = components['schemas']['AuditEntry'];
 export type SchemaAuditEventView = components['schemas']['AuditEventView'];
 export type SchemaAuditPage = components['schemas']['AuditPage'];
+export type SchemaCompactionView = components['schemas']['CompactionView'];
+export type SchemaConversationCreate = components['schemas']['ConversationCreate'];
+export type SchemaConversationDetail = components['schemas']['ConversationDetail'];
+export type SchemaConversationEvent = components['schemas']['ConversationEvent'];
+export type SchemaConversationUpdate = components['schemas']['ConversationUpdate'];
+export type SchemaConversationView = components['schemas']['ConversationView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
@@ -791,6 +1140,7 @@ export type SchemaPolicyResult = components['schemas']['PolicyResult'];
 export type SchemaPolicyUpdate = components['schemas']['PolicyUpdate'];
 export type SchemaPolicyView = components['schemas']['PolicyView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
+export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];
 export type SchemaSecretState = components['schemas']['SecretState'];
 export type SchemaSettingsResult = components['schemas']['SettingsResult'];
@@ -800,7 +1150,9 @@ export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
+export type SchemaTurnView = components['schemas']['TurnView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
+export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
 export type $defs = Record<string, never>;
 export interface operations {
@@ -859,6 +1211,350 @@ export interface operations {
             };
         };
     };
+    list_conversations_conversations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationView"][];
+                };
+            };
+        };
+    };
+    create_conversation_conversations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_conversations__slug__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_conversation_conversations__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_conversation_conversations__slug__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_conversation_conversations__slug__compact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    conversation_compactions_conversations__slug__compactions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompactionView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_note_conversations__slug__notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_conversation_conversations__slug__reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_conversation_conversations__slug__switch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    conversation_turns_conversations__slug__turns_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TurnView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     devices_devices_get: {
         parameters: {
             query?: never;
@@ -894,7 +1590,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"];
                 };
             };
         };
@@ -1225,6 +1921,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutcomeView"];
+                };
+            };
+        };
+    };
+    voices_voices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceInfo"][];
+                };
+            };
+        };
+    };
+    sample_voice_voices__voice__sample_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                voice: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SampleRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

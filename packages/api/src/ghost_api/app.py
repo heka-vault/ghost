@@ -60,6 +60,11 @@ class Controller(Protocol):
     def reload_policy(self) -> AutonomyPolicy: ...
     def apply_settings(self, values: dict[str, str | None]) -> list[str]: ...  # keys live now
     def discovered_abilities(self) -> dict[str, Any]: ...  # name -> Ability
+    # conversations (ADR 0014)
+    async def switch_conversation(self, slug: str) -> bool: ...  # in a session only
+    async def compact_conversation(self, slug: str) -> bool: ...  # asks the model, in session
+    def voices(self) -> list[str]: ...
+    async def sample_voice(self, voice: str, speed: float, text: str | None) -> bool: ...
 
 
 class Deps:
@@ -80,7 +85,9 @@ class Deps:
         input_device: str | None,
         output_device: str | None,
         stt_model: str,
+        conversations: Any = None,  # ghost_core.conversations.Conversations
     ) -> None:
+        self.conversations = conversations
         self.state = state
         self.control = control
         self.gate = gate
@@ -149,9 +156,14 @@ def create_app(deps: Deps) -> FastAPI:
             wake_mode=st.wake_mode,
             abilities=[a.name for a in deps.abilities],
             pending=pending,
+            conversation=st.conversation,
         )
 
     st.set_status_provider(status)
+    if deps.conversations is not None:
+        from ghost_api.conversations import add_conversation_routes
+
+        add_conversation_routes(app, deps)
 
     # --- status + control -------------------------------------------------------
 

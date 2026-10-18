@@ -44,6 +44,7 @@ class Status(BaseModel):
     wake_mode: str
     abilities: list[str]
     pending: PendingProposal | None = None
+    conversation: str | None = None  # slug of the conversation the session is in (ADR 0014)
 
 
 class Turn(BaseModel):
@@ -96,8 +97,17 @@ class LogEvent(BaseModel):
     at: datetime
 
 
+class ConversationEvent(BaseModel):
+    """The session moved to another conversation, or one was created, changed or removed."""
+
+    type: Literal["conversation"] = "conversation"
+    active: str | None
+    changed: str | None = None  # slug that was created/edited/deleted, if any
+
+
 Event = Annotated[
-    StatusEvent | TurnEvent | PendingEvent | OutcomeEvent | LogEvent, Field(discriminator="type")
+    StatusEvent | TurnEvent | PendingEvent | OutcomeEvent | LogEvent | ConversationEvent,
+    Field(discriminator="type"),
 ]
 
 
@@ -268,3 +278,74 @@ class ModelsView(BaseModel):
     cache_dir: str
     kokoro_present: bool
     stt_model: str
+
+
+# --- conversations (ADR 0014) -------------------------------------------------------
+
+
+class ConversationView(BaseModel):
+    slug: str
+    name: str
+    aliases: list[str]
+    voice: str
+    speed: float
+    created_at: datetime
+    last_active_at: datetime | None
+    active: bool  # the running session is in it
+    is_ghost: bool
+
+
+class ConversationDetail(ConversationView):
+    persona: str
+    memory: str
+    notes: list[str]
+    turn_count: int
+    compactions: int
+    dir: str
+
+
+class ConversationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    aliases: list[str] = []
+    voice: str | None = None
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
+    persona: str = Field(default="", max_length=4000)
+
+
+class ConversationUpdate(BaseModel):
+    """Each field present is applied as its own audited, undoable write."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    aliases: list[str] | None = None
+    voice: str | None = None
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
+    persona: str | None = Field(default=None, max_length=4000)
+    memory: str | None = Field(default=None, max_length=20000)
+    notes: list[str] | None = None
+
+
+class TurnView(BaseModel):
+    id: int
+    session_id: str
+    role: Literal["user", "assistant", "call", "system"]
+    text: str
+    at: datetime
+    compacted: bool
+
+
+class CompactionView(BaseModel):
+    id: str
+    at: datetime
+    source: str
+    summary: str
+    through_turn_id: int | None
+
+
+class VoiceInfo(BaseModel):
+    id: str
+    label: str  # "American female: Heart"
+
+
+class SampleRequest(BaseModel):
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    text: str | None = Field(default=None, max_length=200)

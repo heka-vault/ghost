@@ -36,16 +36,33 @@ class _NoControl:
     def discovered_abilities(self):
         return {}
 
+    async def switch_conversation(self, slug):
+        return False
+
+    async def compact_conversation(self, slug):
+        return False
+
+    def voices(self):
+        return []
+
+    async def sample_voice(self, voice, speed, text):
+        return False
+
 
 def openapi() -> dict[str, Any]:
-    from ghost_core import Store, WriteGate
+    import tempfile
 
+    from ghost_core import Store, WriteGate
+    from ghost_core.conversations import Conversations
+
+    store = Store()
     deps = Deps(
         state=DaemonState(version="schema", wake_mode="file"),
         control=_NoControl(),
-        gate=WriteGate(Store()),
-        store=Store(),
+        gate=WriteGate(store),
+        store=store,
         abilities=[],
+        conversations=Conversations(store, Path(tempfile.mkdtemp()) / "conversations"),
         policy_path=Path("/dev/null"),
         settings_path=Path("/dev/null"),
         env_path=Path("/dev/null"),

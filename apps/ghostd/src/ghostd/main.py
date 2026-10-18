@@ -33,9 +33,11 @@ from ghost_core import (
     discover,
     load,
 )
+from ghost_core.conversations import ABILITY as CONVERSATIONS
+from ghost_core.conversations import GHOST, Conversations
 from ghost_core.jev import JevClassifier, JevClient
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
-from ghost_voice.pipeline import Models
+from ghost_voice.pipeline import Models, conversations_ability
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
 from loguru import logger
 
@@ -65,6 +67,8 @@ class Daemon:
         self._listener: WakeListener | None = None
         self._rearm = asyncio.Event()  # set when the passive listener must be rebuilt
         self._discovered: dict = {}
+        self.conversations: Conversations | None = None
+        self._models: Models | None = None
 
     # --- Controller (called by the API) -------------------------------------
 
@@ -154,6 +158,66 @@ class Daemon:
     def discovered_abilities(self) -> dict:
         return self._discovered
 
+    # --- conversations (ADR 0014) ------------------------------------------------
+
+    async def switch_conversation(self, slug: str) -> bool:
+        """A click in the desktop app: the same transfer the model performs, fed in
+        at the pipeline source so the announce, tone, voice and context frames
+        arrive in order."""
+        s = self.session
+        if s is None or s.conversation is None or self.conversations is None:
+            return False
+        target = self.conversations.get(slug)
+        if target is None or not s.conversation.switch_allowed():
+            return False
+
+        async def push(frame) -> None:
+            await s.inject([frame])
+
+        follow_up = await s.conversation.switch(target, push=push)
+        if follow_up:
+            await s.inject(follow_up)
+        return True
+
+    async def compact_conversation(self, slug: str) -> bool:
+        s = self.session
+        if s is None or s.conversation is None or s.conversation.active.slug != slug:
+            return False
+        await s.system_note(
+            "[system] The operator asked, from the desktop app, to compact this "
+            "conversation's memory now. Call change with conversations.compact and a "
+            "fresh summary, then say in a few words that it is done."
+        )
+        return True
+
+    def voices(self) -> list[str]:
+        if self._models is None:
+            return []
+        try:
+            return sorted(self._models.tts._kokoro.voices)  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            return []
+
+    async def sample_voice(self, voice: str, speed: float, text: str | None) -> bool:
+        if self._models is None:
+            return False
+        line = text or f"Hi, this is {voice.partition('_')[2].capitalize()}. This is how I sound."
+        kokoro = self._models.tts._kokoro  # noqa: SLF001
+
+        def play() -> None:
+            import sounddevice as sd
+
+            samples, rate = kokoro.create(line, voice=voice, speed=speed, lang="en-us")
+            sd.play(samples, rate, device=self.voice.output_device)
+            sd.wait()
+
+        try:
+            await asyncio.to_thread(play)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"voice sample failed: {e}")
+            return False
+        return True
+
     # --- the loop --------------------------------------------------------------
 
     def build_wake(self, models: Models) -> WakeDetector:
@@ -209,6 +273,18 @@ class Daemon:
         for a in abilities:
             gate.register(a.name, a.contributions.operations)
         self.gate = gate
+        conversations = Conversations(
+            store,
+            self.cfg.conversations_dir,
+            default_voice=self.voice.tts_voice,
+            default_speed=self.voice.tts_speed,
+            retention=timedelta(days=self.cfg.turn_retention_days),
+        )
+        gate.register(CONVERSATIONS, conversations_ability(conversations).contributions.operations)
+        self.conversations = conversations
+        pruned = conversations.prune()
+        if pruned:
+            logger.info(f"conversations: pruned {pruned} summarized turns past retention")
         self._discovered = discover(self.cfg.abilities_dir)
         self.state.abilities = [a.name for a in abilities]
         events = Events(ln for a in abilities for ln in a.contributions.listeners)
@@ -224,7 +300,9 @@ class Daemon:
         logger.info("loading models")
         models = await asyncio.to_thread(Models.load, self.voice)
         logger.info("models ready")
+        self._models = models
         self.state.set_models_ready(True)
+        self._bind_voices(conversations, models)
 
         ducker = Ducker(self.cfg.duck_apps, self.cfg.duck_level, self.rt / DUCK_STATE)
         restore_from_state(self.rt / DUCK_STATE)  # undo a previous crash
@@ -269,6 +347,15 @@ class Daemon:
                 await jev.aclose()
             store.close()
 
+    def _bind_voices(self, conversations: Conversations, models: Models) -> None:
+        """Once Kokoro is loaded, the operations validate voice ids against its list."""
+        voices = self.voices()
+        if voices and self.gate is not None:
+            conversations._voices = tuple(voices)  # noqa: SLF001
+            self.gate.register(
+                CONVERSATIONS, conversations_ability(conversations).contributions.operations
+            )
+
     async def _start_api(self, gate: WriteGate, store: Store, abilities) -> ApiServer | None:
         socket_path = self.cfg.api_socket or default_socket_path()
         deps = Deps(
@@ -286,6 +373,7 @@ class Daemon:
             input_device=self.voice.input_device,
             output_device=self.voice.output_device,
             stt_model=self.voice.stt_model,
+            conversations=self.conversations,
         )
         server = ApiServer(create_app(deps), socket_path)
         try:
@@ -324,6 +412,10 @@ class Daemon:
             if phase == "listening":
                 self._refresh_pending()
 
+        async def on_conversation(slug: str) -> None:
+            self.state.set_conversation(slug)
+            self._refresh_pending()
+
         session = build_session(
             self.voice,
             models=models,
@@ -333,9 +425,13 @@ class Daemon:
             first_utterance=first_utterance,
             on_turn=on_turn,
             on_phase=on_phase,
+            conversations=self.conversations,
+            start_in=GHOST,
+            on_conversation=on_conversation,
         )
         self.session = session
         self.state.set_phase(Phase.LISTENING, session.session_id)
+        self.state.set_conversation(GHOST)
         if first_utterance:
             self.state.add_turn("user", first_utterance, via=self._first_via)
         self._first_via = "voice"

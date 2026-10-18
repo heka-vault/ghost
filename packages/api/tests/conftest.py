@@ -19,6 +19,8 @@ from ghost_core import (
     Store,
     WriteGate,
 )
+from ghost_core.conversations import ABILITY as CONVERSATIONS
+from ghost_core.conversations import Conversations
 
 
 class FakeControl:
@@ -83,6 +85,25 @@ class FakeControl:
     def discovered_abilities(self):
         return self.discovered
 
+    # conversations (ADR 0014)
+    async def switch_conversation(self, slug):
+        self.calls.append(("switch", slug))
+        if not self.state.session_id:
+            return False
+        self.state.set_conversation(slug)
+        return True
+
+    async def compact_conversation(self, slug):
+        self.calls.append(("compact", slug))
+        return True
+
+    def voices(self):
+        return ["af_heart", "am_adam", "bf_emma"]
+
+    async def sample_voice(self, voice, speed, text):
+        self.calls.append(("sample", voice, speed, text))
+        return True
+
 
 def make_ability(writer) -> LoadedAbility:
     async def echo(args):
@@ -130,6 +151,13 @@ def world(tmp_path: Path):
     policy_path = tmp_path / "policy.toml"
     gate = WriteGate(store, autonomy=AutonomyPolicy.load(policy_path))
     gate.register("fake", loaded.contributions.operations)
+    conversations = Conversations(
+        store,
+        tmp_path / "conversations",
+        default_voice="af_heart",
+        voices=("af_heart", "am_adam", "bf_emma"),
+    )
+    gate.register(CONVERSATIONS, conversations.operations())
     state = DaemonState(version="test", wake_mode="file")
     control = FakeControl(state, gate, policy_path)
     control.discovered = {
@@ -155,6 +183,7 @@ def world(tmp_path: Path):
         input_device="ghost.mic",
         output_device=None,
         stt_model="parakeet",
+        conversations=conversations,
     )
     app = create_app(deps)
     client = TestClient(app)
