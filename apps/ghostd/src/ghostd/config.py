@@ -57,6 +57,7 @@ class GhostdSettings(BaseSettings):
     # `ghostd wake` works in every mode.
     wake_mode: str = "transcript"  # transcript | file | onnx
     wake_phrases: str = ""  # comma-separated; empty = ghost_voice.wake.DEFAULT_WAKE_PHRASES
+    wake_fuzzy: float = 0.8  # phonetic near-miss threshold for the wake phrase; 0 = exact only
     wake_model_path: Path | None = None
     wake_threshold: float = 0.5
     wake_cooldown_secs: float = 2.0

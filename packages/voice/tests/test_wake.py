@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from ghost_voice.wake import DEFAULT_WAKE_PHRASES, match_wake, parse_phrases
+from ghost_voice.wake import DEFAULT_WAKE_PHRASES, WakeMatch, match_wake, parse_phrases
 
 PHRASES = ("hey ghost", "ghost you there", "ghost are you there", "okay ghost")
 
@@ -131,3 +131,48 @@ async def test_listener_rebuilds_when_pipeline_ends_without_match(monkeypatch):
     assert m.remainder == "hi"
     assert runs == [0, 1]
     assert listener._runner is None and listener._run_task is None
+
+
+# --- phonetic near-misses ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "heard, phrase, remainder",
+    [
+        ("Hey guys.", "hey ghost", ""),  # what Parakeet made of "hey ghost" through the AEC
+        ("There he goes.", "hey ghost", ""),
+        ("Hey ghosts.", "hey ghost", ""),
+        ("He goes what a fear is.", "hey ghost", "what a fear is"),
+        ("okay goes", "okay ghost", ""),
+    ],
+)
+def test_fuzzy_matches_asr_spellings(heard, phrase, remainder):
+    m = match_wake(heard, DEFAULT_WAKE_PHRASES, fuzzy=0.8)
+    assert m is not None and (m.phrase, m.remainder) == (phrase, remainder)
+
+
+@pytest.mark.parametrize(
+    "heard",
+    [
+        "There you go.",
+        "We go.",
+        "No see you there.",
+        "see you there",
+        "hey there",
+        "hey toast",
+        "the ghost",
+        "he gets it",
+        "",
+    ],
+)
+def test_fuzzy_rejects_unrelated_speech(heard):
+    assert match_wake(heard, DEFAULT_WAKE_PHRASES, fuzzy=0.8) is None
+
+
+def test_fuzzy_off_by_default():
+    assert match_wake("Hey guys.", DEFAULT_WAKE_PHRASES) is None
+
+
+def test_exact_match_wins_over_fuzzy():
+    m = match_wake("hey ghost close it", DEFAULT_WAKE_PHRASES, fuzzy=0.8)
+    assert m == WakeMatch(phrase="hey ghost", remainder="close it")

@@ -34,7 +34,8 @@ make run             # loads models (~3 s warm), then listens for "hey ghost"; C
 make wake            # optional, from another shell: trigger a wake by hand
 ```
 
-Say "Hey Ghost", or "Ghost, you there?" (`GHOST_WAKE_PHRASES` to change them). Words
+Say "Hey Ghost", or "Ghost, you there?" (`GHOST_WAKE_PHRASES` to change them; phonetic
+near-misses such as "hey guys" count too, `GHOST_WAKE_FUZZY=0` for exact only). Words
 in the same breath are the first request: "hey ghost, what needs my sign-off".
 
 When Ghost does not react the way you expect, run `GHOST_DEBUG_AUDIO=1 make run`: it

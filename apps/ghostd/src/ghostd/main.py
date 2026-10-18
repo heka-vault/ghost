@@ -138,6 +138,7 @@ class Daemon:
                 self.voice,
                 stt_factory=models.stt.fork,
                 phrases=phrases,
+                fuzzy=self.cfg.wake_fuzzy,
             )
             return TranscriptWakeDetector(listener, manual)
         if self.cfg.wake_mode == "file":
