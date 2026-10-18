@@ -13,8 +13,10 @@ the text is written to ``memory.md`` through the gate as a quiet, audited write.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -32,6 +34,7 @@ from ghost_core.models import ChangeSet
 from ghost_core.policy import Autonomy, PolicyError
 from loguru import logger
 from pipecat.frames.frames import (
+    ControlFrame,
     Frame,
     LLMMessagesUpdateFrame,
     LLMUpdateSettingsFrame,
@@ -42,13 +45,20 @@ from pipecat.frames.frames import (
 
 from ghost_voice.prompt import build_system_prompt
 
-PushFrame = Callable[[Frame], Awaitable[None]]
-
 HANDOFF_NOTE = (
-    "[system] The operator was just patched through to you from {origin}. "
+    "[system] The operator was just patched through to you from {origin}.{outcome} "
     "Greet them in one short sentence as yourself and say in a few words where this "
-    "conversation left off, or that it is new.{handoff}"
+    "conversation left off, or that it is new. Then handle whatever they say next as "
+    "usual, including asking to be patched somewhere else.{handoff}"
 )
+
+
+@dataclass
+class ConversationMarkerFrame(ControlFrame):
+    """Travels with the transfer frames so that text spoken after it is recorded under
+    the new conversation and text before it under the old one, whatever the timing."""
+
+    slug: str = ""
 
 
 def transfer_tone(sample_rate: int) -> bytes:
@@ -89,9 +99,14 @@ class ConversationRuntime:
         self._sample_rate = sample_rate
         self._keep = keep_messages
         self._on_switch = on_switch
-        self._skip_once: set[str] = set()
         p = conversations.get(start) or conversations.ensure_ghost()
         self.active: Profile = p
+        self._speaking_as: str = p.slug  # follows the marker frames through the pipeline
+        # Cleared from the start of a transfer until the new line has greeted; a
+        # typed turn that arrives in that window waits (bounded), or it would run on
+        # the old context and race the greeting.
+        self.settled = asyncio.Event()
+        self.settled.set()
         conversations.touch(p.slug)
 
     # --- what the session is built from -----------------------------------------
@@ -120,10 +135,15 @@ class ConversationRuntime:
     # --- records --------------------------------------------------------------------
 
     def record(self, role: str, text: str) -> None:
-        if text in self._skip_once:
-            self._skip_once.discard(text)
-            return
-        self._conversations.record(self.active.slug, self._session_id, role, text)
+        """User turns belong to the conversation the session is in now; assistant text
+        belongs to the one that was speaking when it was generated (see the marker)."""
+        slug = self._speaking_as if role == "assistant" else self.active.slug
+        self._conversations.record(slug, self._session_id, role, text)
+        if role == "assistant" and slug == self.active.slug and not self.settled.is_set():
+            self.settled.set()  # the new line has greeted; turns may flow again
+
+    def on_marker(self, frame: ConversationMarkerFrame) -> None:
+        self._speaking_as = frame.slug
 
     def record_call(self, name: str, args: dict[str, Any]) -> None:
         shown = ", ".join(
@@ -147,44 +167,54 @@ class ConversationRuntime:
             return True
         return level is not Autonomy.DENY
 
-    async def switch(self, target: Profile, *, push: PushFrame, handoff: str = "") -> list[Frame]:
-        """Perform the transfer. Pushes the announce line, the tone and the voice change
-        now (in order, downstream of the LLM); returns the context-replacing frame the
-        caller pushes once the tool result has landed in the context."""
+    async def switch(self, target: Profile, *, handoff: str = "", outcome: str = "") -> list[Frame]:
+        """Perform the transfer and return the frames that carry it out, in order:
+        the announce line, the tone, the voice change, the marker, the new system
+        prompt, and the context replacement that makes the new line greet. The caller
+        feeds them in at the pipeline source once any in-flight tool result has been
+        appended to the context (``settled`` is cleared until then). ``outcome`` is
+        what just happened (a created conversation), told to the new line so it does
+        not redo it."""
         origin = self.active
         if target.slug == origin.slug:
             return []
         if self._gate.pending(self._session_id) is not None:
             self._gate.cancel(self._session_id, "switched conversation")
+        self.settled.clear()
         line = "Back to Ghost." if target.is_ghost else f"Patching you through to {target.name}."
-        self.record("assistant", line)
-        self._skip_once.add(line)  # the tap will report it spoken; not twice
         self.record("system", f"transferred to {target.name}")
-        await push(TTSSpeakFrame(line, append_to_context=False))
-        await push(
-            OutputAudioRawFrame(
-                audio=transfer_tone(self._sample_rate),
-                sample_rate=self._sample_rate,
-                num_channels=1,
-            )
-        )
         self.active = target
         self._conversations.touch(target.slug)
         self.record("system", f"transferred from {origin.name}")
-        await push(self._voice_frame(target))
-        await push(
-            LLMUpdateSettingsFrame(
-                delta=self._llm_settings(system_instruction=self.system_prompt(target))
-            )
-        )
         if self._on_switch:
             await self._on_switch(target)
         note = HANDOFF_NOTE.format(
             origin=origin.name,
+            outcome=f" {outcome.strip()}" if outcome.strip() else "",
             handoff=f" Handoff from {origin.name}: {handoff.strip()}" if handoff.strip() else "",
         )
         messages = self.initial_messages(target) + [{"role": "user", "content": note}]
-        return [LLMMessagesUpdateFrame(messages=messages, run_llm=True)]
+        return [
+            TTSSpeakFrame(line, append_to_context=False),  # the tap records it
+            OutputAudioRawFrame(
+                audio=transfer_tone(self._sample_rate),
+                sample_rate=self._sample_rate,
+                num_channels=1,
+            ),
+            self._voice_frame(target),
+            ConversationMarkerFrame(slug=target.slug),
+            LLMUpdateSettingsFrame(
+                delta=self._llm_settings(system_instruction=self.system_prompt(target))
+            ),
+            LLMMessagesUpdateFrame(messages=messages, run_llm=True),
+        ]
+
+    def transfer_done(self) -> None:
+        """The transfer frames are in the pipeline. ``settled`` is set when the new
+        line's greeting has been generated (see ``record``); a caller that could not
+        queue the frames releases it here so nothing waits forever."""
+        if self._speaking_as == self.active.slug:
+            self.settled.set()
 
     def _voice_frame(self, p: Profile) -> Frame:
         return TTSUpdateSettingsFrame(delta=self._tts_settings(voice=p.voice, speed=p.speed))

@@ -153,7 +153,18 @@ def register_tools(
                 target = conversations.conversations.get(sub.proposal.target.scope())
                 if target is not None:
                     conversations.carry_session_turns(target)
-                    await _transfer(params, conversations, target, handoff="", result=result)
+                    await _transfer(
+                        params,
+                        conversations,
+                        target,
+                        handoff="",
+                        result=result,
+                        outcome=(
+                            f"The conversation {target.name!r} was just created at their "
+                            "request and they are now on it; that is done, do not create "
+                            "or switch again."
+                        ),
+                    )
                     await events.emit(
                         "outcome", ability=aname, operation=op.name, status=sub.outcome.status
                     )
@@ -281,19 +292,30 @@ async def _transfer(
     *,
     handoff: str,
     result: dict[str, Any],
+    outcome: str = "",
 ) -> None:
-    """Announce, tone, voice change now; replace the context once the tool result has
-    been appended, so the new line's greeting is the next model turn."""
-
-    async def push(frame) -> None:
-        await params.llm.push_frame(frame, FrameDirection.DOWNSTREAM)
-
-    follow_up = await conversations.switch(target, push=push, handoff=handoff)
+    """Return the tool result without a model run, then, once the aggregator has
+    appended it to the context, feed the transfer frames in at the pipeline source.
+    Not out of the LLM service: a frame the LLM pushes never passes through the LLM
+    itself (the system prompt would not change), and anything pushed downstream
+    queues behind the audio being played."""
+    worker = getattr(params, "pipeline_worker", None)
+    frames = await conversations.switch(target, handoff=handoff, outcome=outcome)
 
     async def on_context_updated() -> None:
-        for frame in follow_up:
-            await push(frame)
+        try:
+            if worker is not None:
+                await worker.queue_frames(frames)
+            else:
+                for frame in frames:
+                    await params.llm.push_frame(frame, FrameDirection.DOWNSTREAM)
+        except Exception:
+            conversations.transfer_done()
+            raise
 
+    if not frames:
+        await params.result_callback(result)
+        return
     await params.result_callback(
         result,
         properties=FunctionCallResultProperties(

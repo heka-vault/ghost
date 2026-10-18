@@ -113,6 +113,12 @@ class GhostSession:
 
     async def say_text(self, text: str) -> None:
         """A typed user turn: goes through the LLM, the tools and the gate like speech."""
+        if self.conversation:
+            try:  # a transfer in flight: let its context land first
+                await asyncio.wait_for(self.conversation.settled.wait(), 8.0)
+            except TimeoutError:
+                pass
+            self.conversation.record("user", text)
         await self.inject(
             [
                 ThinkingStartFrame(),
@@ -388,7 +394,7 @@ def build_session(
                 (Slot.BEFORE_LLM, user_agg),
                 (Slot.AFTER_LLM, llm),
                 (None, ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs)),
-                (Slot.BEFORE_TTS, AssistantTap(on_turn)),
+                (Slot.BEFORE_TTS, AssistantTap(on_turn, runtime.on_marker if runtime else None)),
                 (Slot.AUDIO_OUT, models.tts),
                 (None, ThinkingSoundCut()),
                 (None, transport.output()),

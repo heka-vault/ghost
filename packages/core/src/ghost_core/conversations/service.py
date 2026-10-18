@@ -390,7 +390,11 @@ class Conversations:
         return [
             Operation(
                 "create",
-                "Start a new saved conversation (a line the operator can be patched to later).",
+                (
+                    "Start a new saved conversation (a line the operator can be patched to "
+                    "later). Use it at once, without asking, when the operator says 'save this "
+                    "as X' or 'start a conversation called X'; it switches them to it."
+                ),
                 {
                     "name": {"type": "string"},
                     "aliases": {"type": "array", "items": {"type": "string"}},

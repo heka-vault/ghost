@@ -24,9 +24,12 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from ghost_voice.conversation import ConversationMarkerFrame
+
 Phase = Literal["listening", "thinking", "speaking"]
 OnTurn = Callable[[str, str], Awaitable[None]]  # (role, text)
 OnPhase = Callable[[Phase], Awaitable[None]]
+OnMarker = Callable[[ConversationMarkerFrame], None]
 
 
 class UserTap(FrameProcessor):
@@ -48,14 +51,23 @@ class UserTap(FrameProcessor):
 
 
 class AssistantTap(FrameProcessor):
-    def __init__(self, on_turn: OnTurn, **kwargs) -> None:
+    def __init__(self, on_turn: OnTurn, on_marker: OnMarker | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._on_turn = on_turn
+        self._on_marker = on_marker
         self._buf: list[str] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        if isinstance(frame, LLMTextFrame):
+        if isinstance(frame, ConversationMarkerFrame):
+            # Text generated so far was the old line's; flush it before moving on.
+            text = "".join(self._buf).strip()
+            self._buf.clear()
+            if text:
+                await self._on_turn("assistant", text)
+            if self._on_marker:
+                self._on_marker(frame)
+        elif isinstance(frame, LLMTextFrame):
             self._buf.append(frame.text)
         elif isinstance(frame, LLMFullResponseEndFrame):
             text = "".join(self._buf).strip()

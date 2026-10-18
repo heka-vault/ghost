@@ -171,12 +171,13 @@ class Daemon:
         if target is None or not s.conversation.switch_allowed():
             return False
 
-        async def push(frame) -> None:
-            await s.inject([frame])
-
-        follow_up = await s.conversation.switch(target, push=push)
-        if follow_up:
-            await s.inject(follow_up)
+        frames = await s.conversation.switch(target)
+        try:
+            if frames:
+                await s.inject(frames)
+        except Exception:
+            s.conversation.transfer_done()
+            raise
         return True
 
     async def compact_conversation(self, slug: str) -> bool:

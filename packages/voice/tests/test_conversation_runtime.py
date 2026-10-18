@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from ghost_core import AutonomyPolicy, Store, WriteGate
 from ghost_core.conversations import ABILITY, GHOST, SUMMARY_TEMPLATE, Conversations
-from ghost_voice.conversation import ConversationRuntime, transfer_tone
+from ghost_voice.conversation import ConversationMarkerFrame, ConversationRuntime, transfer_tone
 from ghost_voice.pipeline import conversations_ability
 from ghost_voice.tools import SWITCH_TOOL, register_tools
 from pipecat.frames.frames import (
@@ -56,6 +56,7 @@ class FakeParams:
     async def result_callback(self, result, properties=None, **_):
         self.result = result
         self.properties = properties
+        self.pushed_before_update = list(self.llm.pushed)
         if properties and properties.on_context_updated:
             await properties.on_context_updated()
 
@@ -139,38 +140,47 @@ async def test_switch_tool_transfers_with_announce_tone_voice_and_context(world)
     await llm.functions[SWITCH_TOOL](p)
     assert p.result == {"status": "transferred", "to": "Accounting"}
     assert p.properties.run_llm is False
+    assert p.pushed_before_update == []  # nothing moves until the result has landed
+    assert not rt.settled.is_set()  # held until the new line has greeted
 
     kinds = [type(f) for f in llm.pushed]
     assert kinds == [
         TTSSpeakFrame,
         OutputAudioRawFrame,
         TTSUpdateSettingsFrame,
+        ConversationMarkerFrame,
         LLMUpdateSettingsFrame,
         LLMMessagesUpdateFrame,
     ]
     assert llm.pushed[0].text == "Patching you through to Accounting."
     assert llm.pushed[2].delta == TTSSettings(voice="am_adam", speed=1.1)
-    prompt = llm.pushed[3].delta.system_instruction
+    assert llm.pushed[3].slug == "accounting"
+    prompt = llm.pushed[4].delta.system_instruction
     assert "You are Accounting" in prompt and "hates surprises" in prompt and "FRAG" in prompt
-    update = llm.pushed[4]
+    update = llm.pushed[5]
     assert update.run_llm is True
     assert "Reconciling September" in update.messages[0]["content"]
     assert "patched through to you from Ghost" in update.messages[-1]["content"]
     assert "Q3 invoices" in update.messages[-1]["content"]
     assert rt.active.slug == "accounting"
 
-    # the transcript shows the handoff on both sides, and the announce line once
-    ghost_turns = [t.text for t in convs.turns(GHOST)]
-    assert ghost_turns == [
+    # assistant text is attributed by the marker, not by the clock: what the tap
+    # reports before the marker is Ghost's, after it Accounting's
+    rt.record("assistant", "Patching you through to Accounting.")
+    assert not rt.settled.is_set()  # Ghost's announce line is not the greeting
+    rt.on_marker(llm.pushed[3])
+    rt.record("assistant", "Accounting here. We were reconciling September.")
+    assert rt.settled.is_set()
+    assert [t.text for t in convs.turns(GHOST)] == [
         "patch me to accounting",
         "switch_conversation(handoff=Q3 invoices, name=the accounting team)",
-        "Patching you through to Accounting.",
         "transferred to Accounting",
+        "Patching you through to Accounting.",
     ]
-    assert [t.text for t in convs.turns("accounting")] == ["transferred from Ghost"]
-    # the tap would report the spoken announce line; it is not recorded twice
-    rt.record("assistant", "Patching you through to Accounting.")
-    assert len(convs.turns("accounting")) == 1
+    assert [t.text for t in convs.turns("accounting")] == [
+        "transferred from Ghost",
+        "Accounting here. We were reconciling September.",
+    ]
 
     # back to Ghost
     p = FakeParams(llm, SWITCH_TOOL, {"name": "ghost"})
@@ -232,12 +242,10 @@ async def test_save_as_creates_switches_and_carries_turns(world):
         "Sure, which ones?",
         "save this as accounting",
     ]
-    assert [t.text for t in convs.turns(GHOST)] == [
-        "Patching you through to Accounting.",
-        "transferred to Accounting",
-    ]
+    assert [t.text for t in convs.turns(GHOST)] == ["transferred to Accounting"]
     update = [f for f in llm.pushed if isinstance(f, LLMMessagesUpdateFrame)][0]
     assert update.messages[0]["content"] == "let's go over the invoices"
+    assert "was just created" in update.messages[-1]["content"]
 
 
 async def test_read_tool_and_change_records_calls(world):
