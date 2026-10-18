@@ -27,3 +27,17 @@ First increment running on the workstation: generic write gate with per-operatio
 ## Commits
 
 Conventional commits. Commit on `main` until the project needs branches.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `heka-vault/ghost`, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical labels, unrenamed: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at the root (created lazily) and the ADRs in `docs/adr/`. See `docs/agents/domain.md`.
