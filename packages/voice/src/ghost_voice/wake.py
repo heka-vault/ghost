@@ -200,6 +200,13 @@ class WakeListener:
         self._runner: WorkerRunner | None = None
         self._run_task: asyncio.Task | None = None
 
+    def set_phrases(self, phrases: tuple[str, ...], fuzzy: float | None = None) -> None:
+        """Change what the next passive pipeline listens for. Takes effect when the
+        listener is next (re)built, so the daemon re-arms it after a settings change."""
+        self._phrases = phrases
+        if fuzzy is not None:
+            self._fuzzy = fuzzy
+
     def _default_transport(self) -> BaseTransport:
         return SoundDeviceTransport(
             SoundDeviceTransportParams(

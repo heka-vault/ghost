@@ -645,6 +645,11 @@ export interface components {
         };
         /** SettingsResult */
         SettingsResult: {
+            /**
+             * Applied
+             * @default []
+             */
+            applied: string[];
             /** Restart Required */
             restart_required: boolean;
             settings: components["schemas"]["SettingsView"];

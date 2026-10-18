@@ -8,7 +8,8 @@ const NON_SECRET = [
   ["ANTHROPIC_BASE_URL", "Anthropic-compatible endpoint"],
   ["GHOST_LLM_MODEL", "Model id (default claude-sonnet-5-5)"],
   ["GHOST_INPUT_DEVICE", "Microphone source (ghost.mic after echo-cancel setup)"],
-  ["GHOST_WAKE_PHRASES", "Comma-separated wake phrases"],
+  ["GHOST_WAKE_PHRASES", "Wake phrases, comma-separated (applies immediately)"],
+  ["GHOST_WAKE_FUZZY", "Wake near-miss threshold 0-1, default 0.8; 0 = exact words only (applies immediately)"],
   ["GHOST_JEV", "Confirmation classifier: auto | on | off"],
 ] as const;
 
@@ -50,7 +51,8 @@ export function Settings() {
         secrets: Object.keys(changedSecrets).length ? changedSecrets : null,
       });
       setSecrets({});
-      setMsg(r.restart_required ? "Saved. Restart ghostd to apply." : "Saved.");
+      const live = r.applied.length ? ` ${r.applied.join(", ")} applied now.` : "";
+      setMsg(r.restart_required ? `Saved.${live} Restart ghostd for the rest.` : `Saved.${live}`);
       await load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));

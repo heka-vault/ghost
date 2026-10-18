@@ -58,6 +58,7 @@ class Controller(Protocol):
     async def confirm_pending(self) -> Outcome | None: ...
     async def cancel_pending(self) -> bool: ...
     def reload_policy(self) -> AutonomyPolicy: ...
+    def apply_settings(self, values: dict[str, str | None]) -> list[str]: ...  # keys live now
     def discovered_abilities(self) -> dict[str, Any]: ...  # name -> Ability
 
 
@@ -359,6 +360,7 @@ def create_app(deps: Deps) -> FastAPI:
 
     @app.put("/settings", response_model=SettingsResult, tags=["settings"])
     async def put_settings(update: SettingsUpdate) -> SettingsResult:
+        applied: list[str] = []
         try:
             if update.values:
                 bad = [k for k in update.values if k in SECRET_KEYS_SET]
@@ -368,6 +370,7 @@ def create_app(deps: Deps) -> FastAPI:
                 # settings.env is folded into env by the renderer; mirror it now so a
                 # restart without the renderer still sees the new values.
                 update_env(deps.env_path, update.values, mode=0o600)
+                applied = deps.control.apply_settings(update.values)
             if update.secrets:
                 bad = [k for k in update.secrets if k not in SECRET_KEYS_SET]
                 if bad:
@@ -376,7 +379,12 @@ def create_app(deps: Deps) -> FastAPI:
                 logger.info(f"settings: secrets updated: {sorted(update.secrets)}")
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
-        return SettingsResult(settings=settings_view(), restart_required=True)
+        pending_values = [k for k in (update.values or {}) if k not in applied]
+        return SettingsResult(
+            settings=settings_view(),
+            restart_required=bool(pending_values) or bool(update.secrets),
+            applied=applied,
+        )
 
     # --- devices + setup ----------------------------------------------------------------
 

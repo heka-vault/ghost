@@ -70,6 +70,10 @@ class FakeControl:
             self.state.set_pending(None)
         return p is not None
 
+    def apply_settings(self, values):
+        self.applied = [k for k in values if k.startswith("GHOST_WAKE_")]
+        return list(self.applied)
+
     def reload_policy(self):
         policy = AutonomyPolicy.load(self.policy_path)
         self.gate.set_autonomy(policy)

@@ -239,6 +239,7 @@ class SettingsUpdate(BaseModel):
 class SettingsResult(BaseModel):
     settings: SettingsView
     restart_required: bool
+    applied: list[str] = []  # keys the daemon picked up without a restart
 
 
 # --- devices + setup ------------------------------------------------------------

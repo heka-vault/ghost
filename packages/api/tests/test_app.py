@@ -222,3 +222,16 @@ def test_say_rejects_blank(world, bad):
     client, state, *_ = world
     state.set_phase(Phase.PASSIVE)
     assert client.post("/session/say", json={"text": bad}).status_code in (422, 200)
+
+
+def test_settings_live_keys_do_not_require_restart(world):
+    client, _state, control, *_ = world
+    r = client.put(
+        "/settings", json={"values": {"GHOST_WAKE_PHRASES": "hey ghost, computer"}}
+    ).json()
+    assert r["applied"] == ["GHOST_WAKE_PHRASES"] and r["restart_required"] is False
+    assert control.applied == ["GHOST_WAKE_PHRASES"]
+    r = client.put(
+        "/settings", json={"values": {"GHOST_WAKE_PHRASES": "x", "GHOST_REPOS": "a/b"}}
+    ).json()
+    assert r["applied"] == ["GHOST_WAKE_PHRASES"] and r["restart_required"] is True

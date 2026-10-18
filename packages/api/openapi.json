@@ -890,6 +890,14 @@
       },
       "SettingsResult": {
         "properties": {
+          "applied": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
           "restart_required": {
             "title": "Restart Required",
             "type": "boolean"

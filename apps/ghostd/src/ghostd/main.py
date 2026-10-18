@@ -36,7 +36,7 @@ from ghost_core import (
 from ghost_core.jev import JevClassifier, JevClient
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.pipeline import Models
-from ghost_voice.wake import build_wake_listener, parse_phrases
+from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
 from loguru import logger
 
 from ghostd.audio import Ducker, chime, restore_from_state
@@ -62,6 +62,8 @@ class Daemon:
         self.gate: WriteGate | None = None
         self._first_via = "voice"  # how the wake-time utterance arrived
         self._manual: FileWakeDetector | None = None
+        self._listener: WakeListener | None = None
+        self._rearm = asyncio.Event()  # set when the passive listener must be rebuilt
         self._discovered: dict = {}
 
     # --- Controller (called by the API) -------------------------------------
@@ -123,6 +125,32 @@ class Daemon:
         logger.info(f"policy reloaded from {policy.source}")
         return policy
 
+    def apply_settings(self, values: dict[str, str | None]) -> list[str]:
+        """Apply what can change without a restart; return those keys. Today: the wake
+        phrases and the near-miss threshold, picked up by rebuilding the passive listener."""
+        applied: list[str] = []
+        if self._listener is None:
+            return applied
+        if "GHOST_WAKE_PHRASES" in values:
+            phrases = parse_phrases(values["GHOST_WAKE_PHRASES"])
+            self.cfg.wake_phrases = values["GHOST_WAKE_PHRASES"] or ""
+            self._listener.set_phrases(phrases)
+            logger.info(f"wake phrases: {', '.join(repr(p) for p in phrases)}")
+            applied.append("GHOST_WAKE_PHRASES")
+        if "GHOST_WAKE_FUZZY" in values:
+            try:
+                fuzzy = float(values["GHOST_WAKE_FUZZY"] or 0.8)
+            except ValueError:
+                fuzzy = None
+            if fuzzy is not None:
+                self.cfg.wake_fuzzy = fuzzy
+                self._listener.set_phrases(self._listener._phrases, fuzzy)
+                logger.info(f"wake fuzzy threshold: {fuzzy:g}")
+                applied.append("GHOST_WAKE_FUZZY")
+        if applied:
+            self._rearm.set()
+        return applied
+
     def discovered_abilities(self) -> dict:
         return self._discovered
 
@@ -140,6 +168,7 @@ class Daemon:
                 phrases=phrases,
                 fuzzy=self.cfg.wake_fuzzy,
             )
+            self._listener = listener
             return TranscriptWakeDetector(listener, manual)
         if self.cfg.wake_mode == "file":
             return manual
@@ -205,14 +234,23 @@ class Daemon:
             while not self._stop.is_set():
                 logger.info("passive: waiting for wake word")
                 self.state.set_phase(Phase.PASSIVE)
+                self._rearm.clear()
                 wake_task = asyncio.ensure_future(wake.wait())
                 stop_task = asyncio.ensure_future(self._stop.wait())
-                await asyncio.wait({wake_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+                rearm_task = asyncio.ensure_future(self._rearm.wait())
+                await asyncio.wait(
+                    {wake_task, stop_task, rearm_task}, return_when=asyncio.FIRST_COMPLETED
+                )
                 stop_task.cancel()
+                rearm_task.cancel()
                 if self._stop.is_set():
                     wake_task.cancel()
                     await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
                     break
+                if not wake_task.done():  # settings changed: rebuild the listener
+                    wake_task.cancel()
+                    await asyncio.gather(wake_task, return_exceptions=True)
+                    continue
                 if is_dictating(self.cfg.dictation_flag):
                     logger.info("wake ignored: dictation is active")
                     continue
