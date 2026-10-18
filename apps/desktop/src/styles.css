@@ -29,9 +29,10 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; }
-.dot.passive { background: var(--muted); } .dot.listening { background: var(--ok); }
-.dot.thinking { background: var(--accent); } .dot.speaking { background: var(--warn); }
-.dot.starting { background: var(--warn); } .dot.off { background: var(--bad); }
+.dot.passive { background: var(--accent); } .dot.listening { background: var(--ok); }
+.dot.thinking { background: var(--warn); } .dot.speaking { background: var(--ok); animation: pulse 1s ease-in-out infinite; }
+.dot.starting { background: var(--muted); animation: pulse 1.2s ease-in-out infinite; } .dot.off { background: var(--bad); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 button.primary, button.ghost, button.danger { font: inherit; padding: 8px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
 button.primary { background: var(--accent); color: #0b0e14; border-color: transparent; font-weight: 600; }
 button.danger { color: var(--bad); }

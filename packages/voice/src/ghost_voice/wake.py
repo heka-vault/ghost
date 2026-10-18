@@ -165,6 +165,9 @@ class WakeListener:
             pipeline,
             params=PipelineParams(audio_in_sample_rate=16000),
             processor_unusable_policy=ProcessorUnusablePolicy.END,
+            # Pipecat cancels a worker that sees no speech for five minutes by default.
+            # A wake listener is idle by definition; it must sit for hours.
+            idle_timeout_secs=None,
         )
 
     async def wait(self) -> WakeMatch:
@@ -178,23 +181,38 @@ class WakeListener:
             result.append(m)
             matched.set()
 
-        worker = self._build(on_match)
-        self._runner = WorkerRunner(handle_sigint=False)
-        await self._runner.add_workers(worker)
-        self._run_task = asyncio.ensure_future(self._runner.run())
-        try:
-            await matched.wait()
-        finally:
-            await self.stop()
-        return result[0]
+        backoff = 1.0
+        while True:
+            worker = self._build(on_match)
+            self._runner = WorkerRunner(handle_sigint=False)
+            await self._runner.add_workers(worker)
+            self._run_task = asyncio.ensure_future(self._runner.run())
+            match_task = asyncio.ensure_future(matched.wait())
+            try:
+                await asyncio.wait(
+                    {match_task, self._run_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+            finally:
+                match_task.cancel()
+                await self.stop()
+            if matched.is_set():
+                return result[0]
+            # The pipeline ended on its own (device gone, processor failure). Rebuild it
+            # rather than sit in "passive" with nobody reading the microphone.
+            logger.error(f"passive listener stopped without a wake phrase; retry in {backoff:g}s")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
 
     async def stop(self) -> None:
-        if self._runner and self._run_task and not self._run_task.done():
-            await self._runner.cancel()
+        if self._runner and self._run_task:
+            if not self._run_task.done():
+                await self._runner.cancel()
             try:
                 await self._run_task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:  # noqa: BLE001 - surfaced, then the listener is rebuilt
+                logger.error(f"passive listener failed: {e!r}")
         self._run_task = None
         self._runner = None
 
