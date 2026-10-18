@@ -34,6 +34,13 @@ export type SettingsUpdate = Schemas["SettingsUpdate"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
 export type Ack = Schemas["Ack"];
+export type ConversationView = Schemas["ConversationView"];
+export type ConversationDetail = Schemas["ConversationDetail"];
+export type ConversationCreate = Schemas["ConversationCreate"];
+export type ConversationUpdate = Schemas["ConversationUpdate"];
+export type TurnView = Schemas["TurnView"];
+export type CompactionView = Schemas["CompactionView"];
+export type VoiceInfo = Schemas["VoiceInfo"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -41,7 +48,8 @@ export type GhostEvent =
   | Schemas["TurnEvent"]
   | Schemas["PendingEvent"]
   | Schemas["OutcomeEvent"]
-  | Schemas["LogEvent"];
+  | Schemas["LogEvent"]
+  | Schemas["ConversationEvent"];
 
 export type Unsubscribe = () => void;
 
@@ -131,6 +139,58 @@ export class GhostClient {
   }
   models() {
     return unwrap(this.api.GET("/setup/models"));
+  }
+
+  // --- conversations (ADR 0014) -------------------------------------------------------
+  conversations() {
+    return unwrap(this.api.GET("/conversations"));
+  }
+  conversation(slug: string) {
+    return unwrap(this.api.GET("/conversations/{slug}", { params: { path: { slug } } }));
+  }
+  createConversation(body: ConversationCreate) {
+    return unwrap(this.api.POST("/conversations", { body }));
+  }
+  updateConversation(slug: string, body: ConversationUpdate) {
+    return unwrap(this.api.PATCH("/conversations/{slug}", { params: { path: { slug } }, body }));
+  }
+  addNote(slug: string, text: string) {
+    return unwrap(
+      this.api.POST("/conversations/{slug}/notes", { params: { path: { slug } }, body: { text } }),
+    );
+  }
+  deleteConversation(slug: string) {
+    return unwrap(this.api.DELETE("/conversations/{slug}", { params: { path: { slug } } }));
+  }
+  resetConversation(slug: string) {
+    return unwrap(this.api.POST("/conversations/{slug}/reset", { params: { path: { slug } } }));
+  }
+  switchConversation(slug: string) {
+    return unwrap(this.api.POST("/conversations/{slug}/switch", { params: { path: { slug } } }));
+  }
+  compactConversation(slug: string) {
+    return unwrap(this.api.POST("/conversations/{slug}/compact", { params: { path: { slug } } }));
+  }
+  conversationTurns(slug: string, limit = 200) {
+    return unwrap(
+      this.api.GET("/conversations/{slug}/turns", { params: { path: { slug }, query: { limit } } }),
+    );
+  }
+  conversationCompactions(slug: string) {
+    return unwrap(
+      this.api.GET("/conversations/{slug}/compactions", { params: { path: { slug } } }),
+    );
+  }
+  voices() {
+    return unwrap(this.api.GET("/voices"));
+  }
+  sampleVoice(voice: string, speed = 1.0, text?: string) {
+    return unwrap(
+      this.api.POST("/voices/{voice}/sample", {
+        params: { path: { voice } },
+        body: { speed, text: text ?? null },
+      }),
+    );
   }
 }
 

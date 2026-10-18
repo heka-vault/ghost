@@ -16,6 +16,8 @@ export interface GhostState {
   pending: PendingProposal | null;
   logs: { level: string; message: string; at: string }[];
   lastEvent: GhostEvent | null;
+  /** Bumps whenever a conversation is created, edited, deleted or switched (ADR 0014). */
+  conversationsVersion: number;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -28,6 +30,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [pending, setPending] = useState<PendingProposal | null>(null);
   const [logs, setLogs] = useState<GhostState["logs"]>([]);
   const [lastEvent, setLastEvent] = useState<GhostEvent | null>(null);
+  const [conversationsVersion, setConversationsVersion] = useState(0);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -62,6 +65,9 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
               break;
             case "outcome":
               break;
+            case "conversation":
+              setConversationsVersion((v) => v + 1);
+              break;
           }
         },
         () => {
@@ -84,8 +90,8 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   }, [client]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns, pending, logs, lastEvent }),
-    [client, status, connected, turns, pending, logs, lastEvent],
+    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion }),
+    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

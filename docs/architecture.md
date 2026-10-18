@@ -38,7 +38,8 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 | `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, undo, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
 | `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, undo, and the audit log. The only code that can execute a write |
 | `abilities/*` | Installable capabilities (ADR 0012). Each contributes a prompt paragraph, read tools, write operations with a risk class and a writer, and optionally turn interceptors, pipeline processors, listeners and CLI commands. `github_issues` is the first one; third-party abilities use the same entry point |
-| SQLite | Review checkpoints, proposals, operations, operation events, optional transcripts |
+| `core/conversations` | Named conversations (ADR 0014): the registry, the transcript, every compaction version, and the three Markdown files per conversation (`persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
+| SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
 
 ## Conversation flow
 
@@ -47,7 +48,12 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking. Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks one sentence at a time. Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off.
    A typed turn from the desktop app (`POST /session/say`) enters the same pipeline after
    the STT stage, so it meets the same tools and the same gate as speech.
-4. **Sleep.** "Go to sleep" or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive.
+4. **Transfer.** Every session opens in `ghost`. "Patch me to accounting" is an LLM tool: Ghost's voice announces it, a short tone plays, the TTS voice and the system prompt change, and the context is replaced with that conversation's rolling summary, pinned notes and recent turns; the line greets with a one-line recap. "Back to Ghost" returns. "Save this as accounting" creates the conversation and carries this session's turns into it. A transfer cancels any change waiting for a yes.
+5. **Sleep.** "Go to sleep" or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive. Every spoken turn was persisted as it happened; the next wake is `ghost` again.
+
+### Memory and compaction
+
+Each conversation loads only its own persona, memory and notes. The memory is a rolling summary kept in `memory.md`, produced by Pipecat's in-session summarizer with a tokens-only trigger (24k estimated tokens, last 20 messages kept raw, summary up to 3k; `GHOST_COMPACT_*`). Each applied summary is recorded as a version and written to the file through the gate; the file is the source of truth on resume, so an edit by hand is folded into the next version. Summarized turns stay in SQLite, flagged, and are pruned after `GHOST_TURN_RETENTION_DAYS` (90). Raw tool results are never stored, so old untrusted text does not re-enter a later session.
 
 ## Writes
 
@@ -84,7 +90,7 @@ ghost/
 │   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, policy, audit, settings
 │   └── mobile/          # later: Expo (ADR 0005), a WebRTC transport into the same pipeline
 ├── packages/
-│   ├── core/            # Python: ability API, loader, context, gate, policy, confirmation, audit
+│   ├── core/            # Python: ability API, loader, context, gate, policy, confirmation, audit, conversations
 │   ├── voice/           # Python: Pipecat pipeline factory, Parakeet, sounddevice transport, slots
 │   ├── api/             # Python: FastAPI on the Unix socket; openapi.json is the contract
 │   ├── client-ts/       # TypeScript: GENERATED from packages/api/openapi.json (pnpm gen)

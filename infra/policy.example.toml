@@ -31,3 +31,16 @@ reopen          = "confirm"
 # [github_issues.targets."owner/public-repo"]
 # comment = "confirm"
 # close   = "deny"
+
+# Saved conversations (ADR 0014). Built in; these are the defaults.
+# [conversations]
+# create      = "announce"
+# switch      = "announce"   # "deny" keeps the session in Ghost
+# rename      = "announce"
+# set_voice   = "announce"
+# set_persona = "confirm"
+# remember    = "announce"
+# forget      = "confirm"
+# compact     = "announce"
+# reset       = "confirm"
+# delete      = "confirm"

@@ -262,7 +262,8 @@ def create_app(deps: Deps) -> FastAPI:
         loaded = {a.name: a for a in deps.abilities}
         autonomy = deps.gate.autonomy
         out = []
-        for name, ab in sorted(deps.control.discovered_abilities().items()):
+        discovered = dict(deps.control.discovered_abilities())
+        for name, ab in sorted(discovered.items()):
             la = loaded.get(name)
             c = la.contributions if la else None
             out.append(
@@ -292,6 +293,46 @@ def create_app(deps: Deps) -> FastAPI:
                     slots=[str(s) for s in (c.processors if c else {})],
                     listeners=len(c.listeners) if c else 0,
                     commands=[cmd.name for cmd in (c.commands if c else [])],
+                )
+            )
+        if deps.conversations is not None:
+            # Ghost's own conversation operations (ADR 0014): built in, always on, and
+            # tunable in the policy file like any ability's.
+            from ghost_core.conversations import ABILITY as CONVERSATIONS
+
+            out.append(
+                AbilityInfo(
+                    name=CONVERSATIONS,
+                    version="built-in",
+                    description="Saved conversations: persona, voice, memory (ADR 0014)",
+                    enabled=True,
+                    loaded=True,
+                    passive=False,
+                    operations=[
+                        OperationInfo(
+                            name=op.name,
+                            description=op.description,
+                            risk=op.risk,
+                            autonomy=autonomy.resolve(CONVERSATIONS, op.name, risk=op.risk).value,
+                            properties=op.properties,
+                            required=list(op.required),
+                        )
+                        for op in deps.conversations.operations()
+                    ]
+                    + [
+                        OperationInfo(
+                            name="switch",
+                            description="Patch the operator through to another conversation.",
+                            risk="low",
+                            autonomy=autonomy.resolve(CONVERSATIONS, "switch", risk="low").value,
+                            properties={"name": {"type": "string"}},
+                            required=["name"],
+                        )
+                    ],
+                    read_tools=[
+                        ReadToolInfo(name=t.name, description=t.description)
+                        for t in deps.conversations.read_tools()
+                    ],
                 )
             )
         return out

@@ -56,12 +56,18 @@ export function Chat() {
   }
 
   const inSession = !!status?.session_id;
+  const line = status?.conversation ?? null;
   return (
     <>
       <h1>Ghost</h1>
       <div className="panel row">
         <span className={`dot ${status?.phase}`} />
         <strong>{status ? phaseLabel(status.phase) : ""}</strong>
+        {inSession && line && (
+          <span className="tag" title="The conversation this session is in">
+            {line === "ghost" ? "Ghost" : line.replace(/-/g, " ")}
+          </span>
+        )}
         {!status?.models_ready && <span className="muted">loading models…</span>}
         <span className="spacer" style={{ flex: 1 }} />
         {inSession ? (
@@ -101,7 +107,7 @@ export function Chat() {
             <div key={i} className={`turn ${t.role}`}>
               {t.text}
               <div className="meta">
-                {t.role === "user" ? (t.via === "text" ? "typed" : "spoken") : "Ghost"} · {new Date(t.at).toLocaleTimeString()}
+                {t.role === "user" ? (t.via === "text" ? "typed" : "spoken") : line && line !== "ghost" ? line.replace(/-/g, " ") : "Ghost"} · {new Date(t.at).toLocaleTimeString()}
               </div>
             </div>
           ))}

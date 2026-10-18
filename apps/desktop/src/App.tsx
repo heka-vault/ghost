@@ -4,12 +4,14 @@ import { useState } from "react";
 import { Abilities } from "./screens/Abilities";
 import { Audit } from "./screens/Audit";
 import { Chat } from "./screens/Chat";
+import { Conversations } from "./screens/Conversations";
 import { Policy } from "./screens/Policy";
 import { Settings } from "./screens/Settings";
 import { StatusDot } from "./screens/StatusDot";
 
 const SCREENS = {
   chat: ["Ghost", Chat],
+  conversations: ["Conversations", Conversations],
   policy: ["What Ghost may do", Policy],
   audit: ["Audit log", Audit],
   abilities: ["Abilities", Abilities],
