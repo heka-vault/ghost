@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     LLMFullResponseEndFrame,
     MixerEnableFrame,
+    TTSStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -113,3 +114,20 @@ class ThinkingSoundProcessor(FrameProcessor):
         self._on = on
         debug.audio(f"thinking sound {'on' if on else 'off'}")
         await self.push_frame(MixerEnableFrame(enable=on), FrameDirection.DOWNSTREAM)
+
+
+class ThinkingSoundCut(FrameProcessor):
+    """Sits directly before the output transport and switches the mixer off the moment
+    TTS starts producing speech.
+
+    The ``ThinkingSoundProcessor`` upstream also sends an off, but only when playback
+    has started, and that frame then queues behind whatever the TTS service is
+    synthesising; the loop used to run about half a second into Ghost's reply.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TTSStartedFrame) and direction == FrameDirection.DOWNSTREAM:
+            debug.audio("thinking sound cut: speech starting")
+            await self.push_frame(MixerEnableFrame(enable=False), FrameDirection.DOWNSTREAM)
+        await self.push_frame(frame, direction)

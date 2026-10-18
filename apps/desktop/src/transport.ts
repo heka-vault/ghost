@@ -21,9 +21,15 @@ export async function makeTransport(): Promise<Transport> {
   const { listen } = await import("@tauri-apps/api/event");
 
   const tauriFetch: typeof fetch = async (input, init) => {
-    const url = new URL(String(input instanceof Request ? input.url : input), "http://ghost");
-    const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body == null ? null : String(init.body);
+    // openapi-fetch hands over a Request object; its method and body live on it, not on init.
+    const req = input instanceof Request ? input : null;
+    const url = new URL(String(req ? req.url : input), "http://ghost");
+    const method = (init?.method ?? req?.method ?? "GET").toUpperCase();
+    let body: string | null = init?.body == null ? null : String(init.body);
+    if (body == null && req && method !== "GET" && method !== "HEAD") {
+      const t = await req.text();
+      body = t === "" ? null : t;
+    }
     const r = await invoke<{ status: number; body: string }>("api_request", {
       method,
       path: url.pathname + url.search,

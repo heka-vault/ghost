@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -40,7 +41,7 @@ from ghost_voice.parakeet import ParakeetSTTService
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.sounds import ensure_thinking_sound
 from ghost_voice.tap import AssistantTap, OnPhase, OnTurn, UserTap
-from ghost_voice.thinking import ThinkingSoundProcessor, ThinkingStartFrame
+from ghost_voice.thinking import ThinkingSoundCut, ThinkingSoundProcessor, ThinkingStartFrame
 from ghost_voice.tools import register_tools
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
 from ghost_voice.turns import BargeInUserTurnStartStrategy
@@ -142,6 +143,19 @@ def assemble(core: list[tuple[Slot | None, Any]], slots: dict[Slot, list[Any]]) 
     return out
 
 
+GREETING_VARIED = "<varied>"
+GREETINGS = (
+    "Ghost. What do you need?",
+    "Yeah?",
+    "I'm here.",
+    "What's up?",
+    "Go ahead.",
+    "Listening.",
+    "Hey. What can I do?",
+    "Ghost here.",
+)
+
+
 def build_session(
     settings: VoiceSettings,
     *,
@@ -150,7 +164,7 @@ def build_session(
     gate: WriteGate,
     events: Events | None = None,
     transport: BaseTransport | None = None,
-    greeting: str | None = "Ghost. What do you need?",
+    greeting: str | None = GREETING_VARIED,
     first_utterance: str | None = None,
     on_sleep: Callable[[], Awaitable[None]] | None = None,
     on_turn: OnTurn | None = None,
@@ -281,6 +295,7 @@ def build_session(
                 (None, ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs)),
                 (Slot.BEFORE_TTS, AssistantTap(on_turn)),
                 (Slot.AUDIO_OUT, models.tts),
+                (None, ThinkingSoundCut()),
                 (None, transport.output()),
                 (None, assistant_agg),
             ],
@@ -309,7 +324,8 @@ def build_session(
         elif greeting:
             from pipecat.frames.frames import TTSSpeakFrame
 
-            await worker.queue_frames([TTSSpeakFrame(greeting)])
+            text = random.choice(GREETINGS) if greeting == GREETING_VARIED else greeting
+            await worker.queue_frames([TTSSpeakFrame(text)])
         else:
             await worker.queue_frames([LLMRunFrame()])
 

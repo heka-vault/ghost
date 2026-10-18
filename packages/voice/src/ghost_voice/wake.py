@@ -37,6 +37,7 @@ from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportPara
 
 DEFAULT_WAKE_PHRASES = (
     "hey ghost",
+    "yo ghost",
     "okay ghost",
     "ok ghost",
     "ghost you there",

@@ -8,13 +8,31 @@ from pathlib import Path
 import numpy as np
 
 
-def thinking_loop(sample_rate: int, seconds: float = 2.0) -> np.ndarray:
-    """A soft, slow pulse: a low tone breathing in and out. Loops seamlessly."""
-    n = int(sample_rate * seconds)
+def _blip(sample_rate: int, freq: float, length: float, bend: float = 0.82) -> np.ndarray:
+    """One bouncing blip: fast attack, exponential decay, pitch dropping to ``bend`` x."""
+    n = int(sample_rate * length)
     t = np.arange(n) / sample_rate
-    breath = 0.5 - 0.5 * np.cos(2 * math.pi * t / seconds)  # 0 -> 1 -> 0 over the loop
-    tone = np.sin(2 * math.pi * 196.0 * t) + 0.35 * np.sin(2 * math.pi * 392.0 * t)
-    audio = 0.6 * breath**2 * tone / 1.35
+    f = freq * (1 - (1 - bend) * t / length)  # glides down like a bounce losing height
+    phase = 2 * math.pi * np.cumsum(f) / sample_rate
+    env = np.minimum(t / 0.004, 1.0) * np.exp(-t / (length * 0.28))
+    return env * (np.sin(phase) + 0.25 * np.sin(2 * phase))
+
+
+def thinking_loop(sample_rate: int, seconds: float = 1.6) -> np.ndarray:
+    """A light, bouncy figure: four short blips hopping between notes at 150 BPM, each
+    with a small downward pitch bend, over a very soft low pulse. Loops seamlessly."""
+    n = int(sample_rate * seconds)
+    audio = np.zeros(n)
+    beat = seconds / 4
+    for i, freq in enumerate((659.3, 830.6, 987.8, 830.6)):  # E5 G#5 B5 G#5
+        start = int(i * beat * sample_rate)
+        blip = _blip(sample_rate, freq, min(0.18, beat))
+        end = min(n, start + len(blip))
+        audio[start:end] += blip[: end - start]
+    t = np.arange(n) / sample_rate
+    pulse = 0.5 - 0.5 * np.cos(2 * math.pi * t / seconds)
+    audio += 0.12 * pulse * np.sin(2 * math.pi * 164.8 * t)  # E3 breathing underneath
+    audio *= 0.55 / max(1e-6, float(np.abs(audio).max()))
     return (audio * 32767).astype(np.int16)
 
 
@@ -23,7 +41,7 @@ def ensure_thinking_sound(cache_dir: Path, sample_rate: int) -> Path:
     import soundfile as sf
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path = cache_dir / f"thinking-{sample_rate}.wav"
+    path = cache_dir / f"thinking-v2-{sample_rate}.wav"
     if not path.exists():
         sf.write(str(path), thinking_loop(sample_rate), sample_rate, subtype="PCM_16")
     return path

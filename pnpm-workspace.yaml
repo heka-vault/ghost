@@ -6,3 +6,6 @@ packages:
 
 allowBuilds:
   esbuild: true
+
+# The Docker packaging build installs into the same tree; let host pnpm rebuild node_modules without a TTY prompt.
+confirmModulesPurge: false

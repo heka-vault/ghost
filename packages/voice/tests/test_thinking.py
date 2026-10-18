@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 from ghost_voice.sounds import thinking_loop
-from ghost_voice.thinking import ThinkingSoundProcessor, ThinkingStartFrame
+from ghost_voice.thinking import ThinkingSoundCut, ThinkingSoundProcessor, ThinkingStartFrame
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -64,7 +64,7 @@ async def test_silent_llm_turn_stops_sound():
 
 def test_loop_is_quiet_and_seamless():
     a = thinking_loop(24000)
-    assert len(a) == 48000
+    assert len(a) == int(24000 * 1.6)
     assert abs(int(a[0])) < 50 and abs(int(a[-1])) < 50  # starts and ends near silence
     assert 2000 < int(abs(a).max()) < 20000
 
@@ -110,3 +110,25 @@ async def test_sound_resumes_after_interim_sentence_while_tool_runs():
     await proc.process_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
     await asyncio.sleep(0.1)
     assert mixer_frames(pushed) == [True, False, True]
+
+
+@pytest.mark.asyncio
+async def test_cut_switches_mixer_off_as_speech_starts():
+    """The cut sits before the transport: TTSStartedFrame is immediately preceded by a
+    mixer-off, so no queued speech plays over the loop."""
+    from pipecat.frames.frames import TTSStartedFrame, TTSStoppedFrame
+
+    cut = ThinkingSoundCut()
+    pushed: list = []
+
+    async def push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+        pushed.append(frame)
+
+    cut.push_frame = push_frame  # type: ignore[method-assign]
+    await cut.process_frame(TTSStartedFrame(), FrameDirection.DOWNSTREAM)
+    await cut.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+    kinds = [
+        type(f).__name__ + (f"({f.enable})" if isinstance(f, MixerEnableFrame) else "")
+        for f in pushed
+    ]
+    assert kinds == ["MixerEnableFrame(False)", "TTSStartedFrame", "TTSStoppedFrame"]
