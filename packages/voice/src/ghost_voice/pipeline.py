@@ -10,7 +10,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from anthropic import AsyncAnthropic
-from ghost_core import Events, LoadedAbility, Slot, WriteGate
+from ghost_core import (
+    Ability,
+    Contributions,
+    Events,
+    LoadedAbility,
+    SimpleInstance,
+    Slot,
+    WriteGate,
+)
+from ghost_core.conversations import ABILITY as CONVERSATIONS
+from ghost_core.conversations import GHOST, SUMMARY_TEMPLATE, Conversations
 from loguru import logger
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
@@ -21,6 +31,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    LLMAssistantAggregatorParams,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
@@ -31,10 +42,12 @@ from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
     TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.context.llm_context_summarization import LLMContextSummarizationConfig
 from pipecat.workers.runner import WorkerRunner
 
 from ghost_voice.config import VoiceSettings
 from ghost_voice.confirmation import ConfirmationProcessor
+from ghost_voice.conversation import ConversationRuntime
 from ghost_voice.intents import QuickIntents
 from ghost_voice.intercept import InterceptorProcessor
 from ghost_voice.parakeet import ParakeetSTTService
@@ -84,6 +97,7 @@ class GhostSession:
     worker: PipelineWorker
     runner: WorkerRunner
     _ended: asyncio.Event
+    conversation: ConversationRuntime | None = None
 
     async def run(self) -> None:
         await self.runner.run()
@@ -143,7 +157,29 @@ def assemble(core: list[tuple[Slot | None, Any]], slots: dict[Slot, list[Any]]) 
     return out
 
 
+def conversations_ability(convs: Conversations) -> LoadedAbility:
+    """Ghost's own conversation operations, registered like an ability so the gate,
+    the policy file and the audit view treat them uniformly (ADR 0014)."""
+    c = Contributions(read_tools=convs.read_tools(), operations=convs.operations())
+    ab = Ability(
+        CONVERSATIONS,
+        "1",
+        "Saved conversations: persona, voice, memory",
+        setup=None,  # type: ignore[arg-type]
+    )
+    return LoadedAbility(ab, None, SimpleInstance(c), c)
+
+
 GREETING_VARIED = "<varied>"
+COMPACTION_PROMPT = """You are condensing the older part of a spoken conversation between an \
+operator and their assistant into the assistant's memory of it.
+
+Keep, as plain factual statements: decisions and agreements; facts, names and numbers the \
+operator stated; what was asked for and whether it was done; open questions and action \
+items; preferences about how the operator likes things done. Fold in any earlier memory \
+that is still true. Drop greetings, small talk, and tool chatter. Do not invent anything. \
+Write only the memory, no preamble."""
+
 GREETINGS = (
     "Ghost. What do you need?",
     "Yeah?",
@@ -169,12 +205,38 @@ def build_session(
     on_sleep: Callable[[], Awaitable[None]] | None = None,
     on_turn: OnTurn | None = None,
     on_phase: OnPhase | None = None,
+    conversations: Conversations | None = None,
+    start_in: str = GHOST,
+    on_conversation: Callable[[str], Awaitable[None]] | None = None,
 ) -> GhostSession:
-    """Build one conversation. ``first_utterance`` is what the operator said right
-    after the wake phrase; when given it is the first user turn and there is no
-    greeting."""
+    """Build one session. ``first_utterance`` is what the operator said right after
+    the wake phrase; when given it is the first user turn and there is no greeting.
+    With ``conversations`` the session opens in ``start_in`` (normally ``ghost``),
+    seeded from its memory, in its voice, and can be transferred (ADR 0014)."""
     session_id = uuid.uuid4().hex
     ended = asyncio.Event()
+    abilities = list(abilities)
+    runtime: ConversationRuntime | None = None
+    fragments = [a.contributions.prompt for a in abilities if a.contributions.prompt]
+    if conversations is not None:
+        abilities.append(conversations_ability(conversations))
+
+        async def switched(profile) -> None:
+            if on_conversation:
+                await on_conversation(profile.slug)
+
+        runtime = ConversationRuntime(
+            conversations,
+            gate=gate,
+            session_id=session_id,
+            fragments=fragments,
+            tts_settings=models.tts.Settings,
+            llm_settings=AnthropicLLMService.Settings,
+            sample_rate=TTS_SAMPLE_RATE,
+            keep_messages=settings.compact_keep_messages,
+            start=start_in,
+            on_switch=switched,
+        )
 
     mixer = None
     if settings.thinking_sound:
@@ -203,8 +265,8 @@ def build_session(
         ),
         settings=AnthropicLLMService.Settings(
             model=settings.llm_model,
-            system_instruction=build_system_prompt(
-                [a.contributions.prompt for a in abilities if a.contributions.prompt]
+            system_instruction=(
+                runtime.system_prompt() if runtime else build_system_prompt(fragments)
             ),
             max_tokens=settings.llm_max_tokens,
             enable_prompt_caching=True,
@@ -222,12 +284,34 @@ def build_session(
             await session.end()
 
     tools = register_tools(
-        llm, abilities=abilities, gate=gate, session_id=session_id, on_sleep=sleep, events=events
+        llm,
+        abilities=abilities,
+        gate=gate,
+        session_id=session_id,
+        on_sleep=sleep,
+        events=events,
+        conversations=runtime,
+        on_call=runtime.record_call if runtime else None,
     )
-    context = LLMContext(tools=tools)
+    context = LLMContext(messages=runtime.initial_messages() if runtime else None, tools=tools)
+
+    assistant_params = LLMAssistantAggregatorParams()
+    if runtime and settings.compact_trigger_tokens > 0:
+        assistant_params = LLMAssistantAggregatorParams(
+            enable_context_summarization=True,
+            context_summarization_config=LLMContextSummarizationConfig(
+                max_context_tokens=settings.compact_trigger_tokens,
+                max_unsummarized_messages=None,
+                target_context_tokens=settings.compact_summary_tokens,
+                min_messages_after_summary=settings.compact_keep_messages,
+                summary_message_template=SUMMARY_TEMPLATE,
+                summarization_prompt=COMPACTION_PROMPT,
+            ),
+        )
 
     user_agg, assistant_agg = LLMContextAggregatorPair(
         context,
+        assistant_params=assistant_params,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
@@ -250,6 +334,12 @@ def build_session(
         logger.info(f"idle for {settings.idle_timeout_secs}s")
         await sleep()
 
+    if runtime:
+
+        @assistant_agg.event_handler("on_summary_applied")
+        async def on_summary(_agg, _summarizer, _event) -> None:
+            await runtime.on_summary_applied(context.get_messages())
+
     interceptors: list[Any] = [QuickIntents()] if settings.quick_intents else []
     for a in abilities:
         interceptors.extend(a.contributions.interceptors)
@@ -265,8 +355,13 @@ def build_session(
 
     async def _noop_phase(phase: str) -> None: ...
 
-    on_turn = on_turn or _noop_turn
+    outer_turn = on_turn or _noop_turn
     on_phase = on_phase or _noop_phase  # type: ignore[assignment]
+
+    async def on_turn(role: str, text: str) -> None:  # type: ignore[no-redef]
+        if runtime and role in ("user", "assistant"):
+            runtime.record(role, text)
+        await outer_turn(role, text)
 
     pipeline = Pipeline(
         assemble(
@@ -308,11 +403,17 @@ def build_session(
         processor_unusable_policy=ProcessorUnusablePolicy.END,
     )
     runner = WorkerRunner(handle_sigint=False)
-    session = GhostSession(session_id=session_id, worker=worker, runner=runner, _ended=ended)
+    session = GhostSession(
+        session_id=session_id, worker=worker, runner=runner, _ended=ended, conversation=runtime
+    )
 
     async def start() -> None:
         await runner.add_workers(worker)
+        if runtime:
+            await worker.queue_frames(runtime.start_frames())
         if first_utterance:
+            if runtime:
+                runtime.record("user", first_utterance)
             await worker.queue_frames(
                 [
                     ThinkingStartFrame(),

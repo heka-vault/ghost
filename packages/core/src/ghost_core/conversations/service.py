@@ -220,6 +220,10 @@ class Conversations:
             return None
         return self._store.add_turn(slug, session_id, role, text)
 
+    def carry(self, session_id: str, src: str, dst: str) -> int:
+        """Move the turns of one session from ``src`` to ``dst`` (save this as ...)."""
+        return self._store.move_session_turns(session_id, src, dst)
+
     def turns(self, slug: str, *, limit: int = 200) -> list[TurnRecord]:
         return self._store.recent_turns(slug, limit=limit, uncompacted=False)
 

@@ -2,6 +2,7 @@
 
 from ghost_voice import debug
 from ghost_voice.config import VoiceSettings
+from ghost_voice.conversation import ConversationRuntime
 from ghost_voice.pipeline import GhostSession, build_session
 
-__all__ = ["GhostSession", "VoiceSettings", "build_session", "debug"]
+__all__ = ["ConversationRuntime", "GhostSession", "VoiceSettings", "build_session", "debug"]

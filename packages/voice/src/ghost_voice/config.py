@@ -42,6 +42,12 @@ class VoiceSettings(BaseSettings):
     idle_timeout_secs: float = 45.0
     smart_turn_threads: int = 2
 
+    # Compaction (ADR 0014): Pipecat's in-session summarizer, tokens-only trigger. Gentle
+    # on purpose; within one voice session it rarely fires. 0 disables it.
+    compact_trigger_tokens: int = 24000
+    compact_keep_messages: int = 20
+    compact_summary_tokens: int = 3000
+
     # A soft loop while the model and tools are working (ghost_voice.thinking).
     quick_intents: bool = True  # exact-match sleep/cancel/undo without a model round trip
     thinking_sound: bool = True

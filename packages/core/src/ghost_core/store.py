@@ -379,6 +379,15 @@ class Store:
         ).fetchall()
         return [_turn(r) for r in reversed(rows)]
 
+    def move_session_turns(self, session_id: str, src: str, dst: str) -> int:
+        """Carry this session's turns from one conversation to another (save-as)."""
+        cur = self._conn.execute(
+            "UPDATE turns SET conversation = ? WHERE session_id = ? AND conversation = ?"
+            " AND hidden_by IS NULL AND compaction_id IS NULL",
+            (dst, session_id, src),
+        )
+        return cur.rowcount
+
     def turn_count(self, conversation: str) -> int:
         return int(
             self._conn.execute(

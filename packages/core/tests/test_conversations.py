@@ -74,7 +74,9 @@ async def test_create_rename_resolve_and_undo(world):
     assert convs.resolve("patch me to accounting department").slug == "accounting"
     assert convs.resolve("marketing") is None
 
-    sub = await run(gate, convs, "rename", conversation="accounting", name="Finance", aliases=["money"])
+    sub = await run(
+        gate, convs, "rename", conversation="accounting", name="Finance", aliases=["money"]
+    )
     assert sub.outcome.status == "success"
     assert convs.get("accounting").name == "Finance"  # slug is stable
     assert convs.resolve("money people").slug == "accounting"

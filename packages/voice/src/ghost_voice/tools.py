@@ -10,18 +10,26 @@ model never applies a write itself.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ghost_core import Autonomy, Events, GateError, LoadedAbility, Operation, WriteGate
+from ghost_core.conversations import ABILITY as CONVERSATIONS
 from ghost_core.policy import PolicyError
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.frames.frames import FunctionCallResultProperties
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 
+if TYPE_CHECKING:
+    from ghost_voice.conversation import ConversationRuntime
+
 OnSleep = Callable[[], Awaitable[None]]
+OnCall = Callable[[str, dict[str, Any]], None]
 
 CHANGE_TOOL = "change"
 UNDO_TOOL = "undo"
+SWITCH_TOOL = "switch_conversation"
 
 
 def register_tools(
@@ -32,9 +40,12 @@ def register_tools(
     session_id: str,
     on_sleep: OnSleep,
     events: Events | None = None,
+    conversations: ConversationRuntime | None = None,
+    on_call: OnCall | None = None,
 ) -> list[FunctionSchema]:
     schemas: list[FunctionSchema] = []
     events = events or Events()
+    record = on_call or (lambda _n, _a: None)
 
     for a in abilities:
         for tool in a.contributions.read_tools:
@@ -46,7 +57,7 @@ def register_tools(
                     required=tool.required,
                 )
             )
-            llm.register_function(tool.name, _wrap_read(tool.handler))
+            llm.register_function(tool.name, _wrap_read(tool.handler, record))
 
     # Operations the policy denies outright are not offered at all.
     ops: dict[str, dict[str, Operation]] = {}
@@ -98,8 +109,12 @@ def register_tools(
         if op is None:
             await params.result_callback({"error": f"unknown operation {aname!r}.{op_name!r}"})
             return
+        args = dict(a.get("args") or {})
+        record(f"{aname}.{op_name}", args)
+        if aname == CONVERSATIONS and conversations is not None:
+            args["_active"] = conversations.active.slug
         try:
-            prepared = await op.prepare(dict(a.get("args") or {}))
+            prepared = await op.prepare(args)
             sub = await gate.submit(
                 session_id=session_id,
                 ability=aname,
@@ -116,18 +131,34 @@ def register_tools(
                 f"{sub.autonomy.value} {sub.proposal.id}: {sub.outcome.status} "
                 f"{sub.outcome.summary()}"
             )
-            await params.result_callback(
-                {
-                    "status": "done",
-                    "result": sub.outcome.summary(),
-                    "state_now": _state(sub.outcome),
-                    "how_to_say_it": (
-                        "a few words, in passing"
-                        if sub.autonomy is Autonomy.ANNOUNCE
-                        else "only if asked, or if it failed"
-                    ),
-                }
-            )
+            result = {
+                "status": "done",
+                "result": sub.outcome.summary(),
+                "state_now": _state(sub.outcome),
+                "how_to_say_it": (
+                    "a few words, in passing"
+                    if sub.autonomy is Autonomy.ANNOUNCE
+                    else "only if asked, or if it failed"
+                ),
+            }
+            # "Save this as accounting": a created conversation is switched into at
+            # once, carrying this session's turns along (ADR 0014).
+            if (
+                aname == CONVERSATIONS
+                and op.name == "create"
+                and conversations is not None
+                and sub.outcome.status == "success"
+                and bool(args.get("switch", True))
+            ):
+                target = conversations.conversations.get(sub.proposal.target.scope())
+                if target is not None:
+                    conversations.carry_session_turns(target)
+                    await _transfer(params, conversations, target, handoff="", result=result)
+                    await events.emit(
+                        "outcome", ability=aname, operation=op.name, status=sub.outcome.status
+                    )
+                    return
+            await params.result_callback(result)
             await events.emit(
                 "outcome", ability=aname, operation=op.name, status=sub.outcome.status
             )
@@ -143,6 +174,62 @@ def register_tools(
 
     if ops:
         llm.register_function(CHANGE_TOOL, change)
+
+    if conversations is not None:
+        schemas.append(
+            FunctionSchema(
+                name=SWITCH_TOOL,
+                description=(
+                    "Patch the operator through to another saved conversation by name "
+                    '("accounting", "legal", "ghost" to come back). The transfer is '
+                    "announced and the other line greets them; say nothing else yourself. "
+                    "If no conversation matches, the result says so: then ask in one short "
+                    "sentence whether to start one, and on yes call change with "
+                    "conversations.create."
+                ),
+                properties={
+                    "name": {"type": "string", "description": "The conversation to go to."},
+                    "handoff": {
+                        "type": "string",
+                        "description": "One line for the other side about what the operator "
+                        "wants, if the request said.",
+                    },
+                },
+                required=["name"],
+            )
+        )
+
+        async def switch(params: FunctionCallParams) -> None:
+            name = str(params.arguments.get("name") or "")
+            record(SWITCH_TOOL, dict(params.arguments))
+            if not conversations.switch_allowed():
+                await params.result_callback({"error": "switching conversations is not allowed"})
+                return
+            target = conversations.resolve(name)
+            if target is None:
+                names = [p.name for p in conversations.conversations.list()]
+                await params.result_callback(
+                    {
+                        "status": "no_match",
+                        "known": names,
+                        "hint": "ask whether to start a conversation with that name",
+                    }
+                )
+                return
+            if target.slug == conversations.active.slug:
+                await params.result_callback(
+                    {"status": "already_here", "conversation": target.name}
+                )
+                return
+            await _transfer(
+                params,
+                conversations,
+                target,
+                handoff=str(params.arguments.get("handoff") or ""),
+                result={"status": "transferred", "to": target.name},
+            )
+
+        llm.register_function(SWITCH_TOOL, switch)
 
     schemas.append(
         FunctionSchema(
@@ -187,12 +274,41 @@ def register_tools(
     return schemas
 
 
+async def _transfer(
+    params: FunctionCallParams,
+    conversations: ConversationRuntime,
+    target,
+    *,
+    handoff: str,
+    result: dict[str, Any],
+) -> None:
+    """Announce, tone, voice change now; replace the context once the tool result has
+    been appended, so the new line's greeting is the next model turn."""
+
+    async def push(frame) -> None:
+        await params.llm.push_frame(frame, FrameDirection.DOWNSTREAM)
+
+    follow_up = await conversations.switch(target, push=push, handoff=handoff)
+
+    async def on_context_updated() -> None:
+        for frame in follow_up:
+            await push(frame)
+
+    await params.result_callback(
+        result,
+        properties=FunctionCallResultProperties(
+            run_llm=False, on_context_updated=on_context_updated
+        ),
+    )
+
+
 def _state(outcome) -> str:
     return outcome.readback.spoken() if outcome.readback else "unknown"
 
 
-def _wrap_read(handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]):
+def _wrap_read(handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]], record: OnCall):
     async def run(params: FunctionCallParams) -> None:
+        record(params.function_name, dict(params.arguments))
         try:
             result = await handler(dict(params.arguments))
         except (ValueError, PolicyError) as e:
