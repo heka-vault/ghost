@@ -1,0 +1,222 @@
+/* Owner: onboarding. Prefix classes with onb-. Tokens only; never style a g- class here. */
+
+/* ------------------------------------------------------------------ layout: rail + step */
+.onb {
+  position: relative;
+  display: grid;
+  grid-template-columns: calc(var(--sidebar-width) - var(--space-10)) minmax(0, 1fr);
+  column-gap: var(--space-16);
+  align-items: start;
+}
+
+/* The page's top, for scrolling a new step to 0: the Page's own top padding above the grid. */
+
+/* ------------------------------------------------------------------------------ rail */
+/* Sticky to the panel (the panel is the scroller): the step list and the count stay in view
+   on the long steps. Its top clears the bare page's 24px fade. */
+.onb-rail { position: sticky; top: var(--space-6); display: flex; flex-direction: column; gap: var(--space-6); }
+.onb-rail__head { display: flex; flex-direction: column; gap: var(--space-0_5); padding-left: var(--space-2); }
+.onb-rail__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.onb-rail__item { position: relative; }
+/* The thread between markers: from under one marker to the next, turning ok once the step is done. */
+.onb-rail__item:not(:last-child)::after {
+  content: ""; position: absolute; left: calc(var(--space-2) + var(--space-5) / 2 - 0.5px); width: 1px; background: var(--border);
+  top: calc(var(--space-0_5) + var(--space-1_5) + var(--space-5) + var(--space-0_5)); bottom: calc(var(--space-1) * -1);
+}
+.onb-rail__item.is-done:not(:last-child)::after { background: var(--ok-border); }
+.onb-rail__btn {
+  display: flex; align-items: flex-start; gap: var(--space-3); width: 100%;
+  min-height: var(--control-md); padding: var(--space-1_5) var(--space-2); margin: var(--space-0_5) 0;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
+  font: inherit; font-size: var(--text-md); line-height: var(--leading-md); text-align: left; cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.onb-rail__btn:hover { background: var(--bg-hover); color: var(--text-1); }
+.onb-rail__btn:active { background: var(--bg-active); }
+.onb-rail__btn[aria-current="step"] { color: var(--text-1); font-weight: var(--weight-medium); }
+.onb-rail__text { display: flex; flex-direction: column; min-width: 0; }
+.onb-rail__label { overflow-wrap: anywhere; }
+.onb-rail__note { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-weight: var(--weight-regular); }
+
+/* Step marker: number, check (done), dash (skipped). The current step is the selection: accent ring. */
+.onb-mark {
+  flex: none; display: inline-grid; place-items: center; width: var(--space-5); height: var(--space-5);
+  border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: var(--bg-canvas);
+  color: var(--text-3); font-size: var(--text-xs); line-height: 1; font-weight: var(--weight-medium);
+}
+.onb-mark.is-done { border-color: var(--ok-border); background: var(--ok-soft); color: var(--ok); }
+.onb-mark.is-skipped { border-style: dashed; color: var(--text-3); }
+.onb-mark.is-current { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); box-shadow: 0 0 0 var(--space-0_5) var(--accent-soft); }
+.onb-mark.is-current.is-done { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.onb-rail__real { align-self: flex-start; margin-top: var(--space-2); }
+.onb-rail__count-skel { margin-top: var(--space-1); }
+
+/* ------------------------------------------------------------------------------ step */
+/* One measure for every step: fields, cards, the footer and its primary button share one right edge.
+   560px = the inline field column and three quarters; wide enough for two radio cards side by side. */
+.onb-main { min-width: 0; max-width: calc(var(--field-control-width) * 1.75); }
+.onb-step { display: flex; flex-direction: column; }
+.onb-step__head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); margin-bottom: var(--space-8); }
+.onb-step__lead { margin-bottom: var(--space-4); }
+.onb-step__title { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--text-1); outline: none; }
+.onb-step__title:focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-offset); border-radius: var(--radius-xs); }
+.onb-step__description { margin: 0; max-width: 56ch; font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-2); }
+.onb-step__body { display: flex; flex-direction: column; }
+.onb-step__notices { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-6); }
+.onb-step__notices:empty { display: none; }
+.onb-step__foot {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin-top: var(--space-8); padding-top: var(--space-6); border-top: 1px solid var(--border-subtle);
+}
+/* In the Page dock: the dock's own fade and padding replace the footer's top margin; the
+   hairline stays. The step column is repeated so the footer shares the step's edges. */
+.onb--dock .onb-step__foot { margin-top: 0; }
+.onb--dock .onb-step--centered .onb-step__foot { margin-top: 0; }
+/* Back sits on the step's left edge, optically: its ghost padding hangs outside. */
+.onb-step__back { margin-left: calc(var(--space-3) * -1); }
+.onb-step__actions { display: flex; align-items: center; gap: var(--space-3); margin-left: auto; }
+.onb-step__note { margin: var(--space-2) 0 0; text-align: right; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+
+/* The hero moments (say “Hey Ghost”, you’re set): one centered column, no box around it. */
+.onb-step--centered .onb-step__head { align-items: center; text-align: center; margin-bottom: var(--space-6); }
+.onb-step--centered .onb-step__lead { margin-bottom: var(--space-6); }
+.onb-step--centered .onb-step__description { max-width: 48ch; }
+.onb-step--centered .onb-step__body { align-items: center; text-align: center; }
+.onb-step--centered .onb-step__foot { margin-top: var(--space-12); }
+/* Body padding before the dock, so the last field never sits under the fade. */
+.onb-main > .onb-step { padding-bottom: var(--space-4); }
+
+/* --------------------------------------------------------------------------- shared */
+.onb-fields { display: flex; flex-direction: column; gap: var(--space-5); }
+.onb-fields--loose { gap: var(--space-6); }
+.onb-skel-field { display: flex; flex-direction: column; gap: var(--space-2); }
+.onb-row { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); min-width: 0; }
+.onb-help { margin: var(--space-2) 0 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.onb-help--error { color: var(--danger); }
+.onb-after-card { margin-top: var(--space-3); }
+
+/* Quiet icon tile: the promises, the vault, the models. */
+.onb-tile {
+  flex: none; display: inline-grid; place-items: center; width: var(--control-md); height: var(--control-md);
+  border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-2);
+}
+.onb-tile svg { width: var(--icon-md); height: var(--icon-md); }
+.onb-tile--sm { width: var(--control-sm); height: var(--control-sm); border-radius: var(--radius-sm); }
+.onb-tile--sm svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* ------------------------------------------------------------------------- welcome */
+.onb-promises { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-6); }
+.onb-promise { display: flex; gap: var(--space-4); align-items: flex-start; }
+.onb-promise__title { margin: var(--space-1) 0 var(--space-1); font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold); color: var(--text-1); }
+.onb-promise__body { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); max-width: 60ch; }
+
+/* -------------------------------------------------------------------------- github */
+.onb-repos { margin: 0; padding: 0; border: 0; min-width: 0; }
+.onb-repos__legend { display: flex; align-items: center; gap: var(--space-2); padding: 0; margin-bottom: var(--space-2); width: 100%; }
+.onb-repos__label { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
+.onb-repos__legend > :last-child { margin-left: auto; }
+/* The picker's error goes where the eye is, under the legend and above the list. */
+.onb-repos__error { margin: 0 0 var(--space-2); }
+.onb-repo { padding: var(--space-3) var(--space-4); }
+.onb-repo-add { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: var(--space-3); row-gap: 0; padding: var(--space-3) var(--space-4); }
+.onb-repo-add__error { flex: 1 0 100%; }
+.onb-repo-add > :first-child { flex: 1 1 auto; max-width: var(--field-control-width); }
+.onb-repo--note p { margin: 0; }
+.onb-repo--skel { flex-direction: row; align-items: flex-start; gap: var(--space-3); }
+.onb-repo__skel-text { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-0_5); }
+
+/* ---------------------------------------------------------------------- microphone */
+.onb-mic { gap: var(--space-3); }
+.onb-mic__head { display: flex; align-items: center; gap: var(--space-2); }
+.onb-mic__label { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
+.onb-mic__head > :last-child { margin-left: auto; }
+.onb-mic__status { display: flex; align-items: center; gap: var(--space-1_5); margin: 0; min-height: var(--leading-sm); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.onb-mic__status.is-ok { color: var(--ok); }
+.onb-mic__status.is-heard { color: var(--text-2); }
+.onb-mic__status.is-problem { color: var(--text-2); align-items: flex-start; }
+.onb-mic__status.is-problem svg { flex: none; margin-top: var(--space-0_5); color: var(--warn); }
+
+.onb-meter {
+  position: relative; height: var(--space-1); margin: var(--space-1_5) 0; border-radius: var(--radius-full);
+  background: var(--control-track); overflow: hidden;
+}
+.onb-meter__fill {
+  position: absolute; inset: 0; border-radius: inherit; background: var(--phase-listening);
+  transform-origin: left center; transition: transform var(--duration-instant) linear;
+}
+
+/* -------------------------------------------------------------------------- models */
+.onb-dl { display: flex; flex-direction: column; gap: var(--space-3); }
+.onb-dl__head { display: flex; align-items: center; gap: var(--space-2); }
+.onb-dl__head > :last-child { margin-left: auto; }
+.onb-dl__total { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
+.onb-model { gap: var(--space-3); }
+.onb-model__line { display: flex; align-items: center; gap: var(--space-3); }
+.onb-model__text { flex: 1 1 auto; min-width: 0; }
+.onb-model__text p { margin: 0; }
+.onb-model__title { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
+.onb-model__state { flex: none; }
+.onb-model__working { display: inline-flex; align-items: center; gap: var(--space-1_5); }
+.onb-dl__bar { margin-bottom: var(--space-3); }
+/* A stopped download: the Notice is the step's one danger element; the bar goes neutral and only says how far it got. */
+
+/* ------------------------------------------------------------------------- service */
+.onb-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.onb-check { position: relative; display: flex; gap: var(--space-4); align-items: flex-start; padding-bottom: var(--space-6); }
+.onb-check:last-child { padding-bottom: 0; }
+.onb-check:not(:last-child)::after {
+  content: ""; position: absolute; left: calc(var(--space-6) / 2 - 0.5px); top: calc(var(--space-6) + var(--space-1)); bottom: var(--space-1); width: 1px; background: var(--border);
+}
+.onb-check.is-done:not(:last-child)::after { background: var(--ok-border); }
+.onb-check__mark {
+  flex: none; display: inline-grid; place-items: center; width: var(--space-6); height: var(--space-6); border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong); background: var(--bg-canvas); color: var(--text-3); font-size: var(--text-xs); font-weight: var(--weight-medium);
+}
+.onb-check.is-done .onb-check__mark { border-color: var(--ok-border); background: var(--ok-soft); color: var(--ok); }
+.onb-check.is-working .onb-check__mark { border-color: transparent; background: transparent; color: var(--text-2); }
+.onb-check.is-problem .onb-check__mark { border-color: var(--warn-border); background: var(--warn-soft); color: var(--warn); }
+.onb-check__text { flex: 1 1 auto; min-width: 0; padding-top: var(--space-0_5); }
+.onb-check__title { margin: 0; font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-medium); color: var(--text-1); }
+.onb-check.is-waiting .onb-check__title { color: var(--text-2); }
+.onb-check__description { margin: var(--space-1) 0 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.onb-check__trailing { flex: none; padding-top: var(--space-1_5); }
+
+.onb-command {
+  display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-sunken); max-width: max-content;
+}
+.onb-command code { font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-1); user-select: all; }
+
+/* ----------------------------------------------------------------------------- try */
+.onb-try { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); max-width: 48ch; min-height: calc(var(--leading-lg) * 3 + var(--space-2) * 2); }
+.onb-try p { margin: 0; }
+.onb-try .onb-try__hint { margin-top: var(--space-2); }
+.onb-try__line { font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-2); }
+.onb-try__meta { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-3); }
+.onb-try__hint { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.onb-try__wake { margin-top: var(--space-4); }
+.onb-try__action { margin-top: var(--space-2); }
+/* Not hearing it: one suggested action and one quiet fallback, on one row. */
+.onb-try__actions { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
+
+/* The hero presence; a success moment adds one ok check on its shoulder, once. */
+.onb-hero { position: relative; display: inline-grid; place-items: center; }
+.onb-hero__ok {
+  position: absolute; right: 8%; bottom: 8%; display: inline-grid; place-items: center;
+  width: var(--control-md); height: var(--control-md); border-radius: var(--radius-full);
+  background: linear-gradient(var(--ok-soft), var(--ok-soft)), var(--bg-canvas); color: var(--ok); border: 1px solid var(--ok-border);
+  box-shadow: 0 0 0 var(--space-1) var(--bg-canvas);
+  animation: onb-hero-ok var(--duration-slower) var(--ease-emphasized) both;
+}
+.onb-hero--96 .onb-hero__ok { width: var(--control-xs); height: var(--control-xs); right: 2%; bottom: 2%; }
+.onb-hero__ok svg { width: var(--icon-md); height: var(--icon-md); }
+.onb-hero--96 .onb-hero__ok svg { width: var(--icon-sm); height: var(--icon-sm); }
+@keyframes onb-hero-ok { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+
+/* ---------------------------------------------------------------------------- done */
+.onb-next { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; text-align: left; }
+.onb-next__label { margin: 0; padding-left: var(--space-1); }
+
+@media (max-width: 1100px) {
+  .onb { grid-template-columns: calc(var(--sidebar-width) - var(--space-16)) minmax(0, 1fr); column-gap: var(--space-10); }
+}

@@ -1,0 +1,237 @@
+/* Owner: review. Every class is prefixed rev-. Tokens only; no g- class is styled here. */
+
+.rev-root { display: flex; flex-direction: column; }
+.rev-notice { margin-bottom: var(--space-4); }
+.rev-notice__cmd { display: flex; align-items: center; gap: var(--space-2); width: fit-content; margin-top: var(--space-2); }
+.rev-notice__cmd > code { color: var(--text-1); user-select: all; }
+.rev-notice__title { display: inline-flex; align-items: center; gap: var(--space-2); }
+.rev-nowrap { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rev-seg-count { margin-left: var(--space-1); color: var(--text-3); }
+
+/* ------------------------------------------------------------- spoken phrases */
+/* Voice first: the phrase is the primary act, so it reads at body size with the quoted words
+   in --text-1 and the label a step back. The queue foot alone keeps the small, quiet version. */
+.rev-say { margin: 0; min-width: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); cursor: default; }
+.rev-say__label { margin-right: var(--space-1); color: var(--text-2); }
+.rev-say__sep { color: var(--text-3); }
+.rev-say__phrase { white-space: nowrap; }
+.rev-say--small { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.rev-say--small .rev-say__label { color: var(--text-3); }
+
+/* A cut value with the whole of it in a Tooltip (parts.tsx). The outer span keeps the flex
+   sizing and is measured; the inner span (the Tooltip's anchor) does the cutting. */
+.rev-trunc { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.rev-trunc__text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --------------------------------------------------------------------- layout */
+.rev-layout { display: grid; grid-template-columns: var(--field-control-width) minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+
+/* The queue sticks beside the detail, under the shell's sticky stack; its list scrolls on
+   its own, bounded in JS by where it starts and the dock (Queue.tsx). It is always sticky,
+   so the ranked list is in view wherever the operator reads the detail. */
+.rev-queue {
+  --rev-gap: var(--space-4);
+  position: sticky; top: calc(var(--page-sticky-top, var(--page-bar-height)) + var(--space-4));
+  display: flex; flex-direction: column; gap: var(--space-3); min-width: 0;
+}
+.rev-queue__filter > * { width: 100%; }
+/* The card frames the list; the scroller lives inside its border and radius, so rows clip
+   inside the rounded edge. A 32px fade marks an edge only while there is more that way, and
+   the cut list ends on a row plus a peek of the next (Queue.tsx), so the fade dims a row. */
+.rev-queue__card { flex: none; overflow: hidden; }
+.rev-queue__scroll {
+  --rev-fade-top: 0px; --rev-fade-bottom: 0px;
+  overflow: auto; overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black var(--rev-fade-top), black calc(100% - var(--rev-fade-bottom)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, black var(--rev-fade-top), black calc(100% - var(--rev-fade-bottom)), transparent 100%);
+}
+.rev-queue__scroll[data-fade-top] { --rev-fade-top: var(--space-8); }
+.rev-queue__scroll[data-fade-bottom] { --rev-fade-bottom: var(--space-8); }
+/* Under the card: the phrase to say and the keys that move the selection, one quiet line each. */
+.rev-queue__foot { display: flex; flex-direction: column; gap: var(--space-1); padding: 0 var(--space-1); margin-top: calc(var(--space-1) * -1); }
+.rev-queue__say { padding: 0; margin: 0; }
+.rev-queue__keys { display: flex; align-items: center; gap: var(--space-1); margin: 0; }
+
+/* One quiet block: what Ghost is on (the issue on one line, the last thing it said on up to
+   two under it), or where the last session stopped. The glyph and the button sit on the first
+   line; the quote has the column's full width. */
+.rev-ctx { display: flex; align-items: flex-start; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-1); }
+.rev-ctx__text { flex: 1 1 auto; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-0_5); }
+/* The first line is as tall as the glyph and the small button, so the three sit on one baseline. */
+.rev-ctx__label { display: block; min-height: var(--space-5); line-height: var(--space-5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rev-ctx__quote { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+/* While a change waits the dock names the same issue: the quote keeps one line. */
+.rev-ctx__quote--one { -webkit-line-clamp: 1; }
+.rev-ctx__text--row { display: block; line-height: var(--space-5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The small button (28px) centers on the 20px first line rather than hanging under it. */
+.rev-ctx > button { margin-block: calc((var(--space-5) - var(--control-sm)) / 2); }
+/* The resume icon sits in the line glyph's 20px box, so both variants of the slot line up. */
+.rev-ctx__icon { flex: none; display: grid; place-items: center; width: var(--space-5); height: var(--space-5); color: var(--text-2); }
+.rev-ctx__icon > svg { width: var(--icon-sm); height: var(--icon-sm); }
+.rev-ctx__link {
+  padding: 0 var(--space-0_5); margin: 0 calc(var(--space-0_5) * -1); border: 0; background: none; font: inherit; cursor: pointer; border-radius: var(--radius-xs);
+  text-decoration: underline; text-decoration-color: transparent; text-underline-offset: calc(var(--space-0_5) + 1px);
+  transition: text-decoration-color var(--duration-fast) var(--ease-out);
+}
+.rev-ctx__link:hover { text-decoration-color: var(--border-strong); }
+/* Inset: the line clips anything drawn outside it. */
+.rev-ctx__link:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
+
+/* The ranked list: one Tab stop; every row one height, a one-line title and one quiet line under it. */
+.rev-list { display: flex; flex-direction: column; }
+.rev-list__group + .rev-list__group { border-top: 1px solid var(--border-subtle); }
+.rev-list__label { padding: var(--space-3) var(--space-4) var(--space-1); }
+.rev-row {
+  position: relative; display: flex; flex-direction: column; gap: var(--space-0_5);
+  padding: var(--space-2) var(--space-4); cursor: pointer; outline: none;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.rev-row:hover { background: var(--bg-hover); }
+.rev-row:active { background: var(--bg-active); }
+.rev-row.is-selected { background: var(--bg-selected); box-shadow: inset 2px 0 0 var(--accent); }
+.rev-row.is-selected:hover { background: color-mix(in srgb, var(--bg-selected), var(--bg-hover)); }
+.rev-row:focus-visible { box-shadow: var(--focus-ring-inset); }
+.rev-row.is-selected:focus-visible { box-shadow: inset 2px 0 0 var(--accent), var(--focus-ring-inset); }
+.rev-row__top { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.rev-row__title { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
+.rev-row__time { flex: none; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); white-space: nowrap; }
+.rev-row__meta { display: flex; align-items: center; min-width: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.rev-row__ref { flex: none; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rev-row__sep { flex: none; margin: 0 var(--space-1); }
+/* The row's "why it's here": what the operator ranks and chooses by, so --text-2, not meta. */
+.rev-row__why { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.rev-row__now { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); margin-left: var(--space-2); color: var(--text-1); font-weight: var(--weight-medium); white-space: nowrap; }
+
+/* The filter matches nothing: one state across both columns, under the filter. */
+.rev-filter-empty { grid-column: 1 / -1; }
+
+/* --------------------------------------------------------------------- detail */
+.rev-detail { display: flex; flex-direction: column; min-width: 0; }
+.rev-detail__head { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-4) var(--space-6) var(--space-5); }
+.rev-detail__bar { display: flex; align-items: center; gap: var(--space-1); min-height: var(--control-sm); margin-right: calc(var(--space-2) * -1); }
+.rev-detail__pos { margin-right: var(--space-2); }
+.rev-detail__title { max-width: 40em; text-wrap: balance; margin-top: var(--space-1); }
+.rev-detail__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-1); }
+.rev-detail__meta > span:first-child { margin-right: var(--space-1); }
+.rev-detail__block { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-6); border-top: 1px solid var(--border-subtle); }
+
+.rev-block__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+
+/* The decision: the page's focal point, and the largest text in the detail. */
+.rev-decision { gap: var(--space-2); }
+.rev-decision__q {
+  font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight); color: var(--text-1); max-width: 40em; text-wrap: balance;
+}
+.rev-decision__read { max-width: 68ch; }
+.rev-decision__suggest { max-width: 68ch; }
+.rev-decision__note { margin-top: var(--space-3); max-width: 68ch; }
+.rev-decision__resume { display: flex; align-items: flex-start; gap: var(--space-2); }
+.rev-decision__resume > svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); margin-top: var(--space-1); color: var(--text-2); }
+/* Phrases (or the one reason they can't be said) left, where the eye lands, the button right,
+   on one row in every state, so nothing shifts when Ghost goes away and comes back. */
+.rev-decision__act { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-4); min-height: var(--control-md); }
+.rev-decision__act > .rev-say, .rev-decision__act > p, .rev-decision__act > .grow { flex: 1 1 auto; }
+/* The sentence and the phrase read as one: both left, the phrase right after the sentence. */
+.rev-decision__act--okay { justify-content: flex-start; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.rev-decision__act--okay > p, .rev-decision__act--okay > .rev-say { flex: none; margin: 0; }
+.rev-decision__why { margin: 0; }
+.rev-decision__ask { flex: none; }
+
+/* Facts from GitHub. */
+/* Up to four facts share one row at every width (Detail.tsx sets --rev-facts-n); more wrap under. */
+.rev-facts { display: grid; grid-template-columns: repeat(var(--rev-facts-n, 4), minmax(0, 1fr)); gap: var(--space-3) var(--space-6); margin: var(--space-1) 0 0; }
+.rev-facts > div { display: flex; flex-direction: column; gap: var(--space-0_5); min-width: 0; }
+.rev-facts dt { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.rev-facts dd { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
+
+.rev-rank { margin-top: var(--space-1); }
+.rev-rank__list { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: flex; flex-direction: column; gap: var(--space-2); max-width: 64ch; }
+.rev-rank { --rev-rank-label: calc(var(--space-20) * 2); }
+.rev-rank__row { display: grid; grid-template-columns: var(--rev-rank-label) minmax(0, 1fr) var(--space-16); align-items: center; gap: var(--space-3); }
+.rev-rank__bar { position: relative; height: var(--space-1); border-radius: var(--radius-full); background: var(--border); overflow: hidden; }
+.rev-rank__bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--text-2); }
+.rev-rank__w { text-align: right; }
+
+/* Dependencies. */
+.rev-deps { container-type: inline-size; }
+.rev-deps__grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+.rev-deps__grid > p { margin: 0; }
+/* --page-narrow (680). Container query conditions can't read custom properties, so the number is written. */
+@container (min-width: 680px) {
+  .rev-deps__grid[data-both] { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-6); }
+}
+.rev-deps__label { margin-bottom: var(--space-1_5); }
+.rev-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rev-link__hit {
+  display: flex; align-items: center; gap: var(--space-2);
+  width: calc(100% + var(--space-4)); min-height: var(--control-md); margin: 0 calc(var(--space-2) * -1); padding: var(--space-1) var(--space-2);
+  border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left;
+}
+button.rev-link__hit { cursor: pointer; transition: background-color var(--duration-fast) var(--ease-out); }
+button.rev-link__hit:hover { background: var(--bg-hover); }
+button.rev-link__hit:active { background: var(--bg-active); }
+.rev-link__ref { flex: none; min-width: var(--space-16); font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-medium); color: var(--text-1); }
+.rev-link__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+
+/* Comments: other people's words. A quote rule, not a box; the caption says what they are. */
+.rev-untrusted { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; max-width: 68ch; }
+.rev-untrusted > svg { flex: none; margin-top: var(--space-0_5); color: var(--text-3); }
+.rev-comments { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-5); }
+.rev-comment { display: grid; grid-template-columns: var(--control-xs) minmax(0, 1fr); gap: var(--space-3); }
+.rev-author {
+  display: grid; place-items: center; width: var(--control-xs); height: var(--control-xs);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-full); background: var(--bg-sunken); color: var(--text-2);
+  font-size: var(--text-xs); line-height: 1; font-weight: var(--weight-medium);
+}
+.rev-comment__body { display: flex; flex-direction: column; gap: var(--space-1_5); min-width: 0; padding-top: var(--space-0_5); }
+.rev-comment__text { margin: 0; padding-left: var(--space-3); border-left: var(--space-0_5) solid var(--border-strong); max-width: 68ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rev-comment__note { margin: 0; padding-left: var(--space-3); max-width: 68ch; }
+
+/* Decisions recorded. */
+.rev-decisions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rev-decisions__row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; }
+.rev-decisions__row + .rev-decisions__row { border-top: 1px solid var(--border-subtle); }
+
+/* ----------------------------------------------------------------------- week */
+/* The week's list and the Read-aloud card are capped at the default page width and left-aligned,
+   so a row's title, meta and trailing glyph stay one cluster; the view switch sits at the wide
+   Page's edge, as on the queue. The hero is capped at 36em. */
+.rev-week { display: flex; flex-direction: column; }
+.rev-week__lede { display: flex; flex-direction: column; gap: var(--space-2); margin: 0 0 var(--space-10); }
+.rev-week__lede > p { margin: 0; }
+.rev-week__hero { max-width: 36em; text-wrap: balance; color: var(--text-1); }
+.rev-week__title { display: inline-flex; align-items: center; gap: var(--space-2); }
+.rev-week__list { padding: var(--space-1) 0; max-width: var(--page-default); }
+.rev-week__read { max-width: var(--page-default); }
+.rev-week__group + .rev-week__group { border-top: 1px solid var(--border-subtle); margin-top: var(--space-1); }
+.rev-week__day { margin: 0; padding: var(--space-3) var(--space-4) var(--space-1); }
+.rev-week__rows { list-style: none; margin: 0; padding: 0; }
+.rev-wrow {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-2) var(--space-4); border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: none;
+  cursor: pointer; outline: none; transition: background-color var(--duration-fast) var(--ease-out);
+}
+.rev-wrow:hover { background: var(--bg-hover); }
+.rev-wrow:active { background: var(--bg-active); }
+.rev-wrow:focus-visible { box-shadow: var(--focus-ring-inset); }
+.rev-wrow__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--space-0_5); }
+.rev-wrow__title { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rev-wrow__meta { display: flex; align-items: center; min-width: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.rev-wrow__ref { flex: none; white-space: nowrap; }
+.rev-wrow__what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.rev-wrow__extra { flex: none; white-space: pre; }
+.rev-wrow__time { flex: none; white-space: pre; color: var(--text-3); }
+.rev-wrow__glyph { flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--text-3); transition: color var(--duration-fast) var(--ease-out); }
+.rev-wrow:hover .rev-wrow__glyph, .rev-wrow:focus-visible .rev-wrow__glyph { color: var(--text-2); }
+.rev-week__field { padding: var(--space-4) var(--space-5); }
+.rev-week__more { margin-top: var(--space-3); max-width: var(--page-default); }
+.rev-week__empty { margin-bottom: var(--space-10); }
+
+/* ------------------------------------------------------------------ skeletons */
+.rev-skel-context { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-1); }
+.rev-skel-row { display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); min-height: calc(var(--space-12) + var(--space-2)); }
+.rev-skel-row + .rev-skel-row { border-top: 1px solid var(--border-subtle); }
+.rev-skel-row__top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-1); }
+.rev-skel-detail { display: flex; flex-direction: column; gap: var(--space-3); }
+.rev-skel-detail__gap { height: var(--space-4); }

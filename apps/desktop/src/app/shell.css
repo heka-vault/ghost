@@ -1,0 +1,168 @@
+/* The app shell: sidebar on the window ground, the page in an inset canvas panel. The
+   window never scrolls; the panel does, so its inset, border and radius stay put (Linear). */
+
+.shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); height: 100vh; min-width: 1024px; overflow: hidden; background: var(--bg-app); }
+.shell__main {
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  height: calc(100vh - var(--panel-inset) * 2);
+  margin: var(--panel-inset) var(--panel-inset) var(--panel-inset) 0;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain;
+  box-shadow: var(--shadow-sm);
+}
+.shell__main:focus-visible { outline: none; } /* focused only by the skip link */
+.shell__scroll { flex: 1 0 auto; min-width: 0; display: flex; flex-direction: column; }
+.shell__scroll > * { flex: 1 0 auto; }
+
+/* Full-page screenshots: shot.mjs --full sets data-capture="full" so the panel grows to its
+   content and the window scrolls instead. Never set it in the app. */
+html[data-capture="full"] .shell { height: auto; min-height: 100vh; overflow: visible; align-items: start; }
+html[data-capture="full"] .shell__main { height: auto; min-height: calc(100vh - var(--panel-inset) * 2); overflow: visible; }
+html[data-capture="full"] .sidebar { position: sticky; top: 0; }
+
+.shell-skip { border: 0; font: inherit; font-size: var(--text-md); font-weight: var(--weight-medium); cursor: pointer; position: fixed; left: var(--space-3); top: calc(var(--space-12) * -1); z-index: var(--z-tooltip); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--bg-raised); box-shadow: var(--shadow-md); color: var(--text-1); }
+.shell-skip:focus-visible { top: var(--space-3); }
+
+/* ---------------------------------------------------------------------------- sidebar */
+.sidebar { height: 100vh; display: flex; flex-direction: column; min-height: 0; padding: var(--space-3) var(--space-2) var(--space-2) var(--space-3); z-index: var(--z-sidebar); }
+.sidebar__brand { display: flex; align-items: center; gap: var(--space-2); height: var(--control-md); padding: 0 var(--space-2); margin-bottom: var(--space-2); }
+.sidebar__brand-name { font-size: var(--text-lg); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); flex: 1 1 auto; }
+
+.sidebar__status {
+  display: flex; align-items: center; gap: var(--space-2_5);
+  margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-2_5);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-surface); color: var(--text-1); text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast);
+}
+.sidebar__status:hover { background: var(--bg-hover); border-color: var(--border-strong); text-decoration: none; }
+.sidebar__status-dot { display: grid; place-items: center; width: var(--icon-md); height: var(--icon-md); flex: none; }
+.sidebar__status-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.sidebar__status-title { font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar__status-sub { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The list scrolls when it must (busy, 1280x800). Edges fade only on the side with more,
+   so nothing is cut mid-glyph against the footer and the resting list is never faded. */
+.sidebar__nav { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; } /* not display: contents: WebKit drops the landmark */
+.sidebar__scroll {
+  --fade-top: 0px; --fade-bottom: 0px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  /* 4px of room on every side for the focus outline (2px offset + 2px ring), cancelled by the margin */
+  margin: calc(var(--space-1) * -1); padding: var(--space-1);
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%);
+}
+.sidebar__scroll::-webkit-scrollbar { display: none; }
+.sidebar__scroll.is-more-above { --fade-top: var(--space-6); }
+.sidebar__scroll.is-more-below { --fade-bottom: var(--space-6); }
+.sidebar__group { display: flex; flex-direction: column; gap: var(--space-px); list-style: none; margin: 0; padding: 0; }
+.sidebar__section { margin-top: var(--space-5); }
+.sidebar__label { padding: 0 var(--space-2); margin-bottom: var(--space-1); font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-3); }
+/* A group that folds (Prototypes): the label is the toggle, with a chevron that turns. */
+.sidebar__label--toggle { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--space-5); margin-left: calc(var(--space-1) * -1); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-3); cursor: pointer; }
+.sidebar__label--toggle:hover { color: var(--text-1); }
+.sidebar__label--toggle .lucide { transition: transform var(--duration-fast) var(--ease-out); }
+.sidebar__label--toggle.is-open .lucide { transform: rotate(90deg); }
+.sidebar__label-dot { width: var(--space-1); height: var(--space-1); margin-left: var(--space-1); border-radius: var(--radius-full); background: var(--text-2); }
+
+.sidebar__item {
+  display: flex; align-items: center; gap: var(--space-2_5);
+  height: var(--nav-item-height); padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-2); font-weight: var(--weight-medium); text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast);
+}
+.sidebar__item .lucide { color: var(--text-3); transition: color var(--duration-fast); }
+.sidebar__item:hover { background: var(--bg-hover); color: var(--text-1); text-decoration: none; }
+.sidebar__item:hover .lucide { color: var(--text-2); }
+.sidebar__item:active { background: var(--bg-active); }
+.sidebar__item.is-current { background: var(--bg-nav-selected); box-shadow: var(--shadow-nav-selected); color: var(--text-1); }
+.sidebar__item.is-current .lucide { color: var(--text-1); }
+.sidebar__item-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Lines: a glyph, the name, and one line of status like the operator's reference.
+   One icon column, one text column: nav rows are 8 + 16 icon + 10 = 34 to the label; line
+   rows are 6 + 20 glyph + 8 = 34, and the glyph's center (16) sits on the icon's center. */
+.sidebar__item--line { height: var(--nav-item-height-2line); gap: var(--space-2); padding-left: var(--space-1_5); }
+.sidebar__line-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.sidebar__line-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: var(--leading-sm); }
+.sidebar__line-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-regular); color: var(--text-3); }
+.sidebar__line-sub.is-live { color: var(--text-2); }
+.sidebar__line-sub.is-waiting { color: var(--warn); }
+.sidebar__item.is-current .sidebar__line-sub:not(.is-waiting) { color: var(--text-2); }
+.sidebar__item--more { color: var(--text-3); font-weight: var(--weight-regular); padding-left: calc(var(--space-2) + var(--icon-md) + var(--space-2_5)); }
+.sidebar__waiting-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.sidebar__live { display: grid; place-items: center; width: var(--icon-md); flex: none; }
+.sidebar__count { display: inline-grid; place-items: center; min-width: var(--count-size); height: var(--count-size); padding: 0 var(--space-1_5); border-radius: var(--radius-full); background: var(--warn-soft); color: var(--warn); font-size: var(--text-xs); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+
+.sidebar__footer { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); margin-top: var(--space-1); }
+.sidebar__scenario { padding: 0 var(--space-1); }
+.sidebar__scenario .g-select { width: 100%; }
+.sidebar__version { padding: 0 var(--space-2); }
+
+/* ------------------------------------------------------------------ sticky top region */
+/* Banners stack in flow; the slot under them is zero-height and holds the compact page bar
+   (absolutely positioned, so it never pushes content). Full and bare pages have no bar and
+   get a 24px fade instead, so content never cuts hard at the panel's rounded edge. */
+.shell__top { position: sticky; top: 0; z-index: var(--z-banner); flex: none; }
+.shell__bar-slot { position: relative; height: 0; }
+.shell__top::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%; height: var(--space-6);
+  background: linear-gradient(to bottom, var(--bg-canvas), transparent);
+  opacity: 0; pointer-events: none; transition: opacity var(--duration-base) var(--ease-out);
+}
+.shell__main.is-scrolled .shell__top:not(:has(.g-page-bar))::after { opacity: 1; }
+/* Focus moved by Tab lands below the bar, not under it. */
+.shell__main { scroll-padding-top: calc(var(--page-bar-height) + var(--space-2)); }
+
+/* ---------------------------------------------------------------------------- banners */
+/* Banners share the page column's edges: their text starts on the title's left edge and the
+   action ends on the header actions' right edge, at every window width (the same math as
+   .g-page: a centered column of --page-wide inside 40px gutters). */
+.shell { --page-gutter: max(var(--space-10), (100% - var(--page-wide)) / 2); }
+.shell-banner {
+  position: relative;
+  display: flex; align-items: center; gap: var(--space-2_5); flex: none;
+  padding: var(--space-2) var(--page-gutter);
+  border-bottom: 1px solid var(--warn-border);
+  background: color-mix(in srgb, var(--warn) 9%, var(--bg-canvas)); color: var(--text-1);
+  font-size: var(--text-md);
+}
+.shell-banner strong { font-weight: var(--weight-medium); }
+.shell-banner > span { color: var(--text-2); }
+.shell-banner > span strong { color: var(--text-1); }
+.shell-banner .g-spinner { color: var(--warn); flex: none; }
+.shell-banner--loading { border-bottom-color: var(--border); background: var(--bg-surface); }
+/* First run: neutral, not a warning. One action at the far end. */
+.shell-banner--setup { border-bottom-color: var(--border); background: var(--bg-surface); padding-block: var(--space-1_5); }
+.shell-banner__action { margin-left: auto; flex: none; }
+.shell-banner__progress { position: absolute; left: 0; right: 0; bottom: calc(var(--space-px) * -1); height: var(--space-px); background: transparent; }
+.shell-banner__progress .g-progress__bar { background: var(--phase-starting); }
+
+.shell-proto-flag { display: flex; align-items: center; gap: var(--space-2); flex: none; padding: var(--space-1_5) var(--page-gutter); border-bottom: 1px dashed var(--accent-border); font-size: var(--text-sm); color: var(--text-3); background: var(--accent-soft); }
+/* Against the real daemon the strip is a warning: what this prototype saves is saved for real. */
+.shell-proto-flag.is-real { border-bottom-color: var(--warn-border); background: var(--warn-soft); color: var(--text-2); }
+
+/* ---------------------------------------------------------------------- offline, error */
+.shell-offline .g-empty__icon { width: var(--space-12); height: var(--space-12); border-radius: var(--radius-lg); color: var(--phase-offline); background: var(--danger-soft); }
+.shell-offline__command { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-sunken); }
+.shell-offline__command code { font-size: var(--text-sm); color: var(--text-1); user-select: all; }
+.shell-offline__error { width: min(480px, 90%); margin-top: var(--space-4); text-align: left; }
+.shell-offline__retry { display: flex; align-items: center; justify-content: center; gap: var(--space-2); margin-top: var(--space-6); font-size: var(--text-sm); color: var(--text-3); }
+.shell-error-detail { display: block; margin-top: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--bg-sunken); border: 1px solid var(--border); color: var(--text-2); font-size: var(--text-sm); text-align: left; overflow-wrap: anywhere; }
+
+.shell-skeleton { display: flex; flex-direction: column; gap: var(--space-3); }
+.shell-skeleton .g-skeleton { max-width: 100%; }
+/* A bare route loading: centered in the window, nothing wider than it. */
+.shell-skeleton--bare { align-items: center; justify-content: center; min-height: 100vh; padding: var(--space-6); }
+.shell-skeleton__block { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-6); }
+.shell-offline__actions { display: flex; flex-direction: column; align-items: center; }
+
+/* "Section active": the open page lives under this row (a line under Conversations), but
+   that line's own row is the current one. Text and icon go to --text-1; no tile. */
+.sidebar__item.is-section { color: var(--text-1); }
+.sidebar__item.is-section .lucide { color: var(--text-1); }

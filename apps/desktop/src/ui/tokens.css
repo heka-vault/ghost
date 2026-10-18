@@ -1,0 +1,248 @@
+/*
+ * Ghost design tokens. The single source of every color, size, radius, shadow, duration
+ * and layer in the desktop app. Screens use these variables and never raw values.
+ * Contract and rationale: docs/design-system.md. Contrast ratios are checked there.
+ *
+ * Themes: every color is written once as light-dark(LIGHT, DARK). The browser resolves it
+ * from the element's color-scheme, which follows prefers-color-scheme by default. A
+ * data-theme="light|dark" attribute on <html> or any element forces one for that subtree
+ * (the gallery uses it to show both side by side). WebKitGTK 2.44+ and Chrome 123+.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ---------------------------------------------------------------- type */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-features: "cv11", "ss01", "ss03";
+
+  /* size / line-height pairs. 13px is the UI default, 14px is reading text. */
+  --text-xs: 11px;   --leading-xs: 16px;
+  --text-sm: 12px;   --leading-sm: 16px;
+  --text-md: 13px;   --leading-md: 20px;
+  --text-lg: 14px;   --leading-lg: 22px;
+  --text-xl: 16px;   --leading-xl: 24px;
+  --text-2xl: 20px;  --leading-2xl: 28px;
+  --text-3xl: 24px;  --leading-3xl: 32px;
+  --text-4xl: 32px;  --leading-4xl: 40px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --tracking-tight: -0.011em;   /* 16px and up */
+  --tracking-tighter: -0.021em; /* 24px and up */
+  --tracking-caps: 0.04em;      /* only for the 11px overline */
+
+  /* ------------------------------------------------------------- spacing (4px grid) */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-0_5: 2px;
+  --space-1: 4px;
+  --space-1_5: 6px;
+  --space-2: 8px;
+  --space-2_5: 10px; /* half step: control internals only */
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* ---------------------------------------------------------------- sizes */
+  --control-xs: 24px;
+  --control-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 40px;
+  --icon-xs: 12px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --sidebar-width: 244px;
+  --nav-item-height: 28px;       /* sidebar rows: Linear density */
+  --nav-item-height-2line: 40px; /* sidebar line rows with a status line */
+  --count-size: 18px;            /* count pills and badges-sm */
+  --page-narrow: 680px;
+  --page-default: 880px;
+  --page-wide: 1160px;
+  --panel-inset: var(--space-2); /* gap around the inset page panel */
+  --field-control-width: 320px;  /* inline Field control column */
+  --page-bar-height: 48px;       /* the compact sticky page header */
+  --save-bar-min: 480px;         /* the SaveBar's narrowest width */
+  --stop-pitch: 104px;           /* one column per autonomy level in a row of stops (policy) */
+  --touch-target: 56px;          /* phone: the primary row of buttons (Confirm, Start) */
+
+  /* --------------------------------------------------------------- opacity */
+  --opacity-disabled: 0.45;      /* every disabled control dims to this; filled buttons go neutral instead */
+
+  /* ---------------------------------------------------------------- radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* --------------------------------------------------------------- motion */
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+  --duration-slower: 420ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+
+  /* -------------------------------------------------------------- z-index */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-sidebar: 20;
+  --z-banner: 30;
+  --z-popover: 40;
+  --z-dialog: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
+
+  /* ================================================================ color */
+  /*                                    light       dark                       */
+
+  /* neutral ramp, cool-neutral. 0 is the window ground, 12 is full-strength text. */
+  --gray-0: light-dark(#ececee, #09090b);
+  --gray-1: light-dark(#ffffff, #0f0f11);
+  --gray-2: light-dark(#fafafa, #141416);
+  --gray-3: light-dark(#ffffff, #19191c);
+  --gray-4: light-dark(#f4f4f5, #1f1f23);
+  --gray-5: light-dark(#e9e9ec, #26262b);
+  --gray-6: light-dark(#dcdce0, #2f2f35);
+  --gray-7: light-dark(#c4c4ca, #3d3d44);
+  --gray-8: light-dark(#a1a1aa, #56565f);
+  --gray-9: light-dark(#64646d, #8b8b94);
+  --gray-10: light-dark(#52525b, #a1a1aa);
+  --gray-11: light-dark(#3f3f46, #d4d4d8);
+  --gray-12: light-dark(#18181b, #ededef);
+
+  /* surfaces */
+  --bg-app: light-dark(#f1f1f3, #09090b);      /* window ground and sidebar */
+  --bg-canvas: light-dark(#ffffff, #0f0f11);   /* the inset page panel */
+  --bg-surface: light-dark(#fbfbfc, #141416);  /* cards, grouped rows */
+  --bg-raised: light-dark(#ffffff, #19191c);   /* popovers, dialogs, menus */
+  --bg-sunken: light-dark(#f6f6f7, #0c0c0e);   /* wells: code, log output */
+  --bg-input: light-dark(#ffffff, rgba(255, 255, 255, 0.05));
+  --bg-hover: light-dark(rgba(24, 24, 27, 0.035), rgba(255, 255, 255, 0.04));
+  --bg-active: light-dark(rgba(24, 24, 27, 0.07), rgba(255, 255, 255, 0.075));
+  --bg-selected: light-dark(rgba(24, 24, 27, 0.085), rgba(255, 255, 255, 0.085));
+  /* the sidebar's current row: a canvas tile on the grey ground in light (Plain), a lift in dark */
+  --bg-nav-selected: light-dark(#ffffff, rgba(255, 255, 255, 0.085));
+  --shadow-nav-selected: 0 0 0 1px light-dark(rgba(24, 24, 27, 0.07), transparent), 0 1px 2px light-dark(rgba(24, 24, 27, 0.06), transparent);
+  --bg-overlay: light-dark(rgba(24, 24, 27, 0.32), rgba(0, 0, 0, 0.6));
+  --bg-inverse: light-dark(#18181b, #ededef);
+
+  /* borders, hairlines */
+  --border-subtle: light-dark(rgba(24, 24, 27, 0.06), rgba(255, 255, 255, 0.055));
+  --border: light-dark(rgba(24, 24, 27, 0.09), rgba(255, 255, 255, 0.085));
+  --border-strong: light-dark(rgba(24, 24, 27, 0.15), rgba(255, 255, 255, 0.14));
+  /* text-field edges: >= 3:1 on the canvas and on a surface, both themes (WCAG 1.4.11) */
+  --border-input: light-dark(rgba(24, 24, 27, 0.5), rgba(255, 255, 255, 0.38));
+  --border-input-hover: light-dark(rgba(24, 24, 27, 0.62), rgba(255, 255, 255, 0.48));
+
+  /* control tracks (switch off, slider empty, checkbox edge): >= 3:1 on canvas */
+  --control-track: light-dark(#8e8e96, #63636d);
+  --control-track-hover: light-dark(#7a7a83, #74747e);
+
+  /* text */
+  --text-1: light-dark(#18181b, #ededef);       /* primary */
+  --text-2: light-dark(#52525b, #a1a1aa);       /* secondary: AAA */
+  --text-3: light-dark(#64646d, #8b8b94);       /* tertiary, placeholders, meta: AA on every row tint */
+  --text-disabled: light-dark(#a1a1aa, #56565f); /* disabled only; exempt from contrast */
+  --text-inverse: light-dark(#ffffff, #09090b);
+
+  /* the one accent: "ghost iris" */
+  --accent: light-dark(#4c57e0, #5560e8);        /* fills: white on it 5.6 / 4.97 at rest, 5.9 / 5.4 on hover */
+  --accent-hover: light-dark(#4853dd, #4f5ae3);  /* hover darkens in both themes: white only gains contrast */
+  --accent-active: light-dark(#424cc9, #4a54d6);
+  --accent-text: light-dark(#4450d8, #8b9bff);   /* accent as text/icons on canvas */
+  --accent-soft: light-dark(rgba(76, 87, 224, 0.08), rgba(110, 124, 255, 0.14));
+  --accent-soft-hover: light-dark(rgba(76, 87, 224, 0.13), rgba(110, 124, 255, 0.2));
+  --accent-border: light-dark(rgba(76, 87, 224, 0.32), rgba(139, 155, 255, 0.38));
+  --on-accent: #ffffff;
+  --focus-ring-color: light-dark(#4c57e0, #8b9bff); /* 5.6:1 light, 7.5:1 dark */
+
+  /* semantic */
+  --ok: light-dark(#15803d, #4ade80);
+  --ok-soft: light-dark(rgba(21, 128, 61, 0.08), rgba(74, 222, 128, 0.12));
+  --ok-border: light-dark(rgba(21, 128, 61, 0.25), rgba(74, 222, 128, 0.28));
+  --warn: light-dark(#935605, #fbbf24);
+  --warn-soft: light-dark(rgba(217, 119, 6, 0.09), rgba(251, 191, 36, 0.12));
+  --warn-border: light-dark(rgba(217, 119, 6, 0.3), rgba(251, 191, 36, 0.3));
+  --danger: light-dark(#c62828, #f87171);
+  --danger-soft: light-dark(rgba(198, 40, 40, 0.07), rgba(248, 113, 113, 0.12));
+  --danger-border: light-dark(rgba(198, 40, 40, 0.25), rgba(248, 113, 113, 0.32));
+  --info: light-dark(#1d64d8, #60a5fa);
+  --info-soft: light-dark(rgba(29, 100, 216, 0.07), rgba(96, 165, 250, 0.12));
+  --info-border: light-dark(rgba(29, 100, 216, 0.25), rgba(96, 165, 250, 0.3));
+  --danger-fill: #cf3030;                         /* destructive button: white on it 5.1:1, 6.1 / 5.3 on hover */
+  --danger-fill-hover: light-dark(#bb2727, #c93030);
+
+  /* phases of the voice loop */
+  /* light values reach 3:1 on the sidebar ground (#f1f1f3) so a dot never reads faint.
+     Starting is info blue, never amber: amber means only "waiting for your okay". */
+  --phase-starting: light-dark(#1d64d8, #60a5fa);
+  --phase-passive: light-dark(#76767f, #8b8b94);
+  --phase-listening: light-dark(#15803d, #4ade80);
+  --phase-thinking: light-dark(#7c5cf0, #b69bff);
+  --phase-speaking: light-dark(#0891d1, #5cc8ff);
+  --phase-offline: light-dark(#dc2626, #f87171);
+
+  /* line (conversation) glyph hues: fg on its own soft tile is >= 4.5:1 */
+  --hue-0-fg: light-dark(#3f4bc9, #9db0ff); --hue-0-bg: light-dark(rgba(76, 87, 224, 0.1), rgba(110, 130, 255, 0.16));
+  --hue-1-fg: light-dark(#6d3fd0, #c4a8ff); --hue-1-bg: light-dark(rgba(124, 77, 240, 0.1), rgba(170, 130, 255, 0.16));
+  --hue-2-fg: light-dark(#b4236f, #ff9ccf); --hue-2-bg: light-dark(rgba(220, 50, 140, 0.09), rgba(255, 110, 180, 0.15));
+  --hue-3-fg: light-dark(#b4460f, #ffad7a); --hue-3-bg: light-dark(rgba(234, 100, 30, 0.1), rgba(255, 140, 70, 0.15));
+  --hue-4-fg: light-dark(#8a5a00, #f5cc5c); --hue-4-bg: light-dark(rgba(217, 160, 6, 0.13), rgba(245, 190, 60, 0.14));
+  --hue-5-fg: light-dark(#17763a, #6ee39a); --hue-5-bg: light-dark(rgba(22, 163, 74, 0.1), rgba(74, 222, 128, 0.13));
+  --hue-6-fg: light-dark(#0b7365, #5fd4e6); --hue-6-bg: light-dark(rgba(13, 148, 136, 0.1), rgba(70, 200, 230, 0.13));
+  --hue-7-fg: light-dark(#0a6aa8, #7cc9ff); --hue-7-bg: light-dark(rgba(8, 145, 209, 0.1), rgba(90, 180, 255, 0.15));
+
+  /* tooltip: inverse bubble in light, a raised dark surface in dark (Linear, Raycast) */
+  --tooltip-bg: light-dark(#18181b, #26262b);
+  --tooltip-fg: light-dark(#ffffff, #ededef);
+  --tooltip-border: light-dark(transparent, rgba(255, 255, 255, 0.1));
+
+  /* elevation: dark mode leans on borders and surface steps, not shadows */
+  --shadow-xs: 0 1px 0 light-dark(rgba(24, 24, 27, 0.04), rgba(0, 0, 0, 0.4));
+  --shadow-sm: 0 1px 2px light-dark(rgba(24, 24, 27, 0.06), rgba(0, 0, 0, 0.5)), 0 0 0 1px light-dark(rgba(24, 24, 27, 0.04), transparent);
+  --shadow-md: 0 8px 24px -8px light-dark(rgba(24, 24, 27, 0.16), rgba(0, 0, 0, 0.6)), 0 0 0 1px var(--border);
+  --shadow-lg: 0 24px 64px -16px light-dark(rgba(24, 24, 27, 0.28), rgba(0, 0, 0, 0.75)), 0 0 0 1px light-dark(rgba(24, 24, 27, 0.09), rgba(255, 255, 255, 0.14));
+  --shadow-inset-top: inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.04));
+  --shadow-thumb: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.3);
+
+  /* focus: a solid 2px outline 2px off the element. The gap is transparent, so it reads on
+     any surface, follows border-radius, and survives forced-colors mode. */
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --focus-outline: var(--focus-width) solid var(--focus-ring-color);
+  /* inside lists, tables and segmented controls, where an outside ring would be clipped */
+  --focus-ring-inset: inset 0 0 0 2px var(--focus-ring-color);
+  /* text fields: border turns the ring color plus a soft halo */
+  --focus-field: 0 0 0 1px var(--focus-ring-color), 0 0 0 4px var(--accent-soft);
+  --focus-field-danger: 0 0 0 1px var(--danger), 0 0 0 4px var(--danger-soft);
+
+  --scrollbar: light-dark(rgba(24, 24, 27, 0.16), rgba(255, 255, 255, 0.12));
+}
+
+:root[data-theme="light"], [data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"], [data-theme="dark"] { color-scheme: dark; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+    --duration-slower: 0ms;
+  }
+}

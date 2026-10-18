@@ -1,0 +1,175 @@
+/* Owner: conversations. Every class is prefixed conv-. Tokens only. */
+
+/* ------------------------------------------------------------------ shared */
+.conv-notice { margin-bottom: var(--space-6); }
+.conv-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.conv-cell { padding: var(--space-4) var(--space-5); }
+.conv-meta-skel { display: inline-flex; align-items: center; height: var(--leading-lg); vertical-align: top; }
+.conv-meta { display: inline-flex; align-items: center; flex-wrap: wrap; column-gap: var(--space-1_5); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------ index */
+/* The row's one line: the persona as written, clamped; the skeleton keeps the line's height while it loads. */
+.conv-row-desc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: anywhere; }
+.conv-row-desc--loading { display: flex; align-items: center; height: var(--leading-sm); }
+/* The row's end: one slot on the card's content edge. At rest it reads as when the line was
+   last used; while a session is live, the Switch takes the same slot under the pointer or
+   focus (the way a note's edit and remove do), so the column never ragged-edges and rows
+   never shift. On touch, where there is no hover, both show side by side. */
+.conv-row-end { display: grid; justify-items: end; align-items: center; min-height: var(--control-sm); font-size: var(--text-sm); line-height: var(--leading-sm); white-space: nowrap; }
+.conv-row-end > * { grid-area: 1 / 1; }
+.conv-row-end__when { color: var(--text-3); font-variant-numeric: tabular-nums; transition: opacity var(--duration-fast) var(--ease-out); }
+/* Ghost buttons in the slot pull their label onto the content edge, the way History's actions do. */
+.conv-row-action { margin-right: calc(var(--space-2_5) * -1); }
+.conv-row-switch { opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+.g-row:hover .conv-row-switch, .g-row:focus-within .conv-row-switch, .is-switching .conv-row-switch { opacity: 1; }
+.g-row:hover .conv-row-end--swap .conv-row-end__when, .g-row:focus-within .conv-row-end--swap .conv-row-end__when, .conv-row-end--swap.is-switching .conv-row-end__when { opacity: 0; }
+@media (hover: none) {
+  .conv-row-end--swap { display: inline-flex; gap: var(--space-3); }
+  .conv-row-switch { opacity: 1; }
+  .g-row:hover .conv-row-end--swap .conv-row-end__when, .g-row:focus-within .conv-row-end--swap .conv-row-end__when { opacity: 1; }
+}
+.conv-error-detail { display: block; margin-top: var(--space-2); overflow-wrap: anywhere; }
+.conv-row-meta { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); white-space: nowrap; }
+/* The live row's state and its Review sit side by side in the same slot. */
+.conv-row-end:has(.conv-state) { display: inline-flex; gap: var(--space-3); }
+
+/* A line's state: the phase dot and words in text-2; a waiting okay in warn, the one state with tone. */
+.conv-state { display: inline-flex; align-items: center; gap: var(--space-1_5); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); white-space: nowrap; }
+.conv-state.is-waiting { color: var(--warn); font-weight: var(--weight-medium); }
+.conv-state__dot { flex: none; width: var(--space-1_5); height: var(--space-1_5); border-radius: var(--radius-full); background: var(--warn); }
+.conv-skel-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); }
+.conv-foot { margin-top: var(--space-4); }
+
+/* ------------------------------------------------------------------ detail */
+.conv-tab-dot { width: var(--space-1_5); height: var(--space-1_5); margin-left: var(--space-1_5); border-radius: var(--radius-full); background: var(--accent); display: inline-block; vertical-align: var(--space-0_5); }
+/* Text that goes into the prompt (persona, memory): the stock field, full column width,
+   reading type, no resize grip (useAutoRows sizes it). Edges and focus come from g-textarea. */
+.conv-prompt {
+  resize: none;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-lg); line-height: var(--leading-lg);
+}
+
+.conv-voice { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); }
+.conv-voice__play { flex: none; }
+.conv-voice__text { flex: 1 1 auto; min-width: 0; margin-right: var(--space-1); }
+.conv-playing { color: var(--text-1); }
+
+.conv-files { margin-top: var(--space-10); max-width: 64ch; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ notes */
+.conv-pin { display: flex; gap: var(--space-3); }
+.conv-note { display: flex; align-items: center; gap: var(--space-3); min-height: calc(var(--control-sm) + var(--space-5)); padding: var(--space-2_5) var(--space-3) var(--space-2_5) var(--space-4); }
+.conv-note__pin { flex: none; color: var(--text-3); }
+.conv-note__text { flex: 1 1 auto; min-width: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); overflow-wrap: anywhere; }
+.conv-note__new { flex: none; color: var(--text-3); }
+/* Rows stay clean: edit and remove show on hover and whenever focus is inside the row (so Tab
+   still reaches them), and always on touch screens. */
+.conv-note__actions { display: inline-flex; gap: var(--space-1); flex: none; opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+.conv-note:hover .conv-note__actions, .conv-note:focus-within .conv-note__actions { opacity: 1; }
+@media (hover: none) { .conv-note__actions { opacity: 1; } }
+.conv-note__edit { display: flex; align-items: center; gap: var(--space-1); flex: 1 1 auto; min-width: 0; }
+.conv-note__edit > .grow { margin-right: var(--space-2); }
+
+/* ------------------------------------------------------------------ transcript */
+.conv-transcript__note { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: var(--control-sm); margin-bottom: var(--space-4); }
+.conv-transcript__end { height: 0; }
+.conv-skel-turns { display: flex; flex-direction: column; gap: var(--space-3); }
+.conv-skel-you { align-self: flex-end; }
+.conv-skel-marker { align-self: center; margin-bottom: var(--space-4); }
+.conv-turns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+/* Every row spans the column; the bubble sits left or right inside it and every time lands on
+   the right edge, so the times read as one column down the transcript. */
+.conv-turn { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+.conv-turn--you { align-items: flex-end; }
+.conv-turn__bubble { max-width: min(80%, calc(var(--page-default) * 0.7)); padding: var(--space-2) var(--space-4); border-radius: var(--radius-xl); font-size: var(--text-lg); line-height: var(--leading-lg); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-1); }
+/* The operator's bubble is the session's: one opaque step of the neutral ramp, no edge. */
+.conv-turn--you .conv-turn__bubble { background: var(--gray-4); border-color: transparent; }
+.conv-turn__time { align-self: flex-end; padding: 0 var(--space-2); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.conv-turn--note { flex-direction: row; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.conv-turn--note > .lucide { flex: none; color: var(--text-3); }
+.conv-turn--note .conv-turn__time { margin-left: auto; padding: 0; }
+.conv-turn__call { font-family: var(--font-mono); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.conv-day, .conv-marker { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-1); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); font-weight: var(--weight-medium); }
+.conv-day::before, .conv-day::after, .conv-marker::before, .conv-marker::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border-subtle); }
+.conv-day:first-child, .conv-marker:first-child { margin-top: 0; }
+
+/* Summarized turns: one marker row with its toggle inline; opened, a compact labeled log, left-aligned. */
+.conv-archive { display: flex; flex-direction: column; margin-bottom: var(--space-2); }
+.conv-marker__toggle { margin-left: calc(var(--space-2) * -1); }
+.conv-archive:has(.conv-log:not([hidden])) { margin-bottom: var(--space-6); }
+.conv-log { list-style: none; margin: var(--space-4) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.conv-log[hidden] { display: none; }
+.conv-log__row { display: grid; grid-template-columns: var(--space-20) minmax(0, 1fr) auto; column-gap: var(--space-4); align-items: baseline; }
+.conv-log__time { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); white-space: nowrap; }
+.conv-log__who { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-log__row.is-note .conv-log__who { display: flex; justify-content: flex-end; align-self: center; padding-right: var(--space-1); }
+.conv-log__text { font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.conv-log__row.is-note .conv-log__text { font-size: var(--text-sm); line-height: var(--leading-sm); }
+.conv-log__text.is-call { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-log__day { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); font-weight: var(--weight-medium); }
+.conv-log__day::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border-subtle); }
+.conv-fresh-empty { text-align: center; }
+
+/* ------------------------------------------------------------------ history */
+.conv-version { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--space-5); }
+.conv-version__head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
+.conv-version__text { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Clamped to three lines with a fade, not an ellipsis: a period followed by “…” reads as a typo. */
+.conv-version__text.is-clamped { max-height: calc(var(--leading-md) * 3); overflow: hidden; mask-image: linear-gradient(to bottom, black 55%, transparent 100%); }
+.conv-version__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: var(--control-sm); }
+.conv-version__when { min-width: 0; }
+.conv-version__actions { display: inline-flex; align-items: center; gap: var(--space-3); flex: none; margin-right: calc(var(--space-2) * -1); }
+
+/* ------------------------------------------------------------------ voice picker */
+.conv-picker__bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+/* The voices scroll inside the dialog, under a fixed bar and footer. 400px fits the English
+   bank at 1280x800 with the dialog's header and footer in view. Padding keeps focus rings whole. */
+.conv-picker__groups { display: flex; flex-direction: column; gap: var(--space-5); max-height: calc(var(--space-20) * 5); overflow: auto; padding: var(--space-1); margin: calc(var(--space-1) * -1); }
+.conv-picker__group { display: flex; flex-direction: column; gap: var(--space-2); }
+.conv-picker__accent { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); color: var(--text-1); }
+.conv-picker__row { display: grid; grid-template-columns: var(--space-16) minmax(0, 1fr); align-items: start; gap: var(--space-3); }
+.conv-picker__sex { padding-top: var(--space-1_5); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.conv-picker__cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-20) + var(--space-10)), 1fr)); gap: var(--space-2); }
+/* Other languages: a table, accent rows by female and male columns. */
+.conv-picker__table { display: grid; grid-template-columns: calc(var(--space-20) + var(--space-4)) minmax(0, 1fr) minmax(0, 1fr); column-gap: var(--space-4); row-gap: var(--space-2); }
+.conv-picker__trow { display: contents; }
+.conv-picker__col { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.conv-picker__accent--row { padding-top: var(--space-1_5); font-size: var(--text-md); }
+.conv-picker__cells--half { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; }
+.conv-picker__foot { display: flex; align-items: center; gap: var(--space-3); flex: 1 1 auto; min-width: 0; }
+.conv-picker__chosen { flex: 1 1 auto; min-width: 0; }
+.conv-picker__hint { display: flex; align-items: center; gap: var(--space-1); min-height: var(--leading-sm); }
+
+/* One voice: pick it (the whole cell is the radio) or play it (its own button). */
+.conv-vc {
+  position: relative; display: flex; align-items: center;
+  height: var(--control-md); padding-right: var(--space-0_5);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  color: var(--text-1);
+  transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+.conv-vc:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.conv-vc:has(.conv-vc__pick:active) { background: var(--bg-active); }
+.conv-vc.is-on { background: var(--accent-soft); border-color: var(--accent-border); }
+.conv-vc:has(.conv-vc__input:focus-visible) { outline: var(--focus-outline); outline-offset: var(--focus-offset); }
+.conv-vc__pick { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-1_5); flex: 1 1 auto; min-width: 0; height: 100%; padding-left: var(--space-3); cursor: pointer; font-size: var(--text-md); text-align: left; }
+.conv-vc.is-on .conv-vc__pick { padding-left: var(--space-2); }
+.conv-vc__input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; pointer-events: none; }
+.conv-vc__mark { flex: none; color: var(--accent-text); }
+.conv-vc__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-vc__play { flex: none; position: relative; color: var(--text-3); }
+.conv-vc:hover .conv-vc__play, .conv-vc.is-playing .conv-vc__play { color: var(--text-1); }
+.conv-vc.is-playing { border-color: var(--border-strong); }
+
+/* A sample playing: three bars, moving only while there is sound, still under reduced motion. */
+.conv-bars { display: inline-flex; align-items: flex-end; gap: var(--space-0_5); width: var(--icon-sm); height: var(--icon-sm); color: currentColor; }
+.conv-bars > span { flex: 1 1 0; height: 40%; border-radius: var(--radius-full); background: currentColor; animation: conv-bar var(--duration-slower) var(--ease-in-out) infinite alternate; }
+.conv-bars > span:nth-child(2) { animation-delay: calc(var(--duration-fast) * -1); height: 90%; }
+.conv-bars > span:nth-child(3) { animation-delay: calc(var(--duration-base) * -1); height: 60%; }
+@keyframes conv-bar { from { transform: scaleY(0.35); } to { transform: scaleY(1); } }
+.conv-bars > span { transform-origin: bottom; }
+@media (prefers-reduced-motion: reduce) { .conv-bars > span { animation: none; } }
+
+/* The crumb leads the eyebrow, ahead of the page status: "‹ Conversations  ● Live · listening". */
+

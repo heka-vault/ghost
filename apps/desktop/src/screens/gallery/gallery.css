@@ -1,0 +1,87 @@
+/* Owner: foundation. The gallery page. */
+.gal-wrap { padding-bottom: var(--space-8); }
+.gal-toc { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: calc(var(--space-4) * -1) 0 var(--space-8); }
+.gal-toc a { padding: var(--space-1) var(--space-2_5); border-radius: var(--radius-full); color: var(--text-2); font-size: var(--text-sm); border: 1px solid var(--border); }
+.gal-toc a:hover { color: var(--text-1); background: var(--bg-hover); text-decoration: none; }
+.gal-block { display: flex; flex-direction: column; gap: var(--space-5); margin-bottom: var(--space-12); scroll-margin-top: calc(var(--page-bar-height) + var(--space-4)); }
+.gal-h2 { font-size: var(--text-xl); line-height: var(--leading-xl); letter-spacing: var(--tracking-tight); }
+.gal-lead { color: var(--text-2); margin-top: calc(var(--space-2) * -1); }
+.gal-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.gal-chip { padding: var(--space-px) var(--space-2); border-radius: var(--radius-full); background: var(--bg-active); color: var(--text-2); font-size: var(--text-xs); font-family: var(--font-mono); white-space: nowrap; }
+.gal-chip:hover { color: var(--text-1); background: var(--accent-soft-hover); text-decoration: none; }
+.gal-chip.is-current { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent-border); }
+
+.gal-themes { display: grid; gap: var(--space-4); }
+.gal-themes--both { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.gal-theme { position: relative; min-width: 0; padding: var(--space-8) var(--space-6); border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-canvas); color: var(--text-1); }
+.gal-theme__label { position: absolute; top: var(--space-3); right: var(--space-4); }
+.gal-specimens .gal-block { margin-bottom: var(--space-10); }
+.gal-specimens .gal-h2 { font-size: var(--text-lg); line-height: var(--leading-lg); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border-subtle); }
+
+/* Label above the specimen, so each theme panel gives its full width to the specimen. */
+.gal-spec { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.gal-spec__label { font-size: var(--text-sm); color: var(--text-3); }
+.gal-spec__body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.gal-spec__body--col { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+.gal-spec__body--scroll { flex-wrap: nowrap; overflow-x: auto; padding: var(--space-1) var(--space-1) var(--space-2); margin: calc(var(--space-1) * -1); }
+.gal-grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); }
+.gal-row-pad { padding: var(--space-3) var(--space-4); }
+.gal-indent { padding-left: calc(var(--icon-md) + var(--space-2_5)); }
+
+/* state matrix: variants down, states across */
+.gal-matrix { display: grid; align-items: center; column-gap: var(--space-2); row-gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+.gal-matrix__head { font-size: var(--text-xs); color: var(--text-3); white-space: nowrap; }
+.gal-matrix__label { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gal-matrix__cell { display: flex; align-items: center; min-width: 0; }
+.gal-states { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.gal-sizes { display: flex; flex-direction: column; gap: var(--space-3); width: 240px; }
+
+/* Fixed columns: an auto-fill grid inside a flex column is sized at one column and leaves dead rows. */
+.gal-swatches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: auto; align-content: start; column-gap: var(--space-3); row-gap: var(--space-4); }
+.gal-swatch { display: flex; align-items: center; gap: var(--space-2_5); min-width: 0; }
+.gal-swatch__text { display: flex; flex-direction: column; min-width: 0; }
+.gal-swatch__chip { flex: none; display: grid; place-items: center; width: var(--control-md); height: var(--control-md); border-radius: var(--radius-md); border: 1px solid var(--border); font-weight: var(--weight-semibold); background: var(--bg-surface); }
+.gal-swatch__name { font-size: var(--text-sm); font-weight: var(--weight-medium); text-transform: capitalize; }
+.gal-swatch__var { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); overflow-wrap: anywhere; }
+
+.gal-type { display: flex; flex-direction: column; gap: var(--space-2); }
+.gal-spaces { display: flex; align-items: flex-end; gap: var(--space-3); flex: none; }
+.gal-space { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); flex: none; }
+.gal-space span { display: block; background: var(--accent-soft-hover); border: 1px solid var(--accent-border); border-radius: var(--space-0_5); }
+.gal-space small { font-size: var(--text-xs); color: var(--text-3); }
+.gal-radius { flex: none; display: grid; place-items: center; width: var(--space-12); height: var(--control-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); font-size: var(--text-xs); color: var(--text-2); }
+/* Shadows on the window ground: in dark mode they only read against a lighter tile. */
+.gal-elev-patch { display: flex; gap: var(--space-4); padding: var(--space-5); border-radius: var(--radius-lg); background: var(--bg-app); flex: none; }
+.gal-elev { flex: none; display: grid; place-items: center; width: var(--space-16); height: var(--space-12); border-radius: var(--radius-md); background: var(--bg-raised); font-size: var(--text-xs); color: var(--text-2); }
+.gal-progress { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; max-width: 280px; }
+.gal-voice { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); flex: none; }
+.gal-voice small { font-size: var(--text-xs); color: var(--text-3); white-space: nowrap; }
+.gal-menu-demo { display: flex; width: 100%; }
+.gal-static { position: static; animation: none; opacity: 1; width: max-content; max-width: 100%; }
+.gal-static-menu { width: 240px; }
+.gal-static-dialog { padding: var(--space-6); border-radius: var(--radius-lg); background: var(--bg-overlay); }
+.gal-static-dialog .g-dialog__panel { max-width: 420px; margin: 0 auto; animation: none; }
+.g-toast.gal-static { width: 360px; }
+.gal-voice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: var(--space-6); justify-items: center; }
+.gal-widths { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.gal-widths__row { display: flex; align-items: center; gap: var(--space-3); }
+.gal-page-bar { position: relative; width: 100%; height: var(--page-bar-height); overflow: hidden; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-canvas); }
+.gal-page-bar > p { position: absolute; left: var(--space-10); top: var(--space-5); }
+.gal-page-bar .g-page-bar { opacity: 1; z-index: 1; }
+.gal-page-bar .g-page-bar__inner { padding: 0 var(--space-4); }
+/* Inline Field at two widths: the second card is narrow on purpose, so it shows the stack. */
+.gal-inline-widths { display: grid; gap: var(--space-4); }
+.gal-inline-widths > :last-child { max-width: 400px; }
+/* The menu keyboard self-check: real focus, never seen or clicked. */
+.gal-selfcheck { position: fixed; left: 0; top: 0; opacity: 0; pointer-events: none; }
+.gal-pending-compact { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.gal-pending-compact > * { width: 320px; }
+/* Status cards on the window ground, at the sidebar's width, as they sit in the shell. */
+.gal-status-cards { display: grid; grid-template-columns: repeat(auto-fill, 220px); gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-lg); background: var(--bg-app); }
+.gal-status-cards .sidebar__status { margin: 0; }
+/* The contrast self-check: real fields measured, never seen. */
+.gal-contrast-probe { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+/* The checks: one row each, the result badge on the right. */
+.gal-check { display: inline-flex; align-items: center; }
+
+.gal-pending-touch { display: flex; flex-direction: column; gap: var(--space-4); width: 358px; max-width: 100%; }

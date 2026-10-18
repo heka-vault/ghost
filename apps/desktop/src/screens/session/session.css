@@ -1,0 +1,190 @@
+/* Owner: session. Scoped with the session- prefix. */
+
+/* ------------------------------------------------------------------ start state */
+/* Before the first turn: presence, one display line, the composer under it. The stack sits at
+   the optical center (2 : 3 above and below), not the arithmetic one, which reads low. */
+.session-start { display: grid; grid-template-rows: 2fr auto 3fr; justify-items: center; }
+.session-start__stack {
+  grid-row: 2;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  width: 100%; max-width: var(--page-narrow);
+}
+.session-start__stack { position: relative; }
+.session-start__title { margin-top: var(--space-8); color: var(--text-1); text-wrap: balance; }
+.session-start__text { margin-top: var(--space-2); max-width: 56ch; font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-2); text-wrap: balance; }
+.session-start__actions { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-8); }
+.session-start__composer { align-self: stretch; margin-top: var(--space-8); text-align: left; }
+/* Under the composer but outside the centering: an error or the way back hangs below the
+   stack, so the presence and the focal line never move when one appears. */
+.session-start__below {
+  position: absolute; top: 100%; left: 0; right: 0;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+.session-start__below > .session-error { align-self: stretch; text-align: left; }
+/* Wake Ghost, then the way back, on one line under the composer. */
+.session-start__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-2) var(--space-4); }
+/* The way back to what you were reading: a quiet link that still reads as one. */
+.session-start__last {
+  display: inline-flex; align-items: center; gap: var(--space-1_5);
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
+  font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); text-decoration: none;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
+}
+.session-start__last:hover { color: var(--text-1); background: var(--bg-hover); }
+.session-start__last-icon { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-3); transition: transform var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.session-start__last:hover .session-start__last-icon { color: var(--text-1); transform: translateX(var(--space-0_5)); }
+
+/* ------------------------------------------------------------------ transcript */
+/* One centered reading column, the same width as the dock under it. */
+.session-transcript {
+  display: flex; flex-direction: column; gap: var(--space-6);
+  width: 100%; max-width: var(--page-narrow); margin-inline: auto;
+  /* 48px reserved under the newest item: as much as the page will leave unscrolled, so a
+     transcript either fits fully above the dock or overflows by enough to scroll. Nothing
+     ever sits in the dock's fade. */
+  padding-top: var(--space-2); padding-bottom: var(--space-12);
+}
+
+/* Ghost or the line: glyph, then name and time, then its words unboxed. The glyph centers on
+   the name's line; the first paragraph sits 4px under the name, the rest 8px apart. */
+.session-speaker { display: grid; grid-template-columns: var(--space-6) minmax(0, 1fr); column-gap: var(--space-3); align-items: start; }
+.session-speaker__glyph { align-self: start; }
+.session-speaker__body { display: flex; flex-direction: column; min-width: 0; }
+.session-speaker__body > .session-msg + .session-msg { margin-top: var(--space-2); }
+.session-speaker__head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-6); font-size: var(--text-md); line-height: var(--leading-md); }
+.session-speaker__head + .session-msg { margin-top: var(--space-1); }
+.session-speaker__name { font-weight: var(--weight-semibold); color: var(--text-1); }
+.session-speaker__time { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.session-msg { position: relative; font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-1); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+
+/* Thinking: the words shimmer while the model works, and the wait shows after 3 seconds. */
+.session-thinking { display: flex; align-items: baseline; gap: var(--space-2); }
+.session-thinking__text {
+  color: transparent;
+  background: linear-gradient(90deg, var(--text-3) 0%, var(--text-3) 38%, var(--text-1) 50%, var(--text-3) 62%, var(--text-3) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  animation: session-shimmer calc(var(--duration-slower) * 5) linear infinite;
+}
+.session-thinking__time { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+@keyframes session-shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .session-thinking__text { animation: none; background: none; color: var(--text-3); }
+}
+@media (forced-colors: active) {
+  .session-thinking__text { animation: none; background: none; color: CanvasText; }
+}
+
+/* The operator: soft bubbles on the right; how it was said shows only when it's the exception. */
+.session-you { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); padding-left: 20%; }
+.session-bubble {
+  max-width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-xl);
+  /* An opaque step of the neutral ramp, one above the raised surface in both themes. */
+  background: var(--gray-4);
+  font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-1);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.session-you__meta { padding-right: var(--space-2); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* Session start, transfers, settled changes and notes: centered captions; a transfer gets hairlines either side. */
+.session-caption { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.session-caption::before, .session-caption::after { content: ""; flex: 1 1 0; }
+.session-caption--rule::before, .session-caption--rule::after { border-top: 1px solid var(--border-subtle); }
+.session-caption__inner { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; max-width: 80%; text-align: center; text-wrap: balance; }
+.session-caption--rule .session-caption__inner { color: var(--text-2); }
+.session-transcript > .session-caption--rule { margin-block: var(--space-2); }
+.session-caption__icon { display: inline-flex; flex: none; color: var(--text-3); }
+.session-caption__icon > svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* Gmail's inline Undo: a text button on the outcome itself, where the eye already is. */
+.session-caption__undo {
+  margin-left: var(--space-1); padding: var(--space-1) var(--space-2); min-height: var(--control-xs);
+  border: 0; border-radius: var(--radius-sm);
+  background: transparent; font: inherit; font-size: var(--text-md); line-height: var(--leading-md);
+  font-weight: var(--weight-medium); color: var(--accent-text); cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.session-caption__undo:hover { background: var(--bg-hover); }
+.session-caption__undo:active { background: var(--bg-active); }
+.session-caption__undo:disabled { color: var(--text-disabled); background: transparent; cursor: not-allowed; }
+
+/* ------------------------------------------------------------------ dock */
+/* The waiting change (when there is one), any error, then the composer, in the transcript's column. */
+.session-dock { position: relative; display: flex; flex-direction: column; gap: var(--space-3); width: 100%; max-width: var(--page-narrow); margin-inline: auto; }
+/* “New reply”: floats just above the dock, over the fade, so the composer never moves. */
+.session-jump { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-3)); display: flex; justify-content: center; pointer-events: none; }
+.session-jump__btn {
+  pointer-events: auto;
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  height: var(--control-sm); padding: 0 var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: var(--bg-raised); box-shadow: var(--shadow-md);
+  font: inherit; font-size: var(--text-md); font-weight: var(--weight-medium); color: var(--text-1); cursor: pointer;
+  animation: session-arrive var(--duration-base) var(--ease-emphasized);
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.session-jump__btn:hover { background: var(--gray-4); }
+.session-jump__btn > svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-2); }
+@keyframes session-arrive { from { opacity: 0; transform: translateY(var(--space-1)); } }
+
+/* While a change waits, a failure is one plain line under the composer: never a second tinted
+   card, and Confirm never moves. */
+.session-error-line {
+  display: flex; align-items: flex-start; gap: var(--space-2);
+  margin: 0; padding: 0 var(--space-3);
+  font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--danger);
+}
+.session-error-line > svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); margin-top: var(--space-0_5); }
+.session-error-line > span { flex: 1 1 auto; min-width: 0; padding-top: var(--space-1); }
+.session-error-line__title { font-weight: var(--weight-medium); }
+.session-error-line__dismiss { flex: none; margin-top: calc(-1 * var(--space-0_5)); color: var(--text-2); }
+
+/* One Undo in view, on the transcript's column right above the composer. */
+/* Same column as the composer, and the composer's own inner padding, so the button's edge lines up with Send. */
+.session-undo { display: flex; justify-content: flex-end; padding-inline: var(--space-2); }
+
+/* ------------------------------------------------------------------ composer */
+/* The frame is the field: hover and focus show on it, the textarea inside has no frame. A
+   pill while it holds one line; past that it trades the pill for the card radius. */
+.session-composer {
+  display: flex; align-items: flex-end; gap: var(--space-2);
+  min-height: calc(var(--space-12) + var(--space-2));
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-5);
+  border: 1px solid var(--border-input); border-radius: var(--radius-full);
+  background: var(--bg-raised); box-shadow: var(--shadow-md);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+.session-composer.is-multiline { border-radius: var(--radius-xl); }
+.session-composer--live { padding-left: var(--space-1); padding-block: var(--space-1); gap: var(--space-1); }
+.session-composer:hover { border-color: var(--border-input-hover); }
+/* Focus shows on the frame only for the field: a focused button inside the pill keeps its own ring and nothing else lights. */
+.session-composer:has(.session-composer__input:focus) { border-color: var(--focus-ring-color); box-shadow: var(--shadow-md), var(--focus-field); }
+/* Off (reconnecting, models loading): a sunken well, no lift, and the placeholder says why. */
+.session-composer.is-disabled { background: var(--bg-sunken); border-color: var(--border); box-shadow: none; cursor: not-allowed; }
+.session-composer.is-disabled:hover { border-color: var(--border); }
+.session-composer.is-disabled .session-composer__input::placeholder { color: var(--text-disabled); }
+.session-composer__presence { flex: none; }
+.session-composer__input {
+  flex: 1 1 auto; min-width: 0; resize: none; overflow-y: auto;
+  min-height: var(--control-lg); max-height: calc(var(--leading-lg) * 6 + var(--control-lg) - var(--leading-lg));
+  border: 0; padding: calc((var(--control-lg) - var(--leading-lg)) / 2) 0; background: transparent; color: var(--text-1);
+  font: inherit; font-size: var(--text-lg); line-height: var(--leading-lg);
+}
+.session-composer--live .session-composer__input { margin-block: var(--space-1); }
+/* Scrolled past six lines: the top line fades out under the frame instead of being cut. */
+.session-composer__input.is-scrolled {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black var(--space-3));
+  mask-image: linear-gradient(to bottom, transparent 0, black var(--space-3));
+}
+.session-composer__input::placeholder { color: var(--text-3); opacity: 1; }
+.session-composer__input:focus, .session-composer__input:focus-visible { outline: none; }
+.session-composer__input:disabled { cursor: not-allowed; }
+/* 12px between the voice control and Send, so a focus ring never crowds the filled button. */
+.session-composer__voice { flex: none; margin-right: var(--space-1); }
+.session-composer__send { flex: none; }
+
+.session-nowrap { white-space: nowrap; }

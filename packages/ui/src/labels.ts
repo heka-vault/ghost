@@ -3,7 +3,7 @@ import type { Autonomy, Phase } from "@ghost/client-ts";
 export function phaseLabel(phase: Phase): string {
   return {
     starting: "Starting",
-    passive: "Waiting for \"Hey Ghost\"",
+    passive: "Waiting for “Hey Ghost”",
     listening: "Listening",
     thinking: "Thinking",
     speaking: "Speaking",

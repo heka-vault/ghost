@@ -1,0 +1,425 @@
+/*
+ * Owner: tray. Prefix classes with tray-. Rendered without the app shell, on a stand-in
+ * Ubuntu desktop: the GNOME top bar, the popover under Ghost's indicator, the HUD.
+ */
+
+.tray-stage {
+  /* The popover is a menu-sized window: 360 wide, on the 4px grid. */
+  --tray-width: calc(var(--space-20) * 4.5);
+  --tray-bar: var(--space-8); /* GNOME's top bar */
+  /* GNOME Shell draws the top bar and the native menu in Ubuntu's own font, not ours. */
+  --tray-shell-font: "Ubuntu Sans", var(--font-sans);
+  position: relative;
+  /* A bare route with no shell. #root is min-height: 100vh and not a flex column, so a
+     percentage here has nothing to resolve against; until the foundation gives bare routes
+     a stage to fill (shared request), this matches #root's own height, in dvh so a webview's
+     chrome never leaves a gap. */
+  min-height: 100dvh;
+  overflow: hidden;
+  color: var(--text-1);
+  /* A flat ground, as GNOME's own dimmed wallpaper under a menu: the accent stays on Wake. */
+  background: var(--bg-app);
+}
+
+/* ------------------------------------------------------------ the GNOME top bar */
+.tray-topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: var(--tray-bar);
+  padding: 0 var(--space-2);
+  background: var(--gray-0);
+  color: var(--text-1);
+  font-family: var(--tray-shell-font);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.tray-topbar__start { display: flex; align-items: center; gap: var(--space-1_5); padding-left: var(--space-2); }
+.tray-ws { width: var(--space-1_5); height: var(--space-1_5); border-radius: var(--radius-full); background: var(--text-3); }
+.tray-ws.is-current { width: var(--space-6); background: var(--text-1); }
+.tray-topbar__clock { white-space: pre; }
+.tray-topbar__end { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
+
+.tray-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-xs);
+  padding: 0 var(--space-2_5);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-1);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.tray-indicator:hover { background: var(--bg-hover); }
+.tray-indicator.is-open { background: var(--bg-selected); }
+.tray-indicator.is-offline { color: var(--text-disabled); }
+.tray-indicator__mute { width: var(--icon-xs); height: var(--icon-xs); color: var(--warn); }
+.tray-indicator__dot { width: var(--space-1_5); height: var(--space-1_5); border-radius: var(--radius-full); }
+.tray-indicator__dot.is-waiting { background: var(--warn); }
+
+.tray-sys {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-xs);
+  padding: 0 var(--space-2_5);
+  border-radius: var(--radius-full);
+}
+.tray-sys svg { width: var(--icon-md); height: var(--icon-md); }
+
+/* ------------------------------------------------------------ stage legend (prototype only) */
+.tray-legend {
+  position: absolute;
+  top: calc(var(--tray-bar) + var(--space-8));
+  left: var(--space-8);
+  max-width: calc(var(--space-20) * 4);
+}
+.tray-legend__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-semibold);
+}
+.tray-legend__note { margin: var(--space-1) 0 var(--space-4); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.tray-legend__label { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); color: var(--text-2); }
+.tray-legend__list { display: flex; flex-wrap: wrap; gap: var(--space-1_5); margin: 0; padding: 0; list-style: none; }
+.tray-legend__link {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-xs);
+  padding: 0 var(--space-2_5);
+  border: var(--space-px) solid var(--border);
+  border-radius: var(--radius-full);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.tray-legend__link:hover { background: var(--bg-hover); color: var(--text-1); text-decoration: none; }
+.tray-legend__notes { display: grid; gap: var(--space-2); margin-top: var(--space-6); padding-top: var(--space-4); border-top: var(--space-px) solid var(--border-subtle); }
+.tray-legend__notes p { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.tray-legend__notes strong { font-weight: var(--weight-medium); color: var(--text-1); }
+.tray-legend__link.is-current { background: var(--bg-selected); border-color: var(--border-strong); color: var(--text-1); }
+
+/* ------------------------------------------------------------ the popover */
+.tray-pop,
+.tray-quit {
+  position: absolute;
+  top: calc(var(--tray-bar) + var(--space-1_5));
+  right: var(--space-1_5);
+  width: var(--tray-width);
+  border: var(--space-px) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-popover);
+}
+.tray-pop {
+  overflow: hidden;
+  animation: tray-in var(--duration-base) var(--ease-emphasized);
+  transform-origin: top right;
+}
+@keyframes tray-in {
+  from { opacity: 0; transform: translateY(calc(var(--space-1) * -1)); }
+}
+
+.tray-pop__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+}
+/* Room for a title and two subtitle lines in every state, centered: rows below never move. */
+.tray-pop__state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: calc(var(--leading-xl) + var(--leading-sm) * 2);
+}
+.tray-pop__title {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: var(--leading-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+.tray-pop__sub {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Starting: its own row under the header, inset to the header's padding, so both ends sit on
+   the same edges as the rows and separators below. Pulled up into the header's bottom padding. */
+.tray-pop__progress { margin: calc(var(--space-2) * -1) var(--space-3) var(--space-4); }
+.tray-pop__action { flex: none; }
+
+/* A change is waiting: the header steps back to one quiet line (the presence, the state in
+   one sentence, an icon button) so the amber card and its Confirm lead. The 48 presence
+   stays (VoicePresence has no 32; shared request) with the gap closed up. */
+.tray-pop__head.is-quiet { gap: var(--space-2_5); padding: var(--space-3); }
+.tray-pop__head.is-quiet .tray-pop__state { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: var(--space-1_5); min-height: 0; }
+.tray-pop__head.is-quiet .tray-pop__title { flex: none; color: var(--text-1); font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); letter-spacing: 0; }
+.tray-pop__head.is-quiet .tray-pop__title.t-warn { color: var(--warn); }
+.tray-pop__head.is-quiet .tray-pop__sub { flex: 0 1 auto; min-width: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
+.tray-pop__sep { flex: none; font-size: var(--text-sm); color: var(--text-3); }
+
+.tray-pop__slot { display: grid; gap: var(--space-2); padding: 0 var(--space-3) var(--space-4); }
+.tray-pop__hint { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.tray-pop__retry { display: flex; align-items: center; gap: var(--space-2); color: var(--text-3); }
+.tray-pop__command {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: var(--space-px) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+}
+.tray-pop__command code { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-1); overflow-wrap: anywhere; }
+
+.tray-pop__error { margin: 0; padding: 0 var(--space-3) var(--space-3); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--danger); }
+.tray-pop__error--inline { padding: var(--space-1) 0 0; }
+
+.tray-pop__pending { padding: 0 var(--space-3) var(--space-3); }
+/* Decided or lapsed: the slot keeps the card's footprint (--tray-h, measured), then
+   collapses to nothing over --duration-base. Reduced motion makes that 0ms: it just goes. */
+.tray-pop__pending.is-held { height: var(--tray-h); overflow: hidden; }
+.tray-pop__pending.is-collapsing { animation: tray-collapse var(--duration-base) var(--ease-out) forwards; }
+@keyframes tray-collapse {
+  from { height: var(--tray-h); }
+  to { height: 0; padding-bottom: 0; opacity: 0; }
+}
+
+/* The result, where the card was: quiet surface, the summary stepped back, one line where
+   the buttons were. */
+.tray-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  height: 100%;
+  padding: var(--space-3);
+  border: var(--space-px) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  animation: tray-fade var(--duration-base) var(--ease-out);
+}
+@keyframes tray-fade { from { opacity: 0; } }
+.tray-outcome__state { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-medium); color: var(--text-3); }
+.tray-outcome__summary {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tray-outcome__operation { margin: 0; font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); overflow-wrap: anywhere; }
+.tray-outcome__rationale {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tray-outcome__result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1_5);
+  min-height: var(--control-sm);
+  margin: auto 0 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-medium);
+  color: var(--text-1);
+}
+.tray-outcome.is-canceled .tray-outcome__result { font-weight: var(--weight-regular); color: var(--text-2); }
+.tray-outcome__icon { flex: none; width: var(--icon-md); height: var(--icon-md); color: var(--ok); }
+
+.tray-pop__group { border-top: var(--space-px) solid var(--border-subtle); }
+.tray-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.tray-row__icon { display: inline-flex; flex: none; color: var(--text-2); }
+.tray-row__icon svg { width: var(--icon-md); height: var(--icon-md); }
+.tray-row__icon.t-warn { color: var(--warn); }
+.tray-row__text { display: grid; flex: 1 1 auto; min-width: 0; }
+.tray-row__title { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
+.tray-row__desc { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The prototype mark: a quiet word beside the switch, out of the sentence. */
+.tray-row__tag { flex: none; font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); }
+
+/* Same leading column as .tray-row and .tray-item: 12 padding, a 16px icon, 12 gap, so the
+   label, the phrase and the summary start where every other label in the menu does. */
+.tray-pop__last {
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.tray-pop__last-icon { display: inline-flex; align-self: start; margin-top: var(--space-2_5); color: var(--text-2); }
+.tray-pop__last-icon svg { width: var(--icon-md); height: var(--icon-md); }
+.tray-pop__last-text { min-width: 0; border-radius: var(--radius-sm); }
+.tray-pop__label { margin: 0; font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); }
+.tray-pop__done { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tray-pop__done.is-settled { color: var(--text-2); }
+
+/* Inset rounded tiles, as every platform menu draws them: the hover, press and focus
+   shapes never touch the popover's rounded edge. */
+.tray-pop__menu { display: grid; padding: var(--space-1); }
+.tray-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--control-md);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.tray-item:hover { background: var(--bg-hover); text-decoration: none; color: var(--text-1); }
+.tray-item:active { background: var(--bg-active); }
+.tray-item:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
+.tray-item > svg { flex: none; width: var(--icon-md); height: var(--icon-md); color: var(--text-2); }
+.tray-item__label { flex: 1 1 auto; min-width: 0; }
+.tray-item__meta { flex: none; font-size: var(--text-sm); color: var(--text-2); }
+
+/* ------------------------------------------------------------ the native menu (GNOME Shell) */
+/* What GNOME draws for a dbusmenu: its font, 14px items in rounded tiles, hairline
+   separators, a check ornament. No icons, no colors, no badges: dbusmenu can't carry them. */
+.tray-native {
+  position: absolute;
+  top: calc(var(--tray-bar) + var(--space-1_5));
+  right: var(--space-1_5);
+  display: flex;
+  flex-direction: column;
+  min-width: calc(var(--space-20) * 3);
+  max-width: var(--tray-width);
+  padding: var(--space-1_5);
+  border: var(--space-px) solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--tray-shell-font);
+  z-index: var(--z-popover);
+  animation: tray-in var(--duration-fast) var(--ease-out);
+  transform-origin: top center;
+}
+.tray-native:focus-visible { outline: none; }
+.tray-native__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: calc(var(--space-8) + var(--space-1));
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-lg);
+  line-height: var(--leading-md);
+  text-align: left;
+  text-decoration: none;
+  cursor: default;
+}
+.tray-native__item:hover,
+.tray-native__item:focus-visible { background: var(--bg-selected); outline: none; color: var(--text-1); text-decoration: none; }
+.tray-native__item:focus-visible { box-shadow: var(--focus-ring-inset); }
+.tray-native__item:active { background: var(--bg-active); }
+.tray-native__item:disabled { color: var(--text-disabled); background: transparent; }
+.tray-native__item.is-label { color: var(--text-2); }
+.tray-native__item.is-label:hover { background: transparent; }
+.tray-native__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tray-native__check { position: relative; flex: none; width: var(--icon-md); height: var(--icon-md); }
+.tray-native__check.is-on::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 12%;
+  width: 35%;
+  height: 60%;
+  border: solid currentColor;
+  border-width: 0 var(--space-0_5) var(--space-0_5) 0;
+  transform: rotate(45deg);
+}
+.tray-native__sep { height: var(--space-px); margin: var(--space-1_5) var(--space-3); background: var(--border-subtle); }
+
+/* ------------------------------------------------------------ after Quit (prototype) */
+.tray-quit { display: grid; gap: var(--space-2); justify-items: start; padding: var(--space-4); }
+.tray-quit__title { margin: 0; font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold); }
+.tray-quit__text { margin: 0 0 var(--space-2); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.tray-nowrap { white-space: nowrap; }
+
+/* ------------------------------------------------------------ the listening HUD */
+.tray-hud {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-12);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* Hugs its words, 280 to 360 wide; the width eases only when the phase changes (JS, over
+     --duration-base). A caption takes the full 360 so streaming words never move it. */
+  width: max-content;
+  min-width: calc(var(--space-20) * 3.5);
+  max-width: var(--tray-width);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+  border: var(--space-px) solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+  animation: tray-hud-in var(--duration-slow) var(--ease-emphasized);
+}
+@keyframes tray-hud-in {
+  from { opacity: 0; transform: translate(-50%, var(--space-2)); }
+}
+.tray-hud__text { flex: 1 1 auto; min-width: 0; padding-right: var(--space-2); }
+/* The way out reads as a button at a glance: a hairline circle on a quiet surface. */
+.tray-hud__sleep { flex: none; border-radius: var(--radius-full); border: var(--space-px) solid var(--border); background: var(--bg-sunken); }
+.tray-hud__title { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tray-hud.is-caption { width: var(--tray-width); }
+.tray-hud__sub { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Speaking: a caption. The newest words on up to two lines at 13/20, inside the same 48px
+   as title and subtitle, so the capsule keeps its height and shape. */
+.tray-hud.is-caption .tray-hud__sub {
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  color: var(--text-1);
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
