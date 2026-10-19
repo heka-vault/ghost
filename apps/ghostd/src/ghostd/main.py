@@ -62,6 +62,8 @@ DUCK_STATE = "duck.json"
 PHONE_STATE = "phone.json"
 VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 5  # no keepalive from the phone for this long ends its session
+PHONE_WRITE_TIMEOUT_SECS = 2.0  # a write to a gone phone fails after this
+PHONE_WIND_DOWN_SECS = 3.0  # how long the loop waits for a cancelled phone session to drain
 PHONE_READY_SECS = 3.0  # after the connection: how long to wait for the phone's client-ready
 PHONE_GREETING_LEAD_SECS = 0.3  # let the phone's playback settle before the first word
 PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then is dropped
@@ -612,7 +614,12 @@ class Daemon:
                 # to a dead peer. Safe because each session forks its own processors
                 # from Models, so a cancelled one can't leave the next one mute.
                 await session.cancel()
-                await run_task
+                try:
+                    await asyncio.wait_for(asyncio.shield(run_task), PHONE_WIND_DOWN_SECS)
+                except TimeoutError:
+                    # The pipeline is still draining to a dead peer; let it finish on its
+                    # own so the desk is free for the next Start now.
+                    logger.info(f"session {session.session_id}: still winding down; moving on")
         except Exception:
             logger.exception("session failed")
         finally:
@@ -645,6 +652,9 @@ class Daemon:
                     audio_out_enabled=True,
                     audio_out_sample_rate=TTS_SAMPLE_RATE,
                     audio_out_mixer=mixer,
+                    # The phone closes the call itself after the goodbye; a write to the
+                    # gone peer should fail fast, not hold the session for the default 10 s.
+                    audio_out_write_timeout_secs=PHONE_WRITE_TIMEOUT_SECS,
                 ),
             )
 
