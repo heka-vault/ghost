@@ -7,7 +7,9 @@ from ghost_core.conversations.models import (
     ConversationSnapshot,
     ConversationTarget,
     Profile,
+    Scope,
     TurnRecord,
+    describe_scope,
     slugify,
 )
 from ghost_core.conversations.service import (
@@ -32,6 +34,8 @@ __all__ = [
     "Conversations",
     "Profile",
     "ResumeContext",
+    "Scope",
     "TurnRecord",
+    "describe_scope",
     "slugify",
 ]

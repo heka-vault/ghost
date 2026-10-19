@@ -46,13 +46,18 @@ from ghost_core.models import (
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy, PolicyError, Risk
 from ghost_core.request import asked_for, number_mentions
+from ghost_core.scope import SCOPE_ARG, ActiveScope, OutOfScope, scope_of
 from ghost_core.store import Store
 from ghost_core.writer import Writer
 
 __all__ = [
     "asked_for",
     "number_mentions",
+    "scope_of",
+    "SCOPE_ARG",
     "Ability",
+    "ActiveScope",
+    "OutOfScope",
     "AbilityError",
     "AbilityInstance",
     "AbilityStore",

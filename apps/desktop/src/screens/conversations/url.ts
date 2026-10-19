@@ -44,6 +44,12 @@ export function clearParams() {
 export const focusOnOpen: { slug: string | null } = { slug: null };
 
 /**
+ * A settled line to start the next one from (ADR 0019): set by a settled line's Memory tab
+ * before navigating to the index, which opens New line with that line preselected, once.
+ */
+export const newLineSeed: { slug: string | null } = { slug: null };
+
+/**
  * Design mode only (`&fail=lines` or `&fail=line`): that page's loads fail until Try again
  * is pressed, so the failed state can be seen and screenshotted. Try again then loads.
  */

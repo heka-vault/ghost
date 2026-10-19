@@ -236,3 +236,9 @@
   border-radius: var(--radius-full); background: var(--ok-soft); color: var(--ok);
 }
 .set-pair__done .set-help { margin: var(--space-1_5) 0 0; }
+
+/* ------------------------------------------------ GitHub tokens by owner (ADR 0019) */
+.set-tokens { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); width: 100%; }
+.set-tokens__table { width: 100%; }
+.set-tokens__table td { vertical-align: middle; }
+.set-tokens__table td:not(.is-shrink) { width: 50%; }

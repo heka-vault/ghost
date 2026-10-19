@@ -210,3 +210,12 @@ async def test_go_to_sleep_calls_back(wired):
     await llm.functions["go_to_sleep"](FakeParams("go_to_sleep", {}, llm=llm))
     assert slept == [True]
     assert llm.pushed == []  # the model's own goodbye is spoken, not a fixed word
+
+
+def test_prompt_scope_note_follows_the_routing_setting():
+    assert "This thread covers only" not in build_system_prompt(["F"])
+    offer = build_system_prompt(["F"], scope="github_issues: acme/app", routing=False)
+    assert "This thread covers only: github_issues: acme/app" in offer
+    assert "ask whether to patch them through" in offer
+    routed = build_system_prompt(["F"], scope="github_issues: acme/app", routing=True)
+    assert "patches the operator through to it by itself" in routed

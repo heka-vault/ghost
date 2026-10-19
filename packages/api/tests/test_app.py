@@ -94,6 +94,16 @@ def test_abilities_listing(world):
     assert ops["flag"]["autonomy"] == "announce" and ops["nuke"]["autonomy"] == "confirm"
     assert by["fake"]["read_tools"][0]["name"] == "echo"
     assert by["other"]["enabled"] is False and by["other"]["operations"] == []
+    assert by["fake"]["scope_kind"] is None and by["fake"]["scope_items"] == []
+    # a scoped ability (ADR 0019) says how and lists its whole allowlist
+    loaded = world[5]
+    loaded.contributions.scope_kind = "repository"
+    loaded.contributions.scope_items = lambda: ["acme/app", "acme/infra"]
+    by = {a["name"]: a for a in client.get("/abilities").json()}
+    assert by["fake"]["scope_kind"] == "repository"
+    assert by["fake"]["scope_items"] == ["acme/app", "acme/infra"]
+    conv_ops = {o["name"] for o in by["conversations"]["operations"]}
+    assert {"set_scope", "settle", "unsettle", "create"} <= conv_ops
 
 
 def test_policy_round_trip_and_live_reload(world):

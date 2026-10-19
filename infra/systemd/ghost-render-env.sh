@@ -34,6 +34,17 @@ tmp="$(mktemp "$OUT_DIR/.env.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 chmod 600 "$tmp"
 
+# Per-owner GitHub tokens (ADR 0019): GHOST_GITHUB_TOKENS="owner=ENV_NAME,..." in
+# settings.env names the variables; fetch each of those from the store too.
+if [[ -r "$OUT_DIR/settings.env" ]]; then
+  map="$(sed -n 's/^GHOST_GITHUB_TOKENS=//p' "$OUT_DIR/settings.env" | tr -d '"' | tail -1)"
+  IFS=',' read -ra pairs <<<"$map"
+  for pair in "${pairs[@]}"; do
+    name="${pair#*=}"; name="${name// /}"
+    [[ -n "$name" && "$name" != "$pair" ]] && KEYS+=("$name")
+  done
+fi
+
 for key in "${KEYS[@]}"; do
   if value="$(curl -fsS --max-time 10 -H "Authorization: Bearer $HEKA_VAULT_TOKEN" \
       "$HEKA_VAULT_URL/api/v1/projects/$HEKA_VAULT_PROJECT/secrets/$key?env=dev&format=raw" 2>/dev/null)"; then

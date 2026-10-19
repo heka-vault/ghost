@@ -7,14 +7,16 @@
  */
 import type { ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { CloudOff, MessagesSquare, Plus } from "lucide-react";
+import { Archive, CloudOff, MessagesSquare, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { hrefFor, navigate } from "../../app/router";
 import { useDesign } from "../../design/context";
 import {
+  Badge,
   Button,
   Card,
+  Disclosure,
   EmptyState,
   LineGlyph,
   ListRow,
@@ -22,10 +24,12 @@ import {
   Notice,
   Page,
   Skeleton,
+  Tooltip,
   cx,
   errorText,
   lineName,
   quoted,
+  relativeTime,
   useLive,
   useToast,
 } from "../../ui";
@@ -33,12 +37,38 @@ import { drafts } from "./draft";
 import { LineStateText, lineState } from "./lineState";
 import { NewLineDialog } from "./NewLineDialog";
 import { personaCache } from "./personaCache";
-import { designFail, designRetry, focusOnOpen, readParam, writeParam } from "./url";
+import { type Scope, isSettled, scopeItems, scopeOf, settledAt } from "./threads";
+import { designFail, designRetry, focusOnOpen, newLineSeed, readParam, writeParam } from "./url";
 import { parseVoice, voiceKind } from "./voices";
 
 /** The first line of a persona, as the row's one-line description. */
 export function personaLead(persona: string): string {
   return persona.split("\n").map((s) => s.trim()).find(Boolean) ?? "";
+}
+
+/**
+ * A line's scope as small mono chips (ADR 0019): the first two items, then “+N” with the rest
+ * in a tooltip. Unscoped lines show nothing: the absence is the common case and needs no label.
+ */
+export function ScopeChips({ scope, max = 2 }: { scope: Scope; max?: number }) {
+  const items = scopeItems(scope);
+  if (!items.length) return null;
+  const shown = items.slice(0, max);
+  const rest = items.slice(max);
+  return (
+    <span className="conv-row-scope" aria-label={`Scope: ${items.join(", ")}`}>
+      {shown.map((i) => (
+        <Badge key={i} size="sm" mono variant="outline">
+          {i}
+        </Badge>
+      ))}
+      {rest.length > 0 && (
+        <Tooltip content={rest.join(", ")}>
+          <span className="conv-row-scope__more">+{rest.length}</span>
+        </Tooltip>
+      )}
+    </span>
+  );
 }
 
 export function LinesIndex() {
@@ -60,7 +90,13 @@ export function LinesIndex() {
   const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [retrying, setRetrying] = useState(false);
-  const [creating, setCreating] = useState(() => readParam("open") === "new");
+  // New line opens from the URL, or from a settled line's “Start a line from this memory”.
+  const [seed] = useState<string | null>(() => {
+    const s = newLineSeed.slug ?? readParam("seed");
+    newLineSeed.slug = null;
+    return s;
+  });
+  const [creating, setCreating] = useState(() => readParam("open") === "new" || !!seed);
   const [switching, setSwitching] = useState<string | null>(null);
 
   const inSession = !!status?.session_id;
@@ -100,7 +136,10 @@ export function LinesIndex() {
   const sorted = [...(lines ?? [])].sort(
     (a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? "") || a.name.localeCompare(b.name),
   );
-  const others = sorted.filter((l) => !l.is_ghost);
+  // Settled lines (ADR 0019) are out of the active list; they wait in their own group below.
+  const active = sorted.filter((l) => !isSettled(l));
+  const settledLines = sorted.filter(isSettled).sort((a, b) => (settledAt(b) ?? "").localeCompare(settledAt(a) ?? ""));
+  const others = active.filter((l) => !l.is_ghost);
   // With only Ghost, the empty state below the list carries the one call to action.
   const onlyGhost = lines != null && others.length === 0;
 
@@ -187,7 +226,7 @@ export function LinesIndex() {
       ) : (
         <>
           <Card list>
-            {sorted.map((l) => {
+            {active.map((l) => {
               const name = lineName(l.slug, l.name);
               const live = l.slug === liveSlug;
               const unsaved = drafts.has(l.slug);
@@ -217,7 +256,13 @@ export function LinesIndex() {
                       <span className="conv-row-desc t-3">No persona yet</span>
                     )
                   }
-                  meta={unsaved ? <span className="conv-row-meta">Unsaved changes</span> : undefined}
+                  meta={
+                    unsaved ? (
+                      <span className="conv-row-meta">Unsaved changes</span>
+                    ) : (
+                      <ScopeChips scope={scopeOf(l)} />
+                    )
+                  }
                   trailing={
                     live ? (
                       <span className="conv-row-end">
@@ -272,6 +317,54 @@ export function LinesIndex() {
                 : "Switch works while a session is live. Wake Ghost, then switch here or say it."}
             </p>
           )}
+          {settledLines.length > 0 && (
+            <Disclosure
+              className="conv-settled-group"
+              defaultOpen={readParam("open") === "settled"}
+              summary={
+                <span className="conv-settled-group__summary">
+                  Settled
+                  <span className="conv-settled-group__count t-num">{settledLines.length}</span>
+                </span>
+              }
+            >
+              <p className="conv-settled-group__lead t-small t-2">Lines you’ve finished with. Out of voice routing, still there to read, and a new line can start from one’s memory.</p>
+              <Card list className="conv-settled-group__list">
+                {settledLines.map((l) => {
+                  const name = lineName(l.slug, l.name);
+                  const persona = personas[l.slug];
+                  const lead = typeof persona === "string" ? personaLead(persona) : "";
+                  const when = settledAt(l);
+                  return (
+                    <ListRow
+                      key={l.slug}
+                      href={hrefFor(`/conversations/${l.slug}`)}
+                      leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
+                      title={name}
+                      description={
+                        lead ? (
+                          <span className="conv-row-desc" data-user-content>
+                            {lead}
+                          </span>
+                        ) : (
+                          <span className="conv-row-desc t-3">No persona</span>
+                        )
+                      }
+                      meta={<ScopeChips scope={scopeOf(l)} />}
+                      trailing={
+                        <span className="conv-row-end">
+                          <span className="conv-row-end__when conv-row-settled">
+                            <Archive size={12} aria-hidden />
+                            {when ? `Settled ${relativeTime(when)}` : "Settled"}
+                          </span>
+                        </span>
+                      }
+                    />
+                  );
+                })}
+              </Card>
+            </Disclosure>
+          )}
         </>
       )}
 
@@ -282,6 +375,8 @@ export function LinesIndex() {
           writeParam("open", null);
         }}
         taken={(lines ?? []).flatMap((l) => [l.name.toLowerCase(), l.slug])}
+        settled={settledLines}
+        seed={seed}
         onCreated={(d) => {
           setCreating(false);
           writeParam("open", null);

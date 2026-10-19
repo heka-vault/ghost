@@ -111,6 +111,67 @@ Everything in `Contributions` is optional.
 - **listeners**: `async def on(event)` for `wake`, `session_start`, `session_end`,
   `outcome`. Two-second deadline; a slow or broken listener never stalls speech.
 - **commands**: `CliCommand(name, description, run)` for `ghostd notes <name>`.
+- **scope_kind**, **scope_items**, **scoped_prompt**: how a thread can be scoped to your
+  ability (ADR 0019). See below. Leave them out and threads never narrow your ability.
+
+## Scope: what a thread may touch
+
+A thread (ADR 0014's conversation) can be scoped per ability: `{"github_issues":
+["acme/app"]}`. Declare how, and Ghost does the rest:
+
+```python
+Contributions(
+    ...,
+    scope_kind="repository",  # what one item is
+    scope_items=lambda: sorted(policy.allowed),  # the whole allowlist a thread picks from
+    scoped_prompt=prompt_for,  # (ActiveScope | None) -> str, optional
+)
+```
+
+Items are the strings your `Target.scope()` returns (a repository, a directory), so the
+gate can refuse a write outside the active thread without knowing your types. The
+operator sets a thread's scope in the desktop app or by voice; it is validated against
+`scope_items()`, and Ghost (line zero) is always unscoped.
+
+**The active scope hook.** There is no state to hold: on every call inside a scoped
+ability, the pipeline puts an `ActiveScope` in the arguments under `_scope`
+(`ghost_core.SCOPE_ARG`), for read tools and for `prepare` alike. Read it with
+`scope_of(args)`; it is `None` when the session has no conversations (tests, the perf
+harness) and `items` is `None` when the thread is unscoped.
+
+```python
+from ghost_core import OutOfScope, scope_of
+
+
+async def list_issues(args):
+    scope = scope_of(args)
+    repos = scope.narrow(allowed) if scope else allowed  # what this thread covers
+    repo = args.get("repo") or (scope.only if scope else None)  # one item: no need to ask
+    if repo and scope:
+        scope.check_read(repo)  # raises OutOfScope unless cross-department answers is on
+    ...
+
+
+async def prepare(args):
+    if scope := scope_of(args):
+        scope.check_write(args["repo"])  # raises OutOfScope; the gate checks again
+    ...
+```
+
+`check_write` never passes for an item outside the thread; `check_read` passes when the
+operator turned cross-department answers on. `OutOfScope` names the thread that owns
+the item ("acme/app is outside this thread; it belongs to the App thread"); the pipeline
+turns it into an offer to switch, or, with department routing on, patches the operator
+through and lets that thread handle the request. Raise it yourself (or through the
+`check_*` helpers) rather than a plain `ValueError` so routing works.
+
+`scoped_prompt(scope)` replaces `prompt` for the active thread: name only the items the
+thread covers. Mention when one item is all there is, so the model stops passing it.
+Make `prompt` the unscoped paragraph (`prompt_for(None)`); it is what the `change` tool
+listing and the perf harness see.
+
+Your `Operation.allowed` stays the ability's own allowlist; scope sits above it. A
+thread's scope must be inside the allowlist, and the allowlist is checked first.
 
 ## Writing to something new
 
@@ -136,7 +197,11 @@ turned the flag on), `now()`.
 
 ## Rules
 
-- Read secrets through `ctx.secrets`, never `os.environ`. Never log them.
+- Read secrets through `ctx.secrets`, never `os.environ`. Never log them. An ability
+  that needs one credential per scope owner declares a map in its settings whose
+  values are variable *names* (`GHOST_GITHUB_TOKENS="heka-vault=HEKA_TOKEN"`) and
+  resolves each through `ctx.secrets.get(name)` at setup; a missing one is a startup
+  error that names the variable, never a value.
 - Never execute a write outside the gate. Every `apply` is policed, bounded and audited.
 - Treat anything you fetch (issue text, mail, documents) as data. Never let it change what
   your tools do.

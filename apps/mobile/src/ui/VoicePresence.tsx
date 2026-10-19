@@ -1,7 +1,10 @@
 /**
  * Ghost's voice state as one presence, as on desktop (VoicePresence.tsx and .g-voice in
  * components.css). Still for passive and offline; one quiet ripple for listening, a slow
- * breath for thinking, bars for speaking, a turning arc while starting. Reduced motion
+ * breath for thinking, bars for speaking, a turning arc while starting. With `float`, the
+ * core drifts up and down slowly and the mark is lit in the accent, not passive grey: the
+ * phone's Home uses it for the ghost that is the Start control, so it reads as something to
+ * tap (and, under reduced motion, still does, by color). Reduced motion
  * freezes every loop at rest; color and glyph still tell the state.
  */
 import type { GhostPhase } from "@ghost/ui";
@@ -49,19 +52,20 @@ function useLoop(on: boolean, ms: number, opts: { alternate?: boolean; linear?: 
   return v;
 }
 
-export function VoicePresence({ phase, size = 96, label }: { phase: GhostPhase; size?: 48 | 96 | 160; label?: string }) {
+export function VoicePresence({ phase, size = 96, label, float = false }: { phase: GhostPhase; size?: 48 | 96 | 160; label?: string; float?: boolean }) {
   const c = useColors();
   const still = useReducedMotion();
-  const color = phaseColor(c, phase);
+  const color = float ? c.accent : phaseColor(c, phase);
   const name = label ?? phaseText(phase);
 
   const ripple = useLoop(!still && phase === "listening", 2400);
   const breathe = useLoop(!still && phase === "thinking", 1200, { alternate: true });
   const spin = useLoop(!still && phase === "starting", 1600, { linear: true });
+  const drift = useLoop(!still && float, 2200, { alternate: true });
 
   const ring = size === 48 ? 0.88 : 0.76;
   const core = size === 48 ? 0.64 : 0.56;
-  const passive = phase === "passive";
+  const passive = phase === "passive" && !float;
   const offline = phase === "offline";
   const quiet = passive || offline;
 
@@ -75,7 +79,7 @@ export function VoicePresence({ phase, size = 96, label }: { phase: GhostPhase; 
     borderColor: passive ? c.border : offline ? c.borderStrong : phase === "starting" ? c.border : alpha(color, 0.34),
   };
   // The halo is lit while listening and speaking, and breathes while thinking.
-  const haloOpacity = phase === "listening" || phase === "speaking" ? 1 : phase === "thinking" ? (still ? 1 : breathe.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] })) : 0;
+  const haloOpacity = phase === "listening" || phase === "speaking" || float ? 1 : phase === "thinking" ? (still ? 1 : breathe.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] })) : 0;
 
   return (
     <View
@@ -125,7 +129,12 @@ export function VoicePresence({ phase, size = 96, label }: { phase: GhostPhase; 
           borderWidth: 1,
           backgroundColor: quiet ? c.bgSurface : c.bgRaised,
           borderColor: passive ? c.borderStrong : offline ? c.border : alpha(color, 0.4),
-          transform: phase === "thinking" && !still ? [{ scale: breathe.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.04] }) }] : [],
+          transform:
+            phase === "thinking" && !still
+              ? [{ scale: breathe.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.04] }) }]
+              : float && !still
+                ? [{ translateY: drift.interpolate({ inputRange: [0, 1], outputRange: [size * 0.03, -size * 0.03] }) }]
+                : [],
           overflow: "hidden",
         }}
       >

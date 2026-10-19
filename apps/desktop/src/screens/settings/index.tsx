@@ -105,6 +105,7 @@ import {
 } from "./model";
 import { type BarState, ChipsInput, CommandCopy, type NavItem, PageNav, Row, SaveBar, SecretRow, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PhoneSection } from "./Phone";
+import { TokenMapEditor } from "./Tokens";
 import "./settings.css";
 
 // Charter sections with no API yet. Compiled only in development; rendered only under the mock layer.
@@ -666,7 +667,7 @@ export default function SettingsScreen(_: RouteProps) {
   };
   const navItems: NavItem[] = [
     ...(showSetup ? [{ id: "setup" as const, label: SECTION_TITLE.setup }] : []),
-    ...(["secrets", "model", "github", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
+    ...(["secrets", "model", "github", "lines", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
     ...(mock && Prototype ? (["privacy", "sounds"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], prototype: true })) : []),
   ];
 
@@ -758,6 +759,8 @@ export default function SettingsScreen(_: RouteProps) {
   const jev = v.GHOST_JEV || "auto";
   const jevStatus = jevNow(jev, s, draft.secrets);
   const practice = truthy(v.GHOST_GITHUB_MOCK);
+  const crossAnswers = truthy(v.GHOST_CROSS_DEPARTMENT_ANSWERS);
+  const routing = truthy(v.GHOST_DEPARTMENT_ROUTING);
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
   const secretNames = s
     ? SECRET_ORDER.filter((n) => s.secrets.some((x) => x.name === n)).concat(s.secrets.map((x) => x.name).filter((n) => !SECRET_ORDER.includes(n)))
@@ -934,6 +937,20 @@ export default function SettingsScreen(_: RouteProps) {
                       description={waits("GHOST_GITHUB_MOCK", "Sample issues in memory. Nothing reaches github.com.")}
                     />
                   </Row>
+                  <Row>
+                    <Field
+                      id={fieldId("GHOST_GITHUB_TOKENS")}
+                      label="Tokens by owner"
+                      detail="GHOST_GITHUB_TOKENS"
+                      help={help(
+                        "GHOST_GITHUB_TOKENS",
+                        "An organization can have its own token: name the environment variable that holds it. The variable has to exist where Ghost runs (your vault); only its name is kept here. Owners not listed use the GitHub token above.",
+                      )}
+                      error={err("GHOST_GITHUB_TOKENS")}
+                    >
+                      <TokenMapEditor value={v.GHOST_GITHUB_TOKENS ?? ""} disabled={!online} onChange={(next) => setValue("GHOST_GITHUB_TOKENS", next)} />
+                    </Field>
+                  </Row>
                 </Card>
                 {!practice && !isSet(s, "GITHUB_TOKEN") && (
                   <p className="set-note">
@@ -943,6 +960,46 @@ export default function SettingsScreen(_: RouteProps) {
                     </button>
                   </p>
                 )}
+              </Section>
+
+              {/* ----------------------------------------------------------- Lines */}
+              <Section
+                id={sectionDomId("lines")}
+                title={SECTION_TITLE.lines}
+                description="What a scoped line does when you ask about something outside its scope. It never changes anything outside it, whatever you choose here."
+                className="set-section"
+              >
+                <Card list>
+                  <Row className="set-practice">
+                    <Checkbox
+                      id={fieldId("GHOST_CROSS_DEPARTMENT_ANSWERS")}
+                      checked={crossAnswers}
+                      onChange={(on) => setValue("GHOST_CROSS_DEPARTMENT_ANSWERS", on ? "1" : "0")}
+                      label={
+                        <span className="set-practice__label">
+                          Cross-department answers <span className="set-detail">GHOST_CROSS_DEPARTMENT_ANSWERS</span>
+                        </span>
+                      }
+                      description={waits("GHOST_CROSS_DEPARTMENT_ANSWERS", "A line may look things up outside its scope to answer you. It never changes them.")}
+                    />
+                  </Row>
+                  <Row className="set-practice">
+                    <Checkbox
+                      id={fieldId("GHOST_DEPARTMENT_ROUTING")}
+                      checked={routing}
+                      onChange={(on) => setValue("GHOST_DEPARTMENT_ROUTING", on ? "1" : "0")}
+                      label={
+                        <span className="set-practice__label">
+                          Department routing <span className="set-detail">GHOST_DEPARTMENT_ROUTING</span>
+                        </span>
+                      }
+                      description={waits("GHOST_DEPARTMENT_ROUTING", "When a request belongs to another line, Ghost patches you through to it instead of telling you where it belongs.")}
+                    />
+                  </Row>
+                </Card>
+                <p className="set-note">
+                  Both off: Ghost says which line it belongs to and offers to switch. Ghost itself is never scoped.
+                </p>
               </Section>
 
               {/* -------------------------------------------------- Voice and wake */}

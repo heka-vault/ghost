@@ -19,7 +19,10 @@ from ghost_core.conversations.models import (
     SetMemory,
     SetNotes,
     SetPersona,
+    SetScope,
+    Settle,
     SetVoice,
+    Unsettle,
 )
 from ghost_core.models import Change, Snapshot, Target, utcnow
 from ghost_core.store import Store
@@ -48,6 +51,8 @@ class ConversationWriter:
             notes=self._files.notes(p.slug),
             turns=self._store.turn_count(p.slug),
             deleted=p.deleted_at is not None,
+            scope=p.scope,
+            settled=p.settled,
         )
 
     async def apply(self, target: Target, change: Change, idempotency_key: str) -> None:
@@ -55,14 +60,59 @@ class ConversationWriter:
         slug = target.slug
         store, files = self._store, self._files
         match change:
-            case Create(name=name, aliases=aliases, voice=voice, speed=speed, persona=persona):
+            case Create(
+                name=name,
+                aliases=aliases,
+                voice=voice,
+                speed=speed,
+                persona=persona,
+                scope=scope,
+                memory=memory,
+            ):
                 if store.get_conversation(slug) is not None:
                     raise ValueError(f"{name!r} already exists")
+                if slug == GHOST and scope:
+                    raise ValueError("Ghost cannot be scoped")
                 store.upsert_conversation(
-                    Profile(slug=slug, name=name, aliases=aliases, voice=voice, speed=speed)
+                    Profile(
+                        slug=slug, name=name, aliases=aliases, voice=voice, speed=speed, scope=scope
+                    )
                 )
                 files.ensure(slug)
                 files.write(slug, PERSONA, persona)
+                if memory.strip():
+                    files.write(slug, MEMORY, memory)
+                    store.add_compaction(
+                        Compaction(
+                            id=uuid.uuid4().hex,
+                            conversation=slug,
+                            summary=memory,
+                            through_turn_id=None,
+                            at=utcnow(),
+                            source="manual",
+                        )
+                    )
+            case SetScope(scope=scope):
+                if slug == GHOST:
+                    raise ValueError("Ghost is unscoped and cannot be given a scope")
+                p = self._live(slug)
+                store.upsert_conversation(
+                    p.model_copy(update={"scope": scope, "updated_at": utcnow()})
+                )
+            case Settle():
+                if slug == GHOST:
+                    raise ValueError("Ghost cannot be settled")
+                p = self._live(slug)
+                if not p.settled:
+                    store.upsert_conversation(
+                        p.model_copy(update={"settled_at": utcnow(), "updated_at": utcnow()})
+                    )
+            case Unsettle():
+                p = self._live(slug)
+                if p.settled:
+                    store.upsert_conversation(
+                        p.model_copy(update={"settled_at": None, "updated_at": utcnow()})
+                    )
             case Rename(name=name, aliases=aliases):
                 if slug == GHOST:
                     raise ValueError("Ghost keeps its name")

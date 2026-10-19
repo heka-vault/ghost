@@ -45,7 +45,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Conversations */
+        /**
+         * List Conversations
+         * @description Every live thread, Ghost first, settled ones included (``settled_at`` set) so
+         *     the app can show its Settled group. ``settled=true`` or ``false`` filters.
+         */
         get: operations["list_conversations_conversations_get"];
         put?: never;
         /** Create Conversation */
@@ -143,6 +147,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations/{slug}/settle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Settle Conversation
+         * @description Mark the thread done (ADR 0019): out of voice routing, everything kept.
+         */
+        post: operations["settle_conversation_conversations__slug__settle_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations/{slug}/switch": {
         parameters: {
             query?: never;
@@ -171,6 +195,23 @@ export interface paths {
         get: operations["conversation_turns_conversations__slug__turns_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}/unsettle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unsettle Conversation */
+        post: operations["unsettle_conversation_conversations__slug__unsettle_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -538,6 +579,13 @@ export interface components {
              */
             read_tools: components["schemas"]["ReadToolInfo"][];
             /**
+             * Scope Items
+             * @default []
+             */
+            scope_items: string[];
+            /** Scope Kind */
+            scope_kind?: string | null;
+            /**
              * Slots
              * @default []
              */
@@ -633,6 +681,15 @@ export interface components {
              * @default
              */
             persona: string;
+            /**
+             * Scope
+             * @default {}
+             */
+            scope: {
+                [key: string]: string[];
+            };
+            /** Seed From */
+            seed_from?: string | null;
             /** Speed */
             speed?: number | null;
             /** Voice */
@@ -665,6 +722,15 @@ export interface components {
             notes: string[];
             /** Persona */
             persona: string;
+            /**
+             * Scope
+             * @default {}
+             */
+            scope: {
+                [key: string]: string[];
+            };
+            /** Settled At */
+            settled_at?: string | null;
             /** Slug */
             slug: string;
             /** Speed */
@@ -704,6 +770,12 @@ export interface components {
             notes?: string[] | null;
             /** Persona */
             persona?: string | null;
+            /** Scope */
+            scope?: {
+                [key: string]: string[];
+            } | null;
+            /** Seed From */
+            seed_from?: string | null;
             /** Speed */
             speed?: number | null;
             /** Voice */
@@ -726,6 +798,15 @@ export interface components {
             last_active_at: string | null;
             /** Name */
             name: string;
+            /**
+             * Scope
+             * @default {}
+             */
+            scope: {
+                [key: string]: string[];
+            };
+            /** Settled At */
+            settled_at?: string | null;
             /** Slug */
             slug: string;
             /** Speed */
@@ -1281,7 +1362,9 @@ export interface operations {
     };
     list_conversations_conversations_get: {
         parameters: {
-            query?: never;
+            query?: {
+                settled?: boolean | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1295,6 +1378,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1559,6 +1651,37 @@ export interface operations {
             };
         };
     };
+    settle_conversation_conversations__slug__settle_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     switch_conversation_conversations__slug__switch_post: {
         parameters: {
             query?: never;
@@ -1610,6 +1733,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TurnView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unsettle_conversation_conversations__slug__unsettle_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
                 };
             };
             /** @description Validation Error */

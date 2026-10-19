@@ -6,7 +6,6 @@
 import type {
   AbilityInfo,
   AuditEntry,
-  ConversationDetail,
   ConversationView,
   DevicesView,
   GhostEvent,
@@ -24,6 +23,7 @@ import type {
   VoiceInfo,
 } from "@ghost/client-ts";
 
+import type { Scope, ThreadDetail, ThreadFields } from "../../screens/conversations/threads";
 import type { LineRecord } from "./fixtures/conversations";
 import type { Fixtures } from "./fixtures";
 import { renderToml } from "./fixtures/policy";
@@ -226,7 +226,8 @@ export class MockDaemon {
       const patch = /(?:patch me (?:through )?to|switch to|back to)\s+(?:the\s+)?([\w -]+?)(?:\s+line)?[.!?]*$/i.exec(text);
       if (patch) {
         const want = patch[1].trim().toLowerCase();
-        const line = [...this.lines.values()].find((l) => l.detail.slug === want || l.detail.name.toLowerCase() === want || l.detail.aliases.includes(want));
+        // A settled line has left voice routing (ADR 0019): its name no longer patches through.
+        const line = [...this.lines.values()].find((l) => !l.detail.settled_at && (l.detail.slug === want || l.detail.name.toLowerCase() === want || l.detail.aliases.includes(want)));
         if (line) {
           this.switchTo(line.detail.slug);
           return this.reply(`${line.detail.is_ghost ? "Ghost" : line.detail.name} here.`);
@@ -315,9 +316,17 @@ export class MockDaemon {
   }
 
   // ------------------------------------------------------------------ conversations
-  private view(d: ConversationDetail): ConversationView {
-    const { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost } = d;
-    return { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost };
+  private view(d: ThreadDetail): ConversationView & ThreadFields {
+    const { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at } = d;
+    return { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at };
+  }
+  /** A scope as the body carries it: per ability, a list of strings. Anything else is ignored. */
+  private scopeFrom(raw: unknown): Scope {
+    const out: Scope = {};
+    if (raw && typeof raw === "object") {
+      for (const [k, items] of Object.entries(raw as Record<string, unknown>)) if (Array.isArray(items)) out[k] = items.map(String);
+    }
+    return out;
   }
   private line(slug: string): LineRecord {
     const l = this.lines.get(slug);
@@ -328,6 +337,7 @@ export class MockDaemon {
   private switchTo(slug: string) {
     const target = this.line(slug);
     if (!this.status.session_id) throw new HttpError(409, "Wake Ghost first: switching patches a live session through.");
+    if (target.detail.settled_at) throw new HttpError(409, `The ${target.detail.name} line is settled. Unsettle it to patch through.`);
     if (this.status.conversation !== slug) this.addTurn("assistant", target.detail.is_ghost ? "Back to Ghost." : `Patching you through to ${target.detail.name}.`, "system");
     this.setActive(slug);
     this.pushStatus({ conversation: slug });
@@ -448,13 +458,19 @@ export class MockDaemon {
       if (!name) throw new HttpError(422, "A conversation needs a name.");
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       if (this.lines.has(slug)) throw new HttpError(409, `There is already a conversation called ${name}.`);
-      const detail: ConversationDetail = {
+      // seed_from (ADR 0019): a settled line's memory is the new line's starting memory, a handoff to edit.
+      let memory = "";
+      const seed = typeof b.seed_from === "string" && b.seed_from ? this.lines.get(b.seed_from) : null;
+      if (b.seed_from && !seed) throw new HttpError(404, `No conversation called ${String(b.seed_from)} to start from.`);
+      if (seed) memory = seed.detail.memory;
+      const detail: ThreadDetail = {
         slug, name, aliases: (b.aliases as string[]) ?? [], voice: (b.voice as string) ?? "af_heart", speed: (b.speed as number) ?? 1,
-        persona: String(b.persona ?? ""), memory: "", notes: [], created_at: now(), last_active_at: null, active: false, is_ghost: false,
+        persona: String(b.persona ?? ""), memory, notes: [], created_at: now(), last_active_at: null, active: false, is_ghost: false,
         turn_count: 0, compactions: 0, dir: `~/.local/share/ghost/conversations/${slug}`,
+        scope: this.scopeFrom(b.scope), settled_at: null,
       };
       this.lines.set(slug, { detail, turns: [], compactions: [] });
-      this.audited("conversations", "create", `conversation:${slug}`, `Started a new line: ${name}.`);
+      this.audited("conversations", "create", `conversation:${slug}`, seed ? `Started a new line: ${name}, from the ${seed.detail.name} line’s memory.` : `Started a new line: ${name}.`);
       this.conversationEvent(slug);
       return detail;
     }
@@ -467,12 +483,36 @@ export class MockDaemon {
       if (method === "GET" && sub === "/turns") return l.turns.slice(-Number(query.get("limit") ?? 200));
       if (method === "GET" && sub === "/compactions") return l.compactions;
       if (method === "PATCH" && sub === "") {
+        if (d.settled_at) throw new HttpError(409, `The ${d.name} line is settled. Unsettle it to change it.`);
         for (const k of ["name", "aliases", "voice", "speed", "persona", "memory", "notes"] as const) {
           if (b[k] != null) (d as unknown as Record<string, unknown>)[k] = b[k];
+        }
+        if (b.scope != null) {
+          if (d.is_ghost) throw new HttpError(409, "Ghost is unscoped: it sees everything.");
+          d.scope = this.scopeFrom(b.scope);
         }
         this.audited("conversations", "update", `conversation:${slug}`, `On the ${d.name} line: updated ${Object.keys(b).join(", ")}.`);
         this.conversationEvent(slug);
         return d;
+      }
+      // Settle and unsettle (ADR 0019): announce-level, nothing is destroyed.
+      if (method === "POST" && sub === "/settle") {
+        if (d.is_ghost) throw new HttpError(409, "Ghost is the main line and can't be settled.");
+        if (d.active) throw new HttpError(409, "Switch away from this line before settling it.");
+        if (!d.settled_at) {
+          d.settled_at = now();
+          this.audited("conversations", "settle", `conversation:${slug}`, `Settled the ${d.name} line.`);
+          this.conversationEvent(slug);
+        }
+        return { ok: true, detail: `Settled the ${d.name} line.` };
+      }
+      if (method === "POST" && sub === "/unsettle") {
+        if (d.settled_at) {
+          d.settled_at = null;
+          this.audited("conversations", "unsettle", `conversation:${slug}`, `Brought the ${d.name} line back.`);
+          this.conversationEvent(slug);
+        }
+        return { ok: true, detail: `The ${d.name} line is back.` };
       }
       if (method === "POST" && sub === "/notes") {
         d.notes = [...d.notes, String(b.text ?? "")];

@@ -2,15 +2,16 @@
  * Owner: conversations. Lines with their persona, memory, pinned notes, transcript
  * history and compactions; plus the Kokoro voice list. Extend freely.
  */
-import type { CompactionView, ConversationDetail, TurnView, VoiceInfo } from "@ghost/client-ts";
+import type { CompactionView, TurnView, VoiceInfo } from "@ghost/client-ts";
 
+import type { Scope, ThreadDetail } from "../../../screens/conversations/threads";
 import { ago, type Scenario, seeded } from "../scenarios";
 import { SESSION_ID } from "./session";
 
 const HOME = "~/.local/share/ghost/conversations";
 
 export interface LineRecord {
-  detail: ConversationDetail;
+  detail: ThreadDetail;
   turns: TurnView[];
   compactions: CompactionView[];
 }
@@ -28,6 +29,10 @@ interface Seed {
   lastActiveMin: number | null;
   turns: [TurnView["role"], string][];
   compactions: number;
+  /** What the line may touch, per ability (ADR 0019). Absent: unscoped, it sees everything. */
+  scope?: Scope;
+  /** Settled this many days ago (ADR 0019): out of voice routing and the active list, still readable. */
+  settledDaysAgo?: number;
   /**
    * Each version's summary, oldest first, one per compaction; the newest is `memory`.
    * Aliases never repeat the line's own name or slug: ghost_core matches on (name, *aliases).
@@ -85,6 +90,7 @@ const ACCOUNTING: Seed = {
   ],
   createdDaysAgo: 18,
   lastActiveMin: 3,
+  scope: { github_issues: ["ghost-mock/app", "ghost-mock/infra"] },
   turns: [
     ["system", "transferred from Ghost"],
     ["assistant", "Accounting line."],
@@ -148,6 +154,107 @@ const STANDUP: Seed = {
     ["assistant", "Overnight: two issues closed, one reopened. Blocked: infra 77, the ledger export."],
   ],
   compactions: 0,
+};
+
+/** Scoped to one repository each (ADR 0019): the voice alone says which project is in play. */
+const INFRA: Seed = {
+  slug: "infra",
+  name: "Infra",
+  aliases: ["the infra repo", "ops"],
+  voice: "am_onyx",
+  speed: 1.0,
+  persona: "The infra repo only. Deploys, the ledger export, anything paging. Say what broke, what changed, and who's on it.",
+  memory: "Infra 77, the ledger export, times out past 10k rows; Priya is on it and it's labeled blocked.\nThe nightly deploy moved to 02:00 after the October 6 outage.",
+  notes: ["Never close an infra issue without asking."],
+  scope: { github_issues: ["ghost-mock/infra"] },
+  createdDaysAgo: 9,
+  lastActiveMin: 60 * 5,
+  turns: [
+    ["assistant", "Infra line."],
+    ["user", "What's open on the ledger export?"],
+    ["call", "github_issues.search(label=export, state=open)"],
+    ["assistant", "One: 77, the timeout past ten thousand rows. Priya has it and it's still blocked."],
+    ["user", "Leave it. Anything from last night's deploy?"],
+    ["assistant", "Nothing new. The 02:00 deploy went through clean."],
+  ],
+  compactions: 1,
+};
+
+const APP: Seed = {
+  slug: "app",
+  name: "App",
+  aliases: ["the app repo", "frontend"],
+  voice: "af_sky",
+  speed: 1.05,
+  persona: "The app repo only. Bugs first, then what's waiting on my sign-off. Read issue numbers plain.",
+  memory: "App 151 is the Safari login loop; likely a duplicate of 148, whose fix is in review with Dana.\nDecided: duplicates get closed with a link to the older issue, no other comment.",
+  notes: [],
+  scope: { github_issues: ["ghost-mock/app"] },
+  createdDaysAgo: 9,
+  lastActiveMin: 60 * 2,
+  turns: [
+    ["assistant", "App line."],
+    ["user", "Anything new since yesterday?"],
+    ["call", "github_issues.list_awaiting_signoff()"],
+    ["assistant", "Two need your sign-off: 151, the Safari login loop, and 162, the CSV export."],
+    ["user", "Is 151 the same as 148?"],
+    ["assistant", "It looks like it. 148 is the Safari cookie bug, and its fix is in review."],
+  ],
+  compactions: 1,
+};
+
+/** A settled line (ADR 0019): the Q3 close is done, so it left voice routing; everything stays readable. */
+const Q3_CLOSE: Seed = {
+  slug: "q3-close",
+  name: "Q3 close",
+  aliases: ["the close", "quarter close"],
+  voice: "bf_alice",
+  speed: 1.0,
+  persona: "The Q3 books. Refunds, the ledger export and anything finance is waiting on. Numbers first.",
+  memory:
+    "Q3 close finished October 9.\n" +
+    "Refunds: Brightline paid October 8; Northwind and Halcyon still open with finance.\n" +
+    "Ledger export (infra 77) stays blocked on the row limit; finance used the manual export for the close.\n" +
+    "Decided: next quarter, start the close on the first business day, not the fifth.",
+  notes: ["Halcyon refund: wait for their PO number before approving anything."],
+  scope: { github_issues: ["ghost-mock/app"] },
+  createdDaysAgo: 40,
+  lastActiveMin: 60 * 24 * 9,
+  settledDaysAgo: 9,
+  turns: [
+    ["assistant", "Q3 close."],
+    ["user", "Where are we?"],
+    ["assistant", "The close finished on the ninth. Two refunds are still open with finance: Northwind and Halcyon."],
+    ["user", "Good. That's the quarter, then."],
+    ["assistant", "Noted. Settle this line when you're ready and start Q4 fresh."],
+  ],
+  compactions: 2,
+  history: [
+    "Q3 close is running, target October 9. Three refunds open with finance (Northwind, Halcyon, Brightline).",
+    "Q3 close finished October 9.\nRefunds: Brightline paid October 8; Northwind and Halcyon still open with finance.",
+  ],
+};
+
+/** Busy only: a second settled line, so the group shows more than one. */
+const LAUNCH: Seed = {
+  slug: "launch",
+  name: "Launch",
+  aliases: ["the launch"],
+  voice: "am_adam",
+  speed: 1.1,
+  persona: "The September launch. Blockers only; skip anything that can wait a week.",
+  memory: "Shipped September 24. Two follow-ups filed against the app repo: 170 (onboarding copy) and 171 (pricing page cache).",
+  notes: [],
+  scope: { github_issues: ["ghost-mock/app", "ghost-mock/docs"] },
+  createdDaysAgo: 48,
+  lastActiveMin: 60 * 24 * 24,
+  settledDaysAgo: 23,
+  turns: [
+    ["assistant", "Launch line."],
+    ["user", "Anything blocking?"],
+    ["assistant", "Nothing. Both follow-ups are filed and labeled."],
+  ],
+  compactions: 1,
 };
 
 const BUSY_ALIASES: Record<string, string[]> = {
@@ -251,6 +358,8 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): LineRec
       turn_count: all.length,
       compactions: seed.compactions,
       dir: `${HOME}/${seed.slug}`,
+      scope: structuredClone(seed.scope ?? {}),
+      settled_at: seed.settledDaysAgo != null ? ago(60 * 24 * seed.settledDaysAgo) : null,
     },
     turns: all,
     compactions,
@@ -272,6 +381,10 @@ export default function conversations(s: Scenario): ConversationsFixture {
       ACCOUNTING,
       { ...LEGAL, createdDaysAgo: 34, compactions: 5, history: LEGAL_HISTORY },
       STANDUP,
+      INFRA,
+      APP,
+      Q3_CLOSE,
+      LAUNCH,
       ...BUSY_EXTRA.map(([name, persona, voice], i) => ({
         slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
         name,
@@ -288,7 +401,7 @@ export default function conversations(s: Scenario): ConversationsFixture {
       })),
     ];
   } else {
-    seeds = [GHOST, ACCOUNTING, LEGAL, STANDUP];
+    seeds = [GHOST, ACCOUNTING, LEGAL, STANDUP, INFRA, APP, Q3_CLOSE];
   }
   nextId = 4120;
   // Busy: months on the Legal line, more than the 200 turns the screen asks for.

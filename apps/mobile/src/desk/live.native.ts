@@ -20,6 +20,10 @@ const POLL_IN_SESSION_MS = 15000;
 const REQUEST_MS = 8000;
 const GATHER_MS = 3000;
 const JOIN_MS = 15000;
+/** Once everything is up, a moment for the audio route to settle before the desk greets. */
+const READY_SETTLE_MS = 250;
+/** How long the phone waits on a goodbye before closing the call itself. */
+const HANG_UP_MS = 6000;
 /** Missed /hello answers before the link shows offline rather than reconnecting. */
 const OFFLINE_AFTER = 3;
 
@@ -53,6 +57,8 @@ export class LiveDesk implements Desk {
   private mic: MediaStream | null = null;
   private ping: ReturnType<typeof setInterval> | null = null;
   private joined: (() => void) | null = null;
+  private goodbyeHeard = false;
+  private hangUpTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private cfg: LiveDeskConfig) {
     void this.tick();
@@ -154,7 +160,8 @@ export class LiveDesk implements Desk {
     const wasOurs = !!this.pc && !!this.state.status?.session_id;
     this.set({ status, pending: status.pending ?? null });
     // The desk ended the session (Ghost said goodbye, or the operator ended it there).
-    if (wasOurs && !status.session_id) this.teardown();
+    if (wasOurs && !status.session_id) return this.teardown();
+    if (this.pc && status.ending) this.hangingUp(status);
     if (status.session_id && status.session_origin === "phone" && this.joined) {
       this.joined();
       this.joined = null;
@@ -214,14 +221,34 @@ export class LiveDesk implements Desk {
       this.pc = pc;
       const dc = pc.createDataChannel("chat", { ordered: true });
       this.dc = dc;
+      // client-ready is the desk's cue to greet, so it waits for everything the greeting
+      // needs: the channel open, Ghost's audio track here, and the speaker route up.
+      let channelOpen = false;
+      let trackHere = false;
+      let routeUp = false;
+      let readySent = false;
+      const maybeReady = () => {
+        if (readySent || !channelOpen || !trackHere || !routeUp) return;
+        readySent = true;
+        setTimeout(() => {
+          if (dc.readyState === "open") dc.send(JSON.stringify({ label: "rtvi-ai", type: "client-ready", id: rid(), data: { version: "2.1.0", about: { library: "ghost-mobile" } } }));
+        }, READY_SETTLE_MS);
+      };
       dc.addEventListener("open", () => {
-        dc.send(JSON.stringify({ label: "rtvi-ai", type: "client-ready", id: rid(), data: { version: "2.1.0", about: { library: "ghost-mobile" } } }));
+        channelOpen = true;
         this.ping = setInterval(() => dc.readyState === "open" && dc.send("ping"), 1000);
+        maybeReady();
+      });
+      pc.addEventListener("track", () => {
+        trackHere = true;
+        maybeReady();
       });
       dc.addEventListener("message", (e: { data: unknown }) => this.onMessage(e.data));
       pc.addEventListener("connectionstatechange", () => {
         const s = pc.connectionState;
-        if (s === "disconnected") this.set({ link: "reconnecting" });
+        // While Ghost hangs up, the desk closing the call is the end, not a dropout.
+        if (s === "disconnected" && this.state.status?.ending) this.endedUnderUs();
+        else if (s === "disconnected") this.set({ link: "reconnecting" });
         else if (s === "connected") this.set({ link: "online" });
         else if (s === "failed" || s === "closed") this.endedUnderUs();
       });
@@ -236,6 +263,8 @@ export class LiveDesk implements Desk {
 
       InCallManager.start({ media: "audio" });
       InCallManager.setForceSpeakerphoneOn(true);
+      routeUp = true;
+      maybeReady();
 
       await new Promise<void>((resolve, reject) => {
         const t = setTimeout(() => reject(new DeskError("Your desk answered but the session didn’t open. Try again.")), JOIN_MS);
@@ -256,24 +285,34 @@ export class LiveDesk implements Desk {
 
   async end() {
     if (!this.pc) return;
-    // Say goodbye on the call first: it is already open and reaches the desk at once. The
-    // POST is the record that the phone asked; the summary says so if it didn't arrive.
+    // Say goodbye on the call and close it at once: the desk ends the session when the
+    // phone goes, so End never waits on the network. The POST after is the record that the
+    // phone asked; if it fails the summary says the desk may not have heard.
     try {
       if (this.dc?.readyState === "open") this.dc.send(JSON.stringify({ label: "rtvi-ai", type: "disconnect-bot", id: rid(), data: {} }));
     } catch {
-      // the channel closed under us; the POST still tells the desk
+      // the channel closed under us; closing the call and the POST still tell the desk
     }
-    try {
-      await this.request("POST", "/end", {});
-    } finally {
-      this.teardown();
-    }
+    this.teardown();
+    await this.request("POST", "/end", {});
   }
 
   setMuted(muted: boolean) {
     this.mic?.getAudioTracks().forEach((t) => {
       t.enabled = !muted;
     });
+  }
+
+  /**
+   * Ghost is hanging up. Once its goodbye has played (speaking, then listening again), the
+   * phone closes the call itself instead of waiting for the desk to wind down; if the
+   * goodbye never shows, after a few seconds anyway. Either way it's an ordinary end.
+   */
+  private hangingUp(status: Status) {
+    if (status.phase === "speaking") this.goodbyeHeard = true;
+    const done = this.goodbyeHeard && status.phase === "listening";
+    if (!this.hangUpTimer) this.hangUpTimer = setTimeout(() => void this.end().catch(() => {}), HANG_UP_MS);
+    if (done) void this.end().catch(() => {});
   }
 
   /** The call dropped and didn't come back. The desk ends its side when the peer goes. */
@@ -288,6 +327,9 @@ export class LiveDesk implements Desk {
   private teardown() {
     if (this.ping) clearInterval(this.ping);
     this.ping = null;
+    if (this.hangUpTimer) clearTimeout(this.hangUpTimer);
+    this.hangUpTimer = null;
+    this.goodbyeHeard = false;
     const { pc, dc, mic } = this;
     this.pc = null;
     this.dc = null;

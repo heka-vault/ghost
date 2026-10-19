@@ -13,7 +13,10 @@ const op = (name: string, description: string, risk: string, autonomy: string, e
   required,
 });
 
-export const GITHUB_ISSUES: AbilityInfo = {
+/** An ability before its scope fields are filled in by `abilities()` below. */
+type BareAbility = Omit<AbilityInfo, "scope_kind" | "scope_items">;
+
+export const GITHUB_ISSUES: BareAbility = {
   name: "github_issues",
   version: "0.1.0",
   description: "Triage GitHub issues: read what needs sign-off, label, comment, close.",
@@ -50,7 +53,7 @@ const c = (name: string, description: string, risk: string, autonomy: string, pr
   required,
 });
 
-export const CONVERSATIONS: AbilityInfo = {
+export const CONVERSATIONS: BareAbility = {
   name: "conversations",
   version: "built-in",
   description: "Saved conversations: persona, voice, memory (ADR 0014)",
@@ -76,7 +79,7 @@ export const CONVERSATIONS: AbilityInfo = {
   commands: [],
 };
 
-const EXTRA: AbilityInfo[] = [
+const EXTRA: BareAbility[] = [
   {
     name: "wake_onnx",
     version: "0.3.1",
@@ -170,11 +173,24 @@ function variant(): string | null {
   }
 }
 
-export default function abilities(s: Scenario): AbilityInfo[] {
+export type MockAbility = AbilityInfo;
+
+/** The repositories the operator allows (GHOST_REPOS in fixtures/settings.ts): the allowlist a scope is a subset of. */
+export const REPOS = ["ghost-mock/app", "ghost-mock/infra"];
+export const BUSY_REPOS = [...REPOS, "ghost-mock/docs", "heka-vault/ghost"];
+
+export default function abilities(s: Scenario): MockAbility[] {
   const v = variant();
-  if (v === "none") return [structuredClone(CONVERSATIONS)];
-  const base = [structuredClone(GITHUB_ISSUES), structuredClone(CONVERSATIONS)];
-  const all = s.data === "busy" ? [...base, ...structuredClone(EXTRA)] : base;
+  // ADR 0019: how an ability can be scoped (`scope_kind`, null when it can't) and the whole
+  // allowlist a line's scope picks from (`scope_items`).
+  const scoped = (a: BareAbility): MockAbility => ({
+    ...a,
+    scope_kind: a.name === "github_issues" ? "repository" : null,
+    scope_items: a.name === "github_issues" ? [...(s.data === "busy" ? BUSY_REPOS : REPOS)] : [],
+  });
+  if (v === "none") return [scoped(structuredClone(CONVERSATIONS))];
+  const base = [scoped(structuredClone(GITHUB_ISSUES)), scoped(structuredClone(CONVERSATIONS))];
+  const all = s.data === "busy" ? [...base, ...structuredClone(EXTRA).map(scoped)] : base;
   if (v === "blocked") {
     // The busy policy has no enable list, so the wish falls back to `enabled`.
     for (const a of all) if (a.name === "voice_id") a.enabled = true;

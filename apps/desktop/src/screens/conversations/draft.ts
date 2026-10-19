@@ -4,7 +4,9 @@
  * they have touched keeps their text. Drafts live for the app's life per slug, so moving
  * between lines never throws away unsaved words.
  */
-import type { ConversationDetail, ConversationUpdate } from "@ghost/client-ts";
+import type { ConversationDetail } from "@ghost/client-ts";
+
+import { type Scope, type ThreadUpdate, sameScope, scopeOf } from "./threads";
 
 export interface Draft {
   name: string;
@@ -14,6 +16,8 @@ export interface Draft {
   persona: string;
   memory: string;
   notes: string[];
+  /** Per ability, what the line may touch (ADR 0019). Empty: it sees everything. */
+  scope: Scope;
 }
 
 export type DraftKey = keyof Draft;
@@ -27,7 +31,7 @@ export type DraftKey = keyof Draft;
 export function fromDetail(d: ConversationDetail): Draft {
   const own = new Set([d.name.trim().toLowerCase(), d.slug]);
   const aliases = d.aliases.filter((a) => !own.has(a.trim().toLowerCase()));
-  return { name: d.name, aliases: aliases.join(", "), voice: d.voice, speed: d.speed, persona: d.persona, memory: d.memory, notes: [...d.notes] };
+  return { name: d.name, aliases: aliases.join(", "), voice: d.voice, speed: d.speed, persona: d.persona, memory: d.memory, notes: [...d.notes], scope: scopeOf(d) };
 }
 
 export const splitAliases = (s: string) => s.split(",").map((a) => a.trim()).filter(Boolean);
@@ -38,26 +42,36 @@ function same(k: DraftKey, a: Draft, b: Draft): boolean {
   if (k === "notes") return cleanNotes(a.notes).join("\n") === cleanNotes(b.notes).join("\n");
   if (k === "name") return a.name.trim() === b.name.trim();
   if (k === "speed") return Math.abs(a.speed - b.speed) < 0.001;
+  if (k === "scope") return sameScope(a.scope, b.scope);
   return a[k] === b[k];
 }
 
-const KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "memory", "notes"];
+const KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "memory", "notes", "scope"];
 
+/** Ghost keeps its name and is never scoped (ADR 0019): those keys can't be dirty on it. */
 export function dirtyKeys(draft: Draft, base: Draft, isGhost: boolean): DraftKey[] {
-  return KEYS.filter((k) => !(isGhost && (k === "name" || k === "aliases")) && !same(k, draft, base));
+  return KEYS.filter((k) => !(isGhost && (k === "name" || k === "aliases" || k === "scope")) && !same(k, draft, base));
 }
 
 /** The PATCH body for the dirty fields, shaped like the old screen's save. */
-export function updateBody(draft: Draft, keys: DraftKey[]): ConversationUpdate {
-  const body: ConversationUpdate = {};
+export function updateBody(draft: Draft, keys: DraftKey[]): ThreadUpdate {
+  const body: ThreadUpdate = {};
   for (const k of keys) {
     if (k === "name") body.name = draft.name.trim();
     else if (k === "aliases") body.aliases = splitAliases(draft.aliases);
     else if (k === "notes") body.notes = cleanNotes(draft.notes);
     else if (k === "speed") body.speed = draft.speed;
+    else if (k === "scope") body.scope = cleanScope(draft.scope);
     else body[k] = draft[k];
   }
   return body;
+}
+
+/** A scope with no empty lists: an ability without items is simply absent (unscoped for it). */
+export function cleanScope(scope: Scope): Scope {
+  const out: Scope = {};
+  for (const [k, items] of Object.entries(scope)) if (items.length) out[k] = [...items];
+  return out;
 }
 
 /** Carry the operator's edits onto fresh server data. */
@@ -84,6 +98,7 @@ export const FIELD_WORDS: Record<DraftKey, string> = {
   persona: "persona",
   memory: "memory",
   notes: "pinned notes",
+  scope: "scope",
 };
 
 /** "persona, voice and memory" */

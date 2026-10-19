@@ -33,6 +33,7 @@ from ghost_core.models import (
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy, PolicyError
 from ghost_core.request import asked_for
+from ghost_core.scope import ActiveScope
 from ghost_core.store import Store
 
 
@@ -128,10 +129,16 @@ class WriteGate:
         target: Target,
         changes: ChangeSet,
         rationale: str,
+        scope: ActiveScope | None = None,
     ) -> Submission:
+        """``scope`` is the active thread's scope for this ability (ADR 0019): a target
+        outside it is refused here, before policy or autonomy, whatever the setting
+        for reads. None means unscoped."""
         op = self.operation(ability, operation)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
+        if scope is not None:
+            scope.check_write(target.scope())  # raises OutOfScope, a PolicyError
         level = self.level(ability, operation, target)
         if level is Autonomy.DENY:
             raise PolicyError(f"{ability}.{operation} is not allowed on {target.scope()}")
@@ -189,11 +196,14 @@ class WriteGate:
         target: Target,
         changes: ChangeSet,
         rationale: str,
+        scope: ActiveScope | None = None,
     ) -> Proposal:
         """The confirm path regardless of policy. Writes nothing."""
         op = self.operation(ability, operation)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
+        if scope is not None:
+            scope.check_write(target.scope())
         return await self._propose(
             session_id=session_id,
             ability=ability,

@@ -142,8 +142,14 @@ export class GhostClient {
   }
 
   // --- conversations (ADR 0014) -------------------------------------------------------
-  conversations() {
-    return unwrap(this.api.GET("/conversations"));
+  /** Every live thread, Ghost first; settled ones have `settled_at` set (ADR 0019).
+   *  Pass `settled` to get only the settled or only the open ones. */
+  conversations(settled?: boolean) {
+    return unwrap(
+      this.api.GET("/conversations", {
+        params: { query: settled === undefined ? {} : { settled } },
+      }),
+    );
   }
   conversation(slug: string) {
     return unwrap(this.api.GET("/conversations/{slug}", { params: { path: { slug } } }));
@@ -167,6 +173,16 @@ export class GhostClient {
   }
   switchConversation(slug: string) {
     return unwrap(this.api.POST("/conversations/{slug}/switch", { params: { path: { slug } } }));
+  }
+  /** Mark a thread done (ADR 0019): out of voice routing and the active list, everything kept.
+   *  409 for Ghost or for the thread the session is in. */
+  settleConversation(slug: string) {
+    return unwrap(this.api.POST("/conversations/{slug}/settle", { params: { path: { slug } } }));
+  }
+  unsettleConversation(slug: string) {
+    return unwrap(
+      this.api.POST("/conversations/{slug}/unsettle", { params: { path: { slug } } }),
+    );
   }
   compactConversation(slug: string) {
     return unwrap(this.api.POST("/conversations/{slug}/compact", { params: { path: { slug } } }));

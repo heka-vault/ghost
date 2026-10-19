@@ -1,6 +1,6 @@
 # 0014: Named conversations persist across sessions, each with its own persona, voice and memory
 
-- **Status:** accepted; amended by ADR 0015 (no undo)
+- **Status:** accepted; amended by ADR 0015 (no undo), ADR 0019 (scope, settle, and a persona Ghost drafts for a thread it creates by voice)
 - **Date:** 2026-10-18
 - **Amends:** the "fresh context per session" assumption in [architecture.md](../architecture.md)
 

@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     last_active_at  TEXT,
-    deleted_at      TEXT
+    deleted_at      TEXT,
+    scope           TEXT NOT NULL DEFAULT '{}',  -- ADR 0019: {ability: [item, ...]}
+    settled_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS turns (
@@ -117,6 +119,14 @@ class Store:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(operations)")}
         if "readback_version" not in cols:
             self._conn.execute("ALTER TABLE operations ADD COLUMN readback_version TEXT")
+        # ADR 0019: scope and settled state. Older rows load as unscoped and open.
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(conversations)")}
+        if "scope" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN scope TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "settled_at" not in cols:
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN settled_at TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -310,10 +320,12 @@ class Store:
     def upsert_conversation(self, p: Profile) -> None:
         self._conn.execute(
             "INSERT INTO conversations (slug, name, aliases, voice, speed, created_at, updated_at,"
-            " last_active_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " last_active_at, deleted_at, scope, settled_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(slug) DO UPDATE SET name = excluded.name, aliases = excluded.aliases,"
             " voice = excluded.voice, speed = excluded.speed, updated_at = excluded.updated_at,"
-            " last_active_at = excluded.last_active_at, deleted_at = excluded.deleted_at",
+            " last_active_at = excluded.last_active_at, deleted_at = excluded.deleted_at,"
+            " scope = excluded.scope, settled_at = excluded.settled_at",
             (
                 p.slug,
                 p.name,
@@ -324,14 +336,14 @@ class Store:
                 p.updated_at.isoformat(),
                 p.last_active_at.isoformat() if p.last_active_at else None,
                 p.deleted_at.isoformat() if p.deleted_at else None,
+                json.dumps({k: list(v) for k, v in p.scope.items()}),
+                p.settled_at.isoformat() if p.settled_at else None,
             ),
         )
 
     def get_conversation(self, slug: str, *, include_deleted: bool = False) -> Profile | None:
         row = self._conn.execute(
-            "SELECT slug, name, aliases, voice, speed, created_at, updated_at, last_active_at,"
-            " deleted_at FROM conversations WHERE slug = ?",
-            (slug,),
+            f"SELECT {_PROFILE_COLS} FROM conversations WHERE slug = ?", (slug,)
         ).fetchone()
         if row is None:
             return None
@@ -340,10 +352,10 @@ class Store:
             return None
         return p
 
-    def list_conversations(self) -> list[Profile]:
+    def list_conversations(self, *, include_settled: bool = False) -> list[Profile]:
+        where = "deleted_at IS NULL" + ("" if include_settled else " AND settled_at IS NULL")
         rows = self._conn.execute(
-            "SELECT slug, name, aliases, voice, speed, created_at, updated_at, last_active_at,"
-            " deleted_at FROM conversations WHERE deleted_at IS NULL"
+            f"SELECT {_PROFILE_COLS} FROM conversations WHERE {where}"
             " ORDER BY CASE WHEN slug = 'ghost' THEN 0 ELSE 1 END, lower(name)"
         ).fetchall()
         return [_profile(r) for r in rows]
@@ -451,9 +463,16 @@ class Store:
         ]
 
 
+_PROFILE_COLS = (
+    "slug, name, aliases, voice, speed, created_at, updated_at, last_active_at, deleted_at,"
+    " scope, settled_at"
+)
+
+
 def _profile(row) -> Profile:
     from ghost_core.conversations.models import Profile
 
+    scope = json.loads(row[9] or "{}")
     return Profile(
         slug=row[0],
         name=row[1],
@@ -464,6 +483,8 @@ def _profile(row) -> Profile:
         updated_at=datetime.fromisoformat(row[6]),
         last_active_at=datetime.fromisoformat(row[7]) if row[7] else None,
         deleted_at=datetime.fromisoformat(row[8]) if row[8] else None,
+        scope={k: tuple(v) for k, v in scope.items() if v},
+        settled_at=datetime.fromisoformat(row[10]) if row[10] else None,
     )
 
 

@@ -107,3 +107,83 @@ def test_voices_and_sample(world):
     assert client.post("/voices/bf_emma/sample", json={"speed": 0.9}).json()["ok"] is True
     assert ("sample", "bf_emma", 0.9, None) in control.calls
     assert client.post("/voices/zz_nobody/sample").status_code == 404
+
+
+# --- scope and settle (ADR 0019) -------------------------------------------------------
+
+
+def test_scope_round_trips_and_is_validated(world):
+    client, state, control, gate, writer, loaded, deps = world
+    deps.conversations._scopes = {"fake": lambda: ["acme/app", "acme/infra"]}  # noqa: SLF001
+    r = client.post("/conversations", json={"name": "App", "scope": {"fake": ["ACME/app"]}})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["scope"] == {"fake": ["acme/app"]} and d["settled_at"] is None
+    assert d["voice"] == "am_adam"  # an unused voice when none is given
+    assert client.get("/conversations/app").json()["scope"] == {"fake": ["acme/app"]}
+    # outside the allowlist, an unknown ability, and Ghost: validation errors
+    r = client.post("/conversations", json={"name": "Bad", "scope": {"fake": ["acme/x"]}})
+    assert r.status_code == 422 and "acme/x" in r.json()["detail"]
+    r = client.post("/conversations", json={"name": "Bad", "scope": {"nope": ["x"]}})
+    assert r.status_code == 422
+    r = client.patch("/conversations/ghost", json={"scope": {"fake": ["acme/app"]}})
+    assert r.status_code == 422 and "Ghost" in r.json()["detail"]
+    # update replaces the whole map; {} makes it unscoped
+    r = client.patch("/conversations/app", json={"scope": {"fake": ["acme/infra", "acme/app"]}})
+    assert r.json()["scope"] == {"fake": ["acme/infra", "acme/app"]}
+    r = client.patch("/conversations/app", json={"scope": {}})
+    assert r.json()["scope"] == {}
+    ghost = client.get("/conversations/ghost").json()
+    assert ghost["scope"] == {} and ghost["settled_at"] is None
+
+
+def test_settle_unsettle_and_seed_from(world):
+    client, state, control, gate, writer, loaded, deps = world
+    client.post("/conversations", json={"name": "Heka New"})
+    client.patch("/conversations/heka-new", json={"memory": "Shipped v1."})
+    assert client.post("/conversations/ghost/settle").status_code == 409
+    r = client.post("/conversations/heka-new/settle")
+    assert r.json() == {"ok": True, "detail": None}
+    d = client.get("/conversations/heka-new").json()
+    assert d["settled_at"] is not None and d["memory"].strip() == "Shipped v1."  # readable
+    assert client.post("/conversations/heka-new/settle").json()["detail"] == "already settled"
+    # listed, with settled_at, so the app can group it; filterable
+    rows = client.get("/conversations").json()
+    assert [c["slug"] for c in rows] == ["ghost", "heka-new"]
+    assert [c["slug"] for c in client.get("/conversations", params={"settled": "true"}).json()] == [
+        "heka-new"
+    ]
+    assert [
+        c["slug"] for c in client.get("/conversations", params={"settled": "false"}).json()
+    ] == ["ghost"]
+    assert deps.conversations.resolve("heka new") is None  # out of voice routing
+    # the session cannot be switched into a settled thread
+    state.set_phase(Phase.PASSIVE)
+    client.post("/wake")
+    assert client.post("/conversations/heka-new/switch").status_code == 409
+
+    # a new thread seeded from the settled one's memory
+    r = client.post("/conversations", json={"name": "Heka Workshop", "seed_from": "heka-new"})
+    assert r.status_code == 200, r.text
+    assert r.json()["memory"].strip() == "Shipped v1." and r.json()["compactions"] == 1
+    r = client.post("/conversations", json={"name": "Nope", "seed_from": "ghost"})
+    assert r.status_code == 422 and "private" in r.json()["detail"]
+    assert (
+        client.post("/conversations", json={"name": "Nope", "seed_from": "zz"}).status_code == 422
+    )
+    # seed_from on update replaces the memory as an edit
+    client.patch("/conversations/heka-new", json={"memory": "Shipped v1. Then v2."})
+    r = client.patch("/conversations/heka-workshop", json={"seed_from": "heka-new"})
+    assert r.json()["memory"].strip() == "Shipped v1. Then v2."
+
+    r = client.post("/conversations/heka-new/unsettle")
+    assert r.json()["ok"] is True
+    assert client.get("/conversations/heka-new").json()["settled_at"] is None
+    assert client.post("/conversations/heka-new/unsettle").json()["detail"] == "not settled"
+    assert deps.conversations.resolve("heka new").slug == "heka-new"
+    # settling the conversation the session is in is refused
+    client.post("/conversations/heka-new/switch")
+    assert client.post("/conversations/heka-new/settle").status_code == 409
+
+    audit = client.get("/audit", params={"ability": "conversations"}).json()
+    assert {e["operation"] for e in audit["items"]} >= {"settle", "unsettle", "create"}

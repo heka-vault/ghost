@@ -7,7 +7,7 @@
  */
 import { type CompactionView, type ConversationDetail, type TurnView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { ArrowLeftRight, ChevronLeft, CloudOff, Layers, MoreHorizontal, Play, RotateCcw, SearchX, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeftRight, ChevronLeft, CloudOff, Layers, MoreHorizontal, Play, RotateCcw, SearchX, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
@@ -46,15 +46,17 @@ import { LineStateText, lineState } from "./lineState";
 import { History } from "./History";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
+import { ScopePicker } from "./ScopePicker";
+import { type ScopedAbility, scopedAbilities, settleLine, settledAt, unsettleLine } from "./threads";
 import { Transcript } from "./Transcript";
-import { claimParams, clearParams, designFail, designRetry, focusOnOpen, readParam, writeParam } from "./url";
+import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newLineSeed, readParam, writeParam } from "./url";
 import { PlayingBars, VoicePicker, voiceTitle } from "./VoicePicker";
 import { type Voice, parseVoice, voiceKind } from "./voices";
 
 type TabId = "persona" | "memory" | "transcript" | "history";
 const TABS: TabId[] = ["persona", "memory", "transcript", "history"];
 const TURN_LIMIT = 200;
-const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona"];
+const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "scope"];
 const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -73,6 +75,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const [turns, setTurns] = useState<TurnView[]>([]);
   const [versions, setVersions] = useState<CompactionView[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
+  const [abilities, setAbilities] = useState<ScopedAbility[] | null>(null);
   const [missing, setMissing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -85,13 +88,16 @@ export function LineDetail({ slug }: { slug: string }) {
   const [saving, setSaving] = useState(false);
   const [hearing, setHearing] = useState<string | null>(null);
   const [pinning, setPinning] = useState(false);
-  const [acting, setActing] = useState<"switch" | "compact" | null>(null);
+  const [acting, setActing] = useState<"switch" | "compact" | "settle" | "unsettle" | null>(null);
 
   const inSession = !!status?.session_id;
   const liveSlug = inSession ? (status?.conversation ?? "ghost") : null;
   const live = liveSlug === slug;
   const isGhost = slug === "ghost";
   const name = lineName(slug, detail?.name);
+  // Settled (ADR 0019): out of voice routing and the active list, everything readable, nothing editable.
+  const settled = settledAt(detail);
+  const readOnly = settled !== null;
 
   const setTab = (t: TabId) => {
     setTabState(t);
@@ -187,6 +193,19 @@ export function LineDetail({ slug }: { slug: string }) {
       .catch(() => setVoices([]));
   }, [client, status?.models_ready]);
 
+  // Which abilities can be scoped, and their allowlists: the choices in the Scope section.
+  useEffect(() => {
+    if (isGhost) return;
+    let on = true;
+    client
+      .abilities()
+      .then((a) => on && setAbilities(scopedAbilities(a)))
+      .catch(() => on && setAbilities([]));
+    return () => {
+      on = false;
+    };
+  }, [client, isGhost, conversationsVersion]);
+
   // ---------------------------------------------------------------- derived
   const dirty = useMemo(() => (draft && base && detail ? dirtyKeys(draft, base, detail.is_ghost) : []), [draft, base, detail]);
   const voice = draft ? (voices.find((v) => v.id === draft.voice) ?? parseVoice(draft.voice)) : null;
@@ -198,7 +217,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const fail = (title: string, e: unknown) => setNotice({ title, text: errorText(e) });
 
   const save = async () => {
-    if (!draft || !dirty.length || saving || !online) return;
+    if (!draft || !dirty.length || saving || !online || readOnly) return;
     setSaving(true);
     setNotice(null);
     const words = listWords(dirty);
@@ -309,6 +328,44 @@ export function LineDetail({ slug }: { slug: string }) {
     }
   };
 
+  // Settle: announce-level, nothing destroyed (ADR 0019). Unsaved edits can't be kept on a
+  // read-only line, so they are dropped with the settle; the dialog says so when there are any.
+  const settle = async () => {
+    const ok = await confirm({
+      title: `Settle ${name}?`,
+      description: `${name} leaves voice routing and the list of lines you can patch through to. Its transcript, memory and notes stay here to read, and Unsettle brings it back.${dirty.length ? " Your unsaved changes here are dropped." : ""}`,
+      confirmLabel: `Settle ${name}`,
+    });
+    if (!ok) return;
+    setActing("settle");
+    try {
+      // The route answers with an Ack, so the line is read back; the conversation event refreshes the lists.
+      await settleLine(client, slug);
+      drafts.delete(slug);
+      baseRef.current = null;
+      draftRef.current = null;
+      await load();
+      toast({ title: `Settled ${name}`, description: "It stays readable here and is out of voice routing. Unsettle brings it back." });
+    } catch (e) {
+      fail(`Couldn’t settle ${name}`, e);
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const unsettle = async () => {
+    setActing("unsettle");
+    try {
+      await unsettleLine(client, slug);
+      await load();
+      toast({ title: `${name} is back`, description: `Say ${quoted(`patch me to ${name.toLowerCase()}`)} to reach it again.` });
+    } catch (e) {
+      fail(`Couldn’t bring ${name} back`, e);
+    } finally {
+      setActing(null);
+    }
+  };
+
   const remove = async () => {
     const ok = await confirm({
       title: `Delete ${name}?`,
@@ -352,6 +409,7 @@ export function LineDetail({ slug }: { slug: string }) {
     if (import.meta.env.DEV && design && !live) {
       if (o === "reset") void reset();
       if (o === "delete" && !isGhost) void remove();
+      if (o === "settle" && !isGhost && !readOnly) void settle();
     }
     if (design && readParam("dirty") && draftRef.current) {
       setDraft({ persona: `${draftRef.current.persona}\nRead amounts in dollars, never cents.`.trim(), voice: "bm_lewis" });
@@ -397,6 +455,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const meta: string[] = [];
   if (detail) {
     if (isGhost) meta.push("Main line");
+    if (settled) meta.push(`settled ${relativeTime(settled)}`);
     if (!live) meta.push(detail.last_active_at ? `last used ${relativeTime(detail.last_active_at)}` : "not used yet");
     if (detail.turn_count) {
       meta.push(plural(detail.turn_count, "turn"));
@@ -428,15 +487,23 @@ export function LineDetail({ slug }: { slug: string }) {
       items={
         isGhost
           ? [live ? { label: "Reset Ghost…", icon: <RotateCcw />, onSelect: () => void reset(), disabled: true, reason: "Ghost is on this line" } : { label: "Reset Ghost…", icon: <RotateCcw />, onSelect: () => void reset() }]
+          : readOnly
+            ? [
+                { label: `Unsettle ${name}`, icon: <ArchiveRestore />, onSelect: () => void unsettle() },
+                "separator",
+                { label: `Delete ${name}…`, icon: <Trash2 />, danger: true, onSelect: () => void remove() },
+              ]
           : live
             ? [
                 { label: "Switch to Ghost", icon: <ArrowLeftRight />, onSelect: () => void switchTo("ghost") },
                 "separator",
                 // Not red while it can't be chosen: a red label reads as available.
+                { label: `Settle ${name}…`, icon: <Archive />, onSelect: () => void settle(), disabled: true, reason: "Ghost is on this line" },
                 { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset(), disabled: true, reason: "Ghost is on this line" },
                 { label: `Delete ${name}…`, icon: <Trash2 />, onSelect: () => void remove(), disabled: true, reason: "Ghost is on this line" },
               ]
             : [
+                { label: `Settle ${name}…`, icon: <Archive />, onSelect: () => void settle() },
                 { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset() },
                 "separator",
                 { label: `Delete ${name}…`, icon: <Trash2 />, danger: true, onSelect: () => void remove() },
@@ -453,9 +520,15 @@ export function LineDetail({ slug }: { slug: string }) {
           Review the change
         </Button>
       )}
-      {inSession && !live && (
+      {inSession && !live && !readOnly && (
         <Button variant="secondary" leadingIcon={<ArrowLeftRight />} loading={acting === "switch"} disabled={!online} onClick={() => void switchTo(slug)}>
           Switch to {name}
+        </Button>
+      )}
+      {/* On a settled line, bringing it back is the one thing to do here. */}
+      {readOnly && (
+        <Button variant="primary" leadingIcon={<ArchiveRestore />} loading={acting === "unsettle"} disabled={!online} onClick={() => void unsettle()}>
+          Unsettle
         </Button>
       )}
       {live && (
@@ -508,6 +581,15 @@ export function LineDetail({ slug }: { slug: string }) {
         <Notice tone="danger" title={notice.title} onDismiss={() => setNotice(null)} className="conv-notice">
           {notice.text}
         </Notice>
+      )}
+
+      {settled && (
+        <p className="conv-settled t-small">
+          <Archive size={14} aria-hidden />
+          <span>
+            Settled {relativeTime(settled)}. Read-only until you bring it back: {quoted(`patch me to ${name.toLowerCase()}`)} does nothing, and nothing here can change.
+          </span>
+        </p>
       )}
 
       {loadError && !detail ? (
@@ -563,8 +645,29 @@ export function LineDetail({ slug }: { slug: string }) {
                 data-user-content
                 value={draft.persona}
                 placeholder={PERSONA_EXAMPLE}
+                disabled={readOnly}
                 onChange={(e) => setDraft({ persona: e.target.value })}
               />
+            </Section>
+
+            <Section
+              id="conv-scope"
+              title="Scope"
+              description={
+                isGhost ? (
+                  "Ghost is the main line and sees everything: every repository and anything else an ability allows."
+                ) : (
+                  <>What this line may read and change. Outside its scope, Ghost says it belongs to another line; Settings decides whether it answers read-only or patches you through. Ghost never writes outside it.</>
+                )
+              }
+            >
+              {isGhost ? (
+                <Card>
+                  <p className="conv-scope__all t-body">Ghost sees everything.</p>
+                </Card>
+              ) : (
+                <ScopePicker abilities={abilities} value={draft.scope} onChange={(scope) => setDraft({ scope })} disabled={readOnly} idPrefix="conv-scope" />
+              )}
             </Section>
 
             <Section id="conv-voice" title="Voice">
@@ -592,12 +695,12 @@ export function LineDetail({ slug }: { slug: string }) {
                       )}
                     </p>
                   </div>
-                  <Button variant="secondary" onClick={() => setPicker(true)}>
+                  <Button variant="secondary" disabled={readOnly} onClick={() => setPicker(true)}>
                     Change voice
                   </Button>
                 </div>
                 <Field layout="inline" label="Speed" help="1.00× is the voice’s natural pace." className="conv-cell">
-                  <Slider min={0.5} max={2} step={0.05} value={draft.speed} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDraft({ speed: v })} />
+                  <Slider min={0.5} max={2} step={0.05} value={draft.speed} disabled={readOnly} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDraft({ speed: v })} />
                 </Field>
               </Card>
               {hearBlocked && <p className="t-small t-3">{hearBlocked}</p>}
@@ -607,10 +710,10 @@ export function LineDetail({ slug }: { slug: string }) {
               <Section id="conv-name" title="How you reach it" description={<>What you say in a session: {quoted(`patch me to ${(draft.name.trim() || name).toLowerCase()}`)}.</>}>
                 <Card list>
                   <Field layout="inline" label="Name" className="conv-cell" error={draft.name.trim() ? undefined : "A line needs a name."}>
-                    <Input value={draft.name} placeholder={name} onChange={(e) => setDraft({ name: e.target.value })} />
+                    <Input value={draft.name} placeholder={name} disabled={readOnly} onChange={(e) => setDraft({ name: e.target.value })} />
                   </Field>
                   <Field layout="inline" label="Also answers to" help="Other names, separated by commas." className="conv-cell">
-                    <Input value={draft.aliases} placeholder={aliasExample(draft.name || name)} onChange={(e) => setDraft({ aliases: e.target.value })} />
+                    <Input value={draft.aliases} placeholder={aliasExample(draft.name || name)} disabled={readOnly} onChange={(e) => setDraft({ aliases: e.target.value })} />
                   </Field>
                 </Card>
               </Section>
@@ -621,7 +724,11 @@ export function LineDetail({ slug }: { slug: string }) {
             <Section
               id="conv-memory"
               title="Memory"
-              description={`The running summary Ghost keeps for this line. Compacting rewrites it; your edits are folded into the next version.${lastVersion ? ` Updated ${relativeTime(lastVersion.at)}.` : ""}`}
+              description={
+                readOnly
+                  ? `The summary this line ended with. Start a new line from it to carry it on.${lastVersion ? ` Updated ${relativeTime(lastVersion.at)}.` : ""}`
+                  : `The running summary Ghost keeps for this line. Compacting rewrites it; your edits are folded into the next version.${lastVersion ? ` Updated ${relativeTime(lastVersion.at)}.` : ""}`
+              }
             >
               <Textarea
                 ref={memoryRef}
@@ -631,11 +738,25 @@ export function LineDetail({ slug }: { slug: string }) {
                 data-user-content
                 value={draft.memory}
                 placeholder={MEMORY_EXAMPLE}
+                disabled={readOnly}
                 onChange={(e) => setDraft({ memory: e.target.value })}
               />
+              {readOnly && (
+                <div className="conv-handoff">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      newLineSeed.slug = slug;
+                      navigate("/conversations");
+                    }}
+                  >
+                    Start a line from this memory
+                  </Button>
+                </div>
+              )}
             </Section>
             <Section id="conv-notes" title="Pinned notes" description={<>Kept word for word and never summarized. Say {quoted("remember this")} in a session, or pin one here.</>}>
-              <Notes notes={draft.notes} saved={base?.notes ?? []} onChange={(notes) => setDraft({ notes })} onPin={pin} pinning={pinning} disabled={!online} />
+              <Notes notes={draft.notes} saved={base?.notes ?? []} onChange={(notes) => setDraft({ notes })} onPin={pin} pinning={pinning} disabled={!online || readOnly} />
             </Section>
             <p className="conv-files t-small t-3">
               Persona, memory and notes are files in <span className="t-mono">{detail.dir}</span>
@@ -650,6 +771,7 @@ export function LineDetail({ slug }: { slug: string }) {
             whole={turns.length < TURN_LIMIT}
             live={live}
             lineName={name}
+            readOnly={readOnly}
             onUse={(c) => {
               setDraft({ memory: c.summary });
               setTab("memory");

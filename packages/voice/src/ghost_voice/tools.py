@@ -15,8 +15,19 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
-from ghost_core import Autonomy, Events, GateError, LoadedAbility, Operation, WriteGate
+from ghost_core import (
+    SCOPE_ARG,
+    ActiveScope,
+    Autonomy,
+    Events,
+    GateError,
+    LoadedAbility,
+    Operation,
+    OutOfScope,
+    WriteGate,
+)
 from ghost_core.conversations import ABILITY as CONVERSATIONS
+from ghost_core.conversations import GHOST
 from ghost_core.policy import PolicyError
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -57,6 +68,44 @@ def register_tools(
     probe = probe or NULL_PROBE
     events = events or Events()
     record = on_call or (lambda _n, _a: None)
+    last_request = last_request or (lambda: ("", ""))
+
+    def scope_for(ability: LoadedAbility) -> Callable[[], ActiveScope | None]:
+        """The active thread's scope for a scoped ability, read at call time so a
+        switch mid-session is seen by the next call; None for an unscoped ability."""
+        if conversations is None or not ability.contributions.scope_kind:
+            return lambda: None
+        return lambda: conversations.scope_for(ability.name)
+
+    async def out_of_scope(params: FunctionCallParams, e: OutOfScope) -> None:
+        """A request about something another thread owns (ADR 0019). With department
+        routing on, patch the operator through and let that thread handle it; off, tell
+        the model which thread it belongs to so Ghost can offer."""
+        owner = conversations.owner_of(e.ability, e.item) if conversations else None
+        if (
+            owner is not None
+            and conversations is not None
+            and conversations.routing
+            and conversations.switch_allowed()
+        ):
+            request, _ = last_request()
+            await _transfer(
+                params,
+                conversations,
+                owner,
+                handoff=request,
+                result={"status": "routed", "to": owner.name, "item": e.item},
+                outcome=(
+                    f"They asked about {e.item}, which is yours, so Ghost routed them here. "
+                    "After your greeting, handle that request now."
+                ),
+            )
+            return
+        result: dict[str, Any] = {"error": str(e), "item": e.item}
+        if owner is not None:
+            result["belongs_to"] = owner.name
+            result["hint"] = f"offer to patch them through to {owner.name}"
+        await params.result_callback(result)
 
     for a in abilities:
         for tool in a.contributions.read_tools:
@@ -68,7 +117,11 @@ def register_tools(
                     required=tool.required,
                 )
             )
-            llm.register_function(tool.name, _wrap_read(tool.handler, record, probe))
+            llm.register_function(
+                tool.name,
+                _wrap_read(tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope),
+            )
+    scopes = {a.name: scope_for(a) for a in abilities}
 
     # Operations the policy denies outright are not offered at all.
     ops: dict[str, dict[str, Operation]] = {}
@@ -127,6 +180,9 @@ def register_tools(
         record(f"{aname}.{op_name}", args)
         if aname == CONVERSATIONS and conversations is not None:
             args["_active"] = conversations.active.slug
+        scope = scopes.get(aname, lambda: None)()
+        if scope is not None:
+            args[SCOPE_ARG] = scope
         try:
             began = time.perf_counter()
             prepared = await op.prepare(args)
@@ -139,8 +195,13 @@ def register_tools(
                 target=prepared.target,
                 changes=prepared.changes,
                 rationale=str(a.get("rationale") or prepared.rationale),
+                scope=scope,
             )
             probe.tool_step(call_id, "submit", time.perf_counter() - began)
+        except OutOfScope as e:
+            probe.tool_status(call_id, "out_of_scope")
+            await out_of_scope(params, e)
+            return
         except (ValueError, PolicyError, GateError) as e:
             probe.tool_status(call_id, "error")
             await params.result_callback({"error": str(e)})
@@ -189,6 +250,32 @@ def register_tools(
                         "outcome", ability=aname, operation=op.name, status=sub.outcome.status
                     )
                     return
+            # A settled thread leaves voice routing (ADR 0019): settling the one the
+            # operator is in hands them back to Ghost.
+            if (
+                aname == CONVERSATIONS
+                and op.name == "settle"
+                and conversations is not None
+                and sub.outcome.status == "success"
+                and sub.proposal.target.scope() == conversations.active.slug
+            ):
+                ghost = conversations.conversations.get(GHOST)
+                if ghost is not None:
+                    await _transfer(
+                        params,
+                        conversations,
+                        ghost,
+                        handoff="",
+                        result=result,
+                        outcome=(
+                            f"They just settled the {conversations.active.name!r} thread at "
+                            "their request; that is done, do not settle or switch again."
+                        ),
+                    )
+                    await events.emit(
+                        "outcome", ability=aname, operation=op.name, status=sub.outcome.status
+                    )
+                    return
             await params.result_callback(result)
             await events.emit(
                 "outcome", ability=aname, operation=op.name, status=sub.outcome.status
@@ -196,7 +283,7 @@ def register_tools(
             return
         logger.info(f"pending {sub.proposal.id}: {sub.proposal.preview}")
         # The operator may already have said yes by asking for it: "close infra 17".
-        request, before = last_request() if last_request else ("", "")
+        request, before = last_request()
         began = time.perf_counter()
         outcome = await gate.confirm_by_request(session_id, request, question=before)
         probe.tool_step(call_id, "request", time.perf_counter() - began)
@@ -342,17 +429,36 @@ def _state(outcome) -> str:
     return outcome.readback.spoken() if outcome.readback else "unknown"
 
 
+OnScope = Callable[[FunctionCallParams, OutOfScope], Awaitable[None]]
+
+
 def _wrap_read(
     handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
     record: OnCall,
     probe: LatencyProbe = NULL_PROBE,
+    *,
+    scope: Callable[[], ActiveScope | None] = lambda: None,
+    on_scope: OnScope | None = None,
 ):
     async def run(params: FunctionCallParams) -> None:
-        record(params.function_name, dict(params.arguments))
+        args = dict(params.arguments)
+        record(params.function_name, args)
+        active = scope()
+        if active is not None:
+            args[SCOPE_ARG] = active
         began = time.perf_counter()
         status = "ok"
         try:
-            result = await handler(dict(params.arguments))
+            result = await handler(args)
+        except OutOfScope as e:
+            call_id = getattr(params, "tool_call_id", "")
+            probe.tool_step(call_id, "read", time.perf_counter() - began)
+            probe.tool_status(call_id, "out_of_scope")
+            if on_scope is not None:
+                await on_scope(params, e)
+            else:
+                await params.result_callback({"error": str(e), "item": e.item})
+            return
         except (ValueError, PolicyError) as e:
             result = {"error": str(e)}
             status = "error"

@@ -37,6 +37,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.context.llm_context_summarization import LLMContextSummarizationConfig
 from pipecat.workers.runner import WorkerRunner
@@ -273,7 +274,16 @@ def build_session(
     ended = asyncio.Event()
     abilities = list(abilities)
     runtime: ConversationRuntime | None = None
-    fragments = [a.contributions.prompt for a in abilities if a.contributions.prompt]
+    # A scoped ability's paragraph is rebuilt for the active thread (ADR 0019); the
+    # rest are fixed for the session.
+    scoped = {
+        a.name: a.contributions.scoped_prompt
+        for a in abilities
+        if a.contributions.scope_kind and a.contributions.scoped_prompt
+    }
+    fragments = [
+        a.contributions.prompt for a in abilities if a.contributions.prompt and a.name not in scoped
+    ]
     if conversations is not None:
         abilities.append(conversations_ability(conversations))
 
@@ -292,7 +302,12 @@ def build_session(
             keep_messages=settings.compact_keep_messages,
             start=start_in,
             on_switch=switched,
+            scoped_prompts=scoped,
+            reads_wider=settings.cross_department_answers,
+            routing=settings.department_routing,
         )
+    else:
+        fragments += [fn(None) for fn in scoped.values()]
 
     mixer = None
     if settings.thinking_sound:
@@ -398,6 +413,10 @@ def build_session(
                 ],
             ),
             user_idle_timeout=settings.idle_timeout_secs,
+            # A turn that opens on voice activity and ends with no words is echo or noise,
+            # never a missed interruption: barge-in needs two heard words. Pipecat's default
+            # answers such a turn with "sorry, I think I got cut off"; leave it unanswered.
+            empty_user_turn=EmptyUserTurnConfig(interrupted_prompt=None, idle_prompt=None),
         ),
     )
 

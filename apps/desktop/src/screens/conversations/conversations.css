@@ -173,3 +173,32 @@
 
 /* The crumb leads the eyebrow, ahead of the page status: "‹ Conversations  ● Live · listening". */
 
+
+/* ------------------------------------------------------------- scope (ADR 0019) */
+.conv-scope { display: flex; flex-direction: column; gap: var(--space-6); }
+.conv-scope__ability { display: flex; flex-direction: column; gap: var(--space-2); }
+.conv-scope__head { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
+.conv-scope__item { padding: var(--space-3) var(--space-4); }
+.conv-scope__empty { padding: var(--space-4); margin: 0; }
+.conv-scope__help { margin: 0; }
+.conv-scope__all { margin: 0; color: var(--text-2); }
+.conv-scope-skel { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+
+/* Scope on an index row: the items as small mono chips, after the persona lead. */
+.conv-row-scope { display: inline-flex; align-items: center; gap: var(--space-1); flex-wrap: nowrap; white-space: nowrap; }
+.conv-row-scope__more { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* ----------------------------------------------------------- settled (ADR 0019) */
+.conv-settled { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0 0 var(--space-6); color: var(--text-2); max-width: 72ch; }
+.conv-settled > svg { flex: none; margin-top: var(--space-0_5); color: var(--text-3); }
+.conv-handoff { display: flex; justify-content: flex-start; margin-top: var(--space-3); }
+.conv-settled-group { margin-top: var(--space-8); }
+.conv-settled-group__summary { display: inline-flex; align-items: center; gap: var(--space-2); }
+.conv-settled-group__count { display: inline-flex; align-items: center; justify-content: center; min-width: var(--count-size); height: var(--count-size); padding: 0 var(--space-1_5); border-radius: var(--radius-full); background: var(--bg-surface); border: 1px solid var(--border-subtle); font-size: var(--text-xs); line-height: 1; color: var(--text-3); }
+.conv-settled-group__list { margin-top: var(--space-3); }
+.conv-settled-group__lead { margin: var(--space-2) 0 0; max-width: 72ch; }
+/* A labeled group inside the New line form that holds a picker rather than one control. */
+.conv-form__group { display: flex; flex-direction: column; gap: var(--space-2); }
+.conv-form__label { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
+.conv-form__optional { margin-left: var(--space-1); font-weight: var(--weight-regular); color: var(--text-3); }
+.conv-row-settled { display: inline-flex; align-items: center; gap: var(--space-1_5); }

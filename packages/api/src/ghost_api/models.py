@@ -192,6 +192,10 @@ class AbilityInfo(BaseModel):
     slots: list[str] = []
     listeners: int = 0
     commands: list[str] = []
+    # ADR 0019: how a thread can be scoped for this ability ("repository"), and the
+    # whole allowlist a thread's scope is chosen from. None/empty: cannot be scoped.
+    scope_kind: str | None = None
+    scope_items: list[str] = []
 
 
 class PolicyView(BaseModel):
@@ -294,8 +298,12 @@ class ConversationView(BaseModel):
     aliases: list[str]
     voice: str
     speed: float
+    # ADR 0019: per ability, the items this thread may touch ({"github_issues":
+    # ["acme/app"]}); an ability absent here is unscoped. Always empty for Ghost.
+    scope: dict[str, list[str]] = {}
     created_at: datetime
     last_active_at: datetime | None
+    settled_at: datetime | None = None  # set: done, out of voice routing, still readable
     active: bool  # the running session is in it
     is_ghost: bool
 
@@ -312,9 +320,13 @@ class ConversationDetail(ConversationView):
 class ConversationCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     aliases: list[str] = []
-    voice: str | None = None
+    voice: str | None = None  # None: a voice no other thread uses
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     persona: str = Field(default="", max_length=4000)
+    scope: dict[str, list[str]] = {}
+    # Slug of a thread (usually a settled one) whose memory.md becomes this one's first
+    # memory, as a handoff. Never Ghost.
+    seed_from: str | None = None
 
 
 class ConversationUpdate(BaseModel):
@@ -327,6 +339,8 @@ class ConversationUpdate(BaseModel):
     persona: str | None = Field(default=None, max_length=4000)
     memory: str | None = Field(default=None, max_length=20000)
     notes: list[str] | None = None
+    scope: dict[str, list[str]] | None = None  # the whole map; {} makes it unscoped
+    seed_from: str | None = None  # replace the memory with that thread's memory.md
 
 
 class TurnView(BaseModel):

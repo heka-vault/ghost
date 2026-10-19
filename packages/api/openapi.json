@@ -60,6 +60,25 @@
             "title": "Read Tools",
             "type": "array"
           },
+          "scope_items": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Items",
+            "type": "array"
+          },
+          "scope_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Kind"
+          },
           "slots": {
             "default": [],
             "items": {
@@ -295,6 +314,28 @@
             "title": "Persona",
             "type": "string"
           },
+          "scope": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Scope",
+            "type": "object"
+          },
+          "seed_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed From"
+          },
           "speed": {
             "anyOf": [
               {
@@ -386,6 +427,29 @@
           "persona": {
             "title": "Persona",
             "type": "string"
+          },
+          "scope": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Scope",
+            "type": "object"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
           },
           "slug": {
             "title": "Slug",
@@ -530,6 +594,34 @@
             ],
             "title": "Persona"
           },
+          "scope": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "seed_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed From"
+          },
           "speed": {
             "anyOf": [
               {
@@ -595,6 +687,29 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "scope": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Scope",
+            "type": "object"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
           },
           "slug": {
             "title": "Slug",
@@ -1936,7 +2051,26 @@
     },
     "/conversations": {
       "get": {
+        "description": "Every live thread, Ghost first, settled ones included (``settled_at`` set) so\nthe app can show its Settled group. ``settled=true`` or ``false`` filters.",
         "operationId": "list_conversations_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "settled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Settled"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1951,6 +2085,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Conversations",
@@ -2314,6 +2458,49 @@
         ]
       }
     },
+    "/conversations/{slug}/settle": {
+      "post": {
+        "description": "Mark the thread done (ADR 0019): out of voice routing, everything kept.",
+        "operationId": "settle_conversation_conversations__slug__settle_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Settle Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/conversations/{slug}/switch": {
       "post": {
         "operationId": "switch_conversation_conversations__slug__switch_post",
@@ -2407,6 +2594,48 @@
           }
         },
         "summary": "Conversation Turns",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/conversations/{slug}/unsettle": {
+      "post": {
+        "operationId": "unsettle_conversation_conversations__slug__unsettle_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unsettle Conversation",
         "tags": [
           "conversations"
         ]

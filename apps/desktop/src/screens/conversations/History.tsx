@@ -44,11 +44,13 @@ export interface HistoryProps {
   whole: boolean;
   live: boolean;
   lineName: string;
+  /** A settled line (ADR 0019): versions are read, never put back into memory. */
+  readOnly?: boolean;
   /** Put an older version's summary in the memory editor, to save like any edit. */
   onUse: (c: CompactionView) => void;
 }
 
-export function History({ versions, turns, whole, live, lineName, onUse }: HistoryProps) {
+export function History({ versions, turns, whole, live, lineName, readOnly, onUse }: HistoryProps) {
   if (versions.length === 0) {
     return (
       <EmptyState
@@ -67,18 +69,18 @@ export function History({ versions, turns, whole, live, lineName, onUse }: Histo
     <div className="stack gap-3">
       <p className="t-small t-2">
         {sorted.length} {sorted.length === 1 ? "version" : "versions"} of this line’s memory, newest first.
-        {!live && ` Compact now works while a session is on ${lineName}.`}
+        {!live && !readOnly && ` Compact now works while a session is on ${lineName}.`}
       </p>
       <Card list>
         {sorted.map((c, i) => (
-          <Version key={c.id} c={c} current={i === 0} covers={coverage(c.through_turn_id, turns, whole)} onUse={() => onUse(c)} />
+          <Version key={c.id} c={c} current={i === 0} covers={coverage(c.through_turn_id, turns, whole)} onUse={readOnly ? undefined : () => onUse(c)} />
         ))}
       </Card>
     </div>
   );
 }
 
-function Version({ c, current, covers, onUse }: { c: CompactionView; current: boolean; covers: string | null; onUse: () => void }) {
+function Version({ c, current, covers, onUse }: { c: CompactionView; current: boolean; covers: string | null; onUse?: () => void }) {
   const lines = c.summary.split("\n").filter(Boolean);
   const long = lines.length > 3 || c.summary.length > 360;
   const [open, setOpen] = useState(current);
@@ -108,7 +110,7 @@ function Version({ c, current, covers, onUse }: { c: CompactionView; current: bo
               {open ? "Show less" : "Show all"}
             </Button>
           )}
-          {!current && (
+          {!current && onUse && (
             <Button size="sm" variant="ghost" aria-label={`Use this version, from ${formatDateTime(c.at)}`} onClick={onUse}>
               Use this version
             </Button>

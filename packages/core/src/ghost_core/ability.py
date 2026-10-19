@@ -145,6 +145,16 @@ class Contributions:
     processors: dict[Slot, list[ProcessorFactory]] = field(default_factory=dict)
     listeners: list[EventListener] = field(default_factory=list)
     commands: list[CliCommand] = field(default_factory=list)
+    # Scope (ADR 0019). ``scope_kind`` says what a thread can be scoped to for this
+    # ability ("repository", "directory", "workspace"); ``scope_items`` returns the whole
+    # allowlist, each item the string ``Target.scope()`` yields for it. A scoped ability
+    # gets an ``ActiveScope`` as the ``_scope`` argument of every read tool and
+    # ``prepare`` call (``ghost_core.scope.scope_of(args)``), and may give
+    # ``scoped_prompt`` to narrow its prompt paragraph to the active thread. Abilities
+    # that declare no scope kind are unaffected.
+    scope_kind: str | None = None
+    scope_items: Callable[[], list[str]] | None = None
+    scoped_prompt: Callable[[Any], str] | None = None  # (ActiveScope | None) -> str
 
 
 class AbilityInstance(Protocol):

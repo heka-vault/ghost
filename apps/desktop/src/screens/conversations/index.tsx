@@ -3,7 +3,7 @@
  *   #/conversations          every line, with live state, Switch and New line
  *   #/conversations/:slug    one line: voice and persona, memory and notes, transcript, history
  * Views and dialogs that need a URL ride in the query string (see url.ts):
- *   ?tab=memory|transcript|history   ?open=new|voice|reset|delete   ?dirty=1 (mock only)
+ *   ?tab=memory|transcript|history   ?open=new|settled|voice|reset|delete|settle   ?seed=<slug> (New line from a settled line)   ?dirty=1 (mock only)
  */
 import type { RouteProps } from "../../app/routes";
 import { LineDetail } from "./LineDetail";

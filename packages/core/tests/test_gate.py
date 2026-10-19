@@ -204,3 +204,88 @@ def test_changeset_is_bounded():
 
 def test_fresh_writer_fixture_is_independent():
     assert FakeWriter().issues == {}
+
+
+# --- scope (ADR 0019) ---------------------------------------------------------------
+
+
+async def test_scope_refuses_a_write_outside_the_thread_before_policy(gate, writer, target):
+    from ghost_core import ActiveScope, OutOfScope
+
+    other = Issue(owner="acme", repo="app", number=43)
+    writer.seed(other)
+    inside = ActiveScope("github_issues", "App", items=("acme/app",))
+    sub = await gate.submit(
+        session_id="s1",
+        ability="github_issues",
+        operation="set_labels",
+        target=target,
+        changes=changeset(SetLabels(add=("bug",))),
+        rationale="",
+        scope=inside,
+    )
+    assert sub.executed
+
+    outside = ActiveScope(
+        "github_issues",
+        "Infra",
+        items=("acme/infra",),
+        reads_wider=True,  # cross-department answers never loosen writes
+        owners=lambda item: ["App"] if item == "acme/app" else [],
+    )
+    with pytest.raises(OutOfScope) as e:
+        await gate.submit(
+            session_id="s1",
+            ability="github_issues",
+            operation="set_labels",
+            target=other,
+            changes=changeset(SetLabels(add=("bug",))),
+            rationale="",
+            scope=outside,
+        )
+    assert str(e.value) == "acme/app is outside this thread; it belongs to the App thread"
+    assert e.value.owners == ("App",)
+    assert not any(c[0] == "set_labels" and c[1] == other for c in writer.calls)
+    assert gate.pending("s1") is None  # nothing was even proposed
+
+    nobody = ActiveScope("github_issues", "Infra", items=("acme/infra",))
+    with pytest.raises(PolicyError, match="acme/app is outside this thread$"):
+        await gate.prepare(
+            session_id="s1",
+            ability="github_issues",
+            operation="set_labels",
+            target=other,
+            changes=changeset(SetLabels(add=("bug",))),
+            rationale="",
+            scope=nobody,
+        )
+
+    # unscoped (Ghost): everything the ability allows
+    sub = await gate.submit(
+        session_id="s1",
+        ability="github_issues",
+        operation="set_labels",
+        target=other,
+        changes=changeset(SetLabels(add=("bug",))),
+        rationale="",
+        scope=ActiveScope("github_issues", "Ghost", items=None),
+    )
+    assert sub.executed
+
+
+def test_active_scope_helpers():
+    from ghost_core import ActiveScope, OutOfScope, scope_of
+
+    s = ActiveScope("github_issues", "App", items=("acme/app",), reads_wider=True)
+    assert s.scoped and s.only == "acme/app"
+    assert s.covers("ACME/App") and not s.covers("acme/infra")
+    assert s.narrow(["acme/infra", "acme/app"]) == ["acme/app"]
+    s.check_read("acme/infra")  # reads may go wider
+    with pytest.raises(OutOfScope):
+        s.check_write("acme/infra")
+    two = ActiveScope("github_issues", "App", items=("a/b", "c/d"))
+    assert two.only is None
+    with pytest.raises(OutOfScope):
+        two.check_read("x/y")
+    assert scope_of({"_scope": s}) is s and scope_of({"_scope": "junk"}) is None
+    assert scope_of({}) is None

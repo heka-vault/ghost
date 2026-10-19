@@ -62,6 +62,8 @@ DUCK_STATE = "duck.json"
 PHONE_STATE = "phone.json"
 VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 5  # no keepalive from the phone for this long ends its session
+PHONE_READY_SECS = 3.0  # after the connection: how long to wait for the phone's client-ready
+PHONE_GREETING_LEAD_SECS = 0.3  # let the phone's playback settle before the first word
 PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then is dropped
 
 
@@ -155,9 +157,19 @@ class Daemon:
         return policy
 
     def apply_settings(self, values: dict[str, str | None]) -> list[str]:
-        """Apply what can change without a restart; return those keys. Today: the wake
-        phrases and the near-miss threshold, picked up by rebuilding the passive listener."""
+        """Apply what can change without a restart; return those keys. The wake phrases
+        and the near-miss threshold are picked up by rebuilding the passive listener; the
+        crossing-streams toggles (ADR 0019) by the next session, which reads them."""
         applied: list[str] = []
+        for key, attr in (
+            ("GHOST_CROSS_DEPARTMENT_ANSWERS", "cross_department_answers"),
+            ("GHOST_DEPARTMENT_ROUTING", "department_routing"),
+        ):
+            if key in values:
+                on = str(values[key] or "").strip().lower() in ("1", "true", "yes", "on")
+                setattr(self.voice, attr, on)
+                logger.info(f"{key.removeprefix('GHOST_').lower()}: {'on' if on else 'off'}")
+                applied.append(key)
         if self._listener is None:
             return applied
         if "GHOST_WAKE_PHRASES" in values:
@@ -352,6 +364,12 @@ class Daemon:
             default_voice=self.voice.tts_voice,
             default_speed=self.voice.tts_speed,
             retention=timedelta(days=self.cfg.turn_retention_days),
+            # What a thread can be scoped to (ADR 0019): each scoped ability's allowlist.
+            scopes={
+                a.name: a.contributions.scope_items
+                for a in abilities
+                if a.contributions.scope_kind and a.contributions.scope_items
+            },
         )
         gate.register(CONVERSATIONS, conversations_ability(conversations).contributions.operations)
         self.conversations = conversations
@@ -666,7 +684,15 @@ class Daemon:
         session.on_client_ready(on_ready)
 
         async def greet() -> None:
+            # The phone says client-ready once its speaker route and the remote track are
+            # up; greeting on the bare connection lost the first half-second ("...ost. What
+            # do you need?"). An older app that never says it still gets greeted.
             await connected.wait()
+            try:
+                await asyncio.wait_for(ready.wait(), PHONE_READY_SECS)
+            except TimeoutError:
+                logger.info("phone: no client-ready; greeting anyway")
+            await asyncio.sleep(PHONE_GREETING_LEAD_SECS)
             await session.open()  # type: ignore[attr-defined]
 
         async def forward() -> None:
@@ -758,6 +784,8 @@ def describe_abilities(abilities: Sequence[LoadedAbility], autonomy: AutonomyPol
             extras.append(f"processors in {', '.join(a.contributions.processors)}")
         if a.contributions.listeners:
             extras.append(f"{len(a.contributions.listeners)} listener(s)")
+        if a.contributions.scope_kind:
+            extras.append(f"scoped by {a.contributions.scope_kind}")
         suffix = f" [{'; '.join(extras)}]" if extras else ""
         lines.append(f"  {a.name} {a.ability.version}: {table}{suffix}")
     return lines

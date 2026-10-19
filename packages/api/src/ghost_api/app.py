@@ -334,6 +334,10 @@ def create_app(deps: Deps) -> FastAPI:
                     slots=[str(s) for s in (c.processors if c else {})],
                     listeners=len(c.listeners) if c else 0,
                     commands=[cmd.name for cmd in (c.commands if c else [])],
+                    scope_kind=c.scope_kind if c else None,
+                    scope_items=(
+                        list(c.scope_items()) if c and c.scope_kind and c.scope_items else []
+                    ),
                 )
             )
         if deps.conversations is not None:
@@ -438,6 +442,10 @@ def create_app(deps: Deps) -> FastAPI:
     # --- settings --------------------------------------------------------------------
 
     def settings_view() -> SettingsView:
+        # ``values`` is whatever non-secret keys settings.env holds; the desktop app owns
+        # the list it offers. GHOST_CROSS_DEPARTMENT_ANSWERS, GHOST_DEPARTMENT_ROUTING and
+        # GHOST_GITHUB_TOKENS (ADR 0019) are plain values: the token map names
+        # environment variables, and only those variables' values are secrets.
         env = read_env(deps.env_path)
         values = {k: v for k, v in read_env(deps.settings_path).items() if k not in SECRET_KEYS_SET}
         return SettingsView(

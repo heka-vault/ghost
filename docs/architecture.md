@@ -46,7 +46,7 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 | `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
 | `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, and the audit log. The only code that can execute a write |
 | `abilities/*` | Installable capabilities (ADR 0012). Each contributes a prompt paragraph, read tools, write operations with a risk class and a writer, and optionally turn interceptors, pipeline processors, listeners and CLI commands. `github_issues` is the first one; third-party abilities use the same entry point |
-| `core/conversations` | Named conversations (ADR 0014): the registry, the transcript, every compaction version, and the three Markdown files per conversation (`persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
+| `core/conversations` | Named conversations (ADR 0014), now threads with a scope and a settled state (ADR 0019): the registry, the transcript, every compaction version, and the three Markdown files per conversation (`persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
 
 ## Conversation flow
@@ -58,6 +58,28 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
    the STT stage, so it meets the same tools and the same gate as speech.
 4. **Transfer.** Every session opens in `ghost`. "Patch me to accounting" is an LLM tool: Ghost's voice announces it, a short tone plays, the TTS voice and the system prompt change, and the context is replaced with that conversation's rolling summary, pinned notes and recent turns; the line greets with a one-line recap. "Back to Ghost" returns. "Save this as accounting" creates the conversation and carries this session's turns into it. A transfer cancels any change waiting for a yes.
 5. **Sleep.** "Go to sleep" or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive. Every spoken turn was persisted as it happened; the next wake is `ghost` again.
+
+### Threads scope work (ADR 0019)
+
+A conversation is a **thread** with a scope: per ability, the items it may touch
+(`{"github_issues": ["heka-vault/ghost"]}`), a subset of that ability's allowlist. An
+ability declares what it can be scoped by (`Contributions.scope_kind`, `scope_items`),
+and on every call the pipeline hands it the active thread's `ActiveScope` as the
+`_scope` argument, so read tools list only what the thread covers, a single-item thread
+stops asking for the item ("close seventeen"), and the ability's prompt paragraph names
+only the scoped items. The gate refuses a write whose `Target.scope()` is outside the
+active thread before policy or autonomy are consulted. Ghost is always unscoped.
+
+Two operator settings decide what happens when a request crosses threads, both off by
+default: `GHOST_CROSS_DEPARTMENT_ANSWERS` lets a scoped thread read outside its scope
+(never write); `GHOST_DEPARTMENT_ROUTING` patches the operator through to the thread that
+owns the item and hands it the request, otherwise the tool result names the owning
+thread and Ghost offers to switch. A thread whose context has drifted is **settled**
+(announce-level): it leaves voice routing and the model's list, keeps its transcript,
+memory and audit, and can be unsettled; a new thread may be seeded from a settled one's
+`memory.md` as a handoff. `GHOST_GITHUB_TOKENS="owner=ENV_NAME,..."` gives
+`github_issues` a token per organisation, each value the name of an environment
+variable, falling back to `GITHUB_TOKEN`.
 
 ### Memory and compaction
 

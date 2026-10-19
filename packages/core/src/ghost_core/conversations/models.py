@@ -37,23 +37,40 @@ def slugify(name: str) -> str:
     return text[:MAX_NAME] or "conversation"
 
 
+Scope = dict[str, tuple[str, ...]]  # ability -> the items this thread may touch (ADR 0019)
+
+
 class Profile(BaseModel, frozen=True):
     slug: str
     name: str
     aliases: tuple[str, ...] = ()
     voice: str
     speed: float = 1.0
+    # Per ability, what this thread may touch; an ability absent here is unscoped for
+    # it. Ghost is always unscoped. Empty for every thread until the operator sets one.
+    scope: Scope = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     last_active_at: datetime | None = None
+    settled_at: datetime | None = None  # done: out of voice routing, still readable
     deleted_at: datetime | None = None
 
     @property
     def is_ghost(self) -> bool:
         return self.slug == GHOST
 
+    @property
+    def settled(self) -> bool:
+        return self.settled_at is not None
+
     def spoken_names(self) -> tuple[str, ...]:
         return (self.name, *self.aliases)
+
+    def scope_for(self, ability: str) -> tuple[str, ...] | None:
+        """The items this thread may touch for ``ability``; None when unscoped."""
+        if self.is_ghost:
+            return None
+        return self.scope.get(ability)
 
 
 class TurnRecord(BaseModel, frozen=True):
@@ -97,6 +114,8 @@ class ConversationSnapshot(Snapshot, frozen=True):
     aliases: tuple[str, ...] = ()
     voice: str = ""
     speed: float = 1.0
+    scope: Scope = Field(default_factory=dict)
+    settled: bool = False
     persona: str = ""
     memory: str = ""
     notes: str = ""
@@ -119,11 +138,16 @@ class ConversationSnapshot(Snapshot, frozen=True):
         notes: str,
         turns: int,
         deleted: bool = False,
+        scope: Scope | None = None,
+        settled: bool = False,
     ) -> ConversationSnapshot:
+        scope = scope or {}
         h = hashlib.sha256()
         for part in (name, ",".join(aliases), voice, f"{speed:g}", persona, memory, notes):
             h.update(part.encode())
             h.update(b"\0")
+        h.update(describe_scope(scope).encode())
+        h.update(b"settled" if settled else b"open")
         h.update(str(turns).encode())
         h.update(b"deleted" if deleted else b"live")
         return cls(
@@ -133,6 +157,8 @@ class ConversationSnapshot(Snapshot, frozen=True):
             aliases=aliases,
             voice=voice,
             speed=speed,
+            scope=scope,
+            settled=settled,
             persona=persona,
             memory=memory,
             notes=notes,
@@ -143,9 +169,19 @@ class ConversationSnapshot(Snapshot, frozen=True):
         if not self.exists:
             return "does not exist"
         bits = [f"voice {self.voice}", f"{self.turns} turns on record"]
+        if self.scope:
+            bits.append("scoped to " + describe_scope(self.scope))
+        if self.settled:
+            bits.append("settled")
         if self.notes.strip():
             bits.append(f"{self.notes.count(chr(10)) + 1} notes")
         return f"{self.name}: " + ", ".join(bits)
+
+
+def describe_scope(scope: Scope) -> str:
+    """``github_issues: acme/app, acme/infra; notes: work`` or ``everything``."""
+    parts = [f"{ab}: {', '.join(items)}" for ab, items in sorted(scope.items()) if items]
+    return "; ".join(parts) if parts else "everything"
 
 
 class Create(Change, frozen=True):
@@ -155,9 +191,40 @@ class Create(Change, frozen=True):
     voice: str
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     persona: str = Field(default="", max_length=MAX_PERSONA)
+    scope: Scope = Field(default_factory=dict)
+    # A handoff: the first memory, copied from a settled thread's memory.md (ADR 0019).
+    memory: str = Field(default="", max_length=MAX_MEMORY)
 
     def describe(self) -> str:
-        return f"start conversation {self.name!r}"
+        extra = f" scoped to {describe_scope(self.scope)}" if self.scope else ""
+        seed = " with a handoff memory" if self.memory.strip() else ""
+        return f"start conversation {self.name!r}{extra}{seed}"
+
+
+class SetScope(Change, frozen=True):
+    """Replace the thread's whole scope map. Ghost cannot be scoped."""
+
+    kind: Literal["set_scope"] = "set_scope"
+    scope: Scope = Field(default_factory=dict)
+
+    def describe(self) -> str:
+        return f"scope: {describe_scope(self.scope)}"
+
+
+class Settle(Change, frozen=True):
+    """Mark the thread done: out of voice routing and the active list, everything kept."""
+
+    kind: Literal["settle"] = "settle"
+
+    def describe(self) -> str:
+        return "settle the thread"
+
+
+class Unsettle(Change, frozen=True):
+    kind: Literal["unsettle"] = "unsettle"
+
+    def describe(self) -> str:
+        return "bring the thread back"
 
 
 class Rename(Change, frozen=True):

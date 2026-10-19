@@ -72,7 +72,7 @@ async def test_create_rename_resolve(world):
     sub = await run(gate, convs, "create", name="Accounting", aliases=["the accountants"])
     assert sub.executed and sub.outcome.status == "success"
     acc = convs.get("accounting")
-    assert acc.name == "Accounting" and acc.voice == "af_heart"
+    assert acc.name == "Accounting" and acc.voice == "am_adam"  # the first unused voice
     assert (convs.files.dir("accounting")).is_dir()
 
     assert convs.resolve("accounting").slug == "accounting"
@@ -218,3 +218,147 @@ def test_retention_window_is_honoured(tmp_path: Path):
     convs = Conversations(store, tmp_path / "c", retention=timedelta(days=1))
     convs.record(GHOST, "s", "user", "fresh")
     assert convs.prune() == 0  # nothing summarized yet, nothing old
+
+
+# --- scope and settle (ADR 0019) -------------------------------------------------------
+
+
+@pytest.fixture
+def scoped(tmp_path: Path):
+    store = Store()
+    convs = Conversations(
+        store,
+        tmp_path / "conversations",
+        default_voice="af_heart",
+        voices=VOICES,
+        scopes={"github_issues": lambda: ["acme/app", "acme/infra", "other/site"]},
+    )
+    gate = WriteGate(
+        store, autonomy=AutonomyPolicy.parse(f"[{ABILITY}]\nset_persona = 'announce'\n")
+    )
+    gate.register(ABILITY, convs.operations())
+    return store, convs, gate
+
+
+async def test_create_with_scope_validates_against_the_allowlist(scoped):
+    _, convs, gate = scoped
+    sub = await run(gate, convs, "create", name="App", scope={"github_issues": ["ACME/app", ""]})
+    assert sub.outcome.status == "success"
+    app = convs.get("app")
+    assert app.scope == {"github_issues": ("acme/app",)}  # spelled as the allowlist spells it
+    assert app.scope_for("github_issues") == ("acme/app",)
+    assert app.scope_for("notes") is None  # unscoped for an ability not listed
+    with pytest.raises(ValueError, match="not something github_issues is allowed"):
+        await run(gate, convs, "create", name="Bad", scope={"github_issues": ["acme/secret"]})
+    with pytest.raises(ValueError, match="cannot be scoped"):
+        await run(gate, convs, "create", name="Bad", scope={"notes": ["x"]})
+    assert "github_issues" in gate.operation(ABILITY, "create").properties["scope"]["description"]
+
+
+async def test_ghost_is_always_unscoped(scoped):
+    _, convs, gate = scoped
+    with pytest.raises(ValueError, match="Ghost is unscoped"):
+        await run(gate, convs, "set_scope", ability="github_issues", items=["acme/app"])
+    assert convs.get(GHOST).scope_for("github_issues") is None
+    # even a row written with a scope reads back unscoped
+    assert convs.validate_scope(GHOST, {}) == {}
+
+
+async def test_set_scope_merges_per_ability_and_scope_of_finds_owners(scoped):
+    _, convs, gate = scoped
+    await run(gate, convs, "create", name="App")
+    await run(gate, convs, "create", name="Infra")
+    sub = await run(
+        gate, convs, "set_scope", conversation="app", ability="github_issues", items=["acme/app"]
+    )
+    assert sub.outcome.status == "success" and "acme/app" in sub.outcome.summary()
+    await run(
+        gate, convs, "set_scope", conversation="infra", ability="github_issues", items="acme/infra"
+    )
+    assert [p.slug for p in convs.scope_of("github_issues", "acme/app")] == ["app"]
+    assert [p.slug for p in convs.scope_of("github_issues", "ACME/INFRA")] == ["infra"]
+    assert convs.scope_of("github_issues", "other/site") == []
+    # an empty list drops the ability: the thread covers everything again
+    await run(gate, convs, "set_scope", conversation="app", ability="github_issues", items=[])
+    assert convs.get("app").scope == {} and convs.scope_of("github_issues", "acme/app") == []
+
+
+async def test_scope_survives_a_reload_and_old_rows_load_unscoped(tmp_path: Path):
+    db = tmp_path / "ghost.db"
+    store = Store(db)
+    # an older row without the new columns' values
+    store._conn.execute(
+        "INSERT INTO conversations (slug, name, aliases, voice, speed, created_at, updated_at)"
+        " VALUES ('legacy', 'Legacy', '[]', 'af_heart', 1.0, '2026-01-01T00:00:00+00:00',"
+        " '2026-01-01T00:00:00+00:00')"
+    )
+    convs = Conversations(
+        store, tmp_path / "c", scopes={"github_issues": lambda: ["acme/app"]}, voices=VOICES
+    )
+    assert convs.get("legacy").scope == {} and not convs.get("legacy").settled
+    gate = WriteGate(store)
+    gate.register(ABILITY, convs.operations())
+    await run(gate, convs, "create", name="App", scope={"github_issues": ["acme/app"]})
+    store.close()
+    again = Conversations(Store(db), tmp_path / "c", voices=VOICES)
+    assert again.get("app").scope == {"github_issues": ("acme/app",)}
+
+
+async def test_settle_hides_from_resolve_and_the_default_list_but_stays_readable(scoped):
+    _, convs, gate = scoped
+    await run(gate, convs, "create", name="Heka New", voice="bf_emma")
+    convs.record("heka-new", "s1", "user", "we shipped the thing")
+    convs.files.write("heka-new", "memory.md", "Shipped v1; v2 planning next.")
+    with pytest.raises(ValueError, match="cannot be settled"):
+        await run(gate, convs, "settle")
+    sub = await run(gate, convs, "settle", conversation="heka new")
+    assert sub.outcome.status == "success" and sub.autonomy.value == "announce"
+    p = convs.get("heka-new")
+    assert p.settled and p.settled_at is not None
+    assert convs.resolve("heka new") is None  # out of voice routing
+    assert [q.slug for q in convs.list()] == [GHOST]
+    assert [q.slug for q in convs.list(include_settled=True)] == [GHOST, "heka-new"]
+    assert convs.turns("heka-new")[0].text == "we shipped the thing"  # readable
+    assert convs.files.memory("heka-new").strip() == "Shipped v1; v2 planning next."
+    with pytest.raises(ValueError, match="no conversation called"):  # settled: not routable
+        await run(gate, convs, "settle", conversation="heka new")
+
+    # a new thread for the same work is seeded from the settled one's memory
+    sub = await run(gate, convs, "create", name="Heka Workshop", seed_from="heka-new")
+    assert sub.outcome.status == "success" and "handoff" in sub.proposal.changes.describe()
+    assert convs.files.memory("heka-workshop").strip() == "Shipped v1; v2 planning next."
+    assert convs.compactions("heka-workshop")[0].source == "manual"
+    assert convs.get("heka-workshop").voice != "bf_emma"  # picks an unused voice
+    with pytest.raises(ValueError, match="private"):
+        await run(gate, convs, "create", name="Nope", seed_from=GHOST)
+    with pytest.raises(ValueError, match="no thread"):
+        await run(gate, convs, "create", name="Nope", seed_from="zzz")
+
+    # and it can come back; unsettle finds it by name even though resolve() would not
+    sub = await run(gate, convs, "unsettle", conversation="heka new")
+    assert sub.outcome.status == "success"
+    assert convs.resolve("heka new").slug == "heka-new"
+    with pytest.raises(ValueError, match="not settled"):
+        await run(gate, convs, "unsettle", conversation="heka new")
+
+
+def test_unused_voice_prefers_one_nobody_uses(scoped):
+    _, convs, _ = scoped
+    assert convs.unused_voice() == "am_adam"  # Ghost has af_heart
+    bare = Conversations(Store(), Path("/tmp/none"), default_voice="af_heart")
+    assert bare.unused_voice() == "af_heart"  # no voice list: the default
+
+
+def test_list_conversations_tool_shows_scope_and_hides_settled(scoped):
+    import asyncio
+
+    _, convs, gate = scoped
+    asyncio.run(run(gate, convs, "create", name="App", scope={"github_issues": ["acme/app"]}))
+    asyncio.run(run(gate, convs, "create", name="Old"))
+    asyncio.run(run(gate, convs, "settle", conversation="old"))
+    tool = convs.read_tools()[0]
+    out = asyncio.run(tool.handler({}))
+    rows = {c["slug"]: c for c in out["conversations"]}
+    assert set(rows) == {GHOST, "app"}
+    assert rows[GHOST]["scope"] == "everything"
+    assert rows["app"]["scope"] == {"github_issues": ["acme/app"]}

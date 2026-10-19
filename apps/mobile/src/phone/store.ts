@@ -1,20 +1,9 @@
 /**
- * The phone's own state: whether it is paired, its preferences, the session it opened, and
- * the last session it ended (for the summary). None of it lives on the desk. The pairing is
+ * The phone's own state: whether it is paired, its preferences and the session it opened.
+ * None of it lives on the desk. The pairing is
  * kept in secure storage (`./pairing.ts`); the rest lasts as long as the app does.
  */
-import type { Turn } from "@ghost/client-ts";
 import { useSyncExternalStore } from "react";
-
-export interface EndedSession {
-  sessionId: string;
-  line: { slug: string; name: string };
-  startedAt: string;
-  endedAt: string;
-  turns: Turn[];
-  /** The phone couldn't tell the desk to end the session (it was unreachable). */
-  endFailed: boolean;
-}
 
 export interface Pairing {
   /** The id the desk gave this phone; it signs every request with the matching secret. */
@@ -38,7 +27,6 @@ export interface PhoneState {
   /** When this phone opened its mic for the current session, or null. */
   startedAt: string | null;
   muted: boolean;
-  ended: EndedSession | null;
 }
 
 let state: PhoneState = {
@@ -47,7 +35,6 @@ let state: PhoneState = {
   prefs: { captions: false, keepAwake: true, haptics: true },
   startedAt: null,
   muted: false,
-  ended: null,
 };
 const listeners = new Set<() => void>();
 

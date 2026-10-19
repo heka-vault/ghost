@@ -37,8 +37,18 @@ export default function settings(s: Scenario): SettingsFixture {
         GHOST_WAKE_PHRASES: "hey ghost,okay ghost",
         GHOST_WAKE_FUZZY: "0.8",
         GHOST_JEV: "auto",
+        // Threads (ADR 0019): both crossing-streams settings off by default; no per-owner tokens yet.
+        GHOST_CROSS_DEPARTMENT_ANSWERS: "0",
+        GHOST_DEPARTMENT_ROUTING: "0",
         ...(s.data === "busy"
-          ? { GHOST_LLM_MODEL: "claude-sonnet-5-5", GHOST_REPOS: "ghost-mock/app,ghost-mock/infra,ghost-mock/docs,heka-vault/ghost", GHOST_WAKE_PHRASES: "hey ghost,okay ghost,ghost wake up" }
+          ? {
+              GHOST_LLM_MODEL: "claude-sonnet-5-5",
+              GHOST_REPOS: "ghost-mock/app,ghost-mock/infra,ghost-mock/docs,heka-vault/ghost",
+              GHOST_WAKE_PHRASES: "hey ghost,okay ghost,ghost wake up",
+              // Months in: scoped lines answer read-only across streams, and two organisations have their own tokens.
+              GHOST_CROSS_DEPARTMENT_ANSWERS: "1",
+              GHOST_GITHUB_TOKENS: "ghost-mock=GHOST_MOCK_TOKEN,heka-vault=HEKA_ORG_TOKEN",
+            }
           : {}),
       }
     : // First run: practice GitHub on, nothing allowed yet, the default microphone.

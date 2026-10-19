@@ -94,40 +94,28 @@ export default function Session() {
   const elapsed = useElapsed(startedAt);
   const captions = phone.prefs.captions;
 
-  // What the summary needs, kept from the last render in a session: when the desk ends it
-  // (Ghost said goodbye, or someone ended it there) the turns are already gone.
-  const last = useRef<{ sessionId: string; line: { slug: string; name: string }; startedAt: string; turns: Turn[] } | null>(null);
-  if (inSession) {
-    last.current = { sessionId: status?.session_id ?? "", line: { slug, name }, startedAt: startedAt ?? new Date().toISOString(), turns: turns.filter((t) => t.role !== "system") };
-  }
+  // When the session ends, from either side, the phone goes back to Home. There is no
+  // summary to read: this screen is used from a car, and Activity has everything for later.
+  const wasInSession = useRef(false);
   const endingRef = useRef(false);
   useEffect(() => {
-    if (inSession || endingRef.current || !last.current) return;
-    const snapshot = last.current;
-    last.current = null;
-    update({ startedAt: null, muted: false, ended: { ...snapshot, endedAt: new Date().toISOString(), endFailed: false } });
-    router.replace("/summary");
+    if (inSession) {
+      wasInSession.current = true;
+      return;
+    }
+    if (!wasInSession.current || endingRef.current) return;
+    wasInSession.current = false;
+    update({ startedAt: null, muted: false });
+    router.replace("/home");
   }, [inSession, router]);
 
   const end = async () => {
     setEnding(true);
     endingRef.current = true;
-    const snapshot = {
-      sessionId: status?.session_id ?? "",
-      line: { slug, name },
-      startedAt: startedAt ?? new Date().toISOString(),
-      endedAt: new Date().toISOString(),
-      turns: turns.filter((t) => t.role !== "system"),
-    };
-    let endFailed = false;
-    try {
-      if (reconnecting) endFailed = true;
-      else await desk.end();
-    } catch {
-      endFailed = true;
-    }
-    update({ startedAt: null, muted: false, ended: { ...snapshot, endFailed } });
-    router.replace("/summary");
+    update({ startedAt: null, muted: false });
+    router.replace("/home");
+    // The call closes at once; the desk ends the session when the phone goes.
+    await desk.end().catch(() => {});
   };
 
   // No session: the phone never opens the mic by itself. Home's idle layout, Start in thumb reach.

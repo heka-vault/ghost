@@ -21,8 +21,8 @@ debug key: fine for your own phone, not for the Play Store.
 
 ## How it's put together
 
-- `app/`: routes (expo-router). `pair/` first, then the tabs (Home, Activity, Settings),
-  `session` and `summary`.
+- `app/`: routes (expo-router). `pair/` first, then the tabs (Home, Activity, Settings)
+  and `session`. The session ends back on Home; there is no summary to read while driving.
 - `src/desk/`: everything the phone knows about the workstation goes through the `Desk`
   interface in `types.ts`. The phone never uses the control API (ADR 0013). `live.native.ts`
   talks to ghostd's phone listener (ADR 0016, `docs/phone-protocol.md`): signed HTTP for the

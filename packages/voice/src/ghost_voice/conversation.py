@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from ghost_core import GateError, WriteGate
+from ghost_core import ActiveScope, GateError, WriteGate
 from ghost_core.conversations import (
     ABILITY,
     GHOST,
@@ -28,6 +28,7 @@ from ghost_core.conversations import (
     Conversations,
     ConversationTarget,
     Profile,
+    describe_scope,
 )
 from ghost_core.conversations.models import SetMemory
 from ghost_core.models import ChangeSet
@@ -89,11 +90,20 @@ class ConversationRuntime:
         keep_messages: int = 20,
         start: str = GHOST,
         on_switch: Callable[[Profile], Awaitable[None]] | None = None,
+        scoped_prompts: Mapping[str, Callable[[ActiveScope | None], str]] | None = None,
+        reads_wider: bool = False,
+        routing: bool = False,
     ) -> None:
+        """``scoped_prompts`` are the scoped abilities' ``Contributions.scoped_prompt``
+        by ability name, rebuilt for the active thread; ``reads_wider`` and ``routing``
+        are the operator's crossing-streams settings (ADR 0019)."""
         self._conversations = conversations
         self._gate = gate
         self._session_id = session_id
         self._fragments = list(fragments)
+        self._scoped_prompts = dict(scoped_prompts or {})
+        self.reads_wider = reads_wider
+        self.routing = routing
         self._tts_settings = tts_settings
         self._llm_settings = llm_settings
         self._sample_rate = sample_rate
@@ -117,12 +127,45 @@ class ConversationRuntime:
 
     def system_prompt(self, profile: Profile | None = None) -> str:
         p = profile or self.active
+        fragments = list(self._fragments)
+        for ability, fn in self._scoped_prompts.items():
+            fragments.append(fn(self.scope_for(ability, p)))
         return build_system_prompt(
-            self._fragments,
+            [f for f in fragments if f],
             persona=self._conversations.files.persona(p.slug),
             name=p.name,
             is_ghost=p.is_ghost,
+            scope=describe_scope(p.scope) if p.scope and not p.is_ghost else "",
+            routing=self.routing,
         )
+
+    # --- scope (ADR 0019) -------------------------------------------------------------
+
+    def scope_for(self, ability: str, profile: Profile | None = None) -> ActiveScope:
+        """The active thread's scope for one ability, as the pipeline hands it to the
+        ability on each call. Unscoped (``items`` None) for Ghost and for a thread
+        with no scope for that ability."""
+        p = profile or self.active
+        convs = self._conversations
+
+        def owners(item: str) -> list[str]:
+            return [q.name for q in convs.scope_of(ability, item) if q.slug != p.slug]
+
+        return ActiveScope(
+            ability=ability,
+            thread=p.name,
+            items=p.scope_for(ability),
+            reads_wider=self.reads_wider,
+            owners=owners,
+        )
+
+    def owner_of(self, ability: str, item: str) -> Profile | None:
+        """The thread to route a request about ``item`` to: the first live thread
+        whose scope covers it, other than the active one."""
+        for q in self._conversations.scope_of(ability, item):
+            if q.slug != self.active.slug:
+                return q
+        return None
 
     def initial_messages(self, profile: Profile | None = None) -> list[dict[str, Any]]:
         p = profile or self.active

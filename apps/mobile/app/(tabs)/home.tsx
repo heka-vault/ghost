@@ -1,45 +1,40 @@
 /**
- * Home: one thing to do (Start session), how the phone reaches the desk, and the last two
- * decisions. Start sits low, in thumb reach. Nothing listens here: the mic opens only after
- * Start. While Ghost is asking, the question is the hero and only settled decisions make the
- * list, so the screen never says the same thing twice.
+ * Home: one thing to do. The ghost is the Start control: it floats while Ghost is ready,
+ * and a tap opens the mic into a session. Nothing listens here; the mic opens only after
+ * that tap. There is no list to read: this screen is used from a car, and Activity has
+ * everything for later. While Ghost is asking, the question is the hero.
  */
-import type { AuditEntry } from "@ghost/client-ts";
 import { errorText, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
-import { AudioLines, ChevronRight, Inbox, Mic } from "lucide-react-native";
+import { AudioLines } from "lucide-react-native";
 import { useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, View } from "react-native";
 
 import { useDesk } from "../../src/desk/context";
 import { update, usePhone } from "../../src/phone/store";
-import { space, useColors } from "../../src/theme";
+import { opacityDisabled, space } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
 import { GhostMark } from "../../src/ui/Brand";
-import { EntryRow, TargetText } from "../../src/ui/entries";
-import { Cta, Divider, EmptyState, LinkDot, linkLabel, List, Screen, SectionHead, Skeleton } from "../../src/ui/parts";
+import { TargetText } from "../../src/ui/entries";
+import { Cta, LinkDot, linkLabel, Screen, Skeleton } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 import { VoicePresence } from "../../src/ui/VoicePresence";
 
-const RECENT = 2;
-
 export default function Home() {
-  const c = useColors();
   const router = useRouter();
-  const { desk, link, status, pending, audit, phase, online, loadingModels, inSession, deskBusy } = useDesk();
+  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy } = useDesk();
   const { pairing } = usePhone();
   const { tone, title } = linkLabel(link);
   const [starting, setStarting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const settled = (items: AuditEntry[] | null) => items?.filter((e) => e.status !== "pending" && e.id !== pending?.id).slice(0, RECENT) ?? null;
-  const recent = settled(audit);
-  const stale = link === "reconnecting" || link === "offline";
   const line = status?.conversation && status.conversation !== "ghost" ? `${lineName(status.conversation)} line` : "main line";
   const workstation = pairing?.workstation ?? "your desk";
+  const ready = online && !loadingModels && !deskBusy && !inSession;
 
   const start = async () => {
+    if (!ready || starting) return;
     setStarting(true);
     setError(null);
     try {
@@ -78,8 +73,10 @@ export default function Home() {
     hero = { presence: "offline", title: "Lost your desk for a moment", body: "Start comes back as soon as the phone reaches it again." };
   } else if (loadingModels) {
     hero = { presence: "starting", title: "Getting ready", body: "Ghost is loading its voice models. Usually under a minute." };
+  } else if (starting) {
+    hero = { presence: "starting", title: "Opening the mic", body: "" };
   } else {
-    hero = { presence: "passive", title: "Ready when you are", body: "Tap Start and talk. The mic stays off until you do." };
+    hero = { presence: "passive", title: "Tap the ghost and talk", body: "The mic stays off until you do." };
   }
 
   return (
@@ -98,63 +95,43 @@ export default function Home() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: space[5], paddingBottom: space[4] }}>
-        <View style={{ alignItems: "center", paddingTop: space[6], paddingHorizontal: space[2], paddingBottom: space[5] }}>
-          {link === "connecting" ? (
-            <View style={{ alignItems: "center", gap: space[4] }}>
-              <Skeleton width={96} height={96} round />
-              <Skeleton width={220} height={28} />
-              <Skeleton width={260} height={16} />
-            </View>
-          ) : (
-            <>
-              <VoicePresence phase={hero.presence} size={96} label={hero.question ? undefined : ""} />
-              <Text size="3xl" weight="semibold" align="center" style={{ marginTop: space[5] }}>
-                {hero.title}
-              </Text>
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: space[6], paddingBottom: space[10] }}>
+        {link === "connecting" ? (
+          <View style={{ alignItems: "center", gap: space[4] }}>
+            <Skeleton width={160} height={160} round />
+            <Skeleton width={220} height={28} />
+          </View>
+        ) : (
+          <>
+            {/* The ghost is the button. 160 is the hero size; the glyph floats only while a tap would start. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Start session"
+              accessibilityHint="Opens the mic on this phone"
+              accessibilityState={{ disabled: !ready, busy: starting }}
+              disabled={!ready}
+              onPress={start}
+              hitSlop={24}
+              style={({ pressed }) => ({ opacity: ready || inSession ? (pressed ? 0.82 : 1) : opacityDisabled, transform: [{ scale: pressed && ready ? 0.96 : 1 }] })}
+            >
+              <VoicePresence phase={hero.presence} size={160} label={hero.question ? undefined : ""} float={ready && !starting} />
+            </Pressable>
+            <Text size="3xl" weight="semibold" align="center" style={{ marginTop: space[6] }}>
+              {hero.title}
+            </Text>
+            {hero.body ? (
               <Text size="lg" color={hero.question ? "text1" : "text2"} align="center" numberOfLines={hero.question ? 3 : undefined} style={{ marginTop: space[2], maxWidth: 320 }}>
                 {hero.body}
               </Text>
-              {hero.question && pending ? (
-                <View style={{ marginTop: space[2] }}>
-                  <TargetText {...splitSummary(pending)} size="lg" />
-                </View>
-              ) : null}
-            </>
-          )}
-        </View>
-
-        {link !== "connecting" && recent && recent.length > 0 && (
-          <View style={{ marginTop: space[2] }}>
-            <SectionHead
-              title="Recent decisions"
-              trailing={
-                <Pressable accessibilityRole="link" onPress={() => router.navigate("/activity")} hitSlop={12} style={{ flexDirection: "row", alignItems: "center", gap: space[0.5], minHeight: space[12] }}>
-                  <Text size="lg" weight="medium" color="accentText">See all</Text>
-                  <ChevronRight size={16} color={c.accentText} />
-                </Pressable>
-              }
-            />
-            {stale && <Text size="md" color="text2" style={{ marginBottom: space[2] }}>Showing what this phone saw last.</Text>}
-            <List>
-              {recent.map((e, i) => (
-                <View key={e.id}>
-                  {i > 0 && <Divider />}
-                  <EntryRow e={e} onPress={() => router.navigate({ pathname: "/activity", params: { open: e.id } })} />
-                </View>
-              ))}
-            </List>
-          </View>
+            ) : null}
+            {hero.question && pending ? (
+              <View style={{ marginTop: space[2] }}>
+                <TargetText {...splitSummary(pending)} size="lg" />
+              </View>
+            ) : null}
+          </>
         )}
-        {online && recent && recent.length === 0 && (
-          <View style={{ marginTop: space[2] }}>
-            <SectionHead title="Recent decisions" />
-            <List>
-              <EmptyState icon={(color) => <Inbox size={24} color={color} />} title="Nothing yet" description="When Ghost changes something, or asks to, it shows up here." />
-            </List>
-          </View>
-        )}
-      </ScrollView>
+      </View>
 
       <Cta>
         {error ? (
@@ -170,11 +147,7 @@ export default function Home() {
           <TouchButton variant="primary" size="xl" fullWidth icon={(col) => <AudioLines size={22} color={col} />} onPress={() => router.push("/session")}>
             Back to the session
           </TouchButton>
-        ) : (
-          <TouchButton variant="primary" size="xl" fullWidth icon={(col) => <Mic size={22} color={col} />} loading={starting} disabled={!online || loadingModels || deskBusy} onPress={start}>
-            Start session
-          </TouchButton>
-        )}
+        ) : null}
       </Cta>
     </Screen>
   );

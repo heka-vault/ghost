@@ -9,7 +9,7 @@ and is audited."""
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -29,11 +29,16 @@ from ghost_core.conversations.models import (
     Profile,
     Rename,
     Reset,
+    Scope,
     SetMemory,
     SetNotes,
     SetPersona,
+    SetScope,
+    Settle,
     SetVoice,
     TurnRecord,
+    Unsettle,
+    describe_scope,
     slugify,
 )
 from ghost_core.conversations.writer import ConversationWriter
@@ -136,7 +141,11 @@ class Conversations:
         voices: Sequence[str] = (),
         recent_limit: int = 40,
         retention: timedelta = timedelta(days=90),
+        scopes: Mapping[str, Callable[[], list[str]]] | None = None,
     ) -> None:
+        """``scopes`` is what a thread can be scoped to: ability name -> a function
+        returning that ability's whole allowlist (``Contributions.scope_items``). A
+        thread's scope must stay within it (ADR 0019)."""
         self._store = store
         self.files = ConversationFiles(root)
         self.writer = ConversationWriter(store, self.files)
@@ -145,6 +154,7 @@ class Conversations:
         self._voices = tuple(voices)
         self._recent_limit = recent_limit
         self._retention = retention
+        self._scopes: dict[str, Callable[[], list[str]]] = dict(scopes or {})
         self.ensure_ghost()
 
     # --- registry ------------------------------------------------------------
@@ -169,16 +179,19 @@ class Conversations:
     def get(self, slug: str) -> Profile | None:
         return self._store.get_conversation(slug)
 
-    def list(self) -> list[Profile]:
-        return self._store.list_conversations()
+    def list(self, *, include_settled: bool = False) -> list[Profile]:
+        """Live conversations, Ghost first. Settled threads (ADR 0019) are left out
+        unless asked for: they are readable, not routable."""
+        return self._store.list_conversations(include_settled=include_settled)
 
-    def resolve(self, spoken: str) -> Profile | None:
+    def resolve(self, spoken: str, *, include_settled: bool = False) -> Profile | None:
         """The conversation the operator most likely means by ``spoken``: exact slug,
-        then any name or alias, then word overlap with filler words removed."""
+        then any name or alias, then word overlap with filler words removed. A settled
+        thread is not a match unless ``include_settled`` (to bring it back)."""
         text = spoken.strip().lower()
         if not text:
             return None
-        profiles = self.list()
+        profiles = self.list(include_settled=include_settled)
         for p in profiles:
             if p.slug == slugify(text):
                 return p
@@ -203,6 +216,58 @@ class Conversations:
 
     def voices(self) -> tuple[str, ...]:
         return self._voices
+
+    def unused_voice(self) -> str:
+        """A voice no live conversation uses yet, so a new thread sounds like itself.
+        The default when every installed voice is taken (or none is known)."""
+        taken = {p.voice for p in self.list(include_settled=True)}
+        for v in self._voices:
+            if v not in taken:
+                return v
+        return self.default_voice
+
+    # --- scope (ADR 0019) -----------------------------------------------------------
+
+    def scope_kinds(self) -> dict[str, Callable[[], list[str]]]:
+        return dict(self._scopes)
+
+    def validate_scope(self, slug: str, scope: Mapping[str, Sequence[str]]) -> Scope:
+        """A thread's scope as it will be stored: each ability must be one that can be
+        scoped, each item within that ability's allowlist (spelled as the allowlist
+        spells it). Ghost is always unscoped. Empty item lists drop the ability."""
+        if slug == GHOST and any(scope.values()):
+            raise ValueError("Ghost is unscoped and cannot be given a scope")
+        out: Scope = {}
+        for ability, items in scope.items():
+            if ability not in self._scopes:
+                raise ValueError(f"{ability} cannot be scoped")
+            allowed = {a.lower(): a for a in self._scopes[ability]()}
+            kept: list[str] = []
+            for raw in items:
+                item = str(raw).strip()
+                if not item:
+                    continue
+                canonical = allowed.get(item.lower())
+                if canonical is None:
+                    raise ValueError(
+                        f"{item} is not something {ability} is allowed to touch; "
+                        f"it allows {', '.join(sorted(allowed.values())) or 'nothing'}"
+                    )
+                if canonical not in kept:
+                    kept.append(canonical)
+            if kept:
+                out[ability] = tuple(kept)
+        return out
+
+    def scope_of(self, ability: str, item: str) -> list[Profile]:
+        """The live threads whose scope for ``ability`` covers ``item`` (a target's
+        ``scope()`` string). Used to tell the operator where something belongs."""
+        needle = item.strip().lower()
+        return [
+            p
+            for p in self.list()
+            if not p.is_ghost and needle in {i.lower() for i in p.scope.get(ability, ())}
+        ]
 
     # --- what a session loads -------------------------------------------------
 
@@ -254,6 +319,7 @@ class Conversations:
                         "slug": p.slug,
                         "aliases": list(p.aliases),
                         "voice": p.voice,
+                        "scope": {a: list(items) for a, items in p.scope.items()} or "everything",
                         "last_active": p.last_active_at.isoformat() if p.last_active_at else None,
                     }
                     for p in self.list()
@@ -264,8 +330,9 @@ class Conversations:
             ReadTool(
                 name="list_conversations",
                 description=(
-                    "The saved conversations (lines) the operator can be patched through to, "
-                    "with their names and aliases."
+                    "The saved conversations (threads, lines) the operator can be patched "
+                    "through to, with their names, aliases and what each one covers. Settled "
+                    "threads are not listed."
                 ),
                 properties={},
                 required=[],
@@ -288,7 +355,15 @@ class Conversations:
             slug = slugify(name)
             if self._store.get_conversation(slug, include_deleted=True) is not None:
                 raise ValueError(f"there is already a conversation called {name!r}")
-            voice = _voice(args.get("voice"), voices) or self.default_voice
+            voice = _voice(args.get("voice"), voices) or self.unused_voice()
+            persona = str(args.get("persona") or "").strip()
+            if len(persona) > MAX_PERSONA:
+                raise ValueError("that persona is too long")
+            scope = self.validate_scope(slug, _scope_arg(args.get("scope")))
+            memory = ""
+            seed = str(args.get("seed_from") or "").strip()
+            if seed:
+                memory = self.handoff_memory(seed)
             return Prepared(
                 target=ConversationTarget(slug=slug),
                 changes=ChangeSet(
@@ -298,11 +373,54 @@ class Conversations:
                             aliases=_aliases(args.get("aliases")),
                             voice=voice,
                             speed=_speed(args.get("speed"), self.default_speed),
-                            persona="",
+                            persona=persona,
+                            scope=scope,
+                            memory=memory,
                         ),
                     )
                 ),
                 rationale=f"start a conversation called {name}",
+            )
+
+        async def set_scope(args: dict[str, Any]) -> Prepared:
+            p = self._target(args)
+            if p.is_ghost:
+                raise ValueError("Ghost is unscoped and cannot be given a scope")
+            ability = str(args.get("ability") or "").strip()
+            if not ability:
+                raise ValueError("which ability's scope? (for example github_issues)")
+            items = args.get("items")
+            if isinstance(items, str):
+                items = [s for s in re.split(r"[,;]", items)]
+            if items is None:
+                items = []
+            if not isinstance(items, list):
+                raise ValueError("items must be a list")
+            merged = {a: list(v) for a, v in p.scope.items()}
+            merged[ability] = [str(i) for i in items]
+            scope = self.validate_scope(p.slug, merged)
+            return Prepared(
+                target=ConversationTarget(slug=p.slug),
+                changes=ChangeSet(steps=(SetScope(scope=scope),)),
+                rationale=f"{p.name} now covers {describe_scope(scope)}",
+            )
+
+        async def settle(args: dict[str, Any]) -> Prepared:
+            p = self._target(args)
+            if p.is_ghost:
+                raise ValueError("Ghost cannot be settled")
+            if p.settled:
+                raise ValueError(f"{p.name} is already settled")
+            return Prepared(
+                target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Settle(),))
+            )
+
+        async def unsettle(args: dict[str, Any]) -> Prepared:
+            p = self._target(args, include_settled=True)
+            if not p.settled:
+                raise ValueError(f"{p.name} is not settled")
+            return Prepared(
+                target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Unsettle(),))
             )
 
         async def rename(args: dict[str, Any]) -> Prepared:
@@ -393,22 +511,99 @@ class Conversations:
             "type": "string",
             "description": "Which conversation, by name. Omit for the one you are in.",
         }
+        scope_prop = {
+            "type": "object",
+            "description": (
+                "What the thread covers, per ability: {ability: [item, ...]}, for example "
+                '{"github_issues": ["acme/app"]}. Bind what the conversation was about; '
+                "omit for a thread that covers everything."
+                + (
+                    f" Scopable abilities: {', '.join(sorted(self._scopes))}."
+                    if self._scopes
+                    else ""
+                )
+            ),
+            "additionalProperties": {"type": "array", "items": {"type": "string"}},
+        }
         return [
             Operation(
                 "create",
                 (
-                    "Start a new saved conversation (a line the operator can be patched to "
-                    "later). Use it at once, without asking, when the operator says 'save this "
-                    "as X' or 'start a conversation called X'; it switches them to it."
+                    "Start a new saved conversation (a thread, a line the operator can be "
+                    "patched to later). Use it at once, without asking, when the operator says "
+                    "'save this as X', 'make this a thread for X' or 'start a conversation "
+                    "called X'; it switches them to it. When the recent conversation was about "
+                    "particular repositories or items, put them in scope. Always write a "
+                    "persona. Leave voice out and one that no other thread uses is picked."
                 ),
                 {
                     "name": {"type": "string"},
                     "aliases": {"type": "array", "items": {"type": "string"}},
                     "voice": voice_prop(),
                     "speed": {"type": "number"},
+                    "persona": {
+                        "type": "string",
+                        "description": (
+                            "Who this thread is, in two or three sentences, written for this "
+                            "thread from what the conversation has been about: its subject, how "
+                            "the operator talks about it, and a manner that fits (brisk for ops, "
+                            "careful for money, warm for people). Make it distinct from the other "
+                            "threads; never a generic assistant. The operator edits it later."
+                        ),
+                    },
+                    "scope": scope_prop,
+                    "seed_from": {
+                        "type": "string",
+                        "description": (
+                            "Slug of a settled thread whose memory becomes this one's first "
+                            "memory, as a handoff."
+                        ),
+                    },
                 },
                 ["name"],
                 prepare=create,
+                writer=w,
+                risk="low",
+                allowed=w.allowed,
+            ),
+            Operation(
+                "set_scope",
+                (
+                    "Set what a thread covers for one ability: the items it may read and "
+                    "change. An empty list makes it cover everything for that ability. "
+                    "Ghost itself always covers everything."
+                ),
+                {
+                    "conversation": conv,
+                    "ability": {"type": "string", "description": "github_issues, ..."},
+                    "items": {"type": "array", "items": {"type": "string"}},
+                },
+                ["ability", "items"],
+                prepare=set_scope,
+                writer=w,
+                risk="low",
+                allowed=w.allowed,
+            ),
+            Operation(
+                "settle",
+                (
+                    "Mark a thread done: it leaves voice routing and the active list but "
+                    "keeps its transcript and memory, and can be brought back. Nothing is "
+                    "deleted."
+                ),
+                {"conversation": conv},
+                [],
+                prepare=settle,
+                writer=w,
+                risk="low",
+                allowed=w.allowed,
+            ),
+            Operation(
+                "unsettle",
+                "Bring a settled thread back into use.",
+                {"conversation": conv},
+                [],
+                prepare=unsettle,
                 writer=w,
                 risk="low",
                 allowed=w.allowed,
@@ -515,12 +710,25 @@ class Conversations:
             ),
         ]
 
-    def _target(self, args: dict[str, Any]) -> Profile:
+    def handoff_memory(self, seed: str) -> str:
+        """The memory a new thread starts with when seeded from ``seed`` (a slug or a
+        name): that thread's current ``memory.md``. Ghost's memory stays private to
+        Ghost (ADR 0014), so it can never be the seed."""
+        p = self.get(seed) or self.resolve(seed, include_settled=True)
+        if p is None:
+            raise ValueError(f"no thread {seed!r} to seed from")
+        if p.is_ghost:
+            raise ValueError(
+                "Ghost's memory is private; a handoff from Ghost is a summary you write"
+            )
+        return self.files.memory(p.slug)
+
+    def _target(self, args: dict[str, Any], *, include_settled: bool = False) -> Profile:
         """The conversation an operation is about: ``conversation`` by name, else the
         active one the caller put in ``_active``."""
         spoken = args.get("conversation")
         if spoken:
-            p = self.resolve(str(spoken))
+            p = self.resolve(str(spoken), include_settled=include_settled)
             if p is None:
                 raise ValueError(f"no conversation called {spoken!r}")
             return p
@@ -529,6 +737,22 @@ class Conversations:
         if p is None:
             raise ValueError(f"no conversation {slug!r}")
         return p
+
+
+def _scope_arg(value: object) -> dict[str, list[str]]:
+    """The model's ``scope`` argument: a map of ability -> items, or nothing."""
+    if value is None or value == "" or value == {}:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("scope must be a map of ability to items")
+    out: dict[str, list[str]] = {}
+    for ability, items in value.items():
+        if isinstance(items, str):
+            items = [s for s in re.split(r"[,;]", items)]
+        if not isinstance(items, list):
+            raise ValueError(f"scope for {ability} must be a list")
+        out[str(ability)] = [str(i) for i in items]
+    return out
 
 
 def _words(text: str) -> set[str]:

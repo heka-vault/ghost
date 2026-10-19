@@ -6,13 +6,14 @@
 import type { DevicesView, SettingsView } from "@ghost/client-ts";
 
 /** Page sections, in order. The id is also the `?section=` deep link. */
-export type SectionId = "setup" | "secrets" | "model" | "github" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
+export type SectionId = "setup" | "secrets" | "model" | "github" | "lines" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
   secrets: "Secrets",
   model: "Model",
   github: "GitHub",
+  lines: "Lines",
   voice: "Voice and wake",
   audio: "Microphone and speakers",
   models: "Voice models",
@@ -29,6 +30,9 @@ export const VALUE_KEYS = [
   "GHOST_LLM_MODEL",
   "GHOST_REPOS",
   "GHOST_GITHUB_MOCK",
+  "GHOST_GITHUB_TOKENS",
+  "GHOST_CROSS_DEPARTMENT_ANSWERS",
+  "GHOST_DEPARTMENT_ROUTING",
   "GHOST_INPUT_DEVICE",
   "GHOST_WAKE_PHRASES",
   "GHOST_WAKE_FUZZY",
@@ -41,6 +45,9 @@ export const KEY_LABEL: Record<string, string> = {
   GHOST_LLM_MODEL: "Model",
   GHOST_REPOS: "Repositories",
   GHOST_GITHUB_MOCK: "Practice mode",
+  GHOST_GITHUB_TOKENS: "GitHub tokens by owner",
+  GHOST_CROSS_DEPARTMENT_ANSWERS: "Cross-department answers",
+  GHOST_DEPARTMENT_ROUTING: "Department routing",
   GHOST_INPUT_DEVICE: "Microphone",
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
@@ -57,6 +64,9 @@ export const KEY_SECTION: Record<string, SectionId> = {
   GHOST_LLM_MODEL: "model",
   GHOST_REPOS: "github",
   GHOST_GITHUB_MOCK: "github",
+  GHOST_GITHUB_TOKENS: "github",
+  GHOST_CROSS_DEPARTMENT_ANSWERS: "lines",
+  GHOST_DEPARTMENT_ROUTING: "lines",
   GHOST_INPUT_DEVICE: "audio",
   GHOST_WAKE_PHRASES: "voice",
   GHOST_WAKE_FUZZY: "voice",
@@ -95,6 +105,55 @@ export function splitList(v: string | undefined): string[] {
 export const joinList = (items: string[]) => items.join(",");
 
 export const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/* ------------------------------------------------- GitHub tokens by owner (ADR 0019) */
+/** A GitHub owner (user or organisation) as GitHub spells them. */
+export const OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+/** An environment variable name, as the shell spells them. */
+export const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export interface TokenRow {
+  owner: string;
+  env: string;
+}
+
+/** "heka-vault=HEKA_ORG_TOKEN,quotient=QUOTIENT_TOKEN" -> rows. Entries without “=” keep their text as the owner so nothing is lost. */
+export function parseTokenMap(v: string | undefined): TokenRow[] {
+  return (v ?? "")
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean)
+    .map((e) => {
+      const i = e.indexOf("=");
+      return i < 0 ? { owner: e, env: "" } : { owner: e.slice(0, i).trim(), env: e.slice(i + 1).trim() };
+    });
+}
+
+/** Rows -> "owner=ENV,owner2=ENV2". A row with neither side filled in is left out. */
+export function joinTokenMap(rows: TokenRow[]): string {
+  return rows
+    .filter((r) => r.owner.trim() || r.env.trim())
+    .map((r) => `${r.owner.trim()}=${r.env.trim()}`)
+    .join(",");
+}
+
+/** The first thing wrong with a token map, in words, or null. */
+export function tokenMapError(rows: TokenRow[]): string | null {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const owner = r.owner.trim();
+    const env = r.env.trim();
+    if (!owner && !env) continue;
+    if (!owner) return `Name the owner that ${env} is for.`;
+    if (!OWNER_RE.test(owner)) return `“${owner}” isn’t a GitHub owner. Use the part before the slash, like heka-vault.`;
+    if (!env) return `Name the environment variable that holds ${owner}’s token, like ${owner.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_TOKEN.`;
+    if (!ENV_NAME_RE.test(env)) return `“${env}” isn’t a variable name. Letters, digits and underscores only, like HEKA_ORG_TOKEN.`;
+    const key = owner.toLowerCase();
+    if (seen.has(key)) return `${owner} is listed twice. Keep one row per owner.`;
+    seen.add(key);
+  }
+  return null;
+}
 
 export function parseFuzzy(v: string | undefined): number {
   const n = Number.parseFloat(v ?? "");
@@ -145,6 +204,8 @@ export function validate(d: Draft, s: SettingsView | null): Record<string, strin
   if (url && !/^https?:\/\/\S+$/.test(url)) e.ANTHROPIC_BASE_URL = "Use a full URL, like https://api.anthropic.com or http://localhost:8080.";
   const badRepo = splitList(d.values.GHOST_REPOS).find((r) => !REPO_RE.test(r));
   if (badRepo) e.GHOST_REPOS = `“${badRepo}” isn’t owner/repo. Use the form heka-vault/ghost.`;
+  const badTokens = tokenMapError(parseTokenMap(d.values.GHOST_GITHUB_TOKENS));
+  if (badTokens) e.GHOST_GITHUB_TOKENS = badTokens;
   if ((d.values.GHOST_JEV || "auto") === "on" && !jevNow("on", s, d.secrets).ok) e.GHOST_JEV = jevNow("on", s, d.secrets).label;
   if (d.values.GHOST_WAKE_PHRASES != null && d.values.GHOST_WAKE_PHRASES !== "" && splitList(d.values.GHOST_WAKE_PHRASES).length === 0)
     e.GHOST_WAKE_PHRASES = "Add at least one phrase.";

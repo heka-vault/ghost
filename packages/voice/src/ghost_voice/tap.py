@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -42,6 +43,10 @@ class UserTap(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             await self._on_turn("user", frame.text)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            # The turn is over (after the grace hold), so the model is about to run. A
+            # transcript on its own isn't that: sentences arrive in pieces while the
+            # operator is still talking, and the phone showed Thinking mid-sentence.
             await self._on_phase("thinking")
         elif isinstance(frame, BotStartedSpeakingFrame):
             await self._on_phase("speaking")

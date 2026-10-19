@@ -135,6 +135,13 @@ class VoiceSettings(BaseSettings):
     idle_timeout_secs: float = 45.0
     smart_turn_threads: int = 2
 
+    # Crossing streams between scoped threads (ADR 0019); both off by default.
+    # cross_department_answers: a scoped thread may read outside its scope to answer a
+    # question, never write there. department_routing: a request that belongs to another
+    # thread patches the operator through to it; off, Ghost says which thread and offers.
+    cross_department_answers: bool = False
+    department_routing: bool = False
+
     # Compaction (ADR 0014): Pipecat's in-session summarizer, tokens-only trigger. Gentle
     # on purpose; within one voice session it rarely fires. 0 disables it.
     compact_trigger_tokens: int = 24000

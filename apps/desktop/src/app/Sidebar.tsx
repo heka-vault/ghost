@@ -99,7 +99,9 @@ export function Sidebar() {
   // Where the eye starts: Ghost, then the line Ghost is on right now (which is also the one
   // holding any pending okay), then the rest by recency. The live line is never buried.
   const rank = (l: ConversationView) => (l.is_ghost ? 0 : inSession && l.slug === active ? 1 : 2);
-  const sortedLines = [...lines].sort((a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? ""));
+  // A settled line (ADR 0019) has left the active list; the Conversations screen keeps it in its Settled group.
+  const unsettled = lines.filter((l) => !(l as { settled_at?: string | null }).settled_at);
+  const sortedLines = [...unsettled].sort((a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? ""));
   // Exactly one current row. When the open line has its own row, that row is current and
   // Conversations drops to a quiet "section active" state (no tile, no aria-current).
   const shownLines = state !== "offline" ? sortedLines.slice(0, MAX_LINES) : [];
@@ -143,6 +145,8 @@ export function Sidebar() {
               {shownLines.map((l) => {
                 const to = `/conversations/${l.slug}`;
                 const live = inSession && l.slug === active;
+                // No room for scope chips at this density: the items ride on the row's tooltip.
+                const scope = Object.values(((l as { scope?: Record<string, string[]> }).scope ?? {})).flat();
                 const waiting = live && !!pending;
                 const sub = waiting
                   ? "Waiting on your okay"
@@ -153,7 +157,12 @@ export function Sidebar() {
                       : "Not used yet";
                 return (
                   <li key={l.slug}>
-                    <a className={cx("sidebar__item sidebar__item--line", path === to && "is-current")} href={hrefFor(to)} aria-current={path === to ? "page" : undefined}>
+                    <a
+                      className={cx("sidebar__item sidebar__item--line", path === to && "is-current")}
+                      href={hrefFor(to)}
+                      aria-current={path === to ? "page" : undefined}
+                      title={scope.length ? `Scope: ${scope.join(", ")}` : undefined}
+                    >
                       <LineGlyph slug={l.slug} name={l.name} size="sm" />
                       <span className="sidebar__line-text">
                         <span className="sidebar__line-name">{l.is_ghost ? "Ghost" : l.name}</span>
