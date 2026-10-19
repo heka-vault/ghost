@@ -17,11 +17,21 @@ def default_socket_path() -> Path:
     return base / "api.sock"
 
 
+SHUTDOWN_SECS = 2.0
+
+
 class ApiServer:
     def __init__(self, app: FastAPI, socket_path: Path) -> None:
         self.path = socket_path
+        # An open /events WebSocket (the desktop app) never finishes on its own; without a
+        # limit uvicorn waits for it forever and the daemon never exits.
         config = uvicorn.Config(
-            app, uds=str(socket_path), log_level="warning", lifespan="off", access_log=False
+            app,
+            uds=str(socket_path),
+            log_level="warning",
+            lifespan="off",
+            access_log=False,
+            timeout_graceful_shutdown=SHUTDOWN_SECS,
         )
         self._server = uvicorn.Server(config)
         self._task: asyncio.Task[None] | None = None
@@ -40,5 +50,13 @@ class ApiServer:
     async def stop(self) -> None:
         self._server.should_exit = True
         if self._task:
-            await asyncio.gather(self._task, return_exceptions=True)
+            try:
+                await asyncio.wait_for(asyncio.shield(self._task), SHUTDOWN_SECS + 2)
+            except TimeoutError:
+                logger.warning("api: connections still open at shutdown; closing them")
+                self._server.force_exit = True
+                self._task.cancel()
+                await asyncio.gather(self._task, return_exceptions=True)
+            except Exception:  # noqa: BLE001 - the server's own failure, already logged
+                pass
         self.path.unlink(missing_ok=True)

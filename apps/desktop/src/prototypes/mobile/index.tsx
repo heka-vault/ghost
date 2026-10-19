@@ -4,7 +4,7 @@
  * window it sits in a device frame beside an index of every screen and state.
  *
  * Live state (connection, phase, pending, audit) comes from the mock daemon via useGhost()
- * and useLive(), so Start, End, Confirm, Cancel and Undo really run. Pairing and the phone's
+ * and useLive(), so Start, End, Confirm and Cancel really run. Pairing and the phone's
  * own preferences have no API yet; they come from useFixture("mobile") and ./store.
  * Screenshot with --mobile (390x844). States: see the index, or docs in mobile.css's header.
  */

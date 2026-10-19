@@ -41,9 +41,11 @@ JEV_MODES = ("auto", "on", "off")
 # classifier and the intent experiment (docs/benchmarks/scripts/jev_eval.py).
 INTENTS: dict[str, str] = {
     "affirm": (
-        "explicitly agrees to do pending_action now: yes, yeah, yep, go ahead, do it, "
-        "that's right, sure, confirm, close it. A general wrap-up such as 'that's it', "
-        "'all done', 'we're good' or 'that'll do' is NOT affirm; it is sleep."
+        "agrees to do pending_action now, the loose way people answer a yes-or-no "
+        "question: yes, yeah, yep, sure, okay, ok, alright, sounds good, fine, go ahead, "
+        "do it, go for it, uh huh, mm hm, that's right, confirm, close it. A short "
+        "acknowledgement right after the question is affirm. A general wrap-up such as "
+        "'that's it', 'all done', 'we're good' or 'that'll do' is NOT affirm; it is sleep."
     ),
     "deny": (
         "does not want pending_action done: no, nope, nah, don't, wait, hold on, hold off, "
@@ -95,9 +97,11 @@ def confirmation_questions() -> dict[str, Any]:
             "instructions": (
                 "The assistant just said `question`; `pending_action` is the change waiting "
                 "for a yes, or '(nothing pending)'. The operator then said `utterance`. "
-                "Classify what the operator meant by the words of `utterance` alone. Do not "
-                "assume agreement: only an explicit yes or go-ahead is affirm. If the words "
-                "fit a wrap-up, choose sleep; if they fit a refusal, choose deny."
+                "Classify what the operator meant, the way the person who just asked would "
+                "hear it: when a change is pending, a short acknowledgement ('okay', "
+                "'alright', 'sounds good') answers the question and is affirm. Hesitation, "
+                "a refusal or any 'no' or 'wait' is deny. If the words fit a wrap-up, "
+                "choose sleep."
             ),
             "criteria": dict(INTENTS),
         },
@@ -221,7 +225,7 @@ class JevClassifier:
         client: JevClient,
         *,
         fallback: ConfirmationClassifier | None = None,
-        threshold: float = 0.9,
+        threshold: float = 0.95,
         deadline: float = 0.5,
         on_decision: Callable[[str], None] | None = None,
     ) -> None:
@@ -230,10 +234,15 @@ class JevClassifier:
         self._threshold = threshold
         self._deadline = deadline
         self._log = on_decision or (lambda _msg: None)
+        # Which path decided the last call, for latency records: "guard" (negation),
+        # "jev", "regex-fallback" (Jev failed or timed out), "regex-unsure" (Jev not
+        # confident enough). Never the words.
+        self.last_source = ""
 
     async def classify(self, utterance: str, context: ConfirmationContext) -> Verdict:
         if has_negation(utterance):
             self._log(f"jev: skipped, negation guard -> NEGATIVE for {utterance!r}")
+            self.last_source = "guard"
             return Verdict.NEGATIVE
         try:
             a = await asyncio.wait_for(
@@ -241,13 +250,16 @@ class JevClassifier:
             )
         except (TimeoutError, JevError, ValueError, KeyError, TypeError) as e:
             self._log(f"jev: {type(e).__name__}, falling back to regex for {utterance!r}")
+            self.last_source = "regex-fallback"
             return await self._fallback.classify(utterance, context)
         self._log(
             f"jev: {a.choice} conf={a.confidence:.2f} directed={a.directed} "
             f"{a.seconds * 1000:.0f}ms for {utterance!r}"
         )
         if a.confidence < self._threshold or (a.directed is not None and a.directed < 0.5):
+            self.last_source = "regex-unsure"
             return await self._fallback.classify(utterance, context)
+        self.last_source = "jev"
         if a.choice == "affirm":
             return Verdict.AFFIRMATIVE
         if a.choice in {"deny", "cancel"}:  # "never mind" to "close it?" is a no

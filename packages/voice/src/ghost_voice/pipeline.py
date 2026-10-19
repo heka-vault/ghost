@@ -7,9 +7,9 @@ import random
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from anthropic import AsyncAnthropic
 from ghost_core import (
     Ability,
     Contributions,
@@ -22,8 +22,8 @@ from ghost_core import (
 from ghost_core.conversations import ABILITY as CONVERSATIONS
 from ghost_core.conversations import GHOST, SUMMARY_TEMPLATE, Conversations
 from loguru import logger
+from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
@@ -36,11 +36,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
-    TurnAnalyzerUserTurnStopStrategy,
-)
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.context.llm_context_summarization import LLMContextSummarizationConfig
 from pipecat.workers.runner import WorkerRunner
@@ -48,30 +44,41 @@ from pipecat.workers.runner import WorkerRunner
 from ghost_voice.config import VoiceSettings
 from ghost_voice.confirmation import ConfirmationProcessor
 from ghost_voice.conversation import ConversationRuntime
+from ghost_voice.echo import EchoFilter
 from ghost_voice.intents import QuickIntents
 from ghost_voice.intercept import InterceptorProcessor
+from ghost_voice.kokoro import KokoroTTS
+from ghost_voice.latency import LatencyObserver
+from ghost_voice.llm import GhostAnthropicLLMService, shared_client
+from ghost_voice.narration import NarrationCut
 from ghost_voice.parakeet import ParakeetSTTService
 from ghost_voice.prompt import build_system_prompt
+from ghost_voice.rtvi import GhostRTVIProcessor, observer_params
 from ghost_voice.sounds import ensure_thinking_sound
 from ghost_voice.tap import AssistantTap, OnPhase, OnTurn, UserTap
 from ghost_voice.thinking import ThinkingSoundCut, ThinkingSoundProcessor, ThinkingStartFrame
 from ghost_voice.tools import register_tools
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
-from ghost_voice.turns import BargeInUserTurnStartStrategy
+from ghost_voice.turns import BargeInUserTurnStartStrategy, PatientTurnStopStrategy, SmartTurn
 
 TTS_SAMPLE_RATE = 24000  # Kokoro's native rate; the output transport runs at it
+
+# Builds the session's transport, given the thinking-sound mixer (or None when the
+# thinking sound is off) to attach to its audio output.
+TransportFactory = Callable[[BaseAudioMixer | None], BaseTransport]
 
 
 @dataclass
 class Models:
     """Loaded once by the daemon and shared across sessions (about 3 GB).
 
-    ``stt`` is a template: pipelines use ``stt.fork()`` so each gets its own
-    processor over the one loaded model."""
+    Each is a template: pipelines use ``fork()`` so each gets its own processor (or
+    turn analyzer) over the one loaded model. Never put a template in a pipeline:
+    Pipecat leaves a processor that saw a CancelFrame refusing frames for good."""
 
     stt: ParakeetSTTService
-    tts: KokoroTTSService
-    turn: LocalSmartTurnAnalyzerV3
+    tts: KokoroTTS
+    turn: SmartTurn
 
     @classmethod
     def load(cls, s: VoiceSettings) -> Models:
@@ -82,12 +89,12 @@ class Models:
         # Prefer files already in Ghost's cache; otherwise Pipecat downloads them.
         model_path = s.tts_model_path or s.cache_dir / "kokoro" / "kokoro-v1.0.onnx"
         voices_path = s.tts_voices_path or s.cache_dir / "kokoro" / "voices-v1.0.bin"
-        tts = KokoroTTSService(
-            model_path=str(model_path) if model_path.exists() else None,
-            voices_path=str(voices_path) if voices_path.exists() else None,
-            settings=KokoroTTSService.Settings(voice=s.tts_voice, speed=s.tts_speed),
+        tts = KokoroTTS.load(
+            model_path=model_path if model_path.exists() else None,
+            voices_path=voices_path if voices_path.exists() else None,
+            settings=KokoroTTS.Settings(voice=s.tts_voice, speed=s.tts_speed),
         )
-        turn = LocalSmartTurnAnalyzerV3(cpu_count=s.smart_turn_threads)
+        turn = SmartTurn(cpu_count=s.smart_turn_threads)
         return cls(stt=stt, tts=tts, turn=turn)
 
 
@@ -98,9 +105,14 @@ class GhostSession:
     runner: WorkerRunner
     _ended: asyncio.Event
     conversation: ConversationRuntime | None = None
+    latency: LatencyObserver | None = None
 
     async def run(self) -> None:
-        await self.runner.run()
+        try:
+            await self.runner.run()
+        finally:
+            if self.latency:
+                self.latency.flush()  # the turn that was open when the session ended
 
     async def end(self) -> None:
         if not self._ended.is_set():
@@ -135,6 +147,17 @@ class GhostSession:
     async def cancel(self) -> None:
         self._ended.set()
         await self.runner.cancel()
+
+    async def send_server_message(self, data: Any) -> None:
+        """Send ``data`` to a connected client as an RTVI ``server-message``."""
+        await self.worker.rtvi.send_server_message(data)
+
+    def on_client_ready(self, handler: Callable[[], Awaitable[None]]) -> None:
+        """Run ``handler`` when an RTVI client says ``client-ready``."""
+
+        @self.worker.rtvi.event_handler("on_client_ready")
+        async def _ready(_rtvi) -> None:
+            await handler()
 
 
 def last_assistant_text(context: LLMContext) -> str:
@@ -206,6 +229,7 @@ def build_session(
     gate: WriteGate,
     events: Events | None = None,
     transport: BaseTransport | None = None,
+    transport_factory: TransportFactory | None = None,
     greeting: str | None = GREETING_VARIED,
     first_utterance: str | None = None,
     on_sleep: Callable[[], Awaitable[None]] | None = None,
@@ -214,12 +238,38 @@ def build_session(
     conversations: Conversations | None = None,
     start_in: str = GHOST,
     on_conversation: Callable[[str], Awaitable[None]] | None = None,
+    origin: str = "desk",
+    latency_log: Path | None = None,
+    on_latency: Callable[[dict[str, Any]], None] | None = None,
 ) -> GhostSession:
     """Build one session. ``first_utterance`` is what the operator said right after
     the wake phrase; when given it is the first user turn and there is no greeting.
     With ``conversations`` the session opens in ``start_in`` (normally ``ghost``),
-    seeded from its memory, in its voice, and can be transferred (ADR 0014)."""
+    seeded from its memory, in its voice, and can be transferred (ADR 0014).
+
+    The transport is the workstation's sound devices unless ``transport`` or
+    ``transport_factory`` is given; the factory receives the thinking-sound mixer so a
+    phone's WebRTC track gets it too (ADR 0016). ``start(open=False)`` runs the pipeline
+    without the greeting or first turn; ``open()`` sends them later, for a transport
+    whose far end connects after the pipeline starts.
+
+    Every turn's timeline (ghost_voice.latency) is logged and, with ``latency_log``,
+    appended there; ``on_latency`` gets each record too. ``origin`` (desk, phone) is
+    only a label on those records."""
     session_id = uuid.uuid4().hex
+    target = settings.llm_target()  # GHOST_LLM_ENDPOINT: the proxy or OpenRouter
+    latency = (
+        LatencyObserver(
+            session_id=session_id,
+            origin=origin,
+            model=target.model,
+            log_path=latency_log,
+            max_bytes=int(settings.latency_max_mb * 1024 * 1024),
+            sink=on_latency,
+        )
+        if settings.latency
+        else None
+    )
     ended = asyncio.Event()
     abilities = list(abilities)
     runtime: ConversationRuntime | None = None
@@ -253,6 +303,8 @@ def build_session(
             volume=settings.thinking_volume,
             mixing=False,
         )
+    if transport is None and transport_factory is not None:
+        transport = transport_factory(mixer)
     transport = transport or SoundDeviceTransport(
         SoundDeviceTransportParams(
             audio_in_enabled=True,
@@ -264,13 +316,11 @@ def build_session(
         )
     )
 
-    llm = AnthropicLLMService(
-        api_key=settings.anthropic_auth_token,
-        client=AsyncAnthropic(
-            api_key=settings.anthropic_auth_token, base_url=settings.anthropic_base_url
-        ),
+    llm = GhostAnthropicLLMService(
+        api_key=target.api_key,
+        client=shared_client(target),
         settings=AnthropicLLMService.Settings(
-            model=settings.llm_model,
+            model=target.model,
             system_instruction=(
                 runtime.system_prompt() if runtime else build_system_prompt(fragments)
             ),
@@ -282,12 +332,20 @@ def build_session(
 
     session: GhostSession | None = None
 
-    async def sleep() -> None:
+    narration = NarrationCut()
+
+    async def sleep(*, keep_current: bool = True) -> None:
+        """The model called go_to_sleep: its goodbye in this response is spoken, then the
+        session ends. The shortcut (``sleep_now``) has said its own goodbye already."""
         logger.info("go_to_sleep")
+        narration.close(keep_current=keep_current)
         if on_sleep:
             await on_sleep()
         if session:
             await session.end()
+
+    async def sleep_now() -> None:
+        await sleep(keep_current=False)
 
     tools = register_tools(
         llm,
@@ -298,6 +356,8 @@ def build_session(
         events=events,
         conversations=runtime,
         on_call=runtime.record_call if runtime else None,
+        last_request=lambda: last_request(),  # defined below with the turn taps
+        probe=latency,
     )
     context = LLMContext(messages=runtime.initial_messages() if runtime else None, tools=tools)
 
@@ -329,7 +389,13 @@ def build_session(
             ),
             user_turn_strategies=UserTurnStrategies(
                 start=[BargeInUserTurnStartStrategy(min_words=settings.barge_in_min_words)],
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=models.turn)],
+                stop=[
+                    PatientTurnStopStrategy(
+                        turn_analyzer=models.turn.fork(),
+                        grace_secs=settings.turn_grace_secs,
+                        probe=latency,
+                    )
+                ],
             ),
             user_idle_timeout=settings.idle_timeout_secs,
         ),
@@ -363,8 +429,22 @@ def build_session(
 
     outer_turn = on_turn or _noop_turn
     on_phase = on_phase or _noop_phase  # type: ignore[assignment]
+    echo = EchoFilter(window_secs=settings.echo_window_secs)
+    # The operator's words since Ghost last spoke, and that reply: what a change was asked
+    # for in, read by the gate as a possible yes (ghost_core.request).
+    heard: list[str] = []
+    replied = [""]
+
+    def last_request() -> tuple[str, str]:
+        return " ".join(heard), replied[0]
 
     async def on_turn(role: str, text: str) -> None:  # type: ignore[no-redef]
+        if role == "assistant":
+            echo.spoke(text)
+            replied[0] = text
+            heard.clear()
+        elif role == "user":
+            heard.append(text)
         if runtime and role in ("user", "assistant"):
             runtime.record(role, text)
         await outer_turn(role, text)
@@ -374,6 +454,7 @@ def build_session(
             [
                 (Slot.AUDIO_IN, transport.input()),
                 (None, models.stt.fork()),
+                (None, echo),
                 (None, UserTap(on_turn, on_phase)),
                 (
                     None,
@@ -381,21 +462,34 @@ def build_session(
                         interceptors,
                         gate=gate,
                         session_id=session_id,
-                        on_sleep=sleep,
+                        on_sleep=sleep_now,
                         last_assistant=last_assistant,
+                        probe=latency,
                     ),
                 ),
                 (
                     Slot.AFTER_STT,
                     ConfirmationProcessor(
-                        gate, session_id, last_assistant=last_assistant, events=events
+                        gate,
+                        session_id,
+                        last_assistant=last_assistant,
+                        events=events,
+                        probe=latency,
                     ),
                 ),
                 (Slot.BEFORE_LLM, user_agg),
                 (Slot.AFTER_LLM, llm),
+                (None, narration),
                 (None, ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs)),
                 (Slot.BEFORE_TTS, AssistantTap(on_turn, runtime.on_marker if runtime else None)),
-                (Slot.AUDIO_OUT, models.tts),
+                (
+                    Slot.AUDIO_OUT,
+                    models.tts.fork(
+                        clause_min_words=settings.tts_clause_min_words
+                        if settings.tts_clauses
+                        else None
+                    ),
+                ),
                 (None, ThinkingSoundCut()),
                 (None, transport.output()),
                 (None, assistant_agg),
@@ -405,16 +499,31 @@ def build_session(
     )
     worker = PipelineWorker(
         pipeline,
-        params=PipelineParams(audio_in_sample_rate=16000, enable_metrics=True),
+        # Usage metrics carry the token counts and prompt-cache reads per model call.
+        params=PipelineParams(
+            audio_in_sample_rate=16000, enable_metrics=True, enable_usage_metrics=True
+        ),
+        observers=[latency] if latency else None,
         processor_unusable_policy=ProcessorUnusablePolicy.END,
+        rtvi_processor=GhostRTVIProcessor(),
+        rtvi_observer_params=observer_params(),
     )
     runner = WorkerRunner(handle_sigint=False)
     session = GhostSession(
-        session_id=session_id, worker=worker, runner=runner, _ended=ended, conversation=runtime
+        session_id=session_id,
+        worker=worker,
+        runner=runner,
+        _ended=ended,
+        conversation=runtime,
+        latency=latency,
     )
 
-    async def start() -> None:
+    async def start(open: bool = True) -> None:
         await runner.add_workers(worker)
+        if open:
+            await opening()
+
+    async def opening() -> None:
         if runtime:
             await worker.queue_frames(runtime.start_frames())
         if first_utterance:
@@ -437,4 +546,5 @@ def build_session(
             await worker.queue_frames([LLMRunFrame()])
 
     session.start = start  # type: ignore[attr-defined]
+    session.open = opening  # type: ignore[attr-defined]
     return session

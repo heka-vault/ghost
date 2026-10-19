@@ -15,15 +15,15 @@
  * isn’t running” is the shell's (src/app/Offline.tsx).
  */
 import { useGhost } from "@ghost/ui";
-import { ArrowDown, ArrowRight, AudioLines, Mic, Moon, TriangleAlert, Undo2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, AudioLines, Mic, Moon, PhoneOff, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, LiveStatus, Notice, Page, PendingChange, Tooltip, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, useToast, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, LiveStatus, Notice, Page, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
-import { type OwnSettle, plainSummary, shortSummary, useDecisions, useLastSession, useLines, useObservedSwitches, useUndoable } from "./hooks";
+import { type OwnSettle, useDecisions, useLastSession, useLines, useObservedSwitches } from "./hooks";
 import { Transcript } from "./Transcript";
 import { buildTranscript } from "./transcript";
 import "./session.css";
@@ -38,22 +38,20 @@ const MIN_SCROLL_PX = 48;
 /** Within this of the end, the transcript counts as followed and new turns keep it there. */
 const PINNED_PX = 64;
 
-type Action = "send" | "wake" | "sleep" | "undo" | "confirm" | "cancel";
+type Action = "send" | "wake" | "sleep" | "confirm" | "cancel";
 const FAILED: Record<Action, string> = {
   send: "Couldn’t send that",
   wake: "Couldn’t wake Ghost",
   sleep: "Couldn’t put Ghost to sleep",
-  undo: "Couldn’t undo",
   confirm: "Couldn’t confirm",
   cancel: "Couldn’t cancel",
 };
 
 export default function SessionScreen(_: RouteProps) {
-  const { client, status, turns, pending, lastEvent } = useGhost();
+  const { client, status, turns, pending } = useGhost();
   // The shell's state: the same words as the sidebar card, and `online` gates every write.
   const { phase, online, loadingModels: loading, setupNeeded, setupHref } = useLive();
   const design = useDesign();
-  const toast = useToast();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState<{ action: Action; text: ReactNode } | null>(() => designError(!!design));
@@ -64,15 +62,16 @@ export default function SessionScreen(_: RouteProps) {
 
   const sessionId = status?.session_id ?? null;
   const inSession = !!sessionId;
+  // The paired phone started this session (ADR 0016). The desk shows it and can still end it.
+  const onPhone = inSession && status?.session_origin === "phone";
   const line = (inSession && status?.conversation) || "ghost";
   const lines = useLines();
   const names = useMemo(() => new Map(lines.map((l) => [l.slug, l.name])), [lines]);
   const nameOf = (slug: string) => lineName(slug, names.get(slug));
   const lineLabel = nameOf(line);
   const switches = useObservedSwitches(sessionId, inSession ? line : null, turns);
-  const { decisions, recordUndo } = useDecisions(sessionId, pending, turns, own);
+  const decisions = useDecisions(sessionId, pending, turns, own);
   const items = useMemo(() => buildTranscript(turns, line, lines, switches, decisions), [turns, line, lines, switches, decisions]);
-  const undoable = useUndoable(sessionId, lastEvent?.type === "outcome" ? lastEvent : null, turns.length);
   const seenLast = useLastSession(sessionId, inSession ? line : null, turns.length ? turns[turns.length - 1].at : null);
   // What this window saw end, or else the line used most recently (survives a reload).
   const lastSession = useMemo(() => {
@@ -185,21 +184,6 @@ export default function SessionScreen(_: RouteProps) {
     };
   };
 
-  const undo = async () => {
-    const refocus = keepFocus();
-    const what = undoable?.summary ?? null;
-    const afterAt = turns.length ? turns[turns.length - 1].at : null;
-    const r = await run("undo", () => client.undo());
-    if (r.ok) {
-      // The transcript records it where it happened (the change's caption, or a caption of its
-      // own), right above the composer. Only with no transcript to hold it does a toast say so,
-      // leading with what is true now.
-      if (what) recordUndo(what, afterAt);
-      if (!hasTranscript) toast({ title: "Change undone", description: what ? `Reversed: ${shortSummary(what)}.` : undefined, tone: "ok" });
-      refocus(); // the Undo button goes away with nothing left to undo
-    }
-  };
-
   // Confirm calls client.confirm() and nothing else (the click is confirmation evidence); the
   // card unmounts with it, so focus moves on afterwards.
   const settle = async (action: "confirm" | "cancel") => {
@@ -210,8 +194,8 @@ export default function SessionScreen(_: RouteProps) {
     else own.current = null;
   };
 
-  // Wake and sleep: the voice control may remount with the composer (start state <-> dock) or
-  // the header's Undo may go with the session; focus comes back to the composer either way.
+  // Wake and sleep: the voice control may remount with the composer (start state <-> dock);
+  // focus comes back to the composer either way.
   const wake = async () => {
     const refocus = keepFocus();
     const r = await run("wake", () => client.wake());
@@ -222,11 +206,6 @@ export default function SessionScreen(_: RouteProps) {
     const r = await run("sleep", () => client.sleep());
     if (r.ok) refocus();
   };
-
-  // The settled change Undo would reverse right now gets an inline Undo where it happened.
-  const lastDecision = decisions[decisions.length - 1];
-  const undoKey = undoable?.summary && lastDecision?.outcome === "confirmed" && !lastDecision.undone && lastDecision.summary === undoable.summary ? lastDecision.key : null;
-  const undoDisabled = !online || (busy !== null && busy !== "undo");
 
   const presencePhase: GhostPhase = !online ? "offline" : loading ? "starting" : phase;
   // Reconnecting is the field's own fact to state. Models loading is not: the shell's banner and
@@ -246,7 +225,9 @@ export default function SessionScreen(_: RouteProps) {
   const wakeOff = !canWake && busy !== "wake";
   const wakeWhy = !online ? "Ghost is reconnecting" : !modelsReady ? "Ghost is still loading its voice models" : "Wake Ghost";
   const voice: VoiceControl | undefined = inSession
-    ? { label: "Go to sleep", icon: <Moon />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
+    ? onPhone
+      ? { label: "End the phone session", icon: <PhoneOff />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
+      : { label: "Go to sleep", icon: <Moon />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
     : showDock
       ? { label: wakeWhy, icon: <AudioLines />, onClick: wake, loading: busy === "wake", disabled: wakeOff }
       : undefined;
@@ -289,20 +270,7 @@ export default function SessionScreen(_: RouteProps) {
       </Notice>
     ));
 
-  // Only when there is something to undo (a change Ghost made in this session in the last
-  // ten minutes) and its own caption isn't already offering it: one Undo in view, in the
-  // transcript's column right above the composer, never stretched out to the page's edge.
-  const undoEl = undoable && !undoKey && (
-    <div className="session-undo">
-      <Tooltip content={undoable.summary ? plainSummary(undoable.summary) : "Reverses Ghost’s last change in this session"}>
-        <Button variant="ghost" size="sm" leadingIcon={<Undo2 />} loading={busy === "undo"} disabled={undoDisabled} onClick={undo}>
-          Undo last change
-        </Button>
-      </Tooltip>
-    </div>
-  );
-
-  const start = startCopy({ online, loading, needsSetup, inSession });
+  const start = startCopy({ online, loading, needsSetup, inSession, onPhone });
   const showLast = startOnly && online && !loading && !needsSetup && lastSession;
   const newest = turns[turns.length - 1];
 
@@ -312,7 +280,15 @@ export default function SessionScreen(_: RouteProps) {
       bare={startOnly}
       title={inSession ? lineLabel : "Ghost"}
       leading={<LineGlyph slug={line} name={lineLabel} size="lg" />}
-      status={<LiveStatus />}
+      status={
+        onPhone ? (
+          <>
+            <LiveStatus /> · on your phone
+          </>
+        ) : (
+          <LiveStatus />
+        )
+      }
       dock={
         showDock ? (
           <div className="session-dock" ref={dock}>
@@ -338,7 +314,6 @@ export default function SessionScreen(_: RouteProps) {
               />
             )}
             {!pending && errorEl}
-            {undoEl}
             {composerEl}
             {pending && errorEl}
           </div>
@@ -347,7 +322,7 @@ export default function SessionScreen(_: RouteProps) {
     >
       {hasTranscript ? (
         <>
-          <Transcript items={items} nameOf={nameOf} thinkingAs={thinking ? line : null} undoKey={undoKey} onUndo={undo} undoDisabled={undoDisabled} />
+          <Transcript items={items} nameOf={nameOf} thinkingAs={thinking ? line : null} />
           <div ref={end} />
         </>
       ) : (
@@ -368,8 +343,7 @@ export default function SessionScreen(_: RouteProps) {
             ) : (
               !showDock && (
                 <div className="session-start__composer">
-                  {undoEl}
-                  {composerEl}
+                        {composerEl}
                 </div>
               )
             )}
@@ -400,13 +374,14 @@ export default function SessionScreen(_: RouteProps) {
 }
 
 /** The start state before the first turn: one presence, one line, one hint. Never promises what can’t happen yet. */
-function startCopy({ online, loading, needsSetup, inSession }: { online: boolean; loading: boolean; needsSetup: boolean; inSession: boolean }): { title: string; text?: string } {
+function startCopy({ online, loading, needsSetup, inSession, onPhone }: { online: boolean; loading: boolean; needsSetup: boolean; inSession: boolean; onPhone: boolean }): { title: string; text?: string } {
   if (!online) return { title: "Reconnecting", text: "This picks up again as soon as Ghost is back." };
   // The shell's banner and the status card already say the models are loading; this says
   // the next thing instead of repeating it.
   if (loading) return { title: "Almost ready", text: `Say ${quoted("Hey Ghost")} once the models finish` };
   if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model key before it can answer." };
   // The header already says “Listening”; this says what to do with it.
+  if (onPhone) return { title: "On your phone", text: "Ghost hears you through your phone. You can end the session here." };
   if (inSession) return { title: "Go ahead", text: "Ask what’s waiting on you." };
   // The field under it reads the same in every state; this line carries “or type”.
   return { title: `Say ${quoted("Hey Ghost")}`, text: "or type below" };

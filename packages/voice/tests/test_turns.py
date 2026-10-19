@@ -88,3 +88,61 @@ async def test_turn_start_clears_bot_speaking():
     await s.process_frame(BotStartedSpeakingFrame())
     await s.handle_user_turn_started()
     assert s.bot_speaking is False
+
+
+class _Tasks:
+    """Just enough of a task manager for the grace timer."""
+
+    def create_task(self, coro, name):
+        import asyncio
+
+        return asyncio.ensure_future(coro)
+
+    async def cancel_task(self, task):
+        task.cancel()
+
+
+def patient(grace: float):
+    from unittest.mock import MagicMock
+
+    from ghost_voice.turns import PatientTurnStopStrategy
+
+    class Testable(PatientTurnStopStrategy):
+        task_manager = _Tasks()  # type: ignore[assignment]
+
+    s = Testable(turn_analyzer=MagicMock(), grace_secs=grace)
+    stops: list[str] = []
+
+    async def stopped(**_kwargs):
+        stops.append("stopped")
+
+    # what Smart Turn's verdict would do without the hold
+    from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
+        TurnAnalyzerUserTurnStopStrategy,
+    )
+
+    return s, stops, stopped, TurnAnalyzerUserTurnStopStrategy
+
+
+@pytest.mark.asyncio
+async def test_end_of_turn_waits_out_the_grace(monkeypatch):
+    import asyncio
+
+    s, stops, stopped, base = patient(0.05)
+    monkeypatch.setattr(base, "trigger_user_turn_stopped", lambda self, **kw: stopped(**kw))
+    await s.trigger_user_turn_stopped()
+    assert stops == []
+    await asyncio.sleep(0.1)
+    assert stops == ["stopped"]
+
+
+@pytest.mark.asyncio
+async def test_speaking_again_keeps_the_turn_open(monkeypatch):
+    import asyncio
+
+    s, stops, stopped, base = patient(0.05)
+    monkeypatch.setattr(base, "trigger_user_turn_stopped", lambda self, **kw: stopped(**kw))
+    await s.trigger_user_turn_stopped()
+    await s._release_hold()  # noqa: SLF001 - what VADUserStartedSpeaking does
+    await asyncio.sleep(0.1)
+    assert stops == []

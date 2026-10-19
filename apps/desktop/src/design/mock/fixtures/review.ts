@@ -30,8 +30,8 @@ export interface ReviewDecision {
   at: string;
   /** In the operator's words, past tense: "Asked Priya for a plan for the existing objects". */
   text: string;
-  /** The audit status: executed, pending, undone, expired, cancelled. */
-  status: "executed" | "pending" | "undone" | "expired" | "cancelled";
+  /** The audit status: executed, pending, expired, cancelled. */
+  status: "executed" | "pending" | "expired" | "cancelled";
   via: "voice" | "text" | "ui";
   /** The same, short enough for a list row: "Approved", "Closed as a duplicate". */
   short?: string;
@@ -381,7 +381,7 @@ function week(s: Scenario): ReviewWeek {
     { repo: "ghost-mock/app", number: 199, title: "Dunning emails go out twice", text: "Approved the idempotency key fix", at: ago(1 * D + 3 * H), status: "executed", unblocked: 3 },
     { repo: "ghost-mock/app", number: 196, title: "Tax ID field accepts letters", text: "Requested changes: validate per country", at: ago(2 * D + 2 * H), status: "executed", unblocked: 0 },
     { repo: "ghost-mock/infra", number: 74, title: "Move backups to the new region", text: "Approved, after Priya confirmed the restore test", at: ago(2 * D + 5 * H), status: "executed", unblocked: 4 },
-    { repo: "ghost-mock/app", number: 190, title: "Duplicate of the CSV export bug", text: "Closed as a duplicate of 187", at: ago(3 * D + 1 * H), status: "undone", unblocked: 0 },
+    { repo: "ghost-mock/app", number: 190, title: "Duplicate of the CSV export bug", text: "Close as a duplicate of 187", at: ago(3 * D + 1 * H), status: "cancelled", unblocked: 0 },
     { repo: "ghost-mock/app", number: 187, title: "CSV export drops the last row", text: "Approved the off-by-one fix", at: ago(3 * D + 2 * H), status: "executed", unblocked: 2 },
     { repo: "ghost-mock/infra", number: 70, title: "Rotate the Stripe webhook secret", text: "Approved for Thursday night", at: ago(4 * D + 6 * H), status: "executed", unblocked: 1 },
     { repo: "ghost-mock/app", number: 181, title: "Onboarding checklist copy", text: "Asked Lea for shorter copy", at: ago(5 * D), status: "executed", unblocked: 0 },

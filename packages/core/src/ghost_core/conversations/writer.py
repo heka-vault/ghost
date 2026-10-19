@@ -16,7 +16,6 @@ from ghost_core.conversations.models import (
     Profile,
     Rename,
     Reset,
-    Restore,
     SetMemory,
     SetNotes,
     SetPersona,
@@ -116,28 +115,6 @@ class ConversationWriter:
                 p = self._live(slug)
                 store.upsert_conversation(p.model_copy(update={"deleted_at": utcnow()}))
                 store.tag_turns(slug, idempotency_key)
-            case Restore(memory=memory, notes=notes, marker=marker, profile=profile):
-                if profile is not None:
-                    p = store.get_conversation(slug, include_deleted=True)
-                    if p is None:
-                        raise ValueError("nothing to restore")
-                    store.upsert_conversation(
-                        p.model_copy(
-                            update={
-                                "deleted_at": None,
-                                "name": profile.name,
-                                "aliases": profile.aliases,
-                                "voice": profile.voice,
-                                "speed": profile.speed,
-                            }
-                        )
-                    )
-                    files.write(slug, PERSONA, profile.persona)
-                else:
-                    self._live(slug)
-                files.write(slug, MEMORY, memory)
-                files.write(slug, NOTES, notes)
-                store.untag_turns(marker)
             case _:
                 raise TypeError(f"ConversationWriter cannot apply {type(change).__name__}")
 

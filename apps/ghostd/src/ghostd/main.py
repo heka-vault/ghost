@@ -3,23 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
 from collections.abc import Sequence
 from datetime import timedelta
+from pathlib import Path
+from typing import Any
 
 from ghost_api import (
     ApiServer,
+    AuditPage,
     DaemonState,
     Deps,
     GhostClient,
     Phase,
+    PhonePairing,
+    PhoneView,
+    Status,
+    audit_page,
     create_app,
     default_socket_path,
     outcome_view,
     pending_view,
+    status_snapshot,
 )
+from ghost_api.models import StatusEvent
 from ghost_core import (
     AbilityError,
     AutonomyPolicy,
@@ -37,18 +47,22 @@ from ghost_core.conversations import ABILITY as CONVERSATIONS
 from ghost_core.conversations import GHOST, Conversations
 from ghost_core.jev import JevClassifier, JevClient
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
-from ghost_voice.pipeline import Models, conversations_ability
+from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models, conversations_ability
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
 from loguru import logger
 
 from ghostd.audio import Ducker, chime, restore_from_state
 from ghostd.config import GhostdSettings, runtime_dir
 from ghostd.dictation import is_dictating
+from ghostd.phone import PhoneListener, PhoneStore, Refusal
 from ghostd.wake import FileWakeDetector, TranscriptWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
+PHONE_STATE = "phone.json"
 VERSION = "0.1.0"
+PHONE_PING_GRACE_SECS = 5  # no keepalive from the phone for this long ends its session
+PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then is dropped
 
 
 class Daemon:
@@ -69,11 +83,21 @@ class Daemon:
         self._discovered: dict = {}
         self.conversations: Conversations | None = None
         self._models: Models | None = None
+        self._deps: Deps | None = None
+        # The phone (ADR 0016). An accepted offer's connection goes on the queue; the
+        # passive loop takes it, releases the desk mic and runs the session on it.
+        self.phone_listener: PhoneListener | None = None
+        self._phone_q: asyncio.Queue[Any] = asyncio.Queue()
+        self._phone_end = asyncio.Event()
+        self._waiting = False  # the passive loop is waiting for a wake or a phone
+        self._origin: str | None = None  # "desk" | "phone" while a session runs
 
     # --- Controller (called by the API) -------------------------------------
 
     async def wake(self, first_utterance: str | None) -> bool:
         if self.state.phase is not Phase.PASSIVE or self._manual is None:
+            return False
+        if not self._phone_q.empty():  # a phone session is about to start
             return False
         self._manual.trigger(first_utterance)
         return True
@@ -81,6 +105,7 @@ class Daemon:
     async def sleep(self) -> bool:
         if self.session is None:
             return False
+        self.state.set_ending()
         await self.session.end()
         return True
 
@@ -195,7 +220,7 @@ class Daemon:
         if self._models is None:
             return []
         try:
-            return sorted(self._models.tts._kokoro.voices)  # noqa: SLF001
+            return sorted(self._models.tts.kokoro.voices)
         except Exception:  # noqa: BLE001
             return []
 
@@ -203,7 +228,7 @@ class Daemon:
         if self._models is None:
             return False
         line = text or f"Hi, this is {voice.partition('_')[2].capitalize()}. This is how I sound."
-        kokoro = self._models.tts._kokoro  # noqa: SLF001
+        kokoro = self._models.tts.kokoro
 
         def play() -> None:
             import sounddevice as sd
@@ -218,6 +243,54 @@ class Daemon:
             logger.warning(f"voice sample failed: {e}")
             return False
         return True
+
+    # --- the phone (ADR 0016): Controller side ---------------------------------
+
+    def phone_pairing(self) -> PhonePairing | None:
+        return self.phone_listener.new_pairing() if self.phone_listener else None
+
+    def phone_view(self) -> PhoneView:
+        if self.phone_listener is None:
+            return PhoneView(address=None, device=None)
+        return self.phone_listener.view()
+
+    async def forget_phone(self) -> bool:
+        return await self.phone_listener.forget() if self.phone_listener else False
+
+    # --- the phone: PhoneHost side (the listener calls these) --------------------
+
+    def status(self) -> Status:
+        assert self._deps is not None
+        return status_snapshot(self._deps)
+
+    def audit(self, limit: int, offset: int) -> AuditPage:
+        assert self._deps is not None
+        return audit_page(self._deps.store, limit=limit, offset=offset)
+
+    def admit_phone(self) -> Refusal | None:
+        if self.state.phase is Phase.STARTING or not self.state.models_ready:
+            return "not_ready"
+        if (
+            not self._waiting
+            or self.session is not None
+            or self.state.phase is not Phase.PASSIVE
+            or not self._phone_q.empty()
+        ):
+            return "busy"
+        return None
+
+    async def start_phone(self, connection: Any) -> Refusal | None:
+        refusal = self.admit_phone()
+        if refusal is None:
+            self._phone_end.clear()
+            self._phone_q.put_nowait(connection)
+        return refusal
+
+    async def end_phone(self) -> bool:
+        if self._origin == "phone" or not self._phone_q.empty():
+            self._phone_end.set()
+            return True
+        return False
 
     # --- the loop --------------------------------------------------------------
 
@@ -268,7 +341,6 @@ class Daemon:
             store,
             autonomy=autonomy,
             classifier=classifier,
-            undo_window=timedelta(seconds=self.cfg.undo_window_secs),
             on_decision=debug.audio,
         )
         for a in abilities:
@@ -290,7 +362,13 @@ class Daemon:
         self.state.abilities = [a.name for a in abilities]
         events = Events(ln for a in abilities for ln in a.contributions.listeners)
         api = await self._start_api(gate, store, abilities)
+        await self._start_phone()
         logger.info(f"autonomy policy: {autonomy.source}")
+        logger.info(
+            f"llm: {self.voice.llm_target().describe()}, thinking {self.voice.llm_thinking}"
+        )
+        for problem in self.voice.llm_problems():
+            logger.error(f"llm: {problem}")
         for line in describe_abilities(abilities, autonomy):
             logger.info(line)
         logger.info(
@@ -317,18 +395,34 @@ class Daemon:
                 wake_task = asyncio.ensure_future(wake.wait())
                 stop_task = asyncio.ensure_future(self._stop.wait())
                 rearm_task = asyncio.ensure_future(self._rearm.wait())
-                await asyncio.wait(
-                    {wake_task, stop_task, rearm_task}, return_when=asyncio.FIRST_COMPLETED
-                )
+                phone_task = asyncio.ensure_future(self._phone_q.get())
+                self._waiting = True
+                try:
+                    await asyncio.wait(
+                        {wake_task, stop_task, rearm_task, phone_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    self._waiting = False
                 stop_task.cancel()
                 rearm_task.cancel()
-                if self._stop.is_set():
+                phone = phone_task.result() if phone_task.done() else None
+                phone_task.cancel()
+                if phone is None and not self._phone_q.empty():  # accepted in the same tick
+                    phone = self._phone_q.get_nowait()
+                if self._stop.is_set() or phone is not None or not wake_task.done():
                     wake_task.cancel()
                     await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
+                if self._stop.is_set():
+                    if phone is not None:
+                        await _close_peer(phone)
                     break
+                if phone is not None:  # the phone takes the session; the desk mic is free
+                    await self._conversation(
+                        models, abilities, gate, events, ducker, None, phone=phone
+                    )
+                    continue
                 if not wake_task.done():  # settings changed: rebuild the listener
-                    wake_task.cancel()
-                    await asyncio.gather(wake_task, return_exceptions=True)
                     continue
                 if is_dictating(self.cfg.dictation_flag):
                     logger.info("wake ignored: dictation is active")
@@ -340,6 +434,8 @@ class Daemon:
         finally:
             wake.close()
             ducker.restore()
+            if self.phone_listener:
+                await self.phone_listener.stop()
             if api:
                 await api.stop()
             for a in abilities:
@@ -376,6 +472,7 @@ class Daemon:
             stt_model=self.voice.stt_model,
             conversations=self.conversations,
         )
+        self._deps = deps
         server = ApiServer(create_app(deps), socket_path)
         try:
             await server.start()
@@ -390,6 +487,23 @@ class Daemon:
         )
         return server
 
+    async def _start_phone(self) -> None:
+        """The phone listener, when GHOST_PHONE_LISTEN is set (ADR 0016). It starts before
+        the models load so /hello answers and /offer says not_ready meanwhile."""
+        if not self.cfg.phone_listen.strip():
+            return
+        try:
+            listener = PhoneListener(
+                self.cfg.phone_listen,
+                store=PhoneStore(self.cfg.data_dir / PHONE_STATE),
+                host=self,
+            )
+            await listener.start()
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error(f"phone: listener not started on {self.cfg.phone_listen!r}: {e}")
+            return
+        self.phone_listener = listener
+
     async def _conversation(
         self,
         models: Models,
@@ -398,10 +512,22 @@ class Daemon:
         events: Events,
         ducker: Ducker,
         first_utterance: str | None = None,
+        *,
+        phone: Any = None,
     ) -> None:
-        ducker.duck()
-        if self.cfg.chime:
-            await asyncio.to_thread(chime, True, self.voice.output_device)
+        """One session. With ``phone`` (a negotiated SmallWebRTCConnection) the audio is
+        the phone's: no ducking, no desk chime, the thinking sound in its track, and the
+        session's events go to it over RTVI (ADR 0016)."""
+        origin = "phone" if phone is not None else "desk"
+        if phone is None:
+            ducker.duck()
+            if self.cfg.chime:
+                await asyncio.to_thread(chime, True, self.voice.output_device)
+        connected = asyncio.Event()
+        peer_gone = asyncio.Event()
+        transport_factory = (
+            self._phone_transport(phone, connected, peer_gone) if phone is not None else None
+        )
 
         async def on_turn(role: str, text: str) -> None:
             self.state.add_turn(role, text)
@@ -417,6 +543,9 @@ class Daemon:
             self.state.set_conversation(slug)
             self._refresh_pending()
 
+        async def on_sleep() -> None:
+            self.state.set_ending()  # the phone and the desktop app show "Hanging up"
+
         session = build_session(
             self.voice,
             models=models,
@@ -429,33 +558,149 @@ class Daemon:
             conversations=self.conversations,
             start_in=GHOST,
             on_conversation=on_conversation,
+            transport_factory=transport_factory,
+            on_sleep=on_sleep,
+            origin=origin,
+            latency_log=self.cfg.latency_path,
         )
         self.session = session
-        self.state.set_phase(Phase.LISTENING, session.session_id)
+        self._origin = origin
+        self.state.set_phase(Phase.LISTENING, session.session_id, origin=origin)
         self.state.set_conversation(GHOST)
         if first_utterance:
             self.state.add_turn("user", first_utterance, via=self._first_via)
         self._first_via = "voice"
-        logger.info(f"session {session.session_id} start")
-        await events.emit("session_start", session_id=session.session_id)
-        stop_task = asyncio.ensure_future(self._stop.wait())
+        logger.info(f"session {session.session_id} start ({origin})")
+        await events.emit("session_start", session_id=session.session_id, origin=origin)
+        waits = {asyncio.ensure_future(self._stop.wait())}
+        helpers: list[asyncio.Task[Any]] = []
+        events_q = None
+        if phone is not None:
+            events_q = self.state.bus.subscribe()
+            helpers = self._phone_helpers(session, phone, events_q, connected, peer_gone)
+            waits |= {
+                asyncio.ensure_future(peer_gone.wait()),
+                asyncio.ensure_future(self._phone_end.wait()),
+            }
         try:
-            await session.start()  # type: ignore[attr-defined]
+            await session.start(open=phone is None)  # type: ignore[attr-defined]
             run_task = asyncio.ensure_future(session.run())
-            done, _ = await asyncio.wait({run_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait({run_task, *waits}, return_when=asyncio.FIRST_COMPLETED)
+            if run_task not in done and phone is not None and not self._stop.is_set():
+                why = "phone ended it" if self._phone_end.is_set() else "phone went away"
+                logger.info(f"session {session.session_id}: {why}")
             if run_task not in done:
+                # Cancel rather than end: for the phone an EndFrame would wait on writes
+                # to a dead peer. Safe because each session forks its own processors
+                # from Models, so a cancelled one can't leave the next one mute.
                 await session.cancel()
                 await run_task
         except Exception:
             logger.exception("session failed")
         finally:
-            stop_task.cancel()
-            if self.cfg.chime:
+            for t in [*waits, *helpers]:
+                t.cancel()
+            await asyncio.gather(*helpers, return_exceptions=True)
+            if events_q is not None:
+                self.state.bus.unsubscribe(events_q)
+            if phone is not None:
+                await _close_peer(phone)  # the session ending closes the peer
+                self._phone_end.clear()
+            elif self.cfg.chime:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
             self.session = None
+            self._origin = None
             logger.info(f"session {session.session_id} end")
-            await events.emit("session_end", session_id=session.session_id)
+            await events.emit("session_end", session_id=session.session_id, origin=origin)
+
+    def _phone_transport(self, conn: Any, connected: asyncio.Event, peer_gone: asyncio.Event):
+        """A factory for the phone's SmallWebRTCTransport, given the thinking-sound mixer."""
+        from pipecat.transports.base_transport import TransportParams
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+
+        def factory(mixer: Any) -> SmallWebRTCTransport:
+            transport = SmallWebRTCTransport(
+                webrtc_connection=conn,
+                params=TransportParams(
+                    audio_in_enabled=True,
+                    audio_out_enabled=True,
+                    audio_out_sample_rate=TTS_SAMPLE_RATE,
+                    audio_out_mixer=mixer,
+                ),
+            )
+
+            @transport.event_handler("on_client_connected")
+            async def _connected(_t: Any, _c: Any) -> None:
+                connected.set()
+
+            @transport.event_handler("on_client_disconnected")
+            async def _disconnected(_t: Any, _c: Any) -> None:
+                peer_gone.set()
+
+            for state in ("closed", "failed"):
+
+                @conn.event_handler(state)
+                async def _gone(_c: Any) -> None:
+                    peer_gone.set()
+
+            return transport
+
+        return factory
+
+    def _phone_helpers(
+        self,
+        session: GhostSession,
+        conn: Any,
+        events_q: asyncio.Queue[str],
+        connected: asyncio.Event,
+        peer_gone: asyncio.Event,
+    ) -> list[asyncio.Task[Any]]:
+        """Greet once the phone's audio is up, forward the desk's events to it once its
+        data channel says client-ready, and notice when its keepalive stops."""
+        ready = asyncio.Event()
+
+        async def on_ready() -> None:
+            ready.set()
+
+        session.on_client_ready(on_ready)
+
+        async def greet() -> None:
+            await connected.wait()
+            await session.open()  # type: ignore[attr-defined]
+
+        async def forward() -> None:
+            # The same JSON the control API's WebSocket sends; never logged, and the
+            # log events are not sent at all (docs/phone-protocol.md).
+            await ready.wait()
+            backlog = []  # what happened before the channel opened, minus stale statuses
+            while not events_q.empty():
+                data = json.loads(events_q.get_nowait())
+                if data.get("type") not in ("log", "status"):
+                    backlog.append(data)
+            for data in backlog:
+                await session.send_server_message(data)
+            snapshot = StatusEvent(status=self.status()).model_dump(mode="json")
+            await session.send_server_message(snapshot)
+            while True:
+                data = json.loads(await events_q.get())
+                if data.get("type") != "log":
+                    await session.send_server_message(data)
+
+        async def watchdog() -> None:
+            try:
+                await asyncio.wait_for(connected.wait(), PHONE_CONNECT_SECS)
+            except TimeoutError:
+                logger.info("phone: the peer never connected")
+                peer_gone.set()
+                return
+            missed = 0
+            while missed < PHONE_PING_GRACE_SECS:
+                await asyncio.sleep(1)
+                missed = 0 if conn.is_connected() else missed + 1
+            peer_gone.set()
+
+        return [asyncio.ensure_future(c) for c in (greet(), forward(), watchdog())]
 
     def _refresh_pending(self) -> None:
         """Publish the pending proposal when it appears or goes away."""
@@ -465,6 +710,13 @@ class Daemon:
         view = pending_view(p) if p else None
         if (view.id if view else None) != (self.state.pending.id if self.state.pending else None):
             self.state.set_pending(view)
+
+
+async def _close_peer(conn: Any) -> None:
+    try:
+        await conn.disconnect()
+    except Exception:  # noqa: BLE001 - already closed
+        logger.debug("phone: peer already closed")
 
 
 def enabled_names(cfg: GhostdSettings, autonomy: AutonomyPolicy) -> list[str]:
@@ -575,6 +827,56 @@ def _client_command(cmd: str, args: list[str]) -> int:
         client.close()
 
 
+def latency_command(args: list[str]) -> int:
+    """``ghostd latency [--last N] [--file PATH] [--origin desk|phone] [--json]``: p50/p95
+    per stage from the per-turn records, overall and per origin, then the last N turns."""
+    import argparse
+
+    from ghost_voice.latency import format_line, read_records, summarize, summary_table
+
+    ap = argparse.ArgumentParser(prog="ghostd latency")
+    ap.add_argument("--file", type=Path, default=None, help="records (default: data_dir)")
+    ap.add_argument("--last", type=int, default=10, help="list the last N turns")
+    ap.add_argument("--since", type=int, default=0, help="only the newest N records")
+    ap.add_argument("--origin", choices=("desk", "phone"), default=None)
+    ap.add_argument("--json", action="store_true", help="print the summary as JSON")
+    a = ap.parse_args(args)
+    path = a.file or GhostdSettings().latency_path
+    records = read_records(path)
+    if a.origin:
+        records = [r for r in records if r.get("origin") == a.origin]
+    if a.since:
+        records = records[-a.since :]
+    if not records:
+        print(f"no latency records in {path}")
+        return 1
+    if a.json:
+        out = {
+            "all": summarize(records),
+            **{
+                o: summarize([r for r in records if r.get("origin") == o])
+                for o in sorted({str(r.get("origin")) for r in records})
+            },
+        }
+        print(json.dumps(out, indent=2))
+        return 0
+    print("\n".join(summary_table(records, f"all turns in {path}")))
+    origins = sorted({str(r.get("origin")) for r in records})
+    for origin in origins if len(origins) > 1 else []:
+        print()
+        print("\n".join(summary_table([r for r in records if r.get("origin") == origin], origin)))
+    for kind in ("voice", "text", "opening"):
+        sub = [r for r in records if r.get("kind") == kind]
+        if sub and len(sub) != len(records):
+            print()
+            print("\n".join(summary_table(sub, f"{kind} turns")))
+    if a.last:
+        print(f"\nlast {min(a.last, len(records))} turns:")
+        for r in records[-a.last :]:
+            print(f"  {r.get('ts', '')[11:19]} {format_line(r).removeprefix('latency: ')}")
+    return 0
+
+
 def build_jev(cfg: GhostdSettings) -> JevClient | None:
     """A Jev client per GHOST_JEV and whichever key is present, or None for regex only."""
     return JevClient.from_env(
@@ -604,6 +906,12 @@ def cli(argv: list[str] | None = None) -> None:
         asyncio.run(Daemon(cfg, voice).run())
     elif cmd in {"wake", "say", "sleep", "status"}:
         sys.exit(_client_command(cmd, argv[1:]))
+    elif cmd == "latency":
+        sys.exit(latency_command(argv[1:]))
+    elif cmd == "perf":
+        from ghostd.perf.cli import main as perf_main
+
+        sys.exit(perf_main(argv[1:]))
     elif cmd == "restore-volumes":
         restore_from_state(runtime_dir() / DUCK_STATE)
     elif cmd == "devices":
@@ -615,12 +923,16 @@ def cli(argv: list[str] | None = None) -> None:
         problems = []
         try:
             voice = VoiceSettings()  # type: ignore[call-arg]
-        except Exception as e:  # noqa: BLE001 - pydantic-settings reports what is missing
-            missing = [str(err.get("loc", ["?"])[0]) for err in getattr(e, "errors", lambda: [])()]
-            problems.append("voice settings: missing " + ", ".join(missing or [str(e)]))
+        except Exception as e:  # noqa: BLE001 - pydantic-settings reports what is wrong
+            # Field names and messages only: pydantic's input values could be secrets.
+            errs = getattr(e, "errors", lambda: [])()
+            problems += [
+                f"voice settings: {err.get('loc', ['?'])[0]}: {err.get('msg', '')}" for err in errs
+            ] or ["voice settings could not be read"]
             voice = VoiceSettings.model_construct()  # type: ignore[call-arg]
-        if not (getattr(voice, "anthropic_base_url", "") or os.environ.get("ANTHROPIC_BASE_URL")):
-            problems.append("ANTHROPIC_BASE_URL is not set")
+        else:
+            print(f"llm: {voice.llm_target().describe()}, thinking {voice.llm_thinking}")
+            problems += voice.llm_problems()
         autonomy = AutonomyPolicy()
         try:
             autonomy = AutonomyPolicy.load(cfg.policy_path)
@@ -652,8 +964,8 @@ def cli(argv: list[str] | None = None) -> None:
         sys.exit(asyncio.run(run_ability_command(cmd, argv[1:])))
     else:
         print(
-            "usage: ghostd [run|wake|say <text>|sleep|status|restore-volumes|devices|check|"
-            "abilities|<ability> <command>]"
+            "usage: ghostd [run|wake|say <text>|sleep|status|latency|perf|restore-volumes|"
+            "devices|check|abilities|<ability> <command>]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)

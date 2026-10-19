@@ -1,6 +1,6 @@
 """Conversation routes (ADR 0014). Edits made here are the operator's own, applied
 through the gate's internal path so they land in the same files Ghost writes, with
-the same snapshot, audit row and undo. Switching and compacting need a running
+the same snapshot and audit row. Switching and compacting need a running
 session and are delegated to the daemon."""
 
 from __future__ import annotations

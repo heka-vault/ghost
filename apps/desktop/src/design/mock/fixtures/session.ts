@@ -8,10 +8,7 @@ import { ago, type Scenario } from "../scenarios";
 
 /** The Accounting session; the audit fixture's two recent writes (208, 212) belong to it. */
 export const SESSION_ID = "5f2c9e1a8b7d4c3e9a1f0b6d2e4c8a7f";
-/**
- * Every transcript has its own session, so Undo only ever offers a change you can see in the
- * transcript on screen (the Ghost line's pending view has nothing to undo yet).
- */
+/** Every transcript has its own session, so its changes are the ones you can see on screen. */
 const SESSION_IDS: Record<string, string> = {
   accounting: SESSION_ID,
   ghost: "0b9d4e7a2c6f41e8b3a5d9c1e7f2a4b6",

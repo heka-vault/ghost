@@ -48,6 +48,17 @@ class _NoControl:
     async def sample_voice(self, voice, speed, text):
         return False
 
+    def phone_pairing(self):
+        return None
+
+    def phone_view(self):
+        from ghost_api.models import PhoneView
+
+        return PhoneView(address=None, device=None)
+
+    async def forget_phone(self):
+        return False
+
 
 def openapi() -> dict[str, Any]:
     import tempfile

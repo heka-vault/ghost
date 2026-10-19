@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from ghost_core import GateError, Handled, Slot, UserTurn
+from ghost_core import Handled, Slot, UserTurn
 from ghost_voice.intents import QuickIntents
 from ghost_voice.intercept import InterceptorProcessor
 from ghost_voice.pipeline import assemble
@@ -21,9 +21,25 @@ from pipecat.processors.frame_processor import FrameDirection
         ("That's all for now.", True, "sleep"),
         ("never mind", True, "cancel"),
         ("never mind", False, None),  # nothing pending: let the model handle it
-        ("undo that", False, "undo"),
+        # no undo intent: taking a change back is a turn for the model
+        ("undo that", False, None),
+        ("Ghost, undo that.", False, None),
+        ("take that back", False, None),
         ("go to sleep after you close it", False, None),
         ("what needs my sign off", False, None),
+        # a goodbye at the end, after small talk
+        ("I'll talk to you later. Hang up.", False, "sleep"),
+        ("Okay, thanks, bye.", False, "sleep"),
+        ("Alright, I'm done.", False, "sleep"),
+        ("That is all I need. I will talk to you later.", False, "sleep"),
+        ("I think that is everything for today. Bye.", False, "sleep"),
+        ("goodbye", True, "sleep"),
+        # anything else first goes to the model, which does the work
+        ("close it and then hang up", False, None),
+        ("label it bug, bye", False, None),
+        ("don't hang up", False, None),
+        ("not yet, don't hang up", False, None),
+        ("how do I hang up", False, None),
     ],
 )
 async def test_quick_intents(text, pending, expect):
@@ -32,26 +48,15 @@ async def test_quick_intents(text, pending, expect):
 
 
 class FakeGate:
-    def __init__(self, pending=False, undo_ok=True):
+    def __init__(self, pending=False):
         self._pending = pending
         self.cancelled = []
-        self.undo_ok = undo_ok
 
     def pending(self, session_id):
         return object() if self._pending else None
 
     def cancel(self, session_id, reason=""):
         self.cancelled.append(reason)
-
-    async def undo(self, session_id):
-        if not self.undo_ok:
-            raise GateError("There is nothing recent to undo.")
-
-        class Outcome:
-            def summary(self):
-                return "Applied: remove bug."
-
-        return Outcome()
 
 
 class Always:
@@ -98,17 +103,21 @@ async def test_handled_turn_is_dropped_and_spoken():
     assert slept == [True]
 
 
-async def test_cancel_and_undo_actions():
+async def test_cancel_action():
     gate = FakeGate(pending=True)
     proc, pushed, _ = make([Always(Handled(say="Dropped.", action="cancel"))], gate)
     await proc.process_frame(said("never mind"), FrameDirection.DOWNSTREAM)
     assert gate.cancelled == ["operator cancelled"]
-    proc, pushed, _ = make([Always(Handled(action="undo"))], FakeGate())
-    await proc.process_frame(said("undo"), FrameDirection.DOWNSTREAM)
-    assert [f.text for f in pushed if isinstance(f, TTSSpeakFrame)] == ["Applied: remove bug."]
-    proc, pushed, _ = make([Always(Handled(action="undo"))], FakeGate(undo_ok=False))
-    await proc.process_frame(said("undo"), FrameDirection.DOWNSTREAM)
-    assert "nothing recent" in pushed[0].text
+    assert [f.text for f in pushed if isinstance(f, TTSSpeakFrame)] == ["Dropped."]
+
+
+async def test_undo_that_reaches_the_model():
+    gate = FakeGate()
+    proc, pushed, slept = make([QuickIntents()], gate)
+    await proc.process_frame(said("Undo that."), FrameDirection.DOWNSTREAM)
+    assert [f.text for f in pushed if isinstance(f, TranscriptionFrame)] == ["Undo that."]
+    assert not any(isinstance(f, TTSSpeakFrame) for f in pushed)
+    assert gate.cancelled == [] and slept == []
 
 
 async def test_not_evidence_while_bot_speaks():
@@ -134,3 +143,10 @@ def test_assemble_splices_slots_in_order():
     core = [(Slot.AUDIO_IN, "in"), (None, "stt"), (Slot.AFTER_STT, "confirm"), (None, "out")]
     out = assemble(core, {Slot.AFTER_STT: ["a", "b"], Slot.AUDIO_IN: ["ns"]})
     assert out == ["in", "ns", "stt", "confirm", "a", "b", "out"]
+
+
+async def test_the_shortcut_says_a_warm_goodbye_not_a_bare_okay():
+    from ghost_voice.intents import GOODBYES
+
+    h = await QuickIntents().on_user_turn(UserTurn("I'll talk to you later. Hang up.", False, ""))
+    assert h is not None and h.say in GOODBYES and h.say != "Okay."

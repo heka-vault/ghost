@@ -1,6 +1,6 @@
 # Ghost
 
-Ghost is a voice-first assistant for triaging GitHub issues. Say "Ghost" at your desk, ask what needs your sign-off, talk through the options, and approve or request changes without opening the issue tracker. You decide how much it does on its own: by default it labels and comments as you ask and tells you in passing, and asks before closing anything. Say "undo that" to take the last change back.
+Ghost is a voice-first assistant for triaging GitHub issues. Say "Ghost" at your desk, ask what needs your sign-off, talk through the options, and approve or request changes without opening the issue tracker. You decide how much it does on its own: by default it labels and comments as you ask and tells you in passing, and asks before closing anything. Change your mind and Ghost changes it back, the same way.
 
 <p align="center">
   <img src="docs/screenshots/session-pending.webp" alt="The Ghost desktop app in a session: the transcript, and a change waiting for your okay with Confirm and Cancel" width="100%">
@@ -13,7 +13,7 @@ Ghost is a personal tool that runs entirely on your own Linux machine:
 - **Wake word** detected locally. Idle audio never leaves the machine.
 - **Speech-to-text and text-to-speech** run locally on CPU (Parakeet and Kokoro).
 - **Conversation** is built on [Pipecat](https://github.com/pipecat-ai/pipecat). No media server and no cloud voice platform.
-- **The LLM** is reached through any Anthropic-compatible endpoint.
+- **The LLM** is reached through any Anthropic-compatible endpoint, or OpenRouter's (`GHOST_LLM_ENDPOINT=openrouter`).
 - **GitHub** is reached with a fine-grained personal access token scoped to the repositories you choose.
 
 It costs nothing to run beyond the LLM calls.
@@ -53,10 +53,28 @@ desktop app uses. `make help` lists the rest (`test`, `lint`, `start`/`stop` for
 `restore-volumes`, `service`). Non-secret settings such as `GHOST_GITHUB_MOCK=1` go in
 `~/.config/ghost/settings.env`, which `make env` seeds and folds into the rendered file.
 
+The model is reached through `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN` by default.
+`GHOST_LLM_ENDPOINT=openrouter` in `settings.env` sends it to OpenRouter's Anthropic API
+instead, with `OPENROUTER_API_KEY` from the secrets store and `GHOST_LLM_MODEL` mapped to
+OpenRouter's id (`claude-sonnet-5-5` is `anthropic/claude-sonnet-5.5`). `make check` prints
+which endpoint and model are in use, never a key. `make latency` shows where recent turns
+spent their time ([docs/benchmarks/latency-harness.md](docs/benchmarks/latency-harness.md)).
+
+The phone app joins over the home LAN only (ADR 0016). Set `GHOST_PHONE_LISTEN` in
+`settings.env` to the workstation's LAN address and a port, for example
+`GHOST_PHONE_LISTEN=192.168.1.20:8765`, restart, and pair from the desktop app (it shows
+a six-digit code for two minutes). If `ufw` is on, allow the port and UDP from the LAN,
+because aiortc picks its UDP ports at random:
+
+```bash
+sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp
+sudo ufw allow from 192.168.1.0/24 proto udp
+```
+
 Say "what needs my sign-off", talk it through, and "go to sleep" when done. How much
 Ghost may do without asking is in `~/.config/ghost/policy.toml` (seeded by `make env`
 from `infra/policy.example.toml`): per operation, `deny`, `confirm`, `announce`, or
-`quiet`. Every write is logged and "undo that" reverses the last one for ten minutes.
+`quiet`. Every write is logged; to reverse one, ask Ghost and it proposes the opposite change.
 Ctrl+C stops the daemon; "go to sleep" only ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
@@ -86,7 +104,7 @@ audit log, abilities, and settings. It follows the system's light or dark theme.
   </tr>
   <tr>
     <td><img src="docs/screenshots/review.webp" alt="Review queue, prototype"><br><sub><b>Review queue</b> (prototype). What is waiting on your sign-off, and why.</sub></td>
-    <td><img src="docs/screenshots/tray.webp" alt="Tray status window and HUD, prototype"><br><sub><b>Tray</b> (prototype). Status, the waiting change and undo from the top bar.</sub></td>
+    <td><img src="docs/screenshots/tray.webp" alt="Tray status window and HUD, prototype"><br><sub><b>Tray</b> (prototype). Status and the waiting change from the top bar.</sub></td>
   </tr>
 </table>
 

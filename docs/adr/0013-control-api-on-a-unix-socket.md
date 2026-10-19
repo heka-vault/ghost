@@ -1,6 +1,6 @@
 # 0013: A local control API on a Unix socket; TypeScript apps are generated clients
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR 0015 (no undo)
 - **Date:** 2026-10-17
 - **Amends:** ADR 0007 (confirmation evidence)
 

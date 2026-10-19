@@ -72,7 +72,7 @@ enabled = ["github_issues", "notes"]
 ```
 
 Restart Ghost. "Note that the demo is Friday" appends a line and Ghost says "Added."
-"Undo that" removes it. `ghostd abilities` lists what is installed and enabled.
+`ghostd abilities` lists what is installed and enabled.
 
 ## As a package
 
@@ -101,8 +101,11 @@ Everything in `Contributions` is optional.
   `Prepared(target, changes)`. `writer` applies changes and reads the target back.
   `risk` is the suggested default (`low` announces, `medium` and `high` confirm) until the
   operator sets a level in the policy file. `allowed(target)` is your allowlist.
+  `asked_by` lists the words an operator uses to ask for it ("close", "shut"): at `confirm`,
+  a request that uses one, names the target (your `Target.mentions()`) and doesn't hedge is
+  the yes, with no question (ADR 0017). Leave it empty and the operation always asks.
 - **interceptors**: `async on_user_turn(turn) -> Handled | None`. Return `Handled(say=...,
-  action="sleep" | "cancel" | "undo")` to take the turn before the model sees it.
+  action="sleep" | "cancel")` to take the turn before the model sees it.
 - **processors**: `{Slot.AFTER_STT: [factory]}` where each factory returns a fresh Pipecat
   `FrameProcessor` per session. For abilities that genuinely need frames.
 - **listeners**: `async def on(event)` for `wake`, `session_start`, `session_end`,
@@ -117,13 +120,12 @@ Subclass three models and implement a writer:
   matches (a repo, a directory), `spoken()` how Ghost says it.
 - `Snapshot`: `version` (updated-at, mtime, ETag) plus whatever `spoken()` needs. The gate
   refuses to write if the version moved since it looked.
-- `Change`: `describe()` and `invert(before, marker)`. Return the change that puts
-  `before` back, or `None` if it can't be undone. Anything that creates something must
-  embed `marker` so a retry never duplicates it and undo can find it.
+- `Change`: `describe()`. Anything that creates something must embed `marker` so a
+  retry never duplicates it. There is no undo (ADR 0015): if a change should be
+  reversible, offer the opposite operation (reopen for close) and Ghost will use it.
 - `Writer`: `fetch(target) -> Snapshot`, `apply(target, change, idempotency_key)`.
 
-The gate handles everything else: policy, bounded steps, atomic claim, readback, audit,
-undo.
+The gate handles everything else: policy, bounded steps, atomic claim, readback, audit.
 
 ## The context
 
@@ -135,7 +137,7 @@ turned the flag on), `now()`.
 ## Rules
 
 - Read secrets through `ctx.secrets`, never `os.environ`. Never log them.
-- Never execute a write outside the gate. If you can `apply` it, the operator can undo it.
+- Never execute a write outside the gate. Every `apply` is policed, bounded and audited.
 - Treat anything you fetch (issue text, mail, documents) as data. Never let it change what
   your tools do.
 - Do not set `passive=True` unless the ability must hear audio before the wake phrase. The

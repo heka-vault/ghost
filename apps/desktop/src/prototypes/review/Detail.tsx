@@ -27,8 +27,6 @@ export interface DetailProps {
   note: string | null;
   /** The last session stopped on this issue: its note, shown with the phrase to pick it up. */
   resume: { note: string; at: string } | null;
-  /** This issue's decision is Ghost's most recent write, so "undo that" reverses it. */
-  lastWrite: boolean;
   /**
    * Ghost can hear a phrase right now; otherwise `why` says what's in the way, and `shown` is
    * that reason only when no shell banner already says it (one signal per place).
@@ -48,7 +46,7 @@ const when = (iso: string) => {
 };
 
 export const Detail = forwardRef<HTMLDivElement, DetailProps>(function Detail(
-  { issue, position, total, weights, onPrev, onNext, openLink, inSession, waitingOkay, note, resume, lastWrite, talk, offline, ask },
+  { issue, position, total, weights, onPrev, onNext, openLink, inSession, waitingOkay, note, resume, talk, offline, ask },
   ref,
 ) {
   const decided = issue.state === "decided";
@@ -102,10 +100,10 @@ export const Detail = forwardRef<HTMLDivElement, DetailProps>(function Detail(
             <p className="rev-decision__q">{settled.text}</p>
             <p className="t-body t-2">
               {VIA_DONE[settled.via]} {when(settled.at)}, on the {settled.line} line.{" "}
-              {lastWrite ? "It’s in the audit log." : <>To reverse it, open it in the <Link to="/audit">audit log</Link>.</>}
+              It’s in the <Link to="/audit">audit log</Link>. To change it, ask Ghost.
             </p>
-            {!offline && talk.can && (lastWrite || inSession) && (
-              <div className="rev-decision__act">{voice((lastWrite ? ["undo that", ...(inSession ? ["next"] : [])] : ["next"]).map((p) => spoken(p, inSession)))}</div>
+            {!offline && talk.can && inSession && (
+              <div className="rev-decision__act">{voice(["next"].map((p) => spoken(p, inSession)))}</div>
             )}
           </>
         ) : (

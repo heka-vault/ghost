@@ -19,7 +19,7 @@ export interface LiveState {
   connection: ConnectionState;
   /** The voice phase: offline when the daemon isn't answering, starting until models load. */
   phase: GhostPhase;
-  /** The daemon answers right now. Anything that writes (Undo, Sleep, Confirm, Save) needs it. */
+  /** The daemon answers right now. Anything that writes (Sleep, Confirm, Save) needs it. */
   online: boolean;
   /** Online, but the voice models are still loading: voice-dependent actions wait. */
   loadingModels: boolean;

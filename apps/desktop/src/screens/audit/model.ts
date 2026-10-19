@@ -66,11 +66,11 @@ export function outcomeTone(outcome: string): Tone {
 
 /** The status filter. "attention" is every outcome the operator may want to look at. */
 export const ATTENTION = new Set(["failed", "partial", "stale", "pending", "claimed"]);
-export const STATUS_ORDER = ["executed", "pending", "claimed", "failed", "partial", "stale", "expired", "lapsed", "cancelled", "undone"];
+export const STATUS_ORDER = ["executed", "pending", "claimed", "failed", "partial", "stale", "expired", "lapsed", "cancelled"];
 
 /* ---------------------------------------------------------------------------- words */
 
-/** "github_issues.close", or "github_issues.undo:close" as the gate names an undo. */
+/** "github_issues.close". */
 export function opName(e: AuditEntry): string {
   return `${e.ability}.${e.operation}`;
 }
@@ -89,17 +89,12 @@ export function abilityLabel(name: string): string {
  * and the colon go, so the column reads as a list of things, not a repeated prefix.
  */
 export interface SummaryParts {
-  /** An undo: the row leads with the undo icon. */
-  undo?: boolean;
   /** What it was done to, at medium weight: "ghost-mock/app#151", "Standup line". Empty when the summary names none. */
   subject: string;
   /** What Ghost did, in --text-1. */
   action: string;
-  /** Secondary words after a middle dot, in --text-2: what an undo reversed. */
-  detail?: string;
 }
 
-const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
 const upperFirst = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /** "On ghost-mock/app#151: closed the issue." -> subject and action. "the Standup line" reads "Standup line". */
@@ -112,38 +107,10 @@ function splitOn(summary: string): { subject: string; action: string } | null {
 /** A sentence's closing period goes: the row is a list item, not prose. Quotes keep theirs. */
 const trimStop = (s: string) => s.replace(/\.$/, "");
 
-/**
- * An undo never reads like the write it reversed. With the original loaded it borrows the
- * original's words: "ghost-mock/infra#77  undid the change · approved, with a comment: …".
- * Without it, the gate's own summary of the undo describes the reverse steps ("On X: open
- * the issue; delete the comment I added."), shown in past tense: "undid an earlier change ·
- * reopened the issue; deleted the comment I added". Older daemons wrote "Undo: <original>".
- */
-export function splitSummary(e: AuditEntry, original?: AuditEntry | null): SummaryParts {
-  if (!isUndo(e)) {
-    const on = splitOn(e.summary);
-    return on ? { subject: on.subject, action: trimStop(on.action) } : { subject: "", action: trimStop(e.summary) };
-  }
-  const legacy = /^Undo:\s*/.test(e.summary) ? e.summary.replace(/^Undo:\s*/, "") : null;
-  const orig = original?.summary ?? legacy;
-  if (orig) {
-    const on = splitOn(orig);
-    return { undo: true, subject: on?.subject || splitOn(e.summary)?.subject || "", action: "undid the change", detail: trimStop(on ? on.action : lowerFirst(orig)) };
-  }
+/** "On ghost-mock/app#151: closed the issue." -> subject "ghost-mock/app#151", action "closed the issue". */
+export function splitSummary(e: AuditEntry): SummaryParts {
   const on = splitOn(e.summary);
-  if (on) return { undo: true, subject: on.subject, action: "undid an earlier change", detail: pastSteps(trimStop(on.action)) || undefined };
-  return { undo: true, subject: "", action: "undid an earlier change", detail: lowerFirst(trimStop(e.summary)) };
-}
-
-/** "open the issue; delete the comment I added" -> "reopened the issue; deleted the comment I added". */
-function pastSteps(s: string): string {
-  return s
-    .split("; ")
-    .map((part) => {
-      const v = stepView(part);
-      return v.known ? lowerFirst(v.done) : part;
-    })
-    .join("; ");
+  return on ? { subject: on.subject, action: trimStop(on.action) } : { subject: "", action: trimStop(e.summary) };
 }
 
 /* ---------------------------------------------------------------------------- steps */
@@ -168,9 +135,7 @@ export function stepView(raw: string): StepView {
   let m: RegExpExecArray | null;
   // github_issues
   if ((m = /^comment:\s*([\s\S]*)$/.exec(s))) return { done: "Comment added", todo: "add the comment", quote: m[1] || undefined, known: true };
-  if (s === "delete the comment I added") return { done: "Deleted the comment I added", todo: "delete the comment Ghost added", known: true };
   if (s === "closed the issue") return { done: "Closed the issue", todo: "close the issue", known: true };
-  if (s === "open the issue") return { done: "Reopened the issue", todo: "reopen the issue", known: true };
   if ((m = /^labels:\s*([\s\S]*)$/.exec(s))) return { done: `Labels: ${m[1]}`, todo: `change the labels (${m[1]})`, known: true };
   // A bare operation name, as the mock gate writes it and an ability may: the same words.
   if (s === "close") return { done: "Closed the issue", todo: "close the issue", known: true };
@@ -191,13 +156,7 @@ export function stepView(raw: string): StepView {
   if (s === "edit memory") return { done: "Edited the memory", todo: "edit the memory", known: true };
   if (s === "reset: forget everything") return { done: "Reset · forgot everything", todo: "reset the line", known: true };
   if (s === "delete the conversation") return { done: "Deleted the line", todo: "delete the line", known: true };
-  if (s === "put it back") return { done: "Put it back", todo: "put it back", known: true };
   return { done: upperFirst(s), todo: s, known: false };
-}
-
-/** Is this row an undo? The gate names its operation "undo:<op>" and sets undo_of. */
-export function isUndo(e: AuditEntry): boolean {
-  return !!e.undo_of || e.operation.startsWith("undo:");
 }
 
 /** The operator's answer to a confirm-level write. Null when they never answered in words or with a click. */
@@ -275,15 +234,14 @@ export interface EventView {
 
 const STEP = (d: Record<string, unknown>) => (d.step != null ? stepView(String(d.step)) : null);
 
-/** `entry` is the row the event belongs to: an undo's prepared step says so, and a target the row already shows isn't repeated. */
+/** `entry` is the row the event belongs to: a target the row already shows isn't repeated. */
 export function describeEvent(ev: AuditEvent, entry?: AuditEntry): EventView {
   const d = (ev.detail ?? {}) as Record<string, unknown>;
   switch (ev.event) {
     case "prepared": {
-      const undo = !!d.undo_of || String(d.operation ?? "").startsWith("undo:") || (entry ? isUndo(entry) : false);
       const t = d.target ? String(d.target) : "";
       const shown = !t || (entry && (t === entry.target || t.endsWith(`:${entry.target}`)));
-      return { title: undo ? "Ghost prepared the undo" : "Ghost prepared it", detail: shown ? undefined : t };
+      return { title: "Ghost prepared it", detail: shown ? undefined : t };
     }
     case "user_turn": {
       const yes = d.verdict === "affirmative";
@@ -335,21 +293,11 @@ export function describeEvent(ev: AuditEvent, entry?: AuditEntry): EventView {
       if (s === "partial") return { title: "Stopped partway · some steps applied", tone: "warn" };
       return { title: "Finished and read back", tone: "ok" };
     }
-    case "undone":
-      return { title: "You undid it" };
-    case "undo_stale":
-      return { title: "Couldn’t undo · it changed since Ghost wrote it", detail: d.was ? `${d.was} → ${d.now}` : undefined, tone: "warn" };
     default: {
       const t = ev.event.replace(/_/g, " ");
       return { title: t[0].toUpperCase() + t.slice(1), detail: ev.detail ? JSON.stringify(ev.detail) : undefined };
     }
   }
-}
-
-/** The undo that reversed this write, if the log says so. */
-export function undoneBy(e: AuditEntry): string | null {
-  const ev = e.events.find((x) => x.event === "undone");
-  return ev?.detail?.by ? String(ev.detail.by) : null;
 }
 
 /* ---------------------------------------------------------------------------- days */
@@ -386,12 +334,12 @@ export function groupByDay(items: AuditEntry[]): { key: string; label: string; i
 /* ---------------------------------------------------------------------------- search */
 
 /** Everything a search can match on one row: words on screen plus the raw names. */
-export function haystack(e: AuditEntry, original?: AuditEntry | null, ctx: OutcomeContext = {}): string {
+export function haystack(e: AuditEntry, ctx: OutcomeContext = {}): string {
   const o = outcomeOf(e, ctx);
-  const sp = splitSummary(e, original);
+  const sp = splitSummary(e);
   const parts = [
     e.summary,
-    [sp.subject, sp.action, sp.detail].filter(Boolean).join(" "),
+    [sp.subject, sp.action].filter(Boolean).join(" "),
     e.target,
     opName(e),
     e.status,

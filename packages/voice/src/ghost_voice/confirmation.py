@@ -17,6 +17,7 @@ untouched and the proposal stays pending until a turn after the readback ends.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 from ghost_core import Events, Verdict, WriteGate
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from ghost_voice import debug
+from ghost_voice.latency import NULL_PROBE, LatencyProbe
 
 
 class ConfirmationProcessor(FrameProcessor):
@@ -41,9 +43,11 @@ class ConfirmationProcessor(FrameProcessor):
         *,
         last_assistant: Callable[[], str] | None = None,
         events: Events | None = None,
+        probe: LatencyProbe | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        self._probe = probe or NULL_PROBE
         self._gate = gate
         self._session_id = session_id
         self._bot_speaking = False
@@ -67,8 +71,16 @@ class ConfirmationProcessor(FrameProcessor):
             and not self._bot_speaking
             and self._gate.pending(self._session_id)
         ):
+            began = time.perf_counter()
             verdict, outcome = await self._gate.on_user_turn(
                 self._session_id, frame.text, question=self._last_assistant()
+            )
+            took = getattr(self._gate, "last_classification", None)
+            self._probe.confirmation(
+                classifier=took.classifier if took else "unknown",
+                classify_secs=took.seconds if took else 0.0,
+                verdict=verdict.value,
+                total_secs=time.perf_counter() - began,
             )
             debug.audio(f"confirmation: {verdict.name} for {frame.text!r}")
             if verdict is Verdict.AFFIRMATIVE and outcome is not None:

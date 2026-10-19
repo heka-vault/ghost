@@ -100,17 +100,6 @@
 .session-transcript > .session-caption--rule { margin-block: var(--space-2); }
 .session-caption__icon { display: inline-flex; flex: none; color: var(--text-3); }
 .session-caption__icon > svg { width: var(--icon-sm); height: var(--icon-sm); }
-/* Gmail's inline Undo: a text button on the outcome itself, where the eye already is. */
-.session-caption__undo {
-  margin-left: var(--space-1); padding: var(--space-1) var(--space-2); min-height: var(--control-xs);
-  border: 0; border-radius: var(--radius-sm);
-  background: transparent; font: inherit; font-size: var(--text-md); line-height: var(--leading-md);
-  font-weight: var(--weight-medium); color: var(--accent-text); cursor: pointer;
-  transition: background-color var(--duration-fast) var(--ease-out);
-}
-.session-caption__undo:hover { background: var(--bg-hover); }
-.session-caption__undo:active { background: var(--bg-active); }
-.session-caption__undo:disabled { color: var(--text-disabled); background: transparent; cursor: not-allowed; }
 
 /* ------------------------------------------------------------------ dock */
 /* The waiting change (when there is one), any error, then the composer, in the transcript's column. */
@@ -142,10 +131,6 @@
 .session-error-line > span { flex: 1 1 auto; min-width: 0; padding-top: var(--space-1); }
 .session-error-line__title { font-weight: var(--weight-medium); }
 .session-error-line__dismiss { flex: none; margin-top: calc(-1 * var(--space-0_5)); color: var(--text-2); }
-
-/* One Undo in view, on the transcript's column right above the composer. */
-/* Same column as the composer, and the composer's own inner padding, so the button's edge lines up with Send. */
-.session-undo { display: flex; justify-content: flex-end; padding-inline: var(--space-2); }
 
 /* ------------------------------------------------------------------ composer */
 /* The frame is the field: hover and focus show on it, the textarea inside has no frame. A

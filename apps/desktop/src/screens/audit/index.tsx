@@ -12,7 +12,7 @@
 import type { AuditEntry } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { ScrollText, Search, SearchX, X } from "lucide-react";
-import { type KeyboardEvent, type RefObject, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type RefObject, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { hrefFor } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
@@ -98,7 +98,7 @@ export default function AuditScreen(_: RouteProps) {
   // lapsed; without it (not connected), only a row inside the confirmation window is Waiting.
   const liveId = online ? (pending?.id ?? "") : null;
   const ctx = useMemo(() => ({ liveId, now: log.updatedAt ?? Date.now() }), [liveId, log.updatedAt]);
-  const hay = useMemo(() => new Map(log.items.map((e) => [e.id, haystack(e, e.undo_of ? byId.get(e.undo_of) : null, ctx)])), [log.items, byId, ctx]);
+  const hay = useMemo(() => new Map(log.items.map((e) => [e.id, haystack(e, ctx)])), [log.items, ctx]);
 
   const counts = useMemo(() => {
     const c = new Map<string, number>();
@@ -175,23 +175,6 @@ export default function AuditScreen(_: RouteProps) {
       else n.add(id);
       return n;
     });
-
-  const jump = useCallback(
-    (id: string) => {
-      if (!byId.has(id)) return;
-      // The target may be filtered out: show everything so it is on screen.
-      if (!filtered.some((e) => e.id === id)) reset();
-      setOpen((s) => new Set(s).add(id));
-      setCursor(id);
-      requestAnimationFrame(() => {
-        const el = rows.current.get(id);
-        if (!el) return;
-        el.focus({ preventScroll: true });
-        revealRow(el, "start");
-      });
-    },
-    [byId, filtered],
-  );
 
   // The list is one Tab stop (roving tabindex): the last row you were on, or the first.
   const activeId = cursor && filtered.some((e) => e.id === cursor) ? cursor : (filtered[0]?.id ?? null);
@@ -402,9 +385,6 @@ export default function AuditScreen(_: RouteProps) {
                           fresh={log.fresh.has(e.id)}
                           live={pending?.id === e.id ? live : null}
                           outcome={outcomeOf(e, ctx)}
-                          original={e.undo_of ? (byId.get(e.undo_of) ?? null) : null}
-                          canJump={(id) => byId.has(id)}
-                          onJump={jump}
                         />
                       ))}
                     </Card>

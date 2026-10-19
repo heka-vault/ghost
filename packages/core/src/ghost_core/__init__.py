@@ -4,7 +4,6 @@ Flow: an ability turns the model's arguments into a typed change set -> the gate
 resolves the operator's autonomy policy for that operation -> either the write
 happens now (``announce``/``quiet``) or it waits for a spoken yes observed in the
 pipeline's own transcript (``confirm``) -> bounded steps, readback, audit log.
-The last executed change can be undone.
 """
 
 from ghost_core.ability import (
@@ -46,10 +45,13 @@ from ghost_core.models import (
     Target,
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy, PolicyError, Risk
+from ghost_core.request import asked_for, number_mentions
 from ghost_core.store import Store
 from ghost_core.writer import Writer
 
 __all__ = [
+    "asked_for",
+    "number_mentions",
     "Ability",
     "AbilityError",
     "AbilityInstance",

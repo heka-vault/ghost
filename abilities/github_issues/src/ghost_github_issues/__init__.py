@@ -3,7 +3,6 @@
 from ghost_github_issues.ability import GitHubIssues, Settings, ability, setup
 from ghost_github_issues.models import (
     AddComment,
-    DeleteComment,
     IssueSnapshot,
     IssueTarget,
     RepoPolicy,
@@ -13,7 +12,6 @@ from ghost_github_issues.models import (
 
 __all__ = [
     "AddComment",
-    "DeleteComment",
     "GitHubIssues",
     "IssueSnapshot",
     "IssueTarget",

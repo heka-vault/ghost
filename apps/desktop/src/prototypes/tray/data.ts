@@ -1,13 +1,10 @@
 /**
- * Owner: tray. The tray's own reads: the last change (for Undo), the microphone's name and
+ * Owner: tray. The tray's own reads: the last change, the microphone's name and
  * the line names. All real client calls; nothing here writes.
  */
 import type { AuditEntry, ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { useCallback, useEffect, useState } from "react";
-
-/** The gate's undo window (ghost_core.models.UNDO_WINDOW). Undo is offered only inside it. */
-export const UNDO_WINDOW_MS = 10 * 60_000;
 
 /**
  * The newest thing Ghost actually did (executed, or failed trying), kept across a drop.
@@ -16,14 +13,11 @@ export const UNDO_WINDOW_MS = 10 * 60_000;
  */
 export function useLastChange(): {
   entry: AuditEntry | null;
-  /** When `entry` is an undo, the change it reversed (so the tray can say what was undone). */
-  undone: AuditEntry | null;
   loaded: boolean;
   refresh: () => void;
 } {
   const { client, connected, lastEvent } = useGhost();
   const [entry, setEntry] = useState<AuditEntry | null>(null);
-  const [undone, setUndone] = useState<AuditEntry | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
@@ -35,9 +29,8 @@ export function useLastChange(): {
         .audit({ limit: 20 })
         .then((page) => {
           if (!live) return;
-          const e = page.items.find((x) => x.status === "executed" || x.status === "failed" || x.status === "undone") ?? null;
+          const e = page.items.find((x) => x.status === "executed" || x.status === "failed") ?? null;
           setEntry(e);
-          setUndone(e?.undo_of ? (page.items.find((x) => x.id === e.undo_of) ?? null) : null);
           setLoaded(true);
         })
         .catch(() => live && setLoaded(true));
@@ -48,21 +41,7 @@ export function useLastChange(): {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, connected, lastEvent, nonce]);
-  return { entry, undone, loaded, refresh };
-}
-
-/** Executed by Ghost, not itself an undo, and still inside the gate's undo window. */
-export function canUndo(e: AuditEntry | null, now = Date.now()): boolean {
-  if (!e || e.status !== "executed" || e.undo_of) return false;
-  return now - Date.parse(e.created_at) < UNDO_WINDOW_MS;
-}
-
-/**
- * What an undo record reversed, in the gate's words without the "Undo:" prefix: the original
- * entry's summary when it is on the same page, else the undo's own summary stripped.
- */
-export function undoneSummary(entry: AuditEntry, undone: AuditEntry | null): string {
-  return undone?.summary ?? entry.summary.replace(/^Und(?:o|id):\s*/i, "");
+  return { entry, loaded, refresh };
 }
 
 /**
@@ -70,7 +49,7 @@ export function undoneSummary(entry: AuditEntry, undone: AuditEntry | null): str
  * app 151", "approved app 208". Built from the summary's verb and the target's short form.
  */
 export function shortChange(summary: string, target: string | null | undefined): string {
-  const body = summary.replace(/^Und(?:o|id):\s*/i, "").replace(/^On [^:]+:\s*/, "");
+  const body = summary.replace(/^On [^:]+:\s*/, "");
   const verb = body.split(/[,:]/)[0].replace(/\s+the issue$/, "").trim();
   return target ? `${verb} ${shortTarget(target)}` : verb;
 }

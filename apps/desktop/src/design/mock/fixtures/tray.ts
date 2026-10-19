@@ -3,7 +3,7 @@ import { ago, type Scenario } from "../scenarios";
 
 export interface TrayFixture {
   /** The last few things Ghost did, newest first. */
-  recent: { summary: string; at: string; undoable: boolean }[];
+  recent: { summary: string; at: string }[];
   /** Global shortcut in formatShortcut() notation ("super+g"); render with <Kbd shortcut>. Wakes Ghost from anywhere. */
   shortcut: string;
   /**
@@ -21,9 +21,9 @@ export default function tray(s: Scenario): TrayFixture {
       s.data === "empty"
         ? []
         : [
-            { summary: "Approved app 208", at: ago(4), undoable: true },
-            { summary: "Labeled app 212 bug, priority high", at: ago(5), undoable: true },
-            { summary: "Commented on infra 91", at: ago(60 * 24), undoable: false },
+            { summary: "Approved app 208", at: ago(4) },
+            { summary: "Labeled app 212 bug, priority high", at: ago(5) },
+            { summary: "Commented on infra 91", at: ago(60 * 24) },
           ],
     shortcut: "super+g",
     muted: false,

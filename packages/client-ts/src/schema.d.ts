@@ -214,6 +214,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/phone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Phone */
+        get: operations["phone_phone_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Forget Phone
+         * @description Forget the paired phone; its signatures stop working at once.
+         */
+        delete: operations["forget_phone_phone_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/phone/pairing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Phone Pairing
+         * @description A new six-digit code for the phone, good for two minutes and five tries. It
+         *     replaces any earlier code. 409 when GHOST_PHONE_LISTEN is off.
+         */
+        post: operations["phone_pairing_phone_pairing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/policy": {
         parameters: {
             query?: never;
@@ -403,23 +445,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/undo": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Undo */
-        post: operations["undo_undo_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/voices": {
         parameters: {
             query?: never;
@@ -552,8 +577,6 @@ export interface components {
             summary: string;
             /** Target */
             target: string;
-            /** Undo Of */
-            undo_of: string | null;
         };
         /** AuditEventView */
         AuditEventView: {
@@ -668,7 +691,7 @@ export interface components {
         };
         /**
          * ConversationUpdate
-         * @description Each field present is applied as its own audited, undoable write.
+         * @description Each field present is applied as its own audited write.
          */
         ConversationUpdate: {
             /** Aliases */
@@ -802,7 +825,7 @@ export interface components {
              * Via
              * @enum {string}
              */
-            via: "voice" | "ui" | "autonomous" | "undo";
+            via: "voice" | "ui" | "autonomous";
         };
         /** OutcomeView */
         OutcomeView: {
@@ -862,6 +885,41 @@ export interface components {
          * @enum {string}
          */
         Phase: "starting" | "passive" | "listening" | "thinking" | "speaking";
+        /** PhoneDevice */
+        PhoneDevice: {
+            /** Id */
+            id: string;
+            /** Last Seen */
+            last_seen: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Paired At
+             * Format: date-time
+             */
+            paired_at: string;
+        };
+        /**
+         * PhonePairing
+         * @description A fresh pairing code for the phone listener. Shown to the operator only.
+         */
+        PhonePairing: {
+            /** Address */
+            address: string;
+            /** Code */
+            code: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** PhoneView */
+        PhoneView: {
+            /** Address */
+            address: string | null;
+            device: components["schemas"]["PhoneDevice"] | null;
+        };
         /** PolicyResult */
         PolicyResult: {
             /** Applied */
@@ -1004,12 +1062,19 @@ export interface components {
             api_version: string;
             /** Conversation */
             conversation?: string | null;
+            /**
+             * Ending
+             * @default false
+             */
+            ending: boolean;
             /** Models Ready */
             models_ready: boolean;
             pending?: components["schemas"]["PendingProposal"] | null;
             phase: components["schemas"]["Phase"];
             /** Session Id */
             session_id: string | null;
+            /** Session Origin */
+            session_origin?: ("desk" | "phone") | null;
             /** Uptime Secs */
             uptime_secs: number;
             /** Version */
@@ -1136,6 +1201,9 @@ export type SchemaOutcomeView = components['schemas']['OutcomeView'];
 export type SchemaPendingEvent = components['schemas']['PendingEvent'];
 export type SchemaPendingProposal = components['schemas']['PendingProposal'];
 export type SchemaPhase = components['schemas']['Phase'];
+export type SchemaPhoneDevice = components['schemas']['PhoneDevice'];
+export type SchemaPhonePairing = components['schemas']['PhonePairing'];
+export type SchemaPhoneView = components['schemas']['PhoneView'];
 export type SchemaPolicyResult = components['schemas']['PolicyResult'];
 export type SchemaPolicyUpdate = components['schemas']['PolicyUpdate'];
 export type SchemaPolicyView = components['schemas']['PolicyView'];
@@ -1595,6 +1663,66 @@ export interface operations {
             };
         };
     };
+    phone_phone_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneView"];
+                };
+            };
+        };
+    };
+    forget_phone_phone_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    phone_pairing_phone_pairing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhonePairing"];
+                };
+            };
+        };
+    };
     get_policy_policy_get: {
         parameters: {
             query?: never;
@@ -1901,26 +2029,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Status"];
-                };
-            };
-        };
-    };
-    undo_undo_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OutcomeView"];
                 };
             };
         };

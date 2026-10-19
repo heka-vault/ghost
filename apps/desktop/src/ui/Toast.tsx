@@ -7,7 +7,7 @@ export interface ToastInput {
   title: ReactNode;
   description?: ReactNode;
   tone?: "neutral" | "ok" | "warn" | "danger" | "info";
-  /** One short action, e.g. Undo. */
+  /** One short action, e.g. Undo after a save or a discard. */
   action?: { label: string; onClick: () => void };
   /** ms; default 5000, 0 keeps it until dismissed. Danger toasts default to 8000. */
   duration?: number;

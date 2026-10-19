@@ -1,12 +1,28 @@
 /** Owner: settings. Settings and secrets (set / not set only), audio devices, models. */
-import type { DevicesView, ModelsView, SettingsView } from "@ghost/client-ts";
+import type { DevicesView, ModelsView, PhoneView, SettingsView } from "@ghost/client-ts";
 
-import type { Scenario } from "../scenarios";
+import { ago, type Scenario } from "../scenarios";
 
 export interface SettingsFixture {
   settings: SettingsView;
   devices: DevicesView;
   models: ModelsView;
+  /** The phone listener and the paired phone (ADR 0016). */
+  phone: PhoneView;
+}
+
+/** The LAN address the phone listener binds in the mock (GHOST_PHONE_LISTEN). */
+export const PHONE_ADDRESS = "192.168.1.20:8765";
+
+/** Off before setup, on with nothing paired when new, a phone paired after months of use. */
+function phone(s: Scenario): PhoneView {
+  const state = s.phone ?? (!s.configured ? "off" : s.data === "busy" ? "paired" : "unpaired");
+  if (state === "off") return { address: null, device: null };
+  if (state === "unpaired") return { address: PHONE_ADDRESS, device: null };
+  return {
+    address: PHONE_ADDRESS,
+    device: { id: "d7f3a91c2e4b", name: "Pixel 9", paired_at: ago(60 * 24 * 12), last_seen: s.origin === "phone" ? ago(0.1) : ago(95) },
+  };
 }
 
 const SECRET_NAMES = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "HF_TOKEN", "OPENROUTER_API_KEY", "TYPESAFE_API_KEY"];
@@ -57,5 +73,6 @@ export default function settings(s: Scenario): SettingsFixture {
       kokoro_present: s.modelsReady || s.phase !== "starting",
       stt_model: "nemo-parakeet-tdt-0.6b-v3",
     },
+    phone: phone(s),
   };
 }

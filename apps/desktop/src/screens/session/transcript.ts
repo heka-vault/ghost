@@ -33,16 +33,12 @@ export interface Decision {
   key: string;
   /** Placed after the turn at this time (null: before any). */
   afterAt: string | null;
-  /** `undone`: the operator undid a change that has no caption of its own here. */
-  outcome: "confirmed" | "canceled" | "expired" | "failed" | "undone";
+  outcome: "confirmed" | "canceled" | "expired" | "failed";
   /** True when the operator answered by voice rather than with the buttons. */
   byVoice: boolean;
   /** Plain words for what it was, from the gate's summary: “close the issue on ghost-mock/app#163”. */
   what: string;
-  /** The gate's summary, to match it against what Undo would reverse. */
-  summary: string;
   at: string;
-  undone?: boolean;
 }
 
 export type Item =

@@ -32,6 +32,14 @@ export interface Scenario {
    * design work. Changes proposed while you use the mock always expire after 60s.
    */
   pendingExpiresIn?: number;
+  /** Where the live session started: the desk (default) or the paired phone (ADR 0016). */
+  origin?: "desk" | "phone";
+  /**
+   * The phone listener: off (GHOST_PHONE_LISTEN unset), on with no phone, or a phone paired.
+   * Without it the settings fixture derives it from `configured` and `data`. Any scenario can
+   * override it with ?phone=off|unpaired|paired|pairs|expires (see mock/index.ts).
+   */
+  phone?: "off" | "unpaired" | "paired";
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -46,6 +54,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "empty", label: "Empty", description: "Configured, but nothing has happened yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "empty" },
   { name: "expiring", label: "Okay running out", description: "A confirm-level change that expires 8 seconds after load.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal", pendingExpiresIn: 8 },
   { name: "reconnecting", label: "Reconnecting", description: "A live session; the daemon drops 1.5 seconds after load and stays away.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal", dropAfterMs: 1500 },
+  { name: "phone", label: "On the phone", description: "A live session the paired phone started; the desk can end it.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", origin: "phone", phone: "paired" },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, several abilities.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];
 

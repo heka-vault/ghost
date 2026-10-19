@@ -1,6 +1,6 @@
 # 0011: The operator's policy sets autonomy per operation; the gate bounds and records every write
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR 0015 (no undo)
 - **Date:** 2026-10-17
 - **Amends:** ADR 0007 (the confirmation clause)
 
@@ -34,7 +34,7 @@ allowlist is the fallback on no key, timeout, error, or low confidence. Both app
 negation guard first. The evidence is still the pipeline's own transcript, never
 model output.
 
-**Undo.** Because writes can now happen without asking, the last executed change set
+**Undo** (removed by ADR 0015; Ghost reverses a change with an ordinary change). Because writes can now happen without asking, the last executed change set
 in a session can be reversed within ten minutes: labels and state from the stored
 snapshot, comments by their hidden marker. Undo is itself an audited write.
 

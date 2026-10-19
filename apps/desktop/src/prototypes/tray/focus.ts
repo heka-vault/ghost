@@ -1,5 +1,5 @@
 /**
- * Owner: tray. Keyboard focus that survives Ghost's actions. Wake, Confirm, Undo and Sleep
+ * Owner: tray. Keyboard focus that survives Ghost's actions. Wake, Confirm and Sleep
  * all unmount the button that was pressed; without help focus falls to <body> and a keyboard
  * user loses their place right after the most consequential thing they did.
  *

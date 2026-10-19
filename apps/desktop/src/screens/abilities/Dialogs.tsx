@@ -1,5 +1,5 @@
 /** Owner: abilities. The two dialogs: letting an ability hear idle audio, and how to add one. */
-import { ArrowUpRight, Cpu, Ear, FolderInput, Package, Undo2 } from "lucide-react";
+import { ArrowUpRight, Cpu, Ear, FolderInput, Package, PowerOff } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useRef } from "react";
 
 import { Button, Dialog } from "../../ui";
@@ -84,7 +84,7 @@ export function PassiveDialog({
         <Point icon={<Cpu />} title="It runs inside Ghost, on this computer">
           With the same access Ghost has. Ghost can’t stop an ability from sending what it hears, so allow only ones you trust.
         </Point>
-        <Point icon={<Undo2 />} title="You can take it back">
+        <Point icon={<PowerOff />} title="You can turn it off">
           Turn it off here and it stops hearing anything once Ghost restarts.
         </Point>
       </ul>

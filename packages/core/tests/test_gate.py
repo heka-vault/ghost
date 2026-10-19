@@ -151,6 +151,50 @@ async def test_proposal_round_trips_through_sqlite(gate, target):
     assert back.changes == APPROVE and back.snapshot.labels == ("needs-signoff",)
 
 
+async def test_legacy_undo_rows_still_read(tmp_path, target):
+    """Databases from before undo was removed hold proposals marked 'undone' and
+    reversal rows named ``undo:<op>`` whose steps no longer exist. They still read."""
+    import json
+    import sqlite3
+
+    from ghost_core.codec import RetiredChange
+
+    path = tmp_path / "ghost.db"
+    store = Store(path)
+    gate = WriteGate(store)
+    w = FakeWriter()
+    w.seed(target)
+    register_fake(gate, w)
+    p = await prepare(gate, target)
+    body = json.loads(store._conn.execute("SELECT body FROM proposals").fetchone()[0])
+    body |= {
+        "id": "u1",
+        "operation": "undo:approve",
+        "undo_of": p.id,
+        "changes": [{"$type": "fakes:DeleteComment", "data": {"marker": f"ghost:{p.id}"}}],
+    }
+    store.close()
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE proposals SET status = 'undone' WHERE id = ?", (p.id,))
+    conn.execute(
+        "INSERT INTO proposals (id, session_id, status, created_at, expires_at, body)"
+        " VALUES ('u1', 's1', 'executed', ?, ?, ?)",
+        (body["created_at"], body["expires_at"], json.dumps(body)),
+    )
+    conn.commit()
+    conn.close()
+
+    store = Store(path)
+    assert store.get_proposal(p.id).status is ProposalStatus.EXECUTED
+    rows, total = store.list_proposals()
+    assert total == 2 and {r.id for r in rows} == {p.id, "u1"}
+    legacy = next(r for r in rows if r.id == "u1")
+    assert legacy.operation == "undo:approve"
+    assert isinstance(legacy.changes.steps[0], RetiredChange)
+    rows, total = store.list_proposals(status="executed")
+    assert total == 2 and len(rows) == 2
+
+
 def test_changeset_is_bounded():
     with pytest.raises(ValueError):
         ChangeSet(steps=tuple(AddComment(body="x") for _ in range(5)))

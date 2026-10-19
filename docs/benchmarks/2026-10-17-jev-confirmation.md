@@ -53,3 +53,25 @@ removed all of them above 0.8 confidence.
   path. Revisit with real-session transcripts.
 - **Next data:** a few days of `GHOST_DEBUG_AUDIO=1` sessions, hand-labeled, run through
   the same script. That set decides whether the threshold moves.
+
+## 2026-10-19: looser yes, threshold 0.95
+
+The operator wants Ghost to hear a yes the way a person does (ADR 0017). On a real phone
+session "Okay." answering "Okay to close infra 17?" came back as noise at 0.45, and
+"Alright." and "Sounds good." as sleep. The affirm criteria and the instructions now say a
+short acknowledgement right after the question is affirm; wrap-ups stay sleep, and any "no"
+or "wait" stays deny. The rules fallback also takes "okay", "sure", "alright" and
+"sounds good" on their own.
+
+Same 560 utterances:
+
+| threshold | jev used | accuracy | false affirm | affirm recall | deny recall |
+|---|---|---|---|---|---|
+| 0.90 | 65% | 83.2% | 3 | 1.00 | 0.99 |
+| **0.95** | 57% | 82.5% | **0** | **1.00** | 0.99 |
+
+All three false affirms at 0.90 are Parakeet's "Market approved." for "mark it approved"
+said while another change was pending. The default threshold moves to 0.95: no false
+affirms on this set, and every real yes is still heard. Raw Jev accuracy is unchanged at
+88.8%; affirm recall went from 0.99 to 1.00 and affirm precision fell from 0.89 to 0.81,
+which is what the fallback threshold absorbs.

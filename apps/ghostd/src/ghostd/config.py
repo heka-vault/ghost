@@ -29,18 +29,24 @@ class GhostdSettings(BaseSettings):
     # operation falls back to its skill's risk class (labels/comments announce, close
     # confirms). Template: infra/policy.example.toml, seeded by `make env`.
     policy_path: Path = Path.home() / ".config" / "ghost" / "policy.toml"
-    undo_window_secs: int = 600
 
     # Confirmation classifier. auto: Jev when TYPESAFE_API_KEY or OPENROUTER_API_KEY is
     # set, else the regex allowlist; on: Jev or fail at startup; off: regex only.
     jev: str = "auto"  # auto | on | off
-    jev_threshold: float = 0.9
+    jev_threshold: float = 0.95
     jev_deadline_secs: float = 0.5
     typesafe_api_key: str = Field(default="", alias="TYPESAFE_API_KEY")
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
 
     # State
     db_path: Path = Path.home() / ".local" / "share" / "ghost" / "ghost.db"
+    # Per-turn latency records (ghost_voice.latency), timings only; rotated at
+    # GHOST_LATENCY_MAX_MB. Default: data_dir/latency.jsonl. `ghostd latency` summarizes.
+    latency_log: Path | None = None
+
+    @property
+    def latency_path(self) -> Path:
+        return self.latency_log or self.data_dir / "latency.jsonl"
 
     # Conversations (ADR 0014): persona.md, memory.md and notes.md per conversation live
     # here; the transcript and the registry are in the database. Summarized turns older
@@ -57,6 +63,12 @@ class GhostdSettings(BaseSettings):
     # Where the PipeWire installer and unit templates live: the repo's infra/ in a
     # checkout, /usr/share/heka-ghost in the Debian package.
     infra_dir: Path = Path(__file__).resolve().parents[4] / "infra"
+
+    # Phone listener (ADR 0016): plain HTTP with signed requests on one LAN address,
+    # host:port (e.g. 192.168.1.20:8765). Empty = off. Not the control API. The paired
+    # device and its secret are in data_dir/phone.json (0600). With ufw on, allow this
+    # TCP port and UDP from the LAN (aiortc picks random UDP ports).
+    phone_listen: str = ""
 
     # Wake. transcript: local VAD + Parakeet while passive, looking for a phrase
     # (ADR 0010); file: `ghostd wake` / SIGUSR1 only; onnx: trained model (pending).

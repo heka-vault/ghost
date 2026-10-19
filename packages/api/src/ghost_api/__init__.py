@@ -1,21 +1,35 @@
 """Ghost control API (ADR 0013): FastAPI on a Unix socket; the contract the apps use."""
 
-from ghost_api.app import Controller, Deps, create_app, outcome_view, pending_view
+from ghost_api.app import (
+    Controller,
+    Deps,
+    audit_page,
+    create_app,
+    outcome_view,
+    pending_view,
+    status_snapshot,
+)
 from ghost_api.client import GhostClient
-from ghost_api.models import Phase, Status
+from ghost_api.models import AuditPage, Phase, PhoneDevice, PhonePairing, PhoneView, Status
 from ghost_api.server import ApiServer, default_socket_path
 from ghost_api.state import DaemonState
 
 __all__ = [
     "ApiServer",
+    "AuditPage",
     "Controller",
     "DaemonState",
     "Deps",
     "GhostClient",
     "Phase",
+    "PhoneDevice",
+    "PhonePairing",
+    "PhoneView",
     "Status",
     "create_app",
     "default_socket_path",
     "outcome_view",
     "pending_view",
+    "status_snapshot",
+    "audit_page",
 ]

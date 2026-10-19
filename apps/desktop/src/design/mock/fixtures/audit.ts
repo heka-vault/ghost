@@ -100,55 +100,52 @@ const LINES: Record<string, IssueLines> = {
 /**
  * Each step is written exactly as the ability's Change.describe() writes it, because that is
  * what the gate stores in step_applied and step_failed: "labels: add bug, priority-high",
- * "comment: <body>", "closed the issue", "open the issue", "delete the comment I added".
- * `undo` is what the gate's undo writes: each step inverted, last applied first. The gate
- * names the operation "undo:<op>" and summarizes it as "On <target>: <steps>.", the
- * reverse, never the original's words.
+ * "comment: <body>", "closed the issue".
  */
-type Made = { summary: string; steps: string[]; undo: string[] };
+type Made = { summary: string; steps: string[] };
 /** `line(t, kind)` hands out that issue's lines in turn, so one day never shows the same comment twice. */
 type Op = { op: string; autonomy: string; make: (t: string, line: (t: string, kind: keyof IssueLines) => string) => Made };
 const OPS: Op[] = [
-  { op: "set_labels", autonomy: "quiet", make: (t) => ({ summary: `On ${t}: labels: add bug, priority-high.`, steps: ["labels: add bug, priority-high"], undo: ["labels: remove bug, priority-high"] }) },
-  { op: "set_labels", autonomy: "quiet", make: (t) => ({ summary: `On ${t}: labels: add needs-info.`, steps: ["labels: add needs-info"], undo: ["labels: remove needs-info"] }) },
+  { op: "set_labels", autonomy: "quiet", make: (t) => ({ summary: `On ${t}: labels: add bug, priority-high.`, steps: ["labels: add bug, priority-high"] }) },
+  { op: "set_labels", autonomy: "quiet", make: (t) => ({ summary: `On ${t}: labels: add needs-info.`, steps: ["labels: add needs-info"] }) },
   {
     op: "comment", autonomy: "announce",
     make: (t, line) => {
       const body = line(t, "comment");
-      return { summary: `On ${t}: comment: “${body}”`, steps: [`comment: ${body}`], undo: ["delete the comment I added"] };
+      return { summary: `On ${t}: comment: “${body}”`, steps: [`comment: ${body}`] };
     },
   },
   {
     op: "approve", autonomy: "announce",
     make: (t, line) => {
       const body = line(t, "approve");
-      return { summary: `On ${t}: approved, with a comment: “${body}”`, steps: ["labels: add approved; remove needs-signoff", `comment: ${body}`], undo: ["delete the comment I added", "labels: add needs-signoff; remove approved"] };
+      return { summary: `On ${t}: approved, with a comment: “${body}”`, steps: ["labels: add approved; remove needs-signoff", `comment: ${body}`] };
     },
   },
   {
     op: "request_changes", autonomy: "announce",
     make: (t, line) => {
       const body = line(t, "changes");
-      return { summary: `On ${t}: requested changes: “${body}”`, steps: ["labels: add changes-requested; remove needs-signoff", `comment: ${body}`], undo: ["delete the comment I added", "labels: add needs-signoff; remove changes-requested"] };
+      return { summary: `On ${t}: requested changes: “${body}”`, steps: ["labels: add changes-requested; remove needs-signoff", `comment: ${body}`] };
     },
   },
   {
     op: "close", autonomy: "confirm",
     make: (t, line) => {
       const body = line(t, "close");
-      return { summary: `On ${t}: closed the issue, with a comment: “${body}”`, steps: [`comment: ${body}`, "closed the issue"], undo: ["open the issue", "delete the comment I added"] };
+      return { summary: `On ${t}: closed the issue, with a comment: “${body}”`, steps: [`comment: ${body}`, "closed the issue"] };
     },
   },
-  { op: "reopen", autonomy: "confirm", make: (t) => ({ summary: `On ${t}: reopened the issue.`, steps: ["open the issue"], undo: ["closed the issue"] }) },
+  { op: "reopen", autonomy: "confirm", make: (t) => ({ summary: `On ${t}: reopened the issue.`, steps: ["open the issue"] }) },
 ];
 /** Conversation writes, with steps as ghost_core.conversations describes them (Python repr quotes). */
-const CONV_OPS: { op: string; autonomy: string; target: string; summary: string; steps: string[]; undo: string; undoSteps: string[] }[] = [
+const CONV_OPS: { op: string; autonomy: string; target: string; summary: string; steps: string[] }[] = [
   ...["Stripe renewal is due November 3.", "Marta signs off on anything over 5,000.", "Close the books by the 5th; Priya needs the export the day before."].map((note) => ({
-    op: "remember", autonomy: "announce", target: "conversation:accounting", summary: `On the Accounting line: pinned “${note}”`, steps: [`remember: ${note}`], undo: `On the Accounting line: unpinned “${note}”`, undoSteps: ["update notes"],
+    op: "remember", autonomy: "announce", target: "conversation:accounting", summary: `On the Accounting line: pinned “${note}”`, steps: [`remember: ${note}`],
   })),
-  { op: "set_voice", autonomy: "announce", target: "conversation:legal", summary: "On the Legal line: voice set to British female: Emma, speed 0.95.", steps: ["voice bf_emma at 0.95x"], undo: "On the Legal line: voice set back to American female: Heart, speed 1.0.", undoSteps: ["voice af_heart at 1x"] },
-  { op: "set_persona", autonomy: "confirm", target: "conversation:standup", summary: "On the Standup line: persona set, in your words.", steps: ["persona: 'Keep it to three bullets. Blockers first, then what shipped.'"], undo: "On the Standup line: persona put back as it was.", undoSteps: ["clear persona"] },
-  { op: "create", autonomy: "announce", target: "conversation:standup", summary: "Started a new line: Standup.", steps: ["start conversation 'Standup'"], undo: "On the Standup line: deleted the line.", undoSteps: ["delete the conversation"] },
+  { op: "set_voice", autonomy: "announce", target: "conversation:legal", summary: "On the Legal line: voice set to British female: Emma, speed 0.95.", steps: ["voice bf_emma at 0.95x"] },
+  { op: "set_persona", autonomy: "confirm", target: "conversation:standup", summary: "On the Standup line: persona set, in your words.", steps: ["persona: 'Keep it to three bullets. Blockers first, then what shipped.'"] },
+  { op: "create", autonomy: "announce", target: "conversation:standup", summary: "Started a new line: Standup.", steps: ["start conversation 'Standup'"] },
 ];
 
 const CLASSIFIERS = ["jev", "jev", "regex", "ui"];
@@ -197,7 +194,6 @@ export default function audit(s: Scenario): AuditEntry[] {
     const [target] = pick(ISSUES);
     const made = o.make(target, line);
     const c = pick(CONV_OPS);
-    const inverse = conv ? c.undoSteps : made.undo;
     const ability = conv ? "conversations" : "github_issues";
     const operation = conv ? c.op : o.op;
     const autonomy = conv ? c.autonomy : o.autonomy;
@@ -208,7 +204,6 @@ export default function audit(s: Scenario): AuditEntry[] {
     let status = "executed";
     if (autonomy === "confirm") status = r < 0.62 ? "executed" : r < 0.8 ? "cancelled" : r < 0.9 ? "expired" : "stale";
     else status = r < 0.9 ? "executed" : r < 0.95 || steps.length < 2 ? "failed" : "partial";
-    if (status === "executed" && rand() < 0.07) status = "undone";
 
     const t = minutes;
     const key = conv ? tgt : `github:${tgt}`;
@@ -228,7 +223,7 @@ export default function audit(s: Scenario): AuditEntry[] {
       }
     }
     if (status === "stale") events.push(ev(t - 0.25, "stale", { was: "etag-41", now: "etag-42" }));
-    if (["executed", "undone", "failed", "partial"].includes(status)) {
+    if (["executed", "failed", "partial"].includes(status)) {
       events.push(ev(t - 0.25, "claimed"));
       steps.forEach((step, k) => {
         const fail = (status === "failed" && k === 0) || (status === "partial" && k === steps.length - 1 && k > 0);
@@ -236,40 +231,16 @@ export default function audit(s: Scenario): AuditEntry[] {
       });
       events.push(ev(t - 0.27, "finished", { status: status === "failed" ? "failed" : status === "partial" ? "partial" : "success" }));
     }
-    let undo_of: string | null = null;
-    if (status === "undone") {
-      const undoId = hex(32, rand);
-      events.push(ev(t - 3, "undone", { by: undoId }));
-      const undoSteps = inverse ?? ["put it back"];
-      entries.push({
-        id: undoId,
-        session_id,
-        ability,
-        operation: `undo:${operation}`,
-        target: tgt,
-        summary: conv ? c.undo : `On ${tgt}: ${undoSteps.join("; ")}.`,
-        autonomy: "announce",
-        status: "executed",
-        undo_of: id,
-        created_at: ago(t - 3),
-        events: [
-          ev(t - 3, "prepared", { ability, operation: `undo:${operation}`, target: key, autonomy: "announce" }),
-          ev(t - 3.01, "claimed"),
-          ...undoSteps.map((step, k) => ev(t - 3.01, "step_applied", { index: k, step })),
-          ev(t - 3.02, "finished", { status: "success" }),
-        ],
-      });
-    }
     // The real gate stores a failed or partial write as "executed"; its finished event says how
     // it went. Keep both shapes in the fixture so the screen proves it reads either.
     const stored = (status === "failed" || status === "partial") && rand() < 0.6 ? "executed" : status;
-    entries.push({ id, session_id, ability, operation, target: tgt, summary, autonomy, status: stored, undo_of, created_at: ago(t), events });
+    entries.push({ id, session_id, ability, operation, target: tgt, summary, autonomy, status: stored, created_at: ago(t), events });
   }
   // One of each way a waiting write gets canceled, early in the log so the first page shows
   // them: an answer that wasn't a clear yes, “never mind”, switching lines, the app's Cancel,
   // and sleep. The cycle above spreads more of them through the older rows.
   const cancelled = (at: number, operation: string, target: string, summary: string, reason: string, turn?: Record<string, unknown>, ability = "github_issues"): AuditEntry => ({
-    id: hex(32, rand), session_id: sessions[0], ability, operation, target, summary, autonomy: "confirm", status: "cancelled", undo_of: null, created_at: ago(at),
+    id: hex(32, rand), session_id: sessions[0], ability, operation, target, summary, autonomy: "confirm", status: "cancelled", created_at: ago(at),
     events: [
       ev(at, "prepared", { ability, operation, target: ability === "github_issues" ? `github:${target}` : target, autonomy: "confirm" }),
       ...(turn ? [ev(at - 0.2, "user_turn", turn)] : []),
@@ -289,7 +260,7 @@ export default function audit(s: Scenario): AuditEntry[] {
   // ago. The real daemon leaves these behind when it stops while a change waits; the screen
   // must read them as lapsed, never as waiting. Two in the busy log, one otherwise.
   const lapsed = (at: number, target: string, summary: string): AuditEntry => ({
-    id: hex(32, rand), session_id: hex(32, rand), ability: "github_issues", operation: "close", target, summary, autonomy: "confirm", status: "pending", undo_of: null, created_at: ago(at),
+    id: hex(32, rand), session_id: hex(32, rand), ability: "github_issues", operation: "close", target, summary, autonomy: "confirm", status: "pending", created_at: ago(at),
     events: [ev(at, "prepared", { ability: "github_issues", operation: "close", target: `github:${target}`, autonomy: "confirm" })],
   });
   if (count > 0) {
@@ -301,12 +272,12 @@ export default function audit(s: Scenario): AuditEntry[] {
   const recent: AuditEntry[] = [
     {
       id: hex(32, rand), session_id: recentSession, ability: "github_issues", operation: "approve", target: "ghost-mock/app#208",
-      summary: "On ghost-mock/app#208: approved, with a comment: “Dana’s fix looks right to me.”", autonomy: "announce", status: "executed", undo_of: null, created_at: ago(4.0),
+      summary: "On ghost-mock/app#208: approved, with a comment: “Dana’s fix looks right to me.”", autonomy: "announce", status: "executed", created_at: ago(4.0),
       events: [ev(4.0, "prepared", { ability: "github_issues", operation: "approve", target: "github:ghost-mock/app#208", autonomy: "announce" }), ev(3.99, "claimed"), ev(3.98, "step_applied", { index: 0, step: "labels: add approved; remove needs-signoff" }), ev(3.97, "step_applied", { index: 1, step: "comment: Dana’s fix looks right to me." }), ev(3.96, "finished", { status: "success" })],
     },
     {
       id: hex(32, rand), session_id: recentSession, ability: "github_issues", operation: "set_labels", target: "ghost-mock/app#212",
-      summary: "On ghost-mock/app#212: labels: add bug, priority-high.", autonomy: "quiet", status: "executed", undo_of: null, created_at: ago(4.8),
+      summary: "On ghost-mock/app#212: labels: add bug, priority-high.", autonomy: "quiet", status: "executed", created_at: ago(4.8),
       events: [ev(4.8, "prepared", { ability: "github_issues", operation: "set_labels", target: "github:ghost-mock/app#212", autonomy: "quiet" }), ev(4.79, "claimed"), ev(4.78, "step_applied", { index: 0, step: "labels: add bug, priority-high" }), ev(4.77, "finished", { status: "success" })],
     },
   ];

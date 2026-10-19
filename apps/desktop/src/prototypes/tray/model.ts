@@ -56,7 +56,8 @@ export function trayState(opts: {
   const inSession = stale || (online && !!status?.session_id && phase !== "passive" && phase !== "starting");
   const slug = status?.conversation ?? null;
   const line = inSession && slug && slug !== "ghost" ? lineName(slug, lineNameOf(slug)) : null;
-  const where = line ? `On the ${line} line` : "On the main line";
+  // A session the paired phone started (ADR 0016) says so first; the desk can still end it.
+  const where = inSession && status?.session_origin === "phone" ? "On your phone" : line ? `On the ${line} line` : "On the main line";
   const { dot, title } = liveLabel(connection, phase);
   const base = { inSession, stale, muted, line, where };
 

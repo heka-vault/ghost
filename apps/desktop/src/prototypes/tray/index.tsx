@@ -6,7 +6,7 @@
  * Two surfaces open from the indicator:
  *  - the native menu (`&native=1`): what an AppIndicator really shows on Ubuntu, a dbusmenu
  *    drawn by GNOME Shell. Its "Show status…" item opens
- *  - the status popover: Ghost's own window, with the waiting change, mute, Undo.
+ *  - the status popover: Ghost's own window, with the waiting change, mute, the last change.
  *
  * States by URL (any mock scenario works; these are the designed ones):
  *   ?mock=passive#/tray            waiting for “Hey Ghost”

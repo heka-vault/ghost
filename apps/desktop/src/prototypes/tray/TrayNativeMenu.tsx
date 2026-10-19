@@ -13,7 +13,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
 import { inTauri, startDaemon } from "../../transport";
 import { cx, useLive } from "../../ui";
-import { canUndo, shortChange, useLastChange } from "./data";
+import { shortChange } from "./data";
 import { actionables, roveKey } from "./focus";
 import { type TrayState, lowerFirst } from "./model";
 
@@ -43,7 +43,6 @@ export const TrayNativeMenu = forwardRef<HTMLDivElement, TrayNativeMenuProps>(fu
 ) {
   const { client, status, pending } = useGhost();
   const { connection, online, loadingModels } = useLive();
-  const { entry: last } = useLastChange();
   const root = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => root.current as HTMLDivElement);
 
@@ -114,9 +113,6 @@ export const TrayNativeMenu = forwardRef<HTMLDivElement, TrayNativeMenuProps>(fu
       run: () => client.wake(),
       disabled: !online || !status?.models_ready,
     });
-  }
-  if (canUndo(last) && last) {
-    items.push({ kind: "item", text: `Undo “${shortChange(last.summary, last.target)}”`, run: () => client.undo(), disabled: !online });
   }
 
   items.push({ kind: "separator" });

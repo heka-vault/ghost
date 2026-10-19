@@ -1,6 +1,6 @@
 /**
  * Owner: tray. The status popover: what "Show status…" in Ghost's native top-bar menu opens.
- * State, the waiting change, mute, the last change with Undo, then Open Ghost and Quit.
+ * State, the waiting change, mute, the last change, then Open Ghost and Quit.
  * Every write goes through the same client calls the session uses.
  *
  * Focal point: the waiting change when there is one (the header steps back to one quiet
@@ -14,7 +14,7 @@
  */
 import type { PendingProposal } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { AppWindow, Check, CircleCheck, Copy, History, LogOut, Mic, MicOff, Moon, Undo2 } from "lucide-react";
+import { AppWindow, Check, CircleCheck, Copy, History, LogOut, Mic, MicOff, Moon } from "lucide-react";
 import { type CSSProperties, forwardRef, useCallback, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
 
 import { inTauri, startDaemon } from "../../transport";
@@ -29,12 +29,11 @@ import {
   VoicePresence,
   cx,
   errorText,
-  quoted,
   relativeTime,
   statusLabel,
   useLive,
 } from "../../ui";
-import { canUndo, capitalize, doneChange, micLabel, micTitle, shortChange, undoneSummary, useLastChange, useMicName } from "./data";
+import { capitalize, doneChange, micLabel, micTitle, shortChange, useLastChange, useMicName } from "./data";
 import { actionables, roveKey, useFocusKeeper } from "./focus";
 import { type TrayState, lowerFirst } from "./model";
 import { tokenMs } from "./motion";
@@ -45,7 +44,7 @@ const EXPIRED_HOLD_MS = 3000;
 /** How long the result of a Confirm or Cancel stays where the card was. */
 const OUTCOME_HOLD_MS = 1500;
 
-type Busy = null | "wake" | "sleep" | "confirm" | "cancel" | "undo" | "start";
+type Busy = null | "wake" | "sleep" | "confirm" | "cancel" | "start";
 
 export interface TrayPopoverProps {
   state: TrayState;
@@ -160,11 +159,10 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
 ) {
   const { client, status, pending } = useGhost();
   const { connection, online, loadingModels, setupNeeded, setupHref } = useLive();
-  const { entry: last, undone, refresh } = useLastChange();
+  const { entry: last } = useLastChange();
   const mic = useMicName();
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
-  const [undoError, setUndoError] = useState<string | null>(null);
   const [said, setSaid] = useState("");
   const pendingSlot = useRef<HTMLDivElement>(null);
   const { shown, begin, settle } = useShownPending(pending, pendingSlot);
@@ -173,7 +171,6 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
 
   const root = useRef<HTMLElement>(null);
   const actionSlot = useRef<HTMLDivElement>(null);
-  const lastText = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => root.current as HTMLElement);
 
   // Where focus goes when the control that had it disappears: the header's action (Go to
@@ -185,7 +182,7 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
     if (autoFocus) actionables(root.current)[0]?.focus();
   }, [autoFocus]);
 
-  // One short spoken-style confirmation for screen readers after Confirm, Cancel and Undo.
+  // One short spoken-style confirmation for screen readers after Confirm and Cancel.
   useEffect(() => {
     if (!said) return;
     const t = window.setTimeout(() => setSaid(""), 2500);
@@ -288,18 +285,14 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
     action = shortcut ? <Tooltip content="Wake Ghost" shortcut={shortcut}>{wake}</Tooltip> : wake;
   }
 
-  const undoable = canUndo(last);
-  const isUndo = !!last?.undo_of;
-  // One short phrase beside Undo ("Approved app 208"); the gate's full words are its tooltip
-  // and what a screen reader hears, never a third visible line that restates the lead.
-  const lastDetail = last ? (isUndo ? undoneSummary(last, undone) : last.summary) : "";
+  // One short phrase ("Approved app 208"); the gate's full words are its tooltip and what a
+  // screen reader hears, never a third visible line that restates the lead.
+  const lastDetail = last ? last.summary : "";
   const lastLead = !last
     ? ""
-    : isUndo
-      ? `Undid ${quoted(shortChange(lastDetail, undone?.target ?? last.target))}`
-      : last.status === "executed"
-        ? doneChange(last.summary, last.target)
-        : capitalize(shortChange(last.summary, last.target));
+    : last.status === "executed"
+      ? doneChange(last.summary, last.target)
+      : capitalize(shortChange(last.summary, last.target));
 
   return (
     <section
@@ -412,12 +405,12 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
           <span className="tray-pop__last-icon" aria-hidden>
             <History />
           </span>
-          <div ref={lastText} className="tray-pop__last-text" tabIndex={-1}>
+          <div className="tray-pop__last-text">
             <p className="tray-pop__label">
-              {isUndo ? "Undone" : "Last change"} · {relativeTime(last.created_at)}
-              {!isUndo && last.status !== "executed" && <> · {statusLabel(last.status).toLowerCase()}</>}
+              Last change · {relativeTime(last.created_at)}
+              {last.status !== "executed" && <> · {statusLabel(last.status).toLowerCase()}</>}
             </p>
-            <p className={cx("tray-pop__done", (isUndo || last.status !== "executed") && "is-settled")} title={lastDetail}>
+            <p className={cx("tray-pop__done", last.status !== "executed" && "is-settled")} title={lastDetail}>
               {lastLead}
               {lastDetail !== lastLead && (
                 <span className="sr-only" data-user-content>
@@ -426,27 +419,7 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
                 </span>
               )}
             </p>
-            {undoError && (
-              <p className="tray-pop__error tray-pop__error--inline" role="alert">
-                {undoError}
-              </p>
-            )}
           </div>
-          {undoable && (
-            <Button
-              variant="ghost"
-              size="sm"
-              leadingIcon={<Undo2 />}
-              disabled={!online}
-              loading={busy === "undo"}
-              onClick={() => {
-                focus.request(() => lastText.current);
-                void run("undo", () => client.undo().finally(refresh), setUndoError, "Undone");
-              }}
-            >
-              Undo
-            </Button>
-          )}
         </div>
       )}
 
@@ -478,7 +451,7 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
 /**
  * Where the card was, after Confirm or Cancel: what it was, and one line saying what
  * happened in the place its buttons were. No button here: a second click on Confirm must
- * land on nothing. Undo is one row down, on Last change.
+ * land on nothing.
  */
 function Outcome({ proposal, decision }: { proposal: PendingProposal; decision: Decision }) {
   const confirmed = decision === "confirmed";

@@ -92,7 +92,9 @@ export function Sidebar() {
         : phase === "starting"
           ? "Loading voice models"
           : inSession
-            ? active && active !== "ghost" ? `On the ${lineName(active, activeLine?.name)} line` : "On the main line"
+            ? status?.session_origin === "phone"
+              ? "On your phone"
+              : active && active !== "ghost" ? `On the ${lineName(active, activeLine?.name)} line` : "On the main line"
             : "Nothing leaves this computer";
   // Where the eye starts: Ghost, then the line Ghost is on right now (which is also the one
   // holding any pending okay), then the rest by recency. The live line is never buried.

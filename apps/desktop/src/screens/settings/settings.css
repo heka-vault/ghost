@@ -200,3 +200,39 @@
 .set-skeleton__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .set-skeleton__text { display: flex; flex-direction: column; gap: var(--space-2); }
 
+
+/* ------------------------------------------------------------------ phone */
+.set-phone__icon { color: var(--text-2); flex: none; }
+.set-phone__live { color: var(--ok); }
+.set-phone-off { display: flex; flex-direction: column; gap: var(--space-2); }
+.set-phone-off__commands { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); margin: var(--space-1) 0; }
+.set-phone-off__commands .set-command code { white-space: normal; overflow-wrap: anywhere; }
+.set-phone-off__ufw { padding: var(--space-3) var(--space-4); }
+.set-phone-off__ufw .set-help { margin-top: var(--space-2); }
+
+/* Pair a phone: the two things to type, large, in a quiet well. */
+.set-pair__body { display: flex; flex-direction: column; gap: var(--space-3); }
+.set-pair__pairs {
+  margin: 0; display: grid; grid-template-columns: 1fr auto; gap: var(--space-6);
+  padding: var(--space-5) var(--space-6); border-radius: var(--radius-lg); background: var(--bg-sunken);
+}
+.set-pair__item { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.set-pair__label { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); font-weight: var(--weight-medium); }
+.set-pair__address, .set-pair__code {
+  margin: 0; font-family: var(--font-mono); font-feature-settings: normal; color: var(--text-1);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.set-pair__address { font-size: var(--text-2xl); line-height: var(--leading-4xl); font-weight: var(--weight-medium); overflow-wrap: anywhere; white-space: normal; }
+.set-pair__code { font-size: var(--text-4xl); line-height: var(--leading-4xl); font-weight: var(--weight-semibold); }
+.set-pair__code.is-expired { color: var(--text-disabled); text-decoration: line-through; text-decoration-thickness: 2px; }
+.set-pair__status {
+  margin: 0; min-height: var(--leading-md); display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2);
+}
+.set-pair__status .g-spinner { color: var(--text-3); flex: none; }
+.set-pair__done { display: flex; align-items: flex-start; gap: var(--space-3); }
+.set-pair__done-icon {
+  flex: none; display: inline-grid; place-items: center; width: var(--control-md); height: var(--control-md);
+  border-radius: var(--radius-full); background: var(--ok-soft); color: var(--ok);
+}
+.set-pair__done .set-help { margin: var(--space-1_5) 0 0; }

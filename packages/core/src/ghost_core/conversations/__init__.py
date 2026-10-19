@@ -12,6 +12,7 @@ from ghost_core.conversations.models import (
 )
 from ghost_core.conversations.service import (
     ABILITY,
+    RECENT_TEMPLATE,
     SUMMARY_TEMPLATE,
     Conversations,
     ResumeContext,
@@ -21,6 +22,7 @@ from ghost_core.conversations.writer import ConversationWriter
 __all__ = [
     "ABILITY",
     "GHOST",
+    "RECENT_TEMPLATE",
     "SUMMARY_TEMPLATE",
     "Compaction",
     "ConversationFiles",

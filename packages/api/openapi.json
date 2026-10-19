@@ -153,17 +153,6 @@
           "target": {
             "title": "Target",
             "type": "string"
-          },
-          "undo_of": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Undo Of"
           }
         },
         "required": [
@@ -175,7 +164,6 @@
           "summary",
           "autonomy",
           "status",
-          "undo_of",
           "created_at",
           "events"
         ],
@@ -475,7 +463,7 @@
         "type": "object"
       },
       "ConversationUpdate": {
-        "description": "Each field present is applied as its own audited, undoable write.",
+        "description": "Each field present is applied as its own audited write.",
         "properties": {
           "aliases": {
             "anyOf": [
@@ -856,8 +844,7 @@
             "enum": [
               "voice",
               "ui",
-              "autonomous",
-              "undo"
+              "autonomous"
             ],
             "title": "Via",
             "type": "string"
@@ -1028,6 +1015,99 @@
         ],
         "title": "Phase",
         "type": "string"
+      },
+      "PhoneDevice": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "paired_at": {
+            "format": "date-time",
+            "title": "Paired At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "paired_at",
+          "last_seen"
+        ],
+        "title": "PhoneDevice",
+        "type": "object"
+      },
+      "PhonePairing": {
+        "description": "A fresh pairing code for the phone listener. Shown to the operator only.",
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "address",
+          "expires_at"
+        ],
+        "title": "PhonePairing",
+        "type": "object"
+      },
+      "PhoneView": {
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhoneDevice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "device"
+        ],
+        "title": "PhoneView",
+        "type": "object"
       },
       "PolicyResult": {
         "properties": {
@@ -1441,6 +1521,11 @@
             ],
             "title": "Conversation"
           },
+          "ending": {
+            "default": false,
+            "title": "Ending",
+            "type": "boolean"
+          },
           "models_ready": {
             "title": "Models Ready",
             "type": "boolean"
@@ -1468,6 +1553,21 @@
               }
             ],
             "title": "Session Id"
+          },
+          "session_origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "desk",
+                  "phone"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Origin"
           },
           "uptime_secs": {
             "title": "Uptime Secs",
@@ -2386,6 +2486,69 @@
         ]
       }
     },
+    "/phone": {
+      "delete": {
+        "description": "Forget the paired phone; its signatures stop working at once.",
+        "operationId": "forget_phone_phone_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Forget Phone",
+        "tags": [
+          "phone"
+        ]
+      },
+      "get": {
+        "operationId": "phone_phone_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Phone",
+        "tags": [
+          "phone"
+        ]
+      }
+    },
+    "/phone/pairing": {
+      "post": {
+        "description": "A new six-digit code for the phone, good for two minutes and five tries. It\nreplaces any earlier code. 409 when GHOST_PHONE_LISTEN is off.",
+        "operationId": "phone_pairing_phone_pairing_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonePairing"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Phone Pairing",
+        "tags": [
+          "phone"
+        ]
+      }
+    },
     "/policy": {
       "get": {
         "operationId": "get_policy_policy_get",
@@ -2744,27 +2907,6 @@
         "summary": "Get Status",
         "tags": [
           "session"
-        ]
-      }
-    },
-    "/undo": {
-      "post": {
-        "operationId": "undo_undo_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OutcomeView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Undo",
-        "tags": [
-          "writes"
         ]
       }
     },

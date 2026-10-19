@@ -5,14 +5,15 @@ operations at startup; the operator's policy decides how autonomous each one is;
 gate does the same work at every level: the ability's allowlist, snapshot, bounded
 steps, idempotency, stale check, readback, audit row. At ``confirm`` a spoken yes
 sits between proposal and execution. At ``announce`` and ``quiet`` the write happens
-at once and can be undone.
+at once. Reversing a write is a new change through ``submit`` like any other.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from ghost_core.ability import Operation
 from ghost_core.confirmation import (
@@ -22,7 +23,6 @@ from ghost_core.confirmation import (
     Verdict,
 )
 from ghost_core.models import (
-    UNDO_WINDOW,
     ChangeSet,
     Outcome,
     Proposal,
@@ -32,6 +32,7 @@ from ghost_core.models import (
     utcnow,
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy, PolicyError
+from ghost_core.request import asked_for
 from ghost_core.store import Store
 
 
@@ -53,6 +54,15 @@ class Submission:
         return self.outcome is not None
 
 
+@dataclass(frozen=True)
+class Classification:
+    """Which classifier judged the last confirmation turn and how long it took. Timing
+    only, for ghost_voice.latency; the words are never kept here."""
+
+    classifier: str
+    seconds: float
+
+
 class WriteGate:
     """Holds at most one pending proposal per session.
 
@@ -60,7 +70,6 @@ class WriteGate:
       now or stores a pending proposal.
     * ``on_user_turn`` is called by the pipeline with the operator's transcribed
       turn. It is the only path from a pending proposal to ``execute``.
-    * ``undo`` reverses the last executed change set in the session.
     """
 
     def __init__(
@@ -69,15 +78,14 @@ class WriteGate:
         *,
         autonomy: AutonomyPolicy | None = None,
         classifier: ConfirmationClassifier | None = None,
-        undo_window: timedelta = UNDO_WINDOW,
         on_decision: Callable[[str], None] | None = None,
     ) -> None:
         self._store = store
         self._autonomy = autonomy or AutonomyPolicy()
         self._classifier = classifier or RegexClassifier()
-        self._undo_window = undo_window
         self._log = on_decision or (lambda _msg: None)
         self._ops: dict[tuple[str, str], Operation] = {}
+        self.last_classification: Classification | None = None
 
     # --- registry ------------------------------------------------------
 
@@ -153,7 +161,7 @@ class WriteGate:
     ) -> Outcome:
         """Ghost's own housekeeping (an automatic compaction, an edit made in the
         desktop app by the operator): applied at once at ``quiet`` whatever the policy
-        says, still bounded, snapshotted, audited and undoable. Never reachable from a
+        says, still bounded, snapshotted and audited. Never reachable from a
         model tool; the policy's ``deny`` is honoured."""
         op = self.operation(ability, operation)
         if not op.allowed(target):
@@ -206,9 +214,8 @@ class WriteGate:
         changes: ChangeSet,
         rationale: str,
         autonomy: Autonomy,
-        undo_of: str | None = None,
     ) -> Proposal:
-        writer = self.operation(ability, operation.removeprefix("undo:")).writer
+        writer = self.operation(ability, operation).writer
         # One pending proposal at a time: a new one replaces the old.
         self._store.cancel_pending(session_id)
         snapshot = await writer.fetch(target)
@@ -222,7 +229,6 @@ class WriteGate:
             snapshot=snapshot,
             preview=f"On {target.spoken()}: {changes.describe()}.",
             autonomy=autonomy.value,
-            undo_of=undo_of,
         )
         self._store.insert_proposal(proposal)
         self._store.event(
@@ -274,7 +280,15 @@ class WriteGate:
         if p is None:
             return Verdict.UNCLEAR, None
         ctx = ConfirmationContext(pending_action=p.preview, question=question)
+        began = time.perf_counter()
         verdict = await self._classifier.classify(transcript, ctx)
+        self.last_classification = Classification(
+            classifier=str(
+                getattr(self._classifier, "last_source", None)
+                or getattr(self._classifier, "name", "custom")
+            ),
+            seconds=time.perf_counter() - began,
+        )
         self._store.event(
             p.id,
             "user_turn",
@@ -289,6 +303,37 @@ class WriteGate:
             self._store.event(p.id, "cancelled", {"reason": verdict.value})
             return verdict, None
         return verdict, await self._execute(p, now)
+
+    async def confirm_by_request(
+        self,
+        session_id: str,
+        request: str,
+        *,
+        question: str = "",
+        now: datetime | None = None,
+    ) -> Outcome | None:
+        """The operator's own words that led to the pending proposal, from the pipeline's
+        transcript. When they plainly asked for exactly this operation on this target
+        (``ghost_core.request``), that is the yes: execute now. Otherwise None, and the
+        proposal waits for a yes as before. ``question`` is Ghost's reply before the
+        request, so "close it" can point at the issue it just named."""
+        p = self.pending(session_id, now)
+        if p is None:
+            return None
+        op = self._ops.get((p.ability, p.operation))
+        if op is None or not op.asked_by:
+            return None
+        if not asked_for(
+            request, verbs=op.asked_by, mentions=p.target.mentions(), context=question
+        ):
+            return None
+        self._store.event(
+            p.id,
+            "user_turn",
+            {"verdict": Verdict.AFFIRMATIVE.value, "text": request, "classifier": "request"},
+        )
+        self._log(f"gate: the operator's request confirmed {p.id}")
+        return await self._execute(p, now)
 
     async def confirm_pending(
         self, session_id: str, *, source: str = "ui", now: datetime | None = None
@@ -305,58 +350,11 @@ class WriteGate:
         self._log(f"gate: {source} confirmed {p.id}")
         return await self._execute(p, now)
 
-    # --- undo ----------------------------------------------------------
-
-    def undoable(self, session_id: str, now: datetime | None = None) -> Proposal | None:
-        now = now or utcnow()
-        return self._store.last_executed(session_id, now - self._undo_window)
-
-    async def undo(self, session_id: str, now: datetime | None = None) -> Outcome:
-        """Reverse the last executed change set in this session. Raises GateError when
-        there is nothing to undo or the change cannot be reversed."""
-        now = now or utcnow()
-        last = self.undoable(session_id, now)
-        if last is None:
-            raise GateError("There is nothing recent to undo.")
-        inverse = last.changes.invert(last.snapshot, last.idempotency_key)
-        if inverse is None:
-            raise GateError(f"The last change on {last.target} cannot be reversed.")
-        # Undo is safe only if nobody else touched the target since our write finished.
-        writer = self.operation(last.ability, last.writer_operation).writer
-        current = await writer.fetch(last.target)
-        was = self._store.readback_version(last.id)
-        if was is not None and current.version != was:
-            self._store.event(last.id, "undo_stale", {"was": was, "now": current.version})
-            return Outcome(
-                proposal_id=last.id,
-                target=last.target,
-                status="failed",
-                applied=(),
-                error="It changed since I changed it. Ask me to look again.",
-                readback=current,
-            )
-        proposal = await self._propose(
-            session_id=session_id,
-            ability=last.ability,
-            operation=f"undo:{last.writer_operation}",
-            target=last.target,
-            changes=inverse,
-            rationale=f"undo {last.operation} ({last.id})",
-            autonomy=Autonomy.ANNOUNCE,
-            undo_of=last.id,
-        )
-        self._log(f"gate: undo {last.ability}.{last.operation} on {last.target}")
-        outcome = await self._execute(proposal, now)
-        if outcome.status == "success":
-            self._store.set_status(last.id, ProposalStatus.UNDONE)
-            self._store.event(last.id, "undone", {"by": proposal.id})
-        return outcome
-
     # --- execution -----------------------------------------------------
 
     async def _execute(self, p: Proposal, now: datetime | None = None) -> Outcome:
         now = now or utcnow()
-        writer = self.operation(p.ability, p.writer_operation).writer
+        writer = self.operation(p.ability, p.operation).writer
         # Stale check: the target must not have changed since the snapshot.
         current = await writer.fetch(p.target)
         if current.version != p.snapshot.version:

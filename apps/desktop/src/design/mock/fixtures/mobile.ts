@@ -80,7 +80,7 @@ export interface MobileFixture {
 
 const SAMPLE_SESSION = "5f2c9e1a8b7d4c3e9a1f0b6d2e4c8a7f";
 
-function cachedEntry(target: string, operation: string, summary: string, status: AuditEntry["status"], minutesAgo: number, undo_of: string | null = null): AuditEntry {
+function cachedEntry(target: string, operation: string, summary: string, status: AuditEntry["status"], minutesAgo: number): AuditEntry {
   return {
     id: `cached-${target}-${operation}`,
     session_id: SAMPLE_SESSION,
@@ -90,7 +90,6 @@ function cachedEntry(target: string, operation: string, summary: string, status:
     summary,
     autonomy: status === "expired" ? "confirm" : "announce",
     status,
-    undo_of,
     created_at: ago(minutesAgo),
     events: [{ at: ago(minutesAgo), event: status === "expired" ? "expired" : "finished", detail: status === "expired" ? undefined : { status: "success" } }],
   };
@@ -169,10 +168,8 @@ export default function mobile(s: Scenario): MobileFixture {
       savedAt: ago(60 * 3),
       audit: s.data === "empty" ? [] : [
         cachedEntry("ghost-mock/app#208", "approve", "On ghost-mock/app#208: approved, with a comment: “Dana’s fix looks right to me.”", "executed", 60 * 3 + 4),
-        // An undo and the change it reversed, as the gate writes them: `undo:<op>`, `undo_of`, inverted steps.
-        cachedEntry("ghost-mock/app#199", "undo:comment", "On ghost-mock/app#199: delete the comment I added.", "executed", 60 * 3 + 5, "cached-ghost-mock/app#199-comment"),
         cachedEntry("ghost-mock/app#212", "set_labels", "On ghost-mock/app#212: labels: add bug, priority-high.", "executed", 60 * 3 + 6),
-        cachedEntry("ghost-mock/app#199", "comment", "On ghost-mock/app#199: comment: “Can you share the stack trace from the failing worker?”", "undone", 60 * 3 + 9),
+        cachedEntry("ghost-mock/app#199", "comment", "On ghost-mock/app#199: comment: “Can you share the stack trace from the failing worker?”", "executed", 60 * 3 + 9),
         cachedEntry("ghost-mock/infra#77", "close", "On ghost-mock/infra#77: closed the issue, with a comment: “Fixed by the runner image bump.”", "expired", 60 * 5),
       ],
     },

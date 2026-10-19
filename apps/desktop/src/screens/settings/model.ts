@@ -6,7 +6,7 @@
 import type { DevicesView, SettingsView } from "@ghost/client-ts";
 
 /** Page sections, in order. The id is also the `?section=` deep link. */
-export type SectionId = "setup" | "secrets" | "model" | "github" | "voice" | "audio" | "models" | "privacy" | "sounds";
+export type SectionId = "setup" | "secrets" | "model" | "github" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
@@ -16,6 +16,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   voice: "Voice and wake",
   audio: "Microphone and speakers",
   models: "Voice models",
+  phone: "Phone",
   privacy: "Privacy",
   sounds: "Sounds",
 };

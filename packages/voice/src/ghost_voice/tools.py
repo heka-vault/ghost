@@ -1,14 +1,17 @@
 """Bridge abilities to Pipecat function calling.
 
-Three kinds of tool reach the model: an ability's typed read tools, one shared
-``change`` that hands a typed change set to the gate, and ``undo``. What ``change``
-does depends on the operator's autonomy policy (ADR 0011): the write either happens
-now and the verified result comes back, or a proposal waits for a spoken yes. The
-model never applies a write itself.
+Two kinds of tool reach the model: an ability's typed read tools and one shared
+``change`` that hands a typed change set to the gate (plus session tools: switch
+conversation, go to sleep). There is no undo tool: to take a change back the model
+proposes the reversing change through ``change``. What ``change`` does depends on
+the operator's autonomy policy (ADR 0011): the write either happens now and the
+verified result comes back, or a proposal waits for a spoken yes. The model never
+applies a write itself.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +24,8 @@ from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 
+from ghost_voice.latency import NULL_PROBE, LatencyProbe
+
 if TYPE_CHECKING:
     from ghost_voice.conversation import ConversationRuntime
 
@@ -28,7 +33,6 @@ OnSleep = Callable[[], Awaitable[None]]
 OnCall = Callable[[str, dict[str, Any]], None]
 
 CHANGE_TOOL = "change"
-UNDO_TOOL = "undo"
 SWITCH_TOOL = "switch_conversation"
 
 
@@ -42,8 +46,15 @@ def register_tools(
     events: Events | None = None,
     conversations: ConversationRuntime | None = None,
     on_call: OnCall | None = None,
+    last_request: Callable[[], tuple[str, str]] | None = None,
+    probe: LatencyProbe | None = None,
 ) -> list[FunctionSchema]:
+    """``probe`` gets the time each step inside a call takes (ghost_voice.latency):
+    ``read`` for a read tool (the ability's client, an external API for GitHub), and
+    for ``change`` the ability's ``prepare``, the gate's ``submit`` (snapshot, and the
+    write itself below ``confirm``) and the ``request`` check that may execute it."""
     schemas: list[FunctionSchema] = []
+    probe = probe or NULL_PROBE
     events = events or Events()
     record = on_call or (lambda _n, _a: None)
 
@@ -57,7 +68,7 @@ def register_tools(
                     required=tool.required,
                 )
             )
-            llm.register_function(tool.name, _wrap_read(tool.handler, record))
+            llm.register_function(tool.name, _wrap_read(tool.handler, record, probe))
 
     # Operations the policy denies outright are not offered at all.
     ops: dict[str, dict[str, Operation]] = {}
@@ -106,15 +117,21 @@ def register_tools(
         if not aname and len(ops) == 1:
             aname = next(iter(ops))
         op = ops.get(aname, {}).get(op_name)
+        call_id = getattr(params, "tool_call_id", "")
         if op is None:
+            probe.tool_status(call_id, "error")
             await params.result_callback({"error": f"unknown operation {aname!r}.{op_name!r}"})
             return
+        probe.tool_operation(call_id, f"{aname}.{op.name}")
         args = dict(a.get("args") or {})
         record(f"{aname}.{op_name}", args)
         if aname == CONVERSATIONS and conversations is not None:
             args["_active"] = conversations.active.slug
         try:
+            began = time.perf_counter()
             prepared = await op.prepare(args)
+            probe.tool_step(call_id, "prepare", time.perf_counter() - began)
+            began = time.perf_counter()
             sub = await gate.submit(
                 session_id=session_id,
                 ability=aname,
@@ -123,10 +140,13 @@ def register_tools(
                 changes=prepared.changes,
                 rationale=str(a.get("rationale") or prepared.rationale),
             )
+            probe.tool_step(call_id, "submit", time.perf_counter() - began)
         except (ValueError, PolicyError, GateError) as e:
+            probe.tool_status(call_id, "error")
             await params.result_callback({"error": str(e)})
             return
         if sub.outcome is not None:
+            probe.tool_status(call_id, f"done:{sub.autonomy.value}")
             logger.info(
                 f"{sub.autonomy.value} {sub.proposal.id}: {sub.outcome.status} "
                 f"{sub.outcome.summary()}"
@@ -175,6 +195,24 @@ def register_tools(
             )
             return
         logger.info(f"pending {sub.proposal.id}: {sub.proposal.preview}")
+        # The operator may already have said yes by asking for it: "close infra 17".
+        request, before = last_request() if last_request else ("", "")
+        began = time.perf_counter()
+        outcome = await gate.confirm_by_request(session_id, request, question=before)
+        probe.tool_step(call_id, "request", time.perf_counter() - began)
+        probe.tool_status(call_id, "done:request" if outcome is not None else "needs_confirmation")
+        if outcome is not None:
+            logger.info(f"executed {outcome.proposal_id}: {outcome.status} (as asked)")
+            await params.result_callback(
+                {
+                    "status": "done",
+                    "result": outcome.summary(),
+                    "state_now": _state(outcome),
+                    "how_to_say_it": "a few words, in passing; they asked for exactly this",
+                }
+            )
+            await events.emit("outcome", ability=aname, operation=op.name, status=outcome.status)
+            return
         await params.result_callback(
             {
                 "status": "needs_confirmation",
@@ -244,32 +282,6 @@ def register_tools(
 
     schemas.append(
         FunctionSchema(
-            name=UNDO_TOOL,
-            description=(
-                "Reverse the last change made in this conversation (within ten minutes). "
-                "Returns the verified result."
-            ),
-            properties={},
-            required=[],
-        )
-    )
-
-    async def undo(params: FunctionCallParams) -> None:
-        try:
-            outcome = await gate.undo(session_id)
-        except GateError as e:
-            await params.result_callback({"error": str(e)})
-            return
-        logger.info(f"undo {outcome.proposal_id}: {outcome.status}")
-        await params.result_callback(
-            {"status": "done", "result": outcome.summary(), "state_now": _state(outcome)}
-        )
-        await events.emit("outcome", operation="undo", status=outcome.status)
-
-    llm.register_function(UNDO_TOOL, undo)
-
-    schemas.append(
-        FunctionSchema(
             name="go_to_sleep",
             description="End the conversation and return to passive listening.",
             properties={},
@@ -278,6 +290,8 @@ def register_tools(
     )
 
     async def go_to_sleep(params: FunctionCallParams) -> None:
+        # The model's goodbye in this same response is spoken (ghost_voice.narration lets
+        # go_to_sleep's text through); nothing it says after this is.
         await params.result_callback({"ok": True})
         await on_sleep()
 
@@ -328,16 +342,27 @@ def _state(outcome) -> str:
     return outcome.readback.spoken() if outcome.readback else "unknown"
 
 
-def _wrap_read(handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]], record: OnCall):
+def _wrap_read(
+    handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+    record: OnCall,
+    probe: LatencyProbe = NULL_PROBE,
+):
     async def run(params: FunctionCallParams) -> None:
         record(params.function_name, dict(params.arguments))
+        began = time.perf_counter()
+        status = "ok"
         try:
             result = await handler(dict(params.arguments))
         except (ValueError, PolicyError) as e:
             result = {"error": str(e)}
+            status = "error"
         except Exception as e:  # noqa: BLE001
             logger.exception(f"tool {params.function_name} failed")
             result = {"error": f"{type(e).__name__}: {e}"}
+            status = "error"
+        call_id = getattr(params, "tool_call_id", "")
+        probe.tool_step(call_id, "read", time.perf_counter() - began)
+        probe.tool_status(call_id, status)
         await params.result_callback(result)
 
     return run

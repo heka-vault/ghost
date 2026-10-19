@@ -1,11 +1,11 @@
 /** Owner: audit. One write: a summary row that opens onto its event timeline. */
 import type { AuditEntry } from "@ghost/client-ts";
-import { ArrowUpRight, ChevronRight, CornerDownRight, Undo2 } from "lucide-react";
+import { ArrowUpRight, ChevronRight } from "lucide-react";
 import { type FocusEventHandler, Fragment, forwardRef, useId } from "react";
 
 import { hrefFor } from "../../app/router";
 import { Badge, Button, Disclosure, Notice, PendingChange, cx, errorText, formatDateTime, formatTime } from "../../ui";
-import { ATTENTION, describeEvent, isUndo, levelParts, opName, outcomeLabel, outcomeTone, splitSummary, undoneBy } from "./model";
+import { ATTENTION, describeEvent, levelParts, opName, outcomeLabel, outcomeTone, splitSummary } from "./model";
 
 export interface AuditRowProps {
   entry: AuditEntry;
@@ -19,14 +19,9 @@ export interface AuditRowProps {
    * confirmation evidence, ADR 0013).
    */
   live?: LiveChange | null;
-  /** The write this one undoes, when it is loaded: its words and time describe the undo. */
-  original?: AuditEntry | null;
   /** Roving tabindex: 0 for the list's one Tab stop, -1 for the rest. */
   tabIndex?: number;
   onFocus?: FocusEventHandler<HTMLButtonElement>;
-  /** Jump to another loaded row (the original of an undo, or the undo of an original). */
-  onJump?: (id: string) => void;
-  canJump: (id: string) => boolean;
   /** The search, to mark its terms in the summary. */
   highlight?: string;
   /** The outcome to show, from outcomeOf() with what the page knows (the live id, the time). */
@@ -52,15 +47,13 @@ export interface LiveChange {
 /** Proposed, but nothing was written: the words step back (see .is-notdone). */
 const NOT_DONE = new Set(["cancelled", "expired", "lapsed", "failed", "stale"]);
 
-export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function AuditRow({ entry: e, open, onToggle, fresh, live, original, tabIndex, onFocus, onJump, canJump, highlight, outcome }, ref) {
+export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function AuditRow({ entry: e, open, onToggle, fresh, live, tabIndex, onFocus, highlight, outcome }, ref) {
   const panel = useId();
   const metaId = useId();
-  const { undo: undoRow, subject, action, detail } = splitSummary(e, original);
-  const undoBy = undoneBy(e);
-  const undo = isUndo(e);
+  const { subject, action } = splitSummary(e);
   // The accessible name in words, with the pauses the layout draws with space: "ghost-mock/app#208
   // approved, with a comment: …, Done, 4:52 PM". The meta line describes it.
-  const name = [[subject, action].filter(Boolean).join(" ") + (detail ? `, ${detail}` : ""), outcomeLabel(outcome), formatTime(e.created_at)].join(", ");
+  const name = [[subject, action].filter(Boolean).join(" "), outcomeLabel(outcome), formatTime(e.created_at)].join(", ");
   return (
     <div role="listitem" className={cx("audit-item", open && "is-open", fresh && "is-fresh", NOT_DONE.has(outcome) && "is-notdone")} data-audit-id={e.id}>
       <button
@@ -78,7 +71,6 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
       >
         <span className="audit-row__main">
           <span className="audit-row__summary" data-user-content>
-            {undoRow && <Undo2 className="audit-row__undo" aria-hidden />}
             {subject && (
               <>
                 <span className="audit-row__target">
@@ -90,12 +82,6 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
             <span className="audit-row__action">
               <Marked text={action} terms={highlight} />
             </span>
-            {detail && (
-              <span className="audit-row__detail">
-                <span aria-hidden className="audit-row__sep"> · </span>
-                <Marked text={detail} terms={highlight} />
-              </span>
-            )}
           </span>
           <span className="audit-row__meta" id={metaId}>
             <span className="t-mono audit-row__op">{opName(e)}</span>
@@ -106,12 +92,6 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
                 <span>{part}</span>
               </Fragment>
             ))}
-            {undo && (
-              <>
-                <span aria-hidden className="audit-row__sep">·</span>
-                <span>{original ? `undoes the ${formatTime(original.created_at)} change` : "undoes an earlier change"}</span>
-              </>
-            )}
           </span>
         </span>
         <span className="audit-row__status">
@@ -119,8 +99,8 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
             <Badge tone={outcomeTone(outcome)} dot size="sm">{outcomeLabel(outcome)}</Badge>
           ) : (
             // Settled outcomes need nothing: a dot and a word, no fill, so the only pills on
-            // the page are the ones that need the operator. Done gets the ok dot; Canceled,
-            // Expired and Undone a quiet one.
+            // the page are the ones that need the operator. Done gets the ok dot; Canceled
+            // and Expired a quiet one.
             <span className={cx("audit-quiet", outcomeTone(outcome) === "ok" && "audit-quiet--ok")}>
               <span className="audit-quiet__dot" aria-hidden />
               {outcomeLabel(outcome)}
@@ -200,20 +180,6 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
                 <Notice tone="danger" title="Couldn’t send your answer">
                   {errorText(live.error)} The change is still waiting; try again, or answer in the session.
                 </Notice>
-              )}
-            </div>
-          )}
-          {((e.undo_of && canJump(e.undo_of)) || (undoBy && canJump(undoBy))) && (
-            <div className="audit-detail__actions">
-              {e.undo_of && canJump(e.undo_of) && (
-                <Button size="sm" variant="ghost" leadingIcon={<CornerDownRight />} onClick={() => onJump?.(e.undo_of!)}>
-                  Show the original
-                </Button>
-              )}
-              {undoBy && canJump(undoBy) && (
-                <Button size="sm" variant="ghost" leadingIcon={<Undo2 />} onClick={() => onJump?.(undoBy)}>
-                  Show the undo
-                </Button>
               )}
             </div>
           )}

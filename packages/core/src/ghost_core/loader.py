@@ -82,7 +82,7 @@ def check(ability: Ability, contributions: Contributions) -> list[str]:
     names = [t.name for t in contributions.read_tools]
     if len(set(names)) != len(names):
         problems.append("duplicate read tool names")
-    for reserved in ("change", "undo", "go_to_sleep"):
+    for reserved in ("change", "go_to_sleep"):
         if reserved in names:
             problems.append(f"read tool {reserved!r} shadows a Ghost tool")
     ops = [o.name for o in contributions.operations]

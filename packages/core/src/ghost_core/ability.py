@@ -63,6 +63,10 @@ class Operation:
     writer: Writer
     risk: Risk = "medium"
     allowed: Callable[[Target], bool] = _allow_all
+    # Words in the operator's request that name this operation ("close", "shut"). When a
+    # confirm-level proposal follows a request that plainly asks for it on that target,
+    # the request is the yes (ghost_core.request). Empty: always ask.
+    asked_by: tuple[str, ...] = ()
 
 
 # --- per-turn hooks ---------------------------------------------------------------
@@ -82,7 +86,7 @@ class Handled:
     """An interceptor took the turn. The model never sees it."""
 
     say: str | None = None
-    action: Literal["sleep", "cancel", "undo"] | None = None
+    action: Literal["sleep", "cancel"] | None = None
 
 
 class TurnInterceptor(Protocol):

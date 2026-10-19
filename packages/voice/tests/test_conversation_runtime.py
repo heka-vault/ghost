@@ -125,7 +125,8 @@ def test_prompt_and_seed_follow_the_active_conversation(world):
     msgs = rt.initial_messages()
     assert msgs[0]["content"].startswith(SUMMARY_TEMPLATE.split("{")[0])
     assert "Sam owns payroll" in msgs[0]["content"]
-    assert msgs[-1] == {"role": "assistant", "content": "Hi."}
+    assert msgs[-1]["role"] == "user"
+    assert msgs[-1]["content"].endswith("Operator: hello\nYou: Hi.")
 
 
 async def test_switch_tool_transfers_with_announce_tone_voice_and_context(world):
@@ -244,7 +245,8 @@ async def test_save_as_creates_switches_and_carries_turns(world):
     ]
     assert [t.text for t in convs.turns(GHOST)] == ["transferred to Accounting"]
     update = [f for f in llm.pushed if isinstance(f, LLMMessagesUpdateFrame)][0]
-    assert update.messages[0]["content"] == "let's go over the invoices"
+    seeded = update.messages[0]["content"]
+    assert "Operator: let's go over the invoices\nYou: Sure, which ones?" in seeded
     assert "was just created" in update.messages[-1]["content"]
 
 

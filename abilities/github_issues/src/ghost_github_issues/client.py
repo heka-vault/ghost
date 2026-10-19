@@ -14,7 +14,6 @@ from ghost_core import Change, Target
 
 from ghost_github_issues.models import (
     AddComment,
-    DeleteComment,
     IssueSnapshot,
     IssueTarget,
     SetLabels,
@@ -104,11 +103,6 @@ class GitHubClient:
     async def set_state(self, t: IssueTarget, state: Literal["open", "closed"]) -> None:
         await self._send("PATCH", f"/repos/{t.full_name}/issues/{t.number}", {"state": state})
 
-    async def delete_comment(self, t: IssueTarget, comment_id: int) -> None:
-        r = await self._http.delete(f"/repos/{t.full_name}/issues/comments/{comment_id}")
-        if r.status_code != 404:  # already gone is fine: idempotent
-            r.raise_for_status()
-
 
 def snapshot_of(issue: dict[str, Any]) -> IssueSnapshot:
     return IssueSnapshot(
@@ -143,10 +137,6 @@ class GitHubIssueWriter:
                     if idempotency_key in (c.get("body") or ""):
                         return
                 await self._c.create_comment(target, f"{body}\n\n{marker_comment(idempotency_key)}")
-            case DeleteComment(marker=marker):
-                for c in await self._c.list_comments(target, per_page=100):
-                    if marker in (c.get("body") or "") and "id" in c:
-                        await self._c.delete_comment(target, int(c["id"]))
             case SetState(state=state):
                 await self._c.set_state(target, state)
             case _:

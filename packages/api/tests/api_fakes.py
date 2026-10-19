@@ -29,16 +29,6 @@ class Tag(Change, frozen=True):
     def describe(self):
         return f"add {self.tag}"
 
-    def invert(self, before, marker):
-        return Untag(tag=self.tag)
-
-
-class Untag(Change, frozen=True):
-    tag: str
-
-    def describe(self):
-        return f"remove {self.tag}"
-
 
 class FakeWriter:
     def __init__(self):
@@ -52,6 +42,4 @@ class FakeWriter:
         match change:
             case Tag(tag=t):
                 self.tags.append(t)
-            case Untag(tag=t):
-                self.tags.remove(t)
         self.version += 1

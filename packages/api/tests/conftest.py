@@ -104,6 +104,35 @@ class FakeControl:
         self.calls.append(("sample", voice, speed, text))
         return True
 
+    # the paired phone (ADR 0016)
+    phone_address: str | None = None
+    phone_device = None
+
+    def phone_pairing(self):
+        from datetime import UTC, datetime, timedelta
+
+        from ghost_api import PhonePairing
+
+        self.calls.append(("phone_pairing",))
+        if self.phone_address is None:
+            return None
+        return PhonePairing(
+            code="123456",
+            address=self.phone_address,
+            expires_at=datetime.now(UTC) + timedelta(seconds=120),
+        )
+
+    def phone_view(self):
+        from ghost_api import PhoneView
+
+        return PhoneView(address=self.phone_address, device=self.phone_device)
+
+    async def forget_phone(self):
+        self.calls.append(("forget_phone",))
+        had = self.phone_device is not None
+        self.phone_device = None
+        return had
+
 
 def make_ability(writer) -> LoadedAbility:
     async def echo(args):

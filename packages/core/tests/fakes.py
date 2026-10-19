@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ghost_core import Change, ChangeSet, Operation, Prepared, Snapshot, Target, WriteGate
+from ghost_core import (
+    Change,
+    ChangeSet,
+    Operation,
+    Prepared,
+    Snapshot,
+    Target,
+    WriteGate,
+    number_mentions,
+)
 
 
 class Issue(Target, frozen=True):
@@ -24,6 +33,9 @@ class Issue(Target, frozen=True):
 
     def spoken(self) -> str:
         return f"{self.full_name}#{self.number}"
+
+    def mentions(self) -> set[str]:
+        return number_mentions(self.number)
 
 
 class IssueSnap(Snapshot, frozen=True):
@@ -47,12 +59,6 @@ class SetLabels(Change, frozen=True):
             parts.append("remove " + ", ".join(self.remove))
         return "labels: " + "; ".join(parts)
 
-    def invert(self, before, marker):
-        had = set(before.labels)
-        add = tuple(lb for lb in self.remove if lb in had)
-        remove = tuple(lb for lb in self.add if lb not in had)
-        return SetLabels(add=add, remove=remove) if add or remove else None
-
 
 class AddComment(Change, frozen=True):
     body: str
@@ -60,25 +66,12 @@ class AddComment(Change, frozen=True):
     def describe(self) -> str:
         return f"comment: {self.body}"
 
-    def invert(self, before, marker):
-        return DeleteComment(marker=marker)
-
-
-class DeleteComment(Change, frozen=True):
-    marker: str
-
-    def describe(self) -> str:
-        return "delete the comment I added"
-
 
 class SetState(Change, frozen=True):
     state: Literal["open", "closed"]
 
     def describe(self) -> str:
         return f"{self.state} the issue"
-
-    def invert(self, before, marker):
-        return SetState(state=before.state) if before.state != self.state else None
 
 
 class FakeWriter:
@@ -124,11 +117,6 @@ class FakeWriter:
                 if any(m == idempotency_key for _, m in existing):
                     return
                 existing.append((body, idempotency_key))
-            case DeleteComment(marker=marker):
-                self.calls.append(("delete_comment", target, marker))
-                self.comments[target] = [
-                    (b, m) for b, m in self.comments.get(target, []) if m != marker
-                ]
             case SetState(state=state):
                 self.calls.append(("set_state", target, state))
                 self.issues[target]["state"] = state
@@ -142,6 +130,9 @@ RISKS = {
     "close": "high",
     "reopen": "medium",
 }
+
+
+ASKED_BY = {"close": ("close", "shut")}  # approve declares none: it always asks
 
 
 def register_fake(gate: WriteGate, writer: FakeWriter, allowed_repo: str = "acme/app") -> None:
@@ -160,6 +151,7 @@ def register_fake(gate: WriteGate, writer: FakeWriter, allowed_repo: str = "acme
                 writer=writer,
                 risk=risk,  # type: ignore[arg-type]
                 allowed=lambda t, r=allowed_repo: isinstance(t, Issue) and t.full_name == r,
+                asked_by=ASKED_BY.get(name, ()),
             )
             for name, risk in RISKS.items()
         ],

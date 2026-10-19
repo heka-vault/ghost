@@ -5,8 +5,8 @@
  * change started or stopped waiting, a write settled, a line was edited, a turn landed) it
  * re-reads the newest rows and merges them by id, so statuses settle in place and new
  * changes appear at the top, marked new for a moment. A refresh reads only the newest PAGE,
- * unless an older loaded row can still change (waiting, writing, or recent enough to be
- * undone): then it reads down to that row. The loaded rows stay a contiguous prefix of the
+ * unless an older loaded row can still change (waiting or writing): then it reads down to
+ * that row. The loaded rows stay a contiguous prefix of the
  * log, so "Show older" keeps using the loaded count as its offset.
  *
  * A failed refresh keeps the rows already on screen (reconnecting never clears the log).
@@ -19,7 +19,6 @@ export const PAGE = 50;
 /** The API's limit per request; also how deep an automatic search reads before it hands back to "Show older". */
 export const MAX_LOADED = 500;
 const MAX = MAX_LOADED;
-const UNDO_WINDOW_MS = 15 * 60_000; // a little past the gate's ten-minute undo window
 
 export interface AuditLog {
   items: AuditEntry[];
@@ -40,11 +39,11 @@ export interface AuditLog {
 }
 
 /** How deep a live refresh must read so every row that can still change is covered. */
-function depth(loaded: AuditEntry[], now = Date.now()): number {
+function depth(loaded: AuditEntry[]): number {
   let last = -1;
   for (let i = PAGE; i < loaded.length; i++) {
     const e = loaded[i];
-    if (e.status === "pending" || e.status === "claimed" || now - new Date(e.created_at).getTime() < UNDO_WINDOW_MS) last = i;
+    if (e.status === "pending" || e.status === "claimed") last = i;
   }
   return Math.min(MAX, Math.max(PAGE, last + 1));
 }

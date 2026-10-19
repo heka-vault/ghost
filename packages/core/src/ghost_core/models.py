@@ -2,11 +2,11 @@
 
 An ability defines its own ``Target``, ``Snapshot`` and ``Change`` subclasses and a
 ``Writer`` that applies them. The gate never names a concrete type: it snapshots,
-bounds, applies, reads back, audits and undoes through these four interfaces, so a
+bounds, applies, reads back and audits through these four interfaces, so a
 GitHub issue, a local file and a calendar entry get the same protections.
 
-Every ``Change`` knows how to invert itself against the snapshot taken before it was
-applied, which is what makes "undo that" possible (ADR 0011).
+There is no undo machinery. Reversing a change is an ordinary change the model
+proposes (reopen the issue, set the labels back), through the same gate and policy.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 PROPOSAL_TTL = timedelta(seconds=60)
-UNDO_WINDOW = timedelta(minutes=10)
 MAX_STEPS = 4
 
 
@@ -43,6 +42,11 @@ class Target(BaseModel, frozen=True):
         """How Ghost says it aloud."""
         return self.key()
 
+    def mentions(self) -> set[str]:
+        """Words an operator would use to name it in a request ("17", "seventeen"). Empty
+        means a request can't name it, so a confirm-level change on it always asks."""
+        return set()
+
     def __str__(self) -> str:
         return self.spoken()
 
@@ -65,11 +69,6 @@ class Change(BaseModel, frozen=True):
     def describe(self) -> str:
         raise NotImplementedError
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        """The change that puts ``before`` back, or None if this cannot be reversed.
-        ``marker`` is the idempotency key the original write carried."""
-        return None
-
 
 class ChangeSet(BaseModel, frozen=True):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -79,11 +78,6 @@ class ChangeSet(BaseModel, frozen=True):
     def describe(self) -> str:
         return "; ".join(s.describe() for s in self.steps)
 
-    def invert(self, before: Snapshot, marker: str) -> ChangeSet | None:
-        """The steps that put ``before`` back, last applied first. None if nothing can be."""
-        steps = [inv for st in reversed(self.steps) if (inv := st.invert(before, marker))]
-        return ChangeSet(steps=tuple(steps)) if steps else None
-
 
 class ProposalStatus(enum.StrEnum):
     PENDING = "pending"
@@ -92,7 +86,6 @@ class ProposalStatus(enum.StrEnum):
     EXPIRED = "expired"
     STALE = "stale"
     EXECUTED = "executed"
-    UNDONE = "undone"
 
 
 class Proposal(BaseModel, frozen=True):
@@ -110,7 +103,6 @@ class Proposal(BaseModel, frozen=True):
     snapshot: SerializeAsAny[Snapshot]
     preview: str
     autonomy: str = "confirm"  # the level the policy resolved to; audit, not control
-    undo_of: str | None = None  # set on the proposal that reverses another
     created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime = Field(default_factory=lambda: utcnow() + PROPOSAL_TTL)
     status: ProposalStatus = ProposalStatus.PENDING
@@ -118,11 +110,6 @@ class Proposal(BaseModel, frozen=True):
     @property
     def idempotency_key(self) -> str:
         return f"ghost:{self.id}"
-
-    @property
-    def writer_operation(self) -> str:
-        """The operation whose writer applies this proposal (an undo reuses the original's)."""
-        return self.operation.removeprefix("undo:")
 
     def is_expired(self, now: datetime | None = None) -> bool:
         return (now or utcnow()) >= self.expires_at

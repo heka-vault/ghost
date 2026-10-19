@@ -1,54 +1,22 @@
 /**
- * After End: how long, which line, what changed, and one way back from the last change.
- * Done is the single primary action, low on the screen. The transcript is there but folded.
- *
- * Undo here calls the daemon's /undo, which reverses its newest change from the last ten
- * minutes, wherever it came from. So the button shows only when that newest change is this
- * session's, and it names the issue it will undo; otherwise Undo is left to Activity and the desk.
+ * After End: how long, which line, what changed. Done is the single primary action, low on
+ * the screen. The transcript is there but folded.
  */
 import type { MobileFixture } from "../../design/mock/fixtures/mobile";
-import { useGhost } from "@ghost/ui";
-import { Undo2 } from "lucide-react";
-import { useRef, useState } from "react";
-import type { OutcomeView } from "@ghost/client-ts";
+import { useRef } from "react";
 
 import { hrefFor } from "../../app/router";
-import { LineGlyph, Notice, Skeleton, errorText, formatTime, relativeTime, useLive } from "../../ui";
-import { EntryRow, shortTarget, splitSummary, useAudit } from "./entries";
+import { LineGlyph, Notice, Skeleton, formatTime } from "../../ui";
+import { EntryRow, useAudit } from "./entries";
 import { CompactBar, durationWords, Scroller, TouchButton, TouchDisclosure } from "./parts";
 import type { PhoneState } from "./store";
 
-const UNDO_WINDOW_MS = 10 * 60_000;
-
 export function Summary({ phone, sample }: { phone: PhoneState; sample: MobileFixture["sampleSummary"] }) {
-  const { client } = useGhost();
-  const { online } = useLive();
   const s = phone.ended ?? { ...sample, endFailed: false };
   const changes = useAudit({ limit: 20, session_id: s.sessionId || null });
-  // Unfiltered: what /undo would actually reverse right now.
-  const everywhere = useAudit({ limit: 10 });
-  const [undoing, setUndoing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [undone, setUndone] = useState<OutcomeView | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
-  const undoable = (e: { status: string; undo_of?: string | null; created_at: string }) => e.status === "executed" && !e.undo_of && Date.now() - Date.parse(e.created_at) < UNDO_WINDOW_MS;
-  const last = changes.items?.find(undoable);
-  const next = everywhere.items?.find(undoable);
-  const canUndo = !undone && !!last && !!next && next.id === last.id;
   const lineLabel = s.line.slug === "ghost" ? "Main line" : `${s.line.name} line`;
-
-  const undo = async () => {
-    setUndoing(true);
-    setError(null);
-    try {
-      setUndone(await client.undo());
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setUndoing(false);
-    }
-  };
 
   return (
     <div className="mob-screen mob-summary">
@@ -88,20 +56,6 @@ export function Summary({ phone, sample }: { phone: PhoneState; sample: MobileFi
           ) : (
             <p className="mob-quiet">Nothing changed. Ghost only looked things up and answered.</p>
           )}
-          {canUndo && last && (
-            <div className="mob-summary__undo">
-              <TouchButton icon={<Undo2 size={20} />} loading={undoing} disabled={!online} onClick={undo} aria-describedby="mob-undo-what">
-                Undo the change to {shortTarget(splitSummary(last).target)}
-              </TouchButton>
-              <p id="mob-undo-what" className="mob-summary__undo-what">Ghost’s newest change, {relativeTime(last.created_at)}. Older ones are in Activity.</p>
-            </div>
-          )}
-          {undone && (
-            <Notice tone="ok" title="Undone">
-              Ghost reversed its change to <span className="t-mono mob-nowrap">{undone.target}</span>.
-            </Notice>
-          )}
-          {error && <Notice tone="danger" title="Couldn’t undo">{error}</Notice>}
         </section>
 
         {s.turns.length > 0 && (

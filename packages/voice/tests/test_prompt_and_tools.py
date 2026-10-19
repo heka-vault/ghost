@@ -26,16 +26,21 @@ from ghost_voice.tools import register_tools
 class FakeLLM:
     def __init__(self) -> None:
         self.functions: dict[str, Any] = {}
+        self.pushed: list[Any] = []
 
     def register_function(self, name, handler, **_):
         self.functions[name] = handler
 
+    async def push_frame(self, frame, *_):
+        self.pushed.append(frame)
+
 
 class FakeParams:
-    def __init__(self, name, arguments):
+    def __init__(self, name, arguments, llm=None):
         self.function_name = name
         self.arguments = arguments
         self.result: Any = None
+        self.llm = llm
 
     async def result_callback(self, result, **_):
         self.result = result
@@ -61,16 +66,6 @@ class Tag(Change, frozen=True):
     def describe(self):
         return f"add {self.tag}"
 
-    def invert(self, before, marker):
-        return Untag(tag=self.tag)
-
-
-class Untag(Change, frozen=True):
-    tag: str
-
-    def describe(self):
-        return f"remove {self.tag}"
-
 
 class FakeWriter:
     def __init__(self):
@@ -84,8 +79,6 @@ class FakeWriter:
         match change:
             case Tag(tag=t):
                 self.tags.append(t)
-            case Untag(tag=t):
-                self.tags.remove(t)
         self.version += 1
 
 
@@ -140,9 +133,9 @@ def test_prompt_includes_fragments_and_persona():
     assert "You are Ghost" in p and "FRAG" in p and "not Claude Code" in p
 
 
-def test_only_reads_change_undo_and_sleep_are_exposed(wired):
+def test_only_reads_change_and_sleep_are_exposed(wired):
     _, _, schemas, _, _ = wired
-    assert sorted(s.name for s in schemas) == ["change", "echo", "go_to_sleep", "undo"]
+    assert sorted(s.name for s in schemas) == ["change", "echo", "go_to_sleep"]
 
 
 def test_denied_ops_are_not_offered(wired):
@@ -207,19 +200,13 @@ async def test_dotted_operation_name_is_tolerated(wired):
     assert p.result["status"] == "done"
 
 
-async def test_undo_reverses_last_change(wired):
-    llm, gate, _, _, writer = wired
-    await llm.functions["change"](call("flag"))
-    u = FakeParams("undo", {})
-    await llm.functions["undo"](u)
-    assert u.result["status"] == "done" and "remove flagged" in u.result["result"]
-    assert writer.tags == []
-    u2 = FakeParams("undo", {})
-    await llm.functions["undo"](u2)
-    assert "error" in u2.result
+def test_no_undo_tool(wired):
+    llm, *_ = wired
+    assert "undo" not in llm.functions
 
 
 async def test_go_to_sleep_calls_back(wired):
     llm, _, _, slept, _ = wired
-    await llm.functions["go_to_sleep"](FakeParams("go_to_sleep", {}))
+    await llm.functions["go_to_sleep"](FakeParams("go_to_sleep", {}, llm=llm))
     assert slept == [True]
+    assert llm.pushed == []  # the model's own goodbye is spoken, not a fixed word

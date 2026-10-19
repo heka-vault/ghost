@@ -1,11 +1,13 @@
 import { ChevronRight, CircleCheck, CircleX, Info, TriangleAlert, X } from "lucide-react";
 import { type ComponentPropsWithRef, type CSSProperties, type ElementType, type KeyboardEvent, type ReactNode, type Ref, createContext, useContext } from "react";
 
+import type { GhostPhase, Tone } from "@ghost/ui";
+
 import { cx } from "./cx";
 import { formatShortcut, shortcutKeys } from "./format";
 
 /* ------------------------------------------------------------------------- Badge */
-export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
+export type { Tone } from "@ghost/ui";
 
 export interface BadgeProps {
   tone?: Tone;
@@ -32,7 +34,7 @@ export function Badge({ tone = "neutral", variant = "soft", size = "md", dot, ic
 }
 
 /* --------------------------------------------------------------------- StatusDot */
-export type GhostPhase = "starting" | "passive" | "listening" | "thinking" | "speaking" | "offline";
+export type { GhostPhase } from "@ghost/ui";
 
 export interface StatusDotProps {
   phase: GhostPhase;

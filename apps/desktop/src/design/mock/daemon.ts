@@ -13,6 +13,8 @@ import type {
   ModelsView,
   OutcomeView,
   PendingProposal,
+  PhonePairing,
+  PhoneView,
   PolicyUpdate,
   PolicyView,
   SettingsUpdate,
@@ -79,6 +81,14 @@ function doneSummary(summary: string): string {
   return summary.replace(/: close the issue/, ": closed the issue").replace(/: reopen the issue/, ": reopened the issue").replace(/: approve\b/, ": approved");
 }
 
+/** Mock-only knobs for the phone (ADR 0016), from the URL: see mock/index.ts. */
+export interface PhoneOptions {
+  /** The phone pairs this many ms after a code is issued (?phone=pairs). 0: it never does. */
+  pairsAfterMs?: number;
+  /** How long a pairing code lasts, in seconds (?phone=expires makes it short). The real one: 120. */
+  codeTtlSecs?: number;
+}
+
 export class MockDaemon {
   readonly scenario: Scenario;
   private bootedAt = Date.now();
@@ -94,11 +104,16 @@ export class MockDaemon {
   private devices: DevicesView;
   private models: ModelsView;
   private voices: VoiceInfo[];
+  private phone: PhoneView;
+  private pairing: PhonePairing | null = null;
+  private phoneOpts: PhoneOptions;
   private script: SessionFixture;
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
-  constructor(scenario: Scenario, f: Fixtures) {
+  constructor(scenario: Scenario, f: Fixtures, phoneOpts: PhoneOptions = {}) {
     this.scenario = scenario;
+    this.phone = f.settings.phone;
+    this.phoneOpts = phoneOpts;
     this.script = f.session;
     this.turns = f.session.turns;
     this.pending = f.session.pending;
@@ -121,6 +136,8 @@ export class MockDaemon {
       abilities: this.abilities.filter((a) => a.enabled && a.version !== "built-in").map((a) => a.name),
       pending: this.pending,
       conversation: scenario.session,
+      session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
+      ending: false,
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;
@@ -137,7 +154,6 @@ export class MockDaemon {
         summary: this.pending.summary,
         autonomy: "confirm",
         status: "pending",
-        undo_of: null,
         created_at: new Date(Date.now() - 8_000).toISOString(),
         events: [{ at: new Date(Date.now() - 8_000).toISOString(), event: "prepared", detail: { ability: this.pending.ability, operation: this.pending.operation, target: `github:${this.pending.target}`, autonomy: "confirm" } }],
       });
@@ -196,7 +212,7 @@ export class MockDaemon {
     if (this.status.session_id) return;
     this.turns = [];
     this.setActive("ghost");
-    this.pushStatus({ session_id: newId(), phase: "listening", conversation: "ghost" });
+    this.pushStatus({ session_id: newId(), phase: "listening", conversation: "ghost", session_origin: "desk" });
     this.addTurn("assistant", "Ghost here.", "system");
   }
   private setActive(slug: string | null) {
@@ -235,7 +251,7 @@ export class MockDaemon {
     this.pending = { ...p, id: newId(), expires_at: new Date(Date.now() + 60_000).toISOString(), expires_in_secs: 60 };
     this.audit.unshift({
       id: this.pending.id, session_id: this.status.session_id ?? "", ability: p.ability, operation: p.operation, target: p.target,
-      summary: p.summary, autonomy: "confirm", status: "pending", undo_of: null, created_at: now(),
+      summary: p.summary, autonomy: "confirm", status: "pending", created_at: now(),
       events: [{ at: now(), event: "prepared", detail: { ability: p.ability, operation: p.operation, target: `github:${p.target}`, autonomy: "confirm" } }],
     });
     this.emit({ type: "pending", pending: this.pending });
@@ -261,7 +277,7 @@ export class MockDaemon {
   private sleepNow() {
     if (this.pending) this.settlePending("cancelled", { reason: "session ended" });
     this.setActive(null);
-    this.pushStatus({ session_id: null, phase: "passive", conversation: null });
+    this.pushStatus({ session_id: null, phase: "passive", conversation: null, session_origin: null });
     this.conversationEvent(null);
   }
   private settlePending(status: "executed" | "cancelled", detail?: Record<string, unknown>): AuditEntry | null {
@@ -297,18 +313,6 @@ export class MockDaemon {
     this.reply(`Done. ${short[0].toUpperCase()}${short.slice(1)} is closed.`);
     return outcome;
   }
-  private undo(): OutcomeView {
-    const last = this.audit.find((a) => a.status === "executed" && !a.undo_of && Date.now() - new Date(a.created_at).getTime() < 10 * 60_000);
-    if (!last) throw new HttpError(409, "Nothing to undo from the last ten minutes.");
-    last.status = "undone";
-    const id = newId();
-    last.events.push({ at: now(), event: "undone", detail: { by: id } });
-    this.audit.unshift({ ...last, id, status: "executed", undo_of: last.id, summary: `Undo: ${last.summary}`, autonomy: "announce", created_at: now(), events: [{ at: now(), event: "prepared", detail: { undo_of: last.id } }, { at: now(), event: "finished", detail: { status: "success" } }] });
-    const outcome: OutcomeView = { proposal_id: id, status: "success", summary: `Undid: ${last.summary}`, target: last.target, applied: ["undo"], state_now: null, error: null, failed_step: null };
-    this.emit({ type: "outcome", outcome, via: "undo" });
-    if (this.status.session_id) this.reply("Undone.");
-    return outcome;
-  }
 
   // ------------------------------------------------------------------ conversations
   private view(d: ConversationDetail): ConversationView {
@@ -331,7 +335,7 @@ export class MockDaemon {
   }
   private audited(ability: string, operation: string, target: string, summary: string) {
     this.audit.unshift({
-      id: newId(), session_id: this.status.session_id ?? "ui", ability, operation, target, summary, autonomy: "announce", status: "executed", undo_of: null, created_at: now(),
+      id: newId(), session_id: this.status.session_id ?? "ui", ability, operation, target, summary, autonomy: "announce", status: "executed", created_at: now(),
       events: [{ at: now(), event: "prepared", detail: { ability, operation, target } }, { at: now(), event: "claimed" }, { at: now(), event: "finished", detail: { status: "success" } }],
     });
   }
@@ -363,7 +367,6 @@ export class MockDaemon {
       this.reply("Okay, I won't.");
       return { ok: true };
     }
-    if (method === "POST" && path === "/undo") return this.undo();
     if (method === "GET" && path === "/audit") {
       let items = this.audit;
       const ability = query.get("ability"), status = query.get("status"), sid = query.get("session_id");
@@ -427,6 +430,16 @@ export class MockDaemon {
       this.requireReady();
       await sleep(900);
       return { ok: true, detail: `Spoke a sample in ${decodeURIComponent(r[1])}.` };
+    }
+
+    if (method === "GET" && path === "/phone") return this.phone;
+    if (method === "POST" && path === "/phone/pairing") return this.newPairing();
+    if (method === "DELETE" && path === "/phone") {
+      if (!this.phone.device) return { ok: true, detail: "No phone was paired." };
+      const name = this.phone.device.name;
+      this.phone = { ...this.phone, device: null };
+      if (this.status.session_id && this.status.session_origin === "phone") this.sleepNow();
+      return { ok: true, detail: `Forgot ${name}.` };
     }
 
     if (method === "GET" && path === "/conversations") return [...this.lines.values()].map((l) => this.view(l.detail));
@@ -499,6 +512,25 @@ export class MockDaemon {
       }
     }
     throw new HttpError(404, `The mock has no route for ${method} ${path}.`);
+  }
+
+  // ------------------------------------------------------------------ phone (ADR 0016)
+  /** A fresh six-digit code that replaces the last one; with ?phone=pairs the phone spends it. */
+  private newPairing(): PhonePairing {
+    if (!this.phone.address) throw new HttpError(409, "the phone listener is off (set GHOST_PHONE_LISTEN)");
+    const code = String(Math.floor(rand() * 1_000_000)).padStart(6, "0");
+    const ttl = this.phoneOpts.codeTtlSecs ?? 120;
+    const p: PhonePairing = { code, address: this.phone.address, expires_at: new Date(Date.now() + ttl * 1000).toISOString() };
+    this.pairing = p;
+    const after = this.phoneOpts.pairsAfterMs ?? 0;
+    if (after > 0) {
+      this.later(after, () => {
+        if (this.pairing?.code !== code || Date.now() > new Date(p.expires_at).getTime()) return;
+        this.pairing = null;
+        this.phone = { ...this.phone, device: { id: hex(12, rand), name: "Pixel 9", paired_at: now(), last_seen: now() } };
+      });
+    }
+    return p;
   }
 
   dispose() {

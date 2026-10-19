@@ -41,6 +41,9 @@ export type ConversationUpdate = Schemas["ConversationUpdate"];
 export type TurnView = Schemas["TurnView"];
 export type CompactionView = Schemas["CompactionView"];
 export type VoiceInfo = Schemas["VoiceInfo"];
+export type PhoneView = Schemas["PhoneView"];
+export type PhoneDevice = Schemas["PhoneDevice"];
+export type PhonePairing = Schemas["PhonePairing"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -107,9 +110,6 @@ export class GhostClient {
   }
   cancel() {
     return unwrap(this.api.POST("/proposals/pending/cancel"));
-  }
-  undo() {
-    return unwrap(this.api.POST("/undo"));
   }
   audit(query: paths["/audit"]["get"]["parameters"]["query"] = {}) {
     return unwrap(this.api.GET("/audit", { params: { query } }));
@@ -191,6 +191,20 @@ export class GhostClient {
         body: { speed, text: text ?? null },
       }),
     );
+  }
+
+  // --- phone (ADR 0016) ----------------------------------------------------------------
+  /** The phone listener's address (null when GHOST_PHONE_LISTEN is unset) and the paired phone. */
+  phone() {
+    return unwrap(this.api.GET("/phone"));
+  }
+  /** A new six-digit pairing code; replaces the last one. 409 when the listener is off. */
+  pairPhone() {
+    return unwrap(this.api.POST("/phone/pairing"));
+  }
+  /** Forget the paired phone. Its signatures stop working and a running phone session ends. */
+  forgetPhone() {
+    return unwrap(this.api.DELETE("/phone"));
   }
 }
 

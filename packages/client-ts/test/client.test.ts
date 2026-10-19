@@ -53,7 +53,7 @@ describe("GhostClient", () => {
     );
     expect((await client.say("hello")).ok).toBe(true);
     expect(JSON.parse(sent)).toEqual({ text: "hello" });
-    await expect(client.undo()).rejects.toBeInstanceOf(ApiError);
+    await expect(client.confirm()).rejects.toBeInstanceOf(ApiError);
   });
 
   it("distinguishes the initial snapshot from events", () => {

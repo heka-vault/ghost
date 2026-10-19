@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS turns (
     text            TEXT NOT NULL,
     at              TEXT NOT NULL,
     compaction_id   TEXT,
-    hidden_by       TEXT  -- the proposal marker of a reset/delete; undo clears it
+    hidden_by       TEXT  -- the proposal marker of the reset/delete that hid it
 );
 CREATE INDEX IF NOT EXISTS turns_conversation ON turns(conversation, id);
 
@@ -93,6 +93,16 @@ CREATE TABLE IF NOT EXISTS compactions (
 );
 CREATE INDEX IF NOT EXISTS compactions_conversation ON compactions(conversation, at);
 """
+
+
+# Statuses older databases may hold. Ghost once had an undo feature that marked a
+# reversed proposal "undone"; the write did happen, and its reversal is its own row
+# (operation ``undo:<op>``), so it reads back as executed.
+_LEGACY_STATUS = {"undone": ProposalStatus.EXECUTED}
+
+
+def _status(raw: str) -> ProposalStatus:
+    return _LEGACY_STATUS.get(raw) or ProposalStatus(raw)
 
 
 class Store:
@@ -134,7 +144,7 @@ class Store:
         if row is None:
             return None
         p = load_proposal(row[0])
-        return p.model_copy(update={"status": ProposalStatus(row[1])})
+        return p.model_copy(update={"status": _status(row[1])})
 
     def pending_for_session(self, session_id: str) -> Proposal | None:
         row = self._conn.execute(
@@ -143,23 +153,6 @@ class Store:
             (session_id, ProposalStatus.PENDING.value),
         ).fetchone()
         return load_proposal(row[0]) if row else None
-
-    def last_executed(self, session_id: str, since: datetime) -> Proposal | None:
-        """The most recent executed, not-yet-undone proposal in this session since
-        ``since``. Undo proposals themselves are skipped: undoing an undo is a new ask."""
-        rows = self._conn.execute(
-            "SELECT body FROM proposals WHERE session_id = ? AND status = ? AND created_at >= ?"
-            " ORDER BY created_at DESC LIMIT 10",
-            (session_id, ProposalStatus.EXECUTED.value, since.isoformat()),
-        ).fetchall()
-        for (body,) in rows:
-            try:
-                p = load_proposal(body)
-            except Exception:  # noqa: BLE001 - a row from an older schema is not undoable
-                continue
-            if p.undo_of is None:
-                return p.model_copy(update={"status": ProposalStatus.EXECUTED})
-        return None
 
     def list_proposals(
         self,
@@ -173,8 +166,9 @@ class Store:
         """Newest first, for the audit view. Rows from an older schema are skipped."""
         where, args = [], []
         if status:
-            where.append("status = ?")
-            args.append(status)
+            raw = [status, *(k for k, v in _LEGACY_STATUS.items() if v.value == status)]
+            where.append(f"status IN ({', '.join('?' * len(raw))})")
+            args.extend(raw)
         if session_id:
             where.append("session_id = ?")
             args.append(session_id)
@@ -190,7 +184,7 @@ class Store:
         out = []
         for body, st in rows:
             try:
-                out.append(load_proposal(body).model_copy(update={"status": ProposalStatus(st)}))
+                out.append(load_proposal(body).model_copy(update={"status": _status(st)}))
             except Exception:  # noqa: BLE001
                 continue
         return out, int(total)
@@ -412,15 +406,11 @@ class Store:
         return cur.rowcount
 
     def tag_turns(self, conversation: str, marker: str) -> int:
-        """Hide every turn (a reset or delete). Undo calls ``untag_turns``."""
+        """Hide every turn (a reset or delete). Hidden turns are pruned with the rest."""
         cur = self._conn.execute(
             "UPDATE turns SET hidden_by = ? WHERE conversation = ? AND hidden_by IS NULL",
             (marker, conversation),
         )
-        return cur.rowcount
-
-    def untag_turns(self, marker: str) -> int:
-        cur = self._conn.execute("UPDATE turns SET hidden_by = NULL WHERE hidden_by = ?", (marker,))
         return cur.rowcount
 
     def prune_turns(self, before: datetime) -> int:

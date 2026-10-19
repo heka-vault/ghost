@@ -10,7 +10,8 @@
 # operation: low-risk ops (labels, comments) announce; close and reopen confirm.
 # Resolution order: target rule > skill rule > [defaults] > skill default.
 # Ghost never writes this file, and nothing in an issue can change it.
-# Every level still logs the write and lets you say "undo that" for ten minutes.
+# Every level still logs the write. To take one back, ask: Ghost proposes the
+# reversing change (reopen, put the labels back) and it runs at that operation's level.
 
 [abilities]
 # enabled = ["github_issues"]   # which installed abilities to load; default is GHOST_ABILITIES

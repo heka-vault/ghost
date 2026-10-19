@@ -209,7 +209,7 @@ export function Detail({ ability: a, state, policy, passiveAllowed, locked, savi
                 <Block
                   title="What it can change"
                   count={a.operations.length}
-                  description="Every change is logged. Say “undo that” within ten minutes to reverse the last one, if it can be."
+                  description="Every change is logged. To reverse one, ask Ghost to change it back."
                   actions={
                     <Button size="sm" variant="ghost" href={policyHref(a.name)} trailingIcon={<ArrowRight />}>
                       Change levels
@@ -271,7 +271,7 @@ export function Detail({ ability: a, state, policy, passiveAllowed, locked, savi
             <Block title="How it plugs in">
               <Card list>
                 {a.interceptors.length > 0 && (
-                  <Hook label="Hears you first" help="Sees what you say before the model does. It can answer, cancel, undo or put Ghost to sleep.">
+                  <Hook label="Hears you first" help="Sees what you say before the model does. It can answer, cancel or put Ghost to sleep.">
                     {a.interceptors.map((i) => (
                       <span key={i} className="ab-hook__slot">
                         <span>{abilityName(i)}</span>

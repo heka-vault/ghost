@@ -15,8 +15,9 @@
  * --set-sticky-offset, so nothing lands under a Starting or Reconnecting banner.
  *
  * States by URL (mock): any scenario, plus `?section=<id>` to land on a section, and in mock
- * mode only `?settings=dirty|invalid|error|restart|secret|loading|loaderror|nodevices|echoidle` to
- * hold a state for review.
+ * mode only `?settings=dirty|invalid|error|restart|secret|loading|loaderror|nodevices|echoidle|pairing` to
+ * hold a state for review (`pairing` opens the Pair a phone dialog; the phone's own states are
+ * `?phone=off|unpaired|paired|pairs|expires`, see Phone.tsx).
  */
 import type { DevicesView, ModelsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
@@ -103,12 +104,13 @@ import {
   valueChanged,
 } from "./model";
 import { type BarState, ChipsInput, CommandCopy, type NavItem, PageNav, Row, SaveBar, SecretRow, SetupSection, type SetupStep, secretActionId } from "./parts";
+import { PhoneSection } from "./Phone";
 import "./settings.css";
 
 // Charter sections with no API yet. Compiled only in development; rendered only under the mock layer.
 const Prototype = import.meta.env.DEV ? lazy(() => import("./prototype")) : null;
 
-const FORCED = new Set(["dirty", "invalid", "error", "restart", "secret", "loading", "loaderror", "nodevices", "echoidle"]);
+const FORCED = new Set(["dirty", "invalid", "error", "restart", "secret", "loading", "loaderror", "nodevices", "echoidle", "pairing"]);
 
 const FUZZY = "GHOST_WAKE_FUZZY";
 const fieldId = (k: string) => `set-f-${k}`;
@@ -664,7 +666,7 @@ export default function SettingsScreen(_: RouteProps) {
   };
   const navItems: NavItem[] = [
     ...(showSetup ? [{ id: "setup" as const, label: SECTION_TITLE.setup }] : []),
-    ...(["secrets", "model", "github", "voice", "audio", "models"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
+    ...(["secrets", "model", "github", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
     ...(mock && Prototype ? (["privacy", "sounds"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], prototype: true })) : []),
   ];
 
@@ -1240,6 +1242,9 @@ export default function SettingsScreen(_: RouteProps) {
                 <ListRow title="Model cache" description="Delete this folder to download the models again." meta={<span className="set-value is-mono">{models ? tildePath(models.cache_dir) : "–"}</span>} />
               </Card>
             </Section>
+
+            {/* ------------------------------------------------------------ Phone */}
+            <PhoneSection settingsPath={s.settings_path} openOnLoad={forced === "pairing"} />
 
             {mock && Prototype && (
               <Suspense fallback={null}>

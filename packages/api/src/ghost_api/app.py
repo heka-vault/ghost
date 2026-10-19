@@ -34,6 +34,8 @@ from ghost_api.models import (
     OperationInfo,
     OutcomeView,
     PendingProposal,
+    PhonePairing,
+    PhoneView,
     PolicyResult,
     PolicyUpdate,
     PolicyView,
@@ -65,6 +67,10 @@ class Controller(Protocol):
     async def compact_conversation(self, slug: str) -> bool: ...  # asks the model, in session
     def voices(self) -> list[str]: ...
     async def sample_voice(self, voice: str, speed: float, text: str | None) -> bool: ...
+    # the paired phone (ADR 0016)
+    def phone_pairing(self) -> PhonePairing | None: ...  # None when the listener is off
+    def phone_view(self) -> PhoneView: ...
+    async def forget_phone(self) -> bool: ...  # True if a phone was paired
 
 
 class Deps:
@@ -131,6 +137,63 @@ def outcome_view(o: Outcome) -> OutcomeView:
     )
 
 
+def status_snapshot(deps: Deps) -> Status:
+    """The one place a ``Status`` is built: the control API, its event stream and the
+    phone listener's ``/hello`` all use it."""
+    st = deps.state
+    pending = None
+    if st.session_id:
+        p = deps.gate.pending(st.session_id)
+        pending = pending_view(p) if p else None
+    return Status(
+        phase=st.phase,
+        session_id=st.session_id,
+        models_ready=st.models_ready,
+        uptime_secs=st.uptime_secs,
+        version=st.version,
+        wake_mode=st.wake_mode,
+        abilities=[a.name for a in deps.abilities],
+        pending=pending,
+        conversation=st.conversation,
+        session_origin=st.session_origin,  # type: ignore[arg-type]
+        ending=st.ending,
+    )
+
+
+def audit_page(
+    store: Store,
+    *,
+    limit: int,
+    offset: int,
+    ability: str | None = None,
+    status: str | None = None,
+    session_id: str | None = None,
+) -> AuditPage:
+    """A page of the audit log, newest first. Shared by the control API and the phone."""
+    rows, total = store.list_proposals(
+        limit=limit, offset=offset, ability=ability, status=status, session_id=session_id
+    )
+    items = [
+        AuditEntry(
+            id=p.id,
+            session_id=p.session_id,
+            ability=p.ability,
+            operation=p.operation,
+            target=p.target.spoken(),
+            summary=p.preview,
+            autonomy=p.autonomy,
+            status=p.status.value,
+            created_at=p.created_at,
+            events=[
+                AuditEventView(at=at, event=ev, detail=detail)
+                for at, ev, detail in store.events(p.id)
+            ],
+        )
+        for p in rows
+    ]
+    return AuditPage(items=items, total=total, limit=limit, offset=offset)
+
+
 def create_app(deps: Deps) -> FastAPI:
     app = FastAPI(
         title="Ghost control API",
@@ -143,21 +206,7 @@ def create_app(deps: Deps) -> FastAPI:
     st = deps.state
 
     def status() -> Status:
-        pending = None
-        if st.session_id:
-            p = deps.gate.pending(st.session_id)
-            pending = pending_view(p) if p else None
-        return Status(
-            phase=st.phase,
-            session_id=st.session_id,
-            models_ready=st.models_ready,
-            uptime_secs=st.uptime_secs,
-            version=st.version,
-            wake_mode=st.wake_mode,
-            abilities=[a.name for a in deps.abilities],
-            pending=pending,
-            conversation=st.conversation,
-        )
+        return status_snapshot(deps)
 
     st.set_status_provider(status)
     if deps.conversations is not None:
@@ -207,20 +256,6 @@ def create_app(deps: Deps) -> FastAPI:
     async def cancel() -> Ack:
         return Ack(ok=await deps.control.cancel_pending())
 
-    @app.post("/undo", response_model=OutcomeView, tags=["writes"])
-    async def undo() -> OutcomeView:
-        if not st.session_id:
-            raise HTTPException(409, "no session")
-        from ghost_core import GateError
-
-        try:
-            outcome = await deps.gate.undo(st.session_id)
-        except GateError as e:
-            raise HTTPException(409, str(e)) from None
-        view = outcome_view(outcome)
-        st.outcome(view, "undo")
-        return view
-
     # --- audit ---------------------------------------------------------------------
 
     @app.get("/audit", response_model=AuditPage, tags=["writes"])
@@ -231,29 +266,35 @@ def create_app(deps: Deps) -> FastAPI:
         status_: str | None = Query(None, alias="status"),
         session_id: str | None = None,
     ) -> AuditPage:
-        rows, total = deps.store.list_proposals(
-            limit=limit, offset=offset, ability=ability, status=status_, session_id=session_id
+        return audit_page(
+            deps.store,
+            limit=limit,
+            offset=offset,
+            ability=ability,
+            status=status_,
+            session_id=session_id,
         )
-        items = [
-            AuditEntry(
-                id=p.id,
-                session_id=p.session_id,
-                ability=p.ability,
-                operation=p.operation,
-                target=p.target.spoken(),
-                summary=p.preview,
-                autonomy=p.autonomy,
-                status=p.status.value,
-                undo_of=p.undo_of,
-                created_at=p.created_at,
-                events=[
-                    AuditEventView(at=at, event=ev, detail=detail)
-                    for at, ev, detail in deps.store.events(p.id)
-                ],
-            )
-            for p in rows
-        ]
-        return AuditPage(items=items, total=total, limit=limit, offset=offset)
+
+    # --- the paired phone (ADR 0016) -------------------------------------------------
+
+    @app.post("/phone/pairing", response_model=PhonePairing, tags=["phone"])
+    async def phone_pairing() -> PhonePairing:
+        """A new six-digit code for the phone, good for two minutes and five tries. It
+        replaces any earlier code. 409 when GHOST_PHONE_LISTEN is off."""
+        pairing = deps.control.phone_pairing()
+        if pairing is None:
+            raise HTTPException(409, "the phone listener is off (set GHOST_PHONE_LISTEN)")
+        return pairing
+
+    @app.get("/phone", response_model=PhoneView, tags=["phone"])
+    async def phone() -> PhoneView:
+        return deps.control.phone_view()
+
+    @app.delete("/phone", response_model=Ack, tags=["phone"])
+    async def forget_phone() -> Ack:
+        """Forget the paired phone; its signatures stop working at once."""
+        ok = await deps.control.forget_phone()
+        return Ack(ok=ok, detail=None if ok else "no phone paired")
 
     # --- abilities -----------------------------------------------------------------
 
@@ -537,4 +578,13 @@ def _unit_active(unit: str) -> bool:
         return False
 
 
-__all__ = ["Controller", "Deps", "PolicyError", "create_app", "outcome_view", "pending_view"]
+__all__ = [
+    "Controller",
+    "Deps",
+    "PolicyError",
+    "audit_page",
+    "create_app",
+    "outcome_view",
+    "pending_view",
+    "status_snapshot",
+]

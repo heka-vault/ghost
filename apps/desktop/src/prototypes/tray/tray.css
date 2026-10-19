@@ -192,7 +192,6 @@
 .tray-pop__command code { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-1); overflow-wrap: anywhere; }
 
 .tray-pop__error { margin: 0; padding: 0 var(--space-3) var(--space-3); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--danger); }
-.tray-pop__error--inline { padding: var(--space-1) 0 0; }
 
 .tray-pop__pending { padding: 0 var(--space-3) var(--space-3); }
 /* Decided or lapsed: the slot keeps the card's footprint (--tray-h, measured), then
@@ -276,7 +275,7 @@
    label, the phrase and the summary start where every other label in the menu does. */
 .tray-pop__last {
   display: grid;
-  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3);

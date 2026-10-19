@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ghost_core import Change, PolicyError, Snapshot, Target
+from ghost_core import Change, PolicyError, Snapshot, Target, number_mentions
 from pydantic import Field
 
 MAX_COMMENT_CHARS = 2000
@@ -27,6 +27,9 @@ class IssueTarget(Target, frozen=True):
 
     def spoken(self) -> str:
         return f"{self.full_name}#{self.number}"
+
+    def mentions(self) -> set[str]:
+        return number_mentions(self.number)
 
 
 class IssueSnapshot(Snapshot, frozen=True):
@@ -54,13 +57,6 @@ class SetLabels(Change, frozen=True):
             parts.append("remove " + ", ".join(self.remove))
         return "labels: " + "; ".join(parts) if parts else "labels: no change"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, IssueSnapshot)
-        had = set(before.labels)
-        add = tuple(lb for lb in self.remove if lb in had)  # put back what we took off
-        remove = tuple(lb for lb in self.add if lb not in had)  # take off what we added
-        return SetLabels(add=add, remove=remove) if add or remove else None
-
 
 class AddComment(Change, frozen=True):
     kind: Literal["add_comment"] = "add_comment"
@@ -69,19 +65,6 @@ class AddComment(Change, frozen=True):
     def describe(self) -> str:
         return f"comment: {self.body}"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        return DeleteComment(marker=marker)
-
-
-class DeleteComment(Change, frozen=True):
-    """Only ever produced by undo: removes the comment carrying ``marker``."""
-
-    kind: Literal["delete_comment"] = "delete_comment"
-    marker: str
-
-    def describe(self) -> str:
-        return "delete the comment I added"
-
 
 class SetState(Change, frozen=True):
     kind: Literal["set_state"] = "set_state"
@@ -89,10 +72,6 @@ class SetState(Change, frozen=True):
 
     def describe(self) -> str:
         return f"{self.state} the issue"
-
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, IssueSnapshot)
-        return SetState(state=before.state) if before.state != self.state else None
 
 
 class RepoPolicy:

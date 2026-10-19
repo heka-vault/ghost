@@ -1,6 +1,6 @@
 # 0007: The domain package gates every write; the model is never the authority
 
-- **Status:** accepted; amended by ADR 0011 (autonomy levels, pluggable classifier, undo) and ADR 0013 (an authenticated local UI action is also confirmation evidence)
+- **Status:** accepted; amended by ADR 0011 (autonomy levels, pluggable classifier, undo) and ADR 0013 (an authenticated local UI action is also confirmation evidence); amended by ADR 0015 (no undo)
 - **Date:** 2026-10-16
 - **Carries forward:** original spec ADR-003
 

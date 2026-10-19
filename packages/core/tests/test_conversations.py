@@ -1,5 +1,5 @@
 """Conversations (ADR 0014): registry, name resolution, resume context, and every
-operation through the gate with undo."""
+operation through the gate."""
 
 from __future__ import annotations
 
@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 from ghost_core import AutonomyPolicy, Store, WriteGate
-from ghost_core.conversations import ABILITY, GHOST, SUMMARY_TEMPLATE, Conversations, slugify
+from ghost_core.conversations import (
+    ABILITY,
+    GHOST,
+    RECENT_TEMPLATE,
+    SUMMARY_TEMPLATE,
+    Conversations,
+    slugify,
+)
 from ghost_core.conversations.models import ConversationTarget, SetMemory
 from ghost_core.models import ChangeSet
 
@@ -60,7 +67,7 @@ def test_ghost_always_exists_and_lists_first(world):
     assert len(convs.list()) == 1
 
 
-async def test_create_rename_resolve_and_undo(world):
+async def test_create_rename_resolve(world):
     store, convs, gate = world
     sub = await run(gate, convs, "create", name="Accounting", aliases=["the accountants"])
     assert sub.executed and sub.outcome.status == "success"
@@ -81,8 +88,16 @@ async def test_create_rename_resolve_and_undo(world):
     assert convs.get("accounting").name == "Finance"  # slug is stable
     assert convs.resolve("money people").slug == "accounting"
 
-    out = await gate.undo("s1")
-    assert out.status == "success"
+    # taking it back is just another rename
+    sub = await run(
+        gate,
+        convs,
+        "rename",
+        conversation="accounting",
+        name="Accounting",
+        aliases=["the accountants"],
+    )
+    assert sub.outcome.status == "success"
     assert convs.get("accounting").name == "Accounting"
     assert convs.get("accounting").aliases == ("the accountants",)
 
@@ -96,7 +111,7 @@ async def test_create_duplicate_and_bad_voice_rejected(world):
         await run(gate, convs, "create", name="Ops", voice="zz_nobody")
 
 
-async def test_set_voice_persona_and_undo(world):
+async def test_set_voice_and_persona(world):
     _, convs, gate = world
     sub = await run(gate, convs, "set_voice", voice="am_adam", speed=1.2)
     assert sub.outcome.status == "success"
@@ -104,11 +119,9 @@ async def test_set_voice_persona_and_undo(world):
     sub = await run(gate, convs, "set_persona", text="You are terse and dry.")
     assert sub.outcome.status == "success"
     assert convs.files.persona(GHOST).strip() == "You are terse and dry."
-    out = await gate.undo("s1")
-    assert out.status == "success" and convs.files.persona(GHOST) == ""
 
 
-async def test_remember_forget_and_undo(world):
+async def test_remember_and_forget(world):
     _, convs, gate = world
     await run(gate, convs, "remember", text="the books close on the fifth")
     await run(gate, convs, "remember", text="Sam owns payroll")
@@ -116,9 +129,6 @@ async def test_remember_forget_and_undo(world):
     sub = await run(gate, convs, "forget", text="payroll")
     assert sub.outcome.status == "success"
     assert convs.files.note_lines(GHOST) == ["the books close on the fifth"]
-    out = await gate.undo("s1")
-    assert out.status == "success"
-    assert convs.files.note_lines(GHOST) == ["the books close on the fifth", "Sam owns payroll"]
     with pytest.raises(ValueError):
         await run(gate, convs, "forget", text="nothing like this")
 
@@ -133,9 +143,13 @@ async def test_turns_resume_compaction_and_prune(world):
 
     ctx = convs.resume(GHOST)
     msgs = ctx.messages()
-    assert msgs[0] == {"role": "user", "content": "what needs my sign-off"}
-    assert "[earlier I called list_issues" in msgs[1]["content"]
-    assert msgs[-1]["role"] == "user"
+    # one record, from the user side: never replayed as the model's own turns
+    assert [m["role"] for m in msgs] == ["user"]
+    record = msgs[0]["content"]
+    assert record.startswith(RECENT_TEMPLATE.split("{record}")[0])
+    assert "Operator: what needs my sign-off" in record
+    assert "(you called list_issues(repo=acme/app))" in record
+    assert "You: Two issues are waiting." in record
 
     # an automatic compaction through the internal path
     out = await gate.apply_internal(
@@ -157,20 +171,16 @@ async def test_turns_resume_compaction_and_prune(world):
     assert ctx.messages()[0]["content"] == SUMMARY_TEMPLATE.format(
         summary="Operator reviewed two issues."
     )
-    # the operator edits the file by hand; the next resume reads the edit, and an
-    # undo of the compaction now refuses to roll over that edit (stale)
+    # the operator edits the file by hand; the next resume reads the edit
     convs.files.write(GHOST, "memory.md", "Operator reviewed two issues. Sam owes a reply.")
     assert "Sam owes" in convs.resume(GHOST).memory
-    out = await gate.undo("s1")
-    assert out.status == "failed" and "changed since" in out.error
-    assert "Sam owes" in convs.files.memory(GHOST)
 
     # pruning drops only summarized turns older than the window
     assert store.prune_turns(__import__("ghost_core.models", fromlist=["utcnow"]).utcnow()) == 4
     assert convs.turns(GHOST) == []
 
 
-async def test_reset_hides_turns_and_undo_restores(world):
+async def test_reset_hides_turns_and_keeps_the_before_in_the_audit(world):
     _, convs, gate = world
     convs.record(GHOST, "s1", "user", "hello")
     await run(gate, convs, "remember", text="keep this")
@@ -179,14 +189,11 @@ async def test_reset_hides_turns_and_undo_restores(world):
     assert sub.outcome.status == "success"
     assert convs.turns(GHOST) == [] and convs.files.memory(GHOST) == ""
     assert convs.files.note_lines(GHOST) == []
-    out = await gate.undo("s1")
-    assert out.status == "success"
-    assert [t.text for t in convs.turns(GHOST)] == ["hello"]
-    assert convs.files.memory(GHOST).strip() == "some summary"
-    assert convs.files.note_lines(GHOST) == ["keep this"]
+    before = sub.proposal.snapshot
+    assert before.memory.strip() == "some summary" and "keep this" in before.notes
 
 
-async def test_delete_and_undo_restores_profile(world):
+async def test_delete_hides_the_conversation(world):
     _, convs, gate = world
     await run(gate, convs, "create", name="Legal", voice="bf_emma")
     await run(gate, convs, "set_persona", conversation="legal", text="Careful and formal.")
@@ -194,12 +201,8 @@ async def test_delete_and_undo_restores_profile(world):
     sub = await run(gate, convs, "delete", conversation="legal")
     assert sub.outcome.status == "success"
     assert convs.get("legal") is None and convs.resolve("legal") is None
-    out = await gate.undo("s1")
-    assert out.status == "success"
-    p = convs.get("legal")
-    assert p is not None and p.voice == "bf_emma"
-    assert convs.files.persona("legal").strip() == "Careful and formal."
-    assert [t.text for t in convs.turns("legal")] == ["is this contract okay"]
+    before = sub.proposal.snapshot
+    assert before.voice == "bf_emma" and before.persona.strip() == "Careful and formal."
 
 
 async def test_ghost_cannot_be_deleted_or_renamed(world):

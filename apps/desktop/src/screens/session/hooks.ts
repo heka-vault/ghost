@@ -1,7 +1,7 @@
 /** Owner: session. Data hooks for the session view. */
 import type { PendingProposal, Turn } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type MutableRefObject, useEffect, useRef, useState } from "react";
 
 import type { Decision, LineInfo, ObservedSwitch } from "./transcript";
 
@@ -50,54 +50,8 @@ export function useObservedSwitches(sessionId: string | null, line: string | nul
   return switches;
 }
 
-const UNDO_WINDOW_MS = 10 * 60_000;
-
-/**
- * What Undo would reverse, or null when there is nothing: the gate undoes the last executed,
- * not-yet-undone change in this session from the last ten minutes. Re-read after every
- * outcome and turn, and again when the newest one ages out. If the audit can't be read,
- * keep the control (with no summary).
- */
-export function useUndoable(sessionId: string | null, outcome: unknown, turnCount: number): { summary: string | null } | null {
-  const { client } = useGhost();
-  const [last, setLast] = useState<{ until: number; summary: string | null }>({ until: 0, summary: null });
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!sessionId) {
-      setLast({ until: 0, summary: null });
-      return;
-    }
-    let live = true;
-    client
-      .audit({ session_id: sessionId, status: "executed", limit: 10 })
-      .then((page) => {
-        const e = page.items.find((x) => !x.undo_of);
-        if (live) setLast(e ? { until: new Date(e.created_at).getTime() + UNDO_WINDOW_MS, summary: e.summary } : { until: 0, summary: null });
-      })
-      .catch(() => live && setLast({ until: Infinity, summary: null }));
-    return () => {
-      live = false;
-    };
-  }, [client, sessionId, outcome, turnCount]);
-
-  useEffect(() => {
-    const left = last.until - Date.now();
-    if (left <= 0 || !Number.isFinite(left)) return;
-    const t = window.setTimeout(() => setTick((n) => n + 1), left + 50);
-    return () => window.clearTimeout(t);
-  }, [last.until]);
-
-  return last.until > Date.now() ? { summary: last.summary } : null;
-}
-
 /** What the operator just did with the buttons, so a settled change can say “You confirmed”. */
 export type OwnSettle = { id: string; action: "confirm" | "cancel" } | null;
-
-/** “On ghost-mock/app#163: close the issue.” reads “On ghost-mock/app#163, close the issue.” */
-export function plainSummary(summary: string): string {
-  return summary.replace(/^(On [^:]+): /, "$1, ");
-}
 
 /**
  * The gate's summary as a phrase that fits after “You confirmed ·”: “On ghost-mock/app#163:
@@ -133,7 +87,7 @@ export function useDecisions(
   pending: PendingProposal | null,
   turns: Turn[],
   own: MutableRefObject<OwnSettle>,
-): { decisions: Decision[]; recordUndo: (summary: string, afterAt: string | null) => void } {
+): Decision[] {
   const { client } = useGhost();
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const prev = useRef<{ session: string | null; pending: PendingProposal | null }>({ session: sessionId, pending });
@@ -157,7 +111,7 @@ export function useDecisions(
     const add = (outcome: Decision["outcome"] | null, byVoice: boolean) => {
       // Not cancelled by a later pending or status change; only a new session drops it.
       if (!outcome || prev.current.session !== sessionId) return;
-      setDecisions((list) => (list.some((d) => d.key === was.id) ? list : [...list, { key: was.id, afterAt, outcome, byVoice, what, summary: was.summary, at }]));
+      setDecisions((list) => (list.some((d) => d.key === was.id) ? list : [...list, { key: was.id, afterAt, outcome, byVoice, what, at }]));
     };
     // Without the audit, only what this window saw for itself: its own click, or the clock.
     const guess = (): Decision["outcome"] | null =>
@@ -168,7 +122,7 @@ export function useDecisions(
         const e = page.items.find((x) => x.id === was.id);
         if (!e) return add(guess(), false);
         const outcome: Decision["outcome"] | null =
-          e.status === "executed" || e.status === "undone" ? "confirmed" : e.status === "cancelled" ? "canceled" : e.status === "expired" ? "expired" : e.status === "pending" ? guess() : "failed";
+          e.status === "executed" ? "confirmed" : e.status === "cancelled" ? "canceled" : e.status === "expired" ? "expired" : e.status === "pending" ? guess() : "failed";
         add(outcome, !mine && (outcome === "confirmed" || outcome === "canceled"));
       })
       .catch(() => add(guess(), false));
@@ -177,22 +131,7 @@ export function useDecisions(
   useEffect(() => {
     committedLastAt.current = lastAt;
   });
-
-  /**
-   * The operator undid a change from this window. The change it reversed, if its okay is in
-   * the transcript, now reads “You confirmed, then undid it”; otherwise (a change made by voice
-   * or at a level that didn't ask) the undo gets its own caption after the turn that was last
-   * when the operator pressed Undo, before Ghost's “Undone.”
-   */
-  const recordUndo = useCallback((summary: string, afterAt: string | null) => {
-    setDecisions((list) => {
-      const i = list.map((d) => d.outcome === "confirmed" && !d.undone && d.summary === summary).lastIndexOf(true);
-      if (i >= 0) return list.map((d, j) => (j === i ? { ...d, undone: true } : d));
-      const at = new Date().toISOString();
-      return [...list, { key: `undo-${at}`, outcome: "undone", byVoice: false, what: shortSummary(summary), summary, at, afterAt }];
-    });
-  }, []);
-  return { decisions, recordUndo };
+  return decisions;
 }
 
 /** The last session this window saw end, kept for the page's life so sleeping never strands what you were reading. */

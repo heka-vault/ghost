@@ -2,9 +2,9 @@
 
 A conversation is a profile row in SQLite, three Markdown files, and a transcript.
 The gate edits it through the same ``Target`` / ``Snapshot`` / ``Change`` shapes an
-ability uses, so rename, reset and friends are snapshotted, audited and undoable.
-The snapshot carries the full file texts: they are small, and that is what makes
-"undo that" after a reset or a bad compaction a plain restore.
+ability uses, so rename, reset and friends are snapshotted, bounded and audited.
+The snapshot carries the full file texts: they are small, and the audit row then
+keeps what was there before a reset or a compaction.
 """
 
 from __future__ import annotations
@@ -159,9 +159,6 @@ class Create(Change, frozen=True):
     def describe(self) -> str:
         return f"start conversation {self.name!r}"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        return Delete()
-
 
 class Rename(Change, frozen=True):
     kind: Literal["rename"] = "rename"
@@ -172,10 +169,6 @@ class Rename(Change, frozen=True):
         extra = f" (also {', '.join(self.aliases)})" if self.aliases else ""
         return f"rename to {self.name!r}{extra}"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        return Rename(name=before.name, aliases=before.aliases) if before.exists else None
-
 
 class SetVoice(Change, frozen=True):
     kind: Literal["set_voice"] = "set_voice"
@@ -185,10 +178,6 @@ class SetVoice(Change, frozen=True):
     def describe(self) -> str:
         return f"voice {self.voice} at {self.speed:g}x"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        return SetVoice(voice=before.voice, speed=before.speed) if before.exists else None
-
 
 class SetPersona(Change, frozen=True):
     kind: Literal["set_persona"] = "set_persona"
@@ -196,10 +185,6 @@ class SetPersona(Change, frozen=True):
 
     def describe(self) -> str:
         return f"persona: {self.text.strip()[:60]!r}" if self.text.strip() else "clear persona"
-
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        return SetPersona(text=before.persona) if before.exists else None
 
 
 class AppendNote(Change, frozen=True):
@@ -209,23 +194,15 @@ class AppendNote(Change, frozen=True):
     def describe(self) -> str:
         return f"remember: {self.text.strip()}"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        return SetNotes(text=before.notes) if before.exists else None
-
 
 class SetNotes(Change, frozen=True):
-    """The whole notes file. Produced by ``forget`` and by undo of a note."""
+    """The whole notes file. Produced by ``forget``."""
 
     kind: Literal["set_notes"] = "set_notes"
     text: str = Field(max_length=MAX_NOTES)
 
     def describe(self) -> str:
         return "update notes"
-
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        return SetNotes(text=before.notes) if before.exists else None
 
 
 class SetMemory(Change, frozen=True):
@@ -239,25 +216,15 @@ class SetMemory(Change, frozen=True):
     def describe(self) -> str:
         return "compact" if self.source != "edit" else "edit memory"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        return SetMemory(text=before.memory, source="edit") if before.exists else None
-
 
 class Reset(Change, frozen=True):
-    """Wipe memory, notes and the transcript; keep the profile. Turns are tagged with
-    the marker rather than deleted, so undo untags them."""
+    """Wipe memory, notes and the transcript; keep the profile. Turns are hidden with
+    the marker rather than deleted, and pruned later with the summarized ones."""
 
     kind: Literal["reset"] = "reset"
 
     def describe(self) -> str:
         return "reset: forget everything"
-
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        if not before.exists:
-            return None
-        return Restore(memory=before.memory, notes=before.notes, marker=marker)
 
 
 class Delete(Change, frozen=True):
@@ -265,33 +232,3 @@ class Delete(Change, frozen=True):
 
     def describe(self) -> str:
         return "delete the conversation"
-
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, ConversationSnapshot)
-        if not before.exists:
-            return None
-        return Restore(
-            memory=before.memory,
-            notes=before.notes,
-            marker=marker,
-            profile=Create(
-                name=before.name,
-                aliases=before.aliases,
-                voice=before.voice,
-                speed=before.speed,
-                persona=before.persona,
-            ),
-        )
-
-
-class Restore(Change, frozen=True):
-    """Only ever produced by undo of Reset or Delete."""
-
-    kind: Literal["restore"] = "restore"
-    memory: str
-    notes: str
-    marker: str
-    profile: Create | None = None  # set when undoing a delete
-
-    def describe(self) -> str:
-        return "put it back"

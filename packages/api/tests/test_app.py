@@ -70,10 +70,8 @@ async def test_pending_confirm_executes_and_audits(world):
     assert any(
         e["event"] == "user_turn" and e["detail"]["classifier"] == "ui" for e in entry["events"]
     )
-    # undo through the API
-    out = client.post("/undo").json()
-    assert out["status"] == "success" and writer.tags == []
-    assert client.post("/undo").status_code == 409
+    assert "undo_of" not in entry
+    assert client.post("/undo").status_code in (404, 405)
 
 
 async def test_cancel_pending(world):
@@ -235,3 +233,37 @@ def test_settings_live_keys_do_not_require_restart(world):
         "/settings", json={"values": {"GHOST_WAKE_PHRASES": "x", "GHOST_REPOS": "a/b"}}
     ).json()
     assert r["applied"] == ["GHOST_WAKE_PHRASES"] and r["restart_required"] is True
+
+
+def test_session_origin_follows_the_session(world):
+    client, state, *_ = world
+    state.set_phase(Phase.PASSIVE)
+    assert client.get("/status").json()["session_origin"] is None
+    state.set_phase(Phase.LISTENING, "sess1", origin="phone")
+    assert client.get("/status").json()["session_origin"] == "phone"
+    state.set_phase(Phase.SPEAKING, "sess1")  # later phases keep the origin
+    assert client.get("/status").json()["session_origin"] == "phone"
+    state.set_phase(Phase.PASSIVE)
+    assert client.get("/status").json()["session_origin"] is None
+
+
+def test_phone_routes(world):
+    from datetime import UTC, datetime
+
+    from ghost_api import PhoneDevice
+
+    client, state, control, *_ = world
+    assert client.post("/phone/pairing").status_code == 409  # listener off
+    assert client.get("/phone").json() == {"address": None, "device": None}
+
+    control.phone_address = "192.168.1.20:8765"
+    body = client.post("/phone/pairing").json()
+    assert body["code"] == "123456" and body["address"] == "192.168.1.20:8765"
+    control.phone_device = PhoneDevice(
+        id="d1", name="Pixel 9", paired_at=datetime.now(UTC), last_seen=None
+    )
+    view = client.get("/phone").json()
+    assert view["device"]["name"] == "Pixel 9" and "secret" not in json.dumps(view)
+    assert client.delete("/phone").json()["ok"] is True
+    assert client.delete("/phone").json()["ok"] is False
+    assert client.get("/phone").json()["device"] is None

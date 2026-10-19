@@ -1,7 +1,7 @@
 import httpx
 import pytest
 import respx
-from ghost_core import ChangeSet, Store, WriteGate
+from ghost_core import Store, WriteGate
 from ghost_github_issues import (
     AddComment,
     GitHubIssues,
@@ -10,7 +10,7 @@ from ghost_github_issues import (
     SetLabels,
     SetState,
 )
-from ghost_github_issues.client import GitHubClient, GitHubIssueWriter
+from ghost_github_issues.client import GitHubClient
 
 ISSUE = {
     "number": 7,
@@ -114,29 +114,6 @@ async def test_end_to_end_through_gate(ability):
     assert get.call_count == 3  # prepare snapshot, stale check, readback
 
 
-@respx.mock
-async def test_writer_delete_comment_finds_marker():
-    respx.get(f"{BASE}/7/comments").mock(
-        return_value=httpx.Response(
-            200,
-            json=[
-                {"id": 1, "body": "unrelated"},
-                {"id": 2, "body": "mine\n\n<!-- ghost:deadbeef -->"},
-            ],
-        )
-    )
-    delete = respx.delete("https://api.github.com/repos/acme/app/issues/comments/2").mock(
-        return_value=httpx.Response(204)
-    )
-    from ghost_github_issues.models import DeleteComment
-
-    w = GitHubIssueWriter(GitHubClient("t"))
-    await w.apply(
-        IssueTarget(owner="acme", repo="app", number=7), DeleteComment(marker="ghost:deadbeef"), "k"
-    )
-    assert delete.called
-
-
 async def test_setup_from_env_mock(tmp_path, monkeypatch):
     from ghost_core.testing import load_for_test
     from ghost_github_issues import ability as ab
@@ -161,14 +138,43 @@ async def test_setup_without_token_fails_loudly(tmp_path, monkeypatch):
         await load_for_test(ab, tmp_path)
 
 
-def test_changes_invert():
-    from ghost_github_issues import IssueSnapshot
+COMMENTS = [
+    {"user": {"login": f"u{i}"}, "created_at": f"2026-10-1{i}T00:00:00Z", "body": f"note {i}"}
+    for i in range(5)
+] + [
+    {
+        "user": {"login": "operator"},
+        "created_at": "2026-10-18T00:00:00Z",
+        "body": "Approved.\n\n<!-- ghost:" + "a" * 32 + " -->",
+    }
+]
 
-    before = IssueSnapshot(version="v", title="t", state="open", labels=("needs-signoff",))
-    inv = ChangeSet(
-        steps=(SetLabels(add=("bug",), remove=("needs-signoff",)), SetState(state="closed"))
-    ).invert(before, "ghost:k")
-    assert inv.steps == (
-        SetState(state="open"),
-        SetLabels(add=("needs-signoff",), remove=("bug",)),
-    )
+
+@respx.mock
+async def test_get_issue_brings_its_latest_comments_in_the_same_call(ability):
+    respx.get(f"{BASE}/7").mock(return_value=httpx.Response(200, json=ISSUE))
+    comments = respx.get(f"{BASE}/7/comments").mock(return_value=httpx.Response(200, json=COMMENTS))
+    out = await ability._get_issue({"repo": "acme/app", "number": 7})
+    assert comments.called and comments.calls[0].request.url.params["per_page"] == "100"
+    latest = out["latest_comments"]
+    assert [c["author"] for c in latest] == ["u3", "u4", "operator"]
+    assert latest[-1]["body"] == "Approved." and latest[-1]["by_ghost"] is True
+    assert "latest 3 comments" in ability.read_tools[1].description
+
+
+@respx.mock
+async def test_get_issue_still_answers_when_comments_fail(ability):
+    respx.get(f"{BASE}/7").mock(return_value=httpx.Response(200, json=ISSUE))
+    respx.get(f"{BASE}/7/comments").mock(return_value=httpx.Response(502))
+    out = await ability._get_issue({"repo": "acme/app", "number": 7})
+    assert out["title"] == "Add login" and "latest_comments" not in out
+
+
+@respx.mock
+async def test_issue_comments_zero_is_the_issue_alone():
+    plain = GitHubIssues(GitHubClient("t"), RepoPolicy.from_csv("acme/app"), issue_comments=0)
+    respx.get(f"{BASE}/7").mock(return_value=httpx.Response(200, json=ISSUE))
+    comments = respx.get(f"{BASE}/7/comments").mock(return_value=httpx.Response(200, json=[]))
+    out = await plain._get_issue({"repo": "acme/app", "number": 7})
+    assert "latest_comments" not in out and not comments.called
+    assert "comments" not in plain.read_tools[1].description.split(":")[1]

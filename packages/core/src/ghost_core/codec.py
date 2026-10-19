@@ -10,11 +10,24 @@ from __future__ import annotations
 
 import importlib
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from ghost_core.models import Change, ChangeSet, Proposal, Snapshot, Target
+
+
+class RetiredChange(Change, frozen=True):
+    """A stored step whose class no longer exists (the undo-only steps Ghost once had,
+    such as truncating a file or deleting its own comment). Loaded so the audit log
+    still reads; no writer applies it."""
+
+    kind: Literal["retired"] = "retired"
+    type: str
+    data: dict[str, Any]
+
+    def describe(self) -> str:
+        return f"{self.type} (no longer supported)"
 
 
 def type_name(obj: BaseModel | type[BaseModel]) -> str:
@@ -44,11 +57,18 @@ def dump_proposal(p: Proposal) -> str:
     return json.dumps(body)
 
 
+def _load_change(d: dict[str, Any]) -> Change:
+    try:
+        return load(d, Change)
+    except (ImportError, AttributeError):
+        return RetiredChange(type=str(d["$type"]), data=d.get("data") or {})
+
+
 def load_proposal(text: str) -> Proposal:
     body = json.loads(text)
     return Proposal(
         **{k: v for k, v in body.items() if k not in {"target", "snapshot", "changes"}},
         target=load(body["target"], Target),
         snapshot=load(body["snapshot"], Snapshot),
-        changes=ChangeSet(steps=tuple(load(s, Change) for s in body["changes"])),
+        changes=ChangeSet(steps=tuple(_load_change(s) for s in body["changes"])),
     )

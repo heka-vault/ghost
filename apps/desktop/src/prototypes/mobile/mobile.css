@@ -197,16 +197,13 @@ a.mob-row__hit:active, button.mob-row__hit:active { background: var(--bg-active)
 /* A row with several lines of text: the icon sits against the first line, like every other leading icon. */
 .mob-row__hit--top { align-items: flex-start; }
 .mob-row__hit--top .mob-row__leading { margin-top: var(--space-1); }
-/* An undo row leads with the arrow, never a status dot, so it never reads as a fresh change. */
-.mob-status--undo { color: var(--text-2); margin-right: var(--space-1_5); vertical-align: -0.1em; }
-.mob-status--undo svg { flex: none; }
 .mob-row__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-0_5); }
 .mob-row__title { font-size: var(--text-xl); line-height: var(--leading-xl); color: var(--text-1); }
 .mob-row__support { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); overflow-wrap: anywhere; }
 .mob-row__trailing { flex: none; padding-right: var(--space-4); display: inline-flex; align-items: center; }
-/* A change that never happened (canceled, expired, undone, changed first, failed) steps down a tone. */
+/* A change that never happened (canceled, expired, changed first, failed) steps down a tone. */
 .mob-row__title--off, .mob-row__title.mob-row__title--off { color: var(--text-2); }
-/* Its status leads the sentence: a dot and a word. Neutral (Canceled, Expired, Undone) is as quiet
+/* Its status leads the sentence: a dot and a word. Neutral (Canceled, Expired) is as quiet
    as the sentence; only warn and danger (Waiting, Changed first, Failed) keep color and weight. */
 .mob-status { display: inline-flex; align-items: center; gap: var(--space-1_5); white-space: nowrap; font-weight: var(--weight-regular); color: var(--text-2); }
 .mob-status__dot { flex: none; width: var(--space-2); height: var(--space-2); border-radius: var(--radius-full); background: var(--text-3); }
@@ -340,10 +337,7 @@ a.mob-row__hit:active, button.mob-row__hit:active { background: var(--bg-active)
 .mob-summary__meta { margin: var(--space-1) 0 0; font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-2); }
 .mob-summary__mic { margin: var(--space-1) 0 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
 .mob-summary .g-notice { margin-bottom: var(--space-4); }
-.mob-summary__undo { margin-top: var(--space-3); display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
-.mob-summary__undo-what { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.mob-summary__undo + .g-notice, .mob-section > .g-notice { margin-top: var(--space-3); }
-.mob-summary__undo + .g-notice { margin-top: var(--space-3); }
+.mob-section > .g-notice { margin-top: var(--space-3); }
 .mob-summary__transcript { margin-top: var(--space-6); }
 .mob-transcript { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .mob-transcript li { display: grid; grid-template-columns: var(--space-12) 1fr; gap: var(--space-2); font-size: var(--text-lg); line-height: var(--leading-lg); }

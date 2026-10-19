@@ -73,6 +73,8 @@ class DaemonState:
         self.abilities: list[str] = []
         self.pending: PendingProposal | None = None
         self.conversation: str | None = None
+        self.session_origin: str | None = None  # "desk" | "phone" while a session runs
+        self.ending = False  # going to sleep; the goodbye may still be playing
         self.turns: deque[Turn] = deque(maxlen=200)
         self.bus = EventBus()
         self._started = time.monotonic()
@@ -84,16 +86,29 @@ class DaemonState:
 
     # --- mutations, each publishing an event ----------------------------------
 
-    def set_phase(self, phase: Phase, session_id: str | None = None) -> None:
+    def set_phase(
+        self, phase: Phase, session_id: str | None = None, origin: str | None = None
+    ) -> None:
         self.phase = phase
         if phase in (Phase.PASSIVE, Phase.STARTING):
             self.session_id = None
+            self.session_origin = None
+            self.ending = False
             self.pending = None
             self.conversation = None
             self.turns.clear()
-        elif session_id is not None:
-            self.session_id = session_id
+        else:
+            if session_id is not None:
+                self.session_id = session_id
+            if origin is not None:
+                self.session_origin = origin
         self._publish_status()
+
+    def set_ending(self) -> None:
+        """The session is hanging up; it ends once the goodbye has played."""
+        if self.session_id and not self.ending:
+            self.ending = True
+            self._publish_status()
 
     def set_models_ready(self, ready: bool) -> None:
         self.models_ready = ready
@@ -125,6 +140,12 @@ class DaemonState:
             self.bus.publish(LogEvent(level=level, message=message, at=now()))
 
     # --- status snapshot ----------------------------------------------------------
+
+    def snapshot(self) -> object:
+        """The current ``Status``, built by the provider the app installed."""
+        if self._status_provider is None:
+            raise RuntimeError("no status provider installed")
+        return self._status_provider()
 
     def set_status_provider(self, provider: Callable[[], object]) -> None:
         """The app installs a provider that builds a full ``Status`` from this state plus

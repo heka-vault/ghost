@@ -1,12 +1,10 @@
-"""Append-only edits to local text files, with undo by truncation.
+"""Append-only edits to local text files.
 
-The snapshot records the file's length, so undoing an append is cutting the file
-back to that length, provided nothing else wrote in between (the version check
-catches that)."""
+The snapshot records the file's length and mtime, so an append is refused if
+something else wrote in between (the version check catches that)."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Literal
 
@@ -46,20 +44,6 @@ class AppendText(Change, frozen=True):
     def describe(self) -> str:
         return f"append: {self.text.strip()}"
 
-    def invert(self, before: Snapshot, marker: str) -> Change | None:
-        assert isinstance(before, FileSnapshot)
-        return TruncateTo(length=before.length)
-
-
-class TruncateTo(Change, frozen=True):
-    """Only ever produced by undo."""
-
-    kind: Literal["truncate"] = "truncate"
-    length: int = Field(ge=0)
-
-    def describe(self) -> str:
-        return "remove what I appended"
-
 
 class FileWriter:
     """Writes under ``root`` only. ``allowed`` is the matching check for Operation."""
@@ -92,10 +76,5 @@ class FileWriter:
                 p.parent.mkdir(parents=True, exist_ok=True)
                 with p.open("a") as f:
                     f.write(text if text.endswith("\n") else text + "\n")
-            case TruncateTo(length=length):
-                with p.open("r+") as f:
-                    f.seek(0, os.SEEK_END)
-                    if f.tell() > length:
-                        f.truncate(length)
             case _:
                 raise TypeError(f"FileWriter cannot apply {type(change).__name__}")

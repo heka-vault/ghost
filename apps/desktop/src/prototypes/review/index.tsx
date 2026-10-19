@@ -288,16 +288,6 @@ export default function ReviewPrototype(_: RouteProps) {
   const bannerSaysWhy = live.connection === "reconnecting" || (live.online && live.loadingModels);
   const talk = { can: canTalk, why: talkWhy, shown: bannerSaysWhy ? null : talkWhy };
 
-  // "undo that" reverses Ghost's last write only: the newest executed decision this session,
-  // or whatever was just confirmed from this page.
-  const lastWriteKey = useMemo(() => {
-    let best: { k: string; t: number } | null = null;
-    for (const i of issues)
-      for (const d of i.decisions)
-        if (d.thisSession && d.status === "executed" && (!best || Date.parse(d.at) > best.t)) best = { k: keyOf(i), t: Date.parse(d.at) };
-    return best?.k ?? null;
-  }, [issues]);
-
   const start = async () => {
     setStarting(true);
     try {
@@ -503,7 +493,6 @@ export default function ReviewPrototype(_: RouteProps) {
             inSession={inSession}
             waitingOkay={!!pendingRef && sameRef(pendingRef, selected)}
             note={recent === selectedKey && selectedKey ? outcomeNote(outcomes[selectedKey]) : null}
-            lastWrite={lastWriteKey === selectedKey}
             talk={talk}
             resume={resumeShown && sameRef(resumeShown, selected) ? { note: resumeShown.note, at: resumeShown.at } : null}
             offline={live.connection === "offline"}

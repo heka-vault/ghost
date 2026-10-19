@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=1.26",
     "pydantic-settings>=2.5",
     "loguru>=0.7",
+    "aiortc>=1.14,<2",
 ]
 
 [project.scripts]

@@ -578,7 +578,7 @@ export default function PolicyScreen(_: RouteProps) {
     <Page
       width="default"
       title="What Ghost may do"
-      description="Choose how much Ghost does on its own for each kind of change. Every change is logged, and “undo that” puts it back."
+      description="Choose how much Ghost does on its own for each kind of change. Every change is logged. To reverse one, ask Ghost to change it back."
       status={<LiveStatus />}
       actions={
         // Always there, so the header holds still while the policy loads.

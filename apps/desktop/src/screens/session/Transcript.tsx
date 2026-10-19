@@ -4,7 +4,7 @@
  * consecutive turns grouped under one name and time, and quiet centered captions for the
  * session start, transfers between lines, settled changes and system notes.
  */
-import { Check, Clock, TriangleAlert, Undo2, X } from "lucide-react";
+import { Check, Clock, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { formatTime, LineGlyph } from "../../ui";
@@ -15,13 +15,9 @@ export interface TranscriptProps {
   nameOf: (slug: string) => string;
   /** The line working on a reply right now, shown as a last “Thinking…” row. */
   thinkingAs: string | null;
-  /** The settled change Undo would reverse right now, by key, for its inline Undo. */
-  undoKey: string | null;
-  onUndo: () => void;
-  undoDisabled: boolean;
 }
 
-export function Transcript({ items, nameOf, thinkingAs, undoKey, onUndo, undoDisabled }: TranscriptProps) {
+export function Transcript({ items, nameOf, thinkingAs }: TranscriptProps) {
   const last = items[items.length - 1];
   const thinkingJoins = thinkingAs != null && last?.kind === "ghost" && last.slug === thinkingAs;
   // The name and time lead a reply only when the voice changes (the first reply, and the
@@ -74,7 +70,7 @@ export function Transcript({ items, nameOf, thinkingAs, undoKey, onUndo, undoDis
               </Caption>
             );
           case "decision":
-            return <DecisionCaption key={it.key} d={it.decision} undo={undoKey === it.decision.key ? { onUndo, disabled: undoDisabled } : null} />;
+            return <DecisionCaption key={it.key} d={it.decision} />;
           case "ghost":
             return (
               <Speaker key={it.key} slug={it.slug} name={nameOf(it.slug)} at={it.turns[0].at} named={named.has(it)}>
@@ -164,12 +160,11 @@ const DECIDED: Record<Decision["outcome"], { icon: ReactNode; label: (d: Decisio
   canceled: { icon: <X />, label: (d) => (d.byVoice ? "You said no" : "You canceled") },
   expired: { icon: <Clock />, label: () => "Expired" },
   failed: { icon: <TriangleAlert />, label: () => "Didn’t go through" },
-  undone: { icon: <Undo2 />, label: () => "You undid" },
 };
 
-/** “You confirmed · close the issue on ghost-mock/app#163 · 4:05 PM”, with Undo while it is the change Undo would reverse. */
-function DecisionCaption({ d, undo }: { d: Decision; undo: { onUndo: () => void; disabled: boolean } | null }) {
-  const shown = d.undone ? { icon: <Undo2 />, label: () => "You confirmed, then undid it" } : DECIDED[d.outcome];
+/** “You confirmed · close the issue on ghost-mock/app#163 · 4:05 PM”. */
+function DecisionCaption({ d }: { d: Decision }) {
+  const shown = DECIDED[d.outcome];
   return (
     <Caption glyph={<span className="session-caption__icon">{shown.icon}</span>}>
       {shown.label(d)} · <span data-user-content>{d.what}</span>
@@ -177,14 +172,6 @@ function DecisionCaption({ d, undo }: { d: Decision; undo: { onUndo: () => void;
         {" · "}
         <time dateTime={d.at}>{formatTime(d.at)}</time>
       </span>
-      {undo && !d.undone && (
-        <>
-          {" "}
-          <button type="button" className="session-caption__undo" onClick={undo.onUndo} disabled={undo.disabled} aria-label={`Undo: ${d.what}`}>
-            Undo
-          </button>
-        </>
-      )}
     </Caption>
   );
 }

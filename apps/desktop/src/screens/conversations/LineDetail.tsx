@@ -1,7 +1,7 @@
 /**
  * Owner: conversations. One line (#/conversations/:slug): its persona and voice, its
  * memory and pinned notes, its transcript and every version of its memory. Edits collect
- * in a draft and go in with Save; each field Ghost writes is an audited, undoable gate
+ * in a draft and go in with Save; each field Ghost writes is an audited gate
  * write, the same as if it had been said. Pinning a note, compacting, switching, reset and
  * delete happen at once.
  */
@@ -292,7 +292,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const reset = async () => {
     const ok = await confirm({
       title: `Reset ${name}?`,
-      description: `Ghost forgets ${name}’s memory, pinned notes and transcript. The name, voice and persona stay. You can undo it from a session for ten minutes.`,
+      description: `Ghost forgets ${name}’s memory, pinned notes and transcript. The name, voice and persona stay.`,
       confirmLabel: `Reset ${name}`,
       tone: "danger",
     });
@@ -312,7 +312,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const remove = async () => {
     const ok = await confirm({
       title: `Delete ${name}?`,
-      description: `The line goes, with its persona, memory, pinned notes and transcript. You can undo it from a session for ten minutes.`,
+      description: `The line goes, with its persona, memory, pinned notes and transcript.`,
       confirmLabel: `Delete ${name}`,
       tone: "danger",
     });

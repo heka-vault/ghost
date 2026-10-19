@@ -1,6 +1,5 @@
 from ghost_core import ChangeSet, Store, WriteGate
 from ghost_github_issues import AddComment, GitHubIssues, IssueTarget, RepoPolicy, SetLabels
-from ghost_github_issues.client import GitHubIssueWriter
 from ghost_github_issues.mock import MOCK_REPOS, MockGitHubClient
 
 
@@ -16,7 +15,7 @@ async def test_mock_lists_and_reads():
     assert "Redis" in issue["title"]
 
 
-async def test_mock_round_trip_through_gate_announces_and_undoes():
+async def test_mock_round_trip_through_gate_and_back():
     a = make()
     gate = WriteGate(Store())
     gate.register("github_issues", a.contributions().operations)
@@ -31,19 +30,33 @@ async def test_mock_round_trip_through_gate_announces_and_undoes():
     )
     assert sub.executed and sub.outcome.status == "success"
     assert "bug" in sub.outcome.readback.labels
-    out = await gate.undo("s")
-    assert out.status == "success" and "bug" not in out.readback.labels
-    assert not any("hi" in c["body"] for c in await a._client.list_comments(t))
+    # taking it back is the opposite change, through the gate like any other
+    back = await gate.submit(
+        session_id="s",
+        ability="github_issues",
+        operation="set_labels",
+        target=t,
+        changes=ChangeSet(steps=(SetLabels(remove=("bug",)),)),
+        rationale="operator asked to take it back",
+    )
+    assert back.executed and "bug" not in back.outcome.readback.labels
 
 
-async def test_mock_delete_comment_by_id():
-    from ghost_github_issues.models import DeleteComment
+async def test_mock_state_survives_a_restart(tmp_path) -> None:
+    from ghost_github_issues.mock import MockGitHubClient
+    from ghost_github_issues.models import IssueTarget
 
-    c = MockGitHubClient()
-    w = GitHubIssueWriter(c)
-    t = IssueTarget(owner="ghost-mock", repo="app", number=151)
-    await w.apply(t, AddComment(body="hello"), "ghost:abc")
-    assert any("ghost:abc" in x["body"] for x in await c.list_comments(t))
-    await w.apply(t, DeleteComment(marker="ghost:abc"), "k")
-    assert not any("ghost:abc" in x["body"] for x in await c.list_comments(t))
-    await w.apply(t, DeleteComment(marker="ghost:abc"), "k")  # idempotent
+    path = tmp_path / "mock-github.json"
+    t = IssueTarget(owner="ghost-mock", repo="app", number=142)
+    first = MockGitHubClient(path)
+    await first.remove_label(t, "needs-signoff")
+    await first.add_labels(t, ["approved"])
+    await first.create_comment(t, "Approved.")
+
+    again = MockGitHubClient(path)
+    labels = {lb["name"] for lb in (await again.get_issue(t))["labels"]}
+    assert "approved" in labels and "needs-signoff" not in labels
+    assert (await again.list_comments(t))[-1]["body"] == "Approved."
+    await again.create_comment(t, "Second.")
+    ids = [c["id"] for c in await again.list_comments(t)]
+    assert len(ids) == len(set(ids))

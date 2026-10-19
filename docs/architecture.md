@@ -27,7 +27,15 @@ flowchart LR
   SK -->|reads| GH
 ```
 
-Mobile comes later (ADR 0005). It will be a second transport into the same pipeline (Pipecat SmallWebRTC or WebSocket), and how the phone reaches the house is decided then.
+The phone app (`apps/mobile`, Expo, Android) is a second transport into the same pipeline (ADR 0005, ADR 0013), so the gate, the policy and Jev apply unchanged. It never uses the control API. A question from Ghost is answered by voice on the phone: there is no Confirm button there. Its screens read a small `Desk` interface (`apps/mobile/src/desk/types.ts`). How the phone reaches the house from cellular is still open; on the LAN it goes through the phone listener below (ADR 0016).
+
+### The phone listener
+
+`ghostd` serves a second, narrow HTTP app for the phone when `GHOST_PHONE_LISTEN` is set (`host:port`, bound to exactly that address; off when empty). It is not the control API, shares no routes with it, and doesn't proxy it (`ghostd.phone`). Five routes: `POST /pair` spends a six-digit code the desktop app got from the control API's `POST /phone/pairing`; `GET /hello` and `GET /audit` return the control API's `Status` and `AuditPage`, built by the same functions (`ghost_api.status_snapshot`, `ghost_api.audit_page`); `POST`/`PATCH /offer` is WebRTC signalling; `POST /end` ends the phone's session. Every route but `/pair` is HMAC-signed both ways by a middleware, with a 60 s clock window and a nonce cache; the paired device and its secret are in `~/.local/share/ghost/phone.json` (0600). The wire format is [phone-protocol.md](phone-protocol.md).
+
+An accepted offer becomes a `SmallWebRTCConnection` with no ICE servers, which the listener hands to the daemon. The passive loop waits on it next to the wake detector: it cancels the wake task, which releases the desk mic, and runs a session whose transport is a `SmallWebRTCTransport` (16 kHz in, Kokoro's 24 kHz out, the thinking sound mixed into the phone's track). A phone session doesn't duck music or chime on the desk, and `Status.session_origin` is `phone`. An offer while any session runs, or while the models load, is refused (409 `busy`, 503 `not_ready`). The session ends when the peer closes or stops its keepalive, on `POST /end`, or on RTVI `disconnect-bot`, and its ending closes the peer. Phone sessions are ended with an EndFrame, not cancelled: Pipecat leaves a processor that saw a CancelFrame refusing frames, and Kokoro's processor is shared by every session.
+
+The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, which acts only on `client-ready` and `disconnect-bot` (no typed text, raw audio or function results), with an observer that sends `bot-ready` and the speaking events but no transcripts, LLM text, metrics or logs. The daemon forwards its own event bus (`status`, `turn`, `pending`, `outcome`, `conversation`; never `log`) to the phone as `server-message`s, the same JSON the control API's WebSocket sends.
 
 ## Components
 
@@ -35,8 +43,8 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 |---|---|
 | `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on "go to sleep" or idle timeout |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
-| `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, undo, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
-| `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, undo, and the audit log. The only code that can execute a write |
+| `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
+| `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, and the audit log. The only code that can execute a write |
 | `abilities/*` | Installable capabilities (ADR 0012). Each contributes a prompt paragraph, read tools, write operations with a risk class and a writer, and optionally turn interceptors, pipeline processors, listeners and CLI commands. `github_issues` is the first one; third-party abilities use the same entry point |
 | `core/conversations` | Named conversations (ADR 0014): the registry, the transcript, every compaction version, and the three Markdown files per conversation (`persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
@@ -45,7 +53,7 @@ Mobile comes later (ADR 0005). It will be a second transport into the same pipel
 
 1. **Passive.** `ghostd` runs a short local pipeline: VAD, Parakeet, phrase matcher. A transcript without a wake phrase is dropped where it is produced. Nothing is stored or sent.
 2. **Wake.** "Hey Ghost", "Ghost, you there?" or another configured phrase (`GHOST_WAKE_PHRASES`) matches. `ghostd` plays a chime, ducks the configured music streams, and starts the pipeline. Words spoken after the phrase in the same breath become the first turn, so "hey ghost, what needs my sign-off" skips the greeting. `make wake` still triggers it by hand.
-3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking. Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks one sentence at a time. Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off.
+3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking. Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks a clause at a time, so the voice starts after the first few words (`GHOST_TTS_CLAUSES`). Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off.
    A typed turn from the desktop app (`POST /session/say`) enters the same pipeline after
    the STT stage, so it meets the same tools and the same gate as speech.
 4. **Transfer.** Every session opens in `ghost`. "Patch me to accounting" is an LLM tool: Ghost's voice announces it, a short tone plays, the TTS voice and the system prompt change, and the context is replaced with that conversation's rolling summary, pinned notes and recent turns; the line greets with a one-line recap. "Back to Ghost" returns. "Save this as accounting" creates the conversation and carries this session's turns into it. A transfer cancels any change waiting for a yes.
@@ -78,17 +86,17 @@ without asking is the operator's call (ADR 0011):
    the target back, and records success, partial, or failed. Anything created carries a
    hidden idempotency marker so a retry never duplicates it.
 6. The model gets the verified result and says what happened in a few words, or asks
-   one short question when confirmation is needed. "Undo that" reverses the last
-   executed change set within ten minutes using the stored snapshot and the marker.
+   one short question when confirmation is needed. There is no undo (ADR 0015): asked to
+   change something back, Ghost proposes the opposite change like any other.
 
 ## Repository layout
 
 ```text
 ghost/
 ├── apps/
-│   ├── ghostd/          # Python daemon: wake, sessions, ability loading, control API server
+│   ├── ghostd/          # Python daemon: wake, sessions, ability loading, control API server, phone listener
 │   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, policy, audit, settings
-│   └── mobile/          # later: Expo (ADR 0005), a WebRTC transport into the same pipeline
+│   └── mobile/          # Expo + React Native, Android: Home, session, activity
 ├── packages/
 │   ├── core/            # Python: ability API, loader, context, gate, policy, confirmation, audit, conversations
 │   ├── voice/           # Python: Pipecat pipeline factory, Parakeet, sounddevice transport, slots
@@ -125,7 +133,7 @@ transport.input -> [audio_in] -> Parakeet STT -> InterceptorProcessor -> Confirm
 The bracketed names are slots where enabled abilities' processors are spliced in, one
 fresh instance per session. `InterceptorProcessor` offers each user turn to the
 abilities' turn interceptors first (and to Ghost's own fixed intents: "go to sleep",
-"never mind" while a change is pending, "undo that"); a handled turn is spoken to or
+"never mind" while a change is pending); a handled turn is spoken to or
 acted on directly and never reaches the model.
 
 `ConfirmationProcessor` sees every `TranscriptionFrame`. If the gate holds a pending
@@ -135,7 +143,7 @@ that arrive while Ghost is still speaking are not evidence at all: the operator 
 not heard the question yet, and the text may be Ghost's own voice. The verified
 outcome is appended to the context as a system note, so the model's next sentence
 describes what actually happened. The model's tools are the abilities' read tools,
-`change`, `undo`, and `go_to_sleep`. There is no tool that bypasses the gate.
+`change`, and `go_to_sleep`. There is no tool that bypasses the gate.
 
 The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the
 install needs no compiled extension; PortAudio comes with the wheel and talks to
@@ -149,8 +157,8 @@ into the user's config at install time and never committed.
 
 - Wake word: the transcript matcher costs continuous local STT while passive. Measure its CPU and false wakes against music; if either is a problem, train "Hey Ghost" with `livekit-wakeword` for the `OnnxWakeDetector` (ADR 0005, ADR 0010).
 - Real-voice benchmark on the workstation mic, with music playing ([benchmarks](benchmarks/2026-10-16-speech-cpu.md) used synthetic clips).
-- LLM default: `claude-sonnet-5-5` with `thinking: {"type": "between_tools"}` (0.77 s to first token; see the [benchmark](benchmarks/2026-10-16-speech-cpu.md#llm-time-to-first-token)).
-- A dedicated LLM API key for Ghost, so it can be revoked on its own.
+- LLM default: `claude-sonnet-5-5` with `thinking: {"type": "between_tools"}` (0.77 s to first token; see the [benchmark](benchmarks/2026-10-16-speech-cpu.md#llm-time-to-first-token)). Where a turn's time goes, measured: [2026-10-19](benchmarks/2026-10-19-latency.md).
+- A dedicated LLM API key for Ghost, so it can be revoked on its own. `GHOST_LLM_ENDPOINT=openrouter` (OpenRouter's Anthropic API, `OPENROUTER_API_KEY`) is one; the default, `proxy`, is whatever `ANTHROPIC_BASE_URL` points at.
 
 ## Shipping
 

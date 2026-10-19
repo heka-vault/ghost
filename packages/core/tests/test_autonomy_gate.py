@@ -1,20 +1,16 @@
-"""submit/undo paths of the gate (ADR 0011)."""
-
-from datetime import timedelta
+"""submit paths of the gate (ADR 0011)."""
 
 import pytest
 from fakes import AddComment, Issue, SetLabels, SetState, changeset, register_fake
 from ghost_core import (
     Autonomy,
     AutonomyPolicy,
-    GateError,
     PolicyError,
     ProposalStatus,
     Store,
     Verdict,
     WriteGate,
 )
-from ghost_core.models import utcnow
 
 LABEL = changeset(SetLabels(add=("bug",), remove=("needs-signoff",)))
 COMMENT = changeset(AddComment(body="Looks fine."))
@@ -82,71 +78,29 @@ async def test_allowlist_still_wins(writer):
         await submit(gate, other, LABEL)
 
 
-async def test_undo_labels_restores_snapshot(writer, target):
-    gate = make(writer)
-    sub = await submit(gate, target, LABEL)
-    out = await gate.undo("s1")
-    assert out.status == "success"
-    assert writer.issues[target]["labels"] == ["needs-signoff"]
-    assert gate._store.get_proposal(sub.proposal.id).status is ProposalStatus.UNDONE
-    assert "add needs-signoff; remove bug" in out.applied[0]
+async def test_reversing_is_an_ordinary_change(writer, target):
+    """There is no undo path: taking a change back is the opposite change, submitted
+    like any other and resolved against the operator's policy."""
+    gate = make(writer, '[github_issues]\nclose = "announce"\nreopen = "confirm"\n')
+    first = await submit(gate, target, LABEL)
+    back = await submit(gate, target, changeset(SetLabels(add=("needs-signoff",), remove=("bug",))))
+    assert back.executed and writer.issues[target]["labels"] == ["needs-signoff"]
+    store = gate._store
+    assert store.get_proposal(first.proposal.id).status is ProposalStatus.EXECUTED
+    assert store.get_proposal(back.proposal.id).status is ProposalStatus.EXECUTED
 
-
-async def test_undo_comment_deletes_by_marker(writer, target):
-    gate = make(writer)
-    sub = await submit(gate, target, COMMENT, op="comment")
-    assert writer.comments[target] == [("Looks fine.", sub.proposal.idempotency_key)]
-    out = await gate.undo("s1")
-    assert out.status == "success" and writer.comments[target] == []
-
-
-async def test_undo_close_reopens_in_reverse_order(writer, target):
-    gate = make(writer, '[github_issues]\nclose = "announce"\n')
     await submit(gate, target, CLOSE, op="close", risk="high")
+    reopen = await submit(gate, target, changeset(SetState(state="open")), op="reopen")
+    assert reopen.autonomy is Autonomy.CONFIRM and not reopen.executed
     assert writer.issues[target]["state"] == "closed"
-    out = await gate.undo("s1")
-    assert out.status == "success"
-    assert out.applied == ("open the issue", "delete the comment I added")
-    assert writer.issues[target]["state"] == "open" and writer.comments[target] == []
 
 
-async def test_undo_twice_has_nothing_left(writer, target):
-    gate = make(writer)
-    await submit(gate, target, LABEL)
-    await gate.undo("s1")
-    with pytest.raises(GateError, match="nothing recent"):
-        await gate.undo("s1")
-
-
-async def test_undo_respects_window(writer, target):
-    gate = make(writer, undo_window=timedelta(minutes=1))
-    await submit(gate, target, LABEL)
-    with pytest.raises(GateError):
-        await gate.undo("s1", now=utcnow() + timedelta(minutes=2))
-
-
-async def test_undo_is_per_session(writer, target):
-    gate = make(writer)
-    await submit(gate, target, LABEL, session="a")
-    with pytest.raises(GateError):
-        await gate.undo("b")
-
-
-async def test_undo_noop_when_nothing_changed(writer, target):
-    gate = make(writer)
-    # Adding a label the issue already has, then removing one it lacks: nothing to invert.
-    await submit(gate, target, changeset(SetLabels(add=("needs-signoff",), remove=("ghost",))))
-    with pytest.raises(GateError, match="cannot be reversed"):
-        await gate.undo("s1")
-
-
-async def test_audit_records_autonomy_and_undo(writer, target):
+async def test_audit_records_autonomy(writer, target):
     gate = make(writer)
     sub = await submit(gate, target, LABEL)
-    await gate.undo("s1")
     events = gate._store.events(sub.proposal.id)
     assert events[0][1] == "prepared" and events[0][2]["autonomy"] == "announce"
-    assert events[-1][1] == "undone"
+    assert events[-1][1] == "finished"
 
 
 async def test_custom_classifier_is_used_with_context(writer, target):

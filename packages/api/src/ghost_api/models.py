@@ -45,6 +45,12 @@ class Status(BaseModel):
     abilities: list[str]
     pending: PendingProposal | None = None
     conversation: str | None = None  # slug of the conversation the session is in (ADR 0014)
+    # Where the live session's audio is: the workstation's mic and speaker, or the paired
+    # phone over WebRTC (ADR 0016). None when there is no session.
+    session_origin: Literal["desk", "phone"] | None = None
+    # Ghost has decided to hang up: its goodbye may still be playing, and the session ends
+    # as soon as it has. False outside a session.
+    ending: bool = False
 
 
 class Turn(BaseModel):
@@ -87,7 +93,7 @@ class PendingEvent(BaseModel):
 class OutcomeEvent(BaseModel):
     type: Literal["outcome"] = "outcome"
     outcome: OutcomeView
-    via: Literal["voice", "ui", "autonomous", "undo"]
+    via: Literal["voice", "ui", "autonomous"]
 
 
 class LogEvent(BaseModel):
@@ -145,7 +151,6 @@ class AuditEntry(BaseModel):
     summary: str
     autonomy: str
     status: str
-    undo_of: str | None
     created_at: datetime
     events: list[AuditEventView]
 
@@ -313,7 +318,7 @@ class ConversationCreate(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
-    """Each field present is applied as its own audited, undoable write."""
+    """Each field present is applied as its own audited write."""
 
     name: str | None = Field(default=None, min_length=1, max_length=80)
     aliases: list[str] | None = None
@@ -349,3 +354,26 @@ class VoiceInfo(BaseModel):
 class SampleRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     text: str | None = Field(default=None, max_length=200)
+
+
+# --- the paired phone (ADR 0016) ------------------------------------------------------
+
+
+class PhonePairing(BaseModel):
+    """A fresh pairing code for the phone listener. Shown to the operator only."""
+
+    code: str  # six digits
+    address: str  # GHOST_PHONE_LISTEN, host:port
+    expires_at: datetime
+
+
+class PhoneDevice(BaseModel):
+    id: str
+    name: str
+    paired_at: datetime
+    last_seen: datetime | None
+
+
+class PhoneView(BaseModel):
+    address: str | None  # None when the listener is off
+    device: PhoneDevice | None

@@ -25,8 +25,8 @@ import {
   Search,
   Settings2,
   ShieldOff,
+  RotateCcw,
   Trash2,
-  Undo2,
   VolumeX,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -619,7 +619,7 @@ function Specimens({ theme }: { theme: string }) {
         { label: "Pin a note", icon: <Pin />, shortcut: "mod+p", onSelect: () => toast({ title: "Pin a note" }) },
         { label: "Compact now", icon: <Eraser />, disabled: true, reason: "Nothing new to fold in", onSelect: noop },
         "separator",
-        { label: "Reset memory", icon: <Undo2 />, onSelect: () => toast({ title: "Reset Accounting" }) },
+        { label: "Reset memory", icon: <RotateCcw />, onSelect: () => toast({ title: "Reset Accounting" }) },
         { label: "Delete Accounting", icon: <Trash2 />, danger: true, onSelect: () => setConfirmOpen(true) },
       ]}
     />
@@ -734,7 +734,7 @@ function Specimens({ theme }: { theme: string }) {
         </Spec>
         <Spec label="With icons">
           <Button leadingIcon={<Plus />}>New line</Button>
-          <Button variant="ghost" leadingIcon={<Undo2 />}>Undo</Button>
+          <Button variant="ghost" leadingIcon={<Pin />}>Pin a note</Button>
           <Button trailingIcon={<ArrowUpRight />}>Open on GitHub</Button>
         </Spec>
         <Spec label="Link form">
@@ -899,7 +899,7 @@ function Specimens({ theme }: { theme: string }) {
             onChange={setAutonomy}
             options={[
               { value: "confirm", label: "Ask me first", description: `Ghost proposes it and waits for a spoken ${quoted("yes")} or your click.`, icon: <Hand /> },
-              { value: "announce", label: "Do it and tell me", description: "Ghost does it, then says what it did. You can undo.", icon: <Megaphone /> },
+              { value: "announce", label: "Do it and tell me", description: "Ghost does it, then says what it did.", icon: <Megaphone /> },
               { value: "quiet", label: "Do it quietly", description: "Logged, not spoken.", icon: <VolumeX /> },
               { value: "deny", label: "Not allowed", description: "Ghost can’t do this, even if you ask.", icon: <ShieldOff /> },
             ]}
@@ -942,7 +942,7 @@ function Specimens({ theme }: { theme: string }) {
             <div className="g-menu__item is-active"><span className="g-menu__icon"><Pin /></span><span className="g-menu__label">Pin a note</span><span className="g-menu__shortcut t-num">{formatShortcut("mod+p")}</span></div>
             <div className="g-menu__item is-disabled"><span className="g-menu__icon"><Eraser /></span><span className="g-menu__label">Compact now</span></div>
             <div className="g-menu__separator" />
-            <div className="g-menu__item"><span className="g-menu__icon"><Undo2 /></span><span className="g-menu__label">Reset memory</span></div>
+            <div className="g-menu__item"><span className="g-menu__icon"><RotateCcw /></span><span className="g-menu__label">Reset memory</span></div>
             <div className="g-menu__item is-danger"><span className="g-menu__icon"><Trash2 /></span><span className="g-menu__label">Delete Accounting</span></div>
           </div>
         </Spec>
@@ -1018,7 +1018,7 @@ function Specimens({ theme }: { theme: string }) {
           <p className="t-small t-3">Connecting is neutral and still. It turns to Not running only when the shell gives up (about 900ms), the same moment the Offline page appears. Every page’s <code>&lt;LiveStatus /&gt;</code> uses the same <code>liveLabel()</code>, so a page never contradicts this card.</p>
         </Spec>
         <Spec label="Change status (statusLabel, statusTone)">
-          {["pending", "claimed", "executed", "undone", "expired", "cancelled", "stale", "failed"].map((st) => (
+          {["pending", "claimed", "executed", "expired", "cancelled", "stale", "failed"].map((st) => (
             <Badge key={st} tone={statusTone(st)} dot>{statusLabel(st)}</Badge>
           ))}
         </Spec>
@@ -1031,7 +1031,7 @@ function Specimens({ theme }: { theme: string }) {
           <Badge tone="info">Info</Badge>
         </Spec>
         <Spec label="Outline badges">
-          <Badge variant="outline">Undo</Badge>
+          <Badge variant="outline">Optional</Badge>
           <Badge variant="outline" tone="warn">Medium risk</Badge>
           <Badge variant="outline" tone="danger">High risk</Badge>
           <Badge size="sm" mono>v0.1.0</Badge>
@@ -1095,7 +1095,6 @@ function Specimens({ theme }: { theme: string }) {
                 </div>
                 <div className="g-page-bar__actions">
                   <ButtonSizeContext.Provider value="sm">
-                    <Button variant="ghost" leadingIcon={<Undo2 />}>Undo</Button>
                     <Button leadingIcon={<Moon />}>Go to sleep</Button>
                   </ButtonSizeContext.Provider>
                 </div>
@@ -1113,7 +1112,6 @@ function Specimens({ theme }: { theme: string }) {
                 </div>
                 <div className="g-page-bar__actions">
                   <ButtonSizeContext.Provider value="sm">
-                    <Button variant="ghost" leadingIcon={<Undo2 />} disabled>Undo</Button>
                     <Button leadingIcon={<Moon />} disabled>Go to sleep</Button>
                   </ButtonSizeContext.Provider>
                 </div>
@@ -1178,15 +1176,15 @@ function Specimens({ theme }: { theme: string }) {
           </div>
         </Card>
         <Spec label="Toasts">
-          <Button onClick={() => toast({ title: "Approved app 208", description: "Left your note that Dana’s fix looks right.", tone: "ok", action: { label: "Undo", onClick: noop } })}>Success</Button>
+          <Button onClick={() => toast({ title: "Approved app 208", description: "Left your note that Dana’s fix looks right.", tone: "ok" })}>Success</Button>
           <Button onClick={() => toast({ title: "Pinned to Accounting" })}>Neutral</Button>
           <Button onClick={() => toast({ title: "Couldn’t reach GitHub", description: "Ghost will retry in 30 seconds.", tone: "danger" })}>Error</Button>
         </Spec>
         <div className="g-toast g-toast--ok gal-static">
           <CircleCheck size={16} className="g-toast__icon" />
           <div className="g-toast__body">
-            <p className="g-toast__title">Approved app 208</p>
-            <p className="g-toast__description">Left your note.</p>
+            <p className="g-toast__title">Saved</p>
+            <p className="g-toast__description">Ghost uses the new levels from its next change.</p>
           </div>
           <button type="button" className="g-toast__action">Undo</button>
         </div>
@@ -1196,8 +1194,8 @@ function Specimens({ theme }: { theme: string }) {
         <Spec label="Open">
           <Button onClick={() => setDialog(true)}>Dialog</Button>
           <Button variant="danger-ghost" onClick={() => setConfirmOpen(true)}>Confirm dialog</Button>
-          <Tooltip content="Undo the last change" shortcut="mod+z">
-            <Button variant="ghost" leadingIcon={<Undo2 />}>Hover for tooltip</Button>
+          <Tooltip content="Pin a note" shortcut="mod+p">
+            <Button variant="ghost" leadingIcon={<Pin />}>Hover for tooltip</Button>
           </Tooltip>
         </Spec>
         <div className="gal-static-dialog">
@@ -1207,7 +1205,7 @@ function Specimens({ theme }: { theme: string }) {
             <footer className="g-dialog__footer"><Button variant="ghost" className="is-focus">Cancel</Button><Button variant="danger">Delete Legal</Button></footer>
           </div>
         </div>
-        <div className="g-tooltip is-placed gal-static">Undo the last change <span className="g-tooltip__shortcut">Ctrl Z</span></div>
+        <div className="g-tooltip is-placed gal-static">Pin a note <span className="g-tooltip__shortcut">Ctrl P</span></div>
         <Dialog open={dialog} onClose={() => setDialog(false)} title="Pin a note to Accounting" description="Pinned notes are never summarized away." footer={<><Button variant="ghost" onClick={() => setDialog(false)}>Cancel</Button><Button variant="primary" onClick={() => setDialog(false)}>Pin note</Button></>}>
           <Field label="Note"><Input autoFocus placeholder="Stripe renewal is due November 3" /></Field>
         </Dialog>

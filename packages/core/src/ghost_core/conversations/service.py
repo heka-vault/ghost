@@ -3,8 +3,8 @@ loads on resume, turn and summary records, retention, and the operations the gat
 registers under the ``conversations`` ability name.
 
 Switching is not here: it is a session action in ``ghost_voice``. Everything that
-changes a row or a file is an operation below, so it runs at the operator's level,
-is audited, and can be undone."""
+changes a row or a file is an operation below, so it runs at the operator's level
+and is audited."""
 
 from __future__ import annotations
 
@@ -43,6 +43,13 @@ from ghost_core.store import Store
 ABILITY = "conversations"
 DEFAULT_VOICE = "af_heart"
 SUMMARY_TEMPLATE = "What this conversation has covered so far: {summary}"
+# Earlier turns arrive as a record, not as replayed chat: replayed, the model sees its own
+# past claims with none of the tool calls behind them and "corrects" lookups that were real.
+RECENT_TEMPLATE = (
+    "The record of what was said earlier in this conversation, oldest first. The lookups "
+    "and changes in it really happened; their results are not repeated here, so look "
+    "again if you need current details. What follows the record is live.\n\n{record}"
+)
 
 _STOP = {
     "the",
@@ -77,8 +84,8 @@ class ResumeContext:
 
     def messages(self) -> list[dict[str, Any]]:
         """The LLM messages that stand in for the past: the rolling summary in the
-        same shape the in-session summarizer uses, the pinned notes, then the raw
-        turns not yet covered by a summary."""
+        same shape the in-session summarizer uses, the pinned notes, then the record
+        of the turns not yet covered by a summary."""
         out: list[dict[str, Any]] = []
         if self.memory.strip():
             out.append(
@@ -92,17 +99,16 @@ class ResumeContext:
                     + "\n- ".join(self.notes),
                 }
             )
+        lines = []
         for t in self.recent:
             if t.role == "user":
-                out.append({"role": "user", "content": t.text})
+                lines.append(f"Operator: {t.text}")
             elif t.role == "assistant":
-                out.append({"role": "assistant", "content": t.text})
+                lines.append(f"You: {t.text}")
             elif t.role == "call":
-                out.append({"role": "assistant", "content": f"[earlier I called {t.text}]"})
-        # Anthropic needs the first message to be from the user and roles to alternate
-        # only loosely; a leading assistant message is dropped.
-        while out and out[0]["role"] != "user":
-            out.pop(0)
+                lines.append(f"(you called {t.text})")
+        if lines:
+            out.append({"role": "user", "content": RECENT_TEMPLATE.format(record="\n".join(lines))})
         return _merge_adjacent(out)
 
 

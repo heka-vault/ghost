@@ -1,6 +1,6 @@
 # 0012: Abilities are installable packages; Ghost's source is not edited to add one
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR 0015 (no undo)
 - **Date:** 2026-10-17
 - **Amends:** ADR 0006 (skills become abilities; the interface is the one below)
 
