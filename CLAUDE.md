@@ -1,6 +1,6 @@
 # Ghost: agent operating manual
 
-Ghost is a voice-first assistant that triages GitHub issues and records decisions on them. It is a personal tool: one operator, running everything on one Linux workstation (ADR 0001). The original product documents call it VoiceTriage; "Ghost" is the codename and the wake word.
+Ghost is a voice-first assistant that triages GitHub issues and records decisions on them. It is a personal tool: one operator, running everything on one Linux workstation (ADR 0001). Ghost is the go-live name and the wake word; the original product documents use the working title VoiceTriage.
 
 Before any non-trivial task, read:
 

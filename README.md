@@ -6,7 +6,7 @@ Ghost is a voice-first assistant for triaging GitHub issues. Say "Ghost" at your
   <img src="docs/screenshots/session-pending.webp" alt="The Ghost desktop app in a session: the transcript, and a change waiting for your okay with Confirm and Cancel" width="100%">
 </p>
 
-"Ghost" is the codename. The original product documents call it **VoiceTriage**.
+Ghost is the name it goes live under. The original product documents use the working title **VoiceTriage**.
 
 Ghost is a personal tool that runs entirely on your own Linux machine:
 
