@@ -987,6 +987,8 @@ export interface components {
         PhonePairing: {
             /** Address */
             address: string;
+            /** Addresses */
+            addresses?: string[];
             /** Code */
             code: string;
             /**
@@ -999,6 +1001,8 @@ export interface components {
         PhoneView: {
             /** Address */
             address: string | null;
+            /** Addresses */
+            addresses?: string[];
             device: components["schemas"]["PhoneDevice"] | null;
         };
         /** PolicyResult */

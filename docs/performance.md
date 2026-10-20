@@ -69,3 +69,7 @@ and the harness shows what it costs.
 - **Speed never buys a broken rule.** Idle audio stays on the machine, the gate still
   bounds every write, and secrets still never appear in logs. A faster path that breaks one
   of these isn't a path.
+
+## Follow-ups
+
+- **End-of-turn fallback (2026-10-20).** When the turn model says "incomplete" the stop strategy waits its full fallback (about 2.8 s) before closing the turn; seen on 4 of 10 phone turns. Measure how often the fallback fires on real speech, then shorten it or close on a long-enough silence regardless.

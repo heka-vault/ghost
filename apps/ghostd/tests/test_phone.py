@@ -108,7 +108,7 @@ def response_ok(r, creds, nonce) -> bool:
 async def test_pair_then_hello_and_audit_are_signed_both_ways(phone):
     listener, host, client, _ = phone
     creds = await pair(listener, client)
-    assert set(creds) == {"device_id", "secret", "workstation"}
+    assert set(creds) == {"device_id", "secret", "workstation", "addresses"}
     assert creds["workstation"] == "desk" and len(creds["secret"]) == 43  # 32 bytes b64url
 
     r, nonce = await signed(client, creds, "GET", "/hello")
@@ -429,13 +429,70 @@ async def test_listener_binds_its_address_and_signs_over_real_http(tmp_path):
 
 
 def test_parse_listen():
-    from ghostd.phone import parse_listen
+    from ghostd.phone import parse_listen, parse_listen_list
 
     assert parse_listen("192.168.1.20:8765") == ("192.168.1.20", 8765)
     assert parse_listen("[fe80::1]:8765") == ("fe80::1", 8765)
     for bad in ("", "8765", "host:", "host:port"):
         with pytest.raises(ValueError):
             parse_listen(bad)
+    # ADR 0020: the LAN address and the tunnel address, comma separated
+    assert parse_listen_list("192.168.1.20:8765, 10.8.0.4:8765") == [
+        "192.168.1.20:8765",
+        "10.8.0.4:8765",
+    ]
+    for bad in ("", " , ", "192.168.1.20:8765,nope"):
+        with pytest.raises(ValueError):
+            parse_listen_list(bad)
+
+
+async def test_listener_serves_every_address_and_tells_the_phone_all_of_them(tmp_path):
+    """Two addresses (ADR 0020): both serve the same signed app, and /pair and /hello carry
+    the whole list so the phone can pick the one that answers wherever it is."""
+    host = FakeHost()
+    listener = PhoneListener(
+        "127.0.0.1:0,127.0.0.1:0", store=PhoneStore(tmp_path / "p.json"), host=host
+    )
+    await listener.start()
+    try:
+        assert len(listener.bound) == 2
+        ports = [s.servers[0].sockets[0].getsockname()[1] for _, s, _ in listener._servers]
+        assert len(set(ports)) == 2
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{ports[0]}") as c:
+            pairing = listener.new_pairing()
+            assert pairing.addresses == ["127.0.0.1:0", "127.0.0.1:0"]
+            creds = (await c.post("/pair", json={"code": pairing.code, "device_name": "p"})).json()
+            assert creds["addresses"] == ["127.0.0.1:0", "127.0.0.1:0"]
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{ports[1]}") as c:
+            r, nonce = await signed(c, creds, "GET", "/hello")
+            assert r.status_code == 200 and response_ok(r, creds, nonce)
+            assert r.json()["addresses"] == ["127.0.0.1:0", "127.0.0.1:0"]
+        assert listener.view().addresses == ["127.0.0.1:0", "127.0.0.1:0"]
+    finally:
+        await listener.stop()
+
+
+async def test_listener_keeps_trying_an_address_whose_interface_is_not_up(tmp_path):
+    """The tunnel can come up after the daemon: its address is retried, not given up on,
+    while the LAN address serves from the start."""
+    from ghostd.phone import listener as mod
+
+    host = FakeHost()
+    listener = PhoneListener(
+        "127.0.0.1:0,192.0.2.1:0", store=PhoneStore(tmp_path / "p.json"), host=host
+    )
+    await listener.start()  # 192.0.2.1 (TEST-NET) is not an address of this host
+    try:
+        assert listener.bound == ["127.0.0.1:0"]
+        assert listener.addresses == ["127.0.0.1:0", "192.0.2.1:0"]
+        assert listener._rebind is not None and not listener._rebind.done()
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{listener.port}") as c:
+            pairing = listener.new_pairing()
+            r = await c.post("/pair", json={"code": pairing.code, "device_name": "p"})
+            assert r.status_code == 200
+    finally:
+        await listener.stop()
+    assert listener._rebind is None and mod.REBIND_SECS > 0
 
 
 # --- the daemon's side: who may start a session ------------------------------------------

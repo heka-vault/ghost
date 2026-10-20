@@ -1,6 +1,6 @@
 """The phone's way in (ADR 0016): pairing, signed requests, WebRTC signalling."""
 
-from ghostd.phone.listener import PhoneHost, PhoneListener, Refusal, parse_listen
+from ghostd.phone.listener import PhoneHost, PhoneListener, Refusal, parse_listen, parse_listen_list
 from ghostd.phone.pairing import Device, PairingCodes, PhoneStore
 from ghostd.phone.signing import Verifier
 
@@ -13,4 +13,5 @@ __all__ = [
     "Refusal",
     "Verifier",
     "parse_listen",
+    "parse_listen_list",
 ]

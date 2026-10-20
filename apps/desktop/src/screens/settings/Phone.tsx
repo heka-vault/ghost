@@ -139,7 +139,7 @@ export function PhoneSection({ settingsPath, openOnLoad }: { settingsPath: strin
             <ListRow
               leading={<Smartphone size={16} aria-hidden className="set-phone__icon" />}
               title="No phone paired"
-              description="Pair once. After that your phone can start a session whenever it’s home."
+              description="Pair once. After that your phone can start a session from home, or from anywhere through your tunnel."
               trailing={
                 <Button ref={pairButton} size="sm" variant="secondary" disabled={!online} onClick={() => setPairOpen(true)}>
                   Pair a phone
@@ -148,9 +148,13 @@ export function PhoneSection({ settingsPath, openOnLoad }: { settingsPath: strin
             />
           )}
           <ListRow
-            title="Phone address"
-            description="Where your phone reaches Ghost on your home network."
-            meta={<span className="set-value is-mono">{phone.address}</span>}
+            title={phone.addresses && phone.addresses.length > 1 ? "Phone addresses" : "Phone address"}
+            description={
+              phone.addresses && phone.addresses.length > 1
+                ? "Where your phone reaches Ghost: the first on your home network, the rest through your tunnel. The phone picks whichever answers."
+                : "Where your phone reaches Ghost on your home network."
+            }
+            meta={<span className="set-value is-mono">{(phone.addresses?.length ? phone.addresses : [phone.address]).join("  ·  ")}</span>}
           />
         </Card>
       )}

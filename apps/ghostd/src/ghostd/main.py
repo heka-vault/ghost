@@ -61,7 +61,8 @@ WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
 PHONE_STATE = "phone.json"
 VERSION = "0.1.0"
-PHONE_PING_GRACE_SECS = 5  # no keepalive from the phone for this long ends its session
+PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its session;
+# long enough for a cellular blip or a tunnel re-handshake away from home (ADR 0020)
 PHONE_WRITE_TIMEOUT_SECS = 2.0  # a write to a gone phone fails after this
 PHONE_WIND_DOWN_SECS = 3.0  # how long the loop waits for a cancelled phone session to drain
 PHONE_READY_SECS = 3.0  # after the connection: how long to wait for the phone's client-ready
@@ -660,6 +661,8 @@ class Daemon:
 
             @transport.event_handler("on_client_connected")
             async def _connected(_t: Any, _c: Any) -> None:
+                path = _media_path(conn)
+                logger.info(f"phone: connected{f' over {path}' if path else ''}")
                 connected.set()
 
             @transport.event_handler("on_client_disconnected")
@@ -746,6 +749,18 @@ class Daemon:
         view = pending_view(p) if p else None
         if (view.id if view else None) != (self.state.pending.id if self.state.pending else None):
             self.state.set_pending(view)
+
+
+def _media_path(conn: Any) -> str | None:
+    """The nominated ICE pair as ``local -> remote`` (addresses and candidate types), for the
+    log: it says whether the phone came in over the LAN or the tunnel (ADR 0020)."""
+    try:
+        ice = conn._pc.sctp.transport.transport  # RTCIceTransport, through DTLS and SCTP
+        pair = ice._connection._nominated[1]
+        lc, rc = pair.local_candidate, pair.remote_candidate
+        return f"{lc.host}:{lc.port} ({lc.type}) -> {rc.host}:{rc.port} ({rc.type})"
+    except Exception:  # noqa: BLE001 - private aiortc/aioice state; a missing path is fine
+        return None
 
 
 async def _close_peer(conn: Any) -> None:

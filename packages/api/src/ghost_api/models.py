@@ -377,7 +377,8 @@ class PhonePairing(BaseModel):
     """A fresh pairing code for the phone listener. Shown to the operator only."""
 
     code: str  # six digits
-    address: str  # GHOST_PHONE_LISTEN, host:port
+    address: str  # the first GHOST_PHONE_LISTEN address, host:port; what the operator types
+    addresses: list[str] = Field(default_factory=list)  # every address the listener serves
     expires_at: datetime
 
 
@@ -390,4 +391,5 @@ class PhoneDevice(BaseModel):
 
 class PhoneView(BaseModel):
     address: str | None  # None when the listener is off
+    addresses: list[str] = Field(default_factory=list)  # LAN first, then the tunnel (ADR 0020)
     device: PhoneDevice | None

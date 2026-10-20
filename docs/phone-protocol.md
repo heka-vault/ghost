@@ -1,7 +1,9 @@
 # Phone protocol
 
 This is the wire format between `apps/mobile` and `ghostd`'s phone listener (ADR 0016). The
-listener is plain HTTP on `GHOST_PHONE_LISTEN` (for example `192.168.1.20:8765`). JSON bodies are UTF-8.
+listener is plain HTTP on every address in `GHOST_PHONE_LISTEN`, comma separated: the LAN address
+first, then the operator's tunnel address for use away from home (ADR 0020), for example
+`192.168.1.20:8765,10.8.0.4:8765`. The same app serves on each. JSON bodies are UTF-8.
 
 ## Pairing
 
@@ -9,8 +11,8 @@ The desktop app calls the control API (Unix socket, ADR 0013):
 
 | Route | Result |
 |---|---|
-| `POST /phone/pairing` | `{code: "482913", address: "192.168.1.20:8765", expires_at}`. A new code replaces the last one. 409 if the listener is off. |
-| `GET /phone` | `{address: string\|null, device: {id, name, paired_at, last_seen\|null}\|null}` |
+| `POST /phone/pairing` | `{code: "482913", address: "192.168.1.20:8765", addresses: [...], expires_at}`. `address` is the first listen address, the one the operator types; `addresses` is every one. A new code replaces the last one. 409 if the listener is off. |
+| `GET /phone` | `{address: string\|null, addresses: string[], device: {id, name, paired_at, last_seen\|null}\|null}` |
 | `DELETE /phone` | `{ok, detail}`. Forget the paired phone. Its signatures stop working at once, and a phone session that is running ends. |
 
 The phone sends `POST /pair` to the listener, unsigned:
@@ -19,8 +21,10 @@ The phone sends `POST /pair` to the listener, unsigned:
 { "code": "482913", "device_name": "Pixel 9" }
 ```
 
-`200` returns `{device_id, secret, workstation}`. `secret` is 32 random bytes, base64url without padding.
-`workstation` is the desk's hostname. The phone stores the secret in secure storage, and the desk keeps it
+`200` returns `{device_id, secret, workstation, addresses}`. `secret` is 32 random bytes, base64url without padding.
+`workstation` is the desk's hostname. `addresses` is every address the listener serves, in the configured
+order; the phone keeps the list and, whenever it has no address in use, asks all of them and keeps the
+first in the list that answers (home before tunnel). The phone stores the secret in secure storage, and the desk keeps it
 in `~/.local/share/ghost/phone.json` (mode 0600). A code is single use and valid for 120 s. After five
 wrong tries the code is spent. A wrong or spent code returns `403 {error: "bad_code"}`.
 
@@ -73,7 +77,7 @@ or query that doesn't fit), `bad_offer` and `bad_candidate` (400), `not_found` (
 
 | Route | Body | Result |
 |---|---|---|
-| `GET /hello` | | `{workstation, status: Status}`. `Status` is the control API's, including `session_origin: "desk" \| "phone" \| null`. |
+| `GET /hello` | | `{workstation, addresses, status: Status}`. `Status` is the control API's, including `session_origin: "desk" \| "phone" \| null`. `addresses` is the current list; the phone replaces its saved one when it differs. |
 | `GET /audit?limit=N&offset=M` | | the control API's `AuditPage` |
 | `POST /offer` | `{sdp, type: "offer", pc_id?, restart_pc?}` | `{sdp, type: "answer", pc_id}`. 409 `{error: "busy"}` while any session runs, desk or phone. 503 `{error: "not_ready"}` until the models load. |
 | `PATCH /offer` | `{pc_id, candidates: [{candidate, sdp_mid, sdp_mline_index}]}` | `{ok: true}` (trickle ICE). `candidate` may keep its `candidate:` prefix; an empty one means end of candidates. |

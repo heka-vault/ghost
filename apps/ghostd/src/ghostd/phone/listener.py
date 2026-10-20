@@ -1,9 +1,13 @@
-"""The phone listener (ADR 0016): a small signed HTTP app on one LAN address.
+"""The phone listener (ADR 0016, ADR 0020): a small signed HTTP app on the configured addresses.
 
 It is not the control API and does not proxy it. Five routes: ``POST /pair``
 (unsigned, spends a pairing code), ``GET /hello``, ``GET /audit``, ``POST``/``PATCH
 /offer`` (WebRTC signalling) and ``POST /end``. Everything but ``/pair`` is signed both
 ways by ``SigningMiddleware``; the wire format is docs/phone-protocol.md.
+
+``GHOST_PHONE_LISTEN`` may list several ``host:port`` addresses, comma separated: the LAN
+address and the operator's tunnel address (ADR 0020). The first must bind at start; a later
+one whose interface is not up yet is retried until it is.
 
 The daemon is reached through ``PhoneHost``: it owns sessions, so it decides whether a
 phone may start one and runs it on the connection the listener negotiated.
@@ -33,6 +37,7 @@ from ghostd.phone.pairing import PairingCodes, PhoneStore
 from ghostd.phone.signing import H_DEVICE, H_NONCE, H_SIGNATURE, H_TIME, Verifier, sign_response
 
 Refusal = Literal["busy", "not_ready"]
+REBIND_SECS = 5.0  # how often a listen address whose interface isn't up yet is tried again
 UNSIGNED_PATHS = frozenset({"/pair"})
 _STATUS_CODES = {
     400: "bad_request",
@@ -65,6 +70,16 @@ def parse_listen(value: str) -> tuple[str, int]:
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
     return host, int(port)
+
+
+def parse_listen_list(value: str) -> list[str]:
+    """``GHOST_PHONE_LISTEN``: one or more ``host:port``, comma separated, each validated."""
+    addresses = [a.strip() for a in value.split(",") if a.strip()]
+    if not addresses:
+        raise ValueError("GHOST_PHONE_LISTEN is empty")
+    for a in addresses:
+        parse_listen(a)
+    return addresses
 
 
 def _json(status: int, body: Any, headers: dict[str, str] | None = None) -> JSONResponse:
@@ -232,11 +247,12 @@ class _Server(uvicorn.Server):
 def _default_connection() -> Any:
     from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
-    return SmallWebRTCConnection(ice_servers=[])  # no STUN, no TURN: LAN only
+    # No STUN, no TURN: the LAN, or the operator's own tunnel (ADR 0020). Host candidates only.
+    return SmallWebRTCConnection(ice_servers=[])
 
 
 class PhoneListener:
-    """Pairing state, the signed app, and the uvicorn server bound to ``address``."""
+    """Pairing state, the signed app, and one uvicorn server per configured address."""
 
     def __init__(
         self,
@@ -249,8 +265,8 @@ class PhoneListener:
         connection_factory: Callable[[], Any] = _default_connection,
         workstation: str | None = None,
     ) -> None:
-        self.address = address
-        self.bind = parse_listen(address)
+        self.addresses = parse_listen_list(address)
+        self.address = self.addresses[0]  # the one the desktop shows for pairing
         self.store = store
         self.host = host
         self.codes = codes or PairingCodes()
@@ -258,8 +274,8 @@ class PhoneListener:
         self.workstation = workstation or socket.gethostname()
         self._connection_factory = connection_factory
         self._conn: Any = None  # the live phone peer connection, if any
-        self._server: uvicorn.Server | None = None
-        self._task: asyncio.Task[None] | None = None
+        self._servers: list[tuple[str, uvicorn.Server, asyncio.Task[None]]] = []
+        self._rebind: asyncio.Task[None] | None = None
         self.app = self._build_app()
 
     # --- control API side (Controller delegates here) ---------------------------------
@@ -267,7 +283,9 @@ class PhoneListener:
     def new_pairing(self) -> PhonePairing:
         code, expires_at = self.codes.mint()
         logger.info("phone: pairing code issued (valid 2 minutes)")  # never the code
-        return PhonePairing(code=code, address=self.address, expires_at=expires_at)
+        return PhonePairing(
+            code=code, address=self.address, addresses=self.addresses, expires_at=expires_at
+        )
 
     def view(self) -> PhoneView:
         d = self.store.device
@@ -276,7 +294,7 @@ class PhoneListener:
             if d
             else None
         )
-        return PhoneView(address=self.address, device=device)
+        return PhoneView(address=self.address, addresses=self.addresses, device=device)
 
     async def forget(self) -> bool:
         had = self.store.forget()
@@ -325,14 +343,24 @@ class PhoneListener:
             device = self.store.pair(req.device_name.strip())
             return _json(
                 200,
-                {"device_id": device.id, "secret": device.secret, "workstation": self.workstation},
+                {
+                    "device_id": device.id,
+                    "secret": device.secret,
+                    "workstation": self.workstation,
+                    "addresses": self.addresses,
+                },
             )
 
         @app.get("/hello")
         async def hello() -> JSONResponse:
             status = self.host.status()
             return _json(
-                200, {"workstation": self.workstation, "status": status.model_dump(mode="json")}
+                200,
+                {
+                    "workstation": self.workstation,
+                    "addresses": self.addresses,
+                    "status": status.model_dump(mode="json"),
+                },
             )
 
         @app.get("/audit")
@@ -403,8 +431,23 @@ class PhoneListener:
     # --- serving ---------------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Bind exactly ``address`` and serve. A bind failure raises ``OSError`` here."""
-        host, port = self.bind
+        """Bind every configured address and serve. The first address must bind, or this
+        raises ``OSError``. A later one whose interface isn't up yet (a tunnel that comes up
+        after the daemon) is retried every ``REBIND_SECS`` until it binds or the listener stops."""
+        first, *rest = self.addresses
+        await self._serve(first)
+        late: list[str] = []
+        for address in rest:
+            try:
+                await self._serve(address)
+            except OSError as e:
+                logger.warning(f"phone: {address} not bound yet ({e.strerror or e}); retrying")
+                late.append(address)
+        if late:
+            self._rebind = asyncio.ensure_future(self._rebind_loop(late))
+
+    async def _serve(self, address: str) -> None:
+        host, port = parse_listen(address)
         family = socket.AF_INET6 if ":" in host else socket.AF_INET
         sock = socket.socket(family, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -421,42 +464,66 @@ class PhoneListener:
             lifespan="off",
             timeout_graceful_shutdown=2.0,  # the phone's keep-alive polls must not hold the exit
         )
-        self._server = _Server(config)
-        self._task = asyncio.ensure_future(self._server.serve(sockets=[sock]))
+        server = _Server(config)
+        task = asyncio.ensure_future(server.serve(sockets=[sock]))
         for _ in range(200):
-            if self._server.started or self._task.done():
+            if server.started or task.done():
                 break
             await asyncio.sleep(0.02)
-        if not self._server.started:
-            self._server.should_exit = True
-            await asyncio.gather(self._task, return_exceptions=True)
-            raise RuntimeError(f"phone listener did not start on {self.address}")
-        logger.info(f"phone: listening on {self.address}")
+        if not server.started:
+            server.should_exit = True
+            await asyncio.gather(task, return_exceptions=True)
+            raise RuntimeError(f"phone listener did not start on {address}")
+        self._servers.append((address, server, task))
+        logger.info(f"phone: listening on {address}")
+
+    async def _rebind_loop(self, late: list[str]) -> None:
+        while late:
+            await asyncio.sleep(REBIND_SECS)
+            for address in list(late):
+                try:
+                    await self._serve(address)
+                except OSError:
+                    continue
+                except RuntimeError as e:
+                    logger.error(str(e))
+                late.remove(address)
+
+    @property
+    def bound(self) -> list[str]:
+        """The addresses serving right now (a late one is missing until it binds)."""
+        return [address for address, _, _ in self._servers]
 
     @property
     def port(self) -> int:
-        """The bound port (useful when the configured port is 0, in tests)."""
-        assert self._server is not None
-        return self._server.servers[0].sockets[0].getsockname()[1]
+        """The first bound port (useful when the configured port is 0, in tests)."""
+        assert self._servers, "not started"
+        return self._servers[0][1].servers[0].sockets[0].getsockname()[1]
 
     async def stop(self) -> None:
+        if self._rebind is not None:
+            self._rebind.cancel()
+            await asyncio.gather(self._rebind, return_exceptions=True)
+            self._rebind = None
         if self._conn is not None:
             await self._close(self._conn)
             self._conn = None
-        if self._server is not None:
-            self._server.should_exit = True
-        if self._task is not None:
+        for _, server, _ in self._servers:
+            server.should_exit = True
+        tasks = [task for _, _, task in self._servers]
+        if tasks:
             try:
-                await asyncio.wait_for(asyncio.shield(self._task), 4.0)
+                await asyncio.wait_for(asyncio.shield(asyncio.gather(*tasks)), 4.0)
             except TimeoutError:
                 logger.warning("phone: connections still open at shutdown; closing them")
-                if self._server is not None:
-                    self._server.force_exit = True
-                self._task.cancel()
-                await asyncio.gather(self._task, return_exceptions=True)
-            except Exception:  # noqa: BLE001 - the server's own failure, already logged
+                for _, server, task in self._servers:
+                    server.force_exit = True
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except Exception:  # noqa: BLE001 - a server's own failure, already logged
                 pass
+        self._servers = []
         self.store.flush()
 
 
-__all__ = ["PhoneHost", "PhoneListener", "Refusal", "parse_listen"]
+__all__ = ["PhoneHost", "PhoneListener", "Refusal", "parse_listen", "parse_listen_list"]
