@@ -40,6 +40,8 @@ from pipecat.processors.frame_processor import FrameDirection
         ("That is all I need. I will talk to you later.", False, "hang_up"),
         ("I think that is everything for today. Bye.", False, "hang_up"),
         ("goodbye", True, "hang_up"),
+        ("Uh never mind. I will talk to you later.", False, "hang_up"),
+        ("Nothing else, gotta go.", True, "hang_up"),
         # anything else first goes to the model, which does the work
         ("close it and then hang up", False, None),
         ("label it bug, bye", False, None),
@@ -75,13 +77,19 @@ class Always:
         return self.handled
 
 
-def make(interceptors, gate):
+def make(interceptors, gate, dropped=None):
     slept = []
 
     async def on_sleep():
         slept.append(True)
 
-    proc = InterceptorProcessor(interceptors, gate=gate, session_id="s", on_hang_up=on_sleep)
+    async def on_handled():
+        if dropped is not None:
+            dropped.append(True)
+
+    proc = InterceptorProcessor(
+        interceptors, gate=gate, session_id="s", on_hang_up=on_sleep, on_handled=on_handled
+    )
     pushed = []
 
     async def push_frame(frame, direction=FrameDirection.DOWNSTREAM):
@@ -152,7 +160,36 @@ def test_assemble_splices_slots_in_order():
 
 
 async def test_the_shortcut_says_a_warm_goodbye_not_a_bare_okay():
-    from ghost_voice.intents import GOODBYES
 
     h = await QuickIntents().on_user_turn(UserTurn("I'll talk to you later. Hang up.", False, ""))
-    assert h is not None and h.say in GOODBYES and h.say != "Okay."
+    from ghost_voice.intents import GOODBYES
+
+    assert h is not None and h.say in GOODBYES and h.say != "Okay." and h.action == "hang_up"
+
+
+async def test_a_goodbye_in_pieces_is_caught_and_the_earlier_pieces_are_taken_back():
+    """STT hands "All right. Good." and then "I will talk to you later." as two frames. The
+    first went down to the aggregator; the goodbye takes it back (on_handled) so the model
+    never runs on it, and the whole turn is judged together ("I will talk to you" + "later")."""
+    from pipecat.frames.frames import UserStartedSpeakingFrame
+
+    dropped: list = []
+    proc, pushed, slept = make([QuickIntents()], FakeGate(), dropped)
+    await proc.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await proc.process_frame(said("All right. Good."), FrameDirection.DOWNSTREAM)
+    assert any(isinstance(f, TranscriptionFrame) for f in pushed) and not slept
+    await proc.process_frame(said("I will talk to you later."), FrameDirection.DOWNSTREAM)
+    assert slept == [True] and dropped == [True]
+
+    dropped.clear()
+    proc, pushed, slept = make([QuickIntents()], FakeGate(), dropped)
+    await proc.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await proc.process_frame(said("I will talk to you"), FrameDirection.DOWNSTREAM)
+    await proc.process_frame(said("later."), FrameDirection.DOWNSTREAM)
+    assert slept == [True] and dropped == [True]  # neither piece alone is a goodbye
+
+    # a lone piece that is not a goodbye still passes, and nothing is taken back
+    dropped.clear()
+    proc, pushed, slept = make([QuickIntents()], FakeGate(), dropped)
+    await proc.process_frame(said("what needs my sign off"), FrameDirection.DOWNSTREAM)
+    assert not slept and not dropped and isinstance(pushed[-1], TranscriptionFrame)

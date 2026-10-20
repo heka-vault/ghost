@@ -20,6 +20,13 @@ when either changes. Builds are arm64 only (`ANDROID_ARCH`). The APK is signed w
 debug key: fine for your own phone, not for the Play Store.
 
 
+## Lines
+
+Home shows the other lines (threads, ADR 0014) under the ghost, each with its tile and
+colour, its name and its scope. A tap calls that line directly: the session opens in it and
+it greets as itself. From any line you can still be patched to any other live one, or back
+to Ghost, by voice; settled lines are not listed and not reachable by voice.
+
 ## In a pocket or a car
 
 A session keeps the microphone open with the screen off: Start also starts a small foreground

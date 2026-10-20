@@ -11,7 +11,7 @@
  * to change something back the operator asks Ghost, which makes the opposite change through
  * the gate like any other.
  */
-import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn } from "@ghost/client-ts";
+import type { AuditEntry, ConversationView, OutcomeView, PendingProposal, Status, Turn } from "@ghost/client-ts";
 
 /** How the phone reaches the desk right now. */
 export type Link = "connecting" | "online" | "reconnecting" | "offline";
@@ -47,6 +47,8 @@ export interface DeskState {
   lastCall: CallStats | null;
   /** The call's audio route; speaker by default, a car or headset when one is connected. */
   audio: AudioState;
+  /** The threads a call can start in, Ghost first, settled ones left out (ADR 0014). */
+  conversations: ConversationView[];
   /** The daemon's status as it last reported it; null before the first one arrives. */
   status: Status | null;
   /** The confirm-level change waiting for a spoken yes, if any. */
@@ -64,8 +66,8 @@ export interface DeskState {
 export interface Desk {
   getState(): DeskState;
   subscribe(listener: () => void): () => void;
-  /** Open the phone's mic into a session on the desk. */
-  start(): Promise<void>;
+  /** Open the phone's mic into a session on the desk, in Ghost or in the thread named. */
+  start(conversation?: string): Promise<void>;
   /** Close the session and the phone's mic. */
   end(): Promise<void>;
   /** Ask the desk once, now; the link also keeps retrying on its own. */

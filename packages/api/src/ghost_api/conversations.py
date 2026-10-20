@@ -62,24 +62,29 @@ def voice_label(voice_id: str) -> str:
     return f"{lang} {sex}: {name.capitalize()}".strip()
 
 
+def conversation_view(p: Profile, active: str | None) -> ConversationView:
+    """The control API's view of a thread; the phone listener serves the same one."""
+    return ConversationView(
+        slug=p.slug,
+        name=p.name,
+        aliases=list(p.aliases),
+        voice=p.voice,
+        speed=p.speed,
+        scope={a: list(items) for a, items in p.scope.items()},
+        created_at=p.created_at,
+        last_active_at=p.last_active_at,
+        settled_at=p.settled_at,
+        active=active == p.slug,
+        is_ghost=p.is_ghost,
+    )
+
+
 def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
     convs: Conversations = deps.conversations
     st = deps.state
 
     def view(p: Profile) -> ConversationView:
-        return ConversationView(
-            slug=p.slug,
-            name=p.name,
-            aliases=list(p.aliases),
-            voice=p.voice,
-            speed=p.speed,
-            scope={a: list(items) for a, items in p.scope.items()},
-            created_at=p.created_at,
-            last_active_at=p.last_active_at,
-            settled_at=p.settled_at,
-            active=st.conversation == p.slug,
-            is_ghost=p.is_ghost,
-        )
+        return conversation_view(p, st.conversation)
 
     def validated_scope(slug: str, scope: dict[str, list[str]]) -> dict[str, tuple[str, ...]]:
         try:

@@ -22,6 +22,8 @@ Holding costs the time to generate a reply (a sentence or two) before TTS starts
 
 from __future__ import annotations
 
+import random
+
 from pipecat.frames.frames import (
     Frame,
     FunctionCallsStartedFrame,
@@ -29,6 +31,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    TTSSpeakFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -46,6 +49,7 @@ class NarrationCut(FrameProcessor):
         self._released = False  # this response is long: pass its text through
         self._closed = False  # going to sleep: say nothing more
         self._closing = False  # say nothing after the current response
+        self._saw_text = False  # this response produced words
 
     def close(self, *, keep_current: bool = False) -> None:
         if keep_current:
@@ -58,6 +62,7 @@ class NarrationCut(FrameProcessor):
         self._held.clear()
         self._calling = False
         self._released = False
+        self._saw_text = False
 
     async def _release(self) -> None:
         held, self._held = self._held, []
@@ -80,12 +85,21 @@ class NarrationCut(FrameProcessor):
         ):
             self._released = True  # the goodbye: speak what was held and what follows
             await self._release()
+            if not self._saw_text and {c.function_name for c in frame.function_calls} == {
+                "hang_up"
+            }:
+                # The model hung up without a word (seen 2026-10-20: the call closed in
+                # silence). The goodbye is Ghost's, not optional: say one of its own.
+                from ghost_voice.intents import GOODBYES
+
+                await self.push_frame(TTSSpeakFrame(random.choice(GOODBYES)), direction)
         elif isinstance(frame, FunctionCallsStartedFrame):
             if self._held:
                 debug.audio(f"narration: dropped {''.join(f.text for f in self._held)!r}")
             self._held.clear()
             self._calling = True
         elif isinstance(frame, LLMTextFrame):
+            self._saw_text = True
             if self._calling or self._closed:
                 return
             if self._released:

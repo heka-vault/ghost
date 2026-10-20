@@ -74,7 +74,7 @@ async def test_nothing_more_is_said_once_going_to_sleep():
     assert texts(out) == ""
 
 
-async def test_the_goodbye_with_hang_up_is_spoken_and_nothing_after():
+async def test_the_goodbye_with_hang_up_is_spoken_and_nothing_after_and_a_hold_keeps_its_line():
     from pipecat.frames.frames import FunctionCallFromLLM
 
     c, out = cut()
@@ -87,3 +87,29 @@ async def test_the_goodbye_with_hang_up_is_spoken_and_nothing_after():
         c, LLMFullResponseStartFrame(), LLMTextFrame("You're welcome."), LLMFullResponseEndFrame()
     )
     assert texts(out) == "Sounds good, talk later!"
+
+    c, out = cut()
+    hold = FunctionCallFromLLM(function_name="hold", tool_call_id="h", arguments={}, context=None)
+    await feed(c, LLMFullResponseStartFrame(), LLMTextFrame("Take your time."))
+    await feed(c, FunctionCallsStartedFrame(function_calls=[hold]), LLMFullResponseEndFrame())
+    assert texts(out) == "Take your time."
+
+
+async def test_a_hang_up_without_words_gets_a_goodbye_of_ghosts_own():
+    from ghost_voice.intents import GOODBYES
+    from pipecat.frames.frames import FunctionCallFromLLM, TTSSpeakFrame
+
+    c, out = cut()
+    bye = FunctionCallFromLLM(function_name="hang_up", tool_call_id="t", arguments={}, context=None)
+    await feed(c, LLMFullResponseStartFrame())
+    c.close(keep_current=True)
+    await feed(c, FunctionCallsStartedFrame(function_calls=[bye]), LLMFullResponseEndFrame())
+    spoken = [f.text for f in out if isinstance(f, TTSSpeakFrame)]
+    assert len(spoken) == 1 and spoken[0] in GOODBYES
+
+    # with words of its own, no extra goodbye
+    c, out = cut()
+    await feed(c, LLMFullResponseStartFrame(), LLMTextFrame("Talk soon!"))
+    c.close(keep_current=True)
+    await feed(c, FunctionCallsStartedFrame(function_calls=[bye]), LLMFullResponseEndFrame())
+    assert not any(isinstance(f, TTSSpeakFrame) for f in out) and texts(out) == "Talk soon!"

@@ -36,7 +36,11 @@ Ghost and does nothing: in this operator's rooms, Ghost is a project people disc
 The ordinary idle timeout does not run during a hold.
 
 **Goodbye hangs up; "go to sleep" is no longer a phrase.** "Talk to you later", "bye",
-"that's all", "thanks, Ghost" end the session with a warm goodbye, as before. The model's
+"that's all", "thanks, Ghost" end the session with a short, warm goodbye: the operator tried
+a silent hang-up and found the goodbye is what makes the end feel human (2026-10-20). The
+speed comes from everything around it: an instant phrase match where possible, no model
+follow-up after the `hang_up` call, a short end-of-turn fallback, and the phone closing the
+call, with a hang-up tone of its own, the moment the goodbye has played. The model's
 tool is `hang_up`. Nothing answers to "go to sleep" any more. The control API's `/sleep`
 route and the `ghostd sleep` command keep their names for now; they are operator tooling,
 not something said aloud.

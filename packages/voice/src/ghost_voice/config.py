@@ -132,6 +132,10 @@ class VoiceSettings(BaseSettings):
     # How long Ghost waits after the turn model says the operator is done before it
     # answers; speaking again in that time keeps the turn open. 0 answers at once.
     turn_grace_secs: float = 0.8
+    # Smart Turn's fallback: when it judges an utterance incomplete, the turn still closes
+    # after this much silence. 3 s upstream; 1.6 s here because it fired on finished
+    # sentences and goodbyes waited for nothing (docs/performance.md, 2026-10-20).
+    turn_stop_secs: float = 1.6
     idle_timeout_secs: float = 45.0
     # A session on hold (ADR 0021) hangs up quietly after this long without being addressed.
     hold_timeout_secs: float = 1800.0

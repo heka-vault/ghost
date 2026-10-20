@@ -6,6 +6,8 @@
  */
 import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn } from "@ghost/client-ts";
 
+import type { ConversationView } from "@ghost/client-ts";
+
 import type { Desk, DeskState, Link, Route } from "./types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -62,6 +64,12 @@ function seedAudit(): AuditEntry[] {
 
 export type MockAct = "ask" | "yes" | "no" | "talk" | "drop" | "deskDown" | "deskUp" | "deskSession";
 
+const MOCK_LINES: ConversationView[] = [
+  { slug: "ghost", name: "Ghost", aliases: [], voice: "af_heart", speed: 1, scope: {}, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", settled_at: null, active: false, is_ghost: true },
+  { slug: "heka-workshop", name: "Heka workshop", aliases: ["workshop"], voice: "am_adam", speed: 1, scope: { github_issues: ["heka-vault/ghost"] }, created_at: "2026-10-18T09:00:00Z", last_active_at: "2026-10-20T11:00:00Z", settled_at: null, active: false, is_ghost: false },
+  { slug: "quotient-research", name: "Quotient research", aliases: [], voice: "bf_emma", speed: 1, scope: { github_issues: ["quotient-research/quotient-app", "quotient-research/website"] }, created_at: "2026-10-19T09:00:00Z", last_active_at: "2026-10-19T18:00:00Z", settled_at: null, active: false, is_ghost: false },
+];
+
 export class MockDesk implements Desk {
   private state: DeskState;
   private listeners = new Set<() => void>();
@@ -69,7 +77,7 @@ export class MockDesk implements Desk {
   private muted = false;
 
   constructor() {
-    this.state = { link: "connecting", via: "Wi-Fi", lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
+    this.state = { link: "connecting", via: "Wi-Fi", lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, conversations: MOCK_LINES, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
     const audit = seedAudit();
     setTimeout(() => this.set({ link: "online", status: this.status({}), audit, auditTotal: audit.length }), 700);
   }
@@ -132,11 +140,11 @@ export class MockDesk implements Desk {
     return !!this.state.status?.session_id && this.state.status.session_origin !== "desk";
   }
 
-  async start() {
+  async start(conversation?: string) {
     this.reachable();
     if (this.state.status?.session_origin === "desk") throw new Error("Ghost is busy at your desk. End that session there, then start here.");
     await sleep(500);
-    this.set({ status: this.status({ phase: "listening", session_id: id(), session_origin: "phone" }), turns: [] });
+    this.set({ status: this.status({ phase: "listening", session_id: id(), session_origin: "phone", conversation: conversation ?? "ghost" }), turns: [] });
     void this.speak("Ghost here. Two issues are waiting on you.");
   }
 

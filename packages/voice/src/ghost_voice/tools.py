@@ -372,7 +372,10 @@ def register_tools(
     schemas.append(
         FunctionSchema(
             name="hang_up",
-            description="End the conversation: the operator said goodbye.",
+            description=(
+                "End the conversation: the operator said goodbye. Say a short, warm "
+                "goodbye in the same reply."
+            ),
             properties={},
             required=[],
         )
@@ -380,8 +383,11 @@ def register_tools(
 
     async def hang_up(params: FunctionCallParams) -> None:
         # The model's goodbye in this same response is spoken (ghost_voice.narration lets
-        # hang_up's text through); nothing it says after this is.
-        await params.result_callback({"ok": True})
+        # hang_up's text through); no follow-up completion runs, and the call ends as the
+        # goodbye finishes.
+        await params.result_callback(
+            {"ok": True}, properties=FunctionCallResultProperties(run_llm=False)
+        )
         await on_hang_up()
 
     llm.register_function("hang_up", hang_up)

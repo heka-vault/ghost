@@ -83,6 +83,15 @@ GOODBYE_TAILS = (
     "see ya",
     "i'm done",
     "we're done",
+    "gotta go",
+    "got to go",
+    "i have to go",
+    "i gotta go",
+    "have to run",
+    "catch you later",
+    "later",
+    "that's it",
+    "all set",
 )
 _SMALL_TALK = _FILLERS | {
     "alright",
@@ -123,9 +132,21 @@ _SMALL_TALK = _FILLERS | {
     "everything",
     "was",
     "perfect",
+    # "Never mind, I'll talk to you later": a dropped thought before the goodbye
+    "never",
+    "mind",
+    "nevermind",
+    "anyway",
+    "anyways",
+    "nothing",
+    "else",
+    "then",
 }
 # What Ghost says when the shortcut hangs up. Not a bare "Okay.": Kokoro reads a lone
-# word flat and falling, and it came across as sad to be sent away.
+# word flat and falling, and it came across as sad to be sent away. The goodbye stays
+# (it is what makes the end feel human, 2026-10-20); the speed comes from everything
+# around it: the instant phrase match, no model round trip, and the phone closing the
+# call the moment the goodbye has played.
 GOODBYES = ("Talk soon!", "Catch you later!", "Sounds good, talk soon!", "Bye for now!")
 CANCEL = {  # only when a change is waiting for a yes
     "never mind",

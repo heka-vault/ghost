@@ -24,6 +24,7 @@ from ghost_core.conversations import GHOST, SUMMARY_TEMPLATE, Conversations
 from loguru import logger
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
@@ -102,7 +103,9 @@ class Models:
             voices_path=voices_path if voices_path.exists() else None,
             settings=KokoroTTS.Settings(voice=s.tts_voice, speed=s.tts_speed),
         )
-        turn = SmartTurn(cpu_count=s.smart_turn_threads)
+        turn = SmartTurn(
+            cpu_count=s.smart_turn_threads, params=SmartTurnParams(stop_secs=s.turn_stop_secs)
+        )
         return cls(stt=stt, tts=tts, turn=turn)
 
 
@@ -221,6 +224,8 @@ items; preferences about how the operator likes things done. Fold in any earlier
 that is still true. Drop greetings, small talk, and tool chatter. Do not invent anything. \
 Write only the memory, no preamble."""
 
+# A thread called directly (ADR 0014; the phone can start in one) answers as itself.
+THREAD_GREETINGS = ("{name} here.", "{name}. Go ahead.", "{name}, what do you need?")
 GREETINGS = (
     "Ghost. What do you need?",
     "Yeah?",
@@ -373,7 +378,8 @@ def build_session(
 
     async def hang_up(*, keep_current: bool = True) -> None:
         """The model called hang_up: its goodbye in this response is spoken, then the
-        session ends. The shortcut (``hang_up_now``) has said its own goodbye already."""
+        session ends. The shortcut (``hang_up_now``) has queued its own goodbye already;
+        a hold that ran out or the idle timeout hangs up with nothing said."""
         nonlocal hold_timer
         logger.info("hang_up")
         if hold_timer:
@@ -570,6 +576,7 @@ def build_session(
                         session_id=session_id,
                         on_hang_up=hang_up_now,
                         on_hold=hold,
+                        on_handled=user_agg.reset,
                         last_assistant=last_assistant,
                         probe=latency,
                     ),
@@ -652,7 +659,12 @@ def build_session(
         elif greeting:
             from pipecat.frames.frames import TTSSpeakFrame
 
-            text = random.choice(GREETINGS) if greeting == GREETING_VARIED else greeting
+            if greeting == GREETING_VARIED and runtime and not runtime.active.is_ghost:
+                text = random.choice(THREAD_GREETINGS).format(name=runtime.active.name)
+            elif greeting == GREETING_VARIED:
+                text = random.choice(GREETINGS)
+            else:
+                text = greeting
             await worker.queue_frames([TTSSpeakFrame(text)])
         else:
             await worker.queue_frames([LLMRunFrame()])

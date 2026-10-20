@@ -29,7 +29,8 @@ from ghost_api import (
     pending_view,
     status_snapshot,
 )
-from ghost_api.models import StatusEvent
+from ghost_api.conversations import conversation_view
+from ghost_api.models import ConversationView, StatusEvent
 from ghost_core import (
     AbilityError,
     AutonomyPolicy,
@@ -63,11 +64,27 @@ PHONE_STATE = "phone.json"
 VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its session;
 # long enough for a cellular blip or a tunnel re-handshake away from home (ADR 0020)
-PHONE_WRITE_TIMEOUT_SECS = 2.0  # a write to a gone phone fails after this
+PHONE_WRITE_TIMEOUT_SECS = 0.5  # a write to a gone phone fails after this; the desk is free sooner
 PHONE_WIND_DOWN_SECS = 3.0  # how long the loop waits for a cancelled phone session to drain
 PHONE_READY_SECS = 3.0  # after the connection: how long to wait for the phone's client-ready
 PHONE_GREETING_LEAD_SECS = 0.3  # let the phone's playback settle before the first word
 PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then is dropped
+
+# While a phone session winds down after the phone has gone, Pipecat's output transport
+# reports its writes to the dead peer as errors. They are the expected tail of a hang-up,
+# not faults; the sinks drop them while this is set.
+_PHONE_TEARDOWN = {"on": False}
+_TEARDOWN_NOISE = ("writing audio to the transport", "can no longer do its job")
+
+
+def quiet_phone_teardown(record: Any) -> bool:
+    """A loguru filter: True to keep the record."""
+    if not _PHONE_TEARDOWN["on"]:
+        return True
+    if not str(record["name"]).startswith("pipecat"):
+        return True
+    message = record["message"]
+    return not any(noise in message for noise in _TEARDOWN_NOISE)
 
 
 class Daemon:
@@ -294,15 +311,28 @@ class Daemon:
             return "busy"
         return None
 
-    async def start_phone(self, connection: Any) -> Refusal | None:
+    def lines(self) -> list[ConversationView]:
+        """The threads a phone call can start in: Ghost first, settled ones left out."""
+        if self.conversations is None:
+            return []
+        profiles = self.conversations.list(include_settled=False)
+        return [conversation_view(p, self.state.conversation) for p in profiles]
+
+    async def start_phone(self, connection: Any, conversation: str | None = None) -> Refusal | None:
+        line = conversation or GHOST
+        if line != GHOST:
+            profile = self.conversations.get(line) if self.conversations else None
+            if profile is None or profile.settled:
+                return "no_such_line"
         refusal = self.admit_phone()
         if refusal is None:
             self._phone_end.clear()
-            self._phone_q.put_nowait(connection)
+            self._phone_q.put_nowait((connection, line))
         return refusal
 
     async def end_phone(self) -> bool:
         if self._origin == "phone" or not self._phone_q.empty():
+            _PHONE_TEARDOWN["on"] = True
             self._phone_end.set()
             return True
         return False
@@ -431,16 +461,24 @@ class Daemon:
                 phone_task.cancel()
                 if phone is None and not self._phone_q.empty():  # accepted in the same tick
                     phone = self._phone_q.get_nowait()
+                phone_conn, phone_line = phone if phone is not None else (None, GHOST)
                 if self._stop.is_set() or phone is not None or not wake_task.done():
                     wake_task.cancel()
                     await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
                 if self._stop.is_set():
-                    if phone is not None:
-                        await _close_peer(phone)
+                    if phone_conn is not None:
+                        await _close_peer(phone_conn)
                     break
-                if phone is not None:  # the phone takes the session; the desk mic is free
+                if phone_conn is not None:  # the phone takes the session; the desk mic is free
                     await self._conversation(
-                        models, abilities, gate, events, ducker, None, phone=phone
+                        models,
+                        abilities,
+                        gate,
+                        events,
+                        ducker,
+                        None,
+                        phone=phone_conn,
+                        start_in=phone_line,
                     )
                     continue
                 if not wake_task.done():  # settings changed: rebuild the listener
@@ -505,6 +543,7 @@ class Daemon:
             lambda m: self.state.log(m.record["level"].name, m.record["message"]),
             level="INFO",
             format="{message}",
+            filter=quiet_phone_teardown,
         )
         return server
 
@@ -535,10 +574,12 @@ class Daemon:
         first_utterance: str | None = None,
         *,
         phone: Any = None,
+        start_in: str = GHOST,
     ) -> None:
         """One session. With ``phone`` (a negotiated SmallWebRTCConnection) the audio is
         the phone's: no ducking, no desk chime, the thinking sound in its track, and the
-        session's events go to it over RTVI (ADR 0016)."""
+        session's events go to it over RTVI (ADR 0016). ``start_in`` is the thread the
+        session opens in: Ghost, or the one the phone called directly."""
         origin = "phone" if phone is not None else "desk"
         if phone is None:
             ducker.duck()
@@ -566,6 +607,9 @@ class Daemon:
 
         async def on_hang_up() -> None:
             self.state.set_ending()  # the phone and the desktop app show "Hanging up"
+            if phone is not None:
+                # From here the phone may close the call before the desk's last write lands.
+                _PHONE_TEARDOWN["on"] = True
 
         session = build_session(
             self.voice,
@@ -577,7 +621,7 @@ class Daemon:
             on_turn=on_turn,
             on_phase=on_phase,
             conversations=self.conversations,
-            start_in=GHOST,
+            start_in=start_in,
             on_conversation=on_conversation,
             transport_factory=transport_factory,
             on_hang_up=on_hang_up,
@@ -589,7 +633,7 @@ class Daemon:
         self.session = session
         self._origin = origin
         self.state.set_phase(Phase.LISTENING, session.session_id, origin=origin)
-        self.state.set_conversation(GHOST)
+        self.state.set_conversation(start_in)
         if first_utterance:
             self.state.add_turn("user", first_utterance, via=self._first_via)
         self._first_via = "voice"
@@ -612,6 +656,7 @@ class Daemon:
             if run_task not in done and phone is not None and not self._stop.is_set():
                 why = "phone ended it" if self._phone_end.is_set() else "phone went away"
                 logger.info(f"session {session.session_id}: {why}")
+                _PHONE_TEARDOWN["on"] = True
             if run_task not in done:
                 # Cancel rather than end: for the phone an EndFrame would wait on writes
                 # to a dead peer. Safe because each session forks its own processors
@@ -634,6 +679,7 @@ class Daemon:
             if phone is not None:
                 await _close_peer(phone)  # the session ending closes the peer
                 self._phone_end.clear()
+                _PHONE_TEARDOWN["on"] = False
             elif self.cfg.chime:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
@@ -945,7 +991,12 @@ def cli(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     cmd = argv[0] if argv else "run"
     logger.remove()
-    logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss.SSS} {level:<7} {message}")
+    logger.add(
+        sys.stderr,
+        level="INFO",
+        format="{time:HH:mm:ss.SSS} {level:<7} {message}",
+        filter=quiet_phone_teardown,
+    )
 
     if cmd == "run":
         cfg = GhostdSettings()
@@ -956,6 +1007,7 @@ def cli(argv: list[str] | None = None) -> None:
                 sys.stderr,
                 level=voice.log_level.upper(),
                 format="{time:HH:mm:ss.SSS} {level:<7} {name}: {message}",
+                filter=quiet_phone_teardown,
             )
         debug.enable(voice.debug_audio)
         asyncio.run(Daemon(cfg, voice).run())

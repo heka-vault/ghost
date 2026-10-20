@@ -10,7 +10,7 @@
  * desktop app reads. Every request is signed, and so is every reply. An answer whose signature
  * doesn't check is never applied, which is what keeps the audio between this phone and its desk.
  */
-import type { AuditPage, GhostEvent, Status } from "@ghost/client-ts";
+import type { AuditPage, ConversationView, GhostEvent, Status } from "@ghost/client-ts";
 import { lineName } from "@ghost/ui";
 import { DeviceEventEmitter, type EmitterSubscription, PermissionsAndroid, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
@@ -28,12 +28,31 @@ const GATHER_MS = 3000;
 const JOIN_MS = 15000;
 /** Once everything is up, a moment for the audio route to settle before the desk greets. */
 const READY_SETTLE_MS = 250;
-/** How long the phone waits on a goodbye before closing the call itself. */
-const HANG_UP_MS = 6000;
+/**
+ * How long the phone waits for the audio route to settle before saying client-ready. A
+ * Bluetooth headset takes a second or two to bring its call audio up after the call starts;
+ * greeting before that put the first words on the speaker and lost the last ones in the
+ * switch ("System persona he-").
+ */
+const ROUTE_SETTLE_MS = 2500;
+/** The route counts as settled once no device change has arrived for this long. */
+const ROUTE_QUIET_MS = 700;
 /** Missed /hello answers before the link shows offline rather than reconnecting. */
 const OFFLINE_AFTER = 3;
 /** How long the phone gives every address to answer when it is choosing one. */
 const PICK_MS = 3000;
+/** The home address gets this much of a head start before a tunnel answer is taken. */
+const PICK_HOME_LEAD_MS = 400;
+/** After a goodbye, how long the phone waits for it to finish playing before closing the call. */
+const HANG_UP_MS = 3500;
+/**
+ * The desk says "listening" when it has finished sending the goodbye; the phone is still
+ * playing the last of it (jitter buffer and the trip over). Closing on the word cut "Bye for
+ * now" to "bye for n"; this is the tail the phone lets play first.
+ */
+const HANG_UP_TAIL_MS = 600;
+/** After the phone hung up, a stale "session running" from the desk is ignored this long. */
+const JUST_ENDED_MS = 8000;
 
 /** InCallManager's names for the routes. */
 const ROUTE_NAMES: Record<Route, string> = { speaker: "SPEAKER_PHONE", earpiece: "EARPIECE", bluetooth: "BLUETOOTH", headset: "WIRED_HEADSET" };
@@ -58,10 +77,11 @@ const MESSAGES: Record<string, string> = {
   closing: "Your last session is still closing on the desk. Try again in a few seconds.",
   not_ready: "Ghost is still loading its voice models. Try again in a moment.",
   unauthorized: "Your desk doesn’t recognise this phone any more. Pair it again in Settings.",
+  no_such_line: "That line isn’t there any more. Pull the list again and try another.",
 };
 
 export class LiveDesk implements Desk {
-  private state: DeskState = { link: "connecting", via: null, lastCall: null, audio: DEFAULT_AUDIO, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
+  private state: DeskState = { link: "connecting", via: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
   /** The address in use; null until one answers, and again once it stops answering. */
   private address: string | null = null;
   private listeners = new Set<() => void>();
@@ -75,10 +95,14 @@ export class LiveDesk implements Desk {
   private mic: MediaStream | null = null;
   private ping: ReturnType<typeof setInterval> | null = null;
   private joined: (() => void) | null = null;
+  private callStartedAt = 0;
+  private endedAt = 0;
   private goodbyeHeard = false;
   private hangUpTimer: ReturnType<typeof setTimeout> | null = null;
-  private callStartedAt = 0;
+  private tailTimer: ReturnType<typeof setTimeout> | null = null;
   private routeSub: EmitterSubscription | null = null;
+  private routeSettled: (() => void) | null = null;
+  private routeQuiet: ReturnType<typeof setTimeout> | null = null;
   private readonly endSub: () => void;
   private readonly tickSub: () => void;
 
@@ -167,19 +191,25 @@ export class LiveDesk implements Desk {
   // ------------------------------------------------------------------ the link
 
   /**
-   * Ask every address at once and keep the first in the list that answers, so at home the
-   * Wi-Fi path wins even when the tunnel also answers. Null when none does.
+   * Ask every address at once and keep the first that answers, with the home address
+   * given a short head start so Wi-Fi wins at home even when the tunnel also answers.
+   * Waiting for every address to settle made the first Home take the full timeout
+   * whenever one path was dark. Null when none answers.
    */
   private async pick(): Promise<Hello | null> {
-    const tries = this.cfg.addresses.map((a) =>
-      this.requestAt<Hello>(a, "GET", "/hello", undefined, PICK_MS).then(
-        (hello) => ({ a, hello }),
-        () => null,
-      ),
+    const tries = this.cfg.addresses.map((a, i) =>
+      this.requestAt<Hello>(a, "GET", "/hello", undefined, PICK_MS)
+        .then(async (hello) => {
+          if (i > 0) await new Promise((r) => setTimeout(r, PICK_HOME_LEAD_MS));
+          return { a, hello };
+        }),
     );
-    const answers = await Promise.all(tries);
-    const first = answers.find((x) => x !== null);
-    if (!first) return null;
+    let first: { a: string; hello: Hello } | null = null;
+    try {
+      first = await Promise.any(tries);
+    } catch {
+      return null;
+    }
     this.address = first.a;
     this.set({ via: this.viaOf(first.a) });
     return first.hello;
@@ -201,7 +231,10 @@ export class LiveDesk implements Desk {
       const wasSession = !!this.state.status?.session_id;
       this.onStatus(hello.status);
       this.set({ link: "online" });
-      if (first || (wasSession && !hello.status.session_id)) void this.loadAudit(this.auditLimit).catch(() => {});
+      if (first || (wasSession && !hello.status.session_id)) {
+        void this.loadAudit(this.auditLimit).catch(() => {});
+        void this.loadLines().catch(() => {});
+      }
     } catch {
       this.failures += 1;
       const link: Link = this.failures >= OFFLINE_AFTER || this.state.link === "connecting" ? "offline" : "reconnecting";
@@ -227,6 +260,12 @@ export class LiveDesk implements Desk {
     if (this.state.link !== "online") throw new DeskError("Still can’t reach it.");
   }
 
+  /** The threads a call can start in; Ghost first. Refreshed with the audit, and when one changes. */
+  private async loadLines() {
+    const lines = await this.request<ConversationView[]>("GET", "/conversations");
+    this.set({ conversations: lines.filter((c) => !c.settled_at) });
+  }
+
   async loadAudit(limit: number) {
     this.auditLimit = Math.max(this.auditLimit, limit);
     const page = await this.request<AuditPage>("GET", `/audit?limit=${limit}&offset=0`);
@@ -236,6 +275,11 @@ export class LiveDesk implements Desk {
   // ------------------------------------------------------------------ desk events
 
   private onStatus(status: Status) {
+    // The desk takes a moment to wind a session down after the phone hangs up; a poll in
+    // that window still says "in a session". Our own end is the truth until then.
+    if (!this.pc && status.session_origin === "phone" && status.session_id && Date.now() - this.endedAt < JUST_ENDED_MS) {
+      status = { ...status, session_id: null, session_origin: null, phase: "passive", pending: null, ending: false };
+    }
     const wasOurs = !!this.pc && !!this.state.status?.session_id;
     const wasHold = this.state.status?.phase === "hold";
     this.set({ status, pending: status.pending ?? null });
@@ -267,6 +311,7 @@ export class LiveDesk implements Desk {
       case "conversation":
         if (this.state.status) this.set({ status: { ...this.state.status, conversation: e.active ?? null } });
         if (this.pc) updateCall(this.callBody());
+        if (e.changed) void this.loadLines().catch(() => {});  // a thread was created, edited or settled
         return;
     }
   }
@@ -285,7 +330,7 @@ export class LiveDesk implements Desk {
 
   // ------------------------------------------------------------------ the session
 
-  async start() {
+  async start(conversation?: string) {
     if (this.state.link !== "online") throw new DeskError("Your desk isn’t reachable right now.");
     if (this.state.status?.session_origin === "desk") throw new DeskError(MESSAGES.busy);
     if (this.pc) return;
@@ -351,14 +396,24 @@ export class LiveDesk implements Desk {
       this.callStartedAt = Date.now();
       const local = pc.localDescription!;
       this.set({ turns: [], outcomes: {} });
-      const answer = await this.request<{ sdp: string; type: "answer"; pc_id: string }>("POST", "/offer", { sdp: local.sdp, type: local.type });
+      const line = conversation && conversation !== "ghost" ? conversation : undefined;
+      const answer = await this.request<{ sdp: string; type: "answer"; pc_id: string }>("POST", "/offer", { sdp: local.sdp, type: local.type, ...(line ? { conversation: line } : {}) });
       await pc.setRemoteDescription(new RTCSessionDescription({ sdp: answer.sdp, type: answer.type }));
 
       // "video" to InCallManager means: the speaker by default, a Bluetooth or wired headset
       // whenever one is connected, and no proximity sensor. Nothing is forced, so a car's
       // hands-free takes the call and the button on screen can move it.
       this.routeSub = DeviceEventEmitter.addListener("onAudioDeviceChanged", (e: AudioDeviceEvent) => this.onRoute(e));
+      const settled = new Promise<void>((resolve) => {
+        this.routeSettled = resolve;
+      });
       InCallManager.start({ media: "video" });
+      // Greet only once the audio is where it will stay: a headset's call audio up, or the
+      // speaker when there is none. Capped, so a quiet headset never delays the greeting long.
+      await Promise.race([settled, new Promise<void>((r) => setTimeout(r, ROUTE_SETTLE_MS))]);
+      this.routeSettled = null;
+      if (this.routeQuiet) clearTimeout(this.routeQuiet);
+      this.routeQuiet = null;
       routeUp = true;
       maybeReady();
       // Hold the mic open with the screen off, and put an End action in the notification shade.
@@ -381,8 +436,9 @@ export class LiveDesk implements Desk {
     }
   }
 
-  async end() {
+  async end(tone = false) {
     if (!this.pc) return;
+    this.endedAt = Date.now();
     // Say goodbye on the call and close it at once: the desk ends the session when the
     // phone goes, so End never waits on the network. The POST after is the record that the
     // phone asked; if it fails the summary says the desk may not have heard.
@@ -391,7 +447,7 @@ export class LiveDesk implements Desk {
     } catch {
       // the channel closed under us; closing the call and the POST still tell the desk
     }
-    this.teardown();
+    this.teardown(tone);
     await this.request("POST", "/end", {});
   }
 
@@ -417,6 +473,16 @@ export class LiveDesk implements Desk {
     const available = (Array.isArray(names) ? names : []).map((n) => ROUTE_OF[String(n)]).filter((r): r is Route => !!r);
     const route = ROUTE_OF[e.selectedAudioDevice ?? ""] ?? this.state.audio.route;
     this.set({ audio: { route, available: available.length ? available : [route] } });
+    // Settled once the changes stop: a headset reports itself in two or three steps over
+    // a second or so (seen, then its call audio up), and the list only names it at the end.
+    if (this.routeSettled) {
+      if (this.routeQuiet) clearTimeout(this.routeQuiet);
+      this.routeQuiet = setTimeout(() => {
+        this.routeSettled?.();
+        this.routeSettled = null;
+        this.routeQuiet = null;
+      }, ROUTE_QUIET_MS);
+    }
   }
 
   /** The notification's second line. */
@@ -428,14 +494,14 @@ export class LiveDesk implements Desk {
 
   /**
    * Ghost is hanging up. Once its goodbye has played (speaking, then listening again), the
-   * phone closes the call itself instead of waiting for the desk to wind down; if the
-   * goodbye never shows, after a few seconds anyway. Either way it's an ordinary end.
+   * phone closes the call itself, with a hang-up tone, instead of waiting for the desk to
+   * wind down; if the goodbye never shows, after a few seconds anyway.
    */
   private hangingUp(status: Status) {
     if (status.phase === "speaking") this.goodbyeHeard = true;
     const done = this.goodbyeHeard && status.phase === "listening";
-    if (!this.hangUpTimer) this.hangUpTimer = setTimeout(() => void this.end().catch(() => {}), HANG_UP_MS);
-    if (done) void this.end().catch(() => {});
+    if (!this.hangUpTimer) this.hangUpTimer = setTimeout(() => void this.end(true).catch(() => {}), HANG_UP_MS);
+    if (done && !this.tailTimer) this.tailTimer = setTimeout(() => void this.end(true).catch(() => {}), HANG_UP_TAIL_MS);
   }
 
   /** The call dropped and didn't come back. The desk ends its side when the peer goes. */
@@ -447,11 +513,13 @@ export class LiveDesk implements Desk {
     void this.tick();
   }
 
-  private teardown() {
+  private teardown(tone = false) {
     if (this.ping) clearInterval(this.ping);
     this.ping = null;
     if (this.hangUpTimer) clearTimeout(this.hangUpTimer);
     this.hangUpTimer = null;
+    if (this.tailTimer) clearTimeout(this.tailTimer);
+    this.tailTimer = null;
     this.goodbyeHeard = false;
     const { pc, dc, mic } = this;
     this.pc = null;
@@ -492,7 +560,8 @@ export class LiveDesk implements Desk {
     mic?.getTracks().forEach((t) => t.stop());
     if (pc) {
       try {
-        InCallManager.stop();
+        // A hang-up gets the phone's own short end-of-call tone before the audio session closes.
+        InCallManager.stop(tone ? { busytone: "_DEFAULT_" } : undefined);
       } catch {
         // never started
       }

@@ -48,13 +48,16 @@ class FakeHost:
     def audit(self, limit: int, offset: int) -> AuditPage:
         return AuditPage(items=[], total=0, limit=limit, offset=offset)
 
+    def lines(self):
+        return []
+
     def admit_phone(self):
         return self.refusal
 
-    async def start_phone(self, connection):
+    async def start_phone(self, connection, conversation=None):
         if self.refusal:
             return self.refusal
-        self.started.append(connection)
+        self.started.append((connection, conversation))
         return None
 
     async def end_phone(self):
@@ -271,6 +274,20 @@ async def test_offer_refused_while_busy_or_not_ready(phone):
     assert host.started == []
 
 
+async def test_lines_are_served_and_a_call_can_start_in_one(phone):
+    """ADR 0014 on the phone: the listener lists the threads and an offer may name one."""
+    listener, host, client, _ = phone
+    creds = await pair(listener, client)
+    r, nonce = await signed(client, creds, "GET", "/conversations")
+    assert r.status_code == 200 and response_ok(r, creds, nonce) and r.json() == []
+    body = {"sdp": "v=0", "type": "offer", "conversation": "heka-workshop"}
+    r, _ = await signed(client, creds, "POST", "/offer", body)
+    assert r.status_code == 200 and host.started[-1][1] == "heka-workshop"
+    host.refusal = "no_such_line"
+    r, _ = await signed(client, creds, "POST", "/offer", body)
+    assert r.status_code == 404 and r.json() == {"error": "no_such_line"}
+
+
 async def test_end_asks_the_host(phone):
     listener, host, client, _ = phone
     creds = await pair(listener, client)
@@ -311,8 +328,8 @@ async def test_offer_returns_a_signed_answer_the_client_can_apply(phone):
         answer = r.json()
         assert answer["type"] == "answer" and answer["pc_id"] and "a=fingerprint" in answer["sdp"]
         await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
-        assert len(host.started) == 1 and listener.connection is host.started[0]
-        assert host.started[0].ice_servers == []
+        assert len(host.started) == 1 and listener.connection is host.started[0][0]
+        assert host.started[0][0].ice_servers == []
 
         # A second start is the host's call; the listener only tracks the live one.
         r, _ = await signed(
@@ -367,7 +384,7 @@ async def test_webrtc_loopback_through_ghosts_rtvi(phone):
     )
     answer = r.json()
     await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
-    conn = host.started[0]
+    conn = host.started[0][0]
 
     transport = SmallWebRTCTransport(
         webrtc_connection=conn,
@@ -525,7 +542,8 @@ async def test_daemon_admits_a_phone_only_while_passive(daemon):
     assert await d.start_phone(object()) == "busy"
     assert await d.wake(None) is False  # the desk can't take it now
     assert await d.end_phone() is True and d._phone_end.is_set()
-    assert d._phone_q.get_nowait() is conn
+    assert d._phone_q.get_nowait() == (conn, "ghost")  # Ghost when the offer names no line
+    assert await d.start_phone(object(), "no-such-thread") == "no_such_line"
 
 
 async def test_daemon_refuses_a_phone_during_a_desk_session(daemon):

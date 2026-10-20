@@ -28,6 +28,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from ghost_api import AuditPage, PhoneDevice, PhonePairing, PhoneView, Status
+from ghost_api.models import ConversationView
 from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -36,7 +37,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from ghostd.phone.pairing import PairingCodes, PhoneStore
 from ghostd.phone.signing import H_DEVICE, H_NONCE, H_SIGNATURE, H_TIME, Verifier, sign_response
 
-Refusal = Literal["busy", "not_ready"]
+Refusal = Literal["busy", "not_ready", "no_such_line"]
+_REFUSAL_STATUS: dict[str, int] = {"busy": 409, "not_ready": 503, "no_such_line": 404}
 REBIND_SECS = 5.0  # how often a listen address whose interface isn't up yet is tried again
 UNSIGNED_PATHS = frozenset({"/pair"})
 _STATUS_CODES = {
@@ -57,8 +59,11 @@ class PhoneHost(Protocol):
 
     def status(self) -> Status: ...
     def audit(self, limit: int, offset: int) -> AuditPage: ...
+    def lines(self) -> list[ConversationView]: ...  # the threads a call can start in
     def admit_phone(self) -> Refusal | None: ...  # a cheap check before negotiating
-    async def start_phone(self, connection: Any) -> Refusal | None: ...  # takes ownership
+    async def start_phone(
+        self, connection: Any, conversation: str | None = None
+    ) -> Refusal | None: ...  # takes ownership
     async def end_phone(self) -> bool: ...
 
 
@@ -103,6 +108,8 @@ class OfferRequest(BaseModel):
     type: Literal["offer"]
     pc_id: str | None = None
     restart_pc: bool | None = None
+    # The thread to start in (a slug from /conversations); Ghost when absent.
+    conversation: str | None = Field(default=None, max_length=80)
 
 
 class Candidate(BaseModel):
@@ -363,6 +370,11 @@ class PhoneListener:
                 },
             )
 
+        @app.get("/conversations")
+        async def conversations() -> JSONResponse:
+            # Every thread a call may start in: Ghost first, settled ones left out.
+            return _json(200, [c.model_dump(mode="json") for c in self.host.lines()])
+
         @app.get("/audit")
         async def audit(
             limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)
@@ -380,7 +392,7 @@ class PhoneListener:
 
             refusal = self.host.admit_phone()
             if refusal:
-                return _error(409 if refusal == "busy" else 503, refusal)
+                return _error(_REFUSAL_STATUS[refusal], refusal)
             conn = self._connection_factory()
             try:
                 await conn.initialize(sdp=req.sdp, type=req.type)
@@ -392,10 +404,10 @@ class PhoneListener:
             if answer is None:
                 await self._close(conn)
                 return _error(500)
-            refusal = await self.host.start_phone(conn)
+            refusal = await self.host.start_phone(conn, req.conversation)
             if refusal:
                 await self._close(conn)
-                return _error(409 if refusal == "busy" else 503, refusal)
+                return _error(_REFUSAL_STATUS[refusal], refusal)
             self._track(conn)
             logger.info("phone: offer accepted")
             return _json(200, answer)

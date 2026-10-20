@@ -20,7 +20,7 @@ export class LiveDesk implements Desk {
   subscribe(): never {
     throw new Error("unreachable");
   }
-  async start() {}
+  async start(_conversation?: string) {}
   async end() {}
   async retry() {}
   async loadAudit() {}

@@ -1,22 +1,23 @@
 /**
- * Home: one thing to do. The ghost is the Start control: it floats while Ghost is ready,
- * and a tap opens the mic into a session. Nothing listens here; the mic opens only after
- * that tap. There is no list to read: this screen is used from a car, and Activity has
- * everything for later. While Ghost is asking, the question is the hero.
+ * Home: the ghost is the Start control: it floats while Ghost is ready, and a tap opens the
+ * mic into a session on the main line. Under it, the other lines (threads, ADR 0014) each
+ * with their own tile and colour: a tap calls one directly, and the session opens there,
+ * greeting as that line. Nothing listens here; the mic opens only after a tap. Activity has
+ * the history. While Ghost is asking, the question is the hero.
  */
 import { errorText, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
-import { AudioLines } from "lucide-react-native";
+import { AudioLines, Phone } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 
 import { useDesk } from "../../src/desk/context";
 import { update, usePhone } from "../../src/phone/store";
-import { opacityDisabled, space } from "../../src/theme";
+import { opacityDisabled, space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
-import { GhostMark } from "../../src/ui/Brand";
+import { GhostMark, LineGlyph } from "../../src/ui/Brand";
 import { TargetText } from "../../src/ui/entries";
-import { Cta, LinkDot, linkLabel, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
+import { Cta, Divider, LinkDot, linkLabel, List, Row, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 import { VoicePresence } from "../../src/ui/VoicePresence";
 
@@ -24,26 +25,36 @@ import { VoicePresence } from "../../src/ui/VoicePresence";
 let launchChecked = false;
 let launchWantsStart = false;
 
+/** "heka-vault/ghost · heka-vault/eero": what a line is scoped to, if anything. */
+function scopeText(scope: Record<string, string[]>): string {
+  return Object.values(scope).flat().join(" · ");
+}
+
 export default function Home() {
   const router = useRouter();
-  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy, via } = useDesk();
+  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy, via, conversations } = useDesk();
   const phone = usePhone();
   const { pairing } = phone;
   const { tone, title } = linkLabel(link);
   const [starting, setStarting] = useState(false);
+  const [wave, setWave] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const line = status?.conversation && status.conversation !== "ghost" ? `${lineName(status.conversation)} line` : "main line";
+  const lines = conversations.filter((c) => !c.is_ghost && !c.settled_at);
+  const colors = useColors();
   const workstation = pairing?.workstation ?? "your desk";
   const ready = online && !loadingModels && !deskBusy && !inSession;
 
-  const start = async () => {
+  const start = async (conversation?: string) => {
     if (!ready || starting) return;
+    // Wisp waves while the desk opens the session.
+    setWave((w) => w + 1);
     setStarting(true);
     setError(null);
     try {
-      await desk.start();
+      await desk.start(conversation);
       update({ startedAt: new Date().toISOString(), muted: false });
       router.push("/session");
     } catch (e) {
@@ -114,26 +125,27 @@ export default function Home() {
         </View>
       </View>
 
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: space[6], paddingBottom: space[10] }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: space[6], paddingVertical: space[8] }}>
         {link === "connecting" ? (
           <View style={{ alignItems: "center", gap: space[4] }}>
-            <Skeleton width={160} height={160} round />
+            <Skeleton width={320} height={320} round />
             <Skeleton width={220} height={28} />
           </View>
         ) : (
           <>
-            {/* The ghost is the button. 160 is the hero size; the glyph floats only while a tap would start. */}
+            {/* The ghost is the button: the 320 hero, the screen's main control. It floats only while a tap would start. */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Start session"
               accessibilityHint="Opens the mic on this phone"
               accessibilityState={{ disabled: !ready, busy: starting }}
               disabled={!ready}
-              onPress={start}
+              onPress={() => start()}
               hitSlop={24}
               style={({ pressed }) => ({ opacity: ready || inSession ? (pressed ? 0.82 : 1) : opacityDisabled, transform: [{ scale: pressed && ready ? 0.96 : 1 }] })}
             >
-              <VoicePresence phase={hero.presence} size={160} label={hero.question ? undefined : ""} float={ready && !starting} />
+              <VoicePresence phase={hero.presence} size={320} label={hero.question ? undefined : ""} float={ready && !starting} wave={wave} />
             </Pressable>
             <Text size="3xl" weight="semibold" align="center" style={{ marginTop: space[6] }}>
               {hero.title}
@@ -151,6 +163,31 @@ export default function Home() {
           </>
         )}
       </View>
+
+      {/* The other lines: a call straight into a thread, which answers as itself. */}
+      {lines.length > 0 && !inSession && link !== "connecting" ? (
+        <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
+          <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[2], marginLeft: space[1] }}>
+            Lines
+          </Text>
+          <List style={{ opacity: ready ? 1 : opacityDisabled }}>
+            {lines.map((c, i) => (
+              <View key={c.slug}>
+                {i > 0 ? <Divider /> : null}
+                <Row
+                  leading={<LineGlyph slug={c.slug} name={c.name} size="md" />}
+                  title={<Text size="xl" numberOfLines={1}>{lineName(c.slug, c.name)}</Text>}
+                  support={scopeText(c.scope) ? <Text size="md" color="text2" numberOfLines={1}>{scopeText(c.scope)}</Text> : undefined}
+                  trailing={<Phone size={20} color={colors.text2} />}
+                  accessibilityLabel={`Call the ${lineName(c.slug, c.name)} line`}
+                  onPress={() => void start(c.slug)}
+                />
+              </View>
+            ))}
+          </List>
+        </View>
+      ) : null}
+      </ScrollView>
 
       <Cta>
         {error ? (
