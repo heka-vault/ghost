@@ -210,7 +210,7 @@ export default function Session() {
           <AskStage p={question} phase={presencePhase} stale={reconnecting} muted={muted} lostFor={lostFor} />
         ) : (
           <View style={{ flex: showCaptions ? 1 : undefined, alignItems: "center", justifyContent: "center" }}>
-            <VoicePresence phase={presencePhase} size={160} label="" />
+            <VoicePresence phase={presencePhase} size={320} label="" />
             <Text size="4xl" weight="semibold" align="center" accessibilityLiveRegion="polite" style={{ marginTop: space[8] }}>
               {word}
             </Text>

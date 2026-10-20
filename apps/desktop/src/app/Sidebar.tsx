@@ -1,7 +1,7 @@
 import type { ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { ChevronRight } from "lucide-react";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
 import { GhostMark, type GhostPhase, LineGlyph, StatusDot, cx, lineName, liveLabel, phaseText, relativeTime, useLive } from "../ui";
@@ -18,6 +18,18 @@ const Switcher = import.meta.env.DEV ? lazy(() => import("../design/chrome").the
 /** Below this window height the Prototypes group starts collapsed, so the nav fits without scrolling. */
 const SHORT_WINDOW = 840;
 const PROTOS_KEY = "ghost.sidebar.prototypes";
+
+/** The mark and the name. Pointing at it plays the mascot; its state stays here, not in Sidebar. */
+function Brand({ children }: { children?: ReactNode }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div className="sidebar__brand" onPointerEnter={(e) => e.pointerType === "mouse" && setHovered(true)} onPointerLeave={() => setHovered(false)}>
+      <GhostMark size={22} hovered={hovered} />
+      <span className="sidebar__brand-name">Ghost</span>
+      {children}
+    </div>
+  );
+}
 
 export function Sidebar() {
   const path = usePath();
@@ -109,15 +121,13 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar__brand">
-        <GhostMark size={22} />
-        <span className="sidebar__brand-name">Ghost</span>
+      <Brand>
         {design && MockBadge && (
           <Suspense fallback={null}>
             <MockBadge />
           </Suspense>
         )}
-      </div>
+      </Brand>
 
       <StatusCard phase={cardPhase} title={title} sub={sub} />
 

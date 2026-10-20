@@ -46,6 +46,7 @@ import {
   Field,
   GhostGlyph,
   GhostMark,
+  Mascot,
   type GhostPhase,
   IconButton,
   Input,
@@ -206,6 +207,24 @@ function ThemePanel({ theme }: { theme: "dark" | "light" }) {
       <div className="gal-theme__label t-overline">{theme} theme</div>
       <Specimens theme={theme} />
     </div>
+  );
+}
+
+/** The live mascot: point at the row to play it, or play it as a tap. */
+function MascotSpec() {
+  const [hovered, setHovered] = useState(false);
+  const [trigger, setTrigger] = useState(0);
+  return (
+    <Spec label="Mascot (point to play)" scroll>
+      <span className="gal-mascot" onPointerEnter={(e) => e.pointerType === "mouse" && setHovered(true)} onPointerLeave={() => setHovered(false)}>
+        <Mascot size={16} hovered={hovered} trigger={trigger} />
+        <Mascot size={24} hovered={hovered} trigger={trigger} />
+        <Mascot size={48} hovered={hovered} trigger={trigger} />
+        <Mascot size={96} hovered={hovered} trigger={trigger} />
+        <GhostMark size={40} hovered={hovered} trigger={trigger} />
+      </span>
+      <Button size="sm" variant="secondary" onClick={() => setTrigger((t) => t + 1)}>Play as a tap</Button>
+    </Spec>
   );
 }
 
@@ -1222,6 +1241,7 @@ function Specimens({ theme }: { theme: string }) {
         <Spec label="Lines" scroll>
           <LineGlyph slug="ghost" name="Ghost" size="sm" /><LineGlyph slug="ghost" name="Ghost" size="md" /><LineGlyph slug="accounting" name="Accounting" /><LineGlyph slug="legal" name="Legal" size="lg" /><LineGlyph slug="standup" name="Standup" size="xl" /><LineGlyph slug="ghost" name="Ghost" size="xl" />
         </Spec>
+        <MascotSpec />
       </Block>
     </div>
   );

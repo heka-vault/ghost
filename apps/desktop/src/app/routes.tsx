@@ -8,6 +8,7 @@
 import {
   AudioLines,
   Blocks,
+  Ghost,
   Inbox,
   LayoutGrid,
   type LucideIcon,
@@ -172,6 +173,18 @@ export const ROUTES: RouteDef[] = [
     needsDaemon: false,
     nav: { label: "Mobile", icon: Smartphone, group: "prototype" },
     component: DEV ? lazy(() => import("../prototypes/mobile")) : null,
+  },
+  {
+    id: "mascot",
+    patterns: ["/mascot/:view?"],
+    path: "/mascot",
+    owner: "mascot",
+    title: "Mascot",
+    kind: "prototype",
+    chrome: "app",
+    needsDaemon: false,
+    nav: { label: "Mascot", icon: Ghost, group: "prototype" },
+    component: DEV ? lazy(() => import("../prototypes/mascot")) : null,
   },
   {
     id: "gallery",

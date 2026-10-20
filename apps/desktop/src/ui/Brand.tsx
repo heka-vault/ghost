@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 import { GHOST_PATH, GHOST_PATH_SMALL, lineHue } from "@ghost/ui";
 
 import { cx } from "./cx";
+import { Mascot } from "./Mascot";
 
 export { GHOST_PATH, GHOST_PATH_SMALL, lineHue };
 
@@ -14,11 +15,15 @@ export function GhostGlyph({ size = 16, className, title }: { size?: number; cla
   );
 }
 
-/** The app mark: the glyph on an accent tile. Sizes 20, 24, 28, 40, 64. */
-export function GhostMark({ size = 24, className }: { size?: number; className?: string }) {
+/**
+ * The app mark: the glyph on an accent tile. Sizes 20, 24, 28, 40, 64. Pass `hovered` (and
+ * optionally `trigger`) to make it the live mascot, which plays and settles back to this mark.
+ */
+export function GhostMark({ size = 24, hovered, trigger, className }: { size?: number; hovered?: boolean; trigger?: number; className?: string }) {
+  const glyph = Math.round(size * 0.66);
   return (
     <span className={cx("g-mark", className)} style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }} aria-hidden>
-      <GhostGlyph size={Math.round(size * 0.66)} />
+      {hovered === undefined && trigger === undefined ? <GhostGlyph size={glyph} /> : <Mascot size={glyph} hovered={hovered} trigger={trigger} />}
     </span>
   );
 }
