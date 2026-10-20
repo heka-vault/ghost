@@ -1,34 +1,30 @@
 /**
  * Home: the ghost is the Start control: it floats while Ghost is ready, and a tap opens the
- * mic into a session on the main line. Under it, the other lines (threads, ADR 0014) each
- * with their own tile and colour: a tap calls one directly, and the session opens there,
- * greeting as that line. Nothing listens here; the mic opens only after a tap. Activity has
- * the history. While Ghost is asking, the question is the hero.
+ * mic into a session on the main line. Under it, the other lines (threads, ADR 0014) as a
+ * dial pad: three big keys to a row, each a ghost in the line's own colour over its name, so
+ * a line is known by colour and a press, not a scroll, calls it directly (the session opens
+ * there, greeting as that line). Nothing listens here; the mic opens only after a tap.
+ * Activity has the history. While Ghost is asking, the question is the hero.
  */
-import { errorText, lineName, splitSummary } from "@ghost/ui";
+import { errorText, lineHue, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
-import { AudioLines, Phone } from "lucide-react-native";
+import { AudioLines } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { useDesk } from "../../src/desk/context";
 import { update, usePhone } from "../../src/phone/store";
-import { opacityDisabled, space, useColors } from "../../src/theme";
+import { opacityDisabled, radius, space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
-import { GhostMark, LineGlyph } from "../../src/ui/Brand";
+import { GhostGlyph } from "../../src/ui/Brand";
 import { TargetText } from "../../src/ui/entries";
-import { Cta, Divider, LinkDot, linkLabel, List, Row, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
+import { Cta, LinkDot, linkLabel, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 import { VoicePresence } from "../../src/ui/VoicePresence";
 
 /** Decided once per app launch, so turning the preference on later doesn't start a session on the spot. */
 let launchChecked = false;
 let launchWantsStart = false;
-
-/** "heka-vault/ghost · heka-vault/eero": what a line is scoped to, if anything. */
-function scopeText(scope: Record<string, string[]>): string {
-  return Object.values(scope).flat().join(" · ");
-}
 
 export default function Home() {
   const router = useRouter();
@@ -44,6 +40,10 @@ export default function Home() {
   const line = status?.conversation && status.conversation !== "ghost" ? `${lineName(status.conversation)} line` : "main line";
   const lines = conversations.filter((c) => !c.is_ghost && !c.settled_at);
   const colors = useColors();
+  // Three keys to a row, like a dial pad: big enough that a thumb never hits the wrong line.
+  const { width } = useWindowDimensions();
+  const keyGap = space[3];
+  const keySize = Math.floor((width - 2 * space[5] - 2 * keyGap) / 3);
   const workstation = pairing?.workstation ?? "your desk";
   const ready = online && !loadingModels && !deskBusy && !inSession;
 
@@ -112,7 +112,6 @@ export default function Home() {
   return (
     <Screen bottom={false}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space[3], paddingTop: space[3], paddingHorizontal: space[5], paddingBottom: space[2] }}>
-        <GhostMark size={32} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text size="xl" weight="semibold" accessibilityRole="header">Ghost</Text>
           <View accessibilityRole="text" accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: space[2] }}>
@@ -164,27 +163,47 @@ export default function Home() {
         )}
       </View>
 
-      {/* The other lines: a call straight into a thread, which answers as itself. */}
+      {/* The other lines as a dial pad: a press calls straight into a thread, which answers as itself. */}
       {lines.length > 0 && !inSession && link !== "connecting" ? (
         <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
-          <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[2], marginLeft: space[1] }}>
+          <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[3], marginLeft: space[1] }}>
             Lines
           </Text>
-          <List style={{ opacity: ready ? 1 : opacityDisabled }}>
-            {lines.map((c, i) => (
-              <View key={c.slug}>
-                {i > 0 ? <Divider /> : null}
-                <Row
-                  leading={<LineGlyph slug={c.slug} name={c.name} size="md" />}
-                  title={<Text size="xl" numberOfLines={1}>{lineName(c.slug, c.name)}</Text>}
-                  support={scopeText(c.scope) ? <Text size="md" color="text2" numberOfLines={1}>{scopeText(c.scope)}</Text> : undefined}
-                  trailing={<Phone size={20} color={colors.text2} />}
-                  accessibilityLabel={`Call the ${lineName(c.slug, c.name)} line`}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: keyGap, opacity: ready ? 1 : opacityDisabled }}>
+            {lines.map((c) => {
+              const hue = colors.hue[lineHue(c.slug)];
+              const name = lineName(c.slug, c.name);
+              return (
+                <Pressable
+                  key={c.slug}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Call the ${name} line`}
+                  accessibilityHint="Opens the mic on this phone, on that line"
+                  accessibilityState={{ disabled: !ready }}
+                  disabled={!ready}
                   onPress={() => void start(c.slug)}
-                />
-              </View>
-            ))}
-          </List>
+                  style={({ pressed }) => ({
+                    width: keySize,
+                    height: keySize,
+                    borderRadius: radius.lg,
+                    borderWidth: 1,
+                    borderColor: pressed ? hue.fg : colors.border,
+                    backgroundColor: pressed ? hue.bg : colors.bgSurface,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: space[2],
+                    paddingHorizontal: space[2],
+                    transform: [{ scale: pressed ? 0.97 : 1 }],
+                  })}
+                >
+                  <GhostGlyph size={Math.round(keySize * 0.4)} color={hue.fg} />
+                  <Text size="md" weight="semibold" align="center" numberOfLines={2} style={{ color: colors.text1 }}>
+                    {name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
       ) : null}
       </ScrollView>

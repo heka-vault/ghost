@@ -34,9 +34,9 @@ const READY_SETTLE_MS = 250;
  * greeting before that put the first words on the speaker and lost the last ones in the
  * switch ("System persona he-").
  */
-const ROUTE_SETTLE_MS = 2500;
+const ROUTE_SETTLE_MS = 2200;
 /** The route counts as settled once no device change has arrived for this long. */
-const ROUTE_QUIET_MS = 700;
+const ROUTE_QUIET_MS = 600;
 /** Missed /hello answers before the link shows offline rather than reconnecting. */
 const OFFLINE_AFTER = 3;
 /** How long the phone gives every address to answer when it is choosing one. */

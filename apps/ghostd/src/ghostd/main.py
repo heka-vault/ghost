@@ -66,7 +66,9 @@ PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its
 # long enough for a cellular blip or a tunnel re-handshake away from home (ADR 0020)
 PHONE_WRITE_TIMEOUT_SECS = 0.5  # a write to a gone phone fails after this; the desk is free sooner
 PHONE_WIND_DOWN_SECS = 3.0  # how long the loop waits for a cancelled phone session to drain
-PHONE_READY_SECS = 3.0  # after the connection: how long to wait for the phone's client-ready
+# After the connection: how long to wait for the phone's client-ready. The phone holds it until
+# its audio route has settled (a headset takes up to ~2 s), so this must outlast that.
+PHONE_READY_SECS = 4.0
 PHONE_GREETING_LEAD_SECS = 0.3  # let the phone's playback settle before the first word
 PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then is dropped
 

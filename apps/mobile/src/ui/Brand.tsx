@@ -1,17 +1,19 @@
-/** The ghost glyph, the app mark and a line's tile, drawn as on desktop (apps/desktop/src/ui/Brand.tsx). */
-import { GHOST_PATH, GHOST_PATH_SMALL, lineHue } from "@ghost/ui";
+/**
+ * The ghost glyph, the app mark and a line's tile, drawn as on desktop
+ * (apps/desktop/src/ui/Brand.tsx). The glyph is Wisp, the mascot, drawn still: at 40px and up
+ * it is Wisp saying hello (grinning, mid-wave); below that, where the arms are not drawn, the
+ * plain body. Every line gets the ghost in its own colour: the colour is the identity.
+ */
+import { lineHue, wavePose } from "@ghost/ui";
+import { useMemo } from "react";
 import { View } from "react-native";
-import Svg, { Path } from "react-native-svg";
 
 import { useColors } from "../theme";
-import { Text } from "./Text";
+import { Mascot } from "./Mascot";
 
 export function GhostGlyph({ size = 16, color }: { size?: number; color: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path fill={color} fillRule="evenodd" d={size < 24 ? GHOST_PATH_SMALL : GHOST_PATH} />
-    </Svg>
-  );
+  const frame = useMemo(() => (size >= 40 ? wavePose() : {}), [size]);
+  return <Mascot size={size} color={color} frame={frame} />;
 }
 
 /** The app mark: the glyph on an accent tile. */
@@ -27,27 +29,18 @@ export function GhostMark({ size = 24 }: { size?: number }) {
   );
 }
 
-const GLYPH = {
-  sm: { box: 20, r: 6, text: "xs", glyph: 14 },
-  md: { box: 24, r: 6, text: "sm", glyph: 16 },
-  lg: { box: 32, r: 8, text: "lg", glyph: 20 },
-  xl: { box: 48, r: 12, text: "2xl", glyph: 28 },
-} as const;
+const GLYPH = { sm: 20, md: 24, lg: 44, xl: 56 } as const;
 
-/** A line's tile: the ghost for Ghost, the initial for every other line, on its own soft hue. */
-export function LineGlyph({ slug, name, size = "md" }: { slug: string; name: string; size?: keyof typeof GLYPH }) {
+/**
+ * A line's mark: Wisp in the line's own colour, nothing around it. The soft tile with the
+ * initial was the old icon (removed 2026-10-20 at the operator's request); the colour is
+ * the identity, and at lg and xl Wisp is saying hello.
+ */
+export function LineGlyph({ slug, size = "md" }: { slug: string; name?: string; size?: keyof typeof GLYPH }) {
   const c = useColors();
-  const g = GLYPH[size];
-  const hue = c.hue[lineHue(slug)];
   return (
-    <View accessible={false} style={{ width: g.box, height: g.box, borderRadius: g.r, backgroundColor: hue.bg, alignItems: "center", justifyContent: "center" }}>
-      {slug === "ghost" ? (
-        <GhostGlyph size={g.glyph} color={hue.fg} />
-      ) : (
-        <Text size={g.text} weight="semibold" style={{ color: hue.fg, lineHeight: undefined }}>
-          {(name.trim()[0] ?? "?").toUpperCase()}
-        </Text>
-      )}
+    <View accessible={false} style={{ width: GLYPH[size], height: GLYPH[size], alignItems: "center", justifyContent: "center" }}>
+      <GhostGlyph size={GLYPH[size]} color={c.hue[lineHue(slug)].fg} />
     </View>
   );
 }

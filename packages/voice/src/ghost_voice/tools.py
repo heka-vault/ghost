@@ -198,6 +198,7 @@ def register_tools(
                 changes=prepared.changes,
                 rationale=str(a.get("rationale") or prepared.rationale),
                 scope=scope,
+                conversation=conversations.active.slug if conversations else None,
             )
             probe.tool_step(call_id, "submit", time.perf_counter() - began)
         except OutOfScope as e:

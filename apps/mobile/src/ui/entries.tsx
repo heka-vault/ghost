@@ -1,11 +1,27 @@
-/** How the phone shows an audit entry: what happened in plain words, the issue as mono detail. */
+/**
+ * How the phone shows an audit entry: what happened in plain words, the issue as mono
+ * detail, and the line it happened in (ADR 0014) as a ghost in that line's colour, so a
+ * glance at the colour says which conversation did it.
+ */
 import type { AuditEntry } from "@ghost/client-ts";
-import { didNotHappen, relativeTime, splitSummary, statusLabel, statusTone } from "@ghost/ui";
+import { didNotHappen, lineHue, lineName, relativeTime, splitSummary, statusLabel, statusTone } from "@ghost/ui";
 import { View } from "react-native";
 
 import { space, useColors } from "../theme";
+import { GhostGlyph } from "./Brand";
 import { Badge, Row } from "./parts";
 import { Text } from "./Text";
+
+/** The line an entry was made in: Ghost when it was recorded before lines were kept on entries. */
+export function entryLine(e: AuditEntry): string {
+  return e.conversation ?? "ghost";
+}
+
+/** The ghost in the line's colour, leading a row. */
+export function LineMark({ slug, size = 40 }: { slug: string; size?: number }) {
+  const c = useColors();
+  return <GhostGlyph size={size} color={c.hue[lineHue(slug)].fg} />;
+}
 
 /** The target as a row shows it: an issue ref in mono, a line's name in regular text. */
 export function TargetText({ target, conversation, size = "md", color = "text2" }: { target: string; conversation: boolean; size?: "md" | "lg" | "xl"; color?: "text1" | "text2" }) {
@@ -25,12 +41,15 @@ export function EntryTitle({ e, lines }: { e: AuditEntry; lines?: number }) {
   );
 }
 
-/** The support line: the status badge (when not done), then issue or line · when. */
+/** The support line: the status badge (when not done), the line's name, then issue · when. */
 export function EntrySupport({ e }: { e: AuditEntry }) {
   const { target, conversation } = splitSummary(e);
+  const line = entryLine(e);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space[1.5] }}>
       {e.status !== "executed" && <Badge tone={statusTone(e.status)}>{statusLabel(e.status)}</Badge>}
+      <Text size="md" color="text2">{lineName(line)}</Text>
+      <Text size="md" color="text2">·</Text>
       <TargetText target={target} conversation={conversation} />
       <Text size="md" color="text2">·</Text>
       <Text size="md" color="text2">{relativeTime(e.created_at)}</Text>
@@ -39,5 +58,5 @@ export function EntrySupport({ e }: { e: AuditEntry }) {
 }
 
 export function EntryRow({ e, onPress }: { e: AuditEntry; onPress?: () => void }) {
-  return <Row top onPress={onPress} title={<EntryTitle e={e} lines={2} />} support={<EntrySupport e={e} />} />;
+  return <Row top leading={<LineMark slug={entryLine(e)} />} onPress={onPress} title={<EntryTitle e={e} lines={2} />} support={<EntrySupport e={e} />} />;
 }

@@ -52,8 +52,8 @@ function seedAudit(): AuditEntry[] {
         { at: ago(60 * 3 + 4), event: "finished", detail: { status: "success" } },
       ],
     }),
-    entry("ghost-mock/app#199", "reopen", "On ghost-mock/app#199: reopened the issue.", "executed", 60 * 3 + 5),
-    entry("ghost-mock/app#212", "set_labels", "On ghost-mock/app#212: labels: add bug, priority-high.", "executed", 60 * 3 + 6),
+    entry("ghost-mock/app#199", "reopen", "On ghost-mock/app#199: reopened the issue.", "executed", 60 * 3 + 5, { conversation: "heka-workshop" }),
+    entry("ghost-mock/app#212", "set_labels", "On ghost-mock/app#212: labels: add bug, priority-high.", "executed", 60 * 3 + 6, { conversation: "quotient-research" }),
     entry("ghost-mock/app#199", "close", "On ghost-mock/app#199: closed the issue.", "executed", 60 * 3 + 9),
     entry("ghost-mock/infra#64", "close", "On ghost-mock/infra#64: close the issue, with a comment: “Duplicate of #61.”", "expired", 60 * 26, {
       autonomy: "confirm",

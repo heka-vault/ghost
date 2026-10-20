@@ -184,6 +184,7 @@ def audit_page(
             autonomy=p.autonomy,
             status=p.status.value,
             created_at=p.created_at,
+            conversation=p.conversation,
             events=[
                 AuditEventView(at=at, event=ev, detail=detail)
                 for at, ev, detail in store.events(p.id)

@@ -130,10 +130,12 @@ class WriteGate:
         changes: ChangeSet,
         rationale: str,
         scope: ActiveScope | None = None,
+        conversation: str | None = None,
     ) -> Submission:
         """``scope`` is the active thread's scope for this ability (ADR 0019): a target
         outside it is refused here, before policy or autonomy, whatever the setting
-        for reads. None means unscoped."""
+        for reads. None means unscoped. ``conversation`` is the thread the session is
+        in, kept on the proposal for the audit."""
         op = self.operation(ability, operation)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
@@ -150,6 +152,7 @@ class WriteGate:
             changes=changes,
             rationale=rationale,
             autonomy=level,
+            conversation=conversation,
         )
         self._log(f"gate: {ability}.{operation} on {target} -> {level.value}")
         if level is Autonomy.CONFIRM:
@@ -224,6 +227,7 @@ class WriteGate:
         changes: ChangeSet,
         rationale: str,
         autonomy: Autonomy,
+        conversation: str | None = None,
     ) -> Proposal:
         writer = self.operation(ability, operation).writer
         # One pending proposal at a time: a new one replaces the old.
@@ -239,6 +243,7 @@ class WriteGate:
             snapshot=snapshot,
             preview=f"On {target.spoken()}: {changes.describe()}.",
             autonomy=autonomy.value,
+            conversation=conversation,
         )
         self._store.insert_proposal(proposal)
         self._store.event(

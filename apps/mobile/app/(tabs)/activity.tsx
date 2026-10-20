@@ -3,7 +3,7 @@
  * opens in place to show how it was decided. Read-only on the phone.
  */
 import type { AuditEntry } from "@ghost/client-ts";
-import { autonomyLabel, formatTime, statusLabel } from "@ghost/ui";
+import { autonomyLabel, formatTime, lineName, statusLabel } from "@ghost/ui";
 import { useLocalSearchParams } from "expo-router";
 import { Power, ScrollText } from "lucide-react-native";
 import { type ComponentRef, useEffect, useRef, useState } from "react";
@@ -12,7 +12,7 @@ import { ScrollView, View } from "react-native";
 import { useDesk } from "../../src/desk/context";
 import { space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
-import { EntrySupport, EntryTitle } from "../../src/ui/entries";
+import { entryLine, EntrySupport, EntryTitle, LineMark } from "../../src/ui/entries";
 import { Divider, EmptyState, LargeHead, List, Row, Screen, Skeleton } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 
@@ -101,12 +101,13 @@ function ActivityRow({ e, open, onToggle }: { e: AuditEntry; open: boolean; onTo
   const how = decidedBy(e);
   return (
     <View>
-      <Row top expanded={open} onPress={onToggle} title={<EntryTitle e={e} lines={open ? undefined : 2} />} support={<EntrySupport e={e} />} />
+      <Row top leading={<LineMark slug={entryLine(e)} />} expanded={open} onPress={onToggle} title={<EntryTitle e={e} lines={open ? undefined : 2} />} support={<EntrySupport e={e} />} />
       {open && (
         <View style={{ paddingHorizontal: space[4], paddingBottom: space[4], gap: space[2], borderTopWidth: 1, borderTopColor: c.borderSubtle, paddingTop: space[3] }}>
           <Detail term="Status" value={statusLabel(e.status)} />
           <Detail term="Your rule" value={autonomyLabel(e.autonomy)} />
           {how && <Detail term="Decided by" value={how} />}
+          <Detail term="Line" value={lineName(entryLine(e))} />
           <Detail term="When" value={formatTime(e.created_at)} />
           <Detail term="Operation" value={`${e.ability}.${e.operation}`} mono />
         </View>

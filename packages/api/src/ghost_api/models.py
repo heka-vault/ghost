@@ -154,6 +154,7 @@ class AuditEntry(BaseModel):
     status: str
     created_at: datetime
     events: list[AuditEventView]
+    conversation: str | None = None  # the thread it was proposed in (ADR 0014); colours the entry
 
 
 class AuditPage(BaseModel):

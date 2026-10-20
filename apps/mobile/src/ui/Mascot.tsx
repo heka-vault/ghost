@@ -45,9 +45,11 @@ export interface MascotProps {
   blinks?: boolean;
   /** What Wisp is doing between gestures: a voice phase. */
   mood?: string | null;
+  /** Draw this exact pose and never animate (an icon). */
+  frame?: MascotFrame;
 }
 
-export function Mascot({ size = 96, color, trigger = 0, blinks = false, mood = null }: MascotProps) {
+export function Mascot({ size = 96, color, trigger = 0, blinks = false, mood = null, frame }: MascotProps) {
   const still = useReducedMotion();
   const { simple, props } = detailFor(size);
   const d = useMemo(() => ({ simple, props }), [simple, props]);
@@ -91,24 +93,26 @@ export function Mascot({ size = 96, color, trigger = 0, blinks = false, mood = n
     [],
   );
 
+  const fixed = frame !== undefined;
   const lastTrigger = useRef(trigger);
   useEffect(() => {
     if (trigger === lastTrigger.current) return;
     lastTrigger.current = trigger;
-    if (still) return;
+    if (still || fixed) return;
     motion.play(performance.now());
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger]);
 
   useEffect(() => {
+    if (fixed) return;
     motion.setMood(mood, performance.now());
     if (!still) run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mood, still]);
 
   useEffect(() => {
-    if (!blinks || still) return;
+    if (!blinks || still || fixed) return;
     let timer: ReturnType<typeof setTimeout>;
     const next = () => {
       timer = setTimeout(() => {
@@ -122,7 +126,7 @@ export function Mascot({ size = 96, color, trigger = 0, blinks = false, mood = n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blinks, still]);
 
-  const attrs = WISP.attrs(still ? stillPose(WISP, false, mood) : view.f, d, view.clock);
+  const attrs = WISP.attrs(frame ? { ...WISP.rest, ...frame } : still ? stillPose(WISP, false, mood) : view.f, d, view.clock);
   return (
     <Svg width={size} height={size} viewBox={scene.viewBox} color={color}>
       <Defs>

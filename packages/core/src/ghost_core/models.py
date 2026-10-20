@@ -103,6 +103,9 @@ class Proposal(BaseModel, frozen=True):
     snapshot: SerializeAsAny[Snapshot]
     preview: str
     autonomy: str = "confirm"  # the level the policy resolved to; audit, not control
+    # The thread (ADR 0014) the session was in when the model proposed this; None before
+    # it was recorded. The apps colour an audit entry by it.
+    conversation: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime = Field(default_factory=lambda: utcnow() + PROPOSAL_TTL)
     status: ProposalStatus = ProposalStatus.PENDING

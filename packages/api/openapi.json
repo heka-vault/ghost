@@ -137,6 +137,17 @@
             "title": "Autonomy",
             "type": "string"
           },
+          "conversation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",

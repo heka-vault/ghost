@@ -280,3 +280,13 @@ export const WISP: Character = {
     return out;
   },
 };
+
+/**
+ * Wisp saying hello, as one still pose: mid-wave, grinning, a little lifted. The icon the apps
+ * use wherever the ghost stands for a line or for Ghost itself at 40px and up (below that the
+ * arms are not drawn and the plain body is the icon).
+ */
+export function wavePose(): Frame {
+  const f = WISP.enter(0.5 * WISP.gestureMs, { look: { x: 0, y: 0 } });
+  return { ...WISP.rest, ...f, x: 0, y: -0.6, r: 0, bl: 0 };
+}

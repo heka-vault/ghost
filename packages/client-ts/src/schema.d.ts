@@ -606,6 +606,8 @@ export interface components {
             ability: string;
             /** Autonomy */
             autonomy: string;
+            /** Conversation */
+            conversation?: string | null;
             /**
              * Created At
              * Format: date-time

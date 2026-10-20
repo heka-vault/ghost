@@ -22,9 +22,9 @@ debug key: fine for your own phone, not for the Play Store.
 
 ## Lines
 
-Home shows the other lines (threads, ADR 0014) under the ghost, each with its tile and
-colour, its name and its scope. A tap calls that line directly: the session opens in it and
-it greets as itself. From any line you can still be patched to any other live one, or back
+Home shows the other lines (threads, ADR 0014) under the ghost as a dial pad: three big keys
+to a row, each a ghost in the line's own colour over its name, so a line is known by colour.
+A press calls that line directly: the session opens in it and it greets as itself. From any line you can still be patched to any other live one, or back
 to Ghost, by voice; settled lines are not listed and not reachable by voice.
 
 ## In a pocket or a car
