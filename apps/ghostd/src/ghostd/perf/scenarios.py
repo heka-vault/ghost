@@ -123,11 +123,11 @@ SCENARIOS: dict[str, Scenario] = {
         ),
         Scenario(
             "bye_model",
-            "a goodbye only the model recognizes (go_to_sleep)",
+            "a goodbye only the model recognizes (hang_up)",
             (
                 Line(
                     "Okay, I'm heading out to lunch now, we can stop here.",
-                    tools=frozenset({"go_to_sleep"}),
+                    tools=frozenset({"hang_up"}),
                     ends=True,
                 ),
             ),

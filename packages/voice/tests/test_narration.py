@@ -74,13 +74,11 @@ async def test_nothing_more_is_said_once_going_to_sleep():
     assert texts(out) == ""
 
 
-async def test_the_goodbye_with_go_to_sleep_is_spoken_and_nothing_after():
+async def test_the_goodbye_with_hang_up_is_spoken_and_nothing_after():
     from pipecat.frames.frames import FunctionCallFromLLM
 
     c, out = cut()
-    bye = FunctionCallFromLLM(
-        function_name="go_to_sleep", tool_call_id="t", arguments={}, context=None
-    )
+    bye = FunctionCallFromLLM(function_name="hang_up", tool_call_id="t", arguments={}, context=None)
     await feed(c, LLMFullResponseStartFrame(), LLMTextFrame("Sounds good, talk later!"))
     c.close(keep_current=True)  # the tool ran
     await feed(c, FunctionCallsStartedFrame(function_calls=[bye]), LLMFullResponseEndFrame())

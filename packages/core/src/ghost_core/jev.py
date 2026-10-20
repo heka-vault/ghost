@@ -45,16 +45,20 @@ INTENTS: dict[str, str] = {
         "question: yes, yeah, yep, sure, okay, ok, alright, sounds good, fine, go ahead, "
         "do it, go for it, uh huh, mm hm, that's right, confirm, close it. A short "
         "acknowledgement right after the question is affirm. A general wrap-up such as "
-        "'that's it', 'all done', 'we're good' or 'that'll do' is NOT affirm; it is sleep."
+        "'that's it', 'all done', 'we're good' or 'that'll do' is NOT affirm; it is hang_up."
     ),
     "deny": (
-        "does not want pending_action done: no, nope, nah, don't, wait, hold on, hold off, "
-        "stop, not yet, not that one, leave it open. Anything starting with 'no' is deny."
+        "does not want pending_action done: no, nope, nah, don't, hold off, stop, not yet, "
+        "not that one, leave it open. Anything starting with 'no' is deny."
     ),
-    "sleep": (
-        "wants to end the conversation: go to sleep, that's all, that's it, all done, "
-        "we're done, we're good, that'll do, thanks ghost, goodnight, bye. Still sleep "
-        "when a question is pending."
+    "hang_up": (
+        "wants to end the conversation: that's all, that's it, all done, we're done, "
+        "we're good, that'll do, thanks ghost, goodnight, bye, talk to you later. Still "
+        "hang_up when a question is pending."
+    ),
+    "hold": (
+        "asks the assistant to wait while they talk to someone else: hang on, hold on, "
+        "one sec, give me a minute, just a moment, be right back, hold that thought."
     ),
     "cancel": (
         "drops the current topic or proposal without answering yes or no: never mind, "

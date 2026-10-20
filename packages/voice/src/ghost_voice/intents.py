@@ -1,7 +1,11 @@
-"""Fixed intents that need no model: sleep and cancel (the Jev experiment showed a
-short exact-match list is nearly as good as a classifier for these, with nothing on
+"""Fixed intents that need no model: hang up, hold and cancel (the Jev experiment showed
+a short exact-match list is nearly as good as a classifier for these, with nothing on
 the network path). An in-tree ``TurnInterceptor``; abilities can add their own.
-"Undo that" is not one: it goes to the model, which proposes the reversing change."""
+"Undo that" is not one: it goes to the model, which proposes the reversing change.
+
+Hold (ADR 0021): "hang on, Ghost" keeps the session but Ghost stops listening until it is
+addressed by name again; the room can talk. There is no "go to sleep" any more: a
+goodbye hangs up, a wait holds."""
 
 from __future__ import annotations
 
@@ -12,9 +16,7 @@ from ghost_core.confirmation import has_negation, normalize
 
 _FILLERS = {"ghost", "okay", "ok", "hey", "oh", "um", "so", "please"}
 
-SLEEP = {
-    "go to sleep",
-    "sleep",
+HANG_UP = {
     "that's all",
     "that's all for now",
     "that's all thanks",
@@ -28,8 +30,43 @@ SLEEP = {
     "we're done",
     "done for now",
     "that's it thanks",
-    "you can go to sleep",
 }
+# The whole turn (fillers aside) asks Ghost to wait. "Wait" alone is left to the model and
+# the confirmation path: with a question pending it is a no, not a hold.
+HOLD = {
+    "hang on",
+    "hang on a sec",
+    "hang on a second",
+    "hang on a minute",
+    "hang on a moment",
+    "hold on",
+    "hold on a sec",
+    "hold on a second",
+    "hold on a minute",
+    "hold on a moment",
+    "hold that thought",
+    "one sec",
+    "one second",
+    "one moment",
+    "one minute",
+    "just a sec",
+    "just a second",
+    "just a minute",
+    "just a moment",
+    "give me a sec",
+    "give me a second",
+    "give me a minute",
+    "give me a moment",
+    "wait a sec",
+    "wait a second",
+    "wait a minute",
+    "wait a moment",
+    "be right back",
+    "stand by",
+}
+# Two words at least: Kokoro reads a lone "Sure." flat. Short, because the operator has
+# already turned to someone else.
+HOLD_ACKS = ("Sure, take your time.", "Take your time.", "I'll be here.", "Sure thing.")
 # A goodbye at the end of a turn ends the session too, when everything before it is small
 # talk: "I'll talk to you later, hang up". Anything else before it ("close it and hang up")
 # goes to the model, which does the work first.
@@ -114,11 +151,15 @@ class QuickIntents:
         if not words or len(words) > 12:
             return None
         if len(words) > 6:
-            return Handled(say=random.choice(GOODBYES), action="sleep") if _goodbye(words) else None
+            return (
+                Handled(say=random.choice(GOODBYES), action="hang_up") if _goodbye(words) else None
+            )
         # Try the words as heard and with fillers ("ghost", "okay") stripped.
         phrases = {norm, " ".join(w for w in words if w not in _FILLERS)}
-        if phrases & SLEEP or _goodbye(norm.split()):
-            return Handled(say=random.choice(GOODBYES), action="sleep")
+        if phrases & HANG_UP or _goodbye(norm.split()):
+            return Handled(say=random.choice(GOODBYES), action="hang_up")
+        if phrases & HOLD and not has_negation(norm):
+            return Handled(say=random.choice(HOLD_ACKS), action="hold")
         if turn.pending and phrases & CANCEL:
             return Handled(say="Dropped it.", action="cancel")
         return None

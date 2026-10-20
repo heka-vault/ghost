@@ -1126,7 +1126,8 @@
           "passive",
           "listening",
           "thinking",
-          "speaking"
+          "speaking",
+          "hold"
         ],
         "title": "Phase",
         "type": "string"

@@ -16,9 +16,15 @@ from pipecat.processors.frame_processor import FrameDirection
 @pytest.mark.parametrize(
     "text,pending,expect",
     [
-        ("Ghost, go to sleep.", False, "sleep"),
-        ("thanks ghost", False, "sleep"),
-        ("That's all for now.", True, "sleep"),
+        ("thanks ghost", False, "hang_up"),
+        ("That's all for now.", True, "hang_up"),
+        ("Ghost, go to sleep.", False, None),  # no such phrase any more (ADR 0021)
+        # hold: the whole turn asks Ghost to wait
+        ("hang on, Ghost", False, "hold"),
+        ("Hold on a sec.", True, "hold"),
+        ("okay ghost one second", False, "hold"),
+        ("don't hold on", False, None),
+        ("hold on, close it first", False, None),
         ("never mind", True, "cancel"),
         ("never mind", False, None),  # nothing pending: let the model handle it
         # no undo intent: taking a change back is a turn for the model
@@ -28,12 +34,12 @@ from pipecat.processors.frame_processor import FrameDirection
         ("go to sleep after you close it", False, None),
         ("what needs my sign off", False, None),
         # a goodbye at the end, after small talk
-        ("I'll talk to you later. Hang up.", False, "sleep"),
-        ("Okay, thanks, bye.", False, "sleep"),
-        ("Alright, I'm done.", False, "sleep"),
-        ("That is all I need. I will talk to you later.", False, "sleep"),
-        ("I think that is everything for today. Bye.", False, "sleep"),
-        ("goodbye", True, "sleep"),
+        ("I'll talk to you later. Hang up.", False, "hang_up"),
+        ("Okay, thanks, bye.", False, "hang_up"),
+        ("Alright, I'm done.", False, "hang_up"),
+        ("That is all I need. I will talk to you later.", False, "hang_up"),
+        ("I think that is everything for today. Bye.", False, "hang_up"),
+        ("goodbye", True, "hang_up"),
         # anything else first goes to the model, which does the work
         ("close it and then hang up", False, None),
         ("label it bug, bye", False, None),
@@ -75,7 +81,7 @@ def make(interceptors, gate):
     async def on_sleep():
         slept.append(True)
 
-    proc = InterceptorProcessor(interceptors, gate=gate, session_id="s", on_sleep=on_sleep)
+    proc = InterceptorProcessor(interceptors, gate=gate, session_id="s", on_hang_up=on_sleep)
     pushed = []
 
     async def push_frame(frame, direction=FrameDirection.DOWNSTREAM):
@@ -96,7 +102,7 @@ async def test_pass_through_when_nobody_handles():
 
 
 async def test_handled_turn_is_dropped_and_spoken():
-    proc, pushed, slept = make([Always(Handled(say="Okay.", action="sleep"))], FakeGate())
+    proc, pushed, slept = make([Always(Handled(say="Okay.", action="hang_up"))], FakeGate())
     await proc.process_frame(said("go to sleep"), FrameDirection.DOWNSTREAM)
     assert not any(isinstance(f, TranscriptionFrame) for f in pushed)
     assert [f.text for f in pushed if isinstance(f, TTSSpeakFrame)] == ["Okay."]
@@ -121,7 +127,7 @@ async def test_undo_that_reaches_the_model():
 
 
 async def test_not_evidence_while_bot_speaks():
-    proc, pushed, slept = make([Always(Handled(action="sleep"))], FakeGate())
+    proc, pushed, slept = make([Always(Handled(action="hang_up"))], FakeGate())
     await proc.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
     await proc.process_frame(said("go to sleep"), FrameDirection.DOWNSTREAM)
     assert slept == [] and any(isinstance(f, TranscriptionFrame) for f in pushed)

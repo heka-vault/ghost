@@ -133,6 +133,8 @@ class VoiceSettings(BaseSettings):
     # answers; speaking again in that time keeps the turn open. 0 answers at once.
     turn_grace_secs: float = 0.8
     idle_timeout_secs: float = 45.0
+    # A session on hold (ADR 0021) hangs up quietly after this long without being addressed.
+    hold_timeout_secs: float = 1800.0
     smart_turn_threads: int = 2
 
     # Crossing streams between scoped threads (ADR 0019); both off by default.

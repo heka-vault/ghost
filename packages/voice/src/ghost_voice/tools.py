@@ -40,7 +40,8 @@ from ghost_voice.latency import NULL_PROBE, LatencyProbe
 if TYPE_CHECKING:
     from ghost_voice.conversation import ConversationRuntime
 
-OnSleep = Callable[[], Awaitable[None]]
+OnHangUp = Callable[[], Awaitable[None]]
+OnHold = Callable[[], Awaitable[None]]
 OnCall = Callable[[str, dict[str, Any]], None]
 
 CHANGE_TOOL = "change"
@@ -53,7 +54,8 @@ def register_tools(
     abilities: Sequence[LoadedAbility],
     gate: WriteGate,
     session_id: str,
-    on_sleep: OnSleep,
+    on_hang_up: OnHangUp,
+    on_hold: OnHold | None = None,
     events: Events | None = None,
     conversations: ConversationRuntime | None = None,
     on_call: OnCall | None = None,
@@ -369,20 +371,44 @@ def register_tools(
 
     schemas.append(
         FunctionSchema(
-            name="go_to_sleep",
-            description="End the conversation and return to passive listening.",
+            name="hang_up",
+            description="End the conversation: the operator said goodbye.",
             properties={},
             required=[],
         )
     )
 
-    async def go_to_sleep(params: FunctionCallParams) -> None:
+    async def hang_up(params: FunctionCallParams) -> None:
         # The model's goodbye in this same response is spoken (ghost_voice.narration lets
-        # go_to_sleep's text through); nothing it says after this is.
+        # hang_up's text through); nothing it says after this is.
         await params.result_callback({"ok": True})
-        await on_sleep()
+        await on_hang_up()
 
-    llm.register_function("go_to_sleep", go_to_sleep)
+    llm.register_function("hang_up", hang_up)
+
+    if on_hold is not None:
+        schemas.append(
+            FunctionSchema(
+                name="hold",
+                description=(
+                    "Wait: the operator asked you to hang on or turned to talk to someone "
+                    "else. You hear nothing until they say your name again; the "
+                    "conversation and any open question keep."
+                ),
+                properties={},
+                required=[],
+            )
+        )
+
+        async def hold(params: FunctionCallParams) -> None:
+            # No follow-up completion: the words in this response are all Ghost says
+            # before it goes quiet.
+            await params.result_callback(
+                {"ok": True}, properties=FunctionCallResultProperties(run_llm=False)
+            )
+            await on_hold()
+
+        llm.register_function("hold", hold)
     return schemas
 
 

@@ -119,7 +119,7 @@ async def ghost_prompt_and_tools() -> tuple[str, list[Any]]:
 
     async def _sleep() -> None: ...
 
-    schemas = register_tools(llm, abilities=abilities, gate=gate, session_id="x", on_sleep=_sleep)
+    schemas = register_tools(llm, abilities=abilities, gate=gate, session_id="x", on_hang_up=_sleep)
     prompt = build_system_prompt(
         [a.contributions.prompt for a in abilities if a.contributions.prompt]
     )

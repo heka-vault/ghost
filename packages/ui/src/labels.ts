@@ -7,6 +7,7 @@ export function phaseLabel(phase: Phase): string {
     listening: "Listening",
     thinking: "Thinking",
     speaking: "Speaking",
+    hold: "Checked out",  // of this conversation, until addressed by name (ADR 0021)
   }[phase];
 }
 

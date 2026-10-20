@@ -46,6 +46,7 @@ from ghost_voice.config import VoiceSettings
 from ghost_voice.confirmation import ConfirmationProcessor
 from ghost_voice.conversation import ConversationRuntime
 from ghost_voice.echo import EchoFilter
+from ghost_voice.hold import HoldGate
 from ghost_voice.intents import QuickIntents
 from ghost_voice.intercept import InterceptorProcessor
 from ghost_voice.kokoro import KokoroTTS
@@ -57,10 +58,16 @@ from ghost_voice.prompt import build_system_prompt
 from ghost_voice.rtvi import GhostRTVIProcessor, observer_params
 from ghost_voice.sounds import ensure_thinking_sound
 from ghost_voice.tap import AssistantTap, OnPhase, OnTurn, UserTap
-from ghost_voice.thinking import ThinkingSoundCut, ThinkingSoundProcessor, ThinkingStartFrame
+from ghost_voice.thinking import (
+    ThinkingSoundCut,
+    ThinkingSoundProcessor,
+    ThinkingStartFrame,
+    ThinkingStopFrame,
+)
 from ghost_voice.tools import register_tools
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
 from ghost_voice.turns import BargeInUserTurnStartStrategy, PatientTurnStopStrategy, SmartTurn
+from ghost_voice.wake import DEFAULT_WAKE_PHRASES
 
 TTS_SAMPLE_RATE = 24000  # Kokoro's native rate; the output transport runs at it
 
@@ -107,6 +114,8 @@ class GhostSession:
     _ended: asyncio.Event
     conversation: ConversationRuntime | None = None
     latency: LatencyObserver | None = None
+    # Set by build_session: a typed turn during a hold ends the hold first (ADR 0021).
+    before_text: Callable[[], Awaitable[None]] | None = None
 
     async def run(self) -> None:
         try:
@@ -126,6 +135,8 @@ class GhostSession:
 
     async def say_text(self, text: str) -> None:
         """A typed user turn: goes through the LLM, the tools and the gate like speech."""
+        if self.before_text:
+            await self.before_text()
         if self.conversation:
             try:  # a transfer in flight: let its context land first
                 await asyncio.wait_for(self.conversation.settled.wait(), 8.0)
@@ -222,6 +233,10 @@ GREETINGS = (
 )
 
 
+# Spoken when the operator comes back from hold with only Ghost's name ("Ghost?").
+BACK_LINES = ("I'm here.", "Go ahead.", "Yes?")
+
+
 def build_session(
     settings: VoiceSettings,
     *,
@@ -233,8 +248,10 @@ def build_session(
     transport_factory: TransportFactory | None = None,
     greeting: str | None = GREETING_VARIED,
     first_utterance: str | None = None,
-    on_sleep: Callable[[], Awaitable[None]] | None = None,
+    on_hang_up: Callable[[], Awaitable[None]] | None = None,
     on_turn: OnTurn | None = None,
+    wake_phrases: tuple[str, ...] | None = None,
+    wake_fuzzy: float = 0.0,
     on_phase: OnPhase | None = None,
     conversations: Conversations | None = None,
     start_in: str = GHOST,
@@ -256,7 +273,11 @@ def build_session(
 
     Every turn's timeline (ghost_voice.latency) is logged and, with ``latency_log``,
     appended there; ``on_latency`` gets each record too. ``origin`` (desk, phone) is
-    only a label on those records."""
+    only a label on those records.
+
+    ``on_hang_up`` is called when the session is ending (a goodbye, the idle timeout, a
+    hold that ran out). ``wake_phrases`` are what brings a session back from hold (ADR
+    0021); the desk's wake phrases by default."""
     session_id = uuid.uuid4().hex
     target = settings.llm_target()  # GHOST_LLM_ENDPOINT: the proxy or OpenRouter
     latency = (
@@ -348,26 +369,89 @@ def build_session(
     session: GhostSession | None = None
 
     narration = NarrationCut()
+    hold_timer: asyncio.Task[None] | None = None
 
-    async def sleep(*, keep_current: bool = True) -> None:
-        """The model called go_to_sleep: its goodbye in this response is spoken, then the
-        session ends. The shortcut (``sleep_now``) has said its own goodbye already."""
-        logger.info("go_to_sleep")
+    async def hang_up(*, keep_current: bool = True) -> None:
+        """The model called hang_up: its goodbye in this response is spoken, then the
+        session ends. The shortcut (``hang_up_now``) has said its own goodbye already."""
+        nonlocal hold_timer
+        logger.info("hang_up")
+        if hold_timer:
+            hold_timer.cancel()
+            hold_timer = None
         narration.close(keep_current=keep_current)
-        if on_sleep:
-            await on_sleep()
+        if on_hang_up:
+            await on_hang_up()
         if session:
             await session.end()
 
-    async def sleep_now() -> None:
-        await sleep(keep_current=False)
+    async def hang_up_now() -> None:
+        await hang_up(keep_current=False)
+
+    # --- hold (ADR 0021) -----------------------------------------------------------
+
+    async def hold_ran_out() -> None:
+        await asyncio.sleep(settings.hold_timeout_secs)
+        logger.info(f"hold: nothing for {settings.hold_timeout_secs:.0f}s; hanging up quietly")
+        await hang_up(keep_current=False)
+
+    async def hold() -> None:
+        """Ghost stops listening until addressed by name; the context, the thread and a
+        pending question keep. Hangs up by itself after ``hold_timeout_secs``."""
+        nonlocal hold_timer
+        if hold_gate.on_hold:
+            return
+        logger.info("hold")
+        hold_gate.hold()
+        await worker.queue_frames([ThinkingStopFrame()])  # no loop while waiting
+        if hold_timer:
+            hold_timer.cancel()
+        hold_timer = asyncio.ensure_future(hold_ran_out())
+        await on_phase("hold")
+
+    async def unhold() -> None:
+        """Back to listening; nothing said yet."""
+        nonlocal hold_timer
+        if hold_timer:
+            hold_timer.cancel()
+            hold_timer = None
+        if not hold_gate.on_hold:
+            return
+        hold_gate.release()
+        logger.info("hold: resumed")
+        await on_phase("listening")
+
+    async def resume(remainder: str) -> None:
+        """Addressed by name again: back to listening, with the rest of what was said as
+        the next turn, or a word that Ghost is here when the name was all."""
+        hold_gate.on_hold = True  # the gate cleared itself; unhold expects to do it
+        await unhold()
+        if remainder.strip():
+            await on_turn("user", remainder)
+            await worker.queue_frames(
+                [
+                    ThinkingStartFrame(),
+                    LLMMessagesAppendFrame(
+                        messages=[{"role": "user", "content": remainder}], run_llm=True
+                    ),
+                ]
+            )
+        else:
+            from pipecat.frames.frames import TTSSpeakFrame
+
+            await worker.queue_frames([TTSSpeakFrame(random.choice(BACK_LINES))])
+
+    hold_gate = HoldGate(
+        on_resume=resume, phrases=wake_phrases or DEFAULT_WAKE_PHRASES, fuzzy=wake_fuzzy
+    )
 
     tools = register_tools(
         llm,
         abilities=abilities,
         gate=gate,
         session_id=session_id,
-        on_sleep=sleep,
+        on_hang_up=hang_up,
+        on_hold=hold,
         events=events,
         conversations=runtime,
         on_call=runtime.record_call if runtime else None,
@@ -422,8 +506,10 @@ def build_session(
 
     @user_agg.event_handler("on_user_turn_idle")
     async def on_idle(_agg) -> None:
+        if hold_gate.on_hold:
+            return  # a hold has its own, longer clock
         logger.info(f"idle for {settings.idle_timeout_secs}s")
-        await sleep()
+        await hang_up()
 
     if runtime:
 
@@ -473,15 +559,17 @@ def build_session(
             [
                 (Slot.AUDIO_IN, transport.input()),
                 (None, models.stt.fork()),
+                (None, hold_gate),  # on hold, nothing below hears the room (ADR 0021)
                 (None, echo),
-                (None, UserTap(on_turn, on_phase)),
+                (None, UserTap(on_turn, on_phase, held=lambda: hold_gate.on_hold)),
                 (
                     None,
                     InterceptorProcessor(
                         interceptors,
                         gate=gate,
                         session_id=session_id,
-                        on_sleep=sleep_now,
+                        on_hang_up=hang_up_now,
+                        on_hold=hold,
                         last_assistant=last_assistant,
                         probe=latency,
                     ),
@@ -499,7 +587,12 @@ def build_session(
                 (Slot.BEFORE_LLM, user_agg),
                 (Slot.AFTER_LLM, llm),
                 (None, narration),
-                (None, ThinkingSoundProcessor(delay_secs=settings.thinking_delay_secs)),
+                (
+                    None,
+                    ThinkingSoundProcessor(
+                        delay_secs=settings.thinking_delay_secs, held=lambda: hold_gate.on_hold
+                    ),
+                ),
                 (Slot.BEFORE_TTS, AssistantTap(on_turn, runtime.on_marker if runtime else None)),
                 (
                     Slot.AUDIO_OUT,
@@ -566,4 +659,5 @@ def build_session(
 
     session.start = start  # type: ignore[attr-defined]
     session.open = opening  # type: ignore[attr-defined]
+    session.before_text = unhold
     return session

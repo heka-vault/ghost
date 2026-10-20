@@ -3,7 +3,7 @@
 Sits right after STT. Each ``TranscriptionFrame`` spoken while Ghost is quiet is
 offered to the interceptors in order; the first ``Handled`` wins, the frame is
 dropped, and the model never sees it. Interceptors can speak a line, cancel a
-pending change, or end the session. Anything they do goes
+pending change, put the session on hold, or end it. Anything they do goes
 through the same gate as everything else.
 """
 
@@ -26,6 +26,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from ghost_voice import debug
 from ghost_voice.latency import NULL_PROBE, LatencyProbe
+from ghost_voice.thinking import ThinkingStopFrame
 
 
 class InterceptorProcessor(FrameProcessor):
@@ -35,7 +36,8 @@ class InterceptorProcessor(FrameProcessor):
         *,
         gate: WriteGate,
         session_id: str,
-        on_sleep: Callable[[], Awaitable[None]],
+        on_hang_up: Callable[[], Awaitable[None]],
+        on_hold: Callable[[], Awaitable[None]] | None = None,
         last_assistant: Callable[[], str] | None = None,
         probe: LatencyProbe | None = None,
         **kwargs,
@@ -45,7 +47,8 @@ class InterceptorProcessor(FrameProcessor):
         self._interceptors = list(interceptors)
         self._gate = gate
         self._session_id = session_id
-        self._on_sleep = on_sleep
+        self._on_hang_up = on_hang_up
+        self._on_hold = on_hold
         self._last_assistant = last_assistant or (lambda: "")
         self._bot_speaking = False
 
@@ -80,15 +83,23 @@ class InterceptorProcessor(FrameProcessor):
 
     async def _handle(self, h: Handled) -> None:
         say = h.say
+        # The model is not going to run on this turn: no thinking sound for it.
+        await self.push_frame(ThinkingStopFrame())
         if h.action == "cancel":
             self._gate.cancel(self._session_id, "operator cancelled")
-        elif h.action == "sleep":
-            self._gate.cancel(self._session_id, "went to sleep")
+        elif h.action == "hang_up":
+            self._gate.cancel(self._session_id, "hung up")
             # A reply to an earlier fragment ("okay, um") may still be on its way: cut it,
             # so the goodbye is the last thing said and the session ends now.
             await self.push_frame(InterruptionFrame())
+        elif h.action == "hold":
+            # Whatever Ghost was saying stops; a pending question stays pending for later.
+            await self.push_frame(InterruptionFrame())
         if say:
             await self.push_frame(TTSSpeakFrame(say))
-        if h.action == "sleep":
-            logger.info("interceptor: sleep")
-            await self._on_sleep()
+        if h.action == "hang_up":
+            logger.info("interceptor: hang up")
+            await self._on_hang_up()
+        elif h.action == "hold" and self._on_hold:
+            logger.info("interceptor: hold")
+            await self._on_hold()

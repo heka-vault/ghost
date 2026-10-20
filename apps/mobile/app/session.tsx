@@ -167,11 +167,13 @@ export default function Session() {
     ? ""
     : muted
       ? "Ghost can’t hear you. Tap Unmute to talk."
-      : phase === "listening"
-        ? "Go ahead."
-        : phase === "starting"
-          ? "Getting ready."
-          : "";
+      : phase === "hold"
+        ? "Ghost is out of this conversation. Say “Ghost” to bring it back."
+        : phase === "listening"
+          ? "Go ahead."
+          : phase === "starting"
+            ? "Getting ready."
+            : "";
   const lastTwo = captionTurns(turns);
   const showCaptions = captions && !question && !showResult && lastTwo.length > 0;
 

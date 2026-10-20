@@ -124,7 +124,9 @@ def wired():
     async def on_sleep():
         slept.append(True)
 
-    schemas = register_tools(llm, abilities=[loaded], gate=gate, session_id="s", on_sleep=on_sleep)
+    schemas = register_tools(
+        llm, abilities=[loaded], gate=gate, session_id="s", on_hang_up=on_sleep
+    )
     return llm, gate, schemas, slept, writer
 
 
@@ -135,7 +137,7 @@ def test_prompt_includes_fragments_and_persona():
 
 def test_only_reads_change_and_sleep_are_exposed(wired):
     _, _, schemas, _, _ = wired
-    assert sorted(s.name for s in schemas) == ["change", "echo", "go_to_sleep"]
+    assert sorted(s.name for s in schemas) == ["change", "echo", "hang_up"]
 
 
 def test_denied_ops_are_not_offered(wired):
@@ -205,9 +207,9 @@ def test_no_undo_tool(wired):
     assert "undo" not in llm.functions
 
 
-async def test_go_to_sleep_calls_back(wired):
+async def test_hang_up_calls_back(wired):
     llm, _, _, slept, _ = wired
-    await llm.functions["go_to_sleep"](FakeParams("go_to_sleep", {}, llm=llm))
+    await llm.functions["hang_up"](FakeParams("hang_up", {}, llm=llm))
     assert slept == [True]
     assert llm.pushed == []  # the model's own goodbye is spoken, not a fixed word
 

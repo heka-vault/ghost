@@ -252,6 +252,7 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
 .g-status-dot--lg { --dot: 10px; }
 .g-status-dot.is-starting { --c: var(--phase-starting); animation: g-breathe 1.6s var(--ease-in-out) infinite; }
 .g-status-dot.is-passive { --c: var(--phase-passive); }
+.g-status-dot.is-hold { --c: var(--phase-passive); }
 .g-status-dot.is-listening { --c: var(--phase-listening); }
 .g-status-dot.is-thinking { --c: var(--phase-thinking); animation: g-breathe 0.9s var(--ease-in-out) infinite; }
 .g-status-dot.is-speaking { --c: var(--phase-speaking); }

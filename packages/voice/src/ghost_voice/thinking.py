@@ -15,6 +15,7 @@ through the microphone); going upstream, the transport's bot-speaking frames.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from pipecat.frames.frames import (
@@ -42,12 +43,22 @@ class ThinkingStartFrame(ControlFrame):
     """Queued with a programmatic first turn: the model is about to run."""
 
 
+@dataclass
+class ThinkingStopFrame(ControlFrame):
+    """Nothing is coming: an interceptor took the turn, or the session went on hold
+    (ADR 0021). Without it the loop would play on after a tool call that ends the
+    model's response, or after a shortcut's reply."""
+
+
 class ThinkingSoundProcessor(FrameProcessor):
     """Sound is on when the model or a tool is busy and Ghost is not speaking."""
 
-    def __init__(self, *, delay_secs: float = 0.5, **kwargs) -> None:
+    def __init__(
+        self, *, delay_secs: float = 0.5, held: Callable[[], bool] | None = None, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self._delay = delay_secs
+        self._held = held or (lambda: False)  # on hold nothing is being waited for
         self._timer: asyncio.Task | None = None
         self._on = False
         self._busy = False
@@ -62,6 +73,8 @@ class ThinkingSoundProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, (UserStoppedSpeakingFrame, ThinkingStartFrame)):
             self._busy = True
+        elif isinstance(frame, ThinkingStopFrame):
+            self._busy = False
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._calls_in_progress += 1
             self._busy = True
@@ -84,12 +97,12 @@ class ThinkingSoundProcessor(FrameProcessor):
         elif isinstance(frame, (EndFrame, CancelFrame)):
             self._busy = False
         await self._reconcile()
-        if isinstance(frame, ThinkingStartFrame):
+        if isinstance(frame, (ThinkingStartFrame, ThinkingStopFrame)):
             return
         await self.push_frame(frame, direction)
 
     async def _reconcile(self) -> None:
-        want = self._busy and not self._bot_speaking
+        want = self._busy and not self._bot_speaking and not self._held()
         if want and not self._on:
             if self._timer is None or self._timer.done():
                 self._timer = self.create_task(self._after_delay())

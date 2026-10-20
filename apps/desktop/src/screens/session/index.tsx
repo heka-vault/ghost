@@ -227,7 +227,7 @@ export default function SessionScreen(_: RouteProps) {
   const voice: VoiceControl | undefined = inSession
     ? onPhone
       ? { label: "End the phone session", icon: <PhoneOff />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
-      : { label: "Go to sleep", icon: <Moon />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
+      : { label: "Hang up", icon: <Moon />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
     : showDock
       ? { label: wakeWhy, icon: <AudioLines />, onClick: wake, loading: busy === "wake", disabled: wakeOff }
       : undefined;

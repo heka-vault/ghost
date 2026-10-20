@@ -564,7 +564,7 @@ class Daemon:
             self.state.set_conversation(slug)
             self._refresh_pending()
 
-        async def on_sleep() -> None:
+        async def on_hang_up() -> None:
             self.state.set_ending()  # the phone and the desktop app show "Hanging up"
 
         session = build_session(
@@ -580,7 +580,9 @@ class Daemon:
             start_in=GHOST,
             on_conversation=on_conversation,
             transport_factory=transport_factory,
-            on_sleep=on_sleep,
+            on_hang_up=on_hang_up,
+            wake_phrases=parse_phrases(self.cfg.wake_phrases),
+            wake_fuzzy=self.cfg.wake_fuzzy,
             origin=origin,
             latency_log=self.cfg.latency_path,
         )

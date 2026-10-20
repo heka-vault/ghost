@@ -106,7 +106,7 @@ def world(tmp_path: Path):
         abilities=[loaded],
         gate=gate,
         session_id="s1",
-        on_sleep=on_sleep,
+        on_hang_up=on_sleep,
         conversations=rt,
         on_call=rt.record_call,
     )
@@ -430,7 +430,7 @@ def threads(tmp_path: Path):
             abilities=[ab, loaded],
             gate=gate,
             session_id="s1",
-            on_sleep=on_sleep,
+            on_hang_up=on_sleep,
             conversations=rt,
             on_call=rt.record_call,
             last_request=lambda: (heard[0], ""),

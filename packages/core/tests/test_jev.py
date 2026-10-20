@@ -58,7 +58,7 @@ async def test_confident_affirm_and_deny():
     assert await JevClassifier(FakeJev(ans("ask"))).classify("what time", CTX) is Verdict.UNCLEAR
     cancel = JevClassifier(FakeJev(ans("cancel")))
     assert await cancel.classify("forget it", CTX) is Verdict.NEGATIVE
-    sleep = JevClassifier(FakeJev(ans("sleep")))
+    sleep = JevClassifier(FakeJev(ans("hang_up")))
     assert await sleep.classify("that's it", CTX) is Verdict.UNCLEAR
 
 

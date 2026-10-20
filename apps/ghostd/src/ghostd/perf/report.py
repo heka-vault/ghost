@@ -59,8 +59,8 @@ def render(
 
 def narration(calls: Sequence[dict[str, Any]]) -> tuple[int, int]:
     """Tool-calling model calls that wrote text first, out of all tool-calling calls
-    (go_to_sleep excepted: its text is the goodbye)."""
-    tool_calls = [c for c in calls if c.get("tools") and c["tools"] != ["go_to_sleep"]]
+    (hang_up and hold excepted: their text is spoken)."""
+    tool_calls = [c for c in calls if c.get("tools") and c["tools"] not in (["hang_up"], ["hold"])]
     return sum(1 for c in tool_calls if c.get("text")), len(tool_calls)
 
 

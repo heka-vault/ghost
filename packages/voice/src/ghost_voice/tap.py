@@ -34,24 +34,33 @@ OnMarker = Callable[[ConversationMarkerFrame], None]
 
 
 class UserTap(FrameProcessor):
-    def __init__(self, on_turn: OnTurn, on_phase: OnPhase, **kwargs) -> None:
+    def __init__(
+        self,
+        on_turn: OnTurn,
+        on_phase: OnPhase,
+        held: Callable[[], bool] | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._on_turn = on_turn
         self._on_phase = on_phase
+        # On hold (ADR 0021) the end of Ghost's "take your time" is not "listening".
+        self._held = held or (lambda: False)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             await self._on_turn("user", frame.text)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, UserStoppedSpeakingFrame) and not self._held():
             # The turn is over (after the grace hold), so the model is about to run. A
             # transcript on its own isn't that: sentences arrive in pieces while the
             # operator is still talking, and the phone showed Thinking mid-sentence.
+            # On hold the room's voices open turns with no words in them; not thinking.
             await self._on_phase("thinking")
         elif isinstance(frame, BotStartedSpeakingFrame):
             await self._on_phase("speaking")
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._on_phase("listening")
+            await self._on_phase("hold" if self._held() else "listening")
         await self.push_frame(frame, direction)
 
 

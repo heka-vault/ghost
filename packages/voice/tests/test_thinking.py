@@ -132,3 +132,39 @@ async def test_cut_switches_mixer_off_as_speech_starts():
         for f in pushed
     ]
     assert kinds == ["MixerEnableFrame(False)", "TTSStartedFrame", "TTSStoppedFrame"]
+
+
+async def test_stop_frame_ends_the_wait_after_a_tool_call_with_no_reply():
+    """hold (ADR 0021) returns run_llm=False: no response follows the result, so the
+    session sends a stop; without it the loop would play on."""
+    from ghost_voice.thinking import ThinkingStopFrame
+
+    proc, pushed = processor()
+    await proc.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await proc.process_frame(
+        FunctionCallInProgressFrame(function_name="hold", tool_call_id="t", arguments={}),
+        FrameDirection.DOWNSTREAM,
+    )
+    await proc.process_frame(
+        FunctionCallResultFrame(function_name="hold", tool_call_id="t", arguments={}, result={}),
+        FrameDirection.DOWNSTREAM,
+    )
+    await asyncio.sleep(0.08)
+    assert proc.playing
+    await proc.process_frame(ThinkingStopFrame(), FrameDirection.DOWNSTREAM)
+    assert not proc.playing
+    assert not any(isinstance(f, ThinkingStopFrame) for f in pushed)  # swallowed
+
+
+async def test_no_sound_while_held():
+    held = [True]
+    proc = ThinkingSoundProcessor(delay_secs=0.02, held=lambda: held[0])
+    pushed: list = []
+
+    async def push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+        pushed.append(frame)
+
+    proc.push_frame = push_frame  # type: ignore[method-assign]
+    await proc.process_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await asyncio.sleep(0.06)
+    assert not proc.playing

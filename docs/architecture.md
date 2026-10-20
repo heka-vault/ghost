@@ -41,7 +41,7 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 
 | Component | Responsibility |
 |---|---|
-| `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on "go to sleep" or idle timeout |
+| `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021) |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
 | `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
 | `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, and the audit log. The only code that can execute a write |
@@ -57,7 +57,7 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
    A typed turn from the desktop app (`POST /session/say`) enters the same pipeline after
    the STT stage, so it meets the same tools and the same gate as speech.
 4. **Transfer.** Every session opens in `ghost`. "Patch me to accounting" is an LLM tool: Ghost's voice announces it, a short tone plays, the TTS voice and the system prompt change, and the context is replaced with that conversation's rolling summary, pinned notes and recent turns; the line greets with a one-line recap. "Back to Ghost" returns. "Save this as accounting" creates the conversation and carries this session's turns into it. A transfer cancels any change waiting for a yes.
-5. **Sleep.** "Go to sleep" or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive. Every spoken turn was persisted as it happened; the next wake is `ghost` again.
+5. **Hold and hang up.** "Hang on, Ghost" puts the session on hold: the gate after STT drops everything the mic hears, unlogged, until an utterance that starts by addressing Ghost resumes it with the rest as the next turn; a hold ends quietly after 30 minutes (ADR 0021). A goodbye ("talk to you later", "bye", "that's all") or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive. Every spoken turn was persisted as it happened; the next wake is `ghost` again.
 
 ### Threads scope work (ADR 0019)
 
@@ -154,7 +154,7 @@ transport.input -> [audio_in] -> Parakeet STT -> InterceptorProcessor -> Confirm
 
 The bracketed names are slots where enabled abilities' processors are spliced in, one
 fresh instance per session. `InterceptorProcessor` offers each user turn to the
-abilities' turn interceptors first (and to Ghost's own fixed intents: "go to sleep",
+abilities' turn interceptors first (and to Ghost's own fixed intents: a goodbye, "hang on",
 "never mind" while a change is pending); a handled turn is spoken to or
 acted on directly and never reaches the model.
 
@@ -165,7 +165,7 @@ that arrive while Ghost is still speaking are not evidence at all: the operator 
 not heard the question yet, and the text may be Ghost's own voice. The verified
 outcome is appended to the context as a system note, so the model's next sentence
 describes what actually happened. The model's tools are the abilities' read tools,
-`change`, and `go_to_sleep`. There is no tool that bypasses the gate.
+`change`, `hang_up` and `hold`. There is no tool that bypasses the gate.
 
 The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the
 install needs no compiled extension; PortAudio comes with the wheel and talks to

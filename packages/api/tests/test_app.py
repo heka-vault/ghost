@@ -264,7 +264,7 @@ def test_phone_routes(world):
 
     client, state, control, *_ = world
     assert client.post("/phone/pairing").status_code == 409  # listener off
-    assert client.get("/phone").json() == {"address": None, "device": None}
+    assert client.get("/phone").json() == {"address": None, "addresses": [], "device": None}
 
     control.phone_address = "192.168.1.20:8765"
     body = client.post("/phone/pairing").json()

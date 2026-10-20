@@ -31,6 +31,10 @@ is connected; when there is a choice, a button in the session's top bar switches
 Permissions asked once at the first Start: the microphone (required), and best effort,
 notifications (Android 13+) and Bluetooth connect (Android 12+).
 
+Checked out: "hang on, Ghost" keeps the session while you talk to someone else. The screen and
+the notification say Ghost is checked out of the conversation; the desk drops everything it hears until an utterance that starts with
+"Ghost" brings it back with the rest as the next turn (ADR 0021). A hold ends quietly after 30 min.
+
 Hands-free start: Settings → "Start talking when Ghost opens" (off by default) opens the mic as
 soon as the app comes up and the desk answers, which makes "Hey Google, open Ghost" enough in
 the car. It is decided once per launch, so turning it on in Settings does not start a session

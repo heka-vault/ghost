@@ -237,7 +237,10 @@ export class LiveDesk implements Desk {
 
   private onStatus(status: Status) {
     const wasOurs = !!this.pc && !!this.state.status?.session_id;
+    const wasHold = this.state.status?.phase === "hold";
     this.set({ status, pending: status.pending ?? null });
+    // The notification says when Ghost is waiting to be addressed by name (ADR 0021).
+    if (this.pc && (status.phase === "hold") !== wasHold) updateCall(this.callBody());
     // The desk ended the session (Ghost said goodbye, or the operator ended it there).
     if (wasOurs && !status.session_id) return this.teardown();
     if (this.pc && status.ending) this.hangingUp(status);
@@ -419,7 +422,8 @@ export class LiveDesk implements Desk {
   /** The notification's second line. */
   private callBody(): string {
     const conv = this.state.status?.conversation;
-    return `In a session on the ${conv && conv !== "ghost" ? lineName(conv) : "main"} line`;
+    const line = `${conv && conv !== "ghost" ? lineName(conv) : "main"} line`;
+    return this.state.status?.phase === "hold" ? `Checked out of the ${line}. Say “Ghost” to bring it back.` : `In a session on the ${line}`;
   }
 
   /**

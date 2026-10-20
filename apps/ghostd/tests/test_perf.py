@@ -80,7 +80,7 @@ def test_check_line_reports_drift_without_text():
         "expected the session to end",
         "hung up without a spoken goodbye",
     ]
-    silent = voice_record(2, 3.0, tools=("go_to_sleep",)) | {"spoke": False, "reply": None}
+    silent = voice_record(2, 3.0, tools=("hang_up",)) | {"spoke": False, "reply": None}
     assert check_line(Line("bye", ends=True), [silent], ended=True) == [
         "hung up without a spoken goodbye"
     ]

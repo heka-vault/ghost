@@ -86,7 +86,9 @@ class Handled:
     """An interceptor took the turn. The model never sees it."""
 
     say: str | None = None
-    action: Literal["sleep", "cancel"] | None = None
+    # hang_up ends the session; hold keeps it while the operator talks to someone else
+    # (ADR 0021); cancel drops a pending change.
+    action: Literal["hang_up", "hold", "cancel"] | None = None
 
 
 class TurnInterceptor(Protocol):

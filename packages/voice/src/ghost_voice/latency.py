@@ -65,7 +65,7 @@ from pipecat.services.tts_service import TTSService
 RECORD_VERSION = 1
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 # A response that calls only these still speaks its text (ghost_voice.narration).
-_SPOKEN_WITH = frozenset({"go_to_sleep"})
+_SPOKEN_WITH = frozenset({"hang_up", "hold"})
 # The thinking sound processor's frame; matched by name to keep this module free of
 # a dependency on ghost_voice.thinking.
 _THINKING_START = "ThinkingStartFrame"

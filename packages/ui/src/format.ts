@@ -9,7 +9,7 @@ import { phaseLabel } from "./labels";
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
 
 /** Ghost's phase as the apps show it: the daemon's phases plus offline and starting. */
-export type GhostPhase = "starting" | "passive" | "listening" | "thinking" | "speaking" | "offline";
+export type GhostPhase = "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "offline";
 
 /** The phase to show: offline when the daemon is unreachable, starting until models load. */
 export function phaseOf(status: Status | null, connected: boolean): GhostPhase {

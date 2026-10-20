@@ -7,7 +7,8 @@ the response ends, then spoken; if the response calls a tool instead, the held t
 dropped, never spoken and never added to the context. The answer comes in the next
 response, after the tool's result, and is spoken as usual.
 
-A response that calls only ``go_to_sleep`` is the exception: its text is the goodbye
+A response that calls only ``hang_up`` or ``hold`` is the exception: its text is the goodbye
+(or the "take your time")
 ("Sounds good, talk later!") and is spoken.
 
 Once the session is going to sleep (``close()``), nothing later is spoken: a reply to
@@ -35,7 +36,7 @@ from ghost_voice import debug
 
 
 class NarrationCut(FrameProcessor):
-    SPOKEN_WITH = frozenset({"go_to_sleep"})
+    SPOKEN_WITH = frozenset({"hang_up", "hold"})
 
     def __init__(self, *, max_chars: int = 240, **kwargs) -> None:
         super().__init__(**kwargs)

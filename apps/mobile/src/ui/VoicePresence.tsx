@@ -65,7 +65,8 @@ export function VoicePresence({ phase, size = 96, label, float = false }: { phas
 
   const ring = size === 48 ? 0.88 : 0.76;
   const core = size === 48 ? 0.64 : 0.56;
-  const passive = phase === "passive" && !float;
+  // Checked out (hold) Ghost is quiet by choice: the still, grey mark, the same as passive.
+  const passive = (phase === "passive" || phase === "hold") && !float;
   const offline = phase === "offline";
   const quiet = passive || offline;
 

@@ -105,7 +105,7 @@ Everything in `Contributions` is optional.
   a request that uses one, names the target (your `Target.mentions()`) and doesn't hedge is
   the yes, with no question (ADR 0017). Leave it empty and the operation always asks.
 - **interceptors**: `async on_user_turn(turn) -> Handled | None`. Return `Handled(say=...,
-  action="sleep" | "cancel")` to take the turn before the model sees it.
+  action="hang_up" | "hold" | "cancel")` to take the turn before the model sees it.
 - **processors**: `{Slot.AFTER_STT: [factory]}` where each factory returns a fresh Pipecat
   `FrameProcessor` per session. For abilities that genuinely need frames.
 - **listeners**: `async def on(event)` for `wake`, `session_start`, `session_end`,
