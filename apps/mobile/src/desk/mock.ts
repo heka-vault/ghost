@@ -6,7 +6,7 @@
  */
 import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn } from "@ghost/client-ts";
 
-import type { Desk, DeskState, Link } from "./types";
+import type { Desk, DeskState, Link, Route } from "./types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -69,7 +69,7 @@ export class MockDesk implements Desk {
   private muted = false;
 
   constructor() {
-    this.state = { link: "connecting", status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
+    this.state = { link: "connecting", via: "Wi-Fi", lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
     const audit = seedAudit();
     setTimeout(() => this.set({ link: "online", status: this.status({}), audit, auditTotal: audit.length }), 700);
   }
@@ -138,6 +138,10 @@ export class MockDesk implements Desk {
     await sleep(500);
     this.set({ status: this.status({ phase: "listening", session_id: id(), session_origin: "phone" }), turns: [] });
     void this.speak("Ghost here. Two issues are waiting on you.");
+  }
+
+  setRoute(route: Route) {
+    this.set({ audio: { ...this.state.audio, route } });
   }
 
   async end() {

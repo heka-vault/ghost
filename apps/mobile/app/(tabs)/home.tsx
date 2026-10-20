@@ -7,7 +7,7 @@
 import { errorText, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
 import { AudioLines } from "lucide-react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { useDesk } from "../../src/desk/context";
@@ -16,14 +16,19 @@ import { opacityDisabled, space } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
 import { GhostMark } from "../../src/ui/Brand";
 import { TargetText } from "../../src/ui/entries";
-import { Cta, LinkDot, linkLabel, Screen, Skeleton } from "../../src/ui/parts";
+import { Cta, LinkDot, linkLabel, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 import { VoicePresence } from "../../src/ui/VoicePresence";
 
+/** Decided once per app launch, so turning the preference on later doesn't start a session on the spot. */
+let launchChecked = false;
+let launchWantsStart = false;
+
 export default function Home() {
   const router = useRouter();
-  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy } = useDesk();
-  const { pairing } = usePhone();
+  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy, via } = useDesk();
+  const phone = usePhone();
+  const { pairing } = phone;
   const { tone, title } = linkLabel(link);
   const [starting, setStarting] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -60,6 +65,20 @@ export default function Home() {
     }
   };
 
+  // Hands-free: opened by voice with the preference on, the first Home that can start, does.
+  useEffect(() => {
+    if (!phone.hydrated) return;
+    if (!launchChecked) {
+      launchChecked = true;
+      launchWantsStart = phone.prefs.autoStart;
+    }
+    if (launchWantsStart && ready && !starting) {
+      launchWantsStart = false;
+      void start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- start is stable enough for a one-shot
+  }, [phone.hydrated, phone.prefs.autoStart, ready, starting]);
+
   let hero: { presence: Parameters<typeof VoicePresence>[0]["phase"]; title: string; body: string; question?: boolean };
   if (link === "offline") {
     hero = { presence: "offline", title: "Can’t reach your desk", body: `Ghost isn’t answering on ${workstation}. Check that it’s running and that this phone is on the same Wi-Fi.` };
@@ -89,7 +108,7 @@ export default function Home() {
             <LinkDot tone={tone} />
             <Text size="md" color="text2" numberOfLines={1} style={{ flexShrink: 1 }}>
               {title}
-              {link === "online" && pairing ? <Text size="md" color="text3">{` · ${pairing.workstation} · ${pairing.via}`}</Text> : null}
+              {link === "online" && pairing ? <Text size="md" color="text3">{` · ${pairing.workstation}${via ? ` · ${viaLabel(via)}` : ""}`}</Text> : null}
             </Text>
           </View>
         </View>

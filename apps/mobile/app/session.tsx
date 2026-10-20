@@ -14,11 +14,12 @@ import { errorText, lineName, pastTense, phaseText, quoted, splitSummary } from 
 import * as Haptics from "expo-haptics";
 import { useKeepAwake } from "expo-keep-awake";
 import { useRouter } from "expo-router";
-import { Captions, CaptionsOff, Check, CircleX, Mic, MicOff, Minus } from "lucide-react-native";
+import { Bluetooth, Captions, CaptionsOff, Check, CircleX, Headphones, Mic, MicOff, Minus, Smartphone, Volume2 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { useDesk } from "../src/desk/context";
+import type { AudioState, Route } from "../src/desk/types";
 import { setPref, update, usePhone } from "../src/phone/store";
 import { radius, space, useColors } from "../src/theme";
 import { LineGlyph } from "../src/ui/Brand";
@@ -41,7 +42,7 @@ interface Settled {
 
 export default function Session() {
   const router = useRouter();
-  const { desk, link, status, turns, pending, outcomes, phase, online, inSession } = useDesk();
+  const { desk, link, status, turns, pending, outcomes, phase, online, inSession, audio } = useDesk();
   const phone = usePhone();
   const reconnecting = link === "reconnecting" || link === "offline";
   const [ending, setEnding] = useState(false);
@@ -189,12 +190,15 @@ export default function Session() {
             </Text>
           </View>
         </View>
-        <TouchIcon
-          label={captions ? "Hide captions" : "Show captions"}
-          pressed={captions}
-          icon={(col) => (captions ? <Captions size={22} color={col} /> : <CaptionsOff size={22} color={col} />)}
-          onPress={() => setPref("captions", !captions)}
-        />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space[1] }}>
+          {audio.available.length > 1 && <RouteButton audio={audio} onPick={(r) => desk.setRoute(r)} />}
+          <TouchIcon
+            label={captions ? "Hide captions" : "Show captions"}
+            pressed={captions}
+            icon={(col) => (captions ? <Captions size={22} color={col} /> : <CaptionsOff size={22} color={col} />)}
+            onPress={() => setPref("captions", !captions)}
+          />
+        </View>
       </View>
 
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: space[6], paddingHorizontal: space[6], paddingBottom: question ? space[12] : space[6] }}>
@@ -331,6 +335,20 @@ function CaptionBand({ turns, stale }: { turns: Turn[]; stale: boolean }) {
       )}
     </View>
   );
+}
+
+const ROUTE_LABEL: Record<Route, string> = { speaker: "Speaker", earpiece: "Earpiece", bluetooth: "Bluetooth", headset: "Headset" };
+const ROUTE_ICON = { speaker: Volume2, earpiece: Smartphone, bluetooth: Bluetooth, headset: Headphones } as const;
+
+/**
+ * Where the call's audio goes, shown only when there is a choice (a car, a headset). One tap
+ * moves to the next route; the icon is the one in use, so a glance says where Ghost's voice is.
+ */
+function RouteButton({ audio, onPick }: { audio: AudioState; onPick: (r: Route) => void }) {
+  const i = audio.available.indexOf(audio.route);
+  const next = audio.available[(i + 1) % audio.available.length] ?? audio.route;
+  const Icon = ROUTE_ICON[audio.route];
+  return <TouchIcon label={`Audio on ${ROUTE_LABEL[audio.route]}. Switch to ${ROUTE_LABEL[next]}`} icon={(col) => <Icon size={22} color={col} />} onPress={() => onPick(next)} />;
 }
 
 /** Mute, beside End: the phone stops sending its mic, Ghost keeps the session. */

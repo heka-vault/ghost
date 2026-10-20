@@ -10,7 +10,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Animated, Modal, Pressable, type StyleProp, Switch, View, type ViewStyle } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import type { Link } from "../desk/types";
+import type { Link, Via } from "../desk/types";
 import { type Colors, radius, space, useColors } from "../theme";
 import { TouchButton } from "./Button";
 import { Text } from "./Text";
@@ -76,6 +76,11 @@ export function linkLabel(l: Link): { tone: "ok" | "warn" | "danger" | "neutral"
   if (l === "reconnecting") return { tone: "warn", title: "Reconnecting" };
   if (l === "offline") return { tone: "danger", title: "Not connected" };
   return { tone: "neutral", title: "Connecting…" };
+}
+
+/** "Wi-Fi" at home, "away" through the tunnel (ADR 0020). */
+export function viaLabel(via: Via): string {
+  return via === "tunnel" ? "away" : "Wi-Fi";
 }
 
 export function LinkDot({ tone }: { tone: ReturnType<typeof linkLabel>["tone"] }) {

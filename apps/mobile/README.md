@@ -19,6 +19,23 @@ Needs the Android SDK at `~/Android/Sdk` and JDK 17 (override with `ANDROID_HOME
 when either changes. Builds are arm64 only (`ANDROID_ARCH`). The APK is signed with the
 debug key: fine for your own phone, not for the Play Store.
 
+
+## In a pocket or a car
+
+A session keeps the microphone open with the screen off: Start also starts a small foreground
+service of type microphone (`modules/ghost-call`, a local Expo module in Kotlin), which Android
+12+ requires for capture outside the foreground. It shows one quiet notification, "Ghost · In a
+session on the main line", whose End action ends the call like the button. The same service ticks once a second and the app sends the desk's keepalive on that tick, because React Native's own timers stop while the app is off the screen (the first background test hung up after 15 s for that reason). The call's audio
+goes to the speaker by default and moves to a Bluetooth hands-free or a wired headset when one
+is connected; when there is a choice, a button in the session's top bar switches between them.
+Permissions asked once at the first Start: the microphone (required), and best effort,
+notifications (Android 13+) and Bluetooth connect (Android 12+).
+
+Hands-free start: Settings → "Start talking when Ghost opens" (off by default) opens the mic as
+soon as the app comes up and the desk answers, which makes "Hey Google, open Ghost" enough in
+the car. It is decided once per launch, so turning it on in Settings does not start a session
+on the spot. Preferences are kept in secure storage with the pairing.
+
 ## How it's put together
 
 - `app/`: routes (expo-router). `pair/` first, then the tabs (Home, Activity, Settings)
@@ -42,8 +59,12 @@ classifies it and the gate writes. There is no Confirm button on the phone.
 
 ## Pairing with the desk
 
-Same Wi-Fi only for now. On the workstation set `GHOST_PHONE_LISTEN=<LAN IP>:8765` and
-restart ghostd; with `ufw` on, allow that TCP port and UDP from the LAN. In the desktop app
+On the workstation set `GHOST_PHONE_LISTEN=<LAN IP>:8765` and restart ghostd; with `ufw` on,
+allow that TCP port and UDP from the LAN. Away from home the phone comes in through the
+operator's own WireGuard network (ADR 0020): the desk and the phone are peers of a hub, the
+desk also listens on its tunnel address (`GHOST_PHONE_LISTEN=<LAN IP>:8765,<tunnel IP>:8765`),
+and the phone keeps both addresses and uses the first that answers. On the phone the tunnel
+is the WireGuard app's, set up once, carrying only this app, left on. In the desktop app
 choose Pair a phone, then on the phone tap Enter the address and type the address and the
 six-digit code. Scanning a QR code isn't built yet; the app doesn't ask for the camera.
 

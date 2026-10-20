@@ -1,6 +1,9 @@
 /**
- * The real desk: ghostd's phone listener on the LAN (ADR 0016, docs/phone-protocol.md).
+ * The real desk: ghostd's phone listener (ADR 0016, docs/phone-protocol.md), on the home
+ * Wi-Fi or through the operator's tunnel from anywhere (ADR 0020).
  *
+ * The desk lists every address it serves; the phone asks all of them once and keeps the
+ * first in the list that answers (home before tunnel), until that one stops answering.
  * Outside a session the phone asks `/hello` every few seconds for the link and the status,
  * and `/audit` for the Activity tab. Start opens the mic and joins the pipeline over WebRTC.
  * From then on the desk's own session events arrive on the data channel, as the same JSON the
@@ -8,12 +11,15 @@
  * doesn't check is never applied, which is what keeps the audio between this phone and its desk.
  */
 import type { AuditPage, GhostEvent, Status } from "@ghost/client-ts";
-import { PermissionsAndroid, Platform } from "react-native";
+import { lineName } from "@ghost/ui";
+import { DeviceEventEmitter, type EmitterSubscription, PermissionsAndroid, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
 import { mediaDevices, MediaStream, RTCPeerConnection, RTCSessionDescription } from "react-native-webrtc";
 
+import { onCallEnd, onCallTick, startCall, stopCall, updateCall } from "../../modules/ghost-call";
+import { rememberAddresses } from "../phone/pairing";
 import { signRequest, verifyResponse } from "../phone/signing";
-import type { Desk, DeskState, Link } from "./types";
+import type { AudioState, CallStats, Desk, DeskState, Link, Route, Via } from "./types";
 
 const POLL_MS = 4000;
 const POLL_IN_SESSION_MS = 15000;
@@ -26,11 +32,21 @@ const READY_SETTLE_MS = 250;
 const HANG_UP_MS = 6000;
 /** Missed /hello answers before the link shows offline rather than reconnecting. */
 const OFFLINE_AFTER = 3;
+/** How long the phone gives every address to answer when it is choosing one. */
+const PICK_MS = 3000;
+
+/** InCallManager's names for the routes. */
+const ROUTE_NAMES: Record<Route, string> = { speaker: "SPEAKER_PHONE", earpiece: "EARPIECE", bluetooth: "BLUETOOTH", headset: "WIRED_HEADSET" };
+const ROUTE_OF: Record<string, Route> = { SPEAKER_PHONE: "speaker", EARPIECE: "earpiece", BLUETOOTH: "bluetooth", WIRED_HEADSET: "headset" };
+const DEFAULT_AUDIO: AudioState = { route: "speaker", available: ["speaker"] };
+
+type AudioDeviceEvent = { availableAudioDeviceList?: string; selectedAudioDevice?: string };
 
 type DataChannel = ReturnType<RTCPeerConnection["createDataChannel"]>;
 
 export interface LiveDeskConfig {
-  address: string;
+  /** The desk's addresses, home first (ADR 0020). */
+  addresses: string[];
   deviceId: string;
   secret: Uint8Array;
 }
@@ -45,7 +61,9 @@ const MESSAGES: Record<string, string> = {
 };
 
 export class LiveDesk implements Desk {
-  private state: DeskState = { link: "connecting", status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
+  private state: DeskState = { link: "connecting", via: null, lastCall: null, audio: DEFAULT_AUDIO, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
+  /** The address in use; null until one answers, and again once it stops answering. */
+  private address: string | null = null;
   private listeners = new Set<() => void>();
   private failures = 0;
   private poll: ReturnType<typeof setTimeout> | null = null;
@@ -59,9 +77,29 @@ export class LiveDesk implements Desk {
   private joined: (() => void) | null = null;
   private goodbyeHeard = false;
   private hangUpTimer: ReturnType<typeof setTimeout> | null = null;
+  private callStartedAt = 0;
+  private routeSub: EmitterSubscription | null = null;
+  private readonly endSub: () => void;
+  private readonly tickSub: () => void;
 
   constructor(private cfg: LiveDeskConfig) {
+    // End on the session notification (screen off, phone in a pocket) ends the call like the button.
+    this.endSub = onCallEnd(() => void this.end().catch(() => {}));
+    // The keepalive the desk expects every second. JS timers stop in the background (the
+    // desk hung up 15 s after the app left the screen); the service's tick does not.
+    this.tickSub = onCallTick(() => this.keepalive());
     void this.tick();
+  }
+
+  private keepalive() {
+    const dc = this.dc;
+    if (dc?.readyState === "open") {
+      try {
+        dc.send("ping");
+      } catch {
+        // closing under us; the state change handles it
+      }
+    }
   }
 
   getState = () => this.state;
@@ -77,6 +115,8 @@ export class LiveDesk implements Desk {
   dispose() {
     this.disposed = true;
     if (this.poll) clearTimeout(this.poll);
+    this.endSub();
+    this.tickSub();
     this.teardown();
   }
 
@@ -88,13 +128,17 @@ export class LiveDesk implements Desk {
   // ------------------------------------------------------------------ signed HTTP
 
   private async request<T>(method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<T> {
+    return this.requestAt(this.address ?? this.cfg.addresses[0], method, path, body, REQUEST_MS);
+  }
+
+  private async requestAt<T>(address: string, method: "GET" | "POST" | "PATCH", path: string, body: unknown, ms: number): Promise<T> {
     const text = body === undefined ? "" : JSON.stringify(body);
     const { headers, nonce } = signRequest(this.cfg.deviceId, this.cfg.secret, method, path, text);
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), REQUEST_MS);
+    const timer = setTimeout(() => abort.abort(), ms);
     let res: Response;
     try {
-      res = await fetch(`http://${this.cfg.address}${path}`, {
+      res = await fetch(`http://${address}${path}`, {
         method,
         headers: text ? { ...headers, "Content-Type": "application/json" } : headers,
         body: text || undefined,
@@ -122,10 +166,36 @@ export class LiveDesk implements Desk {
 
   // ------------------------------------------------------------------ the link
 
+  /**
+   * Ask every address at once and keep the first in the list that answers, so at home the
+   * Wi-Fi path wins even when the tunnel also answers. Null when none does.
+   */
+  private async pick(): Promise<Hello | null> {
+    const tries = this.cfg.addresses.map((a) =>
+      this.requestAt<Hello>(a, "GET", "/hello", undefined, PICK_MS).then(
+        (hello) => ({ a, hello }),
+        () => null,
+      ),
+    );
+    const answers = await Promise.all(tries);
+    const first = answers.find((x) => x !== null);
+    if (!first) return null;
+    this.address = first.a;
+    this.set({ via: this.viaOf(first.a) });
+    return first.hello;
+  }
+
+  private viaOf(address: string): Via {
+    return address === this.cfg.addresses[0] ? "Wi-Fi" : "tunnel";
+  }
+
   private async tick() {
     if (this.disposed) return;
     try {
-      const hello = await this.request<{ workstation: string; status: Status }>("GET", "/hello");
+      const hello = this.address ? await this.request<Hello>("GET", "/hello") : await this.pick();
+      if (!hello) throw new DeskError("Your desk isn’t reachable right now.");
+      // The desk may have gained or lost an address since pairing (a tunnel set up later).
+      if (hello.addresses?.length) void rememberAddresses(hello.addresses).catch(() => {});
       this.failures = 0;
       const first = this.state.audit === null;
       const wasSession = !!this.state.status?.session_id;
@@ -136,7 +206,16 @@ export class LiveDesk implements Desk {
       this.failures += 1;
       const link: Link = this.failures >= OFFLINE_AFTER || this.state.link === "connecting" ? "offline" : "reconnecting";
       // In a session the data channel is the better witness; leave the link alone while it is open.
-      if (this.dc?.readyState !== "open") this.set({ link });
+      if (this.dc?.readyState !== "open") {
+        this.set({ link });
+        // Off the call, a path that stopped answering is dropped at once so the next tick
+        // chooses again (the phone left the house, or came home). At home a blip costs one
+        // three-second pick that lands on the same address.
+        if (!this.pc) {
+          this.address = null;
+          this.set({ via: null });
+        }
+      }
     }
     if (this.disposed) return;
     this.poll = setTimeout(() => void this.tick(), this.pc ? POLL_IN_SESSION_MS : POLL_MS);
@@ -184,6 +263,7 @@ export class LiveDesk implements Desk {
         return;
       case "conversation":
         if (this.state.status) this.set({ status: { ...this.state.status, conversation: e.active ?? null } });
+        if (this.pc) updateCall(this.callBody());
         return;
     }
   }
@@ -210,6 +290,13 @@ export class LiveDesk implements Desk {
     if (Platform.OS === "android") {
       const ok = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
       if (ok !== PermissionsAndroid.RESULTS.GRANTED) throw new DeskError("Ghost needs the microphone to hear you. Allow it for Ghost in Android settings.");
+      // Best effort, asked once: the session notification (Android 13+) and seeing a car's or
+      // headset's Bluetooth (Android 12+). Either refused still leaves a working call.
+      try {
+        await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS, PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]);
+      } catch {
+        // an older Android without these permissions
+      }
     }
 
     try {
@@ -236,7 +323,9 @@ export class LiveDesk implements Desk {
       };
       dc.addEventListener("open", () => {
         channelOpen = true;
-        this.ping = setInterval(() => dc.readyState === "open" && dc.send("ping"), 1000);
+        // In the foreground this and the service's tick both ping; a ping is a few bytes and
+        // the desk only needs one a second. Alone, this one stops in the background.
+        this.ping = setInterval(() => this.keepalive(), 1000);
         maybeReady();
       });
       pc.addEventListener("track", () => {
@@ -256,15 +345,21 @@ export class LiveDesk implements Desk {
 
       await pc.setLocalDescription(await pc.createOffer({}));
       await gathered(pc);
+      this.callStartedAt = Date.now();
       const local = pc.localDescription!;
       this.set({ turns: [], outcomes: {} });
       const answer = await this.request<{ sdp: string; type: "answer"; pc_id: string }>("POST", "/offer", { sdp: local.sdp, type: local.type });
       await pc.setRemoteDescription(new RTCSessionDescription({ sdp: answer.sdp, type: answer.type }));
 
-      InCallManager.start({ media: "audio" });
-      InCallManager.setForceSpeakerphoneOn(true);
+      // "video" to InCallManager means: the speaker by default, a Bluetooth or wired headset
+      // whenever one is connected, and no proximity sensor. Nothing is forced, so a car's
+      // hands-free takes the call and the button on screen can move it.
+      this.routeSub = DeviceEventEmitter.addListener("onAudioDeviceChanged", (e: AudioDeviceEvent) => this.onRoute(e));
+      InCallManager.start({ media: "video" });
       routeUp = true;
       maybeReady();
+      // Hold the mic open with the screen off, and put an End action in the notification shade.
+      startCall("Ghost", this.callBody());
 
       await new Promise<void>((resolve, reject) => {
         const t = setTimeout(() => reject(new DeskError("Your desk answered but the session didn’t open. Try again.")), JOIN_MS);
@@ -303,6 +398,30 @@ export class LiveDesk implements Desk {
     });
   }
 
+  setRoute(route: Route) {
+    if (!this.pc) return;
+    void (InCallManager.chooseAudioRoute(ROUTE_NAMES[route]) as Promise<unknown>).catch(() => {});
+  }
+
+  /** InCallManager reports the routes it can see and the one in use. */
+  private onRoute(e: AudioDeviceEvent) {
+    let names: unknown = [];
+    try {
+      names = e.availableAudioDeviceList ? JSON.parse(e.availableAudioDeviceList) : [];
+    } catch {
+      names = [];
+    }
+    const available = (Array.isArray(names) ? names : []).map((n) => ROUTE_OF[String(n)]).filter((r): r is Route => !!r);
+    const route = ROUTE_OF[e.selectedAudioDevice ?? ""] ?? this.state.audio.route;
+    this.set({ audio: { route, available: available.length ? available : [route] } });
+  }
+
+  /** The notification's second line. */
+  private callBody(): string {
+    const conv = this.state.status?.conversation;
+    return `In a session on the ${conv && conv !== "ghost" ? lineName(conv) : "main"} line`;
+  }
+
   /**
    * Ghost is hanging up. Once its goodbye has played (speaking, then listening again), the
    * phone closes the call itself instead of waiting for the desk to wind down; if the
@@ -334,11 +453,37 @@ export class LiveDesk implements Desk {
     this.pc = null;
     this.dc = null;
     this.mic = null;
+    const via = this.state.via ?? "Wi-Fi";
+    const seconds = this.callStartedAt ? (Date.now() - this.callStartedAt) / 1000 : 0;
+    this.callStartedAt = 0;
+    this.routeSub?.remove();
+    this.routeSub = null;
+    if (pc) {
+      stopCall();
+      this.set({ audio: DEFAULT_AUDIO });
+    }
     try {
       dc?.close();
-      pc?.close();
     } catch {
       // already closed
+    }
+    if (pc) {
+      // The call's numbers (ADR 0018) are read before the close, which empties them; the
+      // close itself waits only on that read, a few milliseconds.
+      void callStats(pc, via, seconds)
+        .then((stats) => {
+          if (stats) {
+            console.log(`desk: call over ${stats.via}, ${Math.round(stats.seconds)} s, loss ${stats.lossPct ?? "?"}%, jitter ${stats.jitterMs ?? "?"} ms, rtt ${stats.rttMs ?? "?"} ms`);
+            this.set({ lastCall: stats });
+          }
+        })
+        .finally(() => {
+          try {
+            pc.close();
+          } catch {
+            // already closed
+          }
+        });
     }
     mic?.getTracks().forEach((t) => t.stop());
     if (pc) {
@@ -355,6 +500,38 @@ export class LiveDesk implements Desk {
 }
 
 const rid = () => Math.random().toString(36).slice(2, 10);
+
+type Hello = { workstation: string; status: Status; addresses?: string[] };
+
+/**
+ * Loss, jitter and round trip from the phone's WebRTC stats. Loss is on Ghost's voice coming
+ * in (what the operator hears); the round trip is the selected candidate pair's.
+ */
+async function callStats(pc: RTCPeerConnection, via: Via, seconds: number): Promise<CallStats | null> {
+  try {
+    const report = (await pc.getStats()) as Map<string, Record<string, unknown>> | { forEach: (cb: (v: Record<string, unknown>) => void) => void };
+    let lost = 0;
+    let received = 0;
+    let jitter: number | null = null;
+    let rtt: number | null = null;
+    let seen = 0;
+    const each = (s: Record<string, unknown>) => {
+      seen += 1;
+      if (s.type === "inbound-rtp" && s.kind === "audio") {
+        lost += Number(s.packetsLost ?? 0);
+        received += Number(s.packetsReceived ?? 0);
+        if (typeof s.jitter === "number") jitter = s.jitter * 1000;
+      }
+      if (s.type === "candidate-pair" && (s.nominated === true || s.state === "succeeded") && typeof s.currentRoundTripTime === "number") rtt = s.currentRoundTripTime * 1000;
+    };
+    report.forEach(each);
+    if (!seen) return null;
+    const total = lost + received;
+    return { via, endedAt: new Date().toISOString(), seconds, lossPct: total > 0 ? (100 * lost) / total : null, jitterMs: jitter, rttMs: rtt };
+  } catch {
+    return null;
+  }
+}
 
 /** Wait until ICE gathering finishes so the offer carries every host candidate; no trickle. */
 function gathered(pc: RTCPeerConnection): Promise<void> {

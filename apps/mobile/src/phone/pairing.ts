@@ -9,11 +9,12 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 import { fromB64url } from "./signing";
-import { type Pairing, update } from "./store";
+import { DEFAULT_PREFS, type Pairing, persistPrefsWith, type Prefs, stateOf, update } from "./store";
 
 const MOCK_ADDRESS = "192.168.1.20:8765";
 const PAIRING_KEY = "ghost.pairing";
 const SECRET_KEY = "ghost.secret";
+const PREFS_KEY = "ghost.prefs";
 const PAIR_MS = 8000;
 
 /** True when this build talks to the mock desk rather than ghostd. */
@@ -26,19 +27,39 @@ export const pairingSecret = () => secret;
 /** Read the saved pairing, if any, and mark the phone store ready. */
 export async function loadPairing() {
   let pairing: Pairing | null = null;
+  let prefs: Prefs = DEFAULT_PREFS;
   if (!MOCK_DESK) {
     try {
-      const [p, s] = await Promise.all([SecureStore.getItemAsync(PAIRING_KEY), SecureStore.getItemAsync(SECRET_KEY)]);
+      const [p, s, pr] = await Promise.all([SecureStore.getItemAsync(PAIRING_KEY), SecureStore.getItemAsync(SECRET_KEY), SecureStore.getItemAsync(PREFS_KEY)]);
       if (p && s) {
-        pairing = JSON.parse(p) as Pairing;
+        pairing = migrate(JSON.parse(p));
         secret = fromB64url(s);
       }
+      if (pr) prefs = { ...DEFAULT_PREFS, ...(JSON.parse(pr) as Partial<Prefs>) };
     } catch {
       pairing = null;
     }
+    persistPrefsWith((next) => void SecureStore.setItemAsync(PREFS_KEY, JSON.stringify(next)).catch(() => {}));
   }
-  update({ pairing, hydrated: true });
+  update({ pairing, prefs, hydrated: true });
 }
+
+/** A pairing saved before ADR 0020 had one address; keep it as the list's only entry. */
+function migrate(saved: Partial<Pairing> & { address?: string }): Pairing {
+  const addresses = saved.addresses?.length ? saved.addresses : saved.address ? [saved.address] : [];
+  return { deviceId: saved.deviceId ?? "", workstation: saved.workstation ?? "", addresses, pairedAt: saved.pairedAt ?? new Date().toISOString() };
+}
+
+/** The desk told the phone its addresses changed (a tunnel added or removed); keep the new list. */
+export async function rememberAddresses(addresses: string[]) {
+  const current = stateOf().pairing;
+  if (!current || sameList(current.addresses, addresses)) return;
+  const pairing: Pairing = { ...current, addresses };
+  update({ pairing });
+  if (!MOCK_DESK) await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify(pairing));
+}
+
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 /** Forget the desk on this phone. The desktop app can forget the phone on its side too. */
 export async function forgetPairing() {
@@ -48,7 +69,7 @@ export async function forgetPairing() {
 }
 
 export function pairWithMock(address = MOCK_ADDRESS) {
-  update({ pairing: { deviceId: "mock", workstation: "workstation", address, via: "Wi-Fi", pairedAt: new Date().toISOString() } });
+  update({ pairing: { deviceId: "mock", workstation: "workstation", addresses: [address], pairedAt: new Date().toISOString() } });
 }
 
 /** Six digits as 3+3, the way the desk shows them: “482913” → “482 913”. */
@@ -99,8 +120,10 @@ export async function pairByCode(rawAddress: string, code: string): Promise<Pair
     return unreachable;
   }
 
-  const body = (await res.json()) as { device_id: string; secret: string; workstation: string };
-  const pairing: Pairing = { deviceId: body.device_id, workstation: body.workstation, address, via: "Wi-Fi", pairedAt: new Date().toISOString() };
+  const body = (await res.json()) as { device_id: string; secret: string; workstation: string; addresses?: string[] };
+  // The desk lists every address it serves (home first, then the tunnel); an older desk lists none.
+  const addresses = body.addresses?.length ? body.addresses : [address];
+  const pairing: Pairing = { deviceId: body.device_id, workstation: body.workstation, addresses, pairedAt: new Date().toISOString() };
   secret = fromB64url(body.secret);
   await Promise.all([SecureStore.setItemAsync(SECRET_KEY, body.secret), SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify(pairing))]);
   update({ pairing });

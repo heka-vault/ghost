@@ -5,7 +5,7 @@
 import type { Desk } from "./types";
 
 export interface LiveDeskConfig {
-  address: string;
+  addresses: string[];
   deviceId: string;
   secret: Uint8Array;
 }
@@ -25,5 +25,6 @@ export class LiveDesk implements Desk {
   async retry() {}
   async loadAudit() {}
   setMuted() {}
+  setRoute() {}
   dispose() {}
 }

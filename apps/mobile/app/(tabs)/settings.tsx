@@ -15,13 +15,13 @@ import { forgetPairing } from "../../src/phone/pairing";
 import { setPref, usePhone } from "../../src/phone/store";
 import { space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
-import { ConfirmDialog, Divider, LargeHead, LinkDot, linkLabel, List, Row, Screen, SwitchRow } from "../../src/ui/parts";
+import { ConfirmDialog, Divider, LargeHead, LinkDot, linkLabel, List, Row, Screen, SwitchRow, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 
 export default function Settings() {
   const c = useColors();
   const router = useRouter();
-  const { link } = useDesk();
+  const { link, via, lastCall } = useDesk();
   const { pairing, prefs } = usePhone();
   const { tone, title } = linkLabel(link);
   const [asking, setAsking] = useState(false);
@@ -50,13 +50,34 @@ export default function Settings() {
                     <LinkDot tone={tone} />
                     <Text size="md" color="text2">{title}</Text>
                   </View>
-                  <Text size="md" color="text2">
-                    <Text size="md" color="text2" mono>{pairing.address}</Text> · {pairing.via}
-                  </Text>
+                  {pairing.addresses.map((a, i) => (
+                    <Text key={a + i} size="md" color="text2">
+                      <Text size="md" color="text2" mono>{a}</Text>
+                      {i === 0 ? " · home Wi-Fi" : " · away, through your tunnel"}
+                    </Text>
+                  ))}
+                  {via ? <Text size="md" color="text2">Reaching it over {viaLabel(via)} now</Text> : null}
                   <Text size="md" color="text2">Paired {relativeTime(pairing.pairedAt)}</Text>
+                  {lastCall ? (
+                    <Text size="md" color="text3">
+                      Last call {relativeTime(lastCall.endedAt)}, {viaLabel(lastCall.via)}, {Math.round(lastCall.seconds)} s
+                      {lastCall.lossPct !== null ? `, ${lastCall.lossPct.toFixed(1)}% lost` : ""}
+                      {lastCall.jitterMs !== null ? `, jitter ${Math.round(lastCall.jitterMs)} ms` : ""}
+                      {lastCall.rttMs !== null ? `, round trip ${Math.round(lastCall.rttMs)} ms` : ""}
+                    </Text>
+                  ) : null}
                 </View>
               ) : undefined
             }
+          />
+        </Group>
+
+        <Group title="Hands-free">
+          <SwitchRow
+            title="Start talking when Ghost opens"
+            support="For “Hey Google, open Ghost” in the car: the mic opens as soon as the app is in front and your desk answers. Off, you tap the ghost."
+            value={prefs.autoStart}
+            onChange={(v) => setPref("autoStart", v)}
           />
         </Group>
 

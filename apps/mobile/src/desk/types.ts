@@ -16,8 +16,37 @@ import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn } from "@gh
 /** How the phone reaches the desk right now. */
 export type Link = "connecting" | "online" | "reconnecting" | "offline";
 
+/** Which of the desk's addresses answered: the home Wi-Fi one, or the tunnel used away (ADR 0020). */
+export type Via = "Wi-Fi" | "tunnel";
+
+/** Where the call's audio goes on the phone. */
+export type Route = "speaker" | "earpiece" | "bluetooth" | "headset";
+
+export interface AudioState {
+  route: Route;
+  /** What the phone can route to right now; Bluetooth and a headset appear when connected. */
+  available: Route[];
+}
+
+/** What the call looked like, read from the phone's own WebRTC stats when it ended (ADR 0018). */
+export interface CallStats {
+  via: Via;
+  endedAt: string;
+  seconds: number;
+  /** Packets lost on the way to the phone, as a percentage; null if unknown. */
+  lossPct: number | null;
+  jitterMs: number | null;
+  rttMs: number | null;
+}
+
 export interface DeskState {
   link: Link;
+  /** Which address is in use; null until one answers. */
+  via: Via | null;
+  /** The last call this phone made, if any. */
+  lastCall: CallStats | null;
+  /** The call's audio route; speaker by default, a car or headset when one is connected. */
+  audio: AudioState;
   /** The daemon's status as it last reported it; null before the first one arrives. */
   status: Status | null;
   /** The confirm-level change waiting for a spoken yes, if any. */
@@ -45,4 +74,6 @@ export interface Desk {
   loadAudit(limit: number): Promise<void>;
   /** Stop or resume sending the phone's mic; the session stays open. */
   setMuted(muted: boolean): void;
+  /** Send the call's audio somewhere else (speaker, Bluetooth, headset, earpiece). */
+  setRoute(route: Route): void;
 }

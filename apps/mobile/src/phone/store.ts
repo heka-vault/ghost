@@ -9,21 +9,29 @@ export interface Pairing {
   /** The id the desk gave this phone; it signs every request with the matching secret. */
   deviceId: string;
   workstation: string;
-  /** What the operator typed or scanned, shown in Settings. */
-  address: string;
-  via: "Wi-Fi" | "Tailscale";
+  /**
+   * Every address the desk listens on, as it reported them at pairing: the home Wi-Fi one
+   * first, then the tunnel one for away (ADR 0020). The desk picks whichever answers.
+   */
+  addresses: string[];
   pairedAt: string;
 }
+
+export interface Prefs {
+  captions: boolean;
+  keepAwake: boolean;
+  haptics: boolean;
+  /** Open the mic as soon as the app comes up and the desk answers: "Hey Google, open Ghost". */
+  autoStart: boolean;
+}
+
+export const DEFAULT_PREFS: Prefs = { captions: false, keepAwake: true, haptics: true, autoStart: false };
 
 export interface PhoneState {
   /** False until the saved pairing has been read, so nothing redirects to /pair too early. */
   hydrated: boolean;
   pairing: Pairing | null;
-  prefs: {
-    captions: boolean;
-    keepAwake: boolean;
-    haptics: boolean;
-  };
+  prefs: Prefs;
   /** When this phone opened its mic for the current session, or null. */
   startedAt: string | null;
   muted: boolean;
@@ -32,19 +40,29 @@ export interface PhoneState {
 let state: PhoneState = {
   hydrated: false,
   pairing: null,
-  prefs: { captions: false, keepAwake: true, haptics: true },
+  prefs: DEFAULT_PREFS,
   startedAt: null,
   muted: false,
 };
 const listeners = new Set<() => void>();
+
+/** The current state, for code that runs outside React. */
+export const stateOf = () => state;
 
 export function update(patch: Partial<PhoneState> | ((s: PhoneState) => Partial<PhoneState>)) {
   state = { ...state, ...(typeof patch === "function" ? patch(state) : patch) };
   listeners.forEach((l) => l());
 }
 
-export function setPref<K extends keyof PhoneState["prefs"]>(key: K, value: PhoneState["prefs"][K]) {
+/** Set by the pairing code once storage is available; preferences outlive the app then. */
+let persistPrefs: (prefs: Prefs) => void = () => {};
+export function persistPrefsWith(fn: (prefs: Prefs) => void) {
+  persistPrefs = fn;
+}
+
+export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
   update((s) => ({ prefs: { ...s.prefs, [key]: value } }));
+  persistPrefs(state.prefs);
 }
 
 function subscribe(cb: () => void) {
