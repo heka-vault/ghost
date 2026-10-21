@@ -28,12 +28,16 @@ context.modules = [
         webrtc.voice_detection = false
       }
       monitor.mode = true
+      # The capture position is MONO (every channel of the mic mixed down) or one
+      # channel of a multichannel mic taken alone (stream.dont-remix), e.g. FL of an
+      # array's processed beam (install.sh, GHOST_MIC_CHANNEL).
       capture.props = {
         node.name = ghost.mic.capture
         node.target = "@MIC@"
         node.passive = true
         audio.channels = 1
-        audio.position = [ MONO ]
+        audio.position = [ @CHANNEL@ ]
+        stream.dont-remix = @DONT_REMIX@
       }
       source.props = {
         node.name = ghost.mic
