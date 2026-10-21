@@ -93,3 +93,28 @@ async def test_on_hold_the_room_is_dropped_and_the_name_resumes():
     assert resumed == ["we picked option two"] and not gate.on_hold
     # the resuming frame itself is not forwarded: the resume injects the words
     assert not isinstance(pushed[-1], TranscriptionFrame)
+
+
+async def test_session_end_runs_after_run_however_it_ended():
+    """build_session hangs the hold timer's cancel on after_run; it must run when the
+    runner returns on its own (the desktop's End) and when it fails, not only on hang_up."""
+    from ghost_voice.pipeline import GhostSession
+
+    class Runner:
+        def __init__(self, fail: bool) -> None:
+            self.fail = fail
+
+        async def run(self) -> None:
+            if self.fail:
+                raise RuntimeError("pipeline died")
+
+    calls = []
+    for fail in (False, True):
+        s = GhostSession("s", worker=None, runner=Runner(fail), _ended=None)  # type: ignore[arg-type]
+        s.after_run = lambda: calls.append("stopped")
+        if fail:
+            with pytest.raises(RuntimeError):
+                await s.run()
+        else:
+            await s.run()
+    assert calls == ["stopped", "stopped"]

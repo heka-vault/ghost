@@ -115,11 +115,16 @@ class GhostSession:
     latency: LatencyObserver | None = None
     # Set by build_session: a typed turn during a hold ends the hold first (ADR 0021).
     before_text: Callable[[], Awaitable[None]] | None = None
+    # Set by build_session: stops the hold timer however the session ended, so a session
+    # ended from the desktop while on hold can't "hang up" whichever one runs 30 min later.
+    after_run: Callable[[], None] | None = None
 
     async def run(self) -> None:
         try:
             await self.runner.run()
         finally:
+            if self.after_run:
+                self.after_run()
             if self.latency:
                 self.latency.flush()  # the turn that was open when the session ended
 
@@ -394,6 +399,12 @@ def build_session(
         hold_timer = asyncio.ensure_future(hold_ran_out())
         await on_phase("hold")
 
+    def stop_hold_timer() -> None:
+        nonlocal hold_timer
+        if hold_timer:
+            hold_timer.cancel()
+            hold_timer = None
+
     async def unhold() -> None:
         """Back to listening; nothing said yet."""
         nonlocal hold_timer
@@ -651,4 +662,5 @@ def build_session(
     session.start = start  # type: ignore[attr-defined]
     session.open = opening  # type: ignore[attr-defined]
     session.before_text = unhold
+    session.after_run = stop_hold_timer
     return session
