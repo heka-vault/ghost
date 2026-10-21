@@ -6,7 +6,8 @@ import asyncio
 import json
 import signal
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -39,11 +40,13 @@ from ghost_core import (
     ToolSource,
     WriteGate,
 )
-from ghost_core.conversations import GHOST, Conversations, conversations_source
+from ghost_core.conversations import GHOST, Conversations, Profile, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.jev import JevClassifier, JevClient
-from ghost_core.mcp import Servers
+from ghost_core.mcp import Servers, source_of
 from ghost_core.skills import Skills
+from ghost_core.templates import Templates
+from ghost_core.toolkits import Grant, merge
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
@@ -103,6 +106,8 @@ class Daemon:
         self._rearm = asyncio.Event()  # set when the passive listener must be rebuilt
         self.conversations: Conversations | None = None
         self.skills: Skills | None = None
+        self.templates: Templates | None = None
+        self._reach: Callable[[Profile], list[ToolSource]] | None = None
         self._models: Models | None = None
         self._deps: Deps | None = None
         # The phone (ADR 0016). An accepted offer's connection goes on the queue; the
@@ -369,6 +374,8 @@ class Daemon:
         await mcp.connect()
         skills = Skills(self.cfg.skills_dir, self.cfg.skill_root_paths)  # ADR 0023
         self.skills = skills
+        templates = Templates(self.cfg.infra_dir / "templates", self.cfg.templates_dir)
+        self.templates = templates
         # What a session's model may call: every server's offered reads and declared
         # writes, and the skills (the index, read_skill, add and remove).
         tool_sources: list[ToolSource] = [*mcp.sources(), skills.source()]
@@ -401,15 +408,55 @@ class Daemon:
             retention=timedelta(days=self.cfg.turn_retention_days),
             # What a thread can be scoped to (ADR 0019): each scoped server's allowlist.
             scopes={a.name: a.scope_items for a in tool_sources if a.scope_kind and a.scope_items},
+            # What a department can be given (ADR 0023): the policy file's toolkits, live,
+            # and what each one grants on a server, so a request routes to the department.
+            toolkits=lambda: list(gate.autonomy.toolkits),
+            toolkit_items=lambda name, server: _granted_items(gate.autonomy, name, server),
+            templates=templates,
         )
         gate.register(CONVERSATIONS, conversations_source(conversations).operations)
         self.conversations = conversations
+
+        def reach(department: Profile) -> list[ToolSource]:
+            """What a session in this department reaches (ADR 0023): everything for
+            Ghost and for a department with no toolkits; else the toolkits' grants on
+            the connected servers plus their skills. The lines' own tools always."""
+            lines = conversations_source(conversations)
+            if department.department:  # a topic line whose department is gone: nothing
+                return [_without(lines, WIDENING)]
+            if department.is_ghost or not department.toolkits:
+                return [*tool_sources, lines]
+            policy = gate.autonomy
+            grants: dict[str, list[Grant]] = {}
+            names: list[str] = []
+            skill_names: set[str] = set()
+            for name in department.toolkits:
+                t = policy.toolkits.get(name)
+                if t is None:
+                    logger.warning(f"department {department.slug}: no toolkit {name}; skipped")
+                    continue
+                names.append(name)
+                for server, g in t.grants.items():
+                    grants.setdefault(server, []).append(g)
+                skill_names |= set(t.skills)
+            out: list[ToolSource] = []
+            for server, gs in grants.items():
+                live = mcp.servers.get(server)
+                if live is not None:
+                    out.append(source_of(live, merge(gs), "+".join(names)))
+            out.append(skills.source(sorted(skill_names)))
+            # A narrowed department cannot widen itself: no new lines, no toolkit changes,
+            # no deletes from inside it; those happen from Ghost or the desktop.
+            out.append(_without(lines, WIDENING))
+            return out
+
+        self._reach = reach
         pruned = conversations.prune()
         if pruned:
             logger.info(f"conversations: pruned {pruned} summarized turns past retention")
         self.state.servers = list(mcp.servers)
         events = Events()
-        api = await self._start_api(gate, store, tool_sources, mcp, skills)
+        api = await self._start_api(gate, store, tool_sources, mcp, skills, templates)
         await self._start_phone()
         logger.info(f"autonomy policy: {autonomy.source}")
         logger.info(
@@ -514,6 +561,7 @@ class Daemon:
         sources: Sequence[ToolSource],
         mcp: Servers | None = None,
         skills: Skills | None = None,
+        templates: Templates | None = None,
     ) -> ApiServer | None:
         socket_path = self.cfg.api_socket or default_socket_path()
         deps = Deps(
@@ -524,6 +572,7 @@ class Daemon:
             sources=sources,
             mcp=mcp,
             skills=skills,
+            templates=templates,
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,
@@ -625,6 +674,7 @@ class Daemon:
             on_turn=on_turn,
             on_phase=on_phase,
             conversations=self.conversations,
+            reach=self._reach,
             start_in=start_in,
             on_conversation=on_conversation,
             transport_factory=transport_factory,
@@ -820,6 +870,26 @@ async def _close_peer(conn: Any) -> None:
         await conn.disconnect()
     except Exception:  # noqa: BLE001 - already closed
         logger.debug("phone: peer already closed")
+
+
+def _granted_items(policy: AutonomyPolicy, toolkit: str, server: str) -> list[str] | None:
+    """The scope items a toolkit grants on a server: its own list, else the server's whole
+    allowlist; None when the toolkit does not grant the server."""
+    t = policy.toolkits.get(toolkit)
+    g = t.grant(server) if t else None
+    if g is None:
+        return None
+    if g.items is not None:
+        return list(g.items)
+    spec = policy.mcp.get(server)
+    return list(spec.scope.items) if spec and spec.scope else []
+
+
+WIDENING = frozenset({"create", "set_toolkits", "delete"})
+
+
+def _without(source: ToolSource, ops: frozenset[str]) -> ToolSource:
+    return replace(source, operations=[o for o in source.operations if o.name not in ops])
 
 
 def describe_skills(skills: Skills, servers: set[str]) -> str:

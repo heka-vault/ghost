@@ -6,7 +6,7 @@
  */
 import type { ConversationDetail } from "@ghost/client-ts";
 
-import { type Scope, type ThreadUpdate, sameScope, scopeOf } from "./threads";
+import { type Scope, type ThreadUpdate, sameScope, scopeOf, toolkitsOf } from "./threads";
 
 export interface Draft {
   name: string;
@@ -18,6 +18,8 @@ export interface Draft {
   notes: string[];
   /** Per server, what the line may touch (ADR 0019). Empty: it sees everything. */
   scope: Scope;
+  /** A department's toolkits (ADR 0023), saved through their own route. Empty: it reaches everything. */
+  toolkits: string[];
 }
 
 export type DraftKey = keyof Draft;
@@ -31,7 +33,7 @@ export type DraftKey = keyof Draft;
 export function fromDetail(d: ConversationDetail): Draft {
   const own = new Set([d.name.trim().toLowerCase(), d.slug]);
   const aliases = d.aliases.filter((a) => !own.has(a.trim().toLowerCase()));
-  return { name: d.name, aliases: aliases.join(", "), voice: d.voice, speed: d.speed, persona: d.persona, memory: d.memory, notes: [...d.notes], scope: scopeOf(d) };
+  return { name: d.name, aliases: aliases.join(", "), voice: d.voice, speed: d.speed, persona: d.persona, memory: d.memory, notes: [...d.notes], scope: scopeOf(d), toolkits: toolkitsOf(d) };
 }
 
 export const splitAliases = (s: string) => s.split(",").map((a) => a.trim()).filter(Boolean);
@@ -43,20 +45,22 @@ function same(k: DraftKey, a: Draft, b: Draft): boolean {
   if (k === "name") return a.name.trim() === b.name.trim();
   if (k === "speed") return Math.abs(a.speed - b.speed) < 0.001;
   if (k === "scope") return sameScope(a.scope, b.scope);
+  if (k === "toolkits") return [...a.toolkits].sort().join("|") === [...b.toolkits].sort().join("|");
   return a[k] === b[k];
 }
 
-const KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "memory", "notes", "scope"];
+const KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "memory", "notes", "scope", "toolkits"];
 
-/** Ghost keeps its name and is never scoped (ADR 0019): those keys can't be dirty on it. */
+/** Ghost keeps its name, is never scoped (ADR 0019) and takes no toolkits (ADR 0023): those keys can't be dirty on it. */
 export function dirtyKeys(draft: Draft, base: Draft, isGhost: boolean): DraftKey[] {
-  return KEYS.filter((k) => !(isGhost && (k === "name" || k === "aliases" || k === "scope")) && !same(k, draft, base));
+  return KEYS.filter((k) => !(isGhost && (k === "name" || k === "aliases" || k === "scope" || k === "toolkits")) && !same(k, draft, base));
 }
 
-/** The PATCH body for the dirty fields, shaped like the old screen's save. */
+/** The PATCH body for the dirty fields, shaped like the old screen's save. Toolkits go through PUT /conversations/{slug}/toolkits, not here. */
 export function updateBody(draft: Draft, keys: DraftKey[]): ThreadUpdate {
   const body: ThreadUpdate = {};
   for (const k of keys) {
+    if (k === "toolkits") continue;
     if (k === "name") body.name = draft.name.trim();
     else if (k === "aliases") body.aliases = splitAliases(draft.aliases);
     else if (k === "notes") body.notes = cleanNotes(draft.notes);
@@ -99,6 +103,7 @@ export const FIELD_WORDS: Record<DraftKey, string> = {
   memory: "memory",
   notes: "pinned notes",
   scope: "scope",
+  toolkits: "toolkits",
 };
 
 /** "persona, voice and memory" */

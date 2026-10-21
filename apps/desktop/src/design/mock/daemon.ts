@@ -21,6 +21,9 @@ import type {
   SkillInfo,
   SourceInfo,
   Status,
+  TemplateView,
+  ToolkitUpdate,
+  ToolkitView,
   Turn,
   VoiceInfo,
 } from "@ghost/client-ts";
@@ -33,6 +36,8 @@ import { renderToml } from "./fixtures/policy";
 import { parsePolicy } from "../../screens/policy/model";
 import type { SessionFixture } from "./fixtures/session";
 import { GHOST_SKILLS_DIR, type SkillFixture, missingOf } from "./fixtures/skills";
+import { OWN_TEMPLATES_DIR, type TemplateFixture, needsOf } from "./fixtures/templates";
+import { LEVELS, TOOLKIT_SEEDS, problemsOf, renderToolkit } from "./fixtures/toolkits";
 import { hex, type Scenario, seeded } from "./scenarios";
 
 export class HttpError extends Error {
@@ -115,6 +120,10 @@ export class MockDaemon {
   private phoneOpts: PhoneOptions;
   /** The SKILL.md folders Ghost reads (ADR 0023): Ghost's own, and a project's read in place. */
   private skills: SkillFixture[];
+  /** The `[toolkit.<name>]` tables in the policy file (ADR 0023), without their problems, which are read fresh. */
+  private toolkits: Omit<ToolkitView, "problems">[];
+  /** Department templates (ADR 0023): shipped and the operator's own; `needs` is read fresh. */
+  private templates: TemplateFixture[];
   private script: SessionFixture;
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -135,6 +144,10 @@ export class MockDaemon {
     this.devices = f.settings.devices;
     this.models = f.settings.models;
     this.skills = f.skills;
+    this.toolkits = f.toolkits.map(({ problems: _p, ...t }) => t);
+    this.templates = f.templates;
+    if (this.toolkits.length) this.policy = { ...this.policy, text: this.policy.text.trimEnd() + "\n\n" + this.toolkits.map(renderToolkit).join("\n") };
+    const first = f.conversations.lines.find((l) => l.detail.slug === scenario.session)?.detail ?? null;
     this.status = {
       phase: scenario.phase,
       session_id: f.session.sessionId,
@@ -146,6 +159,8 @@ export class MockDaemon {
       servers: this.servers.filter((f) => f.info.connected).map((f) => f.info.name),
       pending: this.pending,
       conversation: scenario.session,
+      department: first ? this.departmentOf(first) : null,
+      toolkit: null,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
     };
@@ -166,6 +181,9 @@ export class MockDaemon {
         status: "pending",
         created_at: new Date(Date.now() - 8_000).toISOString(),
         events: [{ at: new Date(Date.now() - 8_000).toISOString(), event: "prepared", detail: { ability: this.pending.ability, operation: this.pending.operation, target: `github:${this.pending.target}`, autonomy: "confirm" } }],
+        conversation: this.status.conversation ?? null,
+        department: this.status.department ?? null,
+        toolkit: this.toolkitFor(this.pending.ability),
       });
     }
   }
@@ -222,7 +240,7 @@ export class MockDaemon {
     if (this.status.session_id) return;
     this.turns = [];
     this.setActive("ghost");
-    this.pushStatus({ session_id: newId(), phase: "listening", conversation: "ghost", session_origin: "desk" });
+    this.pushStatus({ session_id: newId(), phase: "listening", conversation: "ghost", department: null, toolkit: null, session_origin: "desk" });
     this.addTurn("assistant", "Ghost here.", "system");
   }
   private setActive(slug: string | null) {
@@ -259,11 +277,13 @@ export class MockDaemon {
     this.later(1600, () => this.status.session_id && this.pushStatus({ phase: "listening" }));
   }
   private propose(p: Omit<PendingProposal, "id" | "expires_at" | "expires_in_secs">) {
+    const where = { conversation: this.status.conversation ?? null, department: this.status.department ?? null, toolkit: this.toolkitFor(p.ability) };
     this.pending = { ...p, id: newId(), expires_at: new Date(Date.now() + 60_000).toISOString(), expires_in_secs: 60 };
     this.audit.unshift({
       id: this.pending.id, session_id: this.status.session_id ?? "", ability: p.ability, operation: p.operation, target: p.target,
       summary: p.summary, autonomy: "confirm", status: "pending", created_at: now(),
       events: [{ at: now(), event: "prepared", detail: { ability: p.ability, operation: p.operation, target: `github:${p.target}`, autonomy: "confirm" } }],
+      ...where,
     });
     this.emit({ type: "pending", pending: this.pending });
     this.pushStatus();
@@ -288,7 +308,7 @@ export class MockDaemon {
   private sleepNow() {
     if (this.pending) this.settlePending("cancelled", { reason: "session ended" });
     this.setActive(null);
-    this.pushStatus({ session_id: null, phase: "passive", conversation: null, session_origin: null });
+    this.pushStatus({ session_id: null, phase: "passive", conversation: null, department: null, toolkit: null, session_origin: null });
     this.conversationEvent(null);
   }
   private settlePending(status: "executed" | "cancelled", detail?: Record<string, unknown>): AuditEntry | null {
@@ -327,8 +347,8 @@ export class MockDaemon {
 
   // ------------------------------------------------------------------ conversations
   private view(d: ThreadDetail): ConversationView & ThreadFields {
-    const { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at } = d;
-    return { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at };
+    const { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at, department, is_department, toolkits } = d;
+    return { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at, department: department ?? null, is_department, toolkits: [...toolkits] };
   }
   /** A scope as the body carries it: per source, a list of strings. Anything else is ignored. */
   private scopeFrom(raw: unknown): Scope {
@@ -350,14 +370,125 @@ export class MockDaemon {
     if (target.detail.settled_at) throw new HttpError(409, `The ${target.detail.name} line is settled. Unsettle it to patch through.`);
     if (this.status.conversation !== slug) this.addTurn("assistant", target.detail.is_ghost ? "Back to Ghost." : `Patching you through to ${target.detail.name}.`, "system");
     this.setActive(slug);
-    this.pushStatus({ conversation: slug });
+    this.pushStatus({ conversation: slug, department: this.departmentOf(target.detail), toolkit: null });
     this.conversationEvent(slug);
+  }
+  /** The department a line belongs to (ADR 0023): itself when it is one, its parent for a topic line, none for Ghost. */
+  private departmentOf(d: ThreadDetail): string | null {
+    return d.is_ghost ? null : (d.department ?? d.slug);
+  }
+  /** The toolkit a write on `server` goes through from the live line's department: the first that grants the server, or none (Ghost, or a department that reaches everything). */
+  private toolkitFor(server: string): string | null {
+    const dept = this.status.department ? this.lines.get(this.status.department)?.detail : null;
+    if (!dept || !dept.toolkits.length) return null;
+    return dept.toolkits.find((n) => this.toolkits.find((t) => t.name === n)?.grants.some((g) => g.server === server)) ?? null;
   }
   private audited(ability: string, operation: string, target: string, summary: string, autonomy = "announce") {
     this.audit.unshift({
       id: newId(), session_id: this.status.session_id ?? "ui", ability, operation, target, summary, autonomy, status: "executed", created_at: now(),
       events: [{ at: now(), event: "prepared", detail: { ability, operation, target, autonomy } }, { at: now(), event: "claimed" }, { at: now(), event: "finished", detail: { status: "success" } }],
+      conversation: this.status.conversation ?? null,
+      department: this.status.department ?? null,
+      toolkit: this.toolkitFor(ability),
     });
+  }
+
+  // ------------------------------------------------------------------ toolkits (ADR 0023)
+  /** GET /toolkits as the daemon reports it: problems read fresh against the servers and skills of now. */
+  private toolkitList(): ToolkitView[] {
+    const names = new Set(this.skills.map((f) => f.info.name));
+    return this.toolkits.map((t) => ({ ...structuredClone(t), problems: problemsOf(t.name, t, this.servers, names) }));
+  }
+  /** The policy file re-rendered from its structure (a structured save loses hand comments), toolkits last. */
+  private policyText(): string {
+    const base = renderToml(this.policy, this.servers).trimEnd();
+    return this.toolkits.length ? base + "\n\n" + this.toolkits.map(renderToolkit).join("\n") : base + "\n";
+  }
+  /** PUT /toolkits/{name}: the file is rewritten with the toolkit and read back; what is wrong with it comes back as problems, not an error. */
+  private putToolkit(name: string, u: ToolkitUpdate): ToolkitView {
+    if (!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(name)) throw new HttpError(422, "a toolkit name is letters, digits, _ or -");
+    const grants = (u.grants ?? []).map((g) => ({ server: String(g.server), reads: g.reads ?? null, writes: g.writes ?? null, items: g.items ?? null, levels: { ...(g.levels ?? {}) } }));
+    for (const g of grants) for (const lv of Object.values(g.levels)) if (!(LEVELS as readonly string[]).includes(lv)) throw new HttpError(422, `${JSON.stringify(lv)} is not a level`);
+    const t: Omit<ToolkitView, "problems"> = { name, description: u.description ?? "", skills: [...(u.skills ?? [])], grants };
+    const i = this.toolkits.findIndex((x) => x.name === name);
+    if (i >= 0) this.toolkits[i] = t;
+    else this.toolkits.push(t);
+    this.policy = { ...this.policy, exists: true, text: this.policyText() };
+    return this.toolkitList().find((x) => x.name === name)!;
+  }
+  private deleteToolkit(name: string) {
+    if (!this.toolkits.some((t) => t.name === name)) throw new HttpError(404, `no toolkit ${JSON.stringify(name)}`);
+    this.toolkits = this.toolkits.filter((t) => t.name !== name);
+    this.policy = { ...this.policy, text: this.policyText() };
+  }
+  // ------------------------------------------------------------------ templates (ADR 0023)
+  /** GET /templates: `needs` worked out against the servers declared now. */
+  private templateList(): TemplateView[] {
+    const declared = new Set(this.servers.map((f) => f.info.name));
+    return this.templates.map((t) => ({ ...t.view, needs: needsOf(t.view.toolkits, t.requires, declared) }));
+  }
+  /**
+   * POST /templates/{name}/apply: the template's toolkits into the file (the ones not there
+   * yet), its skills into Ghost's (the ones not installed), then the department, each step
+   * audited as the daemon does. 404 for no such template, 409 for a name already taken.
+   */
+  private applyTemplate(name: string, wanted: string | null): ThreadDetail {
+    const t = this.templates.find((x) => x.view.name === name);
+    if (!t) throw new HttpError(404, `no template ${JSON.stringify(name)}`);
+    for (const tk of t.view.toolkits) {
+      if (this.toolkits.some((x) => x.name === tk)) continue;
+      const seed = TOOLKIT_SEEDS[tk];
+      this.toolkits.push(seed ? structuredClone(seed) : { name: tk, description: `From the ${t.view.title} template.`, skills: [], grants: [] });
+    }
+    if (t.view.toolkits.some((tk) => !this.policy.text.includes(`[toolkit.${tk}]`))) this.policy = { ...this.policy, exists: true, text: this.policyText() };
+    for (const sk of t.view.skills) {
+      if (this.skillNamed(sk)) continue;
+      const title = sk.replace(/[-.]+/g, " ");
+      this.skills.push({
+        info: { name: sk, description: `${title[0].toUpperCase()}${title.slice(1)}, from the ${t.view.title} template.`, source: "ghost", path: `${GHOST_SKILLS_DIR}/${sk}`, requires: t.requires, missing: [], files: [] },
+        body: `# ${title[0].toUpperCase()}${title.slice(1)}\n\nCopied from the ${t.view.title} template (${t.view.path}/skills/${sk}).\n`,
+      });
+      this.audited("skills", "add", `skill:${sk}`, `Added the ${sk} skill from the ${t.view.title} template.`, "quiet");
+    }
+    const title = (wanted ?? "").trim() || t.view.title;
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (this.lines.has(slug)) throw new HttpError(409, `there is already a line called ${JSON.stringify(title)}`);
+    const detail: ThreadDetail = {
+      slug, name: title, aliases: [...t.view.aliases], voice: t.view.voice ?? "af_heart", speed: 1,
+      persona: t.persona, memory: "", notes: [], created_at: now(), last_active_at: null, active: false, is_ghost: false,
+      turn_count: 0, compactions: 0, dir: `~/.local/share/ghost/conversations/${slug}`,
+      scope: {}, settled_at: null, department: null, is_department: true, toolkits: this.validToolkits(t.view.toolkits),
+    };
+    this.lines.set(slug, { detail, turns: [], compactions: [] });
+    this.audited("conversations", "create", `conversation:${slug}`, `Started a new department from the ${t.view.title} template: ${title}.`);
+    this.conversationEvent(slug);
+    return detail;
+  }
+  /** POST /conversations/{slug}/export: a department written out as one of the operator's own templates. */
+  private exportTemplate(d: ThreadDetail): TemplateView {
+    if (d.is_ghost) throw new HttpError(409, "Ghost is the switchboard, not a department");
+    if (d.department) throw new HttpError(409, `${d.name} is a line in a department; export the department`);
+    const skills = [...new Set(d.toolkits.flatMap((n) => this.toolkits.find((t) => t.name === n)?.skills ?? []))];
+    const requires = [...new Set(skills.flatMap((sk) => this.skillNamed(sk)?.info.requires ?? []))];
+    const view: Omit<TemplateView, "needs"> = { name: d.slug, title: d.name, description: d.persona.split("\n").map((x) => x.trim()).find(Boolean) ?? "", source: "ghost", path: `${OWN_TEMPLATES_DIR}/${d.slug}`, aliases: [...d.aliases], voice: d.voice, toolkits: [...d.toolkits], skills };
+    const fixture: TemplateFixture = { view: { ...view, needs: [] }, persona: d.persona, requires };
+    const i = this.templates.findIndex((t) => t.view.name === d.slug && t.view.source === "ghost");
+    if (i >= 0) this.templates[i] = fixture;
+    else this.templates.push(fixture);
+    this.audited("conversations", "export", `conversation:${d.slug}`, `Saved the ${d.name} department as a template at ${view.path}.`, "quiet");
+    return this.templateList().find((t) => t.name === d.slug && t.source === "ghost")!;
+  }
+
+  /** The names a department may be given (ADR 0023): only the file's, case-insensitively, 422 otherwise as ghost_core does. */
+  private validToolkits(raw: unknown): string[] {
+    const known = new Map(this.toolkits.map((t) => [t.name.toLowerCase(), t.name]));
+    const out: string[] = [];
+    for (const n of Array.isArray(raw) ? raw.map(String) : []) {
+      const hit = known.get(n.trim().toLowerCase());
+      if (!hit) throw new HttpError(422, `there is no toolkit called ${n}; the policy file declares ${[...known.values()].join(", ") || "none"}`);
+      if (!out.includes(hit)) out.push(hit);
+    }
+    return out;
   }
 
   // ------------------------------------------------------------------ skills (ADR 0023)
@@ -457,7 +588,7 @@ export class MockDaemon {
         if (u.skills) this.policy.skills = u.skills;
         if (u.default !== undefined) this.policy.default = u.default ?? null;
         if (u.targets) this.policy.targets = u.targets;
-        this.policy = { ...this.policy, exists: true, text: renderToml(this.policy, this.servers) };
+        this.policy = { ...this.policy, exists: true, text: this.policyText() };
       }
       // Levels apply live (ADR 0022): every source's operations and every server's declared
       // writes read the new file's levels; a write set to deny is no longer offered.
@@ -515,6 +646,16 @@ export class MockDaemon {
       if (method === "DELETE") return this.removeSkill(name), { ok: true, detail: null };
     }
 
+    if (method === "GET" && path === "/templates") return this.templateList();
+    if (method === "POST" && (r = m(/^\/templates\/([^/]+)\/apply$/))) return this.applyTemplate(decodeURIComponent(r[1]), typeof b.name === "string" ? b.name : null);
+
+    if (method === "GET" && path === "/toolkits") return this.toolkitList();
+    if ((r = m(/^\/toolkits\/([^/]+)$/))) {
+      const name = decodeURIComponent(r[1]);
+      if (method === "PUT") return this.putToolkit(name, (b ?? {}) as ToolkitUpdate);
+      if (method === "DELETE") return this.deleteToolkit(name), { ok: true, detail: null };
+    }
+
     if (method === "GET" && path === "/phone") return this.phone;
     if (method === "POST" && path === "/phone/pairing") return this.newPairing();
     if (method === "DELETE" && path === "/phone") {
@@ -536,14 +677,21 @@ export class MockDaemon {
       const seed = typeof b.seed_from === "string" && b.seed_from ? this.lines.get(b.seed_from) : null;
       if (b.seed_from && !seed) throw new HttpError(404, `No conversation called ${String(b.seed_from)} to start from.`);
       if (seed) memory = seed.detail.memory;
+      // ADR 0023: inside a department the line reaches what the department reaches, so it takes no toolkits of its own.
+      const depRaw = typeof b.department === "string" ? b.department.trim() : "";
+      const parent = depRaw ? this.lines.get(depRaw) ?? [...this.lines.values()].find((l) => l.detail.name.toLowerCase() === depRaw.toLowerCase()) ?? null : null;
+      if (depRaw && (!parent || parent.detail.is_ghost || parent.detail.department)) throw new HttpError(422, `${depRaw} is not a department`);
+      const toolkits = this.validToolkits(b.toolkits);
+      if (parent && toolkits.length) throw new HttpError(422, "a line in a department reaches what the department reaches");
       const detail: ThreadDetail = {
         slug, name, aliases: (b.aliases as string[]) ?? [], voice: (b.voice as string) ?? "af_heart", speed: (b.speed as number) ?? 1,
         persona: String(b.persona ?? ""), memory, notes: [], created_at: now(), last_active_at: null, active: false, is_ghost: false,
         turn_count: 0, compactions: 0, dir: `~/.local/share/ghost/conversations/${slug}`,
         scope: this.scopeFrom(b.scope), settled_at: null,
+        department: parent?.detail.slug ?? null, is_department: !parent, toolkits,
       };
       this.lines.set(slug, { detail, turns: [], compactions: [] });
-      this.audited("conversations", "create", `conversation:${slug}`, seed ? `Started a new line: ${name}, from the ${seed.detail.name} line’s memory.` : `Started a new line: ${name}.`);
+      this.audited("conversations", "create", `conversation:${slug}`, seed ? `Started a new line: ${name}, from the ${seed.detail.name} line’s memory.` : parent ? `Started a new line in ${parent.detail.name}: ${name}.` : `Started a new line: ${name}.`);
       this.conversationEvent(slug);
       return detail;
     }
@@ -565,6 +713,17 @@ export class MockDaemon {
           d.scope = this.scopeFrom(b.scope);
         }
         this.audited("conversations", "update", `conversation:${slug}`, `On the ${d.name} line: updated ${Object.keys(b).join(", ")}.`);
+        this.conversationEvent(slug);
+        return d;
+      }
+      if (method === "POST" && sub === "/export") return this.exportTemplate(d);
+      // A department's toolkits (ADR 0023): an audited write; Ghost and topic lines take none.
+      if (method === "PUT" && sub === "/toolkits") {
+        if (d.is_ghost) throw new HttpError(409, "Ghost reaches everything; it takes no toolkits");
+        if (d.department) throw new HttpError(409, `${d.name} is a line in a department; set the department's`);
+        if (d.settled_at) throw new HttpError(409, `The ${d.name} line is settled. Unsettle it to change it.`);
+        d.toolkits = this.validToolkits(b.toolkits);
+        this.audited("conversations", "set_toolkits", `conversation:${slug}`, `On the ${d.name} line: toolkits set to ${d.toolkits.length ? d.toolkits.join(", ") : "everything"}.`);
         this.conversationEvent(slug);
         return d;
       }

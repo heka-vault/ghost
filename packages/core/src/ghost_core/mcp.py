@@ -783,29 +783,37 @@ class Server:
         """Tool names are per server; two servers may both have ``list_issues``."""
         return f"{self.spec.name}_{tool}"
 
-    def read_tools(self) -> list[ReadTool]:
+    def read_tools(
+        self, names: Sequence[str] | None = None, items: Sequence[str] | None = None
+    ) -> list[ReadTool]:
+        """The offered reads, or only ``names`` of them, checked against ``items`` (a
+        toolkit's narrowing of the server's scope items)."""
         from ghost_core.source import ReadTool
 
         tools: list[ReadTool] = []
         for t in self.offered():
+            if names is not None and t.name not in names:
+                continue
 
             async def handler(args: dict[str, Any], _t: ToolInfo = t) -> dict[str, Any]:
-                return await self._read(_t, args)
+                return await self._read(_t, args, items)
 
             tools.append(
                 ReadTool(self.public_name(t.name), t.brief, t.properties, t.required, handler)
             )
         return tools
 
-    async def _read(self, tool: ToolInfo, args: dict[str, Any]) -> dict[str, Any]:
+    async def _read(
+        self, tool: ToolInfo, args: dict[str, Any], items: Sequence[str] | None = None
+    ) -> dict[str, Any]:
         scope = scope_of(args)
         args = {k: v for k, v in args.items() if k != SCOPE_ARG}
         sc = self.spec.scope
         if sc is not None and set(sc.arguments) & set(tool.properties):
-            self._fill_scope(args, scope)
+            self._fill_scope(args, scope, items)
             item = sc.item_of(args)
             if item:
-                self._check_item(item, scope, write=False)
+                self._check_item(item, scope, write=False, items=items)
             elif scope is not None and scope.scoped and not scope.reads_wider:
                 # A scoped line may not search past its items by leaving them out
                 # (a free-text query with its own qualifiers would).
@@ -818,23 +826,47 @@ class Server:
         except ToolError as e:
             return {"error": str(e)}
 
-    def _fill_scope(self, args: dict[str, Any], scope: ActiveScope | None) -> None:
+    def _items(self, items: Sequence[str] | None) -> tuple[str, ...]:
+        """The allowlist in force: the server's, narrowed by a toolkit's grant."""
+        sc = self.spec.scope
+        if sc is None:
+            return ()
+        if items is None:
+            return sc.items
+        return tuple(i for i in sc.items if i.lower() in {x.lower() for x in items})
+
+    def _fill_scope(
+        self, args: dict[str, Any], scope: ActiveScope | None, items: Sequence[str] | None = None
+    ) -> None:
         """The scope arguments from the thread when it covers one item, else from the
         allowlist when it has one item: "issue 17" is enough then."""
         sc = self.spec.scope
         if sc is None:
             return
         only = scope.only if scope is not None else None
-        if only is None and len(sc.items) == 1:
-            only = sc.items[0]
+        allowed = self._items(items)
+        if only is None and len(allowed) == 1:
+            only = allowed[0]
         if only:
             sc.fill(args, only)
 
-    def _check_item(self, item: str, scope: ActiveScope | None, *, write: bool) -> None:
+    def _check_item(
+        self,
+        item: str,
+        scope: ActiveScope | None,
+        *,
+        write: bool,
+        items: Sequence[str] | None = None,
+    ) -> None:
         sc = self.spec.scope
         if sc is None:
             return
-        if not sc.allows(item):
+        # Narrowed by a grant: only its items, and none when it narrows to nothing.
+        if items is not None:
+            ok = item.lower() in {i.lower() for i in self._items(items)}
+        else:
+            ok = sc.allows(item)
+        if not ok:
             raise ValueError(f"{item} is not an allowed {sc.kind} for {self.spec.name}")
         if scope is None:
             return
@@ -843,17 +875,26 @@ class Server:
         else:
             scope.check_read(item)
 
-    def allowed(self, target: Target) -> bool:
+    def allowed(self, target: Target, items: Sequence[str] | None = None) -> bool:
         sc = self.spec.scope
-        return sc is None or not sc.items or sc.allows(target.scope())
+        if sc is None:
+            return True
+        if items is None:
+            return not sc.items or sc.allows(target.scope())
+        return target.scope().lower() in {i.lower() for i in self._items(items)}
 
-    def operations(self) -> list[Operation]:
-        """The declared writes as gate operations. A declaration naming a tool the
-        server does not have is logged and left out."""
+    def operations(
+        self, names: Sequence[str] | None = None, items: Sequence[str] | None = None
+    ) -> list[Operation]:
+        """The declared writes as gate operations, or only ``names`` of them, their
+        targets checked against ``items``. A declaration naming a tool the server does
+        not have is logged and left out."""
         from ghost_core.source import Operation
 
         ops: list[Operation] = []
         for op_name, w in self.spec.writes.items():
+            if names is not None and op_name not in names:
+                continue
             tool = self.tool(w.tool)
             if tool is None:
                 logger.error(
@@ -884,24 +925,28 @@ class Server:
                     description=description,
                     properties=props,
                     required=required,
-                    prepare=lambda args, _w=w, _p=props: self._prepare(_w, _p, args),
+                    prepare=lambda args, _w=w, _p=props: self._prepare(_w, _p, args, items),
                     writer=MCPWriter(self, w),
                     risk=w.risk,  # type: ignore[arg-type]
-                    allowed=self.allowed,
+                    allowed=lambda target, _i=items: self.allowed(target, _i),
                     asked_by=w.asked_by,
                 )
             )
         return ops
 
     async def _prepare(
-        self, w: WriteSpec, props: Mapping[str, Any], raw: dict[str, Any]
+        self,
+        w: WriteSpec,
+        props: Mapping[str, Any],
+        raw: dict[str, Any],
+        items: Sequence[str] | None = None,
     ) -> Prepared:
         """The model's arguments into a bounded, typed change on a checked target."""
         from ghost_core.source import Prepared
 
         scope = scope_of(raw)
         args = {k: v for k, v in raw.items() if k not in (SCOPE_ARG, "rationale")}
-        self._fill_scope(args, scope)
+        self._fill_scope(args, scope, items)
         unknown = sorted(k for k in args if k not in props)
         if unknown:
             pinned = [k for k in unknown if k in w.fixed]
@@ -918,7 +963,7 @@ class Server:
         if sc is not None and not item and set(sc.arguments) & set(w.target):
             raise ValueError(f"{w.operation} needs {', '.join(sc.arguments)}")
         if item:
-            self._check_item(item, scope, write=True)
+            self._check_item(item, scope, write=True, items=items)
         extra = {k: v for k, v in args.items() if k not in w.target}
         for k, v in extra.items():
             if isinstance(v, str):
@@ -937,17 +982,30 @@ class Server:
             rationale=str(raw.get("rationale") or ""),
         )
 
-    def prompt_for(self, scope: ActiveScope | None) -> str:
-        """The paragraph for the system prompt, narrowed to the active thread."""
-        reads = ", ".join(self.public_name(t.name) for t in self.offered())
-        ops = [op for op in self.spec.writes if self.tool(self.spec.writes[op].tool)]
-        text = f"Through {self.spec.name} you can look things up with {reads or 'no tools'}"
+    def prompt_for(
+        self,
+        scope: ActiveScope | None,
+        reads: Sequence[str] | None = None,
+        writes: Sequence[str] | None = None,
+        items: Sequence[str] | None = None,
+    ) -> str:
+        """The paragraph for the system prompt, narrowed to the active thread and to a
+        toolkit's grant."""
+        offered = [t for t in self.offered() if reads is None or t.name in reads]
+        names = ", ".join(self.public_name(t.name) for t in offered)
+        ops = [
+            op
+            for op in self.spec.writes
+            if self.tool(self.spec.writes[op].tool) and (writes is None or op in writes)
+        ]
+        text = f"Through {self.spec.name} you can look things up with {names or 'no tools'}"
         if ops:
             text += f" and change things through `change` ({', '.join(ops)})"
         text += "."
         sc = self.spec.scope
-        if sc is not None and sc.items:
-            items = scope.narrow(sc.items) if scope is not None else list(sc.items)
+        allowed = self._items(items)
+        if sc is not None and allowed:
+            items = scope.narrow(allowed) if scope is not None else list(allowed)
             if len(items) == 1:
                 text += f" It covers one {sc.kind}, {items[0]}; tools take it as given."
             elif items:
@@ -977,19 +1035,29 @@ class Server:
         self._session = None
 
 
-def source_of(server: Server) -> ToolSource:
-    """What the pipeline and the gate take from a connected server."""
+def source_of(server: Server, grant: Any = None, toolkit: str | None = None) -> ToolSource:
+    """What the pipeline and the gate take from a connected server: everything, or the
+    view a toolkit's grant allows (``ghost_core.toolkits.Grant``: reads, writes, items)."""
     from ghost_core.source import ToolSource
 
     sc = server.spec.scope
+    reads = grant.reads if grant is not None else None
+    writes = grant.writes if grant is not None else None
+    items = grant.items if grant is not None else None
+    allowed = server._items(items)  # noqa: SLF001 - the server's own view of its allowlist
+
+    def scoped_prompt(scope: ActiveScope | None) -> str:
+        return server.prompt_for(scope, reads=reads, writes=writes, items=items)
+
     return ToolSource(
         name=server.spec.name,
-        prompt=server.prompt_for(None),
-        read_tools=server.read_tools(),
-        operations=server.operations(),
+        prompt=scoped_prompt(None),
+        read_tools=server.read_tools(reads, items),
+        operations=server.operations(writes, items),
         scope_kind=sc.kind if sc is not None else None,
-        scope_items=(lambda: list(sc.items)) if sc is not None and sc.items else None,
-        scoped_prompt=server.prompt_for if sc is not None else None,
+        scope_items=(lambda: list(allowed)) if sc is not None and allowed else None,
+        scoped_prompt=scoped_prompt if sc is not None else None,
+        toolkit=toolkit,
     )
 
 
@@ -1026,9 +1094,23 @@ class Servers:
             )
 
     def sources(self) -> list[ToolSource]:
+        """Every connected server, whole."""
         out: list[ToolSource] = []
         for server in self.servers.values():
             source = source_of(server)
+            if source.read_tools or source.operations:
+                out.append(source)
+        return out
+
+    def granted(self, toolkit: Any) -> list[ToolSource]:
+        """The views a toolkit (``ghost_core.toolkits.ToolkitSpec``) grants of the
+        connected servers; a grant on a server that is not connected is skipped."""
+        out: list[ToolSource] = []
+        for name, grant in toolkit.grants.items():
+            server = self.servers.get(name)
+            if server is None:
+                continue
+            source = source_of(server, grant, toolkit.name)
             if source.read_tools or source.operations:
                 out.append(source)
         return out

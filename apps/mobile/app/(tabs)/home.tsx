@@ -10,7 +10,7 @@ import { errorText, lineHue, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
 import { AudioLines } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import { Modal, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { useDesk } from "../../src/desk/context";
 import { update, usePhone } from "../../src/phone/store";
@@ -18,7 +18,7 @@ import { opacityDisabled, radius, space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
 import { GhostGlyph } from "../../src/ui/Brand";
 import { TargetText } from "../../src/ui/entries";
-import { Cta, LinkDot, linkLabel, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
+import { Cta, Divider, LinkDot, linkLabel, List, Row, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 import { VoicePresence } from "../../src/ui/VoicePresence";
 
@@ -38,7 +38,13 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const line = status?.conversation && status.conversation !== "ghost" ? `${lineName(status.conversation)} line` : "main line";
-  const lines = conversations.filter((c) => !c.is_ghost && !c.settled_at);
+  const lines = conversations.filter((c) => !c.settled_at);
+  // The dial pad groups by department (ADR 0023): Ghost, then a key per department; its topic
+  // lines sit behind the key, in a sheet, so the pad stays one screen of big keys.
+  const keys = lines.filter((c) => c.is_ghost || !c.department);
+  const topicsOf = (slug: string) => lines.filter((c) => c.department === slug);
+  const [opened, setOpened] = useState<string | null>(null);
+  const openedLine = opened ? (lines.find((c) => c.slug === opened) ?? null) : null;
   const colors = useColors();
   // Three keys to a row, like a dial pad: big enough that a thumb never hits the wrong line.
   const { width } = useWindowDimensions();
@@ -163,25 +169,26 @@ export default function Home() {
         )}
       </View>
 
-      {/* The other lines as a dial pad: a press calls straight into a thread, which answers as itself. */}
-      {lines.length > 0 && !inSession && link !== "connecting" ? (
+      {/* The dial pad: Ghost and a key per department. A press calls straight into it; a department with topic lines opens them in a sheet first. */}
+      {keys.length > 1 && !inSession && link !== "connecting" ? (
         <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
           <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[3], marginLeft: space[1] }}>
             Lines
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: keyGap, opacity: ready ? 1 : opacityDisabled }}>
-            {lines.map((c) => {
+            {keys.map((c) => {
               const hue = colors.hue[lineHue(c.slug)];
               const name = lineName(c.slug, c.name);
+              const topics = c.is_ghost ? [] : topicsOf(c.slug);
               return (
                 <Pressable
                   key={c.slug}
                   accessibilityRole="button"
-                  accessibilityLabel={`Call the ${name} line`}
-                  accessibilityHint="Opens the mic on this phone, on that line"
+                  accessibilityLabel={topics.length ? `${name}: ${topics.length === 1 ? "one line" : `${topics.length} lines`}` : `Call the ${name} line`}
+                  accessibilityHint={topics.length ? "Shows the department and its lines; pick one to call" : "Opens the mic on this phone, on that line"}
                   accessibilityState={{ disabled: !ready }}
                   disabled={!ready}
-                  onPress={() => void start(c.slug)}
+                  onPress={() => (topics.length ? setOpened(c.slug) : void start(c.slug))}
                   style={({ pressed }) => ({
                     width: keySize,
                     height: keySize,
@@ -200,6 +207,11 @@ export default function Home() {
                   <Text size="md" weight="semibold" align="center" numberOfLines={2} style={{ color: colors.text1 }}>
                     {name}
                   </Text>
+                  {topics.length > 0 ? (
+                    <Text size="sm" color="text3" align="center" numberOfLines={1}>
+                      {topics.length === 1 ? "1 line" : `${topics.length} lines`}
+                    </Text>
+                  ) : null}
                 </Pressable>
               );
             })}
@@ -207,6 +219,44 @@ export default function Home() {
         </View>
       ) : null}
       </ScrollView>
+
+      {/* A department's lines: the department's own line first, then each topic line; a tap calls it. */}
+      <Modal visible={!!openedLine} transparent animationType="fade" onRequestClose={() => setOpened(null)} statusBarTranslucent>
+        <Pressable accessible={false} onPress={() => setOpened(null)} style={{ flex: 1, backgroundColor: colors.bgOverlay, justifyContent: "flex-end" }}>
+          <Pressable accessible={false} onPress={() => {}} style={{ backgroundColor: colors.bgRaised, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: space[5], paddingBottom: space[8], gap: space[3], borderWidth: 1, borderColor: colors.border }}>
+            {openedLine ? (
+              <>
+                <Text size="xl" weight="semibold" accessibilityRole="header">
+                  {lineName(openedLine.slug, openedLine.name)}
+                </Text>
+                <List>
+                  {[openedLine, ...topicsOf(openedLine.slug)].map((c, i) => {
+                    const name = lineName(c.slug, c.name);
+                    return (
+                      <View key={c.slug}>
+                        {i > 0 && <Divider />}
+                        <Row
+                          leading={<GhostGlyph size={28} color={colors.hue[lineHue(c.slug)].fg} />}
+                          title={name}
+                          support={<Text size="md" color="text2">{i === 0 ? "The department’s own line" : `A line in ${lineName(openedLine.slug, openedLine.name)}`}</Text>}
+                          accessibilityLabel={`Call the ${name} line`}
+                          onPress={() => {
+                            setOpened(null);
+                            void start(c.slug);
+                          }}
+                        />
+                      </View>
+                    );
+                  })}
+                </List>
+                <TouchButton variant="ghost" fullWidth onPress={() => setOpened(null)}>
+                  Cancel
+                </TouchButton>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Cta>
         {error ? (

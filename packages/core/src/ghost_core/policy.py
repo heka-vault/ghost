@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import enum
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
+
+from ghost_core.toolkits import ToolkitSpec, parse_toolkits, render_toolkits, tighter
 
 if TYPE_CHECKING:  # ghost_core.mcp imports the scope module, which imports this one
     from ghost_core.mcp import ServerSpec
@@ -74,6 +76,7 @@ class AutonomyPolicy:
     skills: Mapping[str, OpLevels] = field(default_factory=dict)
     targets: Mapping[str, Mapping[str, OpLevels]] = field(default_factory=dict)
     mcp: Mapping[str, ServerSpec] = field(default_factory=dict)  # [mcp.<name>] (ADR 0022)
+    toolkits: Mapping[str, ToolkitSpec] = field(default_factory=dict)  # [toolkit.<name>] (ADR 0023)
     source: str = "<none>"
 
     @classmethod
@@ -94,6 +97,7 @@ class AutonomyPolicy:
         skills: dict[str, dict[str, Autonomy]] = {}
         targets: dict[str, dict[str, dict[str, Autonomy]]] = {}
         mcp: dict[str, ServerSpec] = {}
+        toolkits: dict[str, ToolkitSpec] = {}
         for section, body in raw.items():
             if not isinstance(body, Mapping):
                 raise ValueError(f"{source}: [{section}] must be a table")
@@ -123,6 +127,9 @@ class AutonomyPolicy:
                 continue
             if section == "abilities":  # the retired ability packages (ADR 0022)
                 continue
+            if section == "toolkit":
+                toolkits = parse_toolkits(body, source)
+                continue
             ops: dict[str, Autonomy] = {}
             for key, value in body.items():
                 if key == "targets":
@@ -135,12 +142,29 @@ class AutonomyPolicy:
             skills=skills,
             targets=targets,
             mcp=mcp,
+            toolkits=toolkits,
             source=source,
         )
 
     def resolve(
-        self, skill: str, operation: str, target: str = "", risk: Risk = "medium"
+        self,
+        skill: str,
+        operation: str,
+        target: str = "",
+        risk: Risk = "medium",
+        toolkit: str | None = None,
     ) -> Autonomy:
+        """The file's level for this source, operation and target; with ``toolkit``, the
+        tighter of that and the toolkit's own level for the operation (ADR 0023: a
+        toolkit narrows, never loosens)."""
+        level = self._ceiling(skill, operation, target, risk)
+        t = self.toolkits.get(toolkit) if toolkit else None
+        grant = t.grant(skill) if t else None
+        if grant is not None and operation in grant.levels:
+            level = Autonomy(tighter(level.value, grant.levels[operation]))
+        return level
+
+    def _ceiling(self, skill: str, operation: str, target: str, risk: Risk) -> Autonomy:
         for_target = self.targets.get(skill, {}).get(target.lower(), {})
         for levels in (for_target, self.skills.get(skill, {})):
             if operation in levels:
@@ -151,6 +175,52 @@ class AutonomyPolicy:
             return self.default
         return RISK_DEFAULTS[risk]
 
+    def check_toolkits(self, skills: Iterable[str] | None = None) -> list[str]:
+        """What is wrong with the toolkits against this file: a server it does not
+        declare, items outside the server's scope, a write it does not declare, a level
+        looser than the file's, a skill that does not exist (when ``skills`` is given).
+        Problems, not exceptions: the daemon logs them and the desktop shows them."""
+        problems: list[str] = []
+        known_skills = set(skills) if skills is not None else None
+        for name, t in self.toolkits.items():
+            for server, g in t.grants.items():
+                spec = self.mcp.get(server)
+                if spec is None:
+                    problems.append(f"toolkit {name}: server {server} is not declared")
+                    continue
+                if g.items is not None and not g.items:
+                    problems.append(
+                        f"toolkit {name}: {server} items is empty, so it reaches no item"
+                    )
+                if g.items is not None:
+                    allowed = {i.lower() for i in (spec.scope.items if spec.scope else ())}
+                    if spec.scope is None:
+                        problems.append(f"toolkit {name}: {server} has no scope to narrow")
+                    else:
+                        for item in g.items:
+                            if item.lower() not in allowed:
+                                problems.append(
+                                    f"toolkit {name}: {item} is not in {server}'s scope items"
+                                )
+                if g.writes is not None:
+                    for op in g.writes:
+                        if op not in spec.writes:
+                            problems.append(f"toolkit {name}: {server} declares no write {op}")
+                for op, level in g.levels.items():
+                    w = spec.writes.get(op)
+                    risk: Risk = w.risk if w else "medium"  # type: ignore[assignment]
+                    ceiling = self._ceiling(server, op, "", risk)
+                    if tighter(ceiling.value, level) != level:
+                        problems.append(
+                            f"toolkit {name}: {server}.{op} = {level} is looser than the "
+                            f"file's {ceiling.value}; a toolkit only narrows"
+                        )
+            if known_skills is not None:
+                for sk in t.skills:
+                    if sk not in known_skills:
+                        problems.append(f"toolkit {name}: no skill named {sk}")
+        return problems
+
     @classmethod
     def from_plain(
         cls,
@@ -159,10 +229,11 @@ class AutonomyPolicy:
         skills: Mapping[str, Mapping[str, str]],
         targets: Mapping[str, Mapping[str, Mapping[str, str]]],
         mcp: Mapping[str, ServerSpec] | None = None,
+        toolkits: Mapping[str, ToolkitSpec] | None = None,
     ) -> AutonomyPolicy:
         """Build from plain strings (the API's structured update), validating levels.
-        ``mcp`` is carried over from the file as is: the structured update doesn't edit
-        servers, and rendering the file must not lose them."""
+        ``mcp`` and ``toolkits`` are carried over from the file (or replaced by the
+        designer): rendering the file must not lose them."""
         return cls(
             default=_level(default, "defaults.autonomy") if default else None,
             skills={
@@ -177,6 +248,7 @@ class AutonomyPolicy:
                 for s, ts in targets.items()
             },
             mcp=dict(mcp or {}),
+            toolkits=dict(toolkits or {}),
             source="<api>",
         )
 
@@ -202,6 +274,7 @@ class AutonomyPolicy:
                     lines.append(f'[mcp.{_toml_key(name)}.targets."{target}"]')
                     lines += [f'{_toml_key(op)} = "{lv.value}"' for op, lv in tops.items()]
                     lines.append("")
+        lines += render_toolkits(self.toolkits)
         for skill in sorted((set(self.skills) | set(self.targets)) - set(self.mcp)):
             ops = self.skills.get(skill, {})
             lines.append(f"[{_toml_key(skill)}]")

@@ -34,6 +34,7 @@ from ghost_core.conversations.models import (
     SetPersona,
     SetScope,
     Settle,
+    SetToolkits,
     SetVoice,
     TurnRecord,
     Unsettle,
@@ -142,10 +143,14 @@ class Conversations:
         recent_limit: int = 40,
         retention: timedelta = timedelta(days=90),
         scopes: Mapping[str, Callable[[], list[str]]] | None = None,
+        toolkits: Callable[[], list[str]] | None = None,
+        toolkit_items: Callable[[str, str], list[str] | None] | None = None,
+        templates: Any = None,
     ) -> None:
         """``scopes`` is what a thread can be scoped to: ability name -> a function
         returning that source's whole allowlist (``ToolSource.scope_items``). A
-        thread's scope must stay within it (ADR 0019)."""
+        thread's scope must stay within it (ADR 0019). ``toolkits`` returns the names
+        the policy file declares; a department may only be given those (ADR 0023)."""
         self._store = store
         self.files = ConversationFiles(root)
         self.writer = ConversationWriter(store, self.files)
@@ -155,6 +160,15 @@ class Conversations:
         self._recent_limit = recent_limit
         self._retention = retention
         self._scopes: dict[str, Callable[[], list[str]]] = dict(scopes or {})
+        self._toolkits: Callable[[], list[str]] = toolkits or (lambda: [])
+        # (toolkit, source) -> the items that toolkit grants on that source, None when it
+        # does not grant the source at all; routes a request to the department (ADR 0023).
+        self._toolkit_items: Callable[[str, str], list[str] | None] = toolkit_items or (
+            lambda _t, _s: None
+        )
+        # A ghost_core.templates.Templates registry (get, list), for "start a department
+        # from the X template" (ADR 0023); its toolkits must already be in the policy file.
+        self._templates: Any = templates
         self.ensure_ghost()
 
     # --- registry ------------------------------------------------------------
@@ -259,15 +273,58 @@ class Conversations:
                 out[ability] = tuple(kept)
         return out
 
+    def validate_toolkits(self, names: Sequence[str]) -> tuple[str, ...]:
+        """Toolkit names as they will be stored: each one the policy file declares."""
+        known = {n.lower(): n for n in self._toolkits()}
+        out: list[str] = []
+        for raw in names:
+            name = str(raw).strip()
+            if not name:
+                continue
+            canonical = known.get(name.lower())
+            if canonical is None:
+                raise ValueError(
+                    f"there is no toolkit called {name}; the policy file declares "
+                    + (", ".join(sorted(known.values())) or "none")
+                )
+            if canonical not in out:
+                out.append(canonical)
+        return tuple(out)
+
+    def _list_templates(self) -> list[Any]:
+        return list(self._templates.list()) if self._templates is not None else []
+
+    def department_of(self, p: Profile) -> Profile:
+        """The department a line belongs to: itself when it is one (or Ghost), its parent
+        when it is a topic line (the line itself if the parent is gone)."""
+        if not p.department:
+            return p
+        return self.get(p.department) or p
+
+    def lines_of(self, slug: str, *, include_settled: bool = False) -> list[Profile]:
+        """A department's topic lines."""
+        return [q for q in self.list(include_settled=include_settled) if q.department == slug]
+
     def scope_of(self, ability: str, item: str) -> list[Profile]:
-        """The live threads whose scope for ``ability`` covers ``item`` (a target's
-        ``scope()`` string). Used to tell the operator where something belongs."""
-        needle = item.strip().lower()
-        return [
-            p
-            for p in self.list()
-            if not p.is_ghost and needle in {i.lower() for i in p.scope.get(ability, ())}
-        ]
+        """The live threads whose scope covers ``item`` for ``ability``, and the
+        departments whose toolkits grant it (ADR 0023): where a request about it can be
+        routed. Ghost is never one of them."""
+        wanted = item.strip().lower()
+        out: list[Profile] = []
+        for p in self.list():
+            if p.is_ghost:
+                continue
+            items = p.scope_for(ability)
+            if items is not None and wanted in {i.lower() for i in items}:
+                out.append(p)
+                continue
+            if p.is_department and p.toolkits:
+                for name in p.toolkits:
+                    granted = self._toolkit_items(name, ability)
+                    if granted is not None and wanted in {i.lower() for i in granted}:
+                        out.append(p)
+                        break
+        return out
 
     # --- what a session loads -------------------------------------------------
 
@@ -320,9 +377,19 @@ class Conversations:
                         "aliases": list(p.aliases),
                         "voice": p.voice,
                         "scope": {a: list(items) for a, items in p.scope.items()} or "everything",
+                        "department": p.department or ("itself" if p.is_department else None),
+                        "toolkits": list(p.toolkits) or ("everything" if p.is_department else None),
                         "last_active": p.last_active_at.isoformat() if p.last_active_at else None,
                     }
                     for p in self.list()
+                ]
+            }
+
+        async def list_templates(_args: dict[str, Any]) -> dict[str, Any]:
+            found = self._list_templates()
+            return {
+                "templates": [
+                    {"name": t.name, "title": t.title, "description": t.description} for t in found
                 ]
             }
 
@@ -337,7 +404,17 @@ class Conversations:
                 properties={},
                 required=[],
                 handler=list_conversations,
-            )
+            ),
+            ReadTool(
+                name="list_templates",
+                description=(
+                    "The department templates Ghost can start a department from (ADR 0023): "
+                    "name and what each is for. Use conversations.create with template=name."
+                ),
+                properties={},
+                required=[],
+                handler=list_templates,
+            ),
         ]
 
     def operations(self) -> list[Operation]:
@@ -351,6 +428,20 @@ class Conversations:
             return prop
 
         async def create(args: dict[str, Any]) -> Prepared:
+            template = None
+            tname = str(args.get("template") or "").strip().lower()
+            if tname:
+                template = self._templates.get(tname) if self._templates is not None else None
+                if template is None:
+                    raise ValueError(f"there is no template called {tname}")
+                args = {
+                    "name": template.title,
+                    "aliases": list(template.aliases),
+                    "voice": template.voice,
+                    "persona": template.persona,
+                    "toolkits": list(template.toolkits),
+                    **{k: v for k, v in args.items() if v not in (None, "", [])},
+                }
             name = _name(args.get("name"))
             slug = slugify(name)
             if self._store.get_conversation(slug, include_deleted=True) is not None:
@@ -360,6 +451,24 @@ class Conversations:
             if len(persona) > MAX_PERSONA:
                 raise ValueError("that persona is too long")
             scope = self.validate_scope(slug, _scope_arg(args.get("scope")))
+            department = ""
+            dep_raw = str(args.get("department") or "").strip()
+            if dep_raw:
+                parent = self.get(dep_raw) or self.resolve(dep_raw)
+                if parent is None or parent.is_ghost or parent.department:
+                    raise ValueError(f"{dep_raw} is not a department")
+                department = parent.slug
+            try:
+                toolkits = self.validate_toolkits(_names_arg(args.get("toolkits")))
+            except ValueError as e:
+                if template is not None:
+                    raise ValueError(
+                        f"{e}; import the {template.title} template in the desktop app "
+                        "first, which adds its toolkits to the policy file"
+                    ) from None
+                raise
+            if department and toolkits:
+                raise ValueError("a line in a department reaches what the department reaches")
             memory = ""
             seed = str(args.get("seed_from") or "").strip()
             if seed:
@@ -376,6 +485,8 @@ class Conversations:
                             persona=persona,
                             scope=scope,
                             memory=memory,
+                            toolkits=toolkits,
+                            department=department or None,
                         ),
                     )
                 ),
@@ -403,6 +514,19 @@ class Conversations:
                 target=ConversationTarget(slug=p.slug),
                 changes=ChangeSet(steps=(SetScope(scope=scope),)),
                 rationale=f"{p.name} now covers {describe_scope(scope)}",
+            )
+
+        async def set_toolkits(args: dict[str, Any]) -> Prepared:
+            p = self._target(args)
+            if p.is_ghost:
+                raise ValueError("Ghost reaches everything; it takes no toolkits")
+            if p.department:
+                raise ValueError(f"{p.name} is a line in a department; set the department's")
+            toolkits = self.validate_toolkits(_names_arg(args.get("toolkits")))
+            return Prepared(
+                target=ConversationTarget(slug=p.slug),
+                changes=ChangeSet(steps=(SetToolkits(toolkits=toolkits),)),
+                rationale=f"{p.name} now has " + (", ".join(toolkits) or "no toolkits"),
             )
 
         async def settle(args: dict[str, Any]) -> Prepared:
@@ -552,6 +676,19 @@ class Conversations:
                         ),
                     },
                     "scope": scope_prop,
+                    "department": {
+                        "type": "string",
+                        "description": "start it as a topic line inside this department",
+                    },
+                    "template": {
+                        "type": "string",
+                        "description": "a department template to start from (list_templates)",
+                    },
+                    "toolkits": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "the toolkits a new department gets (none: everything)",
+                    },
                     "seed_from": {
                         "type": "string",
                         "description": (
@@ -582,6 +719,23 @@ class Conversations:
                 prepare=set_scope,
                 writer=w,
                 risk="low",
+                allowed=w.allowed,
+            ),
+            Operation(
+                "set_toolkits",
+                (
+                    "Give a department its toolkits: the bundles of servers and skills its "
+                    "lines reach (the policy file declares them). An empty list means it "
+                    "reaches everything, like Ghost."
+                ),
+                {
+                    "conversation": conv,
+                    "toolkits": {"type": "array", "items": {"type": "string"}},
+                },
+                ["toolkits"],
+                prepare=set_toolkits,
+                writer=w,
+                risk="medium",
                 allowed=w.allowed,
             ),
             Operation(
@@ -815,3 +969,14 @@ def conversations_source(convs: Conversations) -> ToolSource:
         read_tools=convs.read_tools(),
         operations=convs.operations(),
     )
+
+
+def _names_arg(value: Any) -> list[str]:
+    """A list argument the model may pass as a list or a comma-separated string."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [s.strip() for s in re.split(r"[,;]", value) if s.strip()]
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    raise ValueError("expected a list of names")

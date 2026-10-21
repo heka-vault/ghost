@@ -247,6 +247,7 @@ def build_session(
     origin: str = "desk",
     latency_log: Path | None = None,
     on_latency: Callable[[dict[str, Any]], None] | None = None,
+    reach: Callable[[Any], list[ToolSource]] | None = None,
 ) -> GhostSession:
     """Build one session. ``first_utterance`` is what the operator said right after
     the wake phrase; when given it is the first user turn and there is no greeting.
@@ -308,6 +309,7 @@ def build_session(
             scoped_prompts=scoped,
             reads_wider=settings.cross_department_answers,
             routing=settings.department_routing,
+            reach=reach,  # ADR 0023: a department's sources, narrowed by its toolkits
         )
     else:
         fragments += [fn(None) for fn in scoped.values()]

@@ -71,6 +71,7 @@ def openapi() -> dict[str, Any]:
         store=store,
         sources=[],
         skills=None,
+        templates=None,
         conversations=Conversations(store, Path(tempfile.mkdtemp()) / "conversations"),
         policy_path=Path("/dev/null"),
         settings_path=Path("/dev/null"),

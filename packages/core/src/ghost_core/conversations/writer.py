@@ -21,6 +21,7 @@ from ghost_core.conversations.models import (
     SetPersona,
     SetScope,
     Settle,
+    SetToolkits,
     SetVoice,
     Unsettle,
 )
@@ -68,14 +69,29 @@ class ConversationWriter:
                 persona=persona,
                 scope=scope,
                 memory=memory,
+                toolkits=toolkits,
+                department=department,
             ):
                 if store.get_conversation(slug) is not None:
                     raise ValueError(f"{name!r} already exists")
                 if slug == GHOST and scope:
                     raise ValueError("Ghost cannot be scoped")
+                if department:
+                    parent = store.get_conversation(department)
+                    if parent is None or parent.is_ghost or parent.department:
+                        raise ValueError(f"{department!r} is not a department")
+                    if toolkits:
+                        raise ValueError("a topic line reaches what its department reaches")
                 store.upsert_conversation(
                     Profile(
-                        slug=slug, name=name, aliases=aliases, voice=voice, speed=speed, scope=scope
+                        slug=slug,
+                        name=name,
+                        aliases=aliases,
+                        voice=voice,
+                        speed=speed,
+                        scope=scope,
+                        toolkits=toolkits,
+                        department=department or None,
                     )
                 )
                 files.ensure(slug)
@@ -98,6 +114,18 @@ class ConversationWriter:
                 p = self._live(slug)
                 store.upsert_conversation(
                     p.model_copy(update={"scope": scope, "updated_at": utcnow()})
+                )
+            case SetToolkits(toolkits=toolkits):
+                if slug == GHOST:
+                    raise ValueError("Ghost reaches everything; it takes no toolkits")
+                p = self._live(slug)
+                if p.department:
+                    raise ValueError(
+                        f"{p.name} is a line in the {p.department} department; set the "
+                        "department's toolkits"
+                    )
+                store.upsert_conversation(
+                    p.model_copy(update={"toolkits": toolkits, "updated_at": utcnow()})
                 )
             case Settle():
                 if slug == GHOST:
@@ -163,6 +191,10 @@ class ConversationWriter:
                 if slug == GHOST:
                     raise ValueError("Ghost cannot be deleted")
                 p = self._live(slug)
+                if any(
+                    q.department == slug for q in store.list_conversations(include_settled=True)
+                ):
+                    raise ValueError(f"{p.name} still has lines; delete or move them first")
                 store.upsert_conversation(p.model_copy(update={"deleted_at": utcnow()}))
                 store.tag_turns(slug, idempotency_key)
             case _:

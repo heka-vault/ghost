@@ -143,3 +143,4 @@ class ToolSource:
     scope_kind: str | None = None
     scope_items: Callable[[], list[str]] | None = None
     scoped_prompt: Callable[[Any], str] | None = None  # ActiveScope | None -> paragraph
+    toolkit: str | None = None  # the toolkit that granted this view of the source (ADR 0023)

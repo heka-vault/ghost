@@ -14,10 +14,13 @@ import session from "./session";
 import settings from "./settings";
 import skills from "./skills";
 import sources from "./sources";
+import templates from "./templates";
+import toolkits from "./toolkits";
 import tray from "./tray";
 
 export function composeFixtures(s: Scenario) {
   const servers = mcp(s);
+  const skillList = skills(s, servers);
   return {
     session: session(s),
     conversations: conversations(s),
@@ -28,7 +31,11 @@ export function composeFixtures(s: Scenario) {
     audit: audit(s),
     settings: settings(s),
     /** The SKILL.md folders Ghost reads (GET /skills), ADR 0023; `missing` follows the connected servers. */
-    skills: skills(s, servers),
+    skills: skillList,
+    /** The `[toolkit.<name>]` tables in the policy file (GET /toolkits), ADR 0023, with their problems against the file. */
+    toolkits: toolkits(s, servers, skillList),
+    /** Department templates (GET /templates), ADR 0023: the shipped ones and the operator's own, with what each still needs. */
+    templates: templates(s, servers),
     /** Data with no API behind it yet, exposed to prototypes through useFixture(owner). */
     prototypes: {
       onboarding: onboarding(s),

@@ -1,0 +1,11 @@
+title = "Triage"
+description = "Sorts new GitHub issues with the five labels and hands the clear ones on."
+aliases = ["issues", "the triage desk"]
+toolkits = ["triage"]
+
+[toolkit.triage]
+description = "Read and label issues in the repositories the GitHub server allows."
+skills = ["triage"]
+
+[toolkit.triage.servers.github]
+writes = ["comment", "set_labels", "close", "reopen"]

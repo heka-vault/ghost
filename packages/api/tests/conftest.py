@@ -174,6 +174,7 @@ def world(tmp_path: Path):
         store,
         tmp_path / "conversations",
         default_voice="af_heart",
+        toolkits=lambda: list(gate.autonomy.toolkits),
         voices=("af_heart", "am_adam", "bf_emma"),
     )
     gate.register(CONVERSATIONS, conversations.operations())

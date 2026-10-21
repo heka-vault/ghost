@@ -5,6 +5,7 @@ import { type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useStat
 
 import { useDesign } from "../design/context";
 import { GhostMark, type GhostPhase, LineGlyph, StatusDot, cx, lineName, liveLabel, phaseText, relativeTime, useLive } from "../ui";
+import { groupByDepartment } from "../screens/conversations/threads";
 import { newLineSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
@@ -119,6 +120,8 @@ const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filt
   // Lines drops to a quiet "section active" state (no tile, no aria-current).
   // Every live line, right here: the sidebar is the list, not a preview of one (the operator's call, 2026-10-20).
   const shownLines = state !== "offline" ? sortedLines : [];
+  // Topic lines sit under their department (ADR 0023); a group takes the place of its first member, so the live line still pulls its department up.
+  const groups = groupByDepartment(shownLines).flatMap((g) => [{ line: g.head, topic: false }, ...g.lines.map((l) => ({ line: l, topic: true }))]);
   const settledCount = lines.filter((l) => !!(l as { settled_at?: string | null }).settled_at).length;
   const lineIsCurrent = shownLines.some((l) => path === `/lines/${l.slug}`);
 
@@ -156,7 +159,7 @@ const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filt
               Lines
             </a>
             <ul className="sidebar__group" role="list" aria-labelledby="sidebar-lines">
-              {shownLines.map((l) => {
+              {groups.map(({ line: l, topic }) => {
                 const to = `/lines/${l.slug}`;
                 const live = inSession && l.slug === active;
                 // No room for scope chips at this density: the items ride on the row's tooltip.
@@ -172,7 +175,7 @@ const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filt
                 return (
                   <li key={l.slug}>
                     <a
-                      className={cx("sidebar__item sidebar__item--line", path === to && "is-current")}
+                      className={cx("sidebar__item sidebar__item--line", topic && "sidebar__item--topic", path === to && "is-current")}
                       href={hrefFor(to)}
                       aria-current={path === to ? "page" : undefined}
                       title={scope.length ? `Scope: ${scope.join(", ")}` : undefined}

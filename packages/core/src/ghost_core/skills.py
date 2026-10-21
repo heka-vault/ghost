@@ -458,5 +458,6 @@ class Skills:
             name=SOURCE,
             prompt=self.index_prompt(wanted),
             read_tools=[self.read_tool(wanted)] if self._skills else [],
-            operations=self.operations(),
+            # Adding and removing skills is for Ghost and unrestricted departments only.
+            operations=self.operations() if wanted is None else [],
         )

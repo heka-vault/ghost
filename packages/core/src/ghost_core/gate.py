@@ -113,10 +113,16 @@ class WriteGate:
         self._autonomy = policy
         self._log(f"gate: autonomy policy reloaded from {policy.source}")
 
-    def level(self, ability: str, operation: str, target: Target | None = None) -> Autonomy:
+    def level(
+        self,
+        ability: str,
+        operation: str,
+        target: Target | None = None,
+        toolkit: str | None = None,
+    ) -> Autonomy:
         op = self.operation(ability, operation)
         return self._autonomy.resolve(
-            ability, operation, target.scope() if target else "", risk=op.risk
+            ability, operation, target.scope() if target else "", risk=op.risk, toolkit=toolkit
         )
 
     # --- submit ---------------------------------------------------------
@@ -132,17 +138,20 @@ class WriteGate:
         rationale: str,
         scope: ActiveScope | None = None,
         conversation: str | None = None,
+        department: str | None = None,
+        toolkit: str | None = None,
     ) -> Submission:
         """``scope`` is the active thread's scope for this ability (ADR 0019): a target
         outside it is refused here, before policy or autonomy, whatever the setting
         for reads. None means unscoped. ``conversation`` is the thread the session is
-        in, kept on the proposal for the audit."""
+        in, ``department`` and ``toolkit`` where the grant came from (ADR 0023), kept
+        on the proposal for the audit; the toolkit may tighten the level."""
         op = self.operation(ability, operation)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
         if scope is not None:
             scope.check_write(target.scope())  # raises OutOfScope, a PolicyError
-        level = self.level(ability, operation, target)
+        level = self.level(ability, operation, target, toolkit=toolkit)
         if level is Autonomy.DENY:
             raise PolicyError(f"{ability}.{operation} is not allowed on {target.scope()}")
         proposal = await self._propose(
@@ -154,6 +163,8 @@ class WriteGate:
             rationale=rationale,
             autonomy=level,
             conversation=conversation,
+            department=department,
+            toolkit=toolkit,
         )
         self._log(f"gate: {ability}.{operation} on {target} -> {level.value}")
         if level is Autonomy.CONFIRM:
@@ -229,6 +240,8 @@ class WriteGate:
         rationale: str,
         autonomy: Autonomy,
         conversation: str | None = None,
+        department: str | None = None,
+        toolkit: str | None = None,
     ) -> Proposal:
         writer = self.operation(ability, operation).writer
         # One pending proposal at a time: a new one replaces the old.
@@ -245,6 +258,8 @@ class WriteGate:
             preview=f"On {target.spoken()}: {changes.describe()}.",
             autonomy=autonomy.value,
             conversation=conversation,
+            department=department,
+            toolkit=toolkit,
         )
         self._store.insert_proposal(proposal)
         self._store.event(

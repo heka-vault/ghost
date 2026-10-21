@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from ghost_core import ActiveScope, GateError, WriteGate
+from ghost_core import ActiveScope, GateError, ToolSource, WriteGate
 from ghost_core.conversations import (
     GHOST,
     SOURCE,
@@ -34,10 +34,12 @@ from ghost_core.conversations.models import SetMemory
 from ghost_core.models import ChangeSet
 from ghost_core.policy import Autonomy, PolicyError
 from loguru import logger
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     ControlFrame,
     Frame,
     LLMMessagesUpdateFrame,
+    LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
     OutputAudioRawFrame,
     TTSSpeakFrame,
@@ -91,6 +93,7 @@ class ConversationRuntime:
         start: str = GHOST,
         on_switch: Callable[[Profile], Awaitable[None]] | None = None,
         scoped_prompts: Mapping[str, Callable[[ActiveScope | None], str]] | None = None,
+        reach: Callable[[Profile], list[ToolSource]] | None = None,
         reads_wider: bool = False,
         routing: bool = False,
     ) -> None:
@@ -102,6 +105,12 @@ class ConversationRuntime:
         self._session_id = session_id
         self._fragments = list(fragments)
         self._scoped_prompts = dict(scoped_prompts or {})
+        # ADR 0023: what a department's sessions reach. ``reach(department)`` returns the
+        # sources (narrowed by its toolkits) a line in it gets; None: every session gets
+        # ``fragments`` and whatever tools were registered, as before departments.
+        self._reach = reach
+        # Set by register_tools: the schemas for a list of sources, for a transfer.
+        self.tool_schemas: Callable[[list[ToolSource]], list[Any]] | None = None
         self.reads_wider = reads_wider
         self.routing = routing
         self._tts_settings = tts_settings
@@ -125,14 +134,37 @@ class ConversationRuntime:
     def conversations(self) -> Conversations:
         return self._conversations
 
+    @property
+    def has_reach(self) -> bool:
+        return self._reach is not None
+
+    def sources_for(self, profile: Profile | None = None) -> list[ToolSource]:
+        """The sources a session in this line reaches (ADR 0023): its department's, from
+        the live policy on every call, so an edit in the designer applies at once."""
+        if self._reach is None:
+            return []
+        p = profile or self.active
+        return list(self._reach(self._conversations.department_of(p)))
+
     def system_prompt(self, profile: Profile | None = None) -> str:
         p = profile or self.active
-        fragments = list(self._fragments)
-        for ability, fn in self._scoped_prompts.items():
-            fragments.append(fn(self.scope_for(ability, p)))
+        if self._reach is None:
+            fragments = list(self._fragments)
+            for ability, fn in self._scoped_prompts.items():
+                fragments.append(fn(self.scope_for(ability, p)))
+        else:
+            fragments = []
+            for src in self.sources_for(p):
+                if src.scope_kind and src.scoped_prompt:
+                    fragments.append(src.scoped_prompt(self.scope_for(src.name, p)))
+                elif src.prompt:
+                    fragments.append(src.prompt)
+        persona = self._conversations.files.persona(p.slug)
+        if not persona.strip() and p.department:  # a topic line speaks as its department
+            persona = self._conversations.files.persona(p.department)
         return build_system_prompt(
             [f for f in fragments if f],
-            persona=self._conversations.files.persona(p.slug),
+            persona=persona,
             name=p.name,
             is_ghost=p.is_ghost,
             scope=describe_scope(p.scope) if p.scope and not p.is_ghost else "",
@@ -158,6 +190,14 @@ class ConversationRuntime:
             reads_wider=self.reads_wider,
             owners=owners,
         )
+
+    def department_slug(self) -> str | None:
+        """The department the active line belongs to (ADR 0023): the line itself when it
+        is a department, its parent when it is a topic line, None for Ghost."""
+        p = self.active
+        if p.is_ghost:
+            return None
+        return p.department or p.slug
 
     def owner_of(self, ability: str, item: str) -> Profile | None:
         """The thread to route a request about ``item`` to: the first live thread
@@ -248,6 +288,11 @@ class ConversationRuntime:
             ConversationMarkerFrame(slug=target.slug),
             LLMUpdateSettingsFrame(
                 delta=self._llm_settings(system_instruction=self.system_prompt(target))
+            ),
+            *(
+                [LLMSetToolsFrame(tools=ToolsSchema(self.tool_schemas(self.sources_for(target))))]
+                if self._reach is not None and self.tool_schemas is not None
+                else []
             ),
             LLMMessagesUpdateFrame(messages=messages, run_llm=True),
         ]

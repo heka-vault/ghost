@@ -90,3 +90,24 @@ reopen     = "confirm"
 # [mcp.mobbin]
 # url = "http://proxy.lan:8318/mobbin/mcp"
 # headers = { Authorization = "Bearer $MCP_PROXY_KEY" }
+
+# Toolkits (ADR 0023): what a department may reach, designed in the desktop. A toolkit
+# only narrows this file: fewer servers, tools or items, a level as cautious or more.
+# [toolkit.triage]
+# description = "Read and label issues."
+# skills = ["triage"]
+# [toolkit.triage.servers.github]
+# writes = ["comment", "set_labels"]
+# levels = { set_labels = "confirm" }
+
+# A skill's scripts run only through this server, scoped by skill (ADR 0023).
+# [mcp.scripts]
+# command = "ghost-scripts"
+# args = ["--skills", "~/.config/ghost/skills"]
+# scope = { kind = "skill", arguments = ["skill"], items = ["month-close"] }
+# [mcp.scripts.writes.run]
+# target = ["skill", "script"]
+# asked_by = ["run"]
+# risk = "high"
+# [mcp.scripts.levels]
+# run = "confirm"

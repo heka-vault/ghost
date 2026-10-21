@@ -5,9 +5,9 @@
  * write, the same as if it had been said. Pinning a note, compacting, switching, reset and
  * delete happen at once.
  */
-import { type CompactionView, type ConversationDetail, type TurnView } from "@ghost/client-ts";
+import { type CompactionView, type ConversationDetail, type ConversationView, type ToolkitView, type TurnView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, Layers, MoreHorizontal, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, FileOutput, Layers, MoreHorizontal, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
@@ -44,10 +44,11 @@ import { useAutoRows } from "./autosize";
 import { aliasExample, MEMORY_EXAMPLE, PERSONA_EXAMPLE } from "./examples";
 import { LineStateText, lineState } from "./lineState";
 import { History } from "./History";
+import { ToolkitPicker } from "./NewLineDialog";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
 import { ScopePicker } from "./ScopePicker";
-import { type ScopedSource, scopedSources, settleLine, settledAt, unsettleLine } from "./threads";
+import { type ScopedSource, departmentName, departmentOf, isDepartment, narrowSources, scopedSources, settleLine, settledAt, toolkitsOf, unsettleLine } from "./threads";
 import { Transcript } from "./Transcript";
 import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newLineSeed, readParam, writeParam } from "./url";
 import { PlayingBars, VoicePicker, voiceTitle } from "./VoicePicker";
@@ -56,7 +57,7 @@ import { type Voice, parseVoice, voiceKind } from "./voices";
 type TabId = "persona" | "memory" | "transcript" | "history";
 const TABS: TabId[] = ["persona", "memory", "transcript", "history"];
 const TURN_LIMIT = 200;
-const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "scope"];
+const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "scope", "toolkits"];
 const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -76,6 +77,10 @@ export function LineDetail({ slug }: { slug: string }) {
   const [versions, setVersions] = useState<CompactionView[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
   const [sources, setSources] = useState<ScopedSource[] | null>(null);
+  /** The toolkits the policy file declares (ADR 0023): a department's choices, and what narrows a topic line's scope. */
+  const [toolkitList, setToolkitList] = useState<ToolkitView[] | null>(null);
+  /** Every line, for a topic line's department (its name and toolkits). */
+  const [lines, setLines] = useState<ConversationView[]>([]);
   const [missing, setMissing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -88,7 +93,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const [saving, setSaving] = useState(false);
   const [hearing, setHearing] = useState<string | null>(null);
   const [pinning, setPinning] = useState(false);
-  const [acting, setActing] = useState<"switch" | "compact" | "settle" | "unsettle" | null>(null);
+  const [acting, setActing] = useState<"switch" | "compact" | "settle" | "unsettle" | "export" | null>(null);
 
   const inSession = !!status?.session_id;
   const liveSlug = inSession ? (status?.conversation ?? "ghost") : null;
@@ -98,6 +103,12 @@ export function LineDetail({ slug }: { slug: string }) {
   // Settled (ADR 0019): out of voice routing and the active list, everything readable, nothing editable.
   const settled = settledAt(detail);
   const readOnly = settled !== null;
+  // Where the line sits (ADR 0023): a department of its own, or a topic line inside one.
+  const department = departmentOf(detail);
+  const dept = isDepartment(detail);
+  const deptLine = department ? (lines.find((l) => l.slug === department) ?? null) : null;
+  const deptName = departmentName(department, lines);
+  const deptToolkits = deptLine ? toolkitsOf(deptLine) : [];
 
   const setTab = (t: TabId) => {
     setTabState(t);
@@ -193,7 +204,8 @@ export function LineDetail({ slug }: { slug: string }) {
       .catch(() => setVoices([]));
   }, [client, status?.models_ready]);
 
-  // Which servers can be scoped, and their allowlists: the choices in the Scope section.
+  // Which servers can be scoped, and their allowlists: the choices in the Scope section. With
+  // them, the toolkits the file declares and the other lines (a topic line's department).
   useEffect(() => {
     if (isGhost) return;
     let on = true;
@@ -201,6 +213,14 @@ export function LineDetail({ slug }: { slug: string }) {
       .sources()
       .then((a) => on && setSources(scopedSources(a)))
       .catch(() => on && setSources([]));
+    client
+      .toolkits()
+      .then((t) => on && setToolkitList(t))
+      .catch(() => on && setToolkitList([]));
+    client
+      .conversations()
+      .then((l) => on && setLines(l))
+      .catch(() => {});
     return () => {
       on = false;
     };
@@ -222,7 +242,11 @@ export function LineDetail({ slug }: { slug: string }) {
     setNotice(null);
     const words = listWords(dirty);
     try {
-      const d = await client.updateConversation(slug, updateBody(draft, dirty));
+      // A department's toolkits have their own route (ADR 0023); every other field goes in one PATCH.
+      const rest = dirty.filter((k) => k !== "toolkits");
+      let d = rest.length ? await client.updateConversation(slug, updateBody(draft, rest)) : null;
+      if (dirty.includes("toolkits")) d = await client.setConversationToolkits(slug, draft.toolkits);
+      if (!d) return;
       drafts.delete(slug);
       apply(d, false);
       toast({ title: "Saved", description: `${name}’s ${words} ${dirty.length === 1 && !["notes", "aliases"].includes(dirty[0]) ? "is" : "are"} updated. Each change is in the audit log.`, tone: "ok" });
@@ -366,6 +390,19 @@ export function LineDetail({ slug }: { slug: string }) {
     }
   };
 
+  // A department written back out as one of the operator's own templates (ADR 0023).
+  const exportTemplate = async () => {
+    setActing("export");
+    try {
+      const t = await client.exportTemplate(slug);
+      toast({ title: "Saved as a template", description: `${t.title} is in ${t.path.replace(/^(?:\/home\/[^/]+|\/Users\/[^/]+|\/root)(?=\/|$)/, "~")}. New line can start a department from it.`, tone: "ok" });
+    } catch (e) {
+      fail("Couldn’t save it as a template", e);
+    } finally {
+      setActing(null);
+    }
+  };
+
   const remove = async () => {
     const ok = await confirm({
       title: `Delete ${name}?`,
@@ -455,6 +492,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const meta: string[] = [];
   if (detail) {
     if (isGhost) meta.push("Main line");
+    if (department) meta.push(`a line in ${deptName}`);
     if (settled) meta.push(`settled ${relativeTime(settled)}`);
     if (!live) meta.push(detail.last_active_at ? `last used ${relativeTime(detail.last_active_at)}` : "not used yet");
     if (detail.turn_count) {
@@ -489,6 +527,8 @@ export function LineDetail({ slug }: { slug: string }) {
     { label: `Memory${mark(MEMORY_KEYS)}`, icon: <Brain />, onSelect: () => setTab("memory") },
     { label: "History", icon: <Clock />, onSelect: () => setTab("history") },
     "separator",
+    // A department can be written out as a template: its persona, toolkits and skills, to start another from (ADR 0023).
+    ...(dept && !readOnly ? ([{ label: "Save as template", icon: <FileOutput />, onSelect: () => void exportTemplate() }, "separator"] as MenuItem[]) : []),
   ];
   const menu = detail && (
     <Menu
@@ -661,12 +701,33 @@ export function LineDetail({ slug }: { slug: string }) {
               />
             </Section>
 
+            {dept && (
+              <Section id="conv-toolkits" title="Toolkits" description={<>What this department and its lines may reach: the union of its toolkits. Nothing checked reaches everything, like Ghost. Design toolkits on the <Link to="/toolkits">Toolkits</Link> screen.</>}>
+                <ToolkitPicker toolkits={toolkitList} value={draft.toolkits} onChange={(toolkits) => setDraft({ toolkits })} disabled={readOnly} idPrefix="conv-toolkit" />
+              </Section>
+            )}
+            {department && (
+              <Section id="conv-department" title="Department" description="A topic line: it reaches what its department reaches, and its scope below can only narrow that.">
+                <Card padding="none">
+                  <div className="conv-dept">
+                    <p className="conv-dept__lead">
+                      A line in <Link to={`/lines/${department}`}>{deptName}</Link>.
+                    </p>
+                    <p className="conv-dept__sub">
+                      {deptLine ? (deptToolkits.length ? <>Reaches what {deptToolkits.length === 1 ? "the toolkit" : "the toolkits"} <span className="t-mono">{deptToolkits.join(", ")}</span> {deptToolkits.length === 1 ? "grants" : "grant"}.</> : `${deptName} reaches everything, like Ghost, so this line does too.`) : "Reaches what the department reaches."}
+                    </p>
+                  </div>
+                </Card>
+              </Section>
+            )}
             <Section
               id="conv-scope"
               title="Scope"
               description={
                 isGhost ? (
                   "Ghost is the main line and sees everything: every repository and anything else a server allows."
+                ) : department ? (
+                  <>What this line may read and change, within what {deptName} reaches. Outside its scope, Ghost says it belongs to another line. Ghost never writes outside it.</>
                 ) : (
                   <>What this line may read and change. Outside its scope, Ghost says it belongs to another line; Settings decides whether it answers read-only or patches you through. Ghost never writes outside it.</>
                 )
@@ -677,7 +738,7 @@ export function LineDetail({ slug }: { slug: string }) {
                   <p className="conv-scope__all t-body">Ghost sees everything.</p>
                 </Card>
               ) : (
-                <ScopePicker sources={sources} value={draft.scope} onChange={(scope) => setDraft({ scope })} disabled={readOnly} idPrefix="conv-scope" />
+                <ScopePicker sources={sources && department ? narrowSources(sources, deptToolkits, toolkitList) : sources} value={draft.scope} onChange={(scope) => setDraft({ scope })} disabled={readOnly} idPrefix="conv-scope" />
               )}
             </Section>
 

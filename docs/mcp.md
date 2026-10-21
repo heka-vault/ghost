@@ -94,6 +94,12 @@ comment = "confirm"
 - A declaration naming a tool the server does not have is logged at start and not offered.
   A server's write tool with no declaration is never offered.
 
+## Toolkits and departments
+
+A toolkit picks some of a server (its reads, its declared writes, its scope items, at a
+level no looser than this file's) for a department to reach; a department with no
+toolkits reaches every server. See [departments.md](departments.md).
+
 ## What the model is told
 
 Everything a server sends is data: descriptions, results, notices. The model sees only the

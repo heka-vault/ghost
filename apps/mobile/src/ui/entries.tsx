@@ -41,14 +41,20 @@ export function EntryTitle({ e, lines }: { e: AuditEntry; lines?: number }) {
   );
 }
 
-/** The support line: the status badge (when not done), the line's name, then issue · when. */
+/** Where an entry was made, in words (ADR 0023): the department, then the topic line when it was one of its lines. */
+export function whereMade(e: AuditEntry): string {
+  const line = entryLine(e);
+  if (!e.department || e.department === line) return lineName(line);
+  return `${lineName(e.department)} · ${lineName(line)}`;
+}
+
+/** The support line: the status badge (when not done), the department and line, then issue · when. */
 export function EntrySupport({ e }: { e: AuditEntry }) {
   const { target, conversation } = splitSummary(e);
-  const line = entryLine(e);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space[1.5] }}>
       {e.status !== "executed" && <Badge tone={statusTone(e.status)}>{statusLabel(e.status)}</Badge>}
-      <Text size="md" color="text2">{lineName(line)}</Text>
+      <Text size="md" color="text2">{whereMade(e)}</Text>
       <Text size="md" color="text2">·</Text>
       <TargetText target={target} conversation={conversation} />
       <Text size="md" color="text2">·</Text>

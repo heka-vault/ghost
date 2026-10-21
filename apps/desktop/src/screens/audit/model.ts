@@ -346,6 +346,8 @@ export function haystack(e: AuditEntry, ctx: OutcomeContext = {}): string {
     outcomeLabel(o),
     ...levelParts(e, o),
     sourceLabel(e.ability),
+    e.department ?? "",
+    e.toolkit ?? "",
     e.id,
     ...e.events.flatMap((ev) => {
       const v = describeEvent(ev, e);

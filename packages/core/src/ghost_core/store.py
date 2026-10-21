@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     last_active_at  TEXT,
     deleted_at      TEXT,
     scope           TEXT NOT NULL DEFAULT '{}',  -- ADR 0019: {ability: [item, ...]}
-    settled_at      TEXT
+    settled_at      TEXT,
+    toolkits        TEXT NOT NULL DEFAULT '[]',  -- ADR 0023: a department's reach
+    department      TEXT                          -- ADR 0023: a topic line's department
 );
 
 CREATE TABLE IF NOT EXISTS turns (
@@ -119,6 +121,13 @@ class Store:
             )
         if "settled_at" not in cols:
             self._conn.execute("ALTER TABLE conversations ADD COLUMN settled_at TEXT")
+        # ADR 0023: departments. Older rows load as departments with no toolkits.
+        if "toolkits" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN toolkits TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "department" not in cols:
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN department TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -287,12 +296,13 @@ class Store:
     def upsert_conversation(self, p: Profile) -> None:
         self._conn.execute(
             "INSERT INTO conversations (slug, name, aliases, voice, speed, created_at, updated_at,"
-            " last_active_at, deleted_at, scope, settled_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " last_active_at, deleted_at, scope, settled_at, toolkits, department)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(slug) DO UPDATE SET name = excluded.name, aliases = excluded.aliases,"
             " voice = excluded.voice, speed = excluded.speed, updated_at = excluded.updated_at,"
             " last_active_at = excluded.last_active_at, deleted_at = excluded.deleted_at,"
-            " scope = excluded.scope, settled_at = excluded.settled_at",
+            " scope = excluded.scope, settled_at = excluded.settled_at,"
+            " toolkits = excluded.toolkits, department = excluded.department",
             (
                 p.slug,
                 p.name,
@@ -305,6 +315,8 @@ class Store:
                 p.deleted_at.isoformat() if p.deleted_at else None,
                 json.dumps({k: list(v) for k, v in p.scope.items()}),
                 p.settled_at.isoformat() if p.settled_at else None,
+                json.dumps(list(p.toolkits)),
+                p.department,
             ),
         )
 
@@ -432,7 +444,7 @@ class Store:
 
 _PROFILE_COLS = (
     "slug, name, aliases, voice, speed, created_at, updated_at, last_active_at, deleted_at,"
-    " scope, settled_at"
+    " scope, settled_at, toolkits, department"
 )
 
 
@@ -452,6 +464,8 @@ def _profile(row) -> Profile:
         deleted_at=datetime.fromisoformat(row[8]) if row[8] else None,
         scope={k: tuple(v) for k, v in scope.items() if v},
         settled_at=datetime.fromisoformat(row[10]) if row[10] else None,
+        toolkits=tuple(json.loads(row[11] or "[]")),
+        department=row[12] or None,
     )
 
 

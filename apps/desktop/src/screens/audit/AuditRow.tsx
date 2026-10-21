@@ -4,7 +4,7 @@ import { ArrowUpRight, ChevronRight } from "lucide-react";
 import { type FocusEventHandler, Fragment, forwardRef, useId } from "react";
 
 import { hrefFor } from "../../app/router";
-import { Badge, Button, Disclosure, Notice, PendingChange, cx, errorText, formatDateTime, formatTime } from "../../ui";
+import { Badge, Button, Disclosure, Notice, PendingChange, cx, errorText, formatDateTime, formatTime, lineName } from "../../ui";
 import { ATTENTION, describeEvent, levelParts, opName, outcomeLabel, outcomeTone, splitSummary } from "./model";
 
 export interface AuditRowProps {
@@ -92,6 +92,19 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
                 <span>{part}</span>
               </Fragment>
             ))}
+            {/* Where it was made (ADR 0023): the department, and the toolkit it went through, small. */}
+            {e.department && (
+              <>
+                <span aria-hidden className="audit-row__sep">·</span>
+                <span>in {lineName(e.department)}</span>
+              </>
+            )}
+            {e.toolkit && (
+              <>
+                <span aria-hidden className="audit-row__sep">·</span>
+                <span className="t-mono audit-row__op">{e.toolkit}</span>
+              </>
+            )}
           </span>
         </span>
         <span className="audit-row__status">

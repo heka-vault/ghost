@@ -49,6 +49,9 @@ class GhostdSettings(BaseSettings):
     # .agents/skills are read in place: GHOST_SKILL_ROOTS=~/projects/x,~/projects/y
     skills_dir: Path = Path.home() / ".config" / "ghost" / "skills"
     skill_roots: str = ""
+    # Department templates (ADR 0023): the operator's own; Ghost's shipped ones are in
+    # infra/templates.
+    templates_dir: Path = Path.home() / ".config" / "ghost" / "templates"
 
     @property
     def skill_root_paths(self) -> list[Path]:

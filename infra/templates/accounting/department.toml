@@ -1,0 +1,10 @@
+title = "Accounting"
+description = "The books: a worked example of a department that reaches finance and nothing else."
+aliases = ["the books", "finance"]
+toolkits = ["finance"]
+
+[toolkit.finance]
+description = "The books and the invoices. Declare a 'books' server in the policy file for it to reach anything."
+skills = ["month-close"]
+
+[toolkit.finance.servers.books]

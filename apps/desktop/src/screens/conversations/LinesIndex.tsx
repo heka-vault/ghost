@@ -37,7 +37,7 @@ import { drafts } from "./draft";
 import { LineStateText, lineState } from "./lineState";
 import { NewLineDialog } from "./NewLineDialog";
 import { personaCache } from "./personaCache";
-import { type Scope, isSettled, scopeItems, scopeOf, settledAt } from "./threads";
+import { type Scope, departmentName, departmentOf, isDepartment, isSettled, scopeItems, scopeOf, settledAt } from "./threads";
 import { designFail, designRetry, focusOnOpen, newLineSeed, readParam, writeParam } from "./url";
 import { parseVoice, voiceKind } from "./voices";
 
@@ -269,7 +269,10 @@ export function LinesIndex() {
                     unsaved ? (
                       <span className="conv-row-meta">Unsaved changes</span>
                     ) : (
-                      <ScopeChips scope={scopeOf(l)} />
+                      <>
+                        {departmentOf(l) && <span className="conv-row-dept">in {departmentName(departmentOf(l), lines ?? [])}</span>}
+                        <ScopeChips scope={scopeOf(l)} />
+                      </>
                     )
                   }
                   trailing={
@@ -385,6 +388,7 @@ export function LinesIndex() {
         }}
         taken={(lines ?? []).flatMap((l) => [l.name.toLowerCase(), l.slug])}
         settled={settledLines}
+        departments={active.filter(isDepartment)}
         seed={seed}
         onCreated={(d) => {
           setCreating(false);

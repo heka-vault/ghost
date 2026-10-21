@@ -49,6 +49,12 @@ class Profile(BaseModel, frozen=True):
     # Per ability, what this thread may touch; an ability absent here is unscoped for
     # it. Ghost is always unscoped. Empty for every thread until the operator sets one.
     scope: Scope = Field(default_factory=dict)
+    # ADR 0023. A line with no ``department`` is a department: the toolkits it is given
+    # bound what its sessions reach (none: everything, like Ghost), and it is its own
+    # primary line. A line with a ``department`` is a topic line in that department: it
+    # reaches what the department reaches, with its own memory and scope.
+    toolkits: tuple[str, ...] = ()
+    department: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     last_active_at: datetime | None = None
@@ -58,6 +64,10 @@ class Profile(BaseModel, frozen=True):
     @property
     def is_ghost(self) -> bool:
         return self.slug == GHOST
+
+    @property
+    def is_department(self) -> bool:
+        return not self.is_ghost and self.department is None
 
     @property
     def settled(self) -> bool:
@@ -194,11 +204,27 @@ class Create(Change, frozen=True):
     scope: Scope = Field(default_factory=dict)
     # A handoff: the first memory, copied from a settled thread's memory.md (ADR 0019).
     memory: str = Field(default="", max_length=MAX_MEMORY)
+    toolkits: tuple[str, ...] = ()  # ADR 0023: a department's reach
+    department: str | None = None  # ADR 0023: a topic line's department
 
     def describe(self) -> str:
         extra = f" scoped to {describe_scope(self.scope)}" if self.scope else ""
+        if self.department:
+            extra += f" in the {self.department} department"
+        if self.toolkits:
+            extra += " with the " + ", ".join(self.toolkits) + " toolkit(s)"
         seed = " with a handoff memory" if self.memory.strip() else ""
         return f"start conversation {self.name!r}{extra}{seed}"
+
+
+class SetToolkits(Change, frozen=True):
+    """Replace a department's toolkits (ADR 0023). Empty: everything, like Ghost."""
+
+    kind: Literal["set_toolkits"] = "set_toolkits"
+    toolkits: tuple[str, ...] = ()
+
+    def describe(self) -> str:
+        return "toolkits: " + (", ".join(self.toolkits) or "none, so everything")
 
 
 class SetScope(Change, frozen=True):

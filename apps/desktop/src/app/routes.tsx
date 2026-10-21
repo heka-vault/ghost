@@ -8,6 +8,7 @@
 import {
   AudioLines,
   BookOpen,
+  Briefcase,
   Ghost,
   Inbox,
   LayoutGrid,
@@ -125,6 +126,18 @@ export const ROUTES: RouteDef[] = [
     needsDaemon: true,
     nav: { label: "Skills", icon: BookOpen, group: "main" },
     component: lazy(() => import("../screens/skills")),
+  },
+  {
+    id: "toolkits",
+    patterns: ["/toolkits"],
+    path: "/toolkits",
+    owner: "toolkits",
+    title: "Toolkits",
+    kind: "screen",
+    chrome: "app",
+    needsDaemon: true,
+    nav: { label: "Toolkits", icon: Briefcase, group: "main" },
+    component: lazy(() => import("../screens/toolkits")),
   },
   {
     id: "settings",

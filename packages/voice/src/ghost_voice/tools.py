@@ -66,7 +66,6 @@ def register_tools(
     ``read`` for a read tool (the server behind it, an external API for GitHub), and
     for ``change`` the source's ``prepare``, the gate's ``submit`` (snapshot, and the
     write itself below ``confirm``) and the ``request`` check that may execute it."""
-    schemas: list[FunctionSchema] = []
     probe = probe or NULL_PROBE
     events = events or Events()
     record = on_call or (lambda _n, _a: None)
@@ -109,61 +108,101 @@ def register_tools(
             result["hint"] = f"offer to patch them through to {owner.name}"
         await params.result_callback(result)
 
-    for a in sources:
-        for tool in a.read_tools:
-            schemas.append(
-                FunctionSchema(
-                    name=tool.name,
-                    description=tool.description,
-                    properties=tool.properties,
-                    required=tool.required,
-                )
-            )
-            llm.register_function(
-                tool.name,
-                _wrap_read(tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope),
-            )
-    scopes = {a.name: scope_for(a) for a in sources}
+    def active_sources() -> list[ToolSource]:
+        """What the active line reaches (ADR 0023): its department's sources, or every
+        source when the session was built without departments."""
+        if conversations is not None and conversations.has_reach:
+            return conversations.sources_for(conversations.active)
+        return list(sources)
 
-    # Operations the policy denies outright are not offered at all.
-    ops: dict[str, dict[str, Operation]] = {}
-    for a in sources:
-        offered = {
-            op.name: op for op in a.operations if gate.level(a.name, op.name) is not Autonomy.DENY
-        }
-        if offered:
-            ops[a.name] = offered
-    op_lines = "\n".join(
-        f"- {aname}.{op.name}: {op.description} Args: {sorted(op.properties)}"
-        f" (required: {op.required})"
-        for aname, aops in ops.items()
-        for op in aops.values()
-    )
-    if ops:
-        schemas.append(
-            FunctionSchema(
-                name=CHANGE_TOOL,
-                description=(
-                    "Make a change. Returns status 'done' with the verified result when the "
-                    "change was applied at once, or 'needs_confirmation' with a summary when "
-                    "the operator must okay it first: then ask in one short sentence and stop.\n"
-                    "Operations:\n" + op_lines
-                ),
-                properties={
-                    "ability": {
-                        "type": "string",
-                        "enum": list(ops),
-                        "description": "The source: the server or 'conversations'.",
-                    },
-                    "operation": {"type": "string"},
-                    "args": {"type": "object", "description": "Arguments for the operation."},
-                    "rationale": {"type": "string", "description": "One sentence: why."},
+    def offered_ops(srcs: Sequence[ToolSource]) -> dict[str, dict[str, Operation]]:
+        """Operations the policy (and the granting toolkit) does not deny outright."""
+        out: dict[str, dict[str, Operation]] = {}
+        for a in srcs:
+            offered = {
+                op.name: op
+                for op in a.operations
+                if gate.level(a.name, op.name, toolkit=a.toolkit) is not Autonomy.DENY
+            }
+            if offered:
+                out[a.name] = offered
+        return out
+
+    def change_schema(ops: dict[str, dict[str, Operation]]) -> FunctionSchema:
+        op_lines = "\n".join(
+            f"- {aname}.{op.name}: {op.description} Args: {sorted(op.properties)}"
+            f" (required: {op.required})"
+            for aname, aops in ops.items()
+            for op in aops.values()
+        )
+        return FunctionSchema(
+            name=CHANGE_TOOL,
+            description=(
+                "Make a change. Returns status 'done' with the verified result when the "
+                "change was applied at once, or 'needs_confirmation' with a summary when "
+                "the operator must okay it first: then ask in one short sentence and stop.\n"
+                "Operations:\n" + op_lines
+            ),
+            properties={
+                "ability": {
+                    "type": "string",
+                    "enum": list(ops),
+                    "description": "The source: the server or 'conversations'.",
                 },
-                required=["ability", "operation", "args"],
-            )
+                "operation": {"type": "string"},
+                "args": {"type": "object", "description": "Arguments for the operation."},
+                "rationale": {"type": "string", "description": "One sentence: why."},
+            },
+            required=["ability", "operation", "args"],
         )
 
+    def schemas_for(srcs: Sequence[ToolSource]) -> list[FunctionSchema]:
+        """The tools advertised for a list of sources: their reads, `change` for their
+        operations, and the session's own tools. A transfer advertises the new line's."""
+        out: list[FunctionSchema] = []
+        for a in srcs:
+            for tool in a.read_tools:
+                out.append(
+                    FunctionSchema(
+                        name=tool.name,
+                        description=tool.description,
+                        properties=tool.properties,
+                        required=tool.required,
+                    )
+                )
+        ops = offered_ops(srcs)
+        if ops:
+            out.append(change_schema(ops))
+        out.extend(session_schemas)
+        return out
+
+    # Every read tool any source offers is registered once; a call goes to the version
+    # the active line reaches, or is refused when that line does not reach it.
+    def dispatch(name: str):
+        async def run(params: FunctionCallParams) -> None:
+            current = {t.name: (t, a) for a in active_sources() for t in a.read_tools}
+            hit = current.get(name)
+            if hit is None:
+                record(name, dict(params.arguments))
+                await params.result_callback({"error": f"{name} is not available on this line"})
+                return
+            tool, a = hit
+            await _wrap_read(
+                tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope
+            )(params)
+
+        return run
+
+    for name in {t.name for a in sources for t in a.read_tools}:
+        llm.register_function(name, dispatch(name))
+    scopes = {a.name: scope_for(a) for a in sources}
+    any_ops = any(a.operations for a in sources)
+    session_schemas: list[FunctionSchema] = []  # switch, hang_up, hold; filled below
+
     async def change(params: FunctionCallParams) -> None:
+        reach_now = active_sources()
+        ops = offered_ops(reach_now)
+        toolkit_of: dict[str, str | None] = {a.name: a.toolkit for a in reach_now}
         a = params.arguments
         aname = str(a.get("ability") or a.get("skill") or "")  # "skill" for older contexts
         op_name = str(a.get("operation") or "")
@@ -201,6 +240,8 @@ def register_tools(
                 rationale=str(a.get("rationale") or prepared.rationale),
                 scope=scope,
                 conversation=conversations.active.slug if conversations else None,
+                department=conversations.department_slug() if conversations else None,
+                toolkit=toolkit_of.get(aname),
             )
             probe.tool_step(call_id, "submit", time.perf_counter() - began)
         except OutOfScope as e:
@@ -318,11 +359,11 @@ def register_tools(
             }
         )
 
-    if ops:
+    if any_ops:
         llm.register_function(CHANGE_TOOL, change)
 
     if conversations is not None:
-        schemas.append(
+        session_schemas.append(
             FunctionSchema(
                 name=SWITCH_TOOL,
                 description=(
@@ -377,7 +418,7 @@ def register_tools(
 
         llm.register_function(SWITCH_TOOL, switch)
 
-    schemas.append(
+    session_schemas.append(
         FunctionSchema(
             name="hang_up",
             description=(
@@ -401,7 +442,7 @@ def register_tools(
     llm.register_function("hang_up", hang_up)
 
     if on_hold is not None:
-        schemas.append(
+        session_schemas.append(
             FunctionSchema(
                 name="hold",
                 description=(
@@ -423,7 +464,9 @@ def register_tools(
             await on_hold()
 
         llm.register_function("hold", hold)
-    return schemas
+    if conversations is not None:
+        conversations.tool_schemas = schemas_for
+    return schemas_for(active_sources())
 
 
 async def _transfer(

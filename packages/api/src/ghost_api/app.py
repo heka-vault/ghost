@@ -8,6 +8,7 @@ rule), secret values (write-only), or a way for the model to reach any of it.
 from __future__ import annotations
 
 import asyncio
+import re
 import subprocess
 from collections.abc import Sequence
 from datetime import datetime
@@ -15,7 +16,17 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from ghost_core import AutonomyPolicy, GateError, Outcome, Proposal, Store, ToolSource, WriteGate
+from ghost_core import (
+    AutonomyPolicy,
+    ChangeSet,
+    GateError,
+    Outcome,
+    Proposal,
+    Store,
+    ToolSource,
+    WriteGate,
+)
+from ghost_core.conversations import ConversationTarget
 from ghost_core.policy import PolicyError
 from loguru import logger
 
@@ -26,9 +37,11 @@ from ghost_api.models import (
     AuditEntry,
     AuditEventView,
     AuditPage,
+    ConversationDetail,
     DeviceInfo,
     DevicesView,
     Event,
+    GrantView,
     McpScopeInfo,
     McpServerInfo,
     McpToolInfo,
@@ -53,6 +66,10 @@ from ghost_api.models import (
     SkillInfo,
     SourceInfo,
     Status,
+    TemplateApply,
+    TemplateView,
+    ToolkitUpdate,
+    ToolkitView,
     WakeRequest,
 )
 from ghost_api.state import DaemonState, now
@@ -100,10 +117,12 @@ class Deps:
         conversations: Any = None,  # ghost_core.conversations.Conversations
         mcp: Any = None,  # ghost_core.mcp.Servers
         skills: Any = None,  # ghost_core.skills.Skills
+        templates: Any = None,  # ghost_core.templates.Templates
     ) -> None:
         self.conversations = conversations
         self.mcp = mcp
         self.skills = skills
+        self.templates = templates
         self.state = state
         self.control = control
         self.gate = gate
@@ -202,6 +221,8 @@ def audit_page(
             status=p.status.value,
             created_at=p.created_at,
             conversation=p.conversation,
+            department=p.department,
+            toolkit=p.toolkit,
             events=[
                 AuditEventView(at=at, event=ev, detail=detail)
                 for at, ev, detail in store.events(p.id)
@@ -368,6 +389,232 @@ def create_app(deps: Deps) -> FastAPI:
                 )
             )
         return out
+
+    # --- toolkits (ADR 0023) ----------------------------------------------------------
+
+    def toolkit_views(policy: AutonomyPolicy) -> list[ToolkitView]:
+        skill_names = [s.name for s in deps.skills.list()] if deps.skills is not None else None
+        problems = policy.check_toolkits(skills=skill_names)
+        return [
+            ToolkitView(
+                name=name,
+                description=t.description,
+                skills=list(t.skills),
+                grants=[
+                    GrantView(
+                        server=g.server,
+                        reads=list(g.reads) if g.reads is not None else None,
+                        writes=list(g.writes) if g.writes is not None else None,
+                        items=list(g.items) if g.items is not None else None,
+                        levels=dict(g.levels),
+                    )
+                    for g in t.grants.values()
+                ],
+                problems=[m for m in problems if m.startswith(f"toolkit {name}:")],
+            )
+            for name, t in policy.toolkits.items()
+        ]
+
+    @app.get("/toolkits", response_model=list[ToolkitView], tags=["toolkits"])
+    async def toolkits() -> list[ToolkitView]:
+        try:
+            return toolkit_views(AutonomyPolicy.load(deps.policy_path))
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+
+    def save_toolkits(toolkits: dict) -> AutonomyPolicy:
+        """Rewrite the policy file with these toolkits and reload the gate: the designer's
+        save. Levels, targets and servers are carried over unchanged."""
+        try:
+            current = AutonomyPolicy.load(deps.policy_path)
+        except ValueError as e:
+            raise HTTPException(422, f"the policy file cannot be read: {e}") from None
+        policy = AutonomyPolicy.from_plain(
+            default=current.default.value if current.default else None,
+            skills={
+                s: {op: lv.value for op, lv in ops.items()} for s, ops in current.skills.items()
+            },
+            targets={
+                s: {t: {op: lv.value for op, lv in ops.items()} for t, ops in ts.items()}
+                for s, ts in current.targets.items()
+            },
+            mcp=current.mcp,
+            toolkits=toolkits,
+        )
+        deps.policy_path.parent.mkdir(parents=True, exist_ok=True)
+        deps.policy_path.write_text(policy.to_toml())
+        deps.control.reload_policy()
+        return AutonomyPolicy.load(deps.policy_path)
+
+    @app.put("/toolkits/{name}", response_model=ToolkitView, tags=["toolkits"])
+    async def put_toolkit(name: str, update: ToolkitUpdate) -> ToolkitView:
+        from ghost_core.toolkits import Grant, ToolkitSpec
+
+        if not re.match(r"^[a-z0-9][a-z0-9_-]{0,39}$", name):
+            raise HTTPException(422, "a toolkit name is letters, digits, _ or -")
+        try:
+            current = AutonomyPolicy.load(deps.policy_path)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        spec = ToolkitSpec(
+            name=name,
+            description=update.description,
+            skills=tuple(update.skills),
+            grants={
+                g.server: Grant(
+                    server=g.server,
+                    reads=tuple(g.reads) if g.reads is not None else None,
+                    writes=tuple(g.writes) if g.writes is not None else None,
+                    items=tuple(g.items) if g.items is not None else None,
+                    levels=dict(g.levels),
+                )
+                for g in update.grants
+            },
+        )
+        for level in (lv for g in spec.grants.values() for lv in g.levels.values()):
+            if level not in ("deny", "confirm", "announce", "quiet"):
+                raise HTTPException(422, f"{level!r} is not a level")
+        policy = save_toolkits({**current.toolkits, name: spec})
+        view = next(v for v in toolkit_views(policy) if v.name == name)
+        return view
+
+    @app.delete("/toolkits/{name}", response_model=Ack, tags=["toolkits"])
+    async def delete_toolkit(name: str) -> Ack:
+        try:
+            current = AutonomyPolicy.load(deps.policy_path)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        if name not in current.toolkits:
+            raise HTTPException(404, f"no toolkit {name!r}")
+        save_toolkits({k: v for k, v in current.toolkits.items() if k != name})
+        return Ack(ok=True, detail=None)
+
+    # --- department templates (ADR 0023) ---------------------------------------------
+
+    def template_view(t) -> TemplateView:
+        policy = deps.gate.autonomy
+        servers = list(deps.mcp.servers) if deps.mcp is not None else []
+        return TemplateView(
+            name=t.name,
+            title=t.title,
+            description=t.description,
+            source=t.source,
+            path=str(t.path),
+            aliases=list(t.aliases),
+            voice=t.voice,
+            toolkits=list(t.toolkits),
+            skills=[p.name for p in t.skills],
+            needs=t.needs(list(policy.toolkits), servers),
+        )
+
+    @app.get("/templates", response_model=list[TemplateView], tags=["templates"])
+    async def templates() -> list[TemplateView]:
+        if deps.templates is None:
+            return []
+        deps.templates.refresh()
+        return [template_view(t) for t in deps.templates.list()]
+
+    @app.post("/templates/{name}/apply", response_model=ConversationDetail, tags=["templates"])
+    async def apply_template(name: str, req: TemplateApply) -> ConversationDetail:
+        """The desktop's import: the template's toolkits into the policy file, its skills
+        into Ghost's skills, and a department line with its persona, each one audited."""
+        from ghost_core.conversations.models import Create, slugify
+        from ghost_core.skills import AddSkill, SkillTarget
+
+        from ghost_api.conversations import conversation_detail
+
+        if deps.templates is None or deps.conversations is None:
+            raise HTTPException(503, "templates are not available")
+        t = deps.templates.get(name)
+        if t is None:
+            raise HTTPException(404, f"no template {name!r}")
+        current = AutonomyPolicy.load(deps.policy_path)
+        missing = {k: v for k, v in t.toolkit_specs.items() if k not in current.toolkits}
+        if missing:
+            save_toolkits({**current.toolkits, **missing})
+        if deps.skills is not None:
+            for folder in t.skills:
+                if deps.skills.get(folder.name) is not None:
+                    continue
+                try:
+                    await deps.gate.apply_internal(
+                        session_id=UI_SESSION,
+                        ability="skills",
+                        operation="add",
+                        target=SkillTarget(name=folder.name),
+                        changes=ChangeSet(steps=(AddSkill(source_path=str(folder)),)),
+                        rationale=f"from the {t.title} template",
+                    )
+                except (GateError, PolicyError, ValueError) as e:
+                    raise HTTPException(409, f"skill {folder.name}: {e}") from None
+            deps.skills.refresh()
+        convs = deps.conversations
+        title = (req.name or t.title).strip()
+        slug = slugify(title)
+        if convs.get(slug) is not None:
+            raise HTTPException(409, f"there is already a line called {title!r}")
+        try:
+            toolkits = convs.validate_toolkits(list(t.toolkits))
+            out = await deps.gate.apply_internal(
+                session_id=UI_SESSION,
+                ability="conversations",
+                operation="create",
+                target=ConversationTarget(slug=slug),
+                changes=ChangeSet(
+                    steps=(
+                        Create(
+                            name=title,
+                            aliases=t.aliases,
+                            voice=t.voice or convs.unused_voice(),
+                            speed=convs.default_speed,
+                            persona=t.persona,
+                            toolkits=toolkits,
+                        ),
+                    )
+                ),
+                rationale=f"from the {t.title} template",
+            )
+        except (GateError, PolicyError, ValueError) as e:
+            raise HTTPException(409, str(e)) from None
+        if out.status != "success":
+            raise HTTPException(409, out.error or "not applied")
+        return conversation_detail(convs, convs.get(slug), st.conversation)
+
+    @app.post("/conversations/{slug}/export", response_model=TemplateView, tags=["templates"])
+    async def export_template(slug: str) -> TemplateView:
+        """Write a department back out as one of the operator's own templates."""
+        from ghost_core.templates import export_department, load_template
+
+        if deps.templates is None or deps.conversations is None or deps.templates.own is None:
+            raise HTTPException(503, "templates are not available")
+        p = deps.conversations.get(slug)
+        if p is None or p.is_ghost or not p.is_department:
+            raise HTTPException(404, f"{slug!r} is not a department")
+        policy = deps.gate.autonomy
+        specs = {k: v for k, v in policy.toolkits.items() if k in p.toolkits}
+        skill_names = (
+            {s for k in p.toolkits for s in policy.toolkits.get(k).skills} if p.toolkits else set()
+        )
+        folders = [
+            s.path for s in (deps.skills.list() if deps.skills else []) if s.name in skill_names
+        ]
+        folder = export_department(
+            deps.templates.own,
+            name=p.slug,
+            title=p.name,
+            description="",
+            aliases=p.aliases,
+            voice=p.voice,
+            persona=deps.conversations.files.persona(p.slug),
+            toolkits=p.toolkits,
+            toolkit_specs=specs,
+            skill_folders=folders,
+        )
+        deps.templates.refresh()
+        t = load_template(folder, "ghost")
+        if t is None:
+            raise HTTPException(500, "the template was written but cannot be read back")
+        return template_view(t)
 
     # --- skills (ADR 0023) ------------------------------------------------------------
     UI_SESSION = "ui"  # the desktop's own session id for audited edits (as conversations.py)
@@ -581,6 +828,7 @@ def create_app(deps: Deps) -> FastAPI:
                     skills=update.skills if update.skills is not None else current.skills,
                     targets=update.targets if update.targets is not None else current.targets,
                     mcp=before.mcp,
+                    toolkits=before.toolkits,
                 )
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None

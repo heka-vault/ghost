@@ -1,6 +1,6 @@
 # 0023: Departments, toolkits and skills
 
-- **Status:** proposed (decisions taken with the operator on 2026-10-20; built in phases, skills first)
+- **Status:** accepted (decisions taken with the operator on 2026-10-20; built the same day: skills, toolkits, departments, templates, the scripts server)
 - **Date:** 2026-10-20
 - **Builds on:** ADR 0014 (lines), ADR 0019 (scope), ADR 0022 (MCP servers are core)
 
@@ -65,6 +65,22 @@ pad groups by department.
 drop, add by path, remove), servers, toolkits, departments, templates: the desktop edits
 them; by voice Ghost proposes the same changes as operations at `confirm`. Nothing here is
 reachable by the model except through `change`.
+
+## As built
+
+- A department is a line with toolkits, not a new kind of record: `Profile.toolkits` and
+  `Profile.department` (the parent of a topic line). The department's own line is its
+  primary line. Older lines load as departments with no toolkits.
+- A department with no toolkits reaches everything, like Ghost. Narrowing is opt-in, so
+  nothing changed for existing lines on the day this landed.
+- A session's reach is computed per department from the live policy
+  (`ConversationRuntime.sources_for`); every read tool is registered once and dispatched
+  to the active line's reach, so a transfer only swaps the advertised tools
+  (`LLMSetToolsFrame`) and the prompt.
+- By voice, a template creates the department; its toolkits must already be in the policy
+  file (the desktop's import puts them there). The model never writes policy.
+- The scripts server is scoped by skill, so a toolkit's `items` on it say whose scripts a
+  department may run; `run` is a declared write at `confirm`.
 
 ## Consequences
 

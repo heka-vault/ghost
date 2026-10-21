@@ -19,6 +19,7 @@ from ghost_core.conversations.models import (
     SetPersona,
     SetScope,
     Settle,
+    SetToolkits,
     SetVoice,
     Unsettle,
     slugify,
@@ -35,6 +36,7 @@ from ghost_api.models import (
     ConversationUpdate,
     ConversationView,
     SampleRequest,
+    ToolkitsUpdate,
     TurnView,
     VoiceInfo,
 )
@@ -76,6 +78,22 @@ def conversation_view(p: Profile, active: str | None) -> ConversationView:
         settled_at=p.settled_at,
         active=active == p.slug,
         is_ghost=p.is_ghost,
+        toolkits=list(p.toolkits),
+        department=p.department,
+        is_department=p.is_department,
+    )
+
+
+def conversation_detail(convs: Conversations, p: Profile, active: str | None) -> ConversationDetail:
+    """The full view of a line: the profile plus its files and counts."""
+    return ConversationDetail(
+        **conversation_view(p, active).model_dump(),
+        persona=convs.files.persona(p.slug),
+        memory=convs.files.memory(p.slug),
+        notes=convs.files.note_lines(p.slug),
+        turn_count=len(convs.turns(p.slug, limit=100000)),
+        compactions=len(convs.compactions(p.slug)),
+        dir=str(convs.files.dir(p.slug)),
     )
 
 
@@ -92,6 +110,20 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
 
+    def validated_toolkits(names: list[str]) -> tuple[str, ...]:
+        try:
+            return convs.validate_toolkits(names)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+
+    def validated_department(slug: str | None) -> str | None:
+        if not slug:
+            return None
+        parent = convs.get(slug)
+        if parent is None or parent.is_ghost or parent.department:
+            raise HTTPException(422, f"{slug!r} is not a department")
+        return parent.slug
+
     def seed_memory(seed: str | None) -> str:
         if not seed:
             return ""
@@ -101,15 +133,7 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
             raise HTTPException(422, str(e)) from None
 
     def detail(p: Profile) -> ConversationDetail:
-        return ConversationDetail(
-            **view(p).model_dump(),
-            persona=convs.files.persona(p.slug),
-            memory=convs.files.memory(p.slug),
-            notes=convs.files.note_lines(p.slug),
-            turn_count=len(convs.turns(p.slug, limit=100000)),
-            compactions=len(convs.compactions(p.slug)),
-            dir=str(convs.files.dir(p.slug)),
-        )
+        return conversation_detail(convs, p, st.conversation)
 
     def get(slug: str) -> Profile:
         p = convs.get(slug)
@@ -161,12 +185,23 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
                 persona=req.persona,
                 scope=scope,
                 memory=memory,
+                toolkits=validated_toolkits(req.toolkits),
+                department=validated_department(req.department),
             ),
         )
         return detail(get(slug))
 
     @app.get("/conversations/{slug}", response_model=ConversationDetail, tags=["conversations"])
     async def get_conversation(slug: str) -> ConversationDetail:
+        return detail(get(slug))
+
+    @app.put(
+        "/conversations/{slug}/toolkits", response_model=ConversationDetail, tags=["conversations"]
+    )
+    async def set_toolkits(slug: str, req: ToolkitsUpdate) -> ConversationDetail:
+        """A department's toolkits (ADR 0023): an audited write like the others."""
+        p = get(slug)
+        await apply(p.slug, "set_toolkits", SetToolkits(toolkits=validated_toolkits(req.toolkits)))
         return detail(get(slug))
 
     @app.patch("/conversations/{slug}", response_model=ConversationDetail, tags=["conversations"])

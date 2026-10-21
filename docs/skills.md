@@ -37,14 +37,14 @@ The first folder with a name wins; a later one with the same name is logged and 
   it can read. Capped at 30 skills and 140 characters each.
 - `read_skill(name, file)`: the body (6,000 characters at most) and the files beside it,
   one at a time, text only, inside the skill's folder only.
-- With departments and toolkits (ADR 0023, later phases) a session sees only the skills its
-  toolkits grant; today every session sees every skill.
+- A session in a department sees only the skills its toolkits grant; Ghost and a department
+  with no toolkits see every skill ([departments.md](departments.md)).
 
 ## What a skill cannot do
 
-Skill text is untrusted like issue text. It cannot name a server the session does not have,
-cannot change a level or a scope, and nothing in it is run: a skill's scripts wait for the
-gated scripts server (ADR 0023), and until then are just files the model can read.
+Skill text is untrusted like issue text. It cannot name a server the session does not have
+and cannot change a level or a scope. A skill's scripts never run from its text: they run
+only through `ghost-scripts`, a gated server scoped by skill ([departments.md](departments.md)).
 
 `ghostd check` lists the skills found and any required server that is not connected;
 `GET /skills` on the control API and the desktop's Skills screen show the same.

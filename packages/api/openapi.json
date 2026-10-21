@@ -51,6 +51,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/AuditEventView"
@@ -81,6 +92,17 @@
           "target": {
             "title": "Target",
             "type": "string"
+          },
+          "toolkit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolkit"
           }
         },
         "required": [
@@ -211,6 +233,17 @@
             "title": "Aliases",
             "type": "array"
           },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
           "name": {
             "maxLength": 80,
             "minLength": 1,
@@ -258,6 +291,14 @@
             ],
             "title": "Speed"
           },
+          "toolkits": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Toolkits",
+            "type": "array"
+          },
           "voice": {
             "anyOf": [
               {
@@ -298,9 +339,25 @@
             "title": "Created At",
             "type": "string"
           },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
           "dir": {
             "title": "Dir",
             "type": "string"
+          },
+          "is_department": {
+            "default": false,
+            "title": "Is Department",
+            "type": "boolean"
           },
           "is_ghost": {
             "title": "Is Ghost",
@@ -367,6 +424,14 @@
           "speed": {
             "title": "Speed",
             "type": "number"
+          },
+          "toolkits": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Toolkits",
+            "type": "array"
           },
           "turn_count": {
             "title": "Turn Count",
@@ -577,6 +642,22 @@
             "title": "Created At",
             "type": "string"
           },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
+          "is_department": {
+            "default": false,
+            "title": "Is Department",
+            "type": "boolean"
+          },
           "is_ghost": {
             "title": "Is Ghost",
             "type": "boolean"
@@ -627,6 +708,14 @@
           "speed": {
             "title": "Speed",
             "type": "number"
+          },
+          "toolkits": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Toolkits",
+            "type": "array"
           },
           "voice": {
             "title": "Voice",
@@ -738,6 +827,70 @@
           "echo_cancel_source_present"
         ],
         "title": "DevicesView",
+        "type": "object"
+      },
+      "GrantView": {
+        "description": "A toolkit's grant on one server (ADR 0023). null lists mean everything.",
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "levels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Levels",
+            "type": "object"
+          },
+          "reads": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reads"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes"
+          }
+        },
+        "required": [
+          "server"
+        ],
+        "title": "GrantView",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1854,6 +2007,17 @@
             ],
             "title": "Conversation"
           },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
           "ending": {
             "default": false,
             "title": "Ending",
@@ -1909,6 +2073,17 @@
             ],
             "title": "Session Origin"
           },
+          "toolkit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolkit"
+          },
           "uptime_secs": {
             "title": "Uptime Secs",
             "type": "number"
@@ -1950,6 +2125,183 @@
           "status"
         ],
         "title": "StatusEvent",
+        "type": "object"
+      },
+      "TemplateApply": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "TemplateApply",
+        "type": "object"
+      },
+      "TemplateView": {
+        "description": "A department template (ADR 0023): shipped with Ghost or the operator's own.",
+        "properties": {
+          "aliases": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "needs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Needs",
+            "type": "array"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "toolkits": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Toolkits",
+            "type": "array"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "source",
+          "path"
+        ],
+        "title": "TemplateView",
+        "type": "object"
+      },
+      "ToolkitUpdate": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "grants": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GrantView"
+            },
+            "title": "Grants",
+            "type": "array"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          }
+        },
+        "title": "ToolkitUpdate",
+        "type": "object"
+      },
+      "ToolkitView": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "grants": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GrantView"
+            },
+            "title": "Grants",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ToolkitView",
+        "type": "object"
+      },
+      "ToolkitsUpdate": {
+        "properties": {
+          "toolkits": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Toolkits",
+            "type": "array"
+          }
+        },
+        "title": "ToolkitsUpdate",
         "type": "object"
       },
       "Turn": {
@@ -2562,6 +2914,49 @@
         ]
       }
     },
+    "/conversations/{slug}/export": {
+      "post": {
+        "description": "Write a department back out as one of the operator's own templates.",
+        "operationId": "export_template_conversations__slug__export_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
     "/conversations/{slug}/notes": {
       "post": {
         "operationId": "add_note_conversations__slug__notes_post",
@@ -2738,6 +3133,59 @@
           }
         },
         "summary": "Switch Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/conversations/{slug}/toolkits": {
+      "put": {
+        "description": "A department's toolkits (ADR 0023): an audited write like the others.",
+        "operationId": "set_toolkits_conversations__slug__toolkits_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolkitsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Toolkits",
         "tags": [
           "conversations"
         ]
@@ -3532,6 +3980,201 @@
         "summary": "Get Status",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/templates": {
+      "get": {
+        "operationId": "templates_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateView"
+                  },
+                  "title": "Response Templates Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Templates",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/templates/{name}/apply": {
+      "post": {
+        "description": "The desktop's import: the template's toolkits into the policy file, its skills\ninto Ghost's skills, and a department line with its persona, each one audited.",
+        "operationId": "apply_template_templates__name__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateApply"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/toolkits": {
+      "get": {
+        "operationId": "toolkits_toolkits_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ToolkitView"
+                  },
+                  "title": "Response Toolkits Toolkits Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Toolkits",
+        "tags": [
+          "toolkits"
+        ]
+      }
+    },
+    "/toolkits/{name}": {
+      "delete": {
+        "operationId": "delete_toolkit_toolkits__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Toolkit",
+        "tags": [
+          "toolkits"
+        ]
+      },
+      "put": {
+        "operationId": "put_toolkit_toolkits__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolkitUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolkitView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Toolkit",
+        "tags": [
+          "toolkits"
         ]
       }
     },

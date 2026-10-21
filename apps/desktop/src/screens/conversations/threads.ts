@@ -4,7 +4,7 @@
  * that predates the fields still renders (no scope reads as unscoped, no settled_at as
  * active), and GET /sources is narrowed to the sources that can be scoped (ADR 0022).
  */
-import type { ConversationCreate, ConversationDetail, ConversationUpdate, GhostClient, SourceInfo } from "@ghost/client-ts";
+import type { ConversationCreate, ConversationDetail, ConversationUpdate, ConversationView, GhostClient, SourceInfo, ToolkitView } from "@ghost/client-ts";
 
 /** Per source (a server's name in the policy file), the items this line may touch: `{ github_heka: ["heka-vault/ghost"] }`. */
 export type Scope = Record<string, string[]>;
@@ -94,6 +94,82 @@ export function sourceWords(name: string): string {
   if (name === "conversations") return "Lines";
   const s = name.replace(/[_-]+/g, " ");
   return s.charAt(0).toUpperCase() + s.slice(1).replace(/\bgithub\b/i, "GitHub");
+}
+
+/* ------------------------------------------------------------------ departments (ADR 0023) */
+
+/** The fields a line carries about its department; a daemon that predates them reads as a department with no toolkits. */
+export type DepartmentFields = Pick<ConversationView, "slug" | "is_ghost"> & Partial<Pick<ConversationView, "department" | "is_department" | "toolkits">>;
+
+/** The department a topic line is in (its slug), or null for a department itself and for Ghost. */
+export const departmentOf = (l: DepartmentFields | null | undefined): string | null => (l && typeof l.department === "string" && l.department ? l.department : null);
+
+/** A department: its own primary line (ADR 0023). Ghost is line zero, not a department. */
+export const isDepartment = (l: DepartmentFields | null | undefined): boolean => !!l && !l.is_ghost && departmentOf(l) === null;
+
+/** A department's toolkits; empty means it reaches everything, like Ghost. */
+export const toolkitsOf = (l: DepartmentFields | null | undefined): string[] => (l && Array.isArray(l.toolkits) ? l.toolkits.filter((t): t is string => typeof t === "string") : []);
+
+/** A department's name as the operator says it: the line's name. */
+export function departmentName(slug: string | null, lines: Pick<ConversationView, "slug" | "name">[]): string {
+  if (!slug) return "Ghost";
+  return lines.find((l) => l.slug === slug)?.name ?? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export interface DepartmentGroup<T extends DepartmentFields> {
+  /** The department's primary line, or an orphan topic line whose department is gone. */
+  head: T;
+  /** Its topic lines, in the order given. */
+  lines: T[];
+}
+
+/**
+ * Lines grouped the way the sidebar and the phone show them: Ghost alone, then each
+ * department with its topic lines under it. A topic line whose department isn't in the list
+ * (settled, deleted, or filtered out) stands on its own so it is never lost. Order follows
+ * the input: a group sits where its first member (head or line) would have.
+ */
+export function groupByDepartment<T extends DepartmentFields>(lines: T[]): DepartmentGroup<T>[] {
+  const heads = new Map<string, DepartmentGroup<T>>();
+  const order: DepartmentGroup<T>[] = [];
+  const pending = new Map<string, T[]>();
+  const slugs = new Set(lines.map((l) => l.slug));
+  for (const l of lines) {
+    const dept = departmentOf(l);
+    if (dept && slugs.has(dept) && dept !== l.slug) {
+      const g = heads.get(dept);
+      if (g) g.lines.push(l);
+      else pending.set(dept, [...(pending.get(dept) ?? []), l]);
+      continue;
+    }
+    const g: DepartmentGroup<T> = { head: l, lines: pending.get(l.slug) ?? [] };
+    pending.delete(l.slug);
+    heads.set(l.slug, g);
+    order.push(g);
+  }
+  // A group whose topic line came first in the input moves up to where that line was.
+  return order.sort((a, b) => firstIndex(a, lines) - firstIndex(b, lines));
+}
+const firstIndex = <T extends DepartmentFields>(g: DepartmentGroup<T>, lines: T[]) => Math.min(lines.indexOf(g.head), ...g.lines.map((l) => lines.indexOf(l)));
+
+/**
+ * The scope choices a topic line gets (ADR 0023): only what its department's toolkits grant,
+ * where that can be read off the toolkits. A department with no toolkits reaches everything,
+ * so the sources stay as they are; a toolkit that grants a server with `items: null` grants
+ * every item; a server no toolkit grants is out of reach and not offered. Without the toolkit
+ * list (not loaded, or failed) the sources are left as they are.
+ */
+export function narrowSources(sources: ScopedSource[], toolkitNames: string[], toolkits: ToolkitView[] | null): ScopedSource[] {
+  if (!toolkitNames.length || !toolkits) return sources;
+  const granted = toolkits.filter((t) => toolkitNames.includes(t.name));
+  if (!granted.length) return sources;
+  return sources.flatMap((src) => {
+    const grants = granted.flatMap((t) => t.grants.filter((g) => g.server === src.name));
+    if (!grants.length) return [];
+    if (grants.some((g) => g.items == null)) return [src];
+    const items = new Set(grants.flatMap((g) => g.items ?? []));
+    return [{ ...src, scope_items: src.scope_items.filter((i) => items.has(i)) }];
+  });
 }
 
 /** Settle a line: it leaves voice routing and the active list; everything stays readable. */

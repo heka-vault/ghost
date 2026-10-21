@@ -83,7 +83,10 @@ ends the conversation.
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
 cancellation with [infra/pipewire/](infra/pipewire/). To teach Ghost something new,
 declare an MCP server in the policy file ([docs/mcp.md](docs/mcp.md)): its reads are
-offered to the model, its writes by declaration through the gate. GitHub issues come
+offered to the model, its writes by declaration through the gate. Group what a department
+may reach into toolkits and start departments from templates
+([docs/departments.md](docs/departments.md)); skills are folders of instructions
+([docs/skills.md](docs/skills.md)). GitHub issues come
 through the official GitHub server; `ghost-mock-github` stands in before a token exists.
 
 ## Desktop app

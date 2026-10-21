@@ -16,7 +16,7 @@ is the one that holds: you call a line, and what is said on it is the conversati
 | **Hang up** | A goodbye ends the session; Ghost says a short goodbye and the desk returns to passive (ADR 0021). The End button on the phone ends it silently. | "Go to sleep" (gone). |
 | **Passive** | The desk listening locally for the wake phrase only; nothing leaves the machine (ADR 0010). | |
 | **Gate** | The one path for every write: policy level, snapshot, bounds, read-back, audit (ADR 0007, 0011). | |
-| **Department** | A persona, a voice, a compiled prompt, its toolkits, an optional project root, and its lines; one line is primary. "Transfer me to accounting" lands on the primary line (ADR 0023). | A line. |
+| **Department** | A line that has toolkits: its sessions reach only what they grant (none: everything, like Ghost). It is its own primary line, and topic lines can be started in it (ADR 0023). "Transfer me to accounting" lands on it. | Ghost, which is unscoped. |
 | **Toolkit** | A named bundle of permissions a department is given: which servers (which tools, which items, at what level, never looser than the policy file) and which skills (ADR 0023). Designed in the desktop, stored in the policy file. | An *ability* (the retired packages). |
 | **Skill** | A `SKILL.md` folder: instructions the model reads on demand through `read_skill`, never a source of permission. Scripts in it run only through the gated scripts server (ADR 0023). | |
 | **Template** | A folder that creates a department with its toolkits and skills in one step. The operator's earlier word was *workspace*, now dropped (ADR 0023). | A live department. |

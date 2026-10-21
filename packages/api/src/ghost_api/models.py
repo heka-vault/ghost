@@ -46,6 +46,8 @@ class Status(BaseModel):
     servers: list[str]  # the MCP servers connected at start (ADR 0022)
     pending: PendingProposal | None = None
     conversation: str | None = None  # slug of the conversation the session is in (ADR 0014)
+    department: str | None = None  # ADR 0023
+    toolkit: str | None = None
     # Where the live session's audio is: the workstation's mic and speaker, or the paired
     # phone over WebRTC (ADR 0016). None when there is no session.
     session_origin: Literal["desk", "phone"] | None = None
@@ -155,6 +157,8 @@ class AuditEntry(BaseModel):
     created_at: datetime
     events: list[AuditEventView]
     conversation: str | None = None  # the thread it was proposed in (ADR 0014); colours the entry
+    department: str | None = None  # ADR 0023
+    toolkit: str | None = None
 
 
 class AuditPage(BaseModel):
@@ -242,6 +246,49 @@ class SkillAdd(BaseModel):
     path: str = Field(min_length=1, description="A folder on this machine holding SKILL.md.")
     name: str | None = None
     replace: bool = False
+
+
+class GrantView(BaseModel):
+    """A toolkit's grant on one server (ADR 0023). null lists mean everything."""
+
+    server: str
+    reads: list[str] | None = None
+    writes: list[str] | None = None
+    items: list[str] | None = None
+    levels: dict[str, str] = {}
+
+
+class ToolkitView(BaseModel):
+    name: str
+    description: str = ""
+    skills: list[str] = []
+    grants: list[GrantView] = []
+    problems: list[str] = []  # what the file does not allow or know about, from check_toolkits
+
+
+class ToolkitUpdate(BaseModel):
+    description: str = ""
+    skills: list[str] = []
+    grants: list[GrantView] = []
+
+
+class TemplateView(BaseModel):
+    """A department template (ADR 0023): shipped with Ghost or the operator's own."""
+
+    name: str
+    title: str
+    description: str = ""
+    source: str  # "shipped" or "ghost"
+    path: str
+    aliases: list[str] = []
+    voice: str | None = None
+    toolkits: list[str] = []
+    skills: list[str] = []
+    needs: list[str] = []  # what is missing for it to work as declared
+
+
+class TemplateApply(BaseModel):
+    name: str | None = None  # the department's name; default: the template's title
 
 
 class SourceInfo(BaseModel):
@@ -360,6 +407,10 @@ class ConversationView(BaseModel):
     settled_at: datetime | None = None  # set: done, out of voice routing, still readable
     active: bool  # the running session is in it
     is_ghost: bool
+    # ADR 0023: a department (no ``department``) and its toolkits, or a topic line in one.
+    toolkits: list[str] = []
+    department: str | None = None
+    is_department: bool = False
 
 
 class ConversationDetail(ConversationView):
@@ -381,6 +432,12 @@ class ConversationCreate(BaseModel):
     # Slug of a thread (usually a settled one) whose memory.md becomes this one's first
     # memory, as a handoff. Never Ghost.
     seed_from: str | None = None
+    department: str | None = None  # ADR 0023: start it as a topic line in this department
+    toolkits: list[str] = []  # ADR 0023: a new department's toolkits (none: everything)
+
+
+class ToolkitsUpdate(BaseModel):
+    toolkits: list[str] = []
 
 
 class ConversationUpdate(BaseModel):

@@ -33,6 +33,10 @@ interface Seed {
   scope?: Scope;
   /** Settled this many days ago (ADR 0019): out of voice routing and the active list, still readable. */
   settledDaysAgo?: number;
+  /** The department this line is a topic line of (ADR 0023). Absent: the line is a department itself. */
+  department?: string;
+  /** A department's toolkits (ADR 0023). Absent or empty: it reaches everything, like Ghost. */
+  toolkits?: string[];
   /**
    * Each version's summary, oldest first, one per compaction; the newest is `memory`.
    * Aliases never repeat the line's own name or slug: ghost_core matches on (name, *aliases).
@@ -91,6 +95,7 @@ const ACCOUNTING: Seed = {
   createdDaysAgo: 18,
   lastActiveMin: 3,
   scope: { github_issues: ["ghost-mock/app", "ghost-mock/infra"] },
+  toolkits: ["finance"],
   turns: [
     ["system", "transferred from Ghost"],
     ["assistant", "Accounting line."],
@@ -167,6 +172,7 @@ const INFRA: Seed = {
   memory: "Infra 77, the ledger export, times out past 10k rows; Priya is on it and it's labeled blocked.\nThe nightly deploy moved to 02:00 after the October 6 outage.",
   notes: ["Never close an infra issue without asking."],
   scope: { github_issues: ["ghost-mock/infra"] },
+  toolkits: ["ops"],
   createdDaysAgo: 9,
   lastActiveMin: 60 * 5,
   turns: [
@@ -190,6 +196,7 @@ const APP: Seed = {
   memory: "App 151 is the Safari login loop; likely a duplicate of 148, whose fix is in review with Dana.\nDecided: duplicates get closed with a link to the older issue, no other comment.",
   notes: [],
   scope: { github_issues: ["ghost-mock/app"] },
+  toolkits: ["code"],
   createdDaysAgo: 9,
   lastActiveMin: 60 * 2,
   turns: [
@@ -218,6 +225,7 @@ const Q3_CLOSE: Seed = {
     "Decided: next quarter, start the close on the first business day, not the fifth.",
   notes: ["Halcyon refund: wait for their PO number before approving anything."],
   scope: { github_issues: ["ghost-mock/app"] },
+  department: "accounting",
   createdDaysAgo: 40,
   lastActiveMin: 60 * 24 * 9,
   settledDaysAgo: 9,
@@ -233,6 +241,31 @@ const Q3_CLOSE: Seed = {
     "Q3 close is running, target October 9. Three refunds open with finance (Northwind, Halcyon, Brightline).",
     "Q3 close finished October 9.\nRefunds: Brightline paid October 8; Northwind and Halcyon still open with finance.",
   ],
+};
+
+/** A topic line inside Accounting (ADR 0023): it reaches what the department reaches, narrowed to one repository. */
+const Q3_AUDIT: Seed = {
+  slug: "q3-audit",
+  name: "Q3 audit",
+  aliases: ["the audit", "auditors"],
+  voice: "bm_george",
+  speed: 1.05,
+  persona: "The auditors’ questions on the Q3 books. Exact figures, the ticket for each one, and who answered it. Nothing about Q4.",
+  memory: "Auditors are Hale & Rowe; Marta is their contact.\nOpen: the euro rounding on invoice PDFs (app 212) is on their list; the ledger export gap is explained by infra 77.",
+  notes: ["Every answer to the auditors goes through Marta first."],
+  department: "accounting",
+  scope: { github_issues: ["ghost-mock/app"] },
+  createdDaysAgo: 6,
+  lastActiveMin: 60 * 8,
+  turns: [
+    ["assistant", "Q3 audit."],
+    ["user", "What did Hale and Rowe ask about this week?"],
+    ["call", "github_issues.search(label=audit, repo=ghost-mock/app, state=open)"],
+    ["assistant", "Two things: the euro rounding on invoice PDFs, that’s app 212, and the gap in the September ledger export, which is infra 77."],
+    ["user", "Tell them 212 is fixed in 4.12 and the export gap is the timeout."],
+    ["assistant", "That goes through Marta first. Want me to draft it for her?"],
+  ],
+  compactions: 1,
 };
 
 /** Busy only: a second settled line, so the group shows more than one. */
@@ -360,6 +393,10 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): LineRec
       dir: `${HOME}/${seed.slug}`,
       scope: structuredClone(seed.scope ?? {}),
       settled_at: seed.settledDaysAgo != null ? ago(60 * 24 * seed.settledDaysAgo) : null,
+      // ADR 0023: a line with no department is one (Ghost aside); its toolkits are its reach.
+      department: seed.department ?? null,
+      is_department: seed.slug !== "ghost" && !seed.department,
+      toolkits: seed.department ? [] : [...(seed.toolkits ?? [])],
     },
     turns: all,
     compactions,
@@ -383,6 +420,7 @@ export default function conversations(s: Scenario): ConversationsFixture {
       STANDUP,
       INFRA,
       APP,
+      Q3_AUDIT,
       Q3_CLOSE,
       LAUNCH,
       ...BUSY_EXTRA.map(([name, persona, voice], i) => ({
@@ -401,7 +439,7 @@ export default function conversations(s: Scenario): ConversationsFixture {
       })),
     ];
   } else {
-    seeds = [GHOST, ACCOUNTING, LEGAL, STANDUP, INFRA, APP, Q3_CLOSE];
+    seeds = [GHOST, ACCOUNTING, LEGAL, STANDUP, INFRA, APP, Q3_AUDIT, Q3_CLOSE];
   }
   nextId = 4120;
   // Busy: months on the Legal line, more than the 200 turns the screen asks for.

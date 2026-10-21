@@ -52,6 +52,11 @@ export type PhonePairing = Schemas["PhonePairing"];
 export type SkillInfo = Schemas["SkillInfo"];
 export type SkillBody = Schemas["SkillBody"];
 export type SkillAdd = Schemas["SkillAdd"];
+export type ToolkitView = Schemas["ToolkitView"];
+export type ToolkitUpdate = Schemas["ToolkitUpdate"];
+export type ToolkitsUpdate = Schemas["ToolkitsUpdate"];
+export type GrantView = Schemas["GrantView"];
+export type TemplateView = Schemas["TemplateView"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -256,6 +261,46 @@ export class GhostClient {
   /** Delete one of Ghost's own skills. 409 for a project's, which is read in place. */
   removeSkill(name: string) {
     return unwrap(this.api.DELETE("/skills/{name}", { params: { path: { name } } }));
+  }
+
+  // --- toolkits (ADR 0023) -------------------------------------------------------------
+  /** Every `[toolkit.<name>]` in the policy file: what each grants, and what is wrong with it
+   *  against the file (a looser level, a server or skill it doesn't have). */
+  toolkits() {
+    return unwrap(this.api.GET("/toolkits"));
+  }
+  /** Write one toolkit into the policy file (new or replaced) and read it back with its
+   *  problems. 422 when the name isn't letters, digits, _ or -, or a level isn't one. */
+  putToolkit(name: string, update: ToolkitUpdate) {
+    return unwrap(this.api.PUT("/toolkits/{name}", { params: { path: { name } }, body: update }));
+  }
+  /** Remove a toolkit from the policy file. 404 when there is none by that name. */
+  deleteToolkit(name: string) {
+    return unwrap(this.api.DELETE("/toolkits/{name}", { params: { path: { name } } }));
+  }
+  /** Set a department's toolkits, an audited write. 422 for a name the file doesn't declare,
+   *  for Ghost (it reaches everything) and for a line inside a department. */
+  setConversationToolkits(slug: string, toolkits: string[]) {
+    return unwrap(
+      this.api.PUT("/conversations/{slug}/toolkits", { params: { path: { slug } }, body: { toolkits } }),
+    );
+  }
+
+  // --- department templates (ADR 0023) -------------------------------------------------
+  /** The templates a department can be started from: the ones Ghost ships and the operator's
+   *  own, with what each one still needs (a server the file doesn't declare). */
+  templates() {
+    return unwrap(this.api.GET("/templates"));
+  }
+  /** Start a department from a template: its toolkits go into the policy file, its skills are
+   *  copied, and the department is created, named after the template unless `name` says
+   *  otherwise. 404 for no such template, 409 with a message when it can't be applied. */
+  applyTemplate(name: string, newName?: string | null) {
+    return unwrap(this.api.POST("/templates/{name}/apply", { params: { path: { name } }, body: { name: newName ?? null } }));
+  }
+  /** Write a department back out as one of the operator's own templates. */
+  exportTemplate(slug: string) {
+    return unwrap(this.api.POST("/conversations/{slug}/export", { params: { path: { slug } } }));
   }
 }
 

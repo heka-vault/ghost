@@ -96,6 +96,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations/{slug}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Template
+         * @description Write a department back out as one of the operator's own templates.
+         */
+        post: operations["export_template_conversations__slug__export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations/{slug}/notes": {
         parameters: {
             query?: never;
@@ -161,6 +181,26 @@ export interface paths {
         put?: never;
         /** Switch Conversation */
         post: operations["switch_conversation_conversations__slug__switch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{slug}/toolkits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Toolkits
+         * @description A department's toolkits (ADR 0023): an audited write like the others.
+         */
+        put: operations["set_toolkits_conversations__slug__toolkits_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -539,6 +579,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Templates */
+        get: operations["templates_templates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates/{name}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Template
+         * @description The desktop's import: the template's toolkits into the policy file, its skills
+         *     into Ghost's skills, and a department line with its persona, each one audited.
+         */
+        post: operations["apply_template_templates__name__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/toolkits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Toolkits */
+        get: operations["toolkits_toolkits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/toolkits/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Toolkit */
+        put: operations["put_toolkit_toolkits__name__put"];
+        post?: never;
+        /** Delete Toolkit */
+        delete: operations["delete_toolkit_toolkits__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/voices": {
         parameters: {
             query?: never;
@@ -614,6 +727,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Department */
+            department?: string | null;
             /** Events */
             events: components["schemas"]["AuditEventView"][];
             /** Id */
@@ -628,6 +743,8 @@ export interface components {
             summary: string;
             /** Target */
             target: string;
+            /** Toolkit */
+            toolkit?: string | null;
         };
         /** AuditEventView */
         AuditEventView: {
@@ -677,6 +794,8 @@ export interface components {
              * @default []
              */
             aliases: string[];
+            /** Department */
+            department?: string | null;
             /** Name */
             name: string;
             /**
@@ -695,6 +814,11 @@ export interface components {
             seed_from?: string | null;
             /** Speed */
             speed?: number | null;
+            /**
+             * Toolkits
+             * @default []
+             */
+            toolkits: string[];
             /** Voice */
             voice?: string | null;
         };
@@ -711,8 +835,15 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Department */
+            department?: string | null;
             /** Dir */
             dir: string;
+            /**
+             * Is Department
+             * @default false
+             */
+            is_department: boolean;
             /** Is Ghost */
             is_ghost: boolean;
             /** Last Active At */
@@ -738,6 +869,11 @@ export interface components {
             slug: string;
             /** Speed */
             speed: number;
+            /**
+             * Toolkits
+             * @default []
+             */
+            toolkits: string[];
             /** Turn Count */
             turn_count: number;
             /** Voice */
@@ -795,6 +931,13 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Department */
+            department?: string | null;
+            /**
+             * Is Department
+             * @default false
+             */
+            is_department: boolean;
             /** Is Ghost */
             is_ghost: boolean;
             /** Last Active At */
@@ -814,6 +957,11 @@ export interface components {
             slug: string;
             /** Speed */
             speed: number;
+            /**
+             * Toolkits
+             * @default []
+             */
+            toolkits: string[];
             /** Voice */
             voice: string;
         };
@@ -846,6 +994,27 @@ export interface components {
             input_device: string | null;
             /** Output Device */
             output_device: string | null;
+        };
+        /**
+         * GrantView
+         * @description A toolkit's grant on one server (ADR 0023). null lists mean everything.
+         */
+        GrantView: {
+            /** Items */
+            items?: string[] | null;
+            /**
+             * Levels
+             * @default {}
+             */
+            levels: {
+                [key: string]: string;
+            };
+            /** Reads */
+            reads?: string[] | null;
+            /** Server */
+            server: string;
+            /** Writes */
+            writes?: string[] | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1313,6 +1482,8 @@ export interface components {
             api_version: string;
             /** Conversation */
             conversation?: string | null;
+            /** Department */
+            department?: string | null;
             /**
              * Ending
              * @default false
@@ -1328,6 +1499,8 @@ export interface components {
             session_id: string | null;
             /** Session Origin */
             session_origin?: ("desk" | "phone") | null;
+            /** Toolkit */
+            toolkit?: string | null;
             /** Uptime Secs */
             uptime_secs: number;
             /** Version */
@@ -1343,6 +1516,103 @@ export interface components {
              * @enum {string}
              */
             type: "status";
+        };
+        /** TemplateApply */
+        TemplateApply: {
+            /** Name */
+            name?: string | null;
+        };
+        /**
+         * TemplateView
+         * @description A department template (ADR 0023): shipped with Ghost or the operator's own.
+         */
+        TemplateView: {
+            /**
+             * Aliases
+             * @default []
+             */
+            aliases: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Name */
+            name: string;
+            /**
+             * Needs
+             * @default []
+             */
+            needs: string[];
+            /** Path */
+            path: string;
+            /**
+             * Skills
+             * @default []
+             */
+            skills: string[];
+            /** Source */
+            source: string;
+            /** Title */
+            title: string;
+            /**
+             * Toolkits
+             * @default []
+             */
+            toolkits: string[];
+            /** Voice */
+            voice?: string | null;
+        };
+        /** ToolkitsUpdate */
+        ToolkitsUpdate: {
+            /**
+             * Toolkits
+             * @default []
+             */
+            toolkits: string[];
+        };
+        /** ToolkitUpdate */
+        ToolkitUpdate: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Grants
+             * @default []
+             */
+            grants: components["schemas"]["GrantView"][];
+            /**
+             * Skills
+             * @default []
+             */
+            skills: string[];
+        };
+        /** ToolkitView */
+        ToolkitView: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Grants
+             * @default []
+             */
+            grants: components["schemas"]["GrantView"][];
+            /** Name */
+            name: string;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+            /**
+             * Skills
+             * @default []
+             */
+            skills: string[];
         };
         /** Turn */
         Turn: {
@@ -1444,6 +1714,7 @@ export type SchemaConversationUpdate = components['schemas']['ConversationUpdate
 export type SchemaConversationView = components['schemas']['ConversationView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
+export type SchemaGrantView = components['schemas']['GrantView'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
 export type SchemaMcpScopeInfo = components['schemas']['McpScopeInfo'];
@@ -1476,6 +1747,11 @@ export type SchemaSkillInfo = components['schemas']['SkillInfo'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
+export type SchemaTemplateApply = components['schemas']['TemplateApply'];
+export type SchemaTemplateView = components['schemas']['TemplateView'];
+export type SchemaToolkitsUpdate = components['schemas']['ToolkitsUpdate'];
+export type SchemaToolkitUpdate = components['schemas']['ToolkitUpdate'];
+export type SchemaToolkitView = components['schemas']['ToolkitView'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
@@ -1742,6 +2018,37 @@ export interface operations {
             };
         };
     };
+    export_template_conversations__slug__export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     add_note_conversations__slug__notes_post: {
         parameters: {
             query?: never;
@@ -1859,6 +2166,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_toolkits_conversations__slug__toolkits_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolkitsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
                 };
             };
             /** @description Validation Error */
@@ -2497,6 +2839,147 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Status"];
+                };
+            };
+        };
+    };
+    templates_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateView"][];
+                };
+            };
+        };
+    };
+    apply_template_templates__name__apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateApply"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    toolkits_toolkits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolkitView"][];
+                };
+            };
+        };
+    };
+    put_toolkit_toolkits__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolkitUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolkitView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_toolkit_toolkits__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
