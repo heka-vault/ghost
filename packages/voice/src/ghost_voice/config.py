@@ -123,6 +123,11 @@ class VoiceSettings(BaseSettings):
     vad_start_secs: float = 0.2
     vad_stop_secs: float = 0.2
     vad_min_volume: float = 0.6
+    # The passive wake listener's end of speech, longer than a turn's. At 0.2 s "Hey
+    # Ghost, any new issues" splits at the comma and Parakeet hears the bare "hey ghost"
+    # as "he goes"; 0.5 s caught 4 more of 40 wakes on the mic array, for 0.35 s more
+    # before the chime (docs/benchmarks/2026-10-21-wake.md).
+    wake_vad_stop_secs: float = 0.5
     # Words the STT must hear before the operator can cut Ghost off mid-sentence.
     # Backstop against echo; 0 disables barge-in.
     barge_in_min_words: int = 2

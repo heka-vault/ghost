@@ -80,7 +80,10 @@ class GhostdSettings(BaseSettings):
     # `ghostd wake` works in every mode.
     wake_mode: str = "transcript"  # transcript | file | onnx
     wake_phrases: str = ""  # comma-separated; empty = ghost_voice.wake.DEFAULT_WAKE_PHRASES
-    wake_fuzzy: float = 0.8  # phonetic near-miss threshold for the wake phrase; 0 = exact only
+    # Phonetic near-miss threshold for the wake phrase; 0 = exact only. 0.8 also took "he
+    # set off", "her guests" and "hey guys" (2.1 false wakes an hour of read speech); 0.9
+    # had none and kept the "he ghost" spellings (docs/benchmarks/2026-10-21-wake.md).
+    wake_fuzzy: float = 0.9
     wake_model_path: Path | None = None
     wake_threshold: float = 0.5
     wake_cooldown_secs: float = 2.0

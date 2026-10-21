@@ -60,6 +60,7 @@ from ghostd.wake import FileWakeDetector, TranscriptWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
+DEFAULT_WAKE_FUZZY = GhostdSettings.model_fields["wake_fuzzy"].default
 PHONE_STATE = "phone.json"
 VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its session;
@@ -204,7 +205,7 @@ class Daemon:
             applied.append("GHOST_WAKE_PHRASES")
         if "GHOST_WAKE_FUZZY" in values:
             try:
-                fuzzy = float(values["GHOST_WAKE_FUZZY"] or 0.8)
+                fuzzy = float(values["GHOST_WAKE_FUZZY"] or DEFAULT_WAKE_FUZZY)
             except ValueError:
                 fuzzy = None
             if fuzzy is not None:

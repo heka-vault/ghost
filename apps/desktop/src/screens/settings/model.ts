@@ -84,7 +84,7 @@ export const SECRET_INFO: Record<string, { help: string; optional?: boolean; pla
 };
 
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
-export const DEFAULT_FUZZY = 0.8;
+export const DEFAULT_FUZZY = 0.9;
 
 export const truthy = (v: string | undefined) => ["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase());
 

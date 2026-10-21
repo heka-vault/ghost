@@ -92,6 +92,27 @@ def test_passive_worker_has_no_idle_timeout(monkeypatch):
     assert worker._idle_timeout_secs is None
 
 
+def test_passive_vad_has_its_own_stop(monkeypatch):
+    """The listener waits longer for the end of speech than a turn does, so a comma after
+    "hey ghost" doesn't split the phrase from what follows; the session's VAD keeps its own."""
+    import ghost_voice.wake as wake_mod
+    from ghost_voice.config import VoiceSettings
+
+    seen = []
+    real = wake_mod.SileroVADAnalyzer
+    monkeypatch.setattr(
+        wake_mod, "SileroVADAnalyzer", lambda params: seen.append(params) or real(params=params)
+    )
+    monkeypatch.setenv("GHOST_WAKE_VAD_STOP_SECS", "0.7")
+
+    async def on_match(_m):
+        pass
+
+    _listener(monkeypatch)._build(on_match)
+    assert seen[0].stop_secs == 0.7
+    assert VoiceSettings().vad_stop_secs == 0.2
+
+
 async def test_listener_rebuilds_when_pipeline_ends_without_match(monkeypatch):
     """A worker that exits on its own (device vanished, processor failure) is replaced,
     so the daemon never reports "passive" with nobody reading the microphone."""
@@ -167,6 +188,31 @@ def test_fuzzy_matches_asr_spellings(heard, phrase, remainder):
 )
 def test_fuzzy_rejects_unrelated_speech(heard):
     assert match_wake(heard, DEFAULT_WAKE_PHRASES, fuzzy=0.8) is None
+
+
+@pytest.mark.parametrize(
+    "heard",
+    [
+        # Each woke Ghost at 0.8 in the 2026-10-21 measurements: LibriSpeech, then the
+        # room's confusable sentences.
+        "He set off abruptly for the bull",
+        "As she awaited her guests, she surveyed the table",
+        "He sat down, weak, bewildered",
+        "Here, they said is a rascal who has been harrying our coast",
+        "Hey guys, what's up?",
+        "He goes to the gym every morning.",
+        "Hey Gus, how have you been?",
+        "Okay, coast is clear.",
+        "Hey goat cheese or cheddar.",
+    ],
+)
+def test_strict_fuzzy_rejects_measured_false_wakes(heard):
+    assert match_wake(heard, DEFAULT_WAKE_PHRASES, fuzzy=0.9) is None
+
+
+@pytest.mark.parametrize("heard", ["He ghost.", "Hay ghost, what's new?", "Ok, ghost."])
+def test_strict_fuzzy_keeps_same_sound_spellings(heard):
+    assert match_wake(heard, DEFAULT_WAKE_PHRASES, fuzzy=0.9) is not None
 
 
 def test_fuzzy_off_by_default():

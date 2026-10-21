@@ -92,6 +92,7 @@ import {
   parseFuzzy,
   micDismissedFor,
   readDraft,
+  DEFAULT_FUZZY,
   storeMicDismissed,
   tildePath,
   sectionDomId,
@@ -741,7 +742,7 @@ export default function SettingsScreen(_: RouteProps) {
   const storedFuzzy = s?.values[FUZZY] ?? "";
   const fuzzy = parseFuzzy(v[FUZZY]);
   const exact = (v[FUZZY] ?? "").trim() !== "" && fuzzy === 0;
-  const step = Math.round((1 - Math.max(0.5, exact ? 0.8 : fuzzy)) / 0.05);
+  const step = Math.round((1 - Math.max(0.5, exact ? DEFAULT_FUZZY : fuzzy)) / 0.05);
   // Moving back to the saved level writes the saved text back, so no phantom change is left.
   const setFuzzy = (n: number) => setValue(FUZZY, parseFuzzy(storedFuzzy) === n && parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : n.toFixed(2));
   const jev = v.GHOST_JEV || "auto";
@@ -1028,7 +1029,7 @@ export default function SettingsScreen(_: RouteProps) {
                         onStep={(n) => setFuzzy(stepToFuzzy(n))}
                         onExact={(on) => {
                           if (on) setValue(FUZZY, parseFuzzy(storedFuzzy) === 0 && storedFuzzy.trim() !== "" ? storedFuzzy : "0");
-                          else setValue(FUZZY, storedFuzzy.trim() === "" || parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : "0.80");
+                          else setValue(FUZZY, storedFuzzy.trim() === "" || parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : DEFAULT_FUZZY.toFixed(2));
                         }}
                       />
                     </Field>

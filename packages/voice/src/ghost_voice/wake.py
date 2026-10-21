@@ -108,9 +108,11 @@ def match_wake(
     a plain "ghost" if both are configured.
 
     With ``fuzzy`` > 0, a window of the same word count whose phonetic key is at
-    least that similar to the phrase's also matches: local ASR renders a bare
-    "hey ghost" as "hey guys" or "he goes" often enough that an exact match misses
-    the operator. 0 disables it; 0.8 catches those two without matching "there you go".
+    least that similar to the phrase's also matches. 0 disables it. 0.9 (ghostd's
+    default) takes spellings with the phrase's own sounds, "he ghost" for "hey ghost";
+    0.8 also takes "hey guys" and "he goes", which a webcam mic needed, but they are
+    ordinary speech too: 2.1 false wakes an hour of read speech, none at 0.9
+    (docs/benchmarks/2026-10-21-wake.md).
     """
     words = _words(text)
     if not words:
@@ -223,7 +225,7 @@ class WakeListener:
                 params=VADParams(
                     confidence=s.vad_confidence,
                     start_secs=s.vad_start_secs,
-                    stop_secs=s.vad_stop_secs,
+                    stop_secs=s.wake_vad_stop_secs,
                     min_volume=s.vad_min_volume,
                 )
             )
