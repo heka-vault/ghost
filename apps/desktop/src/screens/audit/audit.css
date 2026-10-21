@@ -14,7 +14,7 @@
 /* ---------------------------------------------------------------- toolbar (page actions) */
 .audit-toolbar { display: flex; align-items: center; gap: var(--space-3); }
 .audit-search { flex: none; width: calc(var(--space-20) * 3); } /* 240 */
-/* The selects fit the option they show (measured in index.tsx), so "All abilities" carries
+/* The selects fit the option they show (measured in index.tsx), so "All sources" carries
    no empty run before its chevron and the title stays the heaviest thing in the header. */
 .audit-filter { flex: none; width: auto; }
 /* At 1280 the description keeps its one line. */

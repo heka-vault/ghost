@@ -1,47 +1,92 @@
-# Ghost autonomy policy (ADR 0011). Copied to ~/.config/ghost/policy.toml by `make env`.
+# Ghost autonomy policy (ADR 0011, ADR 0022). Copied to ~/.config/ghost/policy.toml by `make env`.
 #
-# For each write operation, how much Ghost may do on its own:
+# Two things live here: the MCP servers Ghost connects to, and for each write operation how
+# much Ghost may do on its own:
 #   deny      not offered to the model at all
-#   confirm   Ghost asks first and waits for your spoken yes
+#   confirm   Ghost asks first and waits for your spoken yes (or your plain request is the yes)
 #   announce  Ghost does it, then says so in a few words
 #   quiet     Ghost does it and only mentions it if asked, or if it failed
 #
-# Anything you leave out falls back to the skill's suggested default for that
-# operation: low-risk ops (labels, comments) announce; close and reopen confirm.
-# Resolution order: target rule > skill rule > [defaults] > skill default.
-# Ghost never writes this file, and nothing in an issue can change it.
-# Every level still logs the write. To take one back, ask: Ghost proposes the
-# reversing change (reopen, put the labels back) and it runs at that operation's level.
-
-[abilities]
-# enabled = ["github_issues"]   # which installed abilities to load; default is GHOST_ABILITIES
-# passive = []                  # abilities allowed to hear audio before the wake phrase
+# Anything you leave out falls back to the operation's declared risk: low announces, medium
+# and high confirm. Resolution order: target rule > server rule > [defaults] > risk.
+# Ghost never writes this file, and nothing a server returns can change it.
+# Every write is logged; to reverse one, ask Ghost for the opposite change.
 
 [defaults]
 # autonomy = "confirm"        # uncomment to make everything ask unless listed below
 
-[github_issues]
-set_labels      = "announce"
-comment         = "announce"
-approve         = "announce"
-request_changes = "announce"
-close           = "confirm"
-reopen          = "confirm"
+# A pretend GitHub, so Ghost runs before a token exists. Same tool shape as the official
+# server, so the declaration below carries over: replace the command, args and env with the
+# real server's (commented further down), keep the writes.
+[mcp.github]
+command = "ghost-mock-github"
+args = ["--state", "~/.local/share/ghost/mock-github.json"]
+reads = ["issue_read", "list_issues", "search_issues"]
+scope = { kind = "repository", arguments = ["owner", "repo"], items = ["ghost-mock/app", "ghost-mock/infra"] }
+
+# The real thing (github.com/github/github-mcp-server, the `github-mcp-server` binary on PATH).
+# One server per token; name a second one github_work with its own env and items.
+# command = "github-mcp-server"
+# args = ["stdio", "--toolsets", "issues"]
+# env = { GITHUB_PERSONAL_ACCESS_TOKEN = "$GITHUB_TOKEN" }   # a secret from the environment
+# scope = { kind = "repository", arguments = ["owner", "repo"], items = ["acme/app"] }
+
+[mcp.github.writes.comment]
+tool = "add_issue_comment"
+args = ["owner", "repo", "issue_number", "body"]
+target = ["owner", "repo", "issue_number"]
+read = { tool = "issue_read", with = { method = "get" } }
+asked_by = ["comment", "reply", "note"]
+risk = "low"
+key_in = "body"
+description = "Add a comment to an issue."
+
+[mcp.github.writes.set_labels]
+tool = "issue_write"
+with = { method = "update" }
+args = ["owner", "repo", "issue_number", "labels"]
+target = ["owner", "repo", "issue_number"]
+read = { tool = "issue_read", with = { method = "get" } }
+asked_by = ["label", "tag", "mark"]
+risk = "low"
+bound = { labels = 10 }
+description = "Set an issue's labels to the full new list (read it first: labels replaces them all)."
+
+[mcp.github.writes.close]
+tool = "issue_write"
+with = { method = "update", state = "closed" }
+args = ["owner", "repo", "issue_number", "state_reason"]
+target = ["owner", "repo", "issue_number"]
+read = { tool = "issue_read", with = { method = "get" } }
+asked_by = ["close", "shut"]
+risk = "high"
+description = "Close an issue (state_reason: completed, not_planned or duplicate)."
+
+[mcp.github.writes.reopen]
+tool = "issue_write"
+with = { method = "update", state = "open" }
+args = ["owner", "repo", "issue_number"]
+target = ["owner", "repo", "issue_number"]
+read = { tool = "issue_read", with = { method = "get" } }
+asked_by = ["reopen", "open"]
+risk = "medium"
+description = "Reopen a closed issue."
+
+[mcp.github.levels]
+comment    = "announce"
+set_labels = "announce"
+close      = "confirm"
+reopen     = "confirm"
 
 # Tighter on a repository other people watch:
-# [github_issues.targets."owner/public-repo"]
+# [mcp.github.targets."acme/public-app"]
 # comment = "confirm"
 # close   = "deny"
 
-# Saved conversations (ADR 0014). Built in; these are the defaults.
-# [conversations]
-# create      = "announce"
-# switch      = "announce"   # "deny" keeps the session in Ghost
-# rename      = "announce"
-# set_voice   = "announce"
-# set_persona = "confirm"
-# remember    = "announce"
-# forget      = "confirm"
-# compact     = "announce"
-# reset       = "confirm"
-# delete      = "confirm"
+# Any other MCP server: a streamable HTTP url with headers, or a stdio command. Read-only
+# tools are offered to the model as they are; a write is offered only once declared as above.
+# Secrets are $NAME references, fetched by the service when GHOST_MCP_SECRETS="NAME,NAME" in
+# settings.env names them.
+# [mcp.mobbin]
+# url = "http://proxy.lan:8318/mobbin/mcp"
+# headers = { Authorization = "Bearer $MCP_PROXY_KEY" }

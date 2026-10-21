@@ -30,6 +30,41 @@ class RetiredChange(Change, frozen=True):
         return f"{self.type} (no longer supported)"
 
 
+class RetiredTarget(Target, frozen=True):
+    """A stored target whose class is gone (an ability's, ADR 0022). The audit log keeps
+    reading it by what the row holds; nothing can write to it again."""
+
+    kind: Literal["retired"] = "retired"
+    type: str
+    data: dict[str, Any]
+
+    def key(self) -> str:
+        d = self.data
+        if {"owner", "repo", "number"} <= set(d):
+            return f"retired:{d['owner']}/{d['repo']}#{d['number']}"
+        return f"retired:{self.type}:" + "/".join(str(v) for v in d.values())
+
+    def scope(self) -> str:
+        d = self.data
+        return f"{d['owner']}/{d['repo']}" if {"owner", "repo"} <= set(d) else self.key()
+
+    def spoken(self) -> str:
+        return self.key().removeprefix("retired:")
+
+
+class RetiredSnapshot(Snapshot, frozen=True):
+    kind: Literal["retired"] = "retired"
+    type: str
+    data: dict[str, Any]
+
+    def spoken(self) -> str:
+        d = self.data
+        parts = [str(d[k]) for k in ("state",) if k in d]
+        if isinstance(d.get("labels"), list):
+            parts.append("labels " + (", ".join(str(lb) for lb in d["labels"]) or "none"))
+        return ", ".join(parts) or "as recorded"
+
+
 def type_name(obj: BaseModel | type[BaseModel]) -> str:
     cls = obj if isinstance(obj, type) else type(obj)
     return f"{cls.__module__}:{cls.__qualname__}"
@@ -64,11 +99,28 @@ def _load_change(d: dict[str, Any]) -> Change:
         return RetiredChange(type=str(d["$type"]), data=d.get("data") or {})
 
 
+def _load_target(d: dict[str, Any]) -> Target:
+    try:
+        return load(d, Target)
+    except (ImportError, AttributeError):
+        return RetiredTarget(type=str(d["$type"]), data=d.get("data") or {})
+
+
+def _load_snapshot(d: dict[str, Any]) -> Snapshot:
+    try:
+        return load(d, Snapshot)
+    except (ImportError, AttributeError):
+        data = d.get("data") or {}
+        return RetiredSnapshot(
+            version=str(data.get("version", "")), type=str(d["$type"]), data=data
+        )
+
+
 def load_proposal(text: str) -> Proposal:
     body = json.loads(text)
     return Proposal(
         **{k: v for k, v in body.items() if k not in {"target", "snapshot", "changes"}},
-        target=load(body["target"], Target),
-        snapshot=load(body["snapshot"], Snapshot),
+        target=_load_target(body["target"]),
+        snapshot=_load_snapshot(body["snapshot"]),
         changes=ChangeSet(steps=tuple(_load_change(s) for s in body["changes"])),
     )

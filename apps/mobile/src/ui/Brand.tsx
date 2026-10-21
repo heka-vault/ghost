@@ -11,9 +11,20 @@ import { View } from "react-native";
 import { useColors } from "../theme";
 import { Mascot } from "./Mascot";
 
+const GLYPH_MIN = 40;
+
+/** Wisp saying hello at every size: drawn at 40 (where its arms show) and scaled down below that. */
 export function GhostGlyph({ size = 16, color }: { size?: number; color: string }) {
-  const frame = useMemo(() => (size >= 40 ? wavePose() : {}), [size]);
-  return <Mascot size={size} color={color} frame={frame} />;
+  const frame = useMemo(() => wavePose(), []);
+  if (size >= GLYPH_MIN) return <Mascot size={size} color={color} frame={frame} />;
+  const k = size / GLYPH_MIN;
+  return (
+    <View style={{ width: size, height: size, overflow: "visible" }}>
+      <View style={{ width: GLYPH_MIN, height: GLYPH_MIN, transform: [{ translateX: -(GLYPH_MIN - size) / 2 }, { translateY: -(GLYPH_MIN - size) / 2 }, { scale: k }] }}>
+        <Mascot size={GLYPH_MIN} color={color} frame={frame} />
+      </View>
+    </View>
+  );
 }
 
 /** The app mark: the glyph on an accent tile. */

@@ -18,7 +18,7 @@ const ASK_SECS = 45;
 
 /** What Ghost asks in the mock, and what the gate writes when it is settled. */
 const QUESTION = {
-  ability: "github_issues",
+  ability: "github_heka",
   operation: "close",
   target: "ghost-mock/infra#77",
   summary: "On ghost-mock/infra#77: close the issue, with a comment: “Fixed by the runner image bump.”",
@@ -31,7 +31,7 @@ function entry(target: string, operation: string, summary: string, status: strin
   return {
     id: id(),
     session_id: "earlier",
-    ability: "github_issues",
+    ability: "github_heka",
     operation,
     target,
     summary,
@@ -98,7 +98,7 @@ export class MockDesk implements Desk {
 
   private status(patch: Partial<Status>): Status {
     return {
-      abilities: ["github_issues"],
+      servers: ["github"],
       api_version: "1",
       conversation: "ghost",
       models_ready: true,

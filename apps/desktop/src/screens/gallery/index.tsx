@@ -582,10 +582,10 @@ function SaveBarSpecimens() {
   return (
     <>
       <Spec label="Dirty: a neutral dot, the shortcut while Save can run, ghost Discard and filled Save 12px apart" column>
-        <SaveBar title="3 unsaved changes" detail="closing, labels, which abilities load" onSave={onSave} onDiscard={noop} />
+        <SaveBar title="3 unsaved changes" detail="closing, labels, everything else" onSave={onSave} onDiscard={noop} />
       </Spec>
       <Spec label="Saving: the caps go, Discard waits" column>
-        <SaveBar title="3 unsaved changes" detail="closing, labels, which abilities load" busy onSave={noop} onDiscard={noop} />
+        <SaveBar title="3 unsaved changes" detail="closing, labels, everything else" busy onSave={noop} onDiscard={noop} />
       </Spec>
       <Spec label="Error: red edge, --danger dot, the reason on its own line" column>
         <SaveBar variant="error" title="Couldn’t save" detail="closing, labels" description="Ghost couldn’t write ~/.config/ghost/policy.toml: permission denied." onSave={onSave} onDiscard={noop} />
@@ -702,7 +702,7 @@ function Specimens({ theme }: { theme: string }) {
           <p className="t-small t-2">Small 12. Secondary detail and help text.</p>
           <p className="t-caption t-3">Caption 11. Timestamps and meta.</p>
           <p className="t-overline">Overline 11</p>
-          <p className="t-mono">GHOST_REPOS · ghost-mock/app#151 · 0123456789</p>
+          <p className="t-mono">GHOST_WAKE_PHRASES · ghost-mock/app#151 · 0123456789</p>
         </div>
       </Block>
 
@@ -803,7 +803,7 @@ function Specimens({ theme }: { theme: string }) {
 
       <Block id={id("inputs")} title="Inputs and fields">
         <div className="gal-grid2">
-          <Field label="Repositories" help="owner/repo, comma-separated." detail="GHOST_REPOS">
+          <Field label="Wake phrases" help="Comma-separated." detail="GHOST_WAKE_PHRASES">
             <Input defaultValue="ghost-mock/app, ghost-mock/infra" />
           </Field>
           <Field label="Search" optional>
@@ -1179,7 +1179,7 @@ function Specimens({ theme }: { theme: string }) {
           <Notice title="Saved and applied">Every level still logs the write.</Notice>
           <Notice tone="ok">Echo cancellation installed.</Notice>
           <Notice tone="info" title="Restart needed">
-            <p>Restart Ghost to load the new ability.</p>
+            <p>Restart Ghost to use the new microphone.</p>
             <code className="t-mono t-3">systemctl --user restart ghostd</code>
           </Notice>
           <Notice tone="warn" action={<Button size="sm">Install</Button>}>Ghost can hear itself. Install echo cancellation.</Notice>

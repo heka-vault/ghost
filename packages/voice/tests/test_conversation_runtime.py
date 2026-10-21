@@ -9,25 +9,27 @@ from typing import Any
 
 import pytest
 from ghost_core import (
-    Ability,
     ActiveScope,
     AutonomyPolicy,
     Change,
     ChangeSet,
-    Contributions,
-    LoadedAbility,
     Operation,
     Prepared,
     ReadTool,
-    SimpleInstance,
     Snapshot,
     Store,
     Target,
+    ToolSource,
     WriteGate,
 )
-from ghost_core.conversations import ABILITY, GHOST, SUMMARY_TEMPLATE, Conversations
+from ghost_core.conversations import (
+    GHOST,
+    SOURCE,
+    SUMMARY_TEMPLATE,
+    Conversations,
+    conversations_source,
+)
 from ghost_voice.conversation import ConversationMarkerFrame, ConversationRuntime, transfer_tone
-from ghost_voice.pipeline import conversations_ability
 from ghost_voice.tools import SWITCH_TOOL, register_tools
 from pipecat.frames.frames import (
     LLMMessagesUpdateFrame,
@@ -83,10 +85,10 @@ def world(tmp_path: Path):
     convs = Conversations(store, tmp_path / "c", default_voice="af_heart")
     gate = WriteGate(
         store,
-        autonomy=AutonomyPolicy.parse(f"[{ABILITY}]\nset_persona = 'announce'\n"),
+        autonomy=AutonomyPolicy.parse(f"[{SOURCE}]\nset_persona = 'announce'\n"),
     )
-    loaded = conversations_ability(convs)
-    gate.register(ABILITY, loaded.contributions.operations)
+    loaded = conversations_source(convs)
+    gate.register(SOURCE, loaded.operations)
     rt = ConversationRuntime(
         convs,
         gate=gate,
@@ -103,7 +105,7 @@ def world(tmp_path: Path):
 
     schemas = register_tools(
         llm,
-        abilities=[loaded],
+        sources=[loaded],
         gate=gate,
         session_id="s1",
         on_hang_up=on_sleep,
@@ -114,11 +116,11 @@ def world(tmp_path: Path):
 
 
 async def create(convs, gate, name, **extra):
-    op = gate.operation(ABILITY, "create")
+    op = gate.operation(SOURCE, "create")
     prepared = await op.prepare({"name": name, **extra})
     return await gate.submit(
         session_id="setup",
-        ability=ABILITY,
+        ability=SOURCE,
         operation="create",
         target=prepared.target,
         changes=prepared.changes,
@@ -220,11 +222,11 @@ async def test_switch_cancels_pending_and_policy_can_deny(world):
     store, convs, gate, rt, llm, _ = world
     await create(convs, gate, "Legal")
     # a confirm-level change is waiting; the transfer drops it
-    op = gate.operation(ABILITY, "set_persona")
+    op = gate.operation(SOURCE, "set_persona")
     prepared = await op.prepare({"_active": GHOST, "text": "x"})
     await gate.prepare(
         session_id="s1",
-        ability=ABILITY,
+        ability=SOURCE,
         operation="set_persona",
         target=prepared.target,
         changes=prepared.changes,
@@ -235,7 +237,7 @@ async def test_switch_cancels_pending_and_policy_can_deny(world):
     await llm.functions[SWITCH_TOOL](p)
     assert gate.pending("s1") is None and rt.active.slug == "legal"
 
-    gate.set_autonomy(AutonomyPolicy.parse(f"[{ABILITY}]\nswitch = 'deny'\n"))
+    gate.set_autonomy(AutonomyPolicy.parse(f"[{SOURCE}]\nswitch = 'deny'\n"))
     p = FakeParams(llm, SWITCH_TOOL, {"name": "ghost"})
     await llm.functions[SWITCH_TOOL](p)
     assert "not allowed" in p.result["error"] and rt.active.slug == "legal"
@@ -249,7 +251,7 @@ async def test_save_as_creates_switches_and_carries_turns(world):
     p = FakeParams(
         llm,
         "change",
-        {"ability": ABILITY, "operation": "create", "args": {"name": "Accounting"}},
+        {"ability": SOURCE, "operation": "create", "args": {"name": "Accounting"}},
     )
     await llm.functions["change"](p)
     assert p.result["status"] == "done"
@@ -344,7 +346,7 @@ class RepoWriter:
         self.applied.append((target.repo, target.number, change.tag))
 
 
-def repo_ability(writer) -> LoadedAbility:
+def repo_source(writer) -> ToolSource:
     """Like github_issues: reads and writes scoped by repository, checked through the
     ActiveScope the pipeline passes as ``_scope``."""
     allowed = ["acme/app", "acme/infra"]
@@ -367,7 +369,8 @@ def repo_ability(writer) -> LoadedAbility:
             ChangeSet(steps=(Label(tag="bug"),)),
         )
 
-    c = Contributions(
+    return ToolSource(
+        name="github_issues",
         prompt="UNSCOPED",
         read_tools=[
             ReadTool("list_issues", "List.", {"repo": {"type": "string"}}, [], list_issues)
@@ -387,8 +390,6 @@ def repo_ability(writer) -> LoadedAbility:
         scope_items=lambda: list(allowed),
         scoped_prompt=lambda s: "REPOS: " + ", ".join(s.narrow(allowed) if s else allowed),
     )
-    ab = Ability("github_issues", "0", "", setup=None, config=None)  # type: ignore[arg-type]
-    return LoadedAbility(ab, None, SimpleInstance(c), c)
 
 
 @pytest.fixture
@@ -396,18 +397,18 @@ def threads(tmp_path: Path):
     def build(*, reads_wider=False, routing=False):
         store = Store()
         writer = RepoWriter()
-        ab = repo_ability(writer)
+        ab = repo_source(writer)
         convs = Conversations(
             store,
             tmp_path / "c",
             default_voice="af_heart",
             voices=("af_heart", "am_adam", "bf_emma"),
-            scopes={"github_issues": ab.contributions.scope_items},
+            scopes={"github_issues": ab.scope_items},
         )
         gate = WriteGate(store)
-        loaded = conversations_ability(convs)
-        gate.register(ABILITY, loaded.contributions.operations)
-        gate.register("github_issues", ab.contributions.operations)
+        loaded = conversations_source(convs)
+        gate.register(SOURCE, loaded.operations)
+        gate.register("github_issues", ab.operations)
         rt = ConversationRuntime(
             convs,
             gate=gate,
@@ -416,7 +417,7 @@ def threads(tmp_path: Path):
             tts_settings=TTSSettings,
             llm_settings=LLMSettings,
             sample_rate=24000,
-            scoped_prompts={"github_issues": ab.contributions.scoped_prompt},
+            scoped_prompts={"github_issues": ab.scoped_prompt},
             reads_wider=reads_wider,
             routing=routing,
         )
@@ -427,7 +428,7 @@ def threads(tmp_path: Path):
 
         register_tools(
             llm,
-            abilities=[ab, loaded],
+            sources=[ab, loaded],
             gate=gate,
             session_id="s1",
             on_hang_up=on_sleep,
@@ -577,11 +578,11 @@ async def test_department_routing_patches_through_and_hands_over_the_request(thr
     await llm.functions["list_issues"](p)
     assert p.result["error"] == "other/x is outside this thread" and rt.active.slug == "infra"
     # a settled thread is not a destination
-    op = gate.operation(ABILITY, "settle")
+    op = gate.operation(SOURCE, "settle")
     prepared = await op.prepare({"conversation": "app"})
     await gate.submit(
         session_id="x",
-        ability=ABILITY,
+        ability=SOURCE,
         operation="settle",
         target=prepared.target,
         changes=prepared.changes,
@@ -599,7 +600,7 @@ async def test_voice_created_thread_binds_scope_and_picks_a_voice(threads):
         llm,
         "change",
         {
-            "ability": ABILITY,
+            "ability": SOURCE,
             "operation": "create",
             "args": {"name": "App work", "scope": {"github_issues": ["acme/app"]}},
         },
@@ -614,7 +615,7 @@ async def test_voice_created_thread_binds_scope_and_picks_a_voice(threads):
         llm,
         "change",
         {
-            "ability": ABILITY,
+            "ability": SOURCE,
             "operation": "create",
             "args": {"name": "Bad", "scope": {"github_issues": ["acme/secret"]}},
         },
@@ -628,7 +629,7 @@ async def test_settling_the_active_thread_returns_to_ghost(threads):
     await make_threads(convs, gate)
     await rt.switch(convs.get("app"))
     llm.pushed.clear()
-    p = FakeParams(llm, "change", {"ability": ABILITY, "operation": "settle", "args": {}})
+    p = FakeParams(llm, "change", {"ability": SOURCE, "operation": "settle", "args": {}})
     await llm.functions["change"](p)
     assert p.result["status"] == "done" and convs.get("app").settled
     assert rt.active.slug == GHOST and llm.pushed[0].text == "Back to Ghost."
@@ -637,7 +638,7 @@ async def test_settling_the_active_thread_returns_to_ghost(threads):
     p = FakeParams(
         llm,
         "change",
-        {"ability": ABILITY, "operation": "settle", "args": {"conversation": "infra"}},
+        {"ability": SOURCE, "operation": "settle", "args": {"conversation": "infra"}},
     )
     await llm.functions["change"](p)
     assert p.result["status"] == "done" and rt.active.slug == GHOST

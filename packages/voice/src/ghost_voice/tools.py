@@ -1,6 +1,6 @@
-"""Bridge abilities to Pipecat function calling.
+"""Bridge tool sources to Pipecat function calling.
 
-Two kinds of tool reach the model: an ability's typed read tools and one shared
+Two kinds of tool reach the model: a source's typed read tools and one shared
 ``change`` that hands a typed change set to the gate (plus session tools: switch
 conversation, go to sleep). There is no undo tool: to take a change back the model
 proposes the reversing change through ``change``. What ``change`` does depends on
@@ -21,13 +21,13 @@ from ghost_core import (
     Autonomy,
     Events,
     GateError,
-    LoadedAbility,
     Operation,
     OutOfScope,
+    ToolSource,
     WriteGate,
 )
-from ghost_core.conversations import ABILITY as CONVERSATIONS
 from ghost_core.conversations import GHOST
+from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.policy import PolicyError
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -51,7 +51,7 @@ SWITCH_TOOL = "switch_conversation"
 def register_tools(
     llm: LLMService,
     *,
-    abilities: Sequence[LoadedAbility],
+    sources: Sequence[ToolSource],
     gate: WriteGate,
     session_id: str,
     on_hang_up: OnHangUp,
@@ -63,8 +63,8 @@ def register_tools(
     probe: LatencyProbe | None = None,
 ) -> list[FunctionSchema]:
     """``probe`` gets the time each step inside a call takes (ghost_voice.latency):
-    ``read`` for a read tool (the ability's client, an external API for GitHub), and
-    for ``change`` the ability's ``prepare``, the gate's ``submit`` (snapshot, and the
+    ``read`` for a read tool (the server behind it, an external API for GitHub), and
+    for ``change`` the source's ``prepare``, the gate's ``submit`` (snapshot, and the
     write itself below ``confirm``) and the ``request`` check that may execute it."""
     schemas: list[FunctionSchema] = []
     probe = probe or NULL_PROBE
@@ -72,12 +72,12 @@ def register_tools(
     record = on_call or (lambda _n, _a: None)
     last_request = last_request or (lambda: ("", ""))
 
-    def scope_for(ability: LoadedAbility) -> Callable[[], ActiveScope | None]:
-        """The active thread's scope for a scoped ability, read at call time so a
-        switch mid-session is seen by the next call; None for an unscoped ability."""
-        if conversations is None or not ability.contributions.scope_kind:
+    def scope_for(source: ToolSource) -> Callable[[], ActiveScope | None]:
+        """The active thread's scope for a scoped source, read at call time so a
+        switch mid-session is seen by the next call; None for an unscoped source."""
+        if conversations is None or not source.scope_kind:
             return lambda: None
-        return lambda: conversations.scope_for(ability.name)
+        return lambda: conversations.scope_for(source.name)
 
     async def out_of_scope(params: FunctionCallParams, e: OutOfScope) -> None:
         """A request about something another thread owns (ADR 0019). With department
@@ -109,8 +109,8 @@ def register_tools(
             result["hint"] = f"offer to patch them through to {owner.name}"
         await params.result_callback(result)
 
-    for a in abilities:
-        for tool in a.contributions.read_tools:
+    for a in sources:
+        for tool in a.read_tools:
             schemas.append(
                 FunctionSchema(
                     name=tool.name,
@@ -123,15 +123,13 @@ def register_tools(
                 tool.name,
                 _wrap_read(tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope),
             )
-    scopes = {a.name: scope_for(a) for a in abilities}
+    scopes = {a.name: scope_for(a) for a in sources}
 
     # Operations the policy denies outright are not offered at all.
     ops: dict[str, dict[str, Operation]] = {}
-    for a in abilities:
+    for a in sources:
         offered = {
-            op.name: op
-            for op in a.contributions.operations
-            if gate.level(a.name, op.name) is not Autonomy.DENY
+            op.name: op for op in a.operations if gate.level(a.name, op.name) is not Autonomy.DENY
         }
         if offered:
             ops[a.name] = offered
@@ -152,7 +150,11 @@ def register_tools(
                     "Operations:\n" + op_lines
                 ),
                 properties={
-                    "ability": {"type": "string", "enum": list(ops)},
+                    "ability": {
+                        "type": "string",
+                        "enum": list(ops),
+                        "description": "The source: the server or 'conversations'.",
+                    },
                     "operation": {"type": "string"},
                     "args": {"type": "object", "description": "Arguments for the operation."},
                     "rationale": {"type": "string", "description": "One sentence: why."},
@@ -208,6 +210,11 @@ def register_tools(
         except (ValueError, PolicyError, GateError) as e:
             probe.tool_status(call_id, "error")
             await params.result_callback({"error": str(e)})
+            return
+        except Exception as e:  # noqa: BLE001 - a server's failure (snapshot, write) is the answer
+            logger.warning(f"change {aname}.{op_name} failed: {type(e).__name__}: {e}")
+            probe.tool_status(call_id, "error")
+            await params.result_callback({"error": f"{aname}.{op_name} failed: {e}"})
             return
         if sub.outcome is not None:
             probe.tool_status(call_id, f"done:{sub.autonomy.value}")

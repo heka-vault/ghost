@@ -7,7 +7,7 @@
  */
 import {
   AudioLines,
-  Blocks,
+  BookOpen,
   Ghost,
   Inbox,
   LayoutGrid,
@@ -15,6 +15,7 @@ import {
   MessagesSquare,
   PanelTop,
   ScrollText,
+  Server,
   Settings2,
   ShieldCheck,
   Smartphone,
@@ -25,7 +26,7 @@ import { type ComponentType, lazy, type LazyExoticComponent } from "react";
 import { matchPath } from "./router";
 
 export interface RouteProps {
-  /** Path parameters, e.g. { slug: "legal" } for #/conversations/legal. */
+  /** Path parameters, e.g. { slug: "legal" } for #/lines/legal. */
   params: Record<string, string>;
 }
 
@@ -67,14 +68,14 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "conversations",
-    patterns: ["/conversations/:slug?"],
-    path: "/conversations",
+    patterns: ["/lines/:slug?"],
+    path: "/lines",
     owner: "conversations",
-    title: "Conversations",
+    title: "Lines",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Conversations", icon: MessagesSquare, group: "main" },
+    nav: { label: "Lines", icon: MessagesSquare, group: "main" },
     component: lazy(() => import("../screens/conversations")),
   },
   {
@@ -102,16 +103,28 @@ export const ROUTES: RouteDef[] = [
     component: lazy(() => import("../screens/audit")),
   },
   {
-    id: "abilities",
-    patterns: ["/abilities"],
-    path: "/abilities",
-    owner: "abilities",
-    title: "Abilities",
+    id: "servers",
+    patterns: ["/servers"],
+    path: "/servers",
+    owner: "servers",
+    title: "Servers",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Abilities", icon: Blocks, group: "main" },
-    component: lazy(() => import("../screens/abilities")),
+    nav: { label: "Servers", icon: Server, group: "main" },
+    component: lazy(() => import("../screens/servers")),
+  },
+  {
+    id: "skills",
+    patterns: ["/skills"],
+    path: "/skills",
+    owner: "skills",
+    title: "Skills",
+    kind: "screen",
+    chrome: "app",
+    needsDaemon: true,
+    nav: { label: "Skills", icon: BookOpen, group: "main" },
+    component: lazy(() => import("../screens/skills")),
   },
   {
     id: "settings",

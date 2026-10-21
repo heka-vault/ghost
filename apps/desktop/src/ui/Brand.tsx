@@ -8,11 +8,21 @@ import { Mascot } from "./Mascot";
 export { GHOST_PATH, GHOST_PATH_SMALL, lineHue };
 
 /**
- * The ghost glyph: Wisp drawn still. At 40px and up it is Wisp saying hello (grinning,
- * mid-wave); below that, where the arms are not drawn, the plain body.
+ * The ghost glyph: Wisp saying hello (grinning, mid-wave), drawn still, at every size. The
+ * mascot only draws its arms at 40px and up, so smaller glyphs are the 40px drawing scaled
+ * down: the plain body at small sizes read as the old icon (the operator, 2026-10-20).
  */
+const GLYPH_MIN = 40;
 export function GhostGlyph({ size = 16, className, title }: { size?: number; className?: string; title?: string }) {
-  return <Mascot size={size} frame={size >= 40 ? wavePose() : {}} title={title} className={cx("g-ghost-glyph", className)} />;
+  if (size >= GLYPH_MIN) return <Mascot size={size} frame={wavePose()} title={title} className={cx("g-ghost-glyph", className)} />;
+  const k = size / GLYPH_MIN;
+  return (
+    <span className={cx("g-ghost-glyph", className)} style={{ display: "inline-block", width: size, height: size, overflow: "visible", lineHeight: 0 }} aria-hidden={title ? undefined : true} role={title ? "img" : undefined} aria-label={title}>
+      <span style={{ display: "inline-block", transform: `scale(${k})`, transformOrigin: "top left", width: GLYPH_MIN, height: GLYPH_MIN, lineHeight: 0 }}>
+        <Mascot size={GLYPH_MIN} frame={wavePose()} />
+      </span>
+    </span>
+  );
 }
 
 /**
@@ -23,7 +33,8 @@ export function GhostMark({ size = 24, hovered, trigger, className }: { size?: n
   const glyph = Math.round(size * 0.66);
   return (
     <span className={cx("g-mark", className)} style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }} aria-hidden>
-      {hovered === undefined && trigger === undefined ? <GhostGlyph size={glyph} /> : <Mascot size={glyph} hovered={hovered} trigger={trigger} />}
+      {/* Still: Wisp saying hello at any size. While hovered (or playing), the live mascot. */}
+      {hovered || (trigger !== undefined && trigger > 0) ? <Mascot size={glyph} hovered={hovered} trigger={trigger} /> : <GhostGlyph size={glyph} />}
     </span>
   );
 }

@@ -6,7 +6,7 @@
  * search run over what is loaded, and every count says so; "Show older" loads more.
  *
  * URL states (query before the hash): status=<all|attention|executed|pending|…>,
- * ability=<name>, q=<text>, open=<first|id>, fail=audit (mock only: every request fails),
+ * ability=<source name>, q=<text>, open=<first|id>, fail=audit (mock only: every request fails),
  * fail=audit-more (mock only: the first page loads, "Show older" fails).
  */
 import type { AuditEntry } from "@ghost/client-ts";
@@ -19,7 +19,7 @@ import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
 import { Button, ButtonSizeContext, Card, EmptyState, IconButton, Input, Kbd, LiveStatus, Notice, Page, Select, Skeleton, errorText, formatTime, useLive } from "../../ui";
 import { AuditRow, type LiveChange } from "./AuditRow";
-import { ATTENTION, STATUS_ORDER, abilityLabel, groupByDay, haystack, initialParams, matches, outcomeLabel, outcomeOf } from "./model";
+import { ATTENTION, STATUS_ORDER, groupByDay, haystack, initialParams, matches, outcomeLabel, outcomeOf, sourceLabel } from "./model";
 import { MAX_LOADED, PAGE, useAuditLog } from "./useAuditLog";
 import "./audit.css";
 
@@ -225,14 +225,14 @@ export default function AuditScreen(_: RouteProps) {
   const atLimit = log.items.length >= MAX_LOADED;
   const noMatchDescription =
     q && (status !== "all" || ability !== "all")
-      ? `The search only covers the status and ability you picked.${more ? " Older changes may match too." : ""}`
+      ? `The search only covers the status and source you picked.${more ? " Older changes may match too." : ""}`
       : more && atLimit
         ? `The newest ${log.items.length} were searched; older changes may match.`
         : more
           ? `Older changes aren’t loaded yet, and may match.${online ? "" : " They load once Ghost is back."}`
           : q
             ? "Try fewer words, an issue number, or an operation like close."
-            : "Try another status or ability.";
+            : "Try another status or source.";
   const empty = !log.loading && !log.error && log.total === 0 && log.items.length === 0;
 
   const actions = log.loading ? (
@@ -511,10 +511,10 @@ function AuditToolbar({ search, statusRef, query, setQuery, status, setStatus, a
           ref={abilitySelect}
           size={size}
           className="audit-filter"
-          aria-label="Ability"
+          aria-label="Source"
           value={ability}
           onChange={(e) => setAbility(e.target.value)}
-          options={[{ value: "all", label: "All abilities" }, ...abilities.map((a) => ({ value: a, label: abilityLabel(a) }))]}
+          options={[{ value: "all", label: "All sources" }, ...abilities.map((a) => ({ value: a, label: sourceLabel(a) }))]}
         />
       )}
     </div>
@@ -523,7 +523,7 @@ function AuditToolbar({ search, statusRef, query, setQuery, status, setStatus, a
 
 /**
  * A native select is as wide as its widest option. This sizes it to the option it shows
- * ("All abilities", "Failed · 3"), measured in its own font, so the filters read as compact
+ * ("All sources", "Failed · 3"), measured in its own font, so the filters read as compact
  * chips; the open list can still be wider. Re-measures when the label or the size changes,
  * and once the web font has loaded.
  */

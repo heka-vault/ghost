@@ -63,6 +63,9 @@ html[data-capture="full"] .sidebar { position: sticky; top: 0; }
 .sidebar__section { margin-top: var(--space-5); }
 .sidebar__label { padding: 0 var(--space-2); margin-bottom: var(--space-1); font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-3); }
 /* A group that folds (Prototypes): the label is the toggle, with a chevron that turns. */
+.sidebar__label--link { display: block; text-decoration: none; border-radius: var(--radius-xs); }
+.sidebar__label--link:hover, .sidebar__label--link:focus-visible { color: var(--text-1); }
+.sidebar__label--link[aria-current="page"] { color: var(--text-1); }
 .sidebar__label--toggle { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--space-5); margin-left: calc(var(--space-1) * -1); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-xs); background: transparent; font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-3); cursor: pointer; }
 .sidebar__label--toggle:hover { color: var(--text-1); }
 .sidebar__label--toggle .lucide { transition: transform var(--duration-fast) var(--ease-out); }

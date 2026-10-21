@@ -1,6 +1,6 @@
 # 0012: Abilities are installable packages; Ghost's source is not edited to add one
 
-- **Status:** accepted; amended by ADR 0015 (no undo)
+- **Status:** superseded by ADR 0022 (MCP servers are core; abilities retired 2026-10-20); amended by ADR 0015 (no undo) while it stood
 - **Date:** 2026-10-17
 - **Amends:** ADR 0006 (skills become abilities; the interface is the one below)
 

@@ -1,108 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AbilityInfo": {
-        "properties": {
-          "commands": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Commands",
-            "type": "array"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "interceptors": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Interceptors",
-            "type": "array"
-          },
-          "listeners": {
-            "default": 0,
-            "title": "Listeners",
-            "type": "integer"
-          },
-          "loaded": {
-            "title": "Loaded",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "operations": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/OperationInfo"
-            },
-            "title": "Operations",
-            "type": "array"
-          },
-          "passive": {
-            "title": "Passive",
-            "type": "boolean"
-          },
-          "read_tools": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ReadToolInfo"
-            },
-            "title": "Read Tools",
-            "type": "array"
-          },
-          "scope_items": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Scope Items",
-            "type": "array"
-          },
-          "scope_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope Kind"
-          },
-          "slots": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Slots",
-            "type": "array"
-          },
-          "version": {
-            "title": "Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "version",
-          "description",
-          "enabled",
-          "loaded",
-          "passive"
-        ],
-        "title": "AbilityInfo",
-        "type": "object"
-      },
       "Ack": {
         "properties": {
           "detail": {
@@ -885,6 +783,194 @@
         "title": "LogEvent",
         "type": "object"
       },
+      "McpScopeInfo": {
+        "properties": {
+          "arguments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Arguments",
+            "type": "array"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "arguments"
+        ],
+        "title": "McpScopeInfo",
+        "type": "object"
+      },
+      "McpServerInfo": {
+        "description": "One MCP server from the policy file (ADR 0022) and what Ghost got from it.",
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpScopeInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tools": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/McpToolInfo"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "transport": {
+            "title": "Transport",
+            "type": "string"
+          },
+          "writes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/McpWriteInfo"
+            },
+            "title": "Writes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "transport",
+          "connected"
+        ],
+        "title": "McpServerInfo",
+        "type": "object"
+      },
+      "McpToolInfo": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "offered": {
+            "title": "Offered",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "offered"
+        ],
+        "title": "McpToolInfo",
+        "type": "object"
+      },
+      "McpWriteInfo": {
+        "description": "A declared write: the policy operation, the tool it calls, and its level.",
+        "properties": {
+          "asked_by": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Asked By",
+            "type": "array"
+          },
+          "autonomy": {
+            "title": "Autonomy",
+            "type": "string"
+          },
+          "offered": {
+            "title": "Offered",
+            "type": "boolean"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Properties",
+            "type": "object"
+          },
+          "read": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read"
+          },
+          "required": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required",
+            "type": "array"
+          },
+          "risk": {
+            "title": "Risk",
+            "type": "string"
+          },
+          "target": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Target",
+            "type": "array"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "tool",
+          "risk",
+          "autonomy",
+          "offered"
+        ],
+        "title": "McpWriteInfo",
+        "type": "object"
+      },
       "ModelsView": {
         "properties": {
           "cache_dir": {
@@ -1258,16 +1344,11 @@
           },
           "policy": {
             "$ref": "#/components/schemas/PolicyView"
-          },
-          "restart_required": {
-            "title": "Restart Required",
-            "type": "boolean"
           }
         },
         "required": [
           "policy",
-          "applied",
-          "restart_required"
+          "applied"
         ],
         "title": "PolicyResult",
         "type": "object"
@@ -1285,34 +1366,6 @@
               }
             ],
             "title": "Default"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
-          "passive": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Passive"
           },
           "skills": {
             "anyOf": [
@@ -1379,30 +1432,9 @@
             ],
             "title": "Default"
           },
-          "enabled": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
           "exists": {
             "title": "Exists",
             "type": "boolean"
-          },
-          "passive": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Passive",
-            "type": "array"
           },
           "path": {
             "title": "Path",
@@ -1442,9 +1474,7 @@
           "text",
           "default",
           "skills",
-          "targets",
-          "enabled",
-          "passive"
+          "targets"
         ],
         "title": "PolicyView",
         "type": "object"
@@ -1536,6 +1566,7 @@
             "type": "array"
           },
           "restart_required": {
+            "default": false,
             "title": "Restart Required",
             "type": "boolean"
           },
@@ -1544,8 +1575,7 @@
           }
         },
         "required": [
-          "settings",
-          "restart_required"
+          "settings"
         ],
         "title": "SettingsResult",
         "type": "object"
@@ -1637,15 +1667,177 @@
         "title": "SettingsView",
         "type": "object"
       },
-      "Status": {
+      "SkillAdd": {
         "properties": {
-          "abilities": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "path": {
+            "description": "A folder on this machine holding SKILL.md.",
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "replace": {
+            "default": false,
+            "title": "Replace",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "SkillAdd",
+        "type": "object"
+      },
+      "SkillBody": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Abilities",
+            "title": "Files",
             "type": "array"
           },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "body"
+        ],
+        "title": "SkillBody",
+        "type": "object"
+      },
+      "SkillInfo": {
+        "description": "A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or a project's.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "missing": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "requires": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Requires",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "source",
+          "path"
+        ],
+        "title": "SkillInfo",
+        "type": "object"
+      },
+      "SourceInfo": {
+        "description": "A source of tools the gate knows: the lines (built in) or an MCP server. The\npolicy screen edits levels per operation from this list.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "operations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OperationInfo"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "read_tools": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReadToolInfo"
+            },
+            "title": "Read Tools",
+            "type": "array"
+          },
+          "scope_items": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Items",
+            "type": "array"
+          },
+          "scope_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Kind"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "description"
+        ],
+        "title": "SourceInfo",
+        "type": "object"
+      },
+      "Status": {
+        "properties": {
           "api_version": {
             "default": "1",
             "title": "Api Version",
@@ -1683,6 +1875,13 @@
           },
           "phase": {
             "$ref": "#/components/schemas/Phase"
+          },
+          "servers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Servers",
+            "type": "array"
           },
           "session_id": {
             "anyOf": [
@@ -1730,7 +1929,7 @@
           "uptime_secs",
           "version",
           "wake_mode",
-          "abilities"
+          "servers"
         ],
         "title": "Status",
         "type": "object"
@@ -1946,31 +2145,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/abilities": {
-      "get": {
-        "operationId": "abilities_abilities_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/AbilityInfo"
-                  },
-                  "title": "Response Abilities Abilities Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Abilities",
-        "tags": [
-          "abilities"
-        ]
-      }
-    },
     "/audit": {
       "get": {
         "operationId": "audit_audit_get",
@@ -2741,6 +2915,31 @@
         ]
       }
     },
+    "/mcp": {
+      "get": {
+        "operationId": "mcp_servers_mcp_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/McpServerInfo"
+                  },
+                  "title": "Response Mcp Servers Mcp Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mcp Servers",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
     "/phone": {
       "delete": {
         "description": "Forget the paired phone; its signatures stop working at once.",
@@ -3123,6 +3322,152 @@
         ]
       }
     },
+    "/skills": {
+      "get": {
+        "operationId": "skills_skills_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillInfo"
+                  },
+                  "title": "Response Skills Skills Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Skills",
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "add_skill_skills_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{name}": {
+      "delete": {
+        "operationId": "remove_skill_skills__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Skill",
+        "tags": [
+          "skills"
+        ]
+      },
+      "get": {
+        "operationId": "skill_body_skills__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skill Body",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
     "/sleep": {
       "post": {
         "operationId": "sleep_sleep_post",
@@ -3141,6 +3486,31 @@
         "summary": "Sleep",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/sources": {
+      "get": {
+        "operationId": "sources_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceInfo"
+                  },
+                  "title": "Response Sources Sources Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sources",
+        "tags": [
+          "sources"
         ]
       }
     },

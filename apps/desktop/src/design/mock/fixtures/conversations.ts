@@ -29,7 +29,7 @@ interface Seed {
   lastActiveMin: number | null;
   turns: [TurnView["role"], string][];
   compactions: number;
-  /** What the line may touch, per ability (ADR 0019). Absent: unscoped, it sees everything. */
+  /** What the line may touch, per server (ADR 0019). Absent: unscoped, it sees everything. */
   scope?: Scope;
   /** Settled this many days ago (ADR 0019): out of voice routing and the active list, still readable. */
   settledDaysAgo?: number;

@@ -16,17 +16,10 @@ def runtime_dir() -> Path:
 class GhostdSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GHOST_", extra="ignore")
 
-    # Abilities (ADR 0012). Installed packages exposing the `ghost.abilities` entry
-    # point, or folders under abilities_dir. The policy file's [abilities] enabled
-    # list wins over GHOST_ABILITIES when present. Each ability reads its own
-    # settings from the environment (github_issues: GITHUB_TOKEN, GHOST_REPOS,
-    # GHOST_GITHUB_MOCK).
-    abilities: list[str] = ["github_issues"]
-    abilities_dir: Path = Path.home() / ".config" / "ghost" / "abilities"
     data_dir: Path = Path.home() / ".local" / "share" / "ghost"
 
     # Autonomy (ADR 0011): the operator's per-operation levels. Missing file = every
-    # operation falls back to its skill's risk class (labels/comments announce, close
+    # operation falls back to its declared risk (labels/comments announce, close
     # confirms). Template: infra/policy.example.toml, seeded by `make env`.
     policy_path: Path = Path.home() / ".config" / "ghost" / "policy.toml"
 
@@ -52,6 +45,15 @@ class GhostdSettings(BaseSettings):
     # here; the transcript and the registry are in the database. Summarized turns older
     # than the retention window are pruned daily.
     conversations_dir: Path = Path.home() / ".local" / "share" / "ghost" / "conversations"
+    # Skills (ADR 0023): Ghost's own SKILL.md folders, plus project roots whose
+    # .agents/skills are read in place: GHOST_SKILL_ROOTS=~/projects/x,~/projects/y
+    skills_dir: Path = Path.home() / ".config" / "ghost" / "skills"
+    skill_roots: str = ""
+
+    @property
+    def skill_root_paths(self) -> list[Path]:
+        return [Path(p.strip()).expanduser() for p in self.skill_roots.split(",") if p.strip()]
+
     turn_retention_days: int = 90
 
     # Control API (ADR 0013): a user-owned Unix socket; no TCP. The desktop app, the

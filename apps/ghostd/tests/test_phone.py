@@ -42,7 +42,7 @@ class FakeHost:
             uptime_secs=1.0,
             version="test",
             wake_mode="file",
-            abilities=["fake"],
+            servers=["fake"],
         )
 
     def audit(self, limit: int, offset: int) -> AuditPage:

@@ -50,7 +50,6 @@ only to your terminal.
 While it runs, `make status` shows the daemon's state and `make say TEXT="..."` types a turn
 to it through the control socket (`$XDG_RUNTIME_DIR/ghost/api.sock`), which is what the
 desktop app uses. `make help` lists the rest (`test`, `lint`, `start`/`stop` for a background daemon,
-`restore-volumes`, `service`). Non-secret settings such as `GHOST_GITHUB_MOCK=1` go in
 `~/.config/ghost/settings.env`, which `make env` seeds and folds into the rendered file.
 
 The model is reached through `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN` by default.
@@ -75,19 +74,24 @@ Say "what needs my sign-off", talk it through, and "go to sleep" when done. How 
 Ghost may do without asking is in `~/.config/ghost/policy.toml` (seeded by `make env`
 from `infra/policy.example.toml`): per operation, `deny`, `confirm`, `announce`, or
 `quiet`. Every write is logged; to reverse one, ask Ghost and it proposes the opposite change.
-Ctrl+C stops the daemon; "go to sleep" only ends the conversation.
+The same file lists the MCP servers Ghost connects to (`[mcp.<name>]`, a streamable HTTP
+`url` or a stdio `command`; `$NAME` in a header or env value is a secret from the
+environment). Their read-only tools are offered to the model; `ghostd check` and the
+control API's `/mcp` show what each server gave. Ctrl+C stops the daemon; a goodbye only
+ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
 cancellation with [infra/pipewire/](infra/pipewire/). To teach Ghost something new,
-write an ability: a small package or a folder under `~/.config/ghost/abilities/`
-([docs/abilities.md](docs/abilities.md)). GitHub issues are the first one.
+declare an MCP server in the policy file ([docs/mcp.md](docs/mcp.md)): its reads are
+offered to the model, its writes by declaration through the gate. GitHub issues come
+through the official GitHub server; `ghost-mock-github` stands in before a token exists.
 
 ## Desktop app
 
 `apps/desktop` is a Tauri 2 app (React) that talks to the daemon over its socket. Speaking
 is the product; the app is the companion: the live session with a Confirm card for changes
 that need your okay, your saved lines and their voices, what Ghost may do on its own, the
-audit log, abilities, and settings. It follows the system's light or dark theme.
+audit log, servers, and settings. It follows the system's light or dark theme.
 
 <table>
   <tr>

@@ -19,7 +19,6 @@ import asyncio
 import itertools
 import json
 import os
-import platform
 import sys
 import time
 from datetime import datetime
@@ -54,7 +53,7 @@ def main(argv: list[str]) -> int:
         "--ablate",
         default="none",
         help="variants to compare, comma list: none, all, or names joined by + "
-        "(tts_clauses, issue_comments, prompt_lines, system_cache, shared_client)",
+        "(tts_clauses, prompt_lines, system_cache, shared_client)",
     )
     r.add_argument("--out", type=Path, default=None)
     r.add_argument("--show-text", action="store_true", help="print the dialogue (dev only)")
@@ -153,7 +152,7 @@ async def _run(a: argparse.Namespace, out: Path) -> int:
     runs = []
     meta = {
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "host": f"{platform.node()} ({os.cpu_count()} CPUs)",
+        "host": f"the workstation ({os.cpu_count()} CPUs)",  # no hostname: reports are committed
         "endpoints": ", ".join(sorted({endpoint_host(c) for c in configs})),
         "scenarios": ", ".join(names),
         "runs per scenario": a.runs,

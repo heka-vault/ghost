@@ -98,7 +98,7 @@ const LINES: Record<string, IssueLines> = {
 };
 
 /**
- * Each step is written exactly as the ability's Change.describe() writes it, because that is
+ * Each step is written exactly as the gate's describe() writes it, because that is
  * what the gate stores in step_applied and step_failed: "labels: add bug, priority-high",
  * "comment: <body>", "closed the issue".
  */
@@ -194,7 +194,7 @@ export default function audit(s: Scenario): AuditEntry[] {
     const [target] = pick(ISSUES);
     const made = o.make(target, line);
     const c = pick(CONV_OPS);
-    const ability = conv ? "conversations" : "github_issues";
+    const ability = conv ? "conversations" : "github_heka";
     const operation = conv ? c.op : o.op;
     const autonomy = conv ? c.autonomy : o.autonomy;
     const steps = conv ? c.steps : made.steps;
@@ -239,10 +239,10 @@ export default function audit(s: Scenario): AuditEntry[] {
   // One of each way a waiting write gets canceled, early in the log so the first page shows
   // them: an answer that wasn't a clear yes, “never mind”, switching lines, the app's Cancel,
   // and sleep. The cycle above spreads more of them through the older rows.
-  const cancelled = (at: number, operation: string, target: string, summary: string, reason: string, turn?: Record<string, unknown>, ability = "github_issues"): AuditEntry => ({
+  const cancelled = (at: number, operation: string, target: string, summary: string, reason: string, turn?: Record<string, unknown>, ability = "github_heka"): AuditEntry => ({
     id: hex(32, rand), session_id: sessions[0], ability, operation, target, summary, autonomy: "confirm", status: "cancelled", created_at: ago(at),
     events: [
-      ev(at, "prepared", { ability, operation, target: ability === "github_issues" ? `github:${target}` : target, autonomy: "confirm" }),
+      ev(at, "prepared", { ability, operation, target: ability === "github_heka" ? `github:${target}` : target, autonomy: "confirm" }),
       ...(turn ? [ev(at - 0.2, "user_turn", turn)] : []),
       ev(at - 0.2, "cancelled", { reason }),
     ],
@@ -260,8 +260,8 @@ export default function audit(s: Scenario): AuditEntry[] {
   // ago. The real daemon leaves these behind when it stops while a change waits; the screen
   // must read them as lapsed, never as waiting. Two in the busy log, one otherwise.
   const lapsed = (at: number, target: string, summary: string): AuditEntry => ({
-    id: hex(32, rand), session_id: hex(32, rand), ability: "github_issues", operation: "close", target, summary, autonomy: "confirm", status: "pending", created_at: ago(at),
-    events: [ev(at, "prepared", { ability: "github_issues", operation: "close", target: `github:${target}`, autonomy: "confirm" })],
+    id: hex(32, rand), session_id: hex(32, rand), ability: "github_heka", operation: "close", target, summary, autonomy: "confirm", status: "pending", created_at: ago(at),
+    events: [ev(at, "prepared", { ability: "github_heka", operation: "close", target: `github:${target}`, autonomy: "confirm" })],
   });
   if (count > 0) {
     entries.push(lapsed(60 * 26 + 17, "ghost-mock/app#170", "On ghost-mock/app#170: closed the issue, with a comment: “Fixed in #176.”"));
@@ -271,14 +271,14 @@ export default function audit(s: Scenario): AuditEntry[] {
   const recentSession = "5f2c9e1a8b7d4c3e9a1f0b6d2e4c8a7f";
   const recent: AuditEntry[] = [
     {
-      id: hex(32, rand), session_id: recentSession, ability: "github_issues", operation: "approve", target: "ghost-mock/app#208",
+      id: hex(32, rand), session_id: recentSession, ability: "github_heka", operation: "approve", target: "ghost-mock/app#208",
       summary: "On ghost-mock/app#208: approved, with a comment: “Dana’s fix looks right to me.”", autonomy: "announce", status: "executed", created_at: ago(4.0),
-      events: [ev(4.0, "prepared", { ability: "github_issues", operation: "approve", target: "github:ghost-mock/app#208", autonomy: "announce" }), ev(3.99, "claimed"), ev(3.98, "step_applied", { index: 0, step: "labels: add approved; remove needs-signoff" }), ev(3.97, "step_applied", { index: 1, step: "comment: Dana’s fix looks right to me." }), ev(3.96, "finished", { status: "success" })],
+      events: [ev(4.0, "prepared", { ability: "github_heka", operation: "approve", target: "github:ghost-mock/app#208", autonomy: "announce" }), ev(3.99, "claimed"), ev(3.98, "step_applied", { index: 0, step: "labels: add approved; remove needs-signoff" }), ev(3.97, "step_applied", { index: 1, step: "comment: Dana’s fix looks right to me." }), ev(3.96, "finished", { status: "success" })],
     },
     {
-      id: hex(32, rand), session_id: recentSession, ability: "github_issues", operation: "set_labels", target: "ghost-mock/app#212",
+      id: hex(32, rand), session_id: recentSession, ability: "github_heka", operation: "set_labels", target: "ghost-mock/app#212",
       summary: "On ghost-mock/app#212: labels: add bug, priority-high.", autonomy: "quiet", status: "executed", created_at: ago(4.8),
-      events: [ev(4.8, "prepared", { ability: "github_issues", operation: "set_labels", target: "github:ghost-mock/app#212", autonomy: "quiet" }), ev(4.79, "claimed"), ev(4.78, "step_applied", { index: 0, step: "labels: add bug, priority-high" }), ev(4.77, "finished", { status: "success" })],
+      events: [ev(4.8, "prepared", { ability: "github_heka", operation: "set_labels", target: "github:ghost-mock/app#212", autonomy: "quiet" }), ev(4.79, "claimed"), ev(4.78, "step_applied", { index: 0, step: "labels: add bug, priority-high" }), ev(4.77, "finished", { status: "success" })],
     },
   ];
   return [...recent, ...entries.sort((a, b) => b.created_at.localeCompare(a.created_at))].slice(0, count);

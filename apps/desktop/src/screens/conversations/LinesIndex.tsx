@@ -1,5 +1,5 @@
 /**
- * Owner: conversations. Every line at a glance (#/conversations): Ghost first, the live
+ * Owner: conversations. Every line at a glance (#/lines): Ghost first, the live
  * one next, the rest by last use. Each row is a name, the line's persona (the one thing
  * that makes lines different) and when it was last used; a row opens the line, and while
  * a session is live, Switch shows on the row under the pointer or focus and patches the
@@ -96,7 +96,16 @@ export function LinesIndex() {
     newLineSeed.slug = null;
     return s;
   });
-  const [creating, setCreating] = useState(() => readParam("open") === "new" || !!seed);
+  const [creating, setCreating] = useState(() => {
+    const asked = newLineSeed.open;
+    newLineSeed.open = false;
+    return readParam("open") === "new" || !!seed || asked;
+  });
+  const [settledAsked] = useState(() => {
+    const asked = newLineSeed.settled;
+    newLineSeed.settled = false;
+    return asked;
+  });
   const [switching, setSwitching] = useState<string | null>(null);
 
   const inSession = !!status?.session_id;
@@ -160,7 +169,7 @@ export function LinesIndex() {
   return (
     <Page
       width="default"
-      title="Conversations"
+      title="Lines"
       status={<LiveStatus />}
       description={
         <>
@@ -238,7 +247,7 @@ export function LinesIndex() {
               return (
                 <ListRow
                   key={l.slug}
-                  href={hrefFor(`/conversations/${l.slug}`)}
+                  href={hrefFor(`/lines/${l.slug}`)}
                   leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
                   title={name}
                   description={
@@ -320,7 +329,7 @@ export function LinesIndex() {
           {settledLines.length > 0 && (
             <Disclosure
               className="conv-settled-group"
-              defaultOpen={readParam("open") === "settled"}
+              defaultOpen={readParam("open") === "settled" || settledAsked}
               summary={
                 <span className="conv-settled-group__summary">
                   Settled
@@ -338,7 +347,7 @@ export function LinesIndex() {
                   return (
                     <ListRow
                       key={l.slug}
-                      href={hrefFor(`/conversations/${l.slug}`)}
+                      href={hrefFor(`/lines/${l.slug}`)}
                       leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
                       title={name}
                       description={
@@ -382,7 +391,7 @@ export function LinesIndex() {
           writeParam("open", null);
           toast({ title: `Started ${d.name}`, description: "Give it a persona and a voice, then patch through to it." });
           focusOnOpen.slug = d.slug;
-          navigate(`/conversations/${d.slug}`);
+          navigate(`/lines/${d.slug}`);
         }}
       />
     </Page>

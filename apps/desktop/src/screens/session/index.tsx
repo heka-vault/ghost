@@ -355,7 +355,7 @@ export default function SessionScreen(_: RouteProps) {
                   <div className="session-start__row">
                     {wakeButton}
                     {showLast && (
-                      <Link to={`/conversations/${lastSession.slug}`} className="session-start__last">
+                      <Link to={`/lines/${lastSession.slug}`} className="session-start__last">
                         <span>
                           Last session · {nameOf(lastSession.slug)} · <time dateTime={lastSession.at}>{relativeTime(lastSession.at)}</time>
                         </span>

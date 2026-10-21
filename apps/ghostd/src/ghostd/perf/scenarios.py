@@ -3,10 +3,11 @@ operator's lines one at a time, waiting for Ghost to finish each answer.
 
 A line with ``" ... "`` has a pause in the middle (ghostd.perf.audio). The checks are
 soft: a run that drifts (the model asks instead of acting) is reported, not failed.
-They read the mock GitHub state and the latency records, never transcripts."""
+They read the mock GitHub server's state and the latency records, never transcripts."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -44,10 +45,16 @@ def _closed(key: str) -> Check:
     return check
 
 
+def _slug(label: str) -> str:
+    """ "ready for agent", "ready_for_agent" and "ready-for-agent" are one label here: the
+    check is that the write went through the gate, not how the model hyphenates."""
+    return re.sub(r"[\s_-]+", "-", label.strip().lower())
+
+
 def _labeled(key: str, label: str) -> Check:
     def check(issues: dict[str, Any]) -> str | None:
-        labels = {lb["name"] for lb in _issue(issues, key).get("labels", [])}
-        return None if label in labels else f"{key} lacks {label!r}"
+        labels = {_slug(lb["name"]) for lb in _issue(issues, key).get("labels", [])}
+        return None if _slug(label) in labels else f"{key} lacks {label!r}"
 
     return check
 
@@ -68,34 +75,40 @@ SCENARIOS: dict[str, Scenario] = {
         Scenario(
             "lookup",
             "one read tool",
-            (Line("What needs my sign-off?", tools=frozenset({"list_awaiting_signoff"})),),
+            (Line("What's waiting for triage?", tools=frozenset({"github_list_issues"})),),
         ),
         Scenario(
             "lookup_pause",
             "one read tool, a pause mid-sentence (the turn hold)",
             (
                 Line(
-                    "What needs my sign-off ... in the app repo?",
-                    tools=frozenset({"list_awaiting_signoff"}),
+                    "What's waiting for triage ... in the app repo?",
+                    tools=frozenset({"github_list_issues"}),
                 ),
             ),
             tags=frozenset({"pause"}),
         ),
         Scenario(
             "chain",
-            "an issue and what people said: one get_issue now, two reads before",
+            "an issue and what people said: issue_read for the issue and for its comments",
             (
                 Line(
                     "What's going on with app 142, and what have people said about it?",
-                    tools=frozenset({"get_issue"}),  # with its latest comments
+                    tools=frozenset({"github_issue_read"}),
                 ),
             ),
         ),
         Scenario(
             "announce",
-            "a change at announce: approve",
-            (Line("Approve app 151.", tools=frozenset({"change"}), status="done:announce"),),
-            check=_labeled("ghost-mock/app#151", "approved"),
+            "a change at announce: a label",
+            (
+                Line(
+                    "Mark app 151 ready for agent.",
+                    tools=frozenset({"change"}),
+                    status="done:announce",
+                ),
+            ),
+            check=_labeled("ghost-mock/app#151", "ready-for-agent"),
         ),
         Scenario(
             "confirm_plain",
@@ -136,12 +149,16 @@ SCENARIOS: dict[str, Scenario] = {
             "session",
             "a realistic session: lookups, a change, goodbye (cache growth across turns)",
             (
-                Line("What needs my sign-off?", tools=frozenset({"list_awaiting_signoff"})),
-                Line("Tell me more about the dark mode one.", tools=frozenset({"get_issue"})),
-                Line("Approve it.", tools=frozenset({"change"}), status="done:announce"),
+                Line("What's waiting for triage?", tools=frozenset({"github_list_issues"})),
+                Line(
+                    "Tell me more about the dark mode one.", tools=frozenset({"github_issue_read"})
+                ),
+                Line(
+                    "Mark it ready for agent.", tools=frozenset({"change"}), status="done:announce"
+                ),
                 Line("Thanks, that's everything.", ends=True, intercepted=True),
             ),
-            check=_labeled("ghost-mock/app#151", "approved"),
+            check=_labeled("ghost-mock/app#151", "ready-for-agent"),
             tags=frozenset({"long"}),
         ),
     )

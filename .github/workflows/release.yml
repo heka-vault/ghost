@@ -18,8 +18,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD/dist/deb":/deb:ro ubuntu:26.04 bash -ec '
             apt-get update -qq && apt-get install -y -qq /deb/heka-ghostd_*.deb >/dev/null
-            ghostd abilities
-            GHOST_GITHUB_MOCK=1 ANTHROPIC_BASE_URL=http://x ghostd check'
+            ANTHROPIC_BASE_URL=http://x ghostd check'
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:

@@ -7,19 +7,16 @@ from api_fakes import Doc, FakeWriter, Tag
 from fastapi.testclient import TestClient
 from ghost_api import DaemonState, Deps, Phase, create_app
 from ghost_core import (
-    Ability,
     AutonomyPolicy,
     ChangeSet,
-    Contributions,
-    LoadedAbility,
     Operation,
     Prepared,
     ReadTool,
-    SimpleInstance,
     Store,
+    ToolSource,
     WriteGate,
 )
-from ghost_core.conversations import ABILITY as CONVERSATIONS
+from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.conversations import Conversations
 
 
@@ -31,7 +28,6 @@ class FakeControl:
         self.gate = gate
         self.policy_path = policy_path
         self.calls: list[tuple] = []
-        self.discovered = {}
 
     async def wake(self, first_utterance):
         self.calls.append(("wake", first_utterance))
@@ -82,9 +78,6 @@ class FakeControl:
         self.calls.append(("reload_policy",))
         return policy
 
-    def discovered_abilities(self):
-        return self.discovered
-
     # conversations (ADR 0014)
     async def switch_conversation(self, slug):
         self.calls.append(("switch", slug))
@@ -134,7 +127,7 @@ class FakeControl:
         return had
 
 
-def make_ability(writer) -> LoadedAbility:
+def make_source(writer) -> ToolSource:
     async def echo(args):
         return {"echo": args}
 
@@ -161,25 +154,22 @@ def make_ability(writer) -> LoadedAbility:
             risk="high",
         ),
     ]
-    c = Contributions(
-        prompt="P", read_tools=[ReadTool("echo", "Echo.", {}, [], echo)], operations=ops
+    return ToolSource(
+        name="fake",
+        prompt="A fake server. It echoes.",
+        read_tools=[ReadTool("echo", "Echo.", {}, [], echo)],
+        operations=ops,
     )
-
-    async def setup(ctx, s):
-        return SimpleInstance(c)
-
-    ab = Ability("fake", "1.2.3", "A fake ability", setup)
-    return LoadedAbility(ab, None, SimpleInstance(c), c)
 
 
 @pytest.fixture
 def world(tmp_path: Path):
     store = Store()
     writer = FakeWriter()
-    loaded = make_ability(writer)
+    loaded = make_source(writer)
     policy_path = tmp_path / "policy.toml"
     gate = WriteGate(store, autonomy=AutonomyPolicy.load(policy_path))
-    gate.register("fake", loaded.contributions.operations)
+    gate.register("fake", loaded.operations)
     conversations = Conversations(
         store,
         tmp_path / "conversations",
@@ -189,10 +179,6 @@ def world(tmp_path: Path):
     gate.register(CONVERSATIONS, conversations.operations())
     state = DaemonState(version="test", wake_mode="file")
     control = FakeControl(state, gate, policy_path)
-    control.discovered = {
-        "fake": loaded.ability,
-        "other": Ability("other", "0.1", "not enabled", loaded.ability.setup),
-    }
     infra = tmp_path / "infra" / "pipewire"
     infra.mkdir(parents=True)
     (infra / "install.sh").write_text("#!/bin/sh\necho installed $1\n")
@@ -202,7 +188,7 @@ def world(tmp_path: Path):
         control=control,
         gate=gate,
         store=store,
-        abilities=[loaded],
+        sources=[loaded],
         policy_path=policy_path,
         settings_path=tmp_path / "settings.env",
         env_path=tmp_path / "env",

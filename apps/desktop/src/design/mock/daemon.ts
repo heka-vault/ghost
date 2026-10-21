@@ -4,11 +4,11 @@
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
 import type {
-  AbilityInfo,
   AuditEntry,
   ConversationView,
   DevicesView,
   GhostEvent,
+  McpServerInfo,
   ModelsView,
   OutcomeView,
   PendingProposal,
@@ -18,6 +18,8 @@ import type {
   PolicyView,
   SettingsUpdate,
   SettingsView,
+  SkillInfo,
+  SourceInfo,
   Status,
   Turn,
   VoiceInfo,
@@ -26,8 +28,11 @@ import type {
 import type { Scope, ThreadDetail, ThreadFields } from "../../screens/conversations/threads";
 import type { LineRecord } from "./fixtures/conversations";
 import type { Fixtures } from "./fixtures";
+import type { ServerFixture } from "./fixtures/mcp";
 import { renderToml } from "./fixtures/policy";
+import { parsePolicy } from "../../screens/policy/model";
 import type { SessionFixture } from "./fixtures/session";
+import { GHOST_SKILLS_DIR, type SkillFixture, missingOf } from "./fixtures/skills";
 import { hex, type Scenario, seeded } from "./scenarios";
 
 export class HttpError extends Error {
@@ -43,14 +48,13 @@ const newId = () => hex(32, rand);
 const now = () => new Date().toISOString();
 
 /**
- * The steps the gate records for a write, worded as the real ability's Change.describe()
- * does: "closed the issue", "comment: …", "labels: …". A comment carried in the summary
+ * The steps the gate records for a write, worded as the gate's own describe() does: "closed the issue", "comment: …", "labels: …". A comment carried in the summary
  * ("…, with a comment: “…”") becomes its own step.
  */
 function stepsOf(operation: string, summary: string): string[] {
   const comment = /with a comment:\s*[“"]?([\s\S]*?)[”"]?\.?$/.exec(summary)?.[1]?.trim();
   const main: Record<string, string | null> = { close: "closed the issue", reopen: "open the issue", comment: null, approve: "approve", request_changes: "request_changes", set_labels: "set_labels" };
-  // The comment lands first, then the state change, as the ability orders its steps.
+  // The comment lands first, then the state change, as the declaration orders its steps.
   const steps: string[] = [];
   if (comment) steps.push(`comment: ${comment}`);
   const last = operation in main ? main[operation] : operation;
@@ -97,7 +101,9 @@ export class MockDaemon {
   private turns: Turn[];
   private pending: PendingProposal | null;
   private lines = new Map<string, LineRecord>();
-  private abilities: AbilityInfo[];
+  /** The declared servers (GET /mcp) and what the gate knows (GET /sources), ADR 0022. */
+  private servers: ServerFixture[];
+  private sources: SourceInfo[];
   private policy: PolicyView;
   private audit: AuditEntry[];
   private settings: SettingsView;
@@ -107,6 +113,8 @@ export class MockDaemon {
   private phone: PhoneView;
   private pairing: PhonePairing | null = null;
   private phoneOpts: PhoneOptions;
+  /** The SKILL.md folders Ghost reads (ADR 0023): Ghost's own, and a project's read in place. */
+  private skills: SkillFixture[];
   private script: SessionFixture;
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -119,12 +127,14 @@ export class MockDaemon {
     this.pending = f.session.pending;
     for (const l of f.conversations.lines) this.lines.set(l.detail.slug, l);
     this.voices = f.conversations.voices;
-    this.abilities = f.abilities;
+    this.servers = f.mcp;
+    this.sources = f.sources;
     this.policy = f.policy;
     this.audit = f.audit;
     this.settings = f.settings.settings;
     this.devices = f.settings.devices;
     this.models = f.settings.models;
+    this.skills = f.skills;
     this.status = {
       phase: scenario.phase,
       session_id: f.session.sessionId,
@@ -133,7 +143,7 @@ export class MockDaemon {
       version: "0.1.0",
       api_version: "1",
       wake_mode: "transcript",
-      abilities: this.abilities.filter((a) => a.enabled && a.version !== "built-in").map((a) => a.name),
+      servers: this.servers.filter((f) => f.info.connected).map((f) => f.info.name),
       pending: this.pending,
       conversation: scenario.session,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
@@ -320,7 +330,7 @@ export class MockDaemon {
     const { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at } = d;
     return { slug, name, aliases, voice, speed, created_at, last_active_at, active, is_ghost, scope, settled_at };
   }
-  /** A scope as the body carries it: per ability, a list of strings. Anything else is ignored. */
+  /** A scope as the body carries it: per source, a list of strings. Anything else is ignored. */
   private scopeFrom(raw: unknown): Scope {
     const out: Scope = {};
     if (raw && typeof raw === "object") {
@@ -343,11 +353,57 @@ export class MockDaemon {
     this.pushStatus({ conversation: slug });
     this.conversationEvent(slug);
   }
-  private audited(ability: string, operation: string, target: string, summary: string) {
+  private audited(ability: string, operation: string, target: string, summary: string, autonomy = "announce") {
     this.audit.unshift({
-      id: newId(), session_id: this.status.session_id ?? "ui", ability, operation, target, summary, autonomy: "announce", status: "executed", created_at: now(),
-      events: [{ at: now(), event: "prepared", detail: { ability, operation, target } }, { at: now(), event: "claimed" }, { at: now(), event: "finished", detail: { status: "success" } }],
+      id: newId(), session_id: this.status.session_id ?? "ui", ability, operation, target, summary, autonomy, status: "executed", created_at: now(),
+      events: [{ at: now(), event: "prepared", detail: { ability, operation, target, autonomy } }, { at: now(), event: "claimed" }, { at: now(), event: "finished", detail: { status: "success" } }],
     });
+  }
+
+  // ------------------------------------------------------------------ skills (ADR 0023)
+  /** GET /skills as the daemon reports it: `missing` re-read from the servers connected now. */
+  private skillList(): SkillInfo[] {
+    const connected = new Set(this.servers.filter((f) => f.info.connected).map((f) => f.info.name));
+    return this.skills.map((f) => ({ ...f.info, missing: missingOf(f.info.requires, connected) }));
+  }
+  private skillNamed(name: string): SkillFixture | null {
+    return this.skills.find((f) => f.info.name === name) ?? null;
+  }
+  /**
+   * POST /skills without a file system: the folder's last name is the skill's. The refusals
+   * are worded as ghost_core.skills words them (409), so the screen shows the real sentences:
+   * not a folder, no SKILL.md, inside Ghost's own directory, already installed.
+   */
+  private addSkill(raw: string, wanted: string | null, replace: boolean): SkillInfo {
+    const path = raw.trim().replace(/\/+$/, "");
+    if (!path) throw new HttpError(409, "path is required: the folder holding SKILL.md");
+    if (!/^(~|\/)/.test(path)) throw new HttpError(409, `${path} is not a folder`);
+    const folder = path.replace(/\/SKILL\.md$/, "");
+    const last = folder.split("/").pop() ?? "";
+    if (/\.[a-z0-9]{1,5}$/i.test(last)) throw new HttpError(409, `${path} is not a folder`);
+    if (folder.startsWith(`${GHOST_SKILLS_DIR}/`) || /\/\.config\/ghost\/skills\//.test(folder)) throw new HttpError(409, `${path} is already in Ghost's skills`);
+    // The mock can't look inside: a home folder, a desktop or a downloads folder is plainly not a skill.
+    if (!last || /^(home|desktop|documents|downloads|tmp|projects|src)$/i.test(last)) throw new HttpError(409, `${path} has no SKILL.md with a name`);
+    const name = (wanted ?? last).trim();
+    if (!/^[a-z0-9][a-z0-9.-]*$/i.test(name)) throw new HttpError(409, `${JSON.stringify(name)} is not a skill name (letters, digits, dots, dashes)`);
+    const existing = this.skillNamed(name);
+    if (existing && existing.info.source === "ghost" && !replace) throw new HttpError(409, `${name} is already installed`);
+    const title = name.replace(/[-.]+/g, " ");
+    const added: SkillFixture = {
+      info: { name, description: `${title[0].toUpperCase()}${title.slice(1)}, added from ${folder}.`, source: "ghost", path: `${GHOST_SKILLS_DIR}/${name}`, requires: [], missing: [], files: [] },
+      body: `# ${title[0].toUpperCase()}${title.slice(1)}\n\nCopied from ${folder}. Edit SKILL.md in ${GHOST_SKILLS_DIR}/${name} to change what Ghost reads.\n`,
+    };
+    if (existing && existing.info.source === "ghost") this.skills[this.skills.indexOf(existing)] = added;
+    else this.skills.push(added);
+    this.audited("skills", "add", `skill:${name}`, existing ? `Replaced the ${name} skill from ${folder}.` : `Added the ${name} skill from ${folder}.`, "quiet");
+    return this.skillList().find((i) => i.name === name)!;
+  }
+  private removeSkill(name: string) {
+    const f = this.skillNamed(name);
+    if (!f) throw new HttpError(409, `no skill named ${JSON.stringify(name)}`);
+    if (f.info.source !== "ghost") throw new HttpError(409, `${name} lives in ${f.info.source}; Ghost only removes its own`);
+    this.skills = this.skills.filter((x) => x !== f);
+    this.audited("skills", "remove", `skill:${name}`, `Removed the ${name} skill.`, "quiet");
   }
 
   // ------------------------------------------------------------------ router
@@ -387,26 +443,31 @@ export class MockDaemon {
       return { items: items.slice(offset, offset + limit), total: items.length, limit, offset };
     }
 
-    if (method === "GET" && path === "/abilities") return this.abilities;
+    if (method === "GET" && path === "/sources") return this.sources;
+    if (method === "GET" && path === "/mcp") return this.servers.map((f): McpServerInfo => f.info);
     if (method === "GET" && path === "/policy") return this.policy;
     if (method === "PUT" && path === "/policy") {
       const u = b as PolicyUpdate;
-      let restart = false;
       if (u.text != null) {
-        this.policy = { ...this.policy, text: u.text, exists: true };
+        // As the daemon does: the file is read before it is written, and refused when it can't be.
+        const r = parsePolicy(u.text);
+        if (!r.ok && r.certain) throw new HttpError(422, `request: ${r.message}`);
+        this.policy = r.ok ? { ...this.policy, text: u.text, exists: true, default: r.data.default, skills: r.data.skills, targets: r.data.targets } : { ...this.policy, text: u.text, exists: true };
       } else {
         if (u.skills) this.policy.skills = u.skills;
         if (u.default !== undefined) this.policy.default = u.default ?? null;
         if (u.targets) this.policy.targets = u.targets;
-        if (u.enabled) {
-          restart = true;
-          this.policy.enabled = u.enabled;
-          for (const a of this.abilities) a.enabled = u.enabled.includes(a.name) || a.version === "built-in";
-        }
-        this.policy = { ...this.policy, exists: true, text: renderToml(this.policy) };
+        this.policy = { ...this.policy, exists: true, text: renderToml(this.policy, this.servers) };
       }
-      for (const a of this.abilities) for (const op of a.operations) op.autonomy = this.policy.skills[a.name]?.[op.name] ?? op.autonomy;
-      return { applied: !restart, restart_required: restart, policy: this.policy };
+      // Levels apply live (ADR 0022): every source's operations and every server's declared
+      // writes read the new file's levels; a write set to deny is no longer offered.
+      for (const src of this.sources) for (const op of src.operations) op.autonomy = this.policy.skills[src.name]?.[op.name] ?? op.autonomy;
+      for (const f of this.servers)
+        for (const w of f.info.writes) {
+          w.autonomy = this.policy.skills[f.info.name]?.[w.operation] ?? w.autonomy;
+          w.offered = f.info.connected && w.autonomy !== "deny";
+        }
+      return { applied: true, policy: this.policy };
     }
     if (method === "GET" && path === "/settings") return this.settings;
     if (method === "PUT" && path === "/settings") {
@@ -440,6 +501,18 @@ export class MockDaemon {
       this.requireReady();
       await sleep(900);
       return { ok: true, detail: `Spoke a sample in ${decodeURIComponent(r[1])}.` };
+    }
+
+    if (method === "GET" && path === "/skills") return this.skillList();
+    if (method === "POST" && path === "/skills") return this.addSkill(String(b.path ?? ""), typeof b.name === "string" ? b.name : null, b.replace === true);
+    if ((r = m(/^\/skills\/([^/]+)$/))) {
+      const name = decodeURIComponent(r[1]);
+      if (method === "GET") {
+        const f = this.skillNamed(name);
+        if (!f) throw new HttpError(404, `no skill ${JSON.stringify(name)}`);
+        return { name: f.info.name, body: f.body, files: [...f.info.files] };
+      }
+      if (method === "DELETE") return this.removeSkill(name), { ok: true, detail: null };
     }
 
     if (method === "GET" && path === "/phone") return this.phone;

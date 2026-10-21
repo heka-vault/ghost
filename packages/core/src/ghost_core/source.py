@@ -1,11 +1,9 @@
-"""The ability API: what an installable package contributes to Ghost (ADR 0012).
+"""What a source of tools gives Ghost: a prompt paragraph, typed read tools, write
+operations for the gate, and the pipeline hooks Ghost's own parts use.
 
-An ability is a package with an ``Ability`` object exported through the
-``ghost.abilities`` entry point group (or dropped into
-``~/.config/ghost/abilities/<name>/``). Ghost instantiates its settings from the
-environment, calls ``setup`` with a ``GhostContext``, and asks the returned instance
-for its ``Contributions``. Every field is optional: a read-only ability declares a
-prompt paragraph and some read tools and is done.
+Sources are core: the lines (ADR 0014), Ghost's fixed intents, and every MCP server the
+operator declares (ADR 0022). There is no package mechanism any more; a ``ToolSource`` is
+built in code from what a server or a core module offers.
 """
 
 from __future__ import annotations
@@ -52,7 +50,7 @@ class Operation:
     """A named write. The model supplies ``properties``; ``prepare`` validates them into
     a ``Prepared``; the gate applies it through ``writer`` at the autonomy level the
     operator's policy gives this operation. ``risk`` is only the suggested default.
-    ``allowed`` is the ability's own allowlist (repositories, directories, calendars);
+    ``allowed`` is the source's own allowlist (repositories, directories, calendars);
     the gate checks it before anything else."""
 
     name: str
@@ -101,7 +99,7 @@ class TurnInterceptor(Protocol):
 
 
 class Slot(enum.StrEnum):
-    """Where in the voice pipeline an ability's Pipecat processors are spliced in."""
+    """Where in the voice pipeline a processor sits (Ghost's own, by slot)."""
 
     AUDIO_IN = "audio_in"  # raw mic frames in session
     AFTER_STT = "after_stt"  # transcription frames
@@ -126,70 +124,22 @@ class Event:
 EventListener = Callable[[Event], Awaitable[None]]
 
 
-@dataclass(frozen=True)
-class CliCommand:
-    """``ghostd <ability> <name> [args]``."""
+@dataclass
+class ToolSource:
+    """One source of tools, as the pipeline and the gate take it. ``name`` is the key the
+    policy file, the gate registry and the audit use (``[mcp.github.levels]``,
+    ``github.close``). ``scope_kind`` and ``scope_items`` say what a thread can be scoped
+    to for this source (ADR 0019); a scoped source gets an ``ActiveScope`` as the
+    ``_scope`` argument of every read tool and ``prepare`` call, and may give
+    ``scoped_prompt`` to narrow its paragraph to the active thread."""
 
     name: str
-    description: str
-    run: Callable[[list[str]], int]
-
-
-# --- the bundle -------------------------------------------------------------------
-
-
-@dataclass
-class Contributions:
     prompt: str = ""
     read_tools: list[ReadTool] = field(default_factory=list)
     operations: list[Operation] = field(default_factory=list)
     interceptors: list[TurnInterceptor] = field(default_factory=list)
     processors: dict[Slot, list[ProcessorFactory]] = field(default_factory=dict)
     listeners: list[EventListener] = field(default_factory=list)
-    commands: list[CliCommand] = field(default_factory=list)
-    # Scope (ADR 0019). ``scope_kind`` says what a thread can be scoped to for this
-    # ability ("repository", "directory", "workspace"); ``scope_items`` returns the whole
-    # allowlist, each item the string ``Target.scope()`` yields for it. A scoped ability
-    # gets an ``ActiveScope`` as the ``_scope`` argument of every read tool and
-    # ``prepare`` call (``ghost_core.scope.scope_of(args)``), and may give
-    # ``scoped_prompt`` to narrow its prompt paragraph to the active thread. Abilities
-    # that declare no scope kind are unaffected.
     scope_kind: str | None = None
     scope_items: Callable[[], list[str]] | None = None
-    scoped_prompt: Callable[[Any], str] | None = None  # (ActiveScope | None) -> str
-
-
-class AbilityInstance(Protocol):
-    def contributions(self) -> Contributions: ...
-
-    async def aclose(self) -> None: ...
-
-
-@dataclass
-class SimpleInstance:
-    """For abilities that have no state to close beyond a callback."""
-
-    _contributions: Contributions
-    _aclose: Callable[[], Awaitable[None]] | None = None
-
-    def contributions(self) -> Contributions:
-        return self._contributions
-
-    async def aclose(self) -> None:
-        if self._aclose:
-            await self._aclose()
-
-
-@dataclass(frozen=True)
-class Ability:
-    """The exported object. ``config`` is a pydantic-settings class Ghost instantiates
-    from the environment (use ``env_prefix="GHOST_<NAME>_"``), or None. ``passive``
-    marks abilities that may run before the wake phrase; the operator must also list
-    them in the policy file, because they hear idle audio."""
-
-    name: str
-    version: str
-    description: str
-    setup: Callable[[Any, Any], Awaitable[AbilityInstance]]  # (GhostContext, settings)
-    config: type | None = None
-    passive: bool = False
+    scoped_prompt: Callable[[Any], str] | None = None  # ActiveScope | None -> paragraph

@@ -45,8 +45,8 @@ fmt: ## ruff format
 env: ## render ~/.config/ghost/env from the secrets store; seeds settings.env and policy.toml on first run
 	@if [[ ! -e "$(SETTINGS)" ]]; then \
 	  mkdir -p "$(dir $(SETTINGS))"; \
-	  printf 'GHOST_GITHUB_MOCK=1\nGHOST_INPUT_DEVICE=ghost.mic\n' > "$(SETTINGS)"; \
-	  echo "seeded $(SETTINGS) (mock GitHub, ghost.mic); edit it for non-secret settings"; \
+	  printf 'GHOST_INPUT_DEVICE=ghost.mic\n' > "$(SETTINGS)"; \
+	  echo "seeded $(SETTINGS) (ghost.mic); edit it for non-secret settings"; \
 	fi
 	@if [[ ! -e "$(POLICY)" ]]; then \
 	  mkdir -p "$(dir $(POLICY))"; cp infra/policy.example.toml "$(POLICY)"; \
@@ -181,7 +181,7 @@ deb: ## build heka-ghostd, heka-ghost-desktop and heka-ghost .debs into dist/deb
 	docker run --rm -v "$(CURDIR)":/src -v heka-ghost-build-cache:/cache -w /src -e HOST_UID=$(shell id -u) -e HOST_GID=$(shell id -g) heka-ghost-build packaging/build-debs.sh $(ONLY)
 
 deb-test: ## install the .debs into a clean Ubuntu 26.04 container and run ghostd check
-	docker run --rm -v "$(CURDIR)/dist/deb":/deb:ro ubuntu:26.04 bash -c 'apt-get update -qq && apt-get install -y -qq /deb/*.deb >/dev/null && ghostd --help; ghostd abilities; GHOST_GITHUB_MOCK=1 ANTHROPIC_BASE_URL=http://x ghostd check'
+	docker run --rm -v "$(CURDIR)/dist/deb":/deb:ro ubuntu:26.04 bash -c 'apt-get update -qq && apt-get install -y -qq /deb/*.deb >/dev/null && ghostd --help; ANTHROPIC_BASE_URL=http://x ghostd check'
 
 service-logs: ## follow ghostd.service logs
 	journalctl --user -u ghostd -f

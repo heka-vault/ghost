@@ -33,9 +33,6 @@ class _NoControl:
     def reload_policy(self):
         raise NotImplementedError
 
-    def discovered_abilities(self):
-        return {}
-
     async def switch_conversation(self, slug):
         return False
 
@@ -72,7 +69,8 @@ def openapi() -> dict[str, Any]:
         control=_NoControl(),
         gate=WriteGate(store),
         store=store,
-        abilities=[],
+        sources=[],
+        skills=None,
         conversations=Conversations(store, Path(tempfile.mkdtemp()) / "conversations"),
         policy_path=Path("/dev/null"),
         settings_path=Path("/dev/null"),

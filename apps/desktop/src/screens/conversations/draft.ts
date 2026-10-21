@@ -16,7 +16,7 @@ export interface Draft {
   persona: string;
   memory: string;
   notes: string[];
-  /** Per ability, what the line may touch (ADR 0019). Empty: it sees everything. */
+  /** Per server, what the line may touch (ADR 0019). Empty: it sees everything. */
   scope: Scope;
 }
 
@@ -67,7 +67,7 @@ export function updateBody(draft: Draft, keys: DraftKey[]): ThreadUpdate {
   return body;
 }
 
-/** A scope with no empty lists: an ability without items is simply absent (unscoped for it). */
+/** A scope with no empty lists: a server without items is simply absent (unscoped for it). */
 export function cleanScope(scope: Scope): Scope {
   const out: Scope = {};
   for (const [k, items] of Object.entries(scope)) if (items.length) out[k] = [...items];

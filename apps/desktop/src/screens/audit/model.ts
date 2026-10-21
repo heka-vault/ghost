@@ -70,17 +70,16 @@ export const STATUS_ORDER = ["executed", "pending", "claimed", "failed", "partia
 
 /* ---------------------------------------------------------------------------- words */
 
-/** "github_issues.close". */
+/** "github_heka.close": the source (a server's name in the policy file, or the lines) and the operation. */
 export function opName(e: AuditEntry): string {
   return `${e.ability}.${e.operation}`;
 }
 
-/** Ability names read as words in the filter: github_issues is "GitHub issues". */
-export function abilityLabel(name: string): string {
-  if (name === "github_issues") return "GitHub issues";
-  if (name === "conversations") return "Conversations";
+/** Source names read as words in the filter: the built-in one is "Lines", a server goes by its humanized name ("GitHub heka"). */
+export function sourceLabel(name: string): string {
+  if (name === "conversations") return "Lines";
   const s = name.replace(/[_-]+/g, " ");
-  return s[0].toUpperCase() + s.slice(1);
+  return (s[0].toUpperCase() + s.slice(1)).replace(/\bgithub\b/i, "GitHub");
 }
 
 /**
@@ -116,7 +115,7 @@ export function splitSummary(e: AuditEntry): SummaryParts {
 /* ---------------------------------------------------------------------------- steps */
 
 /**
- * One step as the gate wrote it (the ability's Change.describe()), in the operator's words.
+ * One step as the gate wrote it (the source's describe()), in the operator's words.
  * `done` titles an applied step, `todo` follows "Couldn’t" for a failed one, `quote` is the
  * text the step carried (a comment's body, a pinned note). Unknown steps keep their words,
  * sentence-cased.
@@ -137,7 +136,7 @@ export function stepView(raw: string): StepView {
   if ((m = /^comment:\s*([\s\S]*)$/.exec(s))) return { done: "Comment added", todo: "add the comment", quote: m[1] || undefined, known: true };
   if (s === "closed the issue") return { done: "Closed the issue", todo: "close the issue", known: true };
   if ((m = /^labels:\s*([\s\S]*)$/.exec(s))) return { done: `Labels: ${m[1]}`, todo: `change the labels (${m[1]})`, known: true };
-  // A bare operation name, as the mock gate writes it and an ability may: the same words.
+  // A bare operation name, as the mock gate writes it and a source may: the same words.
   if (s === "close") return { done: "Closed the issue", todo: "close the issue", known: true };
   if (s === "reopen") return { done: "Reopened the issue", todo: "reopen the issue", known: true };
   if (s === "approve") return { done: "Approved", todo: "approve it", known: true };
@@ -346,7 +345,7 @@ export function haystack(e: AuditEntry, ctx: OutcomeContext = {}): string {
     o,
     outcomeLabel(o),
     ...levelParts(e, o),
-    abilityLabel(e.ability),
+    sourceLabel(e.ability),
     e.id,
     ...e.events.flatMap((ev) => {
       const v = describeEvent(ev, e);

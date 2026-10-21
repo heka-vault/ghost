@@ -1,6 +1,6 @@
 """Fixed intents that need no model: hang up, hold and cancel (the Jev experiment showed
 a short exact-match list is nearly as good as a classifier for these, with nothing on
-the network path). An in-tree ``TurnInterceptor``; abilities can add their own.
+the network path). Ghost's own ``TurnInterceptor``.
 "Undo that" is not one: it goes to the model, which proposes the reversing change.
 
 Hold (ADR 0021): "hang on, Ghost" keeps the session but Ghost stops listening until it is

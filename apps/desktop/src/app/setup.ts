@@ -26,8 +26,12 @@ export function useSetupNeeded(path: string, online: boolean): boolean {
       .settings()
       .then((s) => {
         if (!live) return;
-        const token = s.secrets.find((x) => x.name === "ANTHROPIC_AUTH_TOKEN")?.set ?? false;
-        setNeeded(!token && !s.values.ANTHROPIC_BASE_URL);
+        // A model is reachable through an Anthropic token, an endpoint of the operator's own,
+        // or OpenRouter (GHOST_LLM_ENDPOINT=openrouter with its key, ADR 0018).
+        const has = (name: string) => s.secrets.find((x) => x.name === name)?.set ?? false;
+        const anthropic = has("ANTHROPIC_AUTH_TOKEN") || !!s.values.ANTHROPIC_BASE_URL;
+        const openrouter = s.values.GHOST_LLM_ENDPOINT === "openrouter" && has("OPENROUTER_API_KEY");
+        setNeeded(!anthropic && !openrouter);
       })
       .catch(() => {});
     return () => {

@@ -72,13 +72,18 @@ def test_example_policy_parses():
 
     example = Path(__file__).parents[3] / "infra" / "policy.example.toml"
     p = AutonomyPolicy.parse(example.read_text())
-    assert p.resolve("github_issues", "set_labels") is Autonomy.ANNOUNCE
-    assert p.resolve("github_issues", "close") is Autonomy.CONFIRM
+    assert set(p.mcp) == {"github"} and set(p.mcp["github"].writes) == {
+        "comment",
+        "set_labels",
+        "close",
+        "reopen",
+    }
+    assert p.resolve("github", "set_labels") is Autonomy.ANNOUNCE
+    assert p.resolve("github", "close") is Autonomy.CONFIRM
 
 
-def test_abilities_section():
-    p = AutonomyPolicy.parse('[abilities]\nenabled = ["notes"]\npassive = ["wake_onnx"]\n')
-    assert p.enabled == ("notes",) and p.passive == ("wake_onnx",)
-    assert AutonomyPolicy.parse("").enabled is None
-    with pytest.raises(ValueError, match="abilities.enabled"):
-        AutonomyPolicy.parse('[abilities]\nenabled = "notes"\n')
+def test_abilities_section_is_ignored():
+    """The retired ability packages' section (ADR 0022) parses to nothing."""
+    p = AutonomyPolicy.parse('[abilities]\nenabled = ["notes"]\n[notes]\nadd = "quiet"\n')
+    assert p.resolve("notes", "add") is Autonomy.QUIET
+    assert "[abilities]" not in p.to_toml()

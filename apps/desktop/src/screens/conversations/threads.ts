@@ -2,11 +2,11 @@
  * Owner: conversations. The ADR 0019 additions to a line (scope, settled, seed_from) as the
  * generated client carries them, plus the helpers every screen reads them through: a daemon
  * that predates the fields still renders (no scope reads as unscoped, no settled_at as
- * active), and GET /abilities is narrowed to the abilities that can be scoped.
+ * active), and GET /sources is narrowed to the sources that can be scoped (ADR 0022).
  */
-import type { AbilityInfo, ConversationCreate, ConversationDetail, ConversationUpdate, GhostClient } from "@ghost/client-ts";
+import type { ConversationCreate, ConversationDetail, ConversationUpdate, GhostClient, SourceInfo } from "@ghost/client-ts";
 
-/** Per ability, the items this line may touch: `{ github_issues: ["heka-vault/ghost"] }`. */
+/** Per source (a server's name in the policy file), the items this line may touch: `{ github_heka: ["heka-vault/ghost"] }`. */
 export type Scope = Record<string, string[]>;
 
 /** The two fields a line record always carries in the mock (the API marks settled_at optional). */
@@ -19,8 +19,8 @@ export type ThreadDetail = ConversationDetail & ThreadFields;
 export type ThreadCreate = ConversationCreate;
 export type ThreadUpdate = ConversationUpdate;
 
-/** An ability that can be scoped: how ("repository"), and the whole allowlist a scope picks from. */
-export interface ScopedAbility {
+/** A source that can be scoped: how ("repository"), and the whole allowlist a scope picks from. */
+export interface ScopedSource {
   name: string;
   scope_kind: string;
   scope_items: string[];
@@ -35,8 +35,8 @@ export function scopeOf(d: MaybeThread | null | undefined): Scope {
   const raw = field(d, "scope");
   if (!raw || typeof raw !== "object") return {};
   const out: Scope = {};
-  for (const [ability, items] of Object.entries(raw as Record<string, unknown>)) {
-    if (Array.isArray(items)) out[ability] = items.filter((i): i is string => typeof i === "string");
+  for (const [source, items] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(items)) out[source] = items.filter((i): i is string => typeof i === "string");
   }
   return out;
 }
@@ -48,14 +48,14 @@ export function settledAt(d: MaybeThread | null | undefined): string | null {
 
 export const isSettled = (d: MaybeThread | null | undefined) => settledAt(d) !== null;
 
-/** Every item in a scope, across abilities, in a stable order: what a row or a tooltip lists. */
+/** Every item in a scope, across sources, in a stable order: what a row or a tooltip lists. */
 export function scopeItems(scope: Scope): string[] {
   return Object.keys(scope)
     .sort()
     .flatMap((k) => [...scope[k]].sort());
 }
 
-/** Scopes with the same abilities and items, in any order. */
+/** Scopes with the same sources and items, in any order. */
 export function sameScope(a: Scope, b: Scope): boolean {
   return scopeKey(a) === scopeKey(b);
 }
@@ -69,13 +69,12 @@ export function scopeKey(scope: Scope): string {
     .join(";");
 }
 
-/** The abilities a scope can name, from GET /abilities, with items this daemon reports. */
-export function scopedAbilities(abilities: AbilityInfo[]): ScopedAbility[] {
-  return abilities.flatMap((a) => {
-    const x = a as AbilityInfo & { scope_kind?: unknown; scope_items?: unknown };
-    if (typeof x.scope_kind !== "string" || !x.scope_kind) return [];
-    const items = Array.isArray(x.scope_items) ? x.scope_items.filter((i): i is string => typeof i === "string") : [];
-    return [{ name: a.name, scope_kind: x.scope_kind, scope_items: items }];
+/** The sources a scope can name, from GET /sources: the servers that declare a scope, with the items they allow. */
+export function scopedSources(sources: SourceInfo[]): ScopedSource[] {
+  return sources.flatMap((a) => {
+    if (typeof a.scope_kind !== "string" || !a.scope_kind) return [];
+    const items = Array.isArray(a.scope_items) ? a.scope_items.filter((i): i is string => typeof i === "string") : [];
+    return [{ name: a.name, scope_kind: a.scope_kind, scope_items: items }];
   });
 }
 
@@ -90,8 +89,9 @@ export function kindWords(kind: string): { one: string; many: string } {
   return k ? { one: k[0], many: k[1] } : { one: kind, many: `${kind}s` };
 }
 
-/** "GitHub issues" for github_issues: the ability's name in words, used as a card heading. */
-export function abilityWords(name: string): string {
+/** "GitHub heka" for github_heka: the server's name in words, used as a card heading. */
+export function sourceWords(name: string): string {
+  if (name === "conversations") return "Lines";
   const s = name.replace(/[_-]+/g, " ");
   return s.charAt(0).toUpperCase() + s.slice(1).replace(/\bgithub\b/i, "GitHub");
 }

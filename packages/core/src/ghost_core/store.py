@@ -42,14 +42,6 @@ CREATE TABLE IF NOT EXISTS operation_events (
     detail      TEXT
 );
 
-CREATE TABLE IF NOT EXISTS ability_kv (
-    ability     TEXT NOT NULL,
-    key         TEXT NOT NULL,
-    value       TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    PRIMARY KEY (ability, key)
-);
-
 CREATE TABLE IF NOT EXISTS checkpoints (
     session_id  TEXT NOT NULL,
     key         TEXT NOT NULL,
@@ -275,31 +267,6 @@ class Store:
         return [(at, ev, json.loads(d) if d else None) for at, ev, d in rows]
 
     # per-ability key/value
-
-    def kv_get(self, ability: str, key: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT value FROM ability_kv WHERE ability = ? AND key = ?", (ability, key)
-        ).fetchone()
-        return row[0] if row else None
-
-    def kv_set(self, ability: str, key: str, value: str) -> None:
-        self._conn.execute(
-            "INSERT INTO ability_kv (ability, key, value, updated_at) VALUES (?, ?, ?, ?)"
-            " ON CONFLICT(ability, key) DO UPDATE SET value = excluded.value,"
-            " updated_at = excluded.updated_at",
-            (ability, key, value, utcnow().isoformat()),
-        )
-
-    def kv_delete(self, ability: str, key: str) -> None:
-        self._conn.execute("DELETE FROM ability_kv WHERE ability = ? AND key = ?", (ability, key))
-
-    def kv_items(self, ability: str) -> dict[str, str]:
-        rows = self._conn.execute(
-            "SELECT key, value FROM ability_kv WHERE ability = ? ORDER BY key", (ability,)
-        ).fetchall()
-        return dict(rows)
-
-    # checkpoints
 
     def set_checkpoint(self, session_id: str, key: str, value: str) -> None:
         self._conn.execute(

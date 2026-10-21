@@ -14,7 +14,7 @@ import re
 import shutil
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -23,22 +23,20 @@ from ghost_core import (
     AutonomyPolicy,
     ConfirmationClassifier,
     Events,
-    GhostContext,
     RegexClassifier,
     Store,
     WriteGate,
-    discover,
-    load,
 )
-from ghost_core.conversations import ABILITY as CONVERSATIONS
-from ghost_core.conversations import GHOST, Conversations
+from ghost_core.conversations import GHOST, Conversations, conversations_source
+from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.jev import JevClassifier, JevClient
-from ghost_voice import VoiceSettings, build_session, debug
+from ghost_core.mcp import Servers
+from ghost_voice import VoiceSettings, build_session
 from ghost_voice import llm as llm_module
 from ghost_voice import prompt as prompt_module
 from ghost_voice.config import LLM_ENDPOINTS
 from ghost_voice.llm import GhostAnthropicLLMService
-from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models, conversations_ability
+from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from loguru import logger
 from pipecat.transports.base_transport import TransportParams
 
@@ -49,18 +47,17 @@ from ghostd.perf.scenarios import Line, Scenario
 # What the harness can turn off to measure a change, each one applied only while a run
 # builds and runs its session (the process runs one session at a time):
 #   tts_clauses     Kokoro gets whole sentences again (GHOST_TTS_CLAUSES=false)
-#   issue_comments  get_issue without the latest comments (GHOST_GITHUB_ISSUES_ISSUE_COMMENTS=0)
 #   prompt_lines    the system prompt without the lead-short and parallel-lookup lines
 #   system_cache    no cache marker on the system prompt
 #   shared_client   a new AsyncAnthropic per session, as before
-ABLATIONS = ("tts_clauses", "issue_comments", "prompt_lines", "system_cache", "shared_client")
+ABLATIONS = ("tts_clauses", "prompt_lines", "system_cache", "shared_client")
 # A plausible record of earlier sessions, for --history: generic, like the seed issues.
 HISTORY = (
-    ("user", "What needs my sign-off?"),
-    ("call", "list_awaiting_signoff()"),
+    ("user", "What's waiting for triage?"),
+    ("call", "github_list_issues(owner=ghost-mock, repo=app, labels=[needs-triage])"),
     ("assistant", "Three: the session cache choice, dark mode, and rotating the webhook."),
     ("user", "What's the cache one about?"),
-    ("call", "get_issue(number=142, repo=ghost-mock/app)"),
+    ("call", "github_issue_read(method=get, owner=ghost-mock, repo=app, issue_number=142)"),
     ("assistant", "Redis versus Postgres for the session cache; it blocks two others."),
     ("user", "Leave it for now. Anything else urgent?"),
     ("assistant", "The webhook rotation is a security fix, so that one."),
@@ -142,12 +139,13 @@ class RunResult:
 
 
 def endpoint_host(cfg: RunConfig) -> str:
-    """Where the model calls go, without any credential."""
-    return make_settings(cfg).llm_target().describe()
+    """Where the model calls go, by name only: no credential and no address, since the
+    report is committed to a public repository."""
+    return re.sub(r"\s*\(https?://[^)]*\)", "", make_settings(cfg).llm_target().describe())
 
 
 def parse_ablations(spec: str) -> list[frozenset[str]]:
-    """``none,all,tts_clauses,issue_comments+prompt_lines`` -> one set per variant."""
+    """``none,all,tts_clauses,system_cache+prompt_lines`` -> one set per variant."""
     variants = []
     for part in [p.strip() for p in spec.split(",") if p.strip()] or ["none"]:
         if part == "none":
@@ -199,10 +197,6 @@ class Ablated:
         self._undo: list[Any] = []
 
     def __enter__(self) -> Ablated:
-        if "issue_comments" in self._ablate:
-            old = os.environ.get("GHOST_GITHUB_ISSUES_ISSUE_COMMENTS")
-            os.environ["GHOST_GITHUB_ISSUES_ISSUE_COMMENTS"] = "0"
-            self._undo.append(lambda: _restore_env("GHOST_GITHUB_ISSUES_ISSUE_COMMENTS", old))
         if "prompt_lines" in self._ablate:
             lead, parallel = prompt_module.LEAD_RULE, prompt_module.PARALLEL_RULE
             prompt_module.LEAD_RULE = prompt_module.PARALLEL_RULE = ""
@@ -315,7 +309,7 @@ class Bench:
         session = build_session(
             settings,
             models=self.models,
-            abilities=env["abilities"],
+            sources=env["sources"],
             gate=env["gate"],
             events=Events(),
             transport_factory=transport_factory,
@@ -431,27 +425,18 @@ class Bench:
     # --- an isolated Ghost -----------------------------------------------------------
 
     async def _env(self, tmp: Path, settings: VoiceSettings, cfg: RunConfig) -> dict[str, Any]:
-        os.environ["GHOST_GITHUB_MOCK"] = "1"
-        os.environ.pop("GHOST_REPOS", None)  # the mock's own repositories
         store = Store(tmp / "ghost.db")
+        # The example policy declares the mock GitHub server (ADR 0022); its state file
+        # goes under this run's directory so every run starts from the seed.
         autonomy = AutonomyPolicy.load(self.gdsettings.infra_dir / "policy.example.toml")
-
-        def make_context(name: str) -> GhostContext:
-            return GhostContext.build(
-                name,
-                data_root=tmp / "data",
-                cache_root=tmp / "cache",
-                store=store,
-                env=os.environ,
-                debug_audio=debug.audio,
-            )
-
-        abilities = await load(
-            ["github_issues"],
-            discovered=discover(tmp / "abilities"),
-            make_context=make_context,
-            passive_allowed=autonomy.passive,
+        github = autonomy.mcp["github"]
+        servers = Servers(
+            {"github": replace(github, args=("--state", str(tmp / "data" / "mock-github.json")))}
         )
+        await servers.connect()
+        if "github" not in servers.servers:
+            raise RuntimeError(f"mock GitHub server did not start: {servers.failed}")
+        sources = servers.sources()
         jev = None
         if cfg.jev:
             jev = JevClient.from_env(
@@ -473,29 +458,29 @@ class Bench:
             else RegexClassifier()
         )
         gate = WriteGate(store, autonomy=autonomy, classifier=classifier)
-        for a in abilities:
-            gate.register(a.name, a.contributions.operations)
+        for a in sources:
+            gate.register(a.name, a.operations)
         conversations = Conversations(
             store,
             tmp / "conversations",
             default_voice=settings.tts_voice,
             default_speed=settings.tts_speed,
         )
-        gate.register(CONVERSATIONS, conversations_ability(conversations).contributions.operations)
+        gate.register(CONVERSATIONS, conversations_source(conversations).operations)
         for i in range(cfg.history):
             role, text = HISTORY[i % len(HISTORY)]
             conversations.record(GHOST, "earlier", role, text)
         return {
             "store": store,
-            "abilities": abilities,
+            "sources": sources,
+            "servers": servers,
             "gate": gate,
             "conversations": conversations,
             "jev": jev,
         }
 
     async def _close_env(self, env: dict[str, Any]) -> None:
-        for a in env["abilities"]:
-            await a.instance.aclose()
+        await env["servers"].close()
         if env["jev"]:
             await env["jev"].aclose()
         env["store"].close()
@@ -506,7 +491,7 @@ def _r3(x: float | None) -> float | None:
 
 
 def _mock_issues(tmp: Path) -> dict[str, Any]:
-    path = tmp / "data" / "github_issues" / "mock-github.json"
+    path = tmp / "data" / "mock-github.json"
     if not path.exists():
         return {}
     return json.loads(path.read_text()).get("issues", {})

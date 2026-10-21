@@ -176,7 +176,7 @@
 
 /* ------------------------------------------------------------- scope (ADR 0019) */
 .conv-scope { display: flex; flex-direction: column; gap: var(--space-6); }
-.conv-scope__ability { display: flex; flex-direction: column; gap: var(--space-2); }
+.conv-scope__source { display: flex; flex-direction: column; gap: var(--space-2); }
 .conv-scope__head { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
 .conv-scope__item { padding: var(--space-3) var(--space-4); }
 .conv-scope__empty { padding: var(--space-4); margin: 0; }
@@ -202,3 +202,8 @@
 .conv-form__label { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
 .conv-form__optional { margin-left: var(--space-1); font-weight: var(--weight-regular); color: var(--text-3); }
 .conv-row-settled { display: inline-flex; align-items: center; gap: var(--space-1_5); }
+
+/* The line page: the conversation is the page; a settings view opens in its place with a way back. */
+.conv-view { display: flex; flex-direction: column; gap: var(--space-4); }
+.conv-view__bar { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-9); }
+.conv-view__title { font-size: var(--text-lg); font-weight: 600; color: var(--text-1); }

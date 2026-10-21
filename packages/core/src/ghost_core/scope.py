@@ -1,9 +1,9 @@
-"""The active thread's scope, as an ability sees it (ADR 0019).
+"""The active thread's scope, as a source sees it (ADR 0019).
 
 A thread (ADR 0014's conversation) may be scoped per ability to a list of items: the
-repositories, directories or workspaces it may touch. An ability declares how it can
-be scoped (``Contributions.scope_kind``) and what the whole allowlist is
-(``Contributions.scope_items``); a thread's scope is a subset. Scope items are
+repositories, directories or workspaces it may touch. A source declares how it can
+be scoped (``ToolSource.scope_kind``) and what the whole allowlist is
+(``ToolSource.scope_items``); a thread's scope is a subset. Scope items are
 compared against ``Target.scope()``, the same string a policy target rule matches, so
 the gate can refuse a write outside the thread without knowing the ability.
 

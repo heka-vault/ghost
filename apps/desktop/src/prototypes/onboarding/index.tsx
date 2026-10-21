@@ -1,19 +1,19 @@
 /**
  * Owner: onboarding. PROTOTYPE: the first-run wizard at #/welcome.
  *
- * Eight steps in one place: welcome and the privacy promise, a model, GitHub and the
- * repositories Ghost may touch, the microphone and echo cancellation, the voice models,
- * the background service, a first “Hey Ghost”, done. A rail on the left shows every step
+ * Eight steps in one place: welcome and the privacy promise, a model, a GitHub token (the
+ * server and its repositories are the policy file's, ADR 0022), the microphone and echo
+ * cancellation, the voice models, the background service, a first “Hey Ghost”, done. A rail on the left shows every step
  * and what's finished; the open step is the page's one focal point.
  *
  * Real endpoints where they exist (GET/PUT /settings, GET /devices, POST /setup/echo-cancel,
- * GET /setup/models, POST /wake, the live status). What the API can't do yet (list a token's
- * repositories, report the mic level, download models with progress) comes from the
- * onboarding fixture and appears only while the mock is on, tagged Prototype.
+ * GET /setup/models, POST /wake, the live status). What the API can't do yet (report the mic
+ * level, download models with progress) comes from the onboarding fixture and appears only
+ * while the mock is on, tagged Prototype.
  *
  * Addresses: ?step=<id> before the hash opens a step (welcome, model, github, microphone,
  * models, service, try, done); ?state= picks a designed state while the mock is on
- * (model: vault; github: looking, found; models: idle, downloading, paused, failed, downloaded;
+ * (model: vault; models: idle, downloading, paused, failed, downloaded;
  * microphone: quiet; try: heard, nothear). Note that in firstrun the models are already on
  * disk: the download itself only shows with &state=idle, downloading, paused or failed.
  *
@@ -48,8 +48,6 @@ import {
   stepIndex,
   storageKey,
   storeSaved,
-  splitList,
-  truthy,
   useDownload,
   writeStepToUrl,
 } from "./state";
@@ -179,7 +177,8 @@ export default function OnboardingPrototype({ params }: RouteProps) {
     const tasks = {
       welcome: true,
       model: !!settings && (settings.vault_managed || secret("ANTHROPIC_AUTH_TOKEN") || !!v.ANTHROPIC_BASE_URL),
-      github: !!settings && (truthy(v.GHOST_GITHUB_MOCK) || secret("GITHUB_TOKEN")) && splitList(v.GHOST_REPOS).length > 0,
+      // GitHub is a server in the policy file; the token is the one thing setup can give it. Without one, a fresh install practices on the mock server.
+      github: !!settings && secret("GITHUB_TOKEN"),
       microphone: !!devices?.echo_cancel_active && !!v.GHOST_INPUT_DEVICE,
       models: modelsOnDisk,
       service: serviceUp && modelsOnDisk,

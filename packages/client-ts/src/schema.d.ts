@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-    "/abilities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Abilities */
-        get: operations["abilities_abilities_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/audit": {
         parameters: {
             query?: never;
@@ -255,6 +238,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mcp Servers */
+        get: operations["mcp_servers_mcp_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/phone": {
         parameters: {
             query?: never;
@@ -452,6 +452,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Skills */
+        get: operations["skills_skills_get"];
+        put?: never;
+        /** Add Skill */
+        post: operations["add_skill_skills_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Skill Body */
+        get: operations["skill_body_skills__name__get"];
+        put?: never;
+        post?: never;
+        /** Remove Skill */
+        delete: operations["remove_skill_skills__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sleep": {
         parameters: {
             query?: never;
@@ -463,6 +499,23 @@ export interface paths {
         put?: never;
         /** Sleep */
         post: operations["sleep_sleep_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sources */
+        get: operations["sources_sources_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -541,58 +594,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AbilityInfo */
-        AbilityInfo: {
-            /**
-             * Commands
-             * @default []
-             */
-            commands: string[];
-            /** Description */
-            description: string;
-            /** Enabled */
-            enabled: boolean;
-            /**
-             * Interceptors
-             * @default []
-             */
-            interceptors: string[];
-            /**
-             * Listeners
-             * @default 0
-             */
-            listeners: number;
-            /** Loaded */
-            loaded: boolean;
-            /** Name */
-            name: string;
-            /**
-             * Operations
-             * @default []
-             */
-            operations: components["schemas"]["OperationInfo"][];
-            /** Passive */
-            passive: boolean;
-            /**
-             * Read Tools
-             * @default []
-             */
-            read_tools: components["schemas"]["ReadToolInfo"][];
-            /**
-             * Scope Items
-             * @default []
-             */
-            scope_items: string[];
-            /** Scope Kind */
-            scope_kind?: string | null;
-            /**
-             * Slots
-             * @default []
-             */
-            slots: string[];
-            /** Version */
-            version: string;
-        };
         /** Ack */
         Ack: {
             /** Detail */
@@ -868,6 +869,92 @@ export interface components {
              */
             type: "log";
         };
+        /** McpScopeInfo */
+        McpScopeInfo: {
+            /** Arguments */
+            arguments: string[];
+            /**
+             * Items
+             * @default []
+             */
+            items: string[];
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * McpServerInfo
+         * @description One MCP server from the policy file (ADR 0022) and what Ghost got from it.
+         */
+        McpServerInfo: {
+            /** Connected */
+            connected: boolean;
+            /** Error */
+            error?: string | null;
+            /** Name */
+            name: string;
+            scope?: components["schemas"]["McpScopeInfo"] | null;
+            /**
+             * Tools
+             * @default []
+             */
+            tools: components["schemas"]["McpToolInfo"][];
+            /** Transport */
+            transport: string;
+            /**
+             * Writes
+             * @default []
+             */
+            writes: components["schemas"]["McpWriteInfo"][];
+        };
+        /** McpToolInfo */
+        McpToolInfo: {
+            /** Description */
+            description: string;
+            /** Name */
+            name: string;
+            /** Offered */
+            offered: boolean;
+        };
+        /**
+         * McpWriteInfo
+         * @description A declared write: the policy operation, the tool it calls, and its level.
+         */
+        McpWriteInfo: {
+            /**
+             * Asked By
+             * @default []
+             */
+            asked_by: string[];
+            /** Autonomy */
+            autonomy: string;
+            /** Offered */
+            offered: boolean;
+            /** Operation */
+            operation: string;
+            /**
+             * Properties
+             * @default {}
+             */
+            properties: {
+                [key: string]: unknown;
+            };
+            /** Read */
+            read?: string | null;
+            /**
+             * Required
+             * @default []
+             */
+            required: string[];
+            /** Risk */
+            risk: string;
+            /**
+             * Target
+             * @default []
+             */
+            target: string[];
+            /** Tool */
+            tool: string;
+        };
         /** ModelsView */
         ModelsView: {
             /** Cache Dir */
@@ -1012,8 +1099,6 @@ export interface components {
             /** Applied */
             applied: boolean;
             policy: components["schemas"]["PolicyView"];
-            /** Restart Required */
-            restart_required: boolean;
         };
         /**
          * PolicyUpdate
@@ -1022,10 +1107,6 @@ export interface components {
         PolicyUpdate: {
             /** Default */
             default?: string | null;
-            /** Enabled */
-            enabled?: string[] | null;
-            /** Passive */
-            passive?: string[] | null;
             /** Skills */
             skills?: {
                 [key: string]: {
@@ -1047,12 +1128,8 @@ export interface components {
         PolicyView: {
             /** Default */
             default: string | null;
-            /** Enabled */
-            enabled: string[] | null;
             /** Exists */
             exists: boolean;
-            /** Passive */
-            passive: string[];
             /** Path */
             path: string;
             /** Skills */
@@ -1108,7 +1185,10 @@ export interface components {
              * @default []
              */
             applied: string[];
-            /** Restart Required */
+            /**
+             * Restart Required
+             * @default false
+             */
             restart_required: boolean;
             settings: components["schemas"]["SettingsView"];
         };
@@ -1138,10 +1218,94 @@ export interface components {
             /** Vault Managed */
             vault_managed: boolean;
         };
+        /** SkillAdd */
+        SkillAdd: {
+            /** Name */
+            name?: string | null;
+            /**
+             * Path
+             * @description A folder on this machine holding SKILL.md.
+             */
+            path: string;
+            /**
+             * Replace
+             * @default false
+             */
+            replace: boolean;
+        };
+        /** SkillBody */
+        SkillBody: {
+            /** Body */
+            body: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: string[];
+            /** Name */
+            name: string;
+        };
+        /**
+         * SkillInfo
+         * @description A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or a project's.
+         */
+        SkillInfo: {
+            /** Description */
+            description: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: string[];
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /**
+             * Requires
+             * @default []
+             */
+            requires: string[];
+            /** Source */
+            source: string;
+        };
+        /**
+         * SourceInfo
+         * @description A source of tools the gate knows: the lines (built in) or an MCP server. The
+         *     policy screen edits levels per operation from this list.
+         */
+        SourceInfo: {
+            /** Description */
+            description: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /**
+             * Operations
+             * @default []
+             */
+            operations: components["schemas"]["OperationInfo"][];
+            /**
+             * Read Tools
+             * @default []
+             */
+            read_tools: components["schemas"]["ReadToolInfo"][];
+            /**
+             * Scope Items
+             * @default []
+             */
+            scope_items: string[];
+            /** Scope Kind */
+            scope_kind?: string | null;
+        };
         /** Status */
         Status: {
-            /** Abilities */
-            abilities: string[];
             /**
              * Api Version
              * @default 1
@@ -1158,6 +1322,8 @@ export interface components {
             models_ready: boolean;
             pending?: components["schemas"]["PendingProposal"] | null;
             phase: components["schemas"]["Phase"];
+            /** Servers */
+            servers: string[];
             /** Session Id */
             session_id: string | null;
             /** Session Origin */
@@ -1266,7 +1432,6 @@ export interface components {
     headers: never;
     pathItems: never;
 }
-export type SchemaAbilityInfo = components['schemas']['AbilityInfo'];
 export type SchemaAck = components['schemas']['Ack'];
 export type SchemaAuditEntry = components['schemas']['AuditEntry'];
 export type SchemaAuditEventView = components['schemas']['AuditEventView'];
@@ -1281,6 +1446,10 @@ export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
+export type SchemaMcpScopeInfo = components['schemas']['McpScopeInfo'];
+export type SchemaMcpServerInfo = components['schemas']['McpServerInfo'];
+export type SchemaMcpToolInfo = components['schemas']['McpToolInfo'];
+export type SchemaMcpWriteInfo = components['schemas']['McpWriteInfo'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
@@ -1301,6 +1470,10 @@ export type SchemaSecretState = components['schemas']['SecretState'];
 export type SchemaSettingsResult = components['schemas']['SettingsResult'];
 export type SchemaSettingsUpdate = components['schemas']['SettingsUpdate'];
 export type SchemaSettingsView = components['schemas']['SettingsView'];
+export type SchemaSkillAdd = components['schemas']['SkillAdd'];
+export type SchemaSkillBody = components['schemas']['SkillBody'];
+export type SchemaSkillInfo = components['schemas']['SkillInfo'];
+export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
 export type SchemaTurn = components['schemas']['Turn'];
@@ -1311,26 +1484,6 @@ export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
 export type $defs = Record<string, never>;
 export interface operations {
-    abilities_abilities_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AbilityInfo"][];
-                };
-            };
-        };
-    };
     audit_audit_get: {
         parameters: {
             query?: {
@@ -1823,6 +1976,26 @@ export interface operations {
             };
         };
     };
+    mcp_servers_mcp_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerInfo"][];
+                };
+            };
+        };
+    };
     phone_phone_get: {
         parameters: {
             query?: never;
@@ -2153,6 +2326,121 @@ export interface operations {
             };
         };
     };
+    skills_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInfo"][];
+                };
+            };
+        };
+    };
+    add_skill_skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillAdd"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skill_body_skills__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_skill_skills__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     sleep_sleep_post: {
         parameters: {
             query?: never;
@@ -2169,6 +2457,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    sources_sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceInfo"][];
                 };
             };
         };

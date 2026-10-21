@@ -158,6 +158,10 @@
 .set-optional-keys__list .set-secret:last-child { padding-bottom: var(--space-1); }
 
 /* --------------------------------------------------------------- github */
+.set-github { margin: 0; max-width: 64ch; color: var(--text-2); }
+.set-github__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
+
+/* ---------------------------------------------------------------- lines */
 .set-practice__label { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); }
 
 /* ---------------------------------------------------------------- voice */
@@ -237,8 +241,3 @@
 }
 .set-pair__done .set-help { margin: var(--space-1_5) 0 0; }
 
-/* ------------------------------------------------ GitHub tokens by owner (ADR 0019) */
-.set-tokens { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); width: 100%; }
-.set-tokens__table { width: 100%; }
-.set-tokens__table td { vertical-align: middle; }
-.set-tokens__table td:not(.is-shrink) { width: 50%; }

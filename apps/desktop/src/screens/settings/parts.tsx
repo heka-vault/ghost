@@ -2,8 +2,8 @@
 import { Check, CircleCheck, Copy, KeyRound, RotateCw, X } from "lucide-react";
 import { type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 
-import { Badge, Button, Card, IconButton, Input, ListRow, SaveBar as SharedSaveBar, Section, cx, useFieldControl } from "../../ui";
-import { KEY_LABEL, SECRET_INFO, type SectionId, SECTION_TITLE, listWords, lowerFirst, sectionDomId, splitList } from "./model";
+import { Badge, Button, Card, IconButton, Input, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
+import { KEY_LABEL, SECRET_INFO, type SectionId, SECTION_TITLE, joinList, listWords, lowerFirst, sectionDomId, splitLines, splitList } from "./model";
 
 /* ------------------------------------------------------------------- ChipsInput */
 export interface ChipsInputProps {
@@ -180,6 +180,53 @@ export function ChipsInput({ items, onChange, placeholder, check, onEntryError, 
         {said}
       </span>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------- LinesInput */
+export interface LinesInputProps {
+  /** The stored form: entries separated by commas. */
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  rows?: number;
+  disabled?: boolean;
+  id?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+}
+
+/**
+ * A comma-separated setting edited one entry per line (paths, which may hold spaces but never
+ * commas). The text stays local while typing, so a line break survives the render that
+ * follows it; the value goes out as the comma list. A value changed from outside (Discard, a
+ * reload) resets the text.
+ */
+export function LinesInput({ value, onChange, placeholder, rows = 3, disabled, ...rest }: LinesInputProps) {
+  const [text, setText] = useState(() => splitList(value).join("\n"));
+  const sent = useRef(value);
+  useEffect(() => {
+    if (value === sent.current) return;
+    sent.current = value;
+    if (joinList(splitLines(text)) !== value) setText(splitList(value).join("\n"));
+  }, [value, text]);
+  return (
+    <Textarea
+      {...rest}
+      mono
+      rows={rows}
+      value={text}
+      placeholder={placeholder}
+      disabled={disabled}
+      spellCheck={false}
+      onChange={(e) => {
+        const t = e.target.value;
+        setText(t);
+        const next = joinList(splitLines(t));
+        sent.current = next;
+        onChange(next);
+      }}
+    />
   );
 }
 
@@ -496,7 +543,7 @@ export function SetupSection({ steps, onGo }: { steps: SetupStep[]; onGo: (id: S
           </span>
         </span>
       }
-      description="Three things between a fresh install and “Hey Ghost”."
+      description={`${steps.length === 2 ? "Two" : "Three"} things between a fresh install and “Hey Ghost”.`}
     >
       <Card list>
         {steps.map((s) => (

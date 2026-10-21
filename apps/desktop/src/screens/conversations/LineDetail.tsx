@@ -1,5 +1,5 @@
 /**
- * Owner: conversations. One line (#/conversations/:slug): its persona and voice, its
+ * Owner: conversations. One line (#/lines/:slug): its persona and voice, its
  * memory and pinned notes, its transcript and every version of its memory. Edits collect
  * in a draft and go in with Save; each field Ghost writes is an audited gate
  * write, the same as if it had been said. Pinning a note, compacting, switching, reset and
@@ -7,7 +7,7 @@
  */
 import { type CompactionView, type ConversationDetail, type TurnView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { Archive, ArchiveRestore, ArrowLeftRight, ChevronLeft, CloudOff, Layers, MoreHorizontal, Play, RotateCcw, SearchX, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, Layers, MoreHorizontal, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
@@ -23,13 +23,13 @@ import {
   LineGlyph,
   LiveStatus,
   Menu,
+  type MenuItem,
   Notice,
   Page,
   Section,
   Skeleton,
   SkeletonText,
   Slider,
-  Tabs,
   Textarea,
   errorText,
   lineName,
@@ -47,7 +47,7 @@ import { History } from "./History";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
 import { ScopePicker } from "./ScopePicker";
-import { type ScopedAbility, scopedAbilities, settleLine, settledAt, unsettleLine } from "./threads";
+import { type ScopedSource, scopedSources, settleLine, settledAt, unsettleLine } from "./threads";
 import { Transcript } from "./Transcript";
 import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newLineSeed, readParam, writeParam } from "./url";
 import { PlayingBars, VoicePicker, voiceTitle } from "./VoicePicker";
@@ -75,14 +75,14 @@ export function LineDetail({ slug }: { slug: string }) {
   const [turns, setTurns] = useState<TurnView[]>([]);
   const [versions, setVersions] = useState<CompactionView[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
-  const [abilities, setAbilities] = useState<ScopedAbility[] | null>(null);
+  const [sources, setSources] = useState<ScopedSource[] | null>(null);
   const [missing, setMissing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
   const [tab, setTabState] = useState<TabId>(() => {
     const t = readParam("tab", slug) as TabId | null;
-    return t && TABS.includes(t) ? t : "persona";
+    return t && TABS.includes(t) ? t : "transcript";
   });
   const [picker, setPicker] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -101,7 +101,7 @@ export function LineDetail({ slug }: { slug: string }) {
 
   const setTab = (t: TabId) => {
     setTabState(t);
-    writeParam("tab", t === "persona" ? null : t, slug);
+    writeParam("tab", t === "transcript" ? null : t, slug);
   };
   // The view and dialog params belong to this line: another line's leftovers are dropped on
   // the way in, and nothing outlives the screen on the way out.
@@ -110,7 +110,7 @@ export function LineDetail({ slug }: { slug: string }) {
   }, [slug]);
   useEffect(
     () => () => {
-      if (!window.location.hash.startsWith("#/conversations/")) clearParams();
+      if (!window.location.hash.startsWith("#/lines/")) clearParams();
     },
     [],
   );
@@ -193,14 +193,14 @@ export function LineDetail({ slug }: { slug: string }) {
       .catch(() => setVoices([]));
   }, [client, status?.models_ready]);
 
-  // Which abilities can be scoped, and their allowlists: the choices in the Scope section.
+  // Which servers can be scoped, and their allowlists: the choices in the Scope section.
   useEffect(() => {
     if (isGhost) return;
     let on = true;
     client
-      .abilities()
-      .then((a) => on && setAbilities(scopedAbilities(a)))
-      .catch(() => on && setAbilities([]));
+      .sources()
+      .then((a) => on && setSources(scopedSources(a)))
+      .catch(() => on && setSources([]));
     return () => {
       on = false;
     };
@@ -378,7 +378,7 @@ export function LineDetail({ slug }: { slug: string }) {
       await client.deleteConversation(slug);
       drafts.delete(slug);
       toast({ title: `Deleted ${name}` });
-      navigate("/conversations");
+      navigate("/lines");
     } catch (e) {
       fail(`Couldn’t delete ${name}`, e);
     }
@@ -446,7 +446,7 @@ export function LineDetail({ slug }: { slug: string }) {
           icon={<SearchX />}
           title={`There’s no line called ${quoted(slug)}`}
           description="It may have been deleted, or the link has a typo."
-          actions={<Button href="#/conversations">See all lines</Button>}
+          actions={<Button href="#/lines">See all lines</Button>}
         />
       </Page>
     );
@@ -480,12 +480,23 @@ export function LineDetail({ slug }: { slug: string }) {
   // Reset and delete need the session elsewhere. On the live line the menu says so and offers
   // the way out (back to Ghost). Every line, Ghost included, keeps them behind the same More
   // menu; Ghost has no Delete, and while Ghost is live its Reset is disabled with the reason.
+  // The conversation is the page; its settings (voice and persona, memory, history) live
+  // behind the same More menu as the actions (the operator's call, 2026-10-20).
+  const mark = (keys: DraftKey[]) => (dirty.some((k) => keys.includes(k)) ? " (unsaved)" : "");
+  const settingsItems: MenuItem[] = [
+    { heading: "Settings" },
+    { label: `Voice and persona${mark(PERSONA_KEYS)}`, icon: <SlidersHorizontal />, onSelect: () => setTab("persona") },
+    { label: `Memory${mark(MEMORY_KEYS)}`, icon: <Brain />, onSelect: () => setTab("memory") },
+    { label: "History", icon: <Clock />, onSelect: () => setTab("history") },
+    "separator",
+  ];
   const menu = detail && (
     <Menu
       align="end"
       trigger={<IconButton label={`More for ${name}`} icon={<MoreHorizontal />} variant="secondary" disabled={!online} />}
-      items={
-        isGhost
+      items={[
+        ...settingsItems,
+        ...((isGhost
           ? [live ? { label: "Reset Ghost…", icon: <RotateCcw />, onSelect: () => void reset(), disabled: true, reason: "Ghost is on this line" } : { label: "Reset Ghost…", icon: <RotateCcw />, onSelect: () => void reset() }]
           : readOnly
             ? [
@@ -507,8 +518,8 @@ export function LineDetail({ slug }: { slug: string }) {
                 { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset() },
                 "separator",
                 { label: `Delete ${name}…`, icon: <Trash2 />, danger: true, onSelect: () => void remove() },
-              ]
-      }
+              ]) as MenuItem[]),
+      ]}
     />
   );
 
@@ -567,9 +578,9 @@ export function LineDetail({ slug }: { slug: string }) {
       title={name}
       leading={<LineGlyph slug={slug} name={name} size="xl" />}
       crumb={
-        <Link to="/conversations">
+        <Link to="/lines">
           <ChevronLeft size={14} aria-hidden />
-          Conversations
+          Lines
         </Link>
       }
       status={pageStatus}
@@ -611,17 +622,17 @@ export function LineDetail({ slug }: { slug: string }) {
           />
         </Card>
       ) : (
-      <Tabs<TabId>
-        aria-label={`${name} line`}
-        value={tab}
-        onChange={setTab}
-        items={[
-          { value: "persona", label: <>Voice and persona{unsaved(PERSONA_KEYS)}</> },
-          { value: "memory", label: <>Memory{unsaved(MEMORY_KEYS)}</> },
-          { value: "transcript", label: "Transcript", count: detail?.turn_count || undefined },
-          { value: "history", label: "History", count: detail?.compactions || undefined },
-        ]}
-      >
+      <div className="conv-view">
+        {tab !== "transcript" && (
+          <div className="conv-view__bar">
+            <Button variant="ghost" size="sm" onClick={() => setTab("transcript")}>
+              ← Conversation
+            </Button>
+            <span className="conv-view__title">
+              {tab === "persona" ? <>Voice and persona{unsaved(PERSONA_KEYS)}</> : tab === "memory" ? <>Memory{unsaved(MEMORY_KEYS)}</> : "History"}
+            </span>
+          </div>
+        )}
         {!detail || !draft ? (
           <DetailSkeleton tab={tab} />
         ) : tab === "persona" ? (
@@ -655,7 +666,7 @@ export function LineDetail({ slug }: { slug: string }) {
               title="Scope"
               description={
                 isGhost ? (
-                  "Ghost is the main line and sees everything: every repository and anything else an ability allows."
+                  "Ghost is the main line and sees everything: every repository and anything else a server allows."
                 ) : (
                   <>What this line may read and change. Outside its scope, Ghost says it belongs to another line; Settings decides whether it answers read-only or patches you through. Ghost never writes outside it.</>
                 )
@@ -666,7 +677,7 @@ export function LineDetail({ slug }: { slug: string }) {
                   <p className="conv-scope__all t-body">Ghost sees everything.</p>
                 </Card>
               ) : (
-                <ScopePicker abilities={abilities} value={draft.scope} onChange={(scope) => setDraft({ scope })} disabled={readOnly} idPrefix="conv-scope" />
+                <ScopePicker sources={sources} value={draft.scope} onChange={(scope) => setDraft({ scope })} disabled={readOnly} idPrefix="conv-scope" />
               )}
             </Section>
 
@@ -747,7 +758,7 @@ export function LineDetail({ slug }: { slug: string }) {
                     variant="secondary"
                     onClick={() => {
                       newLineSeed.slug = slug;
-                      navigate("/conversations");
+                      navigate("/lines");
                     }}
                   >
                     Start a line from this memory
@@ -780,7 +791,7 @@ export function LineDetail({ slug }: { slug: string }) {
             }}
           />
         )}
-      </Tabs>
+      </div>
       )}
 
       {draft && (

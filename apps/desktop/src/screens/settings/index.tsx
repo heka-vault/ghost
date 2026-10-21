@@ -21,7 +21,7 @@
  */
 import type { DevicesView, ModelsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowRight, MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
 import {
   type FocusEvent,
   type FormEvent,
@@ -36,7 +36,7 @@ import {
   useState,
 } from "react";
 
-import { navigate } from "../../app/router";
+import { hrefFor, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
 import {
@@ -72,7 +72,6 @@ import {
   JEV_NEEDS_KEY,
   JEV_OPTIONS,
   KEY_SECTION,
-  REPO_RE,
   SECRET_ORDER,
   SECTION_TITLE,
   type SectionId,
@@ -80,7 +79,6 @@ import {
   changedKeys,
   echoReady,
   fuzzyWords,
-  githubReady,
   isOptionalSecret,
   isSet,
   jevNow,
@@ -103,9 +101,8 @@ import {
   validate,
   valueChanged,
 } from "./model";
-import { type BarState, ChipsInput, CommandCopy, type NavItem, PageNav, Row, SaveBar, SecretRow, SetupSection, type SetupStep, secretActionId } from "./parts";
+import { type BarState, ChipsInput, CommandCopy, LinesInput, type NavItem, PageNav, Row, SaveBar, SecretRow, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PhoneSection } from "./Phone";
-import { TokenMapEditor } from "./Tokens";
 import "./settings.css";
 
 // Charter sections with no API yet. Compiled only in development; rendered only under the mock layer.
@@ -298,7 +295,7 @@ export default function SettingsScreen(_: RouteProps) {
       setOpenSecrets(new Set(["GITHUB_TOKEN"]));
       if (forced === "error") setSaveError("Ghost couldn’t write ~/.config/ghost/settings.env: permission denied. Check who owns the file, then save again.");
     } else if (forced === "invalid") {
-      setDraft({ values: { ...v, ANTHROPIC_BASE_URL: "api.example.com", GHOST_REPOS: joinList([...splitList(v.GHOST_REPOS), "infra"]) }, secrets: {} });
+      setDraft({ values: { ...v, ANTHROPIC_BASE_URL: "api.example.com" }, secrets: {} });
     } else if (forced === "restart") {
       setRestartKeys(["ANTHROPIC_BASE_URL", "GITHUB_TOKEN"]);
       setLastApplied(["GHOST_WAKE_PHRASES"]);
@@ -651,8 +648,8 @@ export default function SettingsScreen(_: RouteProps) {
   const v = draft.values;
   const mock = !!design;
   const ready = !!s && modelReady(s, v);
-  // Until all three basics are done, the page leads with them.
-  const showSetup = !!s && !!devices && !(modelReady(s, s.values) && githubReady(s, s.values) && echoReady(devices));
+  // Until both basics are done, the page leads with them.
+  const showSetup = !!s && !!devices && !(modelReady(s, s.values) && echoReady(devices));
   const restartSet = new Set(restartKeys);
 
   const sectionMark = (id: SectionId): NavItem["mark"] => {
@@ -667,7 +664,7 @@ export default function SettingsScreen(_: RouteProps) {
   };
   const navItems: NavItem[] = [
     ...(showSetup ? [{ id: "setup" as const, label: SECTION_TITLE.setup }] : []),
-    ...(["secrets", "model", "github", "lines", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
+    ...(["secrets", "model", "github", "lines", "skills", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
     ...(mock && Prototype ? (["privacy", "sounds"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], prototype: true })) : []),
   ];
 
@@ -680,14 +677,6 @@ export default function SettingsScreen(_: RouteProps) {
           doneText: isSet(s, "ANTHROPIC_AUTH_TOKEN") ? "Anthropic token set." : "Using your own model endpoint.",
           todoText: "Add an Anthropic token, or point Ghost at your own endpoint.",
           target: isSet(s, "ANTHROPIC_AUTH_TOKEN") || !s.values.ANTHROPIC_BASE_URL ? "secrets" : "model",
-        },
-        {
-          id: "github",
-          title: "Connect GitHub",
-          done: githubReady(s, s.values),
-          doneText: isSet(s, "GITHUB_TOKEN") ? "GitHub token set." : "Practice mode on. Nothing reaches github.com.",
-          todoText: "Add a GitHub token, or turn on practice mode.",
-          target: "github",
         },
         {
           id: "echo",
@@ -748,7 +737,6 @@ export default function SettingsScreen(_: RouteProps) {
     );
 
   /* ----------------------------------------------------------------- render */
-  const repos = splitList(v.GHOST_REPOS);
   const phrases = splitList(v.GHOST_WAKE_PHRASES);
   const storedFuzzy = s?.values[FUZZY] ?? "";
   const fuzzy = parseFuzzy(v[FUZZY]);
@@ -758,7 +746,6 @@ export default function SettingsScreen(_: RouteProps) {
   const setFuzzy = (n: number) => setValue(FUZZY, parseFuzzy(storedFuzzy) === n && parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : n.toFixed(2));
   const jev = v.GHOST_JEV || "auto";
   const jevStatus = jevNow(jev, s, draft.secrets);
-  const practice = truthy(v.GHOST_GITHUB_MOCK);
   const crossAnswers = truthy(v.GHOST_CROSS_DEPARTMENT_ANSWERS);
   const routing = truthy(v.GHOST_DEPARTMENT_ROUTING);
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
@@ -901,60 +888,27 @@ export default function SettingsScreen(_: RouteProps) {
               <Section
                 id={sectionDomId("github")}
                 title={SECTION_TITLE.github}
-                description="Repositories Ghost may read and change. Issue text can’t add to them."
+                description="GitHub is an MCP server declared in your policy file, not a setting here (ADR 0022)."
                 className="set-section"
               >
-                <Card list>
-                  <Row>
-                    <Field
-                      id={fieldId("GHOST_REPOS")}
-                      label="Repositories"
-                      detail="GHOST_REPOS"
-                      help={help("GHOST_REPOS", repos.length ? "Type owner/repo and press Enter. Paste a comma-separated list to add several." : "Ghost can’t touch any repository until you add one.")}
-                      error={err("GHOST_REPOS")}
-                    >
-                      <ChipsInput
-                        kind="mono"
-                        noun="repository"
-                        items={repos}
-                        placeholder="heka-vault/ghost"
-                        check={(e) => (REPO_RE.test(e) ? null : `“${e}” isn’t owner/repo. Use the form heka-vault/ghost.`)}
-                        onEntryError={(m) => setEntryErrors((x) => ({ ...x, GHOST_REPOS: m }))}
-                        onChange={(items) => setValue("GHOST_REPOS", joinList(items))}
-                      />
-                    </Field>
-                  </Row>
-                  <Row className="set-practice">
-                    <Checkbox
-                      id={fieldId("GHOST_GITHUB_MOCK")}
-                      checked={practice}
-                      onChange={(on) => setValue("GHOST_GITHUB_MOCK", on ? "1" : "")}
-                      label={
-                        <span className="set-practice__label">
-                          Practice on a pretend GitHub <span className="set-detail">GHOST_GITHUB_MOCK</span>
-                        </span>
-                      }
-                      description={waits("GHOST_GITHUB_MOCK", "Sample issues in memory. Nothing reaches github.com.")}
-                    />
-                  </Row>
-                  <Row>
-                    <Field
-                      id={fieldId("GHOST_GITHUB_TOKENS")}
-                      label="Tokens by owner"
-                      detail="GHOST_GITHUB_TOKENS"
-                      help={help(
-                        "GHOST_GITHUB_TOKENS",
-                        "An organization can have its own token: name the environment variable that holds it. The variable has to exist where Ghost runs (your vault); only its name is kept here. Owners not listed use the GitHub token above.",
-                      )}
-                      error={err("GHOST_GITHUB_TOKENS")}
-                    >
-                      <TokenMapEditor value={v.GHOST_GITHUB_TOKENS ?? ""} disabled={!online} onChange={(next) => setValue("GHOST_GITHUB_TOKENS", next)} />
-                    </Field>
-                  </Row>
+                <Card padding="md">
+                  <p className="set-github t-body">
+                    Its declaration under <span className="set-detail">[mcp.github]</span> in <span className="set-detail">~/.config/ghost/policy.toml</span> names the
+                    command Ghost runs, the repositories it may touch and the writes Ghost may make. The GitHub token above is what it signs in with; one token per
+                    server, so a second organization is a second server.
+                  </p>
+                  <div className="set-github__links">
+                    <Button size="sm" variant="secondary" href={hrefFor("/servers")} trailingIcon={<ArrowRight />}>
+                      Open Servers
+                    </Button>
+                    <Button size="sm" variant="ghost" href={`${window.location.pathname}?policy=toml#/policy`}>
+                      Edit the policy file
+                    </Button>
+                  </div>
                 </Card>
-                {!practice && !isSet(s, "GITHUB_TOKEN") && (
+                {!isSet(s, "GITHUB_TOKEN") && (
                   <p className="set-note">
-                    Ghost has no GitHub token, so it can’t reach your repositories.{" "}
+                    Ghost has no GitHub token, so a GitHub server can’t sign in.{" "}
                     <button type="button" className="set-link" onClick={() => go("secrets")}>
                       Add a token
                     </button>
@@ -999,6 +953,37 @@ export default function SettingsScreen(_: RouteProps) {
                 </Card>
                 <p className="set-note">
                   Both off: Ghost says which line it belongs to and offers to switch. Ghost itself is never scoped.
+                </p>
+              </Section>
+
+              {/* ----------------------------------------------------------- Skills */}
+              <Section
+                id={sectionDomId("skills")}
+                title={SECTION_TITLE.skills}
+                description="Where Ghost finds skills: the SKILL.md folders that tell it how to do a kind of task."
+                className="set-section"
+              >
+                <Card list>
+                  <Row>
+                    <Field
+                      id={fieldId("GHOST_SKILL_ROOTS")}
+                      label="Project skill roots"
+                      detail="GHOST_SKILL_ROOTS"
+                      help={help(
+                        "GHOST_SKILL_ROOTS",
+                        <>
+                          One folder per line. Ghost reads each one’s <span className="t-mono">.agents/skills</span> in place, without copying. Its own skills live in{" "}
+                          <span className="t-mono">~/.config/ghost/skills</span>.
+                        </>,
+                      )}
+                      error={err("GHOST_SKILL_ROOTS")}
+                    >
+                      <LinesInput value={v.GHOST_SKILL_ROOTS ?? ""} placeholder="~/projects/heka" onChange={(next) => setValue("GHOST_SKILL_ROOTS", next)} />
+                    </Field>
+                  </Row>
+                </Card>
+                <p className="set-note">
+                  What Ghost found, and what each skill needs, is under <a href={hrefFor("/skills")}>Skills</a>.
                 </p>
               </Section>
 

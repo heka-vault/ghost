@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from ghost_core import AutonomyPolicy, Store, WriteGate
 from ghost_core.conversations import (
-    ABILITY,
     GHOST,
     RECENT_TEMPLATE,
+    SOURCE,
     SUMMARY_TEMPLATE,
     Conversations,
     slugify,
@@ -31,20 +31,20 @@ def world(tmp_path: Path):
     gate = WriteGate(
         store,
         autonomy=AutonomyPolicy.parse(
-            f"[{ABILITY}]\nset_persona = 'announce'\nreset = 'announce'\n"
+            f"[{SOURCE}]\nset_persona = 'announce'\nreset = 'announce'\n"
             "delete = 'announce'\nforget = 'announce'\n"
         ),
     )
-    gate.register(ABILITY, convs.operations())
+    gate.register(SOURCE, convs.operations())
     return store, convs, gate
 
 
 async def run(gate: WriteGate, convs: Conversations, op: str, active: str = GHOST, **args):
-    operation = gate.operation(ABILITY, op)
+    operation = gate.operation(SOURCE, op)
     prepared = await operation.prepare({"_active": active, **args})
     return await gate.submit(
         session_id="s1",
-        ability=ABILITY,
+        ability=SOURCE,
         operation=op,
         target=prepared.target,
         changes=prepared.changes,
@@ -154,7 +154,7 @@ async def test_turns_resume_compaction_and_prune(world):
     # an automatic compaction through the internal path
     out = await gate.apply_internal(
         session_id="s1",
-        ability=ABILITY,
+        ability=SOURCE,
         operation="compact",
         target=ConversationTarget(slug=GHOST),
         changes=ChangeSet(
@@ -234,9 +234,9 @@ def scoped(tmp_path: Path):
         scopes={"github_issues": lambda: ["acme/app", "acme/infra", "other/site"]},
     )
     gate = WriteGate(
-        store, autonomy=AutonomyPolicy.parse(f"[{ABILITY}]\nset_persona = 'announce'\n")
+        store, autonomy=AutonomyPolicy.parse(f"[{SOURCE}]\nset_persona = 'announce'\n")
     )
-    gate.register(ABILITY, convs.operations())
+    gate.register(SOURCE, convs.operations())
     return store, convs, gate
 
 
@@ -252,7 +252,7 @@ async def test_create_with_scope_validates_against_the_allowlist(scoped):
         await run(gate, convs, "create", name="Bad", scope={"github_issues": ["acme/secret"]})
     with pytest.raises(ValueError, match="cannot be scoped"):
         await run(gate, convs, "create", name="Bad", scope={"notes": ["x"]})
-    assert "github_issues" in gate.operation(ABILITY, "create").properties["scope"]["description"]
+    assert "github_issues" in gate.operation(SOURCE, "create").properties["scope"]["description"]
 
 
 async def test_ghost_is_always_unscoped(scoped):
@@ -297,7 +297,7 @@ async def test_scope_survives_a_reload_and_old_rows_load_unscoped(tmp_path: Path
     )
     assert convs.get("legacy").scope == {} and not convs.get("legacy").settled
     gate = WriteGate(store)
-    gate.register(ABILITY, convs.operations())
+    gate.register(SOURCE, convs.operations())
     await run(gate, convs, "create", name="App", scope={"github_issues": ["acme/app"]})
     store.close()
     again = Conversations(Store(db), tmp_path / "c", voices=VOICES)

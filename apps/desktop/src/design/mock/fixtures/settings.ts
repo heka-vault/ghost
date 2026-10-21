@@ -32,7 +32,6 @@ export default function settings(s: Scenario): SettingsFixture {
   const set = new Set(configured ? ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "OPENROUTER_API_KEY"] : []);
   const values: Record<string, string> = configured
     ? {
-        GHOST_REPOS: "ghost-mock/app,ghost-mock/infra",
         GHOST_INPUT_DEVICE: "ghost.mic",
         GHOST_WAKE_PHRASES: "hey ghost,okay ghost",
         GHOST_WAKE_FUZZY: "0.8",
@@ -40,19 +39,20 @@ export default function settings(s: Scenario): SettingsFixture {
         // Threads (ADR 0019): both crossing-streams settings off by default; no per-owner tokens yet.
         GHOST_CROSS_DEPARTMENT_ANSWERS: "0",
         GHOST_DEPARTMENT_ROUTING: "0",
+        // Skills (ADR 0023): the heka checkout's .agents/skills are read in place; the skills fixture shows them.
+        GHOST_SKILL_ROOTS: "~/projects/heka",
         ...(s.data === "busy"
           ? {
               GHOST_LLM_MODEL: "claude-sonnet-5-5",
-              GHOST_REPOS: "ghost-mock/app,ghost-mock/infra,ghost-mock/docs,heka-vault/ghost",
               GHOST_WAKE_PHRASES: "hey ghost,okay ghost,ghost wake up",
-              // Months in: scoped lines answer read-only across streams, and two organisations have their own tokens.
+              // Months in: scoped lines answer read-only across streams.
               GHOST_CROSS_DEPARTMENT_ANSWERS: "1",
-              GHOST_GITHUB_TOKENS: "ghost-mock=GHOST_MOCK_TOKEN,heka-vault=HEKA_ORG_TOKEN",
+              GHOST_SKILL_ROOTS: "~/projects/heka,~/projects/fleet",
             }
           : {}),
       }
-    : // First run: practice GitHub on, nothing allowed yet, the default microphone.
-      { GHOST_GITHUB_MOCK: "1" };
+    : // First run: nothing set yet, the default microphone.
+      {};
   return {
     settings: {
       settings_path: "~/.config/ghost/settings.env",

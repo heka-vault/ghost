@@ -22,8 +22,8 @@ from typing import Any
 import numpy as np
 from ghost_core import ActiveScope, GateError, WriteGate
 from ghost_core.conversations import (
-    ABILITY,
     GHOST,
+    SOURCE,
     SUMMARY_TEMPLATE,
     Conversations,
     ConversationTarget,
@@ -94,7 +94,7 @@ class ConversationRuntime:
         reads_wider: bool = False,
         routing: bool = False,
     ) -> None:
-        """``scoped_prompts`` are the scoped abilities' ``Contributions.scoped_prompt``
+        """``scoped_prompts`` are the scoped sources' ``ToolSource.scoped_prompt``
         by ability name, rebuilt for the active thread; ``reads_wider`` and ``routing``
         are the operator's crossing-streams settings (ADR 0019)."""
         self._conversations = conversations
@@ -205,7 +205,7 @@ class ConversationRuntime:
 
     def switch_allowed(self) -> bool:
         try:
-            level = self._gate.autonomy.resolve(ABILITY, "switch", risk="low")
+            level = self._gate.autonomy.resolve(SOURCE, "switch", risk="low")
         except Exception:  # noqa: BLE001
             return True
         return level is not Autonomy.DENY
@@ -279,7 +279,7 @@ class ConversationRuntime:
         try:
             out = await self._gate.apply_internal(
                 session_id=self._session_id,
-                ability=ABILITY,
+                ability=SOURCE,
                 operation="compact",
                 target=ConversationTarget(slug=slug),
                 changes=ChangeSet(

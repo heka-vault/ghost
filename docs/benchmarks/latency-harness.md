@@ -58,21 +58,21 @@ Scripted conversations through `build_session`, headless:
   environment and never printed.
 - **Before and after:** `--ablate` turns the 2026-10-19 changes off one by one, so a change
   can be measured against Ghost without it in the same run: `tts_clauses` (whole sentences
-  to Kokoro), `issue_comments` (get_issue without comments), `prompt_lines` (no "lead with a
+  to Kokoro), `prompt_lines` (no "lead with a
   few words" and "parallel lookups" lines), `system_cache` (no cache marker on the system
   prompt), `shared_client` (a client per session). `all` is Ghost before them, `none` after.
 - **Interleaved:** every config runs a scenario before any runs it again, so a slow minute
   at the endpoint lands on all of them.
 - **State:** a fresh temp dir per run: its own SQLite, conversations, mock GitHub
-  (`GHOST_GITHUB_MOCK=1`), the example policy (`approve` announces, `close` confirms), Jev
+  (`the mock GitHub server declared in infra/policy.example.toml (ghost-mock-github)nnounces, `close` confirms), Jev
   when a key is set. The operator's data is never read or written. No mic, no speakers.
 - **Phone:** `--transport webrtc` runs the same scenario through `SmallWebRTCTransport` with an
   aiortc peer on loopback sending Opus; `audible` is then measured at the peer, so it includes
   both jitter buffers. Use `--set thinking_sound=false` so loud means Ghost's voice.
 
 Scenarios (`ghostd/perf/scenarios.py`): `greeting`, `small_talk`, `lookup`
-(list_awaiting_signoff), `lookup_pause` (the same with a pause mid-sentence), `chain`
-(an issue and what people said: one get_issue with its comments), `announce` (approve), `confirm_plain` ("close infra 17": the
+(github_list_issues on the mock GitHub server), `lookup_pause` (the same with a pause mid-sentence), `chain`
+(an issue and what people said: github_issue_read for the issue and its comments), `announce` (a label), `confirm_plain` ("close infra 17": the
 request is the yes, ADR 0017), `confirm_yes` (a hedge, Ghost asks, "yes, go ahead"),
 `bye_shortcut` (quick intents), `bye_model` (go_to_sleep), `session` (four turns, cache growth).
 

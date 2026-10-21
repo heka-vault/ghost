@@ -1,29 +1,26 @@
 /** Owner: onboarding. The account steps: welcome, model, GitHub, done. Voice steps live in voice.tsx. */
-import { Ear, FlaskConical, FolderGit2, Hand, KeyRound, MessagesSquare, Plus, ShieldCheck } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, Ear, FlaskConical, Hand, KeyRound, MessagesSquare, Server, ShieldCheck } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { hrefFor, navigate } from "../../app/router";
 import {
   Badge,
   Button,
   Card,
-  Checkbox,
   Disclosure,
   Field,
   GhostMark,
   Input,
   ListRow,
   Notice,
-  RadioGroup,
   Skeleton,
   errorText,
   quoted,
-  scrollIntoPanel,
   useLive,
 } from "../../ui";
 import type { Wizard } from "./index";
-import { HeroPresence, PrototypeTag, Row, StepFrame } from "./frame";
-import { phraseCase, STEPS, type StepId, splitList, truthy } from "./state";
+import { HeroPresence, StepFrame } from "./frame";
+import { phraseCase, STEPS, type StepId, splitList } from "./state";
 
 export { MicrophoneStep, ModelsStep, ServiceStep, TryStep } from "./voice";
 
@@ -282,104 +279,30 @@ export function ModelStep({ w }: { w: Wizard }) {
 
 /* ------------------------------------------------------------------------------ github */
 
-type GitHubMode = "practice" | "token";
-/** Stands in for a pasted token in the ?state=looking / found screenshots (mock only; it only ever reaches the mock daemon). */
-const DEMO_TOKEN = "github_pat_prototype";
-/** My GitHub: the repository list comes from the token, so it appears only once there is one. */
-type Lookup = "none" | "looking" | "done";
-
+/**
+ * The token is all this step saves. GitHub itself is an MCP server declared in the policy file
+ * (ADR 0022), and which repositories Ghost may touch is that server's scope, so there is no
+ * practice switch and no repository list here. A fresh install declares a practice server.
+ */
 export function GitHubStep({ w }: { w: Wizard }) {
   const { online } = useLive();
   const s = w.settings;
   const tokenSet = s?.secrets.find((x) => x.name === "GITHUB_TOKEN")?.set ?? false;
-  const practiceOn = truthy(s?.values.GHOST_GITHUB_MOCK);
-  const savedRepos = useMemo(() => splitList(s?.values.GHOST_REPOS), [s]);
-
-  // ?state=looking / found: My GitHub with a token pasted, mid-lookup or after it, for screenshots.
-  const demoToken = !!w.fixture && (w.demo === "looking" || w.demo === "found");
-  const [mode, setMode] = useState<GitHubMode | null>(demoToken ? "token" : null);
-  const modeValue: GitHubMode = mode ?? (tokenSet && !practiceOn ? "token" : "practice");
-  const [token, setToken] = useState(demoToken ? DEMO_TOKEN : "");
-  const [picked, setPicked] = useState<string[] | null>(null);
-  const [typed, setTyped] = useState<string | null>(null);
-  const [extra, setExtra] = useState("");
-  const [extraError, setExtraError] = useState(false);
-  const [added, setAdded] = useState<string[]>([]);
+  const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tokenMissing, setTokenMissing] = useState(false);
-  const [reposMissing, setReposMissing] = useState(false);
-  const tokenInput = useRef<HTMLInputElement>(null);
-  const tokenField = useRef<HTMLDivElement>(null);
-  const reposBox = useRef<HTMLFieldSetElement>(null);
 
-  // Prototype: a pasted token “looks up” its repositories for a moment, then the list appears.
-  const hasToken = tokenSet || !!token.trim();
-  const [lookup, setLookup] = useState<Lookup>("none");
-  useEffect(() => {
-    if (!w.fixture || modeValue !== "token") return;
-    if (demoToken && token === DEMO_TOKEN) return setLookup(w.demo === "looking" ? "looking" : "done");
-    if (tokenSet) return setLookup("done");
-    if (!token.trim()) return setLookup("none");
-    setLookup("looking");
-    const t = setTimeout(() => setLookup("done"), 1100);
-    return () => clearTimeout(t);
-  }, [w.fixture, modeValue, tokenSet, token, demoToken, w.demo]);
-
-  const fullList = w.fixture ? (modeValue === "practice" ? w.fixture.practiceRepos : w.fixture.availableRepos) : null;
-  const list = fullList && (modeValue === "practice" || lookup === "done") ? fullList : fullList ? [] : null;
-  // Practice repositories are harmless: start with them all ticked so the default just works.
-  const defaultPicked = savedRepos.length ? savedRepos : modeValue === "practice" && fullList ? fullList.map((r) => r.name) : [];
-  const pickedValue = picked ?? defaultPicked;
-  const knownNames = new Set(list?.map((r) => r.name) ?? []);
-  const extras = [...new Set([...savedRepos.filter((r) => !knownNames.has(r) && !(modeValue === "practice" && fullList?.some((x) => x.name === r))), ...added])];
-  const repos = fullList ? pickedValue.filter((r) => knownNames.has(r) || extras.includes(r)) : splitList(typed ?? s?.values.GHOST_REPOS ?? "");
-
-  const dirty = !!token.trim() || mode !== null || picked !== null || typed !== null;
+  const dirty = !!token.trim();
   const footNote = useSavesWhenBack(dirty);
-
-  const toggle = (name: string, on: boolean) => {
-    setPicked(on ? [...pickedValue.filter((r) => r !== name), name] : pickedValue.filter((r) => r !== name));
-    setReposMissing(false);
-  };
-  const addExtra = () => {
-    const name = extra.trim().replace(/^https:\/\/github\.com\//, "").replace(/\/+$/, "");
-    if (!/^[\w.-]+\/[\w.-]+$/.test(name)) return void setExtraError(true);
-    setExtraError(false);
-    setAdded((a) => [...a, name]);
-    toggle(name, true);
-    setExtra("");
-  };
 
   const submit = async () => {
     if (!s) return;
     setError(null);
-    const needToken = modeValue === "token" && !tokenSet && !token.trim();
-    setTokenMissing(needToken);
-    // One problem at a time: the repositories are only asked for once the token is sorted.
-    setReposMissing(!needToken && repos.length === 0);
-    // Focus the first thing to fix, as the model step does, and bring its message into view:
-    // after a mouse click the focus ring doesn't draw, so the words have to be on screen.
-    if (needToken) {
-      tokenInput.current?.focus({ preventScroll: true });
-      scrollIntoPanel(tokenField.current, { block: "nearest" });
-      return;
-    }
-    if (repos.length === 0) {
-      reposBox.current?.querySelector<HTMLInputElement>("input:not([disabled])")?.focus({ preventScroll: true });
-      // To the panel's end: the whole picker, past the dock.
-      scrollIntoPanel(reposBox.current, { block: "panel-end" });
-      return;
-    }
-    const values: Record<string, string | null> = {};
-    if (practiceOn !== (modeValue === "practice")) values.GHOST_GITHUB_MOCK = modeValue === "practice" ? "1" : null;
-    const joined = repos.join(",");
-    if (joined !== savedRepos.join(",")) values.GHOST_REPOS = joined;
-    const secrets = modeValue === "token" && token.trim() ? { GITHUB_TOKEN: token.trim() } : null;
-    if (!Object.keys(values).length && !secrets) return w.next();
+    const value = token.trim();
+    if (!value) return w.next();
     setBusy(true);
     try {
-      await w.save({ values: Object.keys(values).length ? values : null, secrets });
+      await w.save({ values: null, secrets: { GITHUB_TOKEN: value } });
       setToken("");
       w.next();
     } catch (e) {
@@ -389,13 +312,11 @@ export function GitHubStep({ w }: { w: Wizard }) {
     }
   };
 
-  const rows = [...(list ?? []).map((r) => ({ ...r, extra: false })), ...extras.map((name) => ({ name, private: false, openIssues: -1, extra: true }))];
-
   return (
     <StepFrame
       id="github"
       title="Connect GitHub"
-      description="Start with the practice GitHub to get a feel for Ghost, or connect your own. Either way, Ghost only touches the repositories you pick."
+      description="Ghost reaches GitHub through a server declared in your policy file. Give it a token to sign in with, or keep practicing on sample issues for now."
       primary={{ label: "Continue", onClick: submit, loading: busy, disabled: (w.loading && !s) || (!online && (!w.done.github || dirty)) }}
       onBack={w.back}
       onSkip={w.done.github ? undefined : w.skip}
@@ -403,7 +324,7 @@ export function GitHubStep({ w }: { w: Wizard }) {
       autoFocus={w.focusOnOpen}
       notices={
         <>
-          <NeedsGhost w={w} />
+          <NeedsGhost w={w} what="save a token" />
           {error && (
             <Notice tone="danger" title="Couldn’t save">
               {error}
@@ -413,157 +334,54 @@ export function GitHubStep({ w }: { w: Wizard }) {
       }
     >
       {!s ? (
-        <FieldsSkeleton n={3} />
+        <FieldsSkeleton />
       ) : (
         <div className="onb-fields onb-fields--loose">
-          <RadioGroup<GitHubMode>
-            aria-label="Which GitHub"
-            variant="card"
-            columns={2}
-            value={modeValue}
-            onChange={(m) => {
-              setMode(m);
-              setPicked(null);
-              setReposMissing(false);
-              setTokenMissing(false);
-            }}
-            options={[
-              { value: "practice", label: "Practice GitHub", icon: <FlaskConical />, description: "Sample issues, kept in memory. Nothing reaches github.com." },
-              { value: "token", label: "My GitHub", icon: <FolderGit2 />, description: "Your real issues, through a fine‑grained token." },
-            ]}
-          />
+          <Field
+            label="GitHub token"
+            detail="GITHUB_TOKEN"
+            aside={<SecretBadge set={tokenSet} />}
+            help={tokenSet ? "Paste a new one only to replace it." : "Fine‑grained, with read and write access to issues. Saved on this computer only."}
+          >
+            <Input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={token}
+              placeholder={tokenSet ? "Replace…" : "github_pat_11A…"}
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </Field>
 
-          {modeValue === "token" && (
-            <div ref={tokenField} className="onb-fields">
-            <Field
-              label="GitHub token"
-              detail="GITHUB_TOKEN"
-              aside={<SecretBadge set={tokenSet} />}
-              help={
-                tokenSet
-                  ? "Paste a new one only to replace it."
-                  : "Fine‑grained, with read and write access to issues on the repositories you pick. Saved on this computer only."
-              }
-              error={tokenMissing ? "Paste a token, or use the practice GitHub for now." : undefined}
-            >
-              <Input
-                ref={tokenInput}
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={token}
-                placeholder={tokenSet ? "Replace…" : "github_pat_11A…"}
-                onChange={(e) => (setToken(e.target.value), setTokenMissing(false))}
-              />
-            </Field>
-            </div>
-          )}
-
-          {list ? (
-            <fieldset
-              ref={reposBox}
-              className="onb-repos"
-              aria-describedby={reposMissing ? "onb-repos-error onb-repos-help" : "onb-repos-help"}
-              aria-invalid={reposMissing || undefined}
-              aria-busy={lookup === "looking" || undefined}
-            >
-              <legend className="onb-repos__legend">
-                <span className="onb-repos__label">Repositories Ghost may touch</span>
-                <span className="t-mono t-3 t-small">GHOST_REPOS</span>
-                <PrototypeTag />
-              </legend>
-              {reposMissing && (
-                <p id="onb-repos-error" className="onb-help onb-help--error onb-repos__error" role="alert">
-                  {modeValue === "token" && !rows.length ? "Add at least one repository by name, like ghost-mock/app." : "Pick at least one repository."}
-                </p>
+          <div>
+            <Card list>
+              {!tokenSet && (
+                <ListRow
+                  leading={<FlaskConical size={16} aria-hidden />}
+                  title="Using the practice GitHub for now"
+                  description="Sample issues, kept in memory. Nothing reaches github.com until a token is set."
+                />
               )}
-              <Card list>
-                {modeValue === "token" && !hasToken && (
-                  <Row className="onb-repo onb-repo--note">
-                    <p className="t-body t-2">Paste a token to see the repositories it can reach.</p>
-                  </Row>
-                )}
-                {modeValue === "token" && lookup === "looking" && (
+              <ListRow
+                leading={<Server size={16} aria-hidden />}
+                title="Repositories are chosen per server"
+                description={
                   <>
-                    <Row className="onb-repo onb-repo--note">
-                      <p className="t-body t-2" role="status">
-                        Looking up your repositories…
-                      </p>
-                    </Row>
-                    {[160, 128, 144].map((width) => (
-                      <Row key={width} className="onb-repo onb-repo--skel">
-                        <Skeleton width={16} height={16} radius="var(--radius-xs)" />
-                        <div className="onb-repo__skel-text">
-                          <Skeleton width={width} height={12} />
-                          <Skeleton width={96} height={10} />
-                        </div>
-                      </Row>
-                    ))}
+                    Each GitHub server in <span className="t-mono">~/.config/ghost/policy.toml</span> lists the repositories Ghost may touch under its{" "}
+                    <span className="t-mono">[mcp.github]</span> section. Nothing written in an issue can add to that list.
                   </>
-                )}
-                {rows.map((r) => (
-                  <Row key={r.name} className="onb-repo">
-                    <Checkbox
-                      checked={pickedValue.includes(r.name)}
-                      onChange={(on) => toggle(r.name, on)}
-                      label={r.name}
-                      description={
-                        r.extra
-                          ? "Added by name"
-                          : `${r.openIssues} open ${r.openIssues === 1 ? "issue" : "issues"}${modeValue === "token" ? ` · ${r.private ? "private" : "public"}` : ""}`
-                      }
-                    />
-                  </Row>
-                ))}
-                {modeValue === "token" && (
-                  <Row className="onb-repo-add">
-                    <Input
-                      size="sm"
-                      aria-label="Add a repository by name"
-                      placeholder="owner/repo"
-                      spellCheck={false}
-                      value={extra}
-                      invalid={extraError}
-                      aria-describedby={extraError ? "onb-repo-add-error" : undefined}
-                      onChange={(e) => (setExtra(e.target.value), setExtraError(false))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addExtra();
-                        }
-                      }}
-                    />
-                    <Button size="sm" variant="ghost" leadingIcon={<Plus />} onClick={addExtra} disabled={!extra.trim()}>
-                      Add
-                    </Button>
-                    {extraError && (
-                      <p id="onb-repo-add-error" className="onb-help onb-help--error onb-repo-add__error" role="alert">
-                        Use owner/repo, like ghost-mock/app.
-                      </p>
-                    )}
-                  </Row>
-                )}
-              </Card>
-              <p id="onb-repos-help" className="onb-help">
-                Ghost reads and changes issues only here. Nothing written in an issue can add to this list.
-              </p>
-            </fieldset>
-          ) : (
-            <Field
-             
-              label="Repositories Ghost may touch"
-              detail="GHOST_REPOS"
-              help="owner/repo, separated by commas. Nothing written in an issue can add to this list."
-              error={reposMissing ? "Add at least one repository, like ghost-mock/app." : undefined}
-            >
-              <Input
-                value={typed ?? s?.values.GHOST_REPOS ?? ""}
-                placeholder="ghost-mock/app, ghost-mock/infra"
-                spellCheck={false}
-                onChange={(e) => (setTyped(e.target.value), setReposMissing(false))}
+                }
               />
-            </Field>
-          )}
+            </Card>
+            <div className="onb-links">
+              <Button size="sm" variant="secondary" href={hrefFor("/servers")} trailingIcon={<ArrowRight />}>
+                Open Servers
+              </Button>
+              <Button size="sm" variant="ghost" href={hrefFor("/policy")}>
+                Edit the policy file
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </StepFrame>
@@ -576,14 +394,12 @@ export function DoneStep({ w }: { w: Wizard }) {
   const live = useLive();
   const s = w.settings;
   const v = s?.values ?? {};
-  const secret = (n: string) => s?.secrets.find((x) => x.name === n)?.set ?? false;
-  const repoCount = splitList(v.GHOST_REPOS).length;
   const phrase = phraseCase(splitList(v.GHOST_WAKE_PHRASES)[0] ?? "hey ghost");
 
   // Why each open step is open, in one line.
   const why: Partial<Record<StepId, ReactNode>> = {
     model: "Without one, Ghost can’t answer.",
-    github: truthy(v.GHOST_GITHUB_MOCK) || secret("GITHUB_TOKEN") ? (repoCount ? "Saved" : "No repositories picked yet.") : "No GitHub connected yet.",
+    github: "Using the practice GitHub for now.",
     microphone: !w.devices?.echo_cancel_active ? "Echo cancellation isn’t installed yet." : (
       <>
         Not listening on <span className="t-mono">ghost.mic</span> yet.
@@ -623,7 +439,7 @@ export function DoneStep({ w }: { w: Wizard }) {
               leading={<MessagesSquare size={16} aria-hidden />}
               title="Add a conversation"
               description="A line with its own persona, voice and memory."
-              href={hrefFor("/conversations")}
+              href={hrefFor("/lines")}
               chevron
             />
           </Card>

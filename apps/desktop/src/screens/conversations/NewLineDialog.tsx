@@ -11,7 +11,7 @@ import { Button, Dialog, Field, Input, Select, Textarea, errorText, lineName, qu
 import { cleanScope, splitAliases } from "./draft";
 import { aliasExample, PERSONA_EXAMPLE } from "./examples";
 import { ScopePicker } from "./ScopePicker";
-import { type Scope, type ScopedAbility, type ThreadCreate, sameScope, scopeOf, scopedAbilities, settledAt } from "./threads";
+import { type Scope, type ScopedSource, type ThreadCreate, sameScope, scopeOf, scopedSources, settledAt } from "./threads";
 
 const NAME_EXAMPLES = ["Vendors", "Legal", "Hiring", "Release train", "Security", "Support"];
 
@@ -35,7 +35,7 @@ export function NewLineDialog({ open, onClose, taken, settled = [], seed = null,
   const [persona, setPersona] = useState("");
   const [scope, setScope] = useState<Scope>({});
   const [seedFrom, setSeedFrom] = useState("");
-  const [abilities, setAbilities] = useState<ScopedAbility[] | null>(null);
+  const [sources, setSources] = useState<ScopedSource[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,14 +67,14 @@ export function NewLineDialog({ open, onClose, taken, settled = [], seed = null,
     setScope(scopeOf(from));
   }, [open, seed, settled]);
 
-  // Which abilities can be scoped, read when the dialog opens; a failure just hides the picker's items.
+  // Which servers can be scoped, read when the dialog opens; a failure just hides the picker's items.
   useEffect(() => {
     if (!open) return;
     let on = true;
     client
-      .abilities()
-      .then((a) => on && setAbilities(scopedAbilities(a)))
-      .catch(() => on && setAbilities([]));
+      .sources()
+      .then((a) => on && setSources(scopedSources(a)))
+      .catch(() => on && setSources([]));
     return () => {
       on = false;
     };
@@ -147,12 +147,12 @@ export function NewLineDialog({ open, onClose, taken, settled = [], seed = null,
         <Field label="Persona" optional help="In your words. It goes into the prompt exactly as written. You can add it later.">
           <Textarea rows={4} value={persona} placeholder={PERSONA_EXAMPLE} onChange={(e) => setPersona(e.target.value)} />
         </Field>
-        {(abilities === null || abilities.length > 0) && (
+        {(sources === null || sources.length > 0) && (
           <div className="conv-form__group">
             <p className="conv-form__label">
               Scope <span className="conv-form__optional">Optional</span>
             </p>
-            <ScopePicker abilities={abilities} value={scope} onChange={setScope} idPrefix="conv-new-scope" />
+            <ScopePicker sources={sources} value={scope} onChange={setScope} idPrefix="conv-new-scope" />
           </div>
         )}
         {settled.length > 0 && (

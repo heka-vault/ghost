@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import signal
 import sys
 from collections.abc import Sequence
@@ -32,23 +31,21 @@ from ghost_api import (
 from ghost_api.conversations import conversation_view
 from ghost_api.models import ConversationView, StatusEvent
 from ghost_core import (
-    AbilityError,
     AutonomyPolicy,
     ConfirmationClassifier,
     Events,
-    GhostContext,
-    LoadedAbility,
     RegexClassifier,
     Store,
+    ToolSource,
     WriteGate,
-    discover,
-    load,
 )
-from ghost_core.conversations import ABILITY as CONVERSATIONS
-from ghost_core.conversations import GHOST, Conversations
+from ghost_core.conversations import GHOST, Conversations, conversations_source
+from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.jev import JevClassifier, JevClient
+from ghost_core.mcp import Servers
+from ghost_core.skills import Skills
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
-from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models, conversations_ability
+from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
 from loguru import logger
 
@@ -104,8 +101,8 @@ class Daemon:
         self._manual: FileWakeDetector | None = None
         self._listener: WakeListener | None = None
         self._rearm = asyncio.Event()  # set when the passive listener must be rebuilt
-        self._discovered: dict = {}
         self.conversations: Conversations | None = None
+        self.skills: Skills | None = None
         self._models: Models | None = None
         self._deps: Deps | None = None
         # The phone (ADR 0016). An accepted offer's connection goes on the queue; the
@@ -213,9 +210,6 @@ class Daemon:
         if applied:
             self._rearm.set()
         return applied
-
-    def discovered_abilities(self) -> dict:
-        return self._discovered
 
     # --- conversations (ADR 0014) ------------------------------------------------
 
@@ -371,7 +365,13 @@ class Daemon:
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         store = Store(self.cfg.db_path)
         autonomy = AutonomyPolicy.load(self.cfg.policy_path)
-        abilities = await load_abilities(self.cfg, self.voice, store, autonomy)
+        mcp = Servers(autonomy.mcp)  # ADR 0022: the servers the policy file declares
+        await mcp.connect()
+        skills = Skills(self.cfg.skills_dir, self.cfg.skill_root_paths)  # ADR 0023
+        self.skills = skills
+        # What a session's model may call: every server's offered reads and declared
+        # writes, and the skills (the index, read_skill, add and remove).
+        tool_sources: list[ToolSource] = [*mcp.sources(), skills.source()]
         jev = build_jev(self.cfg)
         classifier: ConfirmationClassifier = (
             JevClassifier(
@@ -390,8 +390,8 @@ class Daemon:
             classifier=classifier,
             on_decision=debug.audio,
         )
-        for a in abilities:
-            gate.register(a.name, a.contributions.operations)
+        for a in tool_sources:  # declared writes go through the gate
+            gate.register(a.name, a.operations)
         self.gate = gate
         conversations = Conversations(
             store,
@@ -399,22 +399,17 @@ class Daemon:
             default_voice=self.voice.tts_voice,
             default_speed=self.voice.tts_speed,
             retention=timedelta(days=self.cfg.turn_retention_days),
-            # What a thread can be scoped to (ADR 0019): each scoped ability's allowlist.
-            scopes={
-                a.name: a.contributions.scope_items
-                for a in abilities
-                if a.contributions.scope_kind and a.contributions.scope_items
-            },
+            # What a thread can be scoped to (ADR 0019): each scoped server's allowlist.
+            scopes={a.name: a.scope_items for a in tool_sources if a.scope_kind and a.scope_items},
         )
-        gate.register(CONVERSATIONS, conversations_ability(conversations).contributions.operations)
+        gate.register(CONVERSATIONS, conversations_source(conversations).operations)
         self.conversations = conversations
         pruned = conversations.prune()
         if pruned:
             logger.info(f"conversations: pruned {pruned} summarized turns past retention")
-        self._discovered = discover(self.cfg.abilities_dir)
-        self.state.abilities = [a.name for a in abilities]
-        events = Events(ln for a in abilities for ln in a.contributions.listeners)
-        api = await self._start_api(gate, store, abilities)
+        self.state.servers = list(mcp.servers)
+        events = Events()
+        api = await self._start_api(gate, store, tool_sources, mcp, skills)
         await self._start_phone()
         logger.info(f"autonomy policy: {autonomy.source}")
         logger.info(
@@ -422,8 +417,9 @@ class Daemon:
         )
         for problem in self.voice.llm_problems():
             logger.error(f"llm: {problem}")
-        for line in describe_abilities(abilities, autonomy):
+        for line in describe_mcp(mcp, autonomy):
             logger.info(line)
+        logger.info(describe_skills(skills, set(mcp.servers)))
         logger.info(
             "confirmation classifier: "
             + (f"jev via {jev.provider}, regex fallback" if jev else "regex")
@@ -474,7 +470,7 @@ class Daemon:
                 if phone_conn is not None:  # the phone takes the session; the desk mic is free
                     await self._conversation(
                         models,
-                        abilities,
+                        tool_sources,
                         gate,
                         events,
                         ducker,
@@ -490,7 +486,7 @@ class Daemon:
                     continue
                 await events.emit("wake")
                 await self._conversation(
-                    models, abilities, gate, events, ducker, wake_task.result()
+                    models, tool_sources, gate, events, ducker, wake_task.result()
                 )
         finally:
             wake.close()
@@ -499,8 +495,7 @@ class Daemon:
                 await self.phone_listener.stop()
             if api:
                 await api.stop()
-            for a in abilities:
-                await a.instance.aclose()
+            await mcp.close()
             if jev:
                 await jev.aclose()
             store.close()
@@ -510,18 +505,25 @@ class Daemon:
         voices = self.voices()
         if voices and self.gate is not None:
             conversations._voices = tuple(voices)  # noqa: SLF001
-            self.gate.register(
-                CONVERSATIONS, conversations_ability(conversations).contributions.operations
-            )
+            self.gate.register(CONVERSATIONS, conversations_source(conversations).operations)
 
-    async def _start_api(self, gate: WriteGate, store: Store, abilities) -> ApiServer | None:
+    async def _start_api(
+        self,
+        gate: WriteGate,
+        store: Store,
+        sources: Sequence[ToolSource],
+        mcp: Servers | None = None,
+        skills: Skills | None = None,
+    ) -> ApiServer | None:
         socket_path = self.cfg.api_socket or default_socket_path()
         deps = Deps(
             state=self.state,
             control=self,
             gate=gate,
             store=store,
-            abilities=abilities,
+            sources=sources,
+            mcp=mcp,
+            skills=skills,
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,
@@ -569,7 +571,7 @@ class Daemon:
     async def _conversation(
         self,
         models: Models,
-        abilities: Sequence[LoadedAbility],
+        sources: Sequence[ToolSource],
         gate: WriteGate,
         events: Events,
         ducker: Ducker,
@@ -616,7 +618,7 @@ class Daemon:
         session = build_session(
             self.voice,
             models=models,
-            abilities=abilities,
+            sources=sources,
             gate=gate,
             events=events,
             first_utterance=first_utterance,
@@ -820,81 +822,40 @@ async def _close_peer(conn: Any) -> None:
         logger.debug("phone: peer already closed")
 
 
-def enabled_names(cfg: GhostdSettings, autonomy: AutonomyPolicy) -> list[str]:
-    return list(autonomy.enabled) if autonomy.enabled is not None else list(cfg.abilities)
+def describe_skills(skills: Skills, servers: set[str]) -> str:
+    items = []
+    for s in skills.list():
+        missing = s.missing(servers)
+        where = "" if s.source == "ghost" else f" ({s.source})"
+        items.append(f"{s.name}{where}" + (f" [needs {', '.join(missing)}]" if missing else ""))
+    return f"skills: {', '.join(items) if items else 'none'} (in {skills.ghost_dir})"
 
 
-async def load_abilities(
-    cfg: GhostdSettings, voice: VoiceSettings, store: Store, autonomy: AutonomyPolicy
-) -> list[LoadedAbility]:
-    discovered = discover(cfg.abilities_dir)
-
-    def make_context(name: str) -> GhostContext:
-        return GhostContext.build(
-            name,
-            data_root=cfg.data_dir,
-            cache_root=voice.cache_dir,
-            store=store,
-            env=os.environ,
-            debug_audio=debug.audio,
-        )
-
-    return await load(
-        enabled_names(cfg, autonomy),
-        discovered=discovered,
-        make_context=make_context,
-        passive_allowed=autonomy.passive,
-    )
-
-
-def describe_abilities(abilities: Sequence[LoadedAbility], autonomy: AutonomyPolicy) -> list[str]:
+def describe_mcp(mcp: Servers, autonomy: AutonomyPolicy) -> list[str]:
     lines = []
-    for a in abilities:
-        levels = autonomy.describe(a.name, {op.name: op.risk for op in a.contributions.operations})
-        table = ", ".join(f"{op}={lv.value}" for op, lv in levels.items()) or "read-only"
-        extras = []
-        if a.contributions.interceptors:
-            extras.append(f"{len(a.contributions.interceptors)} interceptor(s)")
-        if a.contributions.processors:
-            extras.append(f"processors in {', '.join(a.contributions.processors)}")
-        if a.contributions.listeners:
-            extras.append(f"{len(a.contributions.listeners)} listener(s)")
-        if a.contributions.scope_kind:
-            extras.append(f"scoped by {a.contributions.scope_kind}")
-        suffix = f" [{'; '.join(extras)}]" if extras else ""
-        lines.append(f"  {a.name} {a.ability.version}: {table}{suffix}")
-    return lines
-
-
-async def run_ability_command(name: str, args: list[str]) -> int:
-    """``ghostd <ability> <command> [args]``: load just that ability and dispatch."""
-    cfg = GhostdSettings()
-    voice = VoiceSettings()  # type: ignore[call-arg]
-    store = Store(cfg.db_path)
-    try:
-        [loaded] = await load(
-            [name],
-            discovered=discover(cfg.abilities_dir),
-            make_context=lambda n: GhostContext.build(
-                n, data_root=cfg.data_dir, cache_root=voice.cache_dir, store=store, env=os.environ
-            ),
-            passive_allowed=AutonomyPolicy.load(cfg.policy_path).passive,
-        )
-    except AbilityError as e:
-        print(e, file=sys.stderr)
-        return 1
-    try:
-        commands = {c.name: c for c in loaded.contributions.commands}
-        if not args or args[0] not in commands:
-            print(
-                f"{name} commands: "
-                + ", ".join(f"{c.name} ({c.description})" for c in commands.values())
+    for name, spec in mcp.specs.items():
+        live = mcp.servers.get(name)
+        if live is None:
+            lines.append(f"  mcp {name} ({spec.transport}): not connected: {mcp.failed.get(name)}")
+            continue
+        offered = ", ".join(t.name for t in live.offered()) or "none"
+        ops = {o.name: o for o in live.operations()}
+        levels = autonomy.describe(name, {n: o.risk for n, o in ops.items()})
+        writes = ", ".join(f"{n}={lv.value}" for n, lv in levels.items())
+        undeclared = [
+            t.name
+            for t in live.tools
+            if not t.read_only and t.name not in {w.tool for w in spec.writes.values()}
+        ]
+        line = f"  mcp {name} ({spec.transport}): reads {offered}; writes {writes or 'none'}"
+        if undeclared:
+            line += f"; not declared, not offered: {', '.join(undeclared)}"
+        if spec.scope:
+            line += (
+                f" [scoped by {spec.scope.kind}: {', '.join(spec.scope.items) or 'no allowlist'}]"
             )
-            return 2
-        return commands[args[0]].run(args[1:])
-    finally:
-        await loaded.instance.aclose()
-        store.close()
+        lines.append(line)
+    return lines
 
 
 def _client_command(cmd: str, args: list[str]) -> int:
@@ -1048,12 +1009,22 @@ def cli(argv: list[str] | None = None) -> None:
             print(f"autonomy policy: {autonomy.source}")
         except ValueError as e:
             problems.append(f"policy: {e}")
-        try:
-            abilities = asyncio.run(load_abilities(cfg, voice, Store(), autonomy))
-            print("abilities:")
-            print("\n".join(describe_abilities(abilities, autonomy)))
-        except AbilityError as e:
-            problems.append(f"ability: {e}")
+        if autonomy.mcp:
+
+            async def probe() -> list[str]:
+                mcp = Servers(autonomy.mcp)
+                await mcp.connect()
+                try:
+                    return describe_mcp(mcp, autonomy)
+                finally:
+                    await mcp.close()
+
+            print("mcp servers:")
+            for line in asyncio.run(probe()):
+                print(line)
+                if "not connected" in line:
+                    problems.append(line.strip())
+        print(describe_skills(Skills(cfg.skills_dir, cfg.skill_root_paths), set(autonomy.mcp)))
         try:
             jev = build_jev(cfg)
             how = f"jev via {jev.provider} (regex fallback)" if jev else "regex"
@@ -1062,19 +1033,10 @@ def cli(argv: list[str] | None = None) -> None:
             problems.append(str(e))
         print("\n".join(problems) if problems else "config ok")
         sys.exit(1 if problems else 0)
-    elif cmd == "abilities":
-        cfg = GhostdSettings()
-        autonomy = AutonomyPolicy.load(cfg.policy_path)
-        enabled = set(enabled_names(cfg, autonomy))
-        for name, ab in sorted(discover(cfg.abilities_dir).items()):
-            flag = "enabled " if name in enabled else "         "
-            print(f"{flag}{name} {ab.version}: {ab.description}")
-    elif cmd in discover(GhostdSettings().abilities_dir):
-        sys.exit(asyncio.run(run_ability_command(cmd, argv[1:])))
     else:
         print(
             "usage: ghostd [run|wake|say <text>|sleep|status|latency|perf|restore-volumes|"
-            "devices|check|abilities|<ability> <command>]"
+            "devices|check]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)

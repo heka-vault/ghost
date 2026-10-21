@@ -13,17 +13,18 @@ from ghost_core.conversations.models import (
     slugify,
 )
 from ghost_core.conversations.service import (
-    ABILITY,
     RECENT_TEMPLATE,
+    SOURCE,
     SUMMARY_TEMPLATE,
     Conversations,
     ResumeContext,
+    conversations_source,
 )
 from ghost_core.conversations.writer import ConversationWriter
 
 __all__ = [
-    "ABILITY",
     "GHOST",
+    "SOURCE",
     "RECENT_TEMPLATE",
     "SUMMARY_TEMPLATE",
     "Compaction",
@@ -36,6 +37,7 @@ __all__ = [
     "ResumeContext",
     "Scope",
     "TurnRecord",
+    "conversations_source",
     "describe_scope",
     "slugify",
 ]

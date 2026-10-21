@@ -157,7 +157,7 @@ export default function TrayPrototype(_: RouteProps) {
   }, [open, close]);
 
   const scenario = design?.scenario.name ?? null;
-  const openHref = scenarioHref(scenario, state.line && status?.conversation ? `/conversations/${status.conversation}` : "/");
+  const openHref = scenarioHref(scenario, state.line && status?.conversation ? `/lines/${status.conversation}` : "/");
   const label = `Ghost: ${state.title}${pending ? ", waiting for your okay" : ""}`;
   const dot = pending ? null : state.presence === "passive" ? null : state.presence;
   const current = stateName(state, !!pending, live.connection, live.setupNeeded);

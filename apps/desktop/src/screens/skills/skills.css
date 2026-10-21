@@ -1,0 +1,139 @@
+/* Owner: skills. */
+
+.skl-notice { margin-bottom: var(--space-6); }
+.skl-notice__p { margin: 0; }
+.skl-notice__p + .skl-notice__p { margin-top: var(--space-1); }
+.skl-notice__path { font-family: var(--font-mono); font-size: var(--text-sm); overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ two panes */
+.skl-panes {
+  /* Pending shared tokens: --pane-list-width (280) and a detail measure (760), as Servers. */
+  --skl-list-width: calc(var(--space-20) * 3.5);
+  --skl-measure: calc(var(--space-20) * 9.5);
+  display: grid;
+  grid-template-columns: var(--skl-list-width) minmax(0, 1fr);
+  gap: var(--space-10);
+  align-items: start;
+}
+
+/* The list stays in reach while a long SKILL.md scrolls: sticky under the compact page bar. The
+   panel is the scroller, never a viewport height here. */
+.skl-list {
+  position: sticky;
+  top: calc(var(--page-sticky-top, var(--page-bar-height)) + var(--space-6));
+  align-self: start;
+  min-width: 0;
+}
+/* The row's second line, up to two lines of the skill's own words; the third says where it is from. */
+.skl-list__sum { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.skl-list__from { display: block; margin-top: var(--space-0_5); color: var(--text-3); }
+.skl-list__needs { color: var(--warn); }
+.skl-skel-row { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+
+/* The drop zone: the list (or the empty card) itself. While a folder is dragged over the
+   window a dashed accent frame lies over it and says what will happen; it never takes the
+   pointer, so the drop lands on the webview as before. */
+.skl-zone { position: relative; border-radius: var(--radius-lg); }
+.skl-zone__over {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 2px dashed var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-medium);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.skl-zone.is-over .skl-zone__over { opacity: 1; }
+.skl-zone__over .lucide { width: var(--icon-md); height: var(--icon-md); }
+/* How to add one, under the list: help text, so --text-3 is right here. */
+.skl-hint { margin: var(--space-3) var(--space-1) 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+
+/* The empty state names the folders in mono, and its link reads as one. */
+.skl-empty__p { margin: 0; }
+.skl-empty__p + .skl-empty__p { margin-top: var(--space-2); }
+.skl-empty .t-mono { font-size: var(--text-sm); }
+.skl-link { color: var(--accent-text); text-decoration: underline; text-underline-offset: 0.15em; border-radius: var(--radius-xs); }
+.skl-link:hover { color: var(--accent-hover); }
+
+/* --------------------------------------------------------------------- detail */
+.skl-pane { min-width: 0; max-width: var(--skl-measure); }
+.skl-detail { display: flex; flex-direction: column; min-width: 0; }
+.skl-detail__header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6); padding-bottom: var(--space-3); }
+.skl-detail__titles { min-width: 0; }
+/* Scroll target: a compact page bar plus the list's top gap above the header. */
+.skl-detail__anchor { position: absolute; top: calc((var(--page-bar-height) + var(--space-6)) * -1); left: 0; width: 1px; height: 1px; pointer-events: none; }
+.skl-detail__title { margin: 0; overflow-wrap: anywhere; }
+.skl-detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1_5);
+  margin: var(--space-0_5) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--text-3);
+}
+.skl-detail__meta .t-mono { overflow-wrap: anywhere; }
+/* The readiness badge and Remove sit on the title's line, 12px apart (a focused button next to a badge). */
+.skl-detail__control { flex: none; display: flex; align-items: center; gap: var(--space-3); min-height: var(--control-sm); padding-top: var(--space-0_5); }
+.skl-detail__description { margin: var(--space-1) 0 0; max-width: 64ch; color: var(--text-2); }
+/* Why Remove is off for a project's skill: one quiet line, read with the button. */
+.skl-detail__why { margin: var(--space-2) 0 0; max-width: 64ch; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.skl-detail__why .t-mono { font-size: var(--text-sm); }
+.skl-detail__notice { margin-top: var(--space-6); }
+
+.skl-sections { margin-top: var(--space-8); }
+
+/* A titled block, like Section, with its action on the heading's line (as Servers). */
+.skl-block { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.skl-block + .skl-block { margin-top: var(--space-10); }
+.skl-block__header { display: flex; flex-direction: column; gap: var(--space-0_5); }
+.skl-block__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--leading-lg); }
+.skl-block__count { margin-left: var(--space-2); font-size: var(--text-md); font-weight: var(--weight-regular); color: var(--text-3); }
+.skl-block__title { margin: 0; font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold); color: var(--text-1); }
+.skl-block__description { margin: 0; max-width: 64ch; text-wrap: balance; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.skl-block__description .t-mono { font-size: var(--text-sm); }
+
+.skl-none { margin: 0; max-width: 64ch; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.skl-none .t-mono { font-size: var(--text-sm); }
+
+.skl-item { display: flex; align-items: center; gap: var(--space-6); padding: var(--space-3) var(--space-4); min-width: 0; }
+.skl-item--compact { padding-block: var(--space-2_5); }
+.skl-item__text { display: flex; flex-direction: column; gap: var(--space-0_5); flex: 1 1 auto; min-width: 0; }
+.skl-item__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
+.skl-item__id { min-width: 0; font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); overflow-wrap: anywhere; }
+.skl-item__state { flex: none; }
+
+/* SKILL.md as the model reads it: plain text in a sunken well, wrapped so nothing scrolls
+   sideways at 1280. Untrusted text (ADR 0023): shown, never acted on. */
+.skl-body {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-md);
+  color: var(--text-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+/* The Add dialog: the path field, then the refusal, if any, with Replace beside it. */
+.skl-add__notice { margin-top: var(--space-4); }
+.skl-add__notice .skl-notice__p + .skl-notice__p { margin-top: var(--space-1); }
+
+/* Loading */
+.skl-skeleton-desc { margin-top: var(--space-1); max-width: 64ch; }
+.skl-skeleton-gap { margin: var(--space-8) 0 var(--space-3); }
+.skl-skel-head { display: flex; flex-direction: column; gap: var(--space-2); }
+.skl-skel-body { padding: var(--space-1) 0; }

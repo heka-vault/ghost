@@ -219,10 +219,10 @@ function TomlNote({ id, onOpen }: { id: string; onOpen: () => void }) {
 }
 
 export interface OperationRowProps {
-  ability: string;
-  /** The key in the file: the operation's name, or `*` for the whole ability. */
+  source: string;
+  /** The key in the file: the operation's name, or `*` for the whole source. */
   name: string;
-  /** "" for a row with no risk class (the whole-ability row). */
+  /** "" for a row with no risk class (the whole-source row). */
   risk: string;
   title: string;
   description: ReactNode;
@@ -230,7 +230,7 @@ export interface OperationRowProps {
   own: string | undefined;
   /** What the row does without its own line; "" when that is each operation's risk. */
   inheritedLevel: string;
-  /** Where an inherited level comes from, when that isn't obvious (an ability's `*` line); "" otherwise. */
+  /** Where an inherited level comes from, when that isn't obvious (a source's `*` line); "" otherwise. */
   inheritedFrom: string;
   edited: boolean;
   targets: [string, string][];
@@ -244,7 +244,7 @@ export interface OperationRowProps {
 }
 
 export function OperationRow({
-  ability,
+  source,
   name,
   risk,
   title,
@@ -327,7 +327,7 @@ export function OperationRow({
         )}
       </span>
       <LevelStops
-        name={`${ability}.${name}`}
+        name={`${source}.${name}`}
         value={value}
         inherited={own == null}
         onChange={(lv) => onChange(lv)}
@@ -371,7 +371,7 @@ export function DefaultRow({
         </div>
         <p className="policy-row__description" id={`${id}-d`}>
           {value
-            ? `Anything not set below, and anything a new ability adds: ${autonomyLabel(value).toLowerCase()}.`
+            ? `Anything not set below, and anything a new server adds: ${autonomyLabel(value).toLowerCase()}.`
             : "Anything not set below follows its risk. Low risk is done and told; the rest ask first."}
         </p>
         {tomlOnly && <TomlNote id={`${id}-n`} onOpen={onOpenToml} />}

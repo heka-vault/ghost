@@ -2,7 +2,7 @@
  * The design-mode mock layer. Loaded only by main.tsx in development when the URL has
  * ?mock=<scenario>; production builds never include this folder.
  *
- *   http://localhost:1430/?mock=session#/conversations/accounting
+ *   http://localhost:1430/?mock=session#/lines/accounting
  *   ...&latency=0    answer instantly (default 140ms, to show loading states)
  *   ...&drop=2000    the daemon drops 2s after load (any scenario): reconnecting state
  *   ...&back=6000    and comes back 6s after it dropped

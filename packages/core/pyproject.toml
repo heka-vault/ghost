@@ -1,9 +1,19 @@
 [project]
 name = "ghost-core"
 version = "0.1.0"
-description = "Ghost core: the ability API, the write gate, policy, audit"
+description = "Ghost core: the write gate, policy, audit, lines and MCP servers"
 requires-python = ">=3.12,<3.13"
-dependencies = ["pydantic>=2.9", "pydantic-settings>=2.5", "httpx>=0.27", "loguru>=0.7"]
+dependencies = [
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "httpx>=0.27",
+    "loguru>=0.7",
+    "mcp>=1.2",
+    "pyyaml>=6",
+]
+
+[project.scripts]
+ghost-mock-github = "ghost_core.mock_github:main"
 
 [build-system]
 requires = ["hatchling"]

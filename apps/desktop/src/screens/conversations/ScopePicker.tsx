@@ -1,16 +1,16 @@
 /**
- * Owner: conversations. What a line may touch (ADR 0019): for every ability that can be
- * scoped, a checklist of the items the operator allows (the ability's whole allowlist), and
- * the line's scope is the checked subset. Nothing checked for an ability means the line sees
- * everything that ability allows, so the help line says so rather than leaving it to guess.
+ * Owner: conversations. What a line may touch (ADR 0019): for every server that declares a
+ * scope, a checklist of the items the server's declaration allows (its whole allowlist), and
+ * the line's scope is the checked subset. Nothing checked for a server means the line sees
+ * everything that server allows, so the help line says so rather than leaving it to guess.
  * Checks apply on Save, so these are Checkboxes, not Switches.
  */
 import { Card, Checkbox, Skeleton } from "../../ui";
-import { type Scope, type ScopedAbility, abilityWords, kindWords } from "./threads";
+import { type Scope, type ScopedSource, kindWords, sourceWords } from "./threads";
 
 export interface ScopePickerProps {
-  /** The abilities that declare a scope kind; null while they load. */
-  abilities: ScopedAbility[] | null;
+  /** The sources that declare a scope kind; null while they load. */
+  sources: ScopedSource[] | null;
   value: Scope;
   onChange: (scope: Scope) => void;
   disabled?: boolean;
@@ -18,8 +18,8 @@ export interface ScopePickerProps {
   idPrefix: string;
 }
 
-export function ScopePicker({ abilities, value, onChange, disabled, idPrefix }: ScopePickerProps) {
-  if (!abilities) {
+export function ScopePicker({ sources, value, onChange, disabled, idPrefix }: ScopePickerProps) {
+  if (!sources) {
     return (
       <Card list aria-busy="true" aria-label="Loading scope">
         {[0, 1].map((i) => (
@@ -31,12 +31,12 @@ export function ScopePicker({ abilities, value, onChange, disabled, idPrefix }: 
       </Card>
     );
   }
-  if (!abilities.length) {
-    return <p className="t-small t-2">Nothing to scope yet: no installed ability says what it can be limited to.</p>;
+  if (!sources.length) {
+    return <p className="t-small t-2">Nothing to scope yet: no server in your policy file declares what it can be limited to.</p>;
   }
   return (
     <div className="conv-scope">
-      {abilities.map((a) => {
+      {sources.map((a) => {
         const words = kindWords(a.scope_kind);
         const picked = value[a.name] ?? [];
         // Items the line names that the allowlist no longer has stay visible until unchecked.
@@ -50,16 +50,16 @@ export function ScopePicker({ abilities, value, onChange, disabled, idPrefix }: 
           onChange(scope);
         };
         return (
-          <div key={a.name} className="conv-scope__ability">
-            {abilities.length > 1 && (
+          <div key={a.name} className="conv-scope__source">
+            {sources.length > 1 && (
               <p className="conv-scope__head">
-                <span className="t-medium">{abilityWords(a.name)}</span>
+                <span className="t-medium">{sourceWords(a.name)}</span>
                 <span className="t-mono t-3">{a.name}</span>
               </p>
             )}
             <Card list>
               {items.length === 0 ? (
-                <p className="conv-scope__empty t-small t-2">No {words.many} are allowed yet. Add them under Settings, GitHub.</p>
+                <p className="conv-scope__empty t-small t-2">No {words.many} are allowed yet. Add them to the server’s scope in the policy file.</p>
               ) : (
                 items.map((item) => (
                   <div key={item} className="conv-scope__item">

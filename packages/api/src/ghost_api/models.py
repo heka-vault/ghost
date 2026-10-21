@@ -43,7 +43,7 @@ class Status(BaseModel):
     version: str
     api_version: str = API_VERSION
     wake_mode: str
-    abilities: list[str]
+    servers: list[str]  # the MCP servers connected at start (ADR 0022)
     pending: PendingProposal | None = None
     conversation: str | None = None  # slug of the conversation the session is in (ADR 0014)
     # Where the live session's audio is: the workstation's mic and speaker, or the paired
@@ -164,14 +164,14 @@ class AuditPage(BaseModel):
     offset: int
 
 
-# --- abilities + policy ---------------------------------------------------------
+# --- sources + policy ---------------------------------------------------------
 
 
 class OperationInfo(BaseModel):
     name: str
     description: str
     risk: str
-    autonomy: str  # resolved at the ability level; targets may tighten it
+    autonomy: str  # resolved at the source level; targets may tighten it
     properties: dict[str, Any]
     required: list[str]
 
@@ -181,23 +181,80 @@ class ReadToolInfo(BaseModel):
     description: str
 
 
-class AbilityInfo(BaseModel):
+class McpToolInfo(BaseModel):
     name: str
-    version: str
     description: str
-    enabled: bool
-    loaded: bool
-    passive: bool
+    offered: bool  # read-only (or listed under reads): the model may call it today
+
+
+class McpWriteInfo(BaseModel):
+    """A declared write: the policy operation, the tool it calls, and its level."""
+
+    operation: str
+    tool: str
+    risk: str
+    autonomy: str  # resolved at the server level; a target rule may still tighten it
+    asked_by: list[str] = []
+    target: list[str] = []
+    read: str | None = None  # the read that shows the target; None: no stale check
+    offered: bool  # the tool exists on the server and the level is not deny
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+
+class McpScopeInfo(BaseModel):
+    kind: str
+    arguments: list[str]
+    items: list[str] = []
+
+
+class McpServerInfo(BaseModel):
+    """One MCP server from the policy file (ADR 0022) and what Ghost got from it."""
+
+    name: str
+    transport: str  # "http" or "stdio"
+    connected: bool
+    error: str | None = None  # why it is not connected; never a secret
+    tools: list[McpToolInfo] = []
+    writes: list[McpWriteInfo] = []
+    scope: McpScopeInfo | None = None
+
+
+class SkillInfo(BaseModel):
+    """A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or a project's."""
+
+    name: str
+    description: str
+    source: str  # "ghost" for Ghost's own directory, else the project root it sits under
+    path: str
+    requires: list[str] = []  # "mcp:<server>" names it needs
+    missing: list[str] = []  # the required servers that are not connected
+    files: list[str] = []  # the files beside SKILL.md
+
+
+class SkillBody(BaseModel):
+    name: str
+    body: str  # SKILL.md without its front matter, trimmed
+    files: list[str] = []
+
+
+class SkillAdd(BaseModel):
+    path: str = Field(min_length=1, description="A folder on this machine holding SKILL.md.")
+    name: str | None = None
+    replace: bool = False
+
+
+class SourceInfo(BaseModel):
+    """A source of tools the gate knows: the lines (built in) or an MCP server. The
+    policy screen edits levels per operation from this list."""
+
+    name: str
+    kind: str  # "built-in" or "server"
+    description: str
     operations: list[OperationInfo] = []
     read_tools: list[ReadToolInfo] = []
-    interceptors: list[str] = []
-    slots: list[str] = []
-    listeners: int = 0
-    commands: list[str] = []
-    # ADR 0019: how a thread can be scoped for this ability ("repository"), and the
-    # whole allowlist a thread's scope is chosen from. None/empty: cannot be scoped.
-    scope_kind: str | None = None
-    scope_items: list[str] = []
+    scope_kind: str | None = None  # what a thread can be scoped to for it (ADR 0019)
+    scope_items: list[str] = []  # the whole allowlist, in Target.scope() form
 
 
 class PolicyView(BaseModel):
@@ -207,8 +264,6 @@ class PolicyView(BaseModel):
     default: str | None
     skills: dict[str, dict[str, str]]
     targets: dict[str, dict[str, dict[str, str]]]
-    enabled: list[str] | None
-    passive: list[str]
 
 
 class PolicyUpdate(BaseModel):
@@ -218,14 +273,11 @@ class PolicyUpdate(BaseModel):
     default: str | None = None
     skills: dict[str, dict[str, str]] | None = None
     targets: dict[str, dict[str, dict[str, str]]] | None = None
-    enabled: list[str] | None = None
-    passive: list[str] | None = None
 
 
 class PolicyResult(BaseModel):
     policy: PolicyView
     applied: bool  # autonomy levels reloaded live
-    restart_required: bool  # the enabled list changed
 
 
 # --- settings -------------------------------------------------------------------
@@ -259,8 +311,8 @@ class SettingsUpdate(BaseModel):
 
 class SettingsResult(BaseModel):
     settings: SettingsView
-    restart_required: bool
     applied: list[str] = []  # keys the daemon picked up without a restart
+    restart_required: bool = False  # a pending value or a secret: the service must restart
 
 
 # --- devices + setup ------------------------------------------------------------

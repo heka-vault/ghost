@@ -24,8 +24,13 @@ export type PendingProposal = Schemas["PendingProposal"];
 export type OutcomeView = Schemas["OutcomeView"];
 export type AuditPage = Schemas["AuditPage"];
 export type AuditEntry = Schemas["AuditEntry"];
-export type AbilityInfo = Schemas["AbilityInfo"];
+export type SourceInfo = Schemas["SourceInfo"];
 export type OperationInfo = Schemas["OperationInfo"];
+export type ReadToolInfo = Schemas["ReadToolInfo"];
+export type McpServerInfo = Schemas["McpServerInfo"];
+export type McpToolInfo = Schemas["McpToolInfo"];
+export type McpWriteInfo = Schemas["McpWriteInfo"];
+export type McpScopeInfo = Schemas["McpScopeInfo"];
 export type PolicyView = Schemas["PolicyView"];
 export type PolicyUpdate = Schemas["PolicyUpdate"];
 export type PolicyResult = Schemas["PolicyResult"];
@@ -44,6 +49,9 @@ export type VoiceInfo = Schemas["VoiceInfo"];
 export type PhoneView = Schemas["PhoneView"];
 export type PhoneDevice = Schemas["PhoneDevice"];
 export type PhonePairing = Schemas["PhonePairing"];
+export type SkillInfo = Schemas["SkillInfo"];
+export type SkillBody = Schemas["SkillBody"];
+export type SkillAdd = Schemas["SkillAdd"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -116,8 +124,15 @@ export class GhostClient {
   }
 
   // --- configuration ---------------------------------------------------------------
-  abilities() {
-    return unwrap(this.api.GET("/abilities"));
+  /** Every source of tools the gate knows (ADR 0022): the lines, built in, and each MCP
+   *  server, with its operations at their resolved levels and what a line can be scoped to. */
+  sources() {
+    return unwrap(this.api.GET("/sources"));
+  }
+  /** The MCP servers the policy file declares: connected or not, their tools, and the
+   *  writes declared for the gate. Read-only; the file is the one place to change them. */
+  mcp() {
+    return unwrap(this.api.GET("/mcp"));
   }
   policy() {
     return unwrap(this.api.GET("/policy"));
@@ -221,6 +236,26 @@ export class GhostClient {
   /** Forget the paired phone. Its signatures stop working and a running phone session ends. */
   forgetPhone() {
     return unwrap(this.api.DELETE("/phone"));
+  }
+
+  // --- skills (ADR 0023) ---------------------------------------------------------------
+  /** Every SKILL.md folder Ghost reads: its own and each project root's, with the servers
+   *  it needs and which of those aren't connected. */
+  skills() {
+    return unwrap(this.api.GET("/skills"));
+  }
+  /** The SKILL.md text without its front matter, and the files beside it. */
+  skill(name: string) {
+    return unwrap(this.api.GET("/skills/{name}", { params: { path: { name } } }));
+  }
+  /** Copy a folder on this machine into Ghost's skills. 409 with a message when it is not
+   *  a skill or already installed; `replace` overwrites one already installed. */
+  addSkill({ path, name, replace }: { path: string; name?: string | null; replace?: boolean }) {
+    return unwrap(this.api.POST("/skills", { body: { path, name: name ?? null, replace: replace ?? false } }));
+  }
+  /** Delete one of Ghost's own skills. 409 for a project's, which is read in place. */
+  removeSkill(name: string) {
+    return unwrap(this.api.DELETE("/skills/{name}", { params: { path: { name } } }));
   }
 }
 

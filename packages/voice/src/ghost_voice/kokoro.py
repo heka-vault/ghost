@@ -14,6 +14,7 @@ from pipecat.utils.text.base_text_aggregator import AggregationType
 from pipecat.utils.types import require_given
 
 from ghost_voice.clauses import ClauseTextAggregator
+from ghost_voice.spoken import SpokenTextFilter
 
 _UNSET = object()
 
@@ -40,7 +41,13 @@ class KokoroTTS(KokoroTTSService):
         defaults = self.Settings(model=None, voice=None, language=Language.EN, speed=1.0)
         if settings is not None:
             defaults.apply_update(settings)
-        TTSService.__init__(self, push_start_frame=True, push_stop_frames=True, settings=defaults)
+        TTSService.__init__(
+            self,
+            push_start_frame=True,
+            push_stop_frames=True,
+            settings=defaults,
+            text_filters=[SpokenTextFilter()],  # speech, not Markdown (ghost_voice.spoken)
+        )
         self._kokoro = kokoro
         self._fork_settings = copy.deepcopy(settings)
         voice = require_given(self._settings.voice, "Kokoro TTS voice")

@@ -70,7 +70,7 @@ class DaemonState:
         self.phase = Phase.STARTING
         self.session_id: str | None = None
         self.models_ready = False
-        self.abilities: list[str] = []
+        self.servers: list[str] = []
         self.pending: PendingProposal | None = None
         self.conversation: str | None = None
         self.session_origin: str | None = None  # "desk" | "phone" while a session runs

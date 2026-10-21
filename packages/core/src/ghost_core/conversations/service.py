@@ -15,7 +15,6 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from ghost_core.ability import Operation, Prepared, ReadTool
 from ghost_core.conversations.files import ConversationFiles
 from ghost_core.conversations.models import (
     GHOST,
@@ -43,9 +42,10 @@ from ghost_core.conversations.models import (
 )
 from ghost_core.conversations.writer import ConversationWriter
 from ghost_core.models import ChangeSet, utcnow
+from ghost_core.source import Operation, Prepared, ReadTool, ToolSource
 from ghost_core.store import Store
 
-ABILITY = "conversations"
+SOURCE = "conversations"  # the gate, policy and audit key for the lines' operations
 DEFAULT_VOICE = "af_heart"
 SUMMARY_TEMPLATE = "What this conversation has covered so far: {summary}"
 # Earlier turns arrive as a record, not as replayed chat: replayed, the model sees its own
@@ -144,7 +144,7 @@ class Conversations:
         scopes: Mapping[str, Callable[[], list[str]]] | None = None,
     ) -> None:
         """``scopes`` is what a thread can be scoped to: ability name -> a function
-        returning that ability's whole allowlist (``Contributions.scope_items``). A
+        returning that source's whole allowlist (``ToolSource.scope_items``). A
         thread's scope must stay within it (ADR 0019)."""
         self._store = store
         self.files = ConversationFiles(root)
@@ -804,3 +804,14 @@ def _speed(value: object, default: float) -> float:
     if not 0.5 <= s <= 2.0:
         raise ValueError("speed must be between 0.5 and 2")
     return round(s, 2)
+
+
+def conversations_source(convs: Conversations) -> ToolSource:
+    """The lines' own read tools and operations as a tool source, so the gate, the policy
+    file and the audit treat them like any server's (ADR 0014)."""
+    return ToolSource(
+        name=SOURCE,
+        prompt="",
+        read_tools=convs.read_tools(),
+        operations=convs.operations(),
+    )

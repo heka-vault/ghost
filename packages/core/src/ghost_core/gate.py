@@ -1,11 +1,12 @@
-"""The write gate (ADR 0007, ADR 0011, ADR 0012).
+"""The write gate (ADR 0007, ADR 0011, ADR 0022).
 
-Every write from every ability comes through here. Abilities register their
-operations at startup; the operator's policy decides how autonomous each one is; the
-gate does the same work at every level: the ability's allowlist, snapshot, bounded
-steps, idempotency, stale check, readback, audit row. At ``confirm`` a spoken yes
-sits between proposal and execution. At ``announce`` and ``quiet`` the write happens
-at once. Reversing a write is a new change through ``submit`` like any other.
+Every write from every source comes through here. Sources (the lines, each MCP server's
+declared writes) register their operations at startup; the operator's policy decides how
+autonomous each one is; the gate does the same work at every level: the source's
+allowlist, snapshot, bounded steps, idempotency, stale check, readback, audit row. At
+``confirm`` a spoken yes sits between proposal and execution. At ``announce`` and
+``quiet`` the write happens at once. Reversing a write is a new change through
+``submit`` like any other.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
-from ghost_core.ability import Operation
 from ghost_core.confirmation import (
     ConfirmationClassifier,
     ConfirmationContext,
@@ -34,6 +34,7 @@ from ghost_core.models import (
 from ghost_core.policy import Autonomy, AutonomyPolicy, PolicyError
 from ghost_core.request import asked_for
 from ghost_core.scope import ActiveScope
+from ghost_core.source import Operation
 from ghost_core.store import Store
 
 

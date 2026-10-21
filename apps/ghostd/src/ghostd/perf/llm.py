@@ -22,11 +22,12 @@ import os
 import statistics
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ghost_core import AutonomyPolicy, GhostContext, Store, WriteGate, discover, load
+from ghost_core import AutonomyPolicy, Store, WriteGate
+from ghost_core.mcp import Servers
 from ghost_voice import VoiceSettings
 from ghost_voice.config import OPENROUTER_ANTHROPIC_URL as OPENROUTER_ANTHROPIC
 from ghost_voice.config import openrouter_model
@@ -98,33 +99,25 @@ class Sample:
 
 
 async def ghost_prompt_and_tools() -> tuple[str, list[Any]]:
-    """The system prompt and tool schemas a real session sends, from the mock ability."""
+    """The system prompt and tool schemas a real session sends, from the mock GitHub
+    server the example policy declares."""
     tmp = Path(tempfile.mkdtemp(prefix="ghost-perf-llm-"))
-    os.environ["GHOST_GITHUB_MOCK"] = "1"
-    os.environ.pop("GHOST_REPOS", None)
     store = Store(tmp / "ghost.db")
     autonomy = AutonomyPolicy.load(GhostdSettings().infra_dir / "policy.example.toml")
-    abilities = await load(
-        ["github_issues"],
-        discovered=discover(tmp / "abilities"),
-        make_context=lambda n: GhostContext.build(
-            n, data_root=tmp / "data", cache_root=tmp / "cache", store=store, env=os.environ
-        ),
-        passive_allowed=autonomy.passive,
-    )
+    github = autonomy.mcp["github"]
+    servers = Servers({"github": replace(github, args=("--state", str(tmp / "mock-github.json")))})
+    await servers.connect()
+    sources = servers.sources()
     gate = WriteGate(store, autonomy=autonomy)
-    for a in abilities:
-        gate.register(a.name, a.contributions.operations)
+    for a in sources:
+        gate.register(a.name, a.operations)
     llm = AnthropicLLMService(api_key="unused")
 
     async def _sleep() -> None: ...
 
-    schemas = register_tools(llm, abilities=abilities, gate=gate, session_id="x", on_hang_up=_sleep)
-    prompt = build_system_prompt(
-        [a.contributions.prompt for a in abilities if a.contributions.prompt]
-    )
-    for a in abilities:
-        await a.instance.aclose()
+    schemas = register_tools(llm, sources=sources, gate=gate, session_id="x", on_hang_up=_sleep)
+    prompt = build_system_prompt([a.prompt for a in sources if a.prompt])
+    await servers.close()
     store.close()
     return prompt, schemas
 

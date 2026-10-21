@@ -223,8 +223,6 @@ export function phraseCase(p: string): string {
     .join(" ");
 }
 
-export const truthy = (v: string | undefined) => ["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase());
-
 export const splitList = (v: string | undefined) =>
   (v ?? "")
     .split(",")

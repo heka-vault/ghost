@@ -1,9 +1,9 @@
 /**
  * Owner: onboarding (prototype). First-run wizard data; read with useFixture("onboarding").
  *
- * Everything here stands in for something the control API can't do yet: list the
- * repositories a token can see, report the live microphone level, download the voice
- * models with progress, and hear the wake phrase during setup. Settings, devices, echo
+ * Everything here stands in for something the control API can't do yet: report the live
+ * microphone level, download the voice models with progress, and hear the wake phrase
+ * during setup. Settings, devices, echo
  * cancellation and model status come from the mock daemon like everywhere else.
  */
 import type { Scenario } from "../scenarios";
@@ -17,12 +17,6 @@ export interface OnboardingStep {
   done: boolean;
 }
 
-export interface OnboardingRepo {
-  name: string;
-  private: boolean;
-  openIssues: number;
-}
-
 export interface OnboardingModel {
   id: "kokoro" | "parakeet";
   /** What it is to the operator. */
@@ -34,10 +28,6 @@ export interface OnboardingModel {
 
 export interface OnboardingFixture {
   steps: OnboardingStep[];
-  /** Repositories a GitHub token can see, for the picker. */
-  availableRepos: OnboardingRepo[];
-  /** The practice GitHub's own repositories. */
-  practiceRepos: OnboardingRepo[];
   /** Microphone input levels 0-1 for the meter, sampled every 100ms, looped. */
   micLevels: number[];
   suggestedWakePhrases: string[];
@@ -59,22 +49,12 @@ export default function onboarding(s: Scenario): OnboardingFixture {
     steps: [
       { id: "welcome", title: "Welcome", description: "What Ghost does and what stays on this computer.", done: true },
       { id: "model", title: "Connect a model", description: "An Anthropic-compatible endpoint and its token.", done },
-      { id: "github", title: "Connect GitHub", description: "A fine‑grained token, or keep the practice GitHub on.", done },
+      { id: "github", title: "Connect GitHub", description: "A fine‑grained token; the practice GitHub until then.", done },
       { id: "microphone", title: "Set up the microphone", description: "Echo cancellation and ghost.mic.", done },
       { id: "models", title: "Get the voice models", description: "Kokoro and Parakeet, about 1.6 GB.", done: modelsOnDisk },
       { id: "service", title: "Start Ghost", description: "The background service.", done: s.daemon && s.modelsReady && modelsOnDisk },
       { id: "try", title: "Say “Hey Ghost”", description: "Ghost hears its name on ghost.mic.", done: false },
       { id: "done", title: "Done", description: "", done: false },
-    ],
-    availableRepos: [
-      { name: "ghost-mock/app", private: true, openIssues: 47 },
-      { name: "ghost-mock/infra", private: true, openIssues: 12 },
-      { name: "ghost-mock/docs", private: false, openIssues: 3 },
-      { name: "ghost-mock/website", private: false, openIssues: 9 },
-    ],
-    practiceRepos: [
-      { name: "ghost-mock/app", private: false, openIssues: 24 },
-      { name: "ghost-mock/infra", private: false, openIssues: 7 },
     ],
     micLevels: [
       0.02, 0.03, 0.02, 0.03, 0.02, 0.04, 0.03, 0.02, 0.03, 0.02,

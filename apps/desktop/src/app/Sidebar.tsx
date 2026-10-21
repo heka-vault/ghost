@@ -5,11 +5,11 @@ import { type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useStat
 
 import { useDesign } from "../design/context";
 import { GhostMark, type GhostPhase, LineGlyph, StatusDot, cx, lineName, liveLabel, phaseText, relativeTime, useLive } from "../ui";
+import { newLineSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
 
 /** Ghost, the live line, then the most recent: six rows, then a link to all of them. */
-const MAX_LINES = 6;
 
 /** Design-mode chrome, compiled only in development; null in production builds. */
 const MockBadge = import.meta.env.DEV ? lazy(() => import("../design/chrome").then((m) => ({ default: m.MockBadge }))) : null;
@@ -80,7 +80,8 @@ export function Sidebar() {
     };
   }, [client, connected, conversationsVersion]);
 
-  const main = ROUTES.filter((r) => r.component && r.nav?.group === "main");
+  // Lines are the section below, not a nav item: one word, one place (GLOSSARY.md).
+const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filter((r) => r.id !== "conversations");
   const footer = ROUTES.filter((r) => r.component && r.nav?.group === "footer");
   const protos = design ? ROUTES.filter((r) => r.component && r.nav?.group === "prototype") : [];
 
@@ -111,13 +112,15 @@ export function Sidebar() {
   // Where the eye starts: Ghost, then the line Ghost is on right now (which is also the one
   // holding any pending okay), then the rest by recency. The live line is never buried.
   const rank = (l: ConversationView) => (l.is_ghost ? 0 : inSession && l.slug === active ? 1 : 2);
-  // A settled line (ADR 0019) has left the active list; the Conversations screen keeps it in its Settled group.
+  // A settled line (ADR 0019) has left the active list; the Lines screen keeps it in its Settled group.
   const unsettled = lines.filter((l) => !(l as { settled_at?: string | null }).settled_at);
   const sortedLines = [...unsettled].sort((a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? ""));
   // Exactly one current row. When the open line has its own row, that row is current and
-  // Conversations drops to a quiet "section active" state (no tile, no aria-current).
-  const shownLines = state !== "offline" ? sortedLines.slice(0, MAX_LINES) : [];
-  const lineIsCurrent = shownLines.some((l) => path === `/conversations/${l.slug}`);
+  // Lines drops to a quiet "section active" state (no tile, no aria-current).
+  // Every live line, right here: the sidebar is the list, not a preview of one (the operator's call, 2026-10-20).
+  const shownLines = state !== "offline" ? sortedLines : [];
+  const settledCount = lines.filter((l) => !!(l as { settled_at?: string | null }).settled_at).length;
+  const lineIsCurrent = shownLines.some((l) => path === `/lines/${l.slug}`);
 
   return (
     <aside className="sidebar">
@@ -148,12 +151,13 @@ export function Sidebar() {
         {/* Lines stay on screen while reconnecting: stale, never cleared. */}
         {state !== "offline" && sortedLines.length > 0 && (
           <div className="sidebar__section">
-            <div className="sidebar__label" id="sidebar-lines">
+            {/* The heading is the way to the Lines screen (all lines, settled ones, New line). */}
+            <a className="sidebar__label sidebar__label--link" id="sidebar-lines" href={hrefFor("/lines")} aria-current={path === "/lines" ? "page" : undefined}>
               Lines
-            </div>
+            </a>
             <ul className="sidebar__group" role="list" aria-labelledby="sidebar-lines">
               {shownLines.map((l) => {
-                const to = `/conversations/${l.slug}`;
+                const to = `/lines/${l.slug}`;
                 const live = inSession && l.slug === active;
                 // No room for scope chips at this density: the items ride on the row's tooltip.
                 const scope = Object.values(((l as { scope?: Record<string, string[]> }).scope ?? {})).flat();
@@ -189,10 +193,27 @@ export function Sidebar() {
                   </li>
                 );
               })}
-              {sortedLines.length > MAX_LINES && (
+              <li>
+                <a
+                  className="sidebar__item sidebar__item--more"
+                  href={hrefFor("/lines")}
+                  onClick={() => {
+                    newLineSeed.open = true;
+                  }}
+                >
+                  <span className="sidebar__item-label">New line…</span>
+                </a>
+              </li>
+              {settledCount > 0 && (
                 <li>
-                  <a className="sidebar__item sidebar__item--more" href={hrefFor("/conversations")}>
-                    <span className="sidebar__item-label">All {sortedLines.length} lines</span>
+                  <a
+                    className="sidebar__item sidebar__item--more"
+                    href={hrefFor("/lines")}
+                    onClick={() => {
+                      newLineSeed.settled = true;
+                    }}
+                  >
+                    <span className="sidebar__item-label">Settled · {settledCount}</span>
                   </a>
                 </li>
               )}

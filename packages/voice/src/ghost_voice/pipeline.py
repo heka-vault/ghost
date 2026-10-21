@@ -11,16 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from ghost_core import (
-    Ability,
-    Contributions,
     Events,
-    LoadedAbility,
-    SimpleInstance,
     Slot,
+    ToolSource,
     WriteGate,
 )
-from ghost_core.conversations import ABILITY as CONVERSATIONS
-from ghost_core.conversations import GHOST, SUMMARY_TEMPLATE, Conversations
+from ghost_core.conversations import GHOST, SUMMARY_TEMPLATE, Conversations, conversations_source
 from loguru import logger
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
@@ -191,7 +187,7 @@ def last_assistant_text(context: LLMContext) -> str:
 
 
 def assemble(core: list[tuple[Slot | None, Any]], slots: dict[Slot, list[Any]]) -> list[Any]:
-    """Splice ability processors into the fixed pipeline. ``core`` is the ordered list of
+    """Splice processors into the fixed pipeline. ``core`` is the ordered list of
     Ghost's own processors, each tagged with the slot that comes right after it."""
     out: list[Any] = []
     for slot, proc in core:
@@ -199,19 +195,6 @@ def assemble(core: list[tuple[Slot | None, Any]], slots: dict[Slot, list[Any]]) 
         if slot is not None:
             out.extend(slots.get(slot, []))
     return out
-
-
-def conversations_ability(convs: Conversations) -> LoadedAbility:
-    """Ghost's own conversation operations, registered like an ability so the gate,
-    the policy file and the audit view treat them uniformly (ADR 0014)."""
-    c = Contributions(read_tools=convs.read_tools(), operations=convs.operations())
-    ab = Ability(
-        CONVERSATIONS,
-        "1",
-        "Saved conversations: persona, voice, memory",
-        setup=None,  # type: ignore[arg-type]
-    )
-    return LoadedAbility(ab, None, SimpleInstance(c), c)
 
 
 GREETING_VARIED = "<varied>"
@@ -246,7 +229,7 @@ def build_session(
     settings: VoiceSettings,
     *,
     models: Models,
-    abilities: Sequence[LoadedAbility],
+    sources: Sequence[ToolSource],
     gate: WriteGate,
     events: Events | None = None,
     transport: BaseTransport | None = None,
@@ -298,20 +281,14 @@ def build_session(
         else None
     )
     ended = asyncio.Event()
-    abilities = list(abilities)
+    sources = list(sources)
     runtime: ConversationRuntime | None = None
-    # A scoped ability's paragraph is rebuilt for the active thread (ADR 0019); the
+    # A scoped source's paragraph is rebuilt for the active thread (ADR 0019); the
     # rest are fixed for the session.
-    scoped = {
-        a.name: a.contributions.scoped_prompt
-        for a in abilities
-        if a.contributions.scope_kind and a.contributions.scoped_prompt
-    }
-    fragments = [
-        a.contributions.prompt for a in abilities if a.contributions.prompt and a.name not in scoped
-    ]
+    scoped = {a.name: a.scoped_prompt for a in sources if a.scope_kind and a.scoped_prompt}
+    fragments = [a.prompt for a in sources if a.prompt and a.name not in scoped]
     if conversations is not None:
-        abilities.append(conversations_ability(conversations))
+        sources.append(conversations_source(conversations))
 
         async def switched(profile) -> None:
             if on_conversation:
@@ -453,7 +430,7 @@ def build_session(
 
     tools = register_tools(
         llm,
-        abilities=abilities,
+        sources=sources,
         gate=gate,
         session_id=session_id,
         on_hang_up=hang_up,
@@ -524,11 +501,11 @@ def build_session(
             await runtime.on_summary_applied(context.get_messages())
 
     interceptors: list[Any] = [QuickIntents()] if settings.quick_intents else []
-    for a in abilities:
-        interceptors.extend(a.contributions.interceptors)
+    for a in sources:
+        interceptors.extend(a.interceptors)
     slots: dict[Slot, list[Any]] = {}
-    for a in abilities:
-        for slot, factories in a.contributions.processors.items():
+    for a in sources:
+        for slot, factories in a.processors.items():
             slots.setdefault(Slot(slot), []).extend(f() for f in factories)
 
     def last_assistant() -> str:

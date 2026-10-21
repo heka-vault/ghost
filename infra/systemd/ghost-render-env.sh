@@ -14,7 +14,7 @@ set -euo pipefail
 SECRETS_ENV="${GHOST_SECRETS_ENV:-$HOME/.config/heka-vault/ghost.env}"
 OUT_DIR="$HOME/.config/ghost"
 OUT="$OUT_DIR/env"
-KEYS=(ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN CLIPROXY_BASE_URL GITHUB_TOKEN GHOST_REPOS HF_TOKEN TYPESAFE_API_KEY OPENROUTER_API_KEY)
+KEYS=(ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN CLIPROXY_BASE_URL GITHUB_TOKEN HF_TOKEN TYPESAFE_API_KEY OPENROUTER_API_KEY)
 
 if [[ ! -r "$SECRETS_ENV" ]]; then
   # No secrets store on this machine: the desktop app writes $OUT instead. Not an error.
@@ -34,14 +34,14 @@ tmp="$(mktemp "$OUT_DIR/.env.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 chmod 600 "$tmp"
 
-# Per-owner GitHub tokens (ADR 0019): GHOST_GITHUB_TOKENS="owner=ENV_NAME,..." in
-# settings.env names the variables; fetch each of those from the store too.
+# MCP servers (ADR 0022): GHOST_MCP_SECRETS="NAME,NAME" in settings.env names the variables the
+# policy file's [mcp.*] sections refer to as $NAME; fetch each from the store too.
 if [[ -r "$OUT_DIR/settings.env" ]]; then
-  map="$(sed -n 's/^GHOST_GITHUB_TOKENS=//p' "$OUT_DIR/settings.env" | tr -d '"' | tail -1)"
-  IFS=',' read -ra pairs <<<"$map"
-  for pair in "${pairs[@]}"; do
-    name="${pair#*=}"; name="${name// /}"
-    [[ -n "$name" && "$name" != "$pair" ]] && KEYS+=("$name")
+  names="$(sed -n 's/^GHOST_MCP_SECRETS=//p' "$OUT_DIR/settings.env" | tr -d '"' | tail -1)"
+  IFS=',' read -ra mcp_names <<<"$names"
+  for name in "${mcp_names[@]}"; do
+    name="${name// /}"
+    [[ -n "$name" ]] && KEYS+=("$name")
   done
 fi
 

@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from ghost_core.ability import Event, EventListener
+from ghost_core.source import Event, EventListener
 
 
 class Events:

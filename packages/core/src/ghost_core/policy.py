@@ -1,11 +1,11 @@
 """Who may do what, decided by the operator, never by the model (ADR 0011).
 
-* Each ability enforces its own target allowlist (repositories, directories) through
+* Each source enforces its own target allowlist (repositories, directories) through
   ``Operation.allowed``; anything outside it is denied before autonomy is looked at.
-* ``AutonomyPolicy``: how much an ability may do on its own, per operation and
-  optionally per target, plus which abilities are enabled. Loaded from a TOML file
-  the operator owns. The model cannot read or write it, and issue text never
-  reaches it.
+* ``AutonomyPolicy``: how much a source may do on its own, per operation and
+  optionally per target, and the MCP servers Ghost connects to (ADR 0022,
+  ``[mcp.<name>]``). Loaded from a TOML file the operator owns. The model cannot read
+  or write it, and nothing a server returns reaches it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,10 @@ import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:  # ghost_core.mcp imports the scope module, which imports this one
+    from ghost_core.mcp import ServerSpec
 
 
 class PolicyError(PermissionError):
@@ -47,30 +50,30 @@ OpLevels = Mapping[str, Autonomy]
 
 @dataclass(frozen=True)
 class AutonomyPolicy:
-    """Resolution order: target+op, target+*, ability+op, ability+*, [defaults], risk.
+    """Resolution order: target+op, target+*, source+op, source+*, [defaults], risk.
 
     File shape::
 
-        [abilities]
-        enabled = ["github_issues", "notes"]   # optional; else GHOST_ABILITIES
-        passive = []                           # abilities allowed to hear idle audio
+        [mcp.mobbin]                           # an MCP server (ADR 0022, ghost_core.mcp)
+        url = "http://proxy.lan:8318/mobbin/mcp"
+        headers = { Authorization = "Bearer $MCP_PROXY_KEY" }
+
+        [mcp.github.levels]                    # a server's operations, declared under
+        close = "confirm"                      # [mcp.github.writes.<op>], take their
+        [mcp.github.targets."acme/public-app"] # levels here, per target as above
+        close = "deny"
 
         [defaults]
         autonomy = "confirm"          # optional; omit to fall back to each op's risk class
 
-        [github_issues]
-        set_labels = "announce"
-        close = "confirm"
-
-        [github_issues.targets."acme/public-app"]
-        close = "deny"
+        [conversations]                        # the lines' own operations (ADR 0014)
+        set_persona = "confirm"
     """
 
     default: Autonomy | None = None
     skills: Mapping[str, OpLevels] = field(default_factory=dict)
     targets: Mapping[str, Mapping[str, OpLevels]] = field(default_factory=dict)
-    enabled: tuple[str, ...] | None = None  # None: not set in the file
-    passive: tuple[str, ...] = ()
+    mcp: Mapping[str, ServerSpec] = field(default_factory=dict)  # [mcp.<name>] (ADR 0022)
     source: str = "<none>"
 
     @classmethod
@@ -90,8 +93,7 @@ class AutonomyPolicy:
         default: Autonomy | None = None
         skills: dict[str, dict[str, Autonomy]] = {}
         targets: dict[str, dict[str, dict[str, Autonomy]]] = {}
-        enabled: tuple[str, ...] | None = None
-        passive: tuple[str, ...] = ()
+        mcp: dict[str, ServerSpec] = {}
         for section, body in raw.items():
             if not isinstance(body, Mapping):
                 raise ValueError(f"{source}: [{section}] must be a table")
@@ -99,35 +101,40 @@ class AutonomyPolicy:
                 if "autonomy" in body:
                     default = _level(body["autonomy"], f"{source}: defaults.autonomy")
                 continue
-            if section == "abilities":
-                if "enabled" in body:
-                    enabled = _names(body["enabled"], f"{source}: abilities.enabled")
-                if "passive" in body:
-                    passive = _names(body["passive"], f"{source}: abilities.passive")
+            if section == "mcp":
+                from ghost_core.mcp import parse_servers
+
+                for sname, sbody in body.items():
+                    if not isinstance(sbody, Mapping):
+                        continue  # parse_servers reports it
+                    if "levels" in sbody:
+                        lv = sbody["levels"]
+                        if not isinstance(lv, Mapping):
+                            raise ValueError(f"{source}: [mcp.{sname}.levels] must be a table")
+                        skills.setdefault(sname, {}).update(
+                            {
+                                op: _level(v, f"{source}: mcp.{sname}.levels.{op}")
+                                for op, v in lv.items()
+                            }
+                        )
+                    if "targets" in sbody:
+                        _parse_targets(sbody["targets"], sname, f"mcp.{sname}", targets, source)
+                mcp = parse_servers(body, source)
+                continue
+            if section == "abilities":  # the retired ability packages (ADR 0022)
                 continue
             ops: dict[str, Autonomy] = {}
             for key, value in body.items():
                 if key == "targets":
-                    if not isinstance(value, Mapping):
-                        raise ValueError(f"{source}: [{section}.targets] must be a table")
-                    for tname, tops in value.items():
-                        if not isinstance(tops, Mapping):
-                            raise ValueError(
-                                f"{source}: [{section}.targets.{tname}] must be a table"
-                            )
-                        targets.setdefault(section, {})[tname.lower()] = {
-                            op: _level(lv, f"{source}: {section}.targets.{tname}.{op}")
-                            for op, lv in tops.items()
-                        }
+                    _parse_targets(value, section, section, targets, source)
                     continue
                 ops[key] = _level(value, f"{source}: {section}.{key}")
-            skills[section] = ops
+            skills.setdefault(section, {}).update(ops)
         return cls(
             default=default,
             skills=skills,
             targets=targets,
-            enabled=enabled,
-            passive=passive,
+            mcp=mcp,
             source=source,
         )
 
@@ -151,10 +158,11 @@ class AutonomyPolicy:
         default: str | None,
         skills: Mapping[str, Mapping[str, str]],
         targets: Mapping[str, Mapping[str, Mapping[str, str]]],
-        enabled: Sequence[str] | None,
-        passive: Sequence[str],
+        mcp: Mapping[str, ServerSpec] | None = None,
     ) -> AutonomyPolicy:
-        """Build from plain strings (the API's structured update), validating levels."""
+        """Build from plain strings (the API's structured update), validating levels.
+        ``mcp`` is carried over from the file as is: the structured update doesn't edit
+        servers, and rendering the file must not lose them."""
         return cls(
             default=_level(default, "defaults.autonomy") if default else None,
             skills={
@@ -168,8 +176,7 @@ class AutonomyPolicy:
                 }
                 for s, ts in targets.items()
             },
-            enabled=tuple(enabled) if enabled is not None else None,
-            passive=tuple(passive),
+            mcp=dict(mcp or {}),
             source="<api>",
         )
 
@@ -179,16 +186,23 @@ class AutonomyPolicy:
             "# Ghost autonomy policy (ADR 0011). Edited through the desktop app or by hand.",
             "",
         ]
-        if self.enabled is not None or self.passive:
-            lines.append("[abilities]")
-            if self.enabled is not None:
-                lines.append(f"enabled = {_toml_list(self.enabled)}")
-            if self.passive:
-                lines.append(f"passive = {_toml_list(self.passive)}")
-            lines.append("")
         if self.default is not None:
             lines += ["[defaults]", f'autonomy = "{self.default.value}"', ""]
-        for skill in sorted(set(self.skills) | set(self.targets)):
+        if self.mcp:
+            from ghost_core.mcp import render_server
+
+            for name, spec in self.mcp.items():
+                lines += render_server(name, spec)
+                ops = self.skills.get(name, {})
+                if ops:
+                    lines.append(f"[mcp.{_toml_key(name)}.levels]")
+                    lines += [f'{_toml_key(op)} = "{lv.value}"' for op, lv in ops.items()]
+                    lines.append("")
+                for target, tops in self.targets.get(name, {}).items():
+                    lines.append(f'[mcp.{_toml_key(name)}.targets."{target}"]')
+                    lines += [f'{_toml_key(op)} = "{lv.value}"' for op, lv in tops.items()]
+                    lines.append("")
+        for skill in sorted((set(self.skills) | set(self.targets)) - set(self.mcp)):
             ops = self.skills.get(skill, {})
             lines.append(f"[{_toml_key(skill)}]")
             for op, lv in ops.items():
@@ -214,10 +228,21 @@ def _toml_list(items: Sequence[str]) -> str:
     return "[" + ", ".join(f'"{i}"' for i in items) + "]"
 
 
-def _names(value: object, where: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        raise ValueError(f"{where}: must be a list of ability names")
-    return tuple(value)
+def _parse_targets(
+    value: object,
+    skill: str,
+    where: str,
+    targets: dict[str, dict[str, dict[str, Autonomy]]],
+    source: str,
+) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{source}: [{where}.targets] must be a table")
+    for tname, tops in value.items():
+        if not isinstance(tops, Mapping):
+            raise ValueError(f"{source}: [{where}.targets.{tname}] must be a table")
+        targets.setdefault(skill, {})[tname.lower()] = {
+            op: _level(lv, f"{source}: {where}.targets.{tname}.{op}") for op, lv in tops.items()
+        }
 
 
 def _level(value: object, where: str) -> Autonomy:

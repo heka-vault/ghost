@@ -4,19 +4,16 @@ from typing import Any
 
 import pytest
 from ghost_core import (
-    Ability,
     AutonomyPolicy,
     Change,
     ChangeSet,
-    Contributions,
-    LoadedAbility,
     Operation,
     Prepared,
     ReadTool,
-    SimpleInstance,
     Snapshot,
     Store,
     Target,
+    ToolSource,
     WriteGate,
 )
 from ghost_voice.prompt import build_system_prompt
@@ -82,7 +79,7 @@ class FakeWriter:
         self.version += 1
 
 
-def fake_ability(writer) -> LoadedAbility:
+def fake_source(writer) -> ToolSource:
     async def echo(args):
         return {"echo": args}
 
@@ -103,30 +100,27 @@ def fake_ability(writer) -> LoadedAbility:
             allowed=lambda t: t.name != "other",
         )
 
-    c = Contributions(
+    return ToolSource(
+        name="fake",
         prompt="FAKE FRAGMENT",
         read_tools=[ReadTool("echo", "Echo.", {"x": {"type": "string"}}, ["x"], echo)],
         operations=[op("flag", "low"), op("nuke", "high"), op("never", "low")],
     )
-    ab = Ability("fake", "0", "", setup=None, config=None)  # type: ignore[arg-type]
-    return LoadedAbility(ab, None, SimpleInstance(c), c)
 
 
 @pytest.fixture
 def wired():
     llm = FakeLLM()
     writer = FakeWriter()
-    loaded = fake_ability(writer)
+    loaded = fake_source(writer)
     gate = WriteGate(Store(), autonomy=AutonomyPolicy.parse('[fake]\nnever = "deny"\n'))
-    gate.register("fake", loaded.contributions.operations)
+    gate.register("fake", loaded.operations)
     slept = []
 
     async def on_sleep():
         slept.append(True)
 
-    schemas = register_tools(
-        llm, abilities=[loaded], gate=gate, session_id="s", on_hang_up=on_sleep
-    )
+    schemas = register_tools(llm, sources=[loaded], gate=gate, session_id="s", on_hang_up=on_sleep)
     return llm, gate, schemas, slept, writer
 
 

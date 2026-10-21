@@ -1,7 +1,7 @@
 /**
  * Owner: conversations. Saved conversations, "lines" (ADR 0014).
- *   #/conversations          every line, with live state, Switch and New line
- *   #/conversations/:slug    one line: voice and persona, memory and notes, transcript, history
+ *   #/lines          every line, with live state, Switch and New line
+ *   #/lines/:slug    one line: voice and persona, memory and notes, transcript, history
  * Views and dialogs that need a URL ride in the query string (see url.ts):
  *   ?tab=memory|transcript|history   ?open=new|settled|voice|reset|delete|settle   ?seed=<slug> (New line from a settled line)   ?dirty=1 (mock only)
  */

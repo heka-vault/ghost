@@ -1,5 +1,5 @@
 /** Owner: policy. Pure helpers: how a level resolves, what changed, plain names. */
-import type { AbilityInfo, Autonomy, OperationInfo } from "@ghost/client-ts";
+import type { Autonomy, OperationInfo, SourceInfo } from "@ghost/client-ts";
 import { Hand, Megaphone, ShieldOff, VolumeX } from "lucide-react";
 
 export type Skills = Record<string, Record<string, string>>;
@@ -23,41 +23,41 @@ export const RISK_STEPS: Record<string, number> = { low: 1, medium: 2, high: 3 }
 
 const ANY = "*";
 
-export type InheritedFrom = "ability" | "default" | "risk";
+export type InheritedFrom = "source" | "default" | "risk";
 
 /**
  * What an operation does when its own line is absent, following AutonomyPolicy.resolve
- * without a target: the ability's `*` rule, then [defaults], then the risk class.
+ * without a target: the source's `*` rule, then [defaults], then the risk class.
  */
-export function inherited(skills: Skills, defaultLevel: string, ability: string, op: OperationInfo): { level: string; from: InheritedFrom } {
-  const any = skills[ability]?.[ANY];
-  if (any) return { level: any, from: "ability" };
+export function inherited(skills: Skills, defaultLevel: string, source: string, op: OperationInfo): { level: string; from: InheritedFrom } {
+  const any = skills[source]?.[ANY];
+  if (any) return { level: any, from: "source" };
   if (defaultLevel) return { level: defaultLevel, from: "default" };
   return { level: RISK_DEFAULTS[op.risk] ?? op.autonomy, from: "risk" };
 }
 
 /** Per-target rules that touch this operation: [target, level]. */
-export function targetRules(targets: Targets, ability: string, op: string): [string, string][] {
-  return Object.entries(targets[ability] ?? {}).flatMap(([t, ops]) => {
+export function targetRules(targets: Targets, source: string, op: string): [string, string][] {
+  return Object.entries(targets[source] ?? {}).flatMap(([t, ops]) => {
     const lv = ops[op] ?? ops[ANY];
     return lv ? [[t, lv] as [string, string]] : [];
   });
 }
 
-/** Keys ("ability.op", or "default") whose value differs between two edits. */
+/** Keys ("source.op", or "default") whose value differs between two edits. */
 export function changedKeys(a: Skills, b: Skills, defA: string, defB: string): Set<string> {
   const out = new Set<string>();
   if ((defA || "") !== (defB || "")) out.add("default");
-  for (const ability of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    const x = a[ability] ?? {}, y = b[ability] ?? {};
-    for (const op of new Set([...Object.keys(x), ...Object.keys(y)])) if (x[op] !== y[op]) out.add(`${ability}.${op}`);
+  for (const source of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const x = a[source] ?? {}, y = b[source] ?? {};
+    for (const op of new Set([...Object.keys(x), ...Object.keys(y)])) if (x[op] !== y[op]) out.add(`${source}.${op}`);
   }
   return out;
 }
 
 const WORDS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", dm: "DM", onnx: "ONNX", pr: "PR", prs: "PRs", url: "URL", ai: "AI", api: "API", tts: "TTS", stt: "STT", id: "ID" };
 
-/** "github_issues" → "GitHub issues", "set_labels" → "Set labels". */
+/** "github_heka" → "GitHub heka", "set_labels" → "Set labels". */
 export function humanize(name: string): string {
   const words = name.split(/[_\-.]+/).filter(Boolean).map((w) => WORDS[w.toLowerCase()] ?? w.toLowerCase());
   if (!words.length) return name;
@@ -104,46 +104,18 @@ export function plainDescription(text: string, title: string): string {
 
 /* --------------------------------------------------------------- operator copy */
 
-/** U+2011, so a label like needs‑signoff never breaks at its hyphen. */
-const nb = (label: string) => label.replace(/-/g, "‑");
-
-/** Label names are configurable; read them out of the model-facing description. */
-function labelsIn(description: string): string[] {
-  return [...description.matchAll(/'([^']+)'/g)].map((m) => nb(m[1]));
-}
-
 export interface OperationCopy {
   title?: string;
-  text: string | ((description: string) => string);
+  text: string;
   /** “Ghost won’t ask before …”: the act in a few words, for a high-risk operation set to act alone. */
   act?: string;
 }
 
 /**
- * The operations this repo ships, in the operator’s voice. Anything else falls back to
- * plainDescription() of what the ability wrote for the model.
+ * The operations Ghost itself ships, in the operator’s voice. A server's operations are
+ * described by the operator's own declaration (ADR 0022), so they read as written there.
  */
 export const OPERATION_COPY: Record<string, Record<string, OperationCopy>> = {
-  github_issues: {
-    approve: {
-      text: (d) => {
-        const [off, on] = labelsIn(d);
-        return off && on ? `Sign off on an issue: ${off} comes off, ${on} goes on.` : "Sign off on an issue.";
-      },
-      act: "approving issues",
-    },
-    request_changes: {
-      text: (d) => {
-        const [, on] = labelsIn(d);
-        return on ? `Send an issue back with what must change, labeled ${on}.` : "Send an issue back with what must change.";
-      },
-      act: "sending issues back",
-    },
-    comment: { text: "Comment on an issue.", act: "commenting" },
-    set_labels: { text: "Add or remove labels on an issue.", act: "changing labels" },
-    close: { text: "Close an issue, with a comment if there’s one to leave.", act: "closing issues" },
-    reopen: { text: "Reopen a closed issue.", act: "reopening issues" },
-  },
   conversations: {
     create: { title: "New line", text: "Start a new line and switch you to it.", act: "starting lines" },
     rename: { text: "Rename a line or change what it answers to.", act: "renaming lines" },
@@ -158,29 +130,41 @@ export const OPERATION_COPY: Record<string, Record<string, OperationCopy>> = {
   },
 };
 
-export const ABILITY_COPY: Record<string, string> = {
-  github_issues: "Read what needs your sign-off, then label, comment on and close issues.",
+export const SOURCE_COPY: Record<string, string> = {
   conversations: "Your saved lines: who each one is, how it sounds and what it remembers.",
 };
 
-export function operationTitle(ability: string, op: string): string {
-  return OPERATION_COPY[ability]?.[op]?.title ?? humanize(op);
+/** The built-in source is the lines; a server goes by its name in the file. */
+export function sourceTitle(name: string): string {
+  return name === "conversations" ? "Lines" : humanize(name);
 }
 
-export function operationText(ability: string, op: OperationInfo): string {
-  const c = OPERATION_COPY[ability]?.[op.name];
-  if (c) return typeof c.text === "function" ? c.text(op.description) : c.text;
+export function operationTitle(source: string, op: string): string {
+  return OPERATION_COPY[source]?.[op]?.title ?? humanize(op);
+}
+
+export function operationText(source: string, op: OperationInfo): string {
+  const c = OPERATION_COPY[source]?.[op.name];
+  if (c) return c.text;
   return plainDescription(op.description, humanize(op.name));
 }
 
 /** “Ghost won’t ask before closing issues.” */
-export function highRiskNote(ability: string, op: string): string {
-  const act = OPERATION_COPY[ability]?.[op]?.act;
+export function highRiskNote(source: string, op: string): string {
+  const act = OPERATION_COPY[source]?.[op]?.act;
   return act ? `Ghost won’t ask before ${act}.` : "Ghost won’t ask first.";
 }
 
-export function abilityText(a: AbilityInfo): string {
-  return ABILITY_COPY[a.name] ?? plainDescription(a.description, humanize(a.name));
+export function sourceText(src: SourceInfo): string {
+  return SOURCE_COPY[src.name] ?? plainDescription(src.description, sourceTitle(src.name));
+}
+
+/** True when a source's levels live under `[mcp.<name>.levels]` rather than `[<name>]`. */
+export const isServer = (src: SourceInfo) => src.kind === "server";
+
+/** The table that holds a source's levels in the file (ghost_core.policy.AutonomyPolicy.parse). */
+export function levelTable(src: SourceInfo): string[] {
+  return isServer(src) ? ["mcp", src.name, "levels"] : [src.name];
 }
 
 /** "(at line 4, column 7)" in a tomllib error → 4. */
@@ -189,10 +173,9 @@ export function errorLine(message: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** Abilities with write operations, and the ones that only read. */
-export function splitAbilities(abilities: AbilityInfo[]): { writers: AbilityInfo[]; readers: AbilityInfo[] } {
-  const on = abilities.filter((a) => a.enabled);
-  return { writers: on.filter((a) => (a.operations ?? []).length > 0), readers: on.filter((a) => !(a.operations ?? []).length) };
+/** Sources with write operations, and the ones that only read. */
+export function splitSources(sources: SourceInfo[]): { writers: SourceInfo[]; readers: SourceInfo[] } {
+  return { writers: sources.filter((a) => (a.operations ?? []).length > 0), readers: sources.filter((a) => !(a.operations ?? []).length) };
 }
 
 /** "A", "A and B", "A, B and C". */
@@ -205,17 +188,18 @@ export function listWords(xs: string[]): string {
 
 /**
  * The policy file, read the way ghost_core.policy.AutonomyPolicy.parse reads it, for the
- * subset of TOML the file uses: tables, quoted or bare keys, strings, arrays of strings,
- * inline tables, comments. Levels and TOML are two views of one text, so the page reads
- * levels out of the text it is editing and writes them back with setKey(), which touches
- * only the one line it changes: the operator’s comments and layout survive every save.
+ * subset of TOML the file uses: tables, quoted or bare keys, strings, numbers, booleans,
+ * arrays, inline tables, comments. Levels and TOML are two views of one text, so the page
+ * reads levels out of the text it is editing and writes them back with setKey(), which
+ * touches only the one line it changes: the operator’s comments and layout survive every
+ * save. A server's declaration (`[mcp.<name>]`, its writes and scope, ADR 0022) is read
+ * past and left as written; only its `levels` and `targets` tables are levels.
  */
 export interface PolicyData {
   default: string | null;
+  /** Levels per source: a built-in's `[<name>]` table, or a server's `[mcp.<name>.levels]`. */
   skills: Skills;
   targets: Targets;
-  enabled: string[] | null;
-  passive: string[];
 }
 
 export type ParseResult =
@@ -244,7 +228,7 @@ class Fail extends Error {
   }
 }
 
-type Value = string | Value[] | Table;
+type Value = string | number | boolean | Value[] | Table;
 interface Table {
   [k: string]: Value;
 }
@@ -401,6 +385,15 @@ export function parsePolicy(text: string): ParseResult {
     }
     const m = /^[^\s,\]}#]+/.exec(src.slice(i));
     const word = m?.[0] ?? "";
+    // Numbers and booleans appear in a server's declaration (`bound = { labels = 10 }`); they are never levels.
+    if (word === "true" || word === "false") {
+      i += word.length;
+      return word === "true";
+    }
+    if (/^[+-]?(\d[\d_]*(\.\d[\d_]*)?([eE][+-]?\d+)?|inf|nan)$/.test(word)) {
+      i += word.length;
+      return Number(word.replace(/_/g, ""));
+    }
     if (LEVEL_SET.has(word)) throw new Fail(line, `Line ${line}: the level \`${word}\` needs quotes: \`"${word}"\`.`);
     if (!word) throw new Fail(line, `Line ${line}: there’s no value after the =.`);
     throw new Fail(line, `Line ${line}: \`${word}\` isn’t a level. Use \`"deny"\`, \`"confirm"\`, \`"announce"\` or \`"quiet"\`.`);
@@ -484,37 +477,49 @@ export function parsePolicy(text: string): ParseResult {
     const shown = typeof v === "string" ? `\`"${v}"\`` : "That value";
     throw new Fail(ln, `Line ${ln}: ${shown} isn’t a level. Use \`"deny"\`, \`"confirm"\`, \`"announce"\` or \`"quiet"\`.`);
   };
-  const names = (v: Value, path: string[]): string[] => {
-    if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as string[];
-    const ln = lineOf(path);
-    throw new Fail(ln, `Line ${ln}: \`${path.join(".")}\` needs to be a list of ability names, each in quotes.`);
+  /** `[<where>.targets."<name>"]` tables, as _parse_targets reads them. */
+  const parseTargets = (v: Value, source: string, where: string[], data: PolicyData) => {
+    const key = [...where, "targets"];
+    const shown = where.join(".");
+    if (!isTable(v)) throw new Fail(lineOf(key), `Line ${lineOf(key)}: [${shown}.targets] needs to be a table.`);
+    for (const [tname, tops] of Object.entries(v)) {
+      if (!isTable(tops)) throw new Fail(lineOf([...key, tname]), `Line ${lineOf([...key, tname])}: [${shown}.targets."${tname}"] needs to be a table.`);
+      const out: Record<string, string> = {};
+      for (const [op, lv] of Object.entries(tops)) out[op] = level(lv, [...key, tname, op]);
+      (data.targets[source] ??= {})[tname.toLowerCase()] = out;
+    }
   };
   try {
-    const data: PolicyData = { default: null, skills: {}, targets: {}, enabled: null, passive: [] };
+    const data: PolicyData = { default: null, skills: {}, targets: {} };
     for (const [section, body] of Object.entries(root)) {
       if (!isTable(body)) {
         const ln = lineOf([section]);
-        throw new Fail(ln, `Line ${ln}: \`${section}\` needs to sit under a table, like \`[github_issues]\`.`);
+        throw new Fail(ln, `Line ${ln}: \`${section}\` needs to sit under a table, like \`[conversations]\`.`);
       }
       if (section === "defaults") {
         if ("autonomy" in body) data.default = level(body.autonomy, ["defaults", "autonomy"]);
         continue;
       }
-      if (section === "abilities") {
-        if ("enabled" in body) data.enabled = names(body.enabled, ["abilities", "enabled"]);
-        if ("passive" in body) data.passive = names(body.passive, ["abilities", "passive"]);
+      if (section === "mcp") {
+        // Each server's declaration is Ghost's to check; its levels and targets are read here.
+        for (const [sname, sbody] of Object.entries(body)) {
+          if (!isTable(sbody)) continue;
+          if ("levels" in sbody) {
+            const lv = sbody.levels;
+            if (!isTable(lv)) throw new Fail(lineOf(["mcp", sname, "levels"]), `Line ${lineOf(["mcp", sname, "levels"])}: [mcp.${sname}.levels] needs to be a table.`);
+            const ops: Record<string, string> = {};
+            for (const [op, v] of Object.entries(lv)) ops[op] = level(v, ["mcp", sname, "levels", op]);
+            data.skills[sname] = ops;
+          }
+          if ("targets" in sbody) parseTargets(sbody.targets, sname, ["mcp", sname], data);
+        }
         continue;
       }
+      if (section === "abilities") continue; // the retired ability packages (ADR 0022): Ghost ignores it too
       const ops: Record<string, string> = {};
       for (const [key, v] of Object.entries(body)) {
         if (key === "targets") {
-          if (!isTable(v)) throw new Fail(lineOf([section, key]), `Line ${lineOf([section, key])}: [${section}.targets] needs to be a table.`);
-          for (const [tname, tops] of Object.entries(v)) {
-            if (!isTable(tops)) throw new Fail(lineOf([section, key, tname]), `Line ${lineOf([section, key, tname])}: [${section}.targets."${tname}"] needs to be a table.`);
-            const out: Record<string, string> = {};
-            for (const [op, lv] of Object.entries(tops)) out[op] = level(lv, [section, key, tname, op]);
-            (data.targets[section] ??= {})[tname.toLowerCase()] = out;
-          }
+          parseTargets(v, section, [section], data);
           continue;
         }
         ops[key] = level(v, [section, key]);
@@ -529,7 +534,7 @@ export function parsePolicy(text: string): ParseResult {
 }
 
 /** The first line of a file Ghost writes (ghost_core.policy.to_toml). */
-export const FILE_HEADER = "# Ghost autonomy policy (ADR 0011). Edited through the desktop app or by hand.";
+export const FILE_HEADER = "# Ghost autonomy policy (ADR 0011, ADR 0022). Edited through the desktop app or by hand.";
 
 /**
  * Set or remove one `key = "level"` in `[table]`, changing only that line. A new key goes
@@ -580,12 +585,28 @@ export function setKey(text: string, table: string[], key: string, value: string
   if (lines.every((l) => !l.trim())) return [FILE_HEADER, "", ...block, ""].join("\n");
 
   let at: number | null = null;
+  /** The last line of the block a header opens: its last key, or the end of the comments and blanks that follow. */
+  const blockEnd = (h: Header) => {
+    let end = h.last;
+    while (end < lines.length && !/^\s*\[/.test(lines[end])) end++;
+    // Comments right above the next header belong to that header.
+    while (end > h.last && (/^\s*#/.test(lines[end - 1]) || !lines[end - 1].trim())) end--;
+    return end;
+  };
   if (table[0] === "defaults") {
-    // After [abilities], before the first ability table: where Ghost itself puts it.
-    const ab = r.headers.get(pathKey(["abilities"]));
-    const first = [...r.headers.entries()].filter(([k]) => k !== pathKey(["abilities"])).map(([, h]) => h.line).sort((a, b) => a - b)[0];
-    if (ab) at = ab.last;
-    else if (first) at = first - 1;
+    // Before the first table: where Ghost itself puts it.
+    const first = [...r.headers.values()].map((h) => h.line).sort((a, b) => a - b)[0];
+    if (first) at = first - 1;
+  } else if (table.length > 1) {
+    // A server's levels: after the last of its own tables ([mcp.<name>], its writes, its targets).
+    const parent = pathKey(table.slice(0, -1));
+    const prefix = parent.slice(0, -1) + ",";
+    const own = [...r.headers.entries()].filter(([k]) => k === parent || k.startsWith(prefix)).map(([, h]) => h);
+    if (own.length) {
+      const last = own.reduce((a, b) => (b.last > a.last ? b : a));
+      lines.splice(blockEnd(last), 0, "", ...block);
+      return tidy(lines);
+    }
   } else {
     const prefix = tk.slice(0, -1) + ",";
     const subs = [...r.headers.entries()].filter(([k]) => k.startsWith(prefix)).map(([, h]) => h.line);
@@ -597,7 +618,7 @@ export function setKey(text: string, table: string[], key: string, value: string
     return tidy(lines);
   }
   // Skip back over comments that belong to the next header.
-  while (at > 0 && /^\s*#/.test(lines[at - 1]) && at - 1 >= (r.headers.get(pathKey(["abilities"]))?.last ?? 0)) at--;
+  while (at > 0 && /^\s*#/.test(lines[at - 1])) at--;
   lines.splice(at, 0, ...block, "");
   if (at > 0 && lines[at - 1].trim()) lines.splice(at, 0, "");
   return tidy(lines);
@@ -622,7 +643,3 @@ export function levelsOf(r: ParseResult, fallback: PolicyData): PolicyData {
   return r.ok ? r.data : fallback;
 }
 
-/** "a,b" equality for the enabled list, which is what decides a restart. */
-export function sameList(a: string[] | null, b: string[] | null): boolean {
-  return (a ?? []).join("\n") === (b ?? []).join("\n");
-}

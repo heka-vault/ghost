@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from ghost_core import GateError
-from ghost_core.conversations import ABILITY, Conversations, ConversationTarget, Profile
+from ghost_core.conversations import SOURCE, Conversations, ConversationTarget, Profile
 from ghost_core.conversations.models import (
     AppendNote,
     Create,
@@ -121,7 +121,7 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
         try:
             out = await deps.gate.apply_internal(
                 session_id=UI_SESSION,
-                ability=ABILITY,
+                ability=SOURCE,
                 operation=op,
                 target=ConversationTarget(slug=slug),
                 changes=ChangeSet(steps=(change,)),

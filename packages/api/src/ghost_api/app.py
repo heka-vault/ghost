@@ -15,14 +15,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from ghost_core import AutonomyPolicy, LoadedAbility, Outcome, Proposal, Store, WriteGate
+from ghost_core import AutonomyPolicy, GateError, Outcome, Proposal, Store, ToolSource, WriteGate
 from ghost_core.policy import PolicyError
 from loguru import logger
 
 from ghost_api.files import read_env, update_env
 from ghost_api.models import (
     API_VERSION,
-    AbilityInfo,
     Ack,
     AuditEntry,
     AuditEventView,
@@ -30,6 +29,10 @@ from ghost_api.models import (
     DeviceInfo,
     DevicesView,
     Event,
+    McpScopeInfo,
+    McpServerInfo,
+    McpToolInfo,
+    McpWriteInfo,
     ModelsView,
     OperationInfo,
     OutcomeView,
@@ -45,6 +48,10 @@ from ghost_api.models import (
     SettingsResult,
     SettingsUpdate,
     SettingsView,
+    SkillAdd,
+    SkillBody,
+    SkillInfo,
+    SourceInfo,
     Status,
     WakeRequest,
 )
@@ -61,7 +68,6 @@ class Controller(Protocol):
     async def cancel_pending(self) -> bool: ...
     def reload_policy(self) -> AutonomyPolicy: ...
     def apply_settings(self, values: dict[str, str | None]) -> list[str]: ...  # keys live now
-    def discovered_abilities(self) -> dict[str, Any]: ...  # name -> Ability
     # conversations (ADR 0014)
     async def switch_conversation(self, slug: str) -> bool: ...  # in a session only
     async def compact_conversation(self, slug: str) -> bool: ...  # asks the model, in session
@@ -81,7 +87,7 @@ class Deps:
         control: Controller,
         gate: WriteGate,
         store: Store,
-        abilities: Sequence[LoadedAbility],
+        sources: Sequence[ToolSource],
         policy_path: Path,
         settings_path: Path,
         env_path: Path,
@@ -92,13 +98,17 @@ class Deps:
         output_device: str | None,
         stt_model: str,
         conversations: Any = None,  # ghost_core.conversations.Conversations
+        mcp: Any = None,  # ghost_core.mcp.Servers
+        skills: Any = None,  # ghost_core.skills.Skills
     ) -> None:
         self.conversations = conversations
+        self.mcp = mcp
+        self.skills = skills
         self.state = state
         self.control = control
         self.gate = gate
         self.store = store
-        self.abilities = list(abilities)
+        self.sources = list(sources)
         self.policy_path = policy_path
         self.settings_path = settings_path
         self.env_path = env_path
@@ -108,6 +118,13 @@ class Deps:
         self.input_device = input_device
         self.output_device = output_device
         self.stt_model = stt_model
+
+
+def mcp_secret_names(values: dict[str, str]) -> set[str]:
+    """The secret names the operator listed for MCP servers (GHOST_MCP_SECRETS, a comma
+    list): settable from the desktop like the built-in ones, never readable."""
+    raw = values.get("GHOST_MCP_SECRETS", "") or ""
+    return {n.strip() for n in raw.split(",") if n.strip() and n.strip().isupper()}
 
 
 def pending_view(p: Proposal, at: datetime | None = None) -> PendingProposal:
@@ -152,7 +169,7 @@ def status_snapshot(deps: Deps) -> Status:
         uptime_secs=st.uptime_secs,
         version=st.version,
         wake_mode=st.wake_mode,
-        abilities=[a.name for a in deps.abilities],
+        servers=list(deps.mcp.servers) if deps.mcp is not None else [],
         pending=pending,
         conversation=st.conversation,
         session_origin=st.session_origin,  # type: ignore[arg-type]
@@ -297,78 +314,170 @@ def create_app(deps: Deps) -> FastAPI:
         ok = await deps.control.forget_phone()
         return Ack(ok=ok, detail=None if ok else "no phone paired")
 
-    # --- abilities -----------------------------------------------------------------
+    # --- mcp servers (ADR 0022) ----------------------------------------------------
 
-    @app.get("/abilities", response_model=list[AbilityInfo], tags=["abilities"])
-    async def abilities() -> list[AbilityInfo]:
-        loaded = {a.name: a for a in deps.abilities}
+    @app.get("/mcp", response_model=list[McpServerInfo], tags=["mcp"])
+    async def mcp_servers() -> list[McpServerInfo]:
+        servers = deps.mcp
+        if servers is None:
+            return []
         autonomy = deps.gate.autonomy
         out = []
-        discovered = dict(deps.control.discovered_abilities())
-        for name, ab in sorted(discovered.items()):
-            la = loaded.get(name)
-            c = la.contributions if la else None
+        for name, spec in servers.specs.items():
+            live = servers.servers.get(name)
+            offered = {t.name for t in live.offered()} if live else set()
+            ops = {o.name: o for o in live.operations()} if live else {}
+            writes = []
+            for op_name, w in spec.writes.items():
+                level = autonomy.resolve(name, op_name, risk=w.risk)  # type: ignore[arg-type]
+                built = ops.get(op_name)
+                writes.append(
+                    McpWriteInfo(
+                        operation=op_name,
+                        tool=w.tool,
+                        risk=w.risk,
+                        autonomy=level.value,
+                        asked_by=list(w.asked_by),
+                        target=list(w.target),
+                        read=w.read.tool if w.read else None,
+                        offered=built is not None and level.value != "deny",
+                        properties=built.properties if built else {},
+                        required=list(built.required) if built else [],
+                    )
+                )
             out.append(
-                AbilityInfo(
+                McpServerInfo(
                     name=name,
-                    version=ab.version,
-                    description=ab.description,
-                    enabled=la is not None,
-                    loaded=la is not None,
-                    passive=ab.passive,
-                    operations=[
-                        OperationInfo(
-                            name=op.name,
-                            description=op.description,
-                            risk=op.risk,
-                            autonomy=autonomy.resolve(name, op.name, risk=op.risk).value,
-                            properties=op.properties,
-                            required=list(op.required),
+                    transport=spec.transport,
+                    connected=live is not None,
+                    error=servers.failed.get(name),
+                    tools=[
+                        McpToolInfo(
+                            name=t.name, description=t.description, offered=t.name in offered
                         )
-                        for op in (c.operations if c else [])
+                        for t in (live.tools if live else [])
                     ],
-                    read_tools=[
-                        ReadToolInfo(name=t.name, description=t.description)
-                        for t in (c.read_tools if c else [])
-                    ],
-                    interceptors=[i.name for i in (c.interceptors if c else [])],
-                    slots=[str(s) for s in (c.processors if c else {})],
-                    listeners=len(c.listeners) if c else 0,
-                    commands=[cmd.name for cmd in (c.commands if c else [])],
-                    scope_kind=c.scope_kind if c else None,
-                    scope_items=(
-                        list(c.scope_items()) if c and c.scope_kind and c.scope_items else []
-                    ),
+                    writes=writes,
+                    scope=McpScopeInfo(
+                        kind=spec.scope.kind,
+                        arguments=list(spec.scope.arguments),
+                        items=list(spec.scope.items),
+                    )
+                    if spec.scope
+                    else None,
                 )
             )
+        return out
+
+    # --- skills (ADR 0023) ------------------------------------------------------------
+    UI_SESSION = "ui"  # the desktop's own session id for audited edits (as conversations.py)
+
+    def skill_info(skill) -> SkillInfo:
+        servers = set(deps.mcp.servers) if deps.mcp is not None else set()
+        return SkillInfo(
+            name=skill.name,
+            description=skill.description,
+            source=skill.source,
+            path=str(skill.path),
+            requires=list(skill.requires),
+            missing=skill.missing(servers),
+            files=skill.files(),
+        )
+
+    @app.get("/skills", response_model=list[SkillInfo], tags=["skills"])
+    async def skills() -> list[SkillInfo]:
+        if deps.skills is None:
+            return []
+        deps.skills.refresh()
+        return [skill_info(s) for s in deps.skills.list()]
+
+    @app.get("/skills/{name}", response_model=SkillBody, tags=["skills"])
+    async def skill_body(name: str) -> SkillBody:
+        skill = deps.skills.get(name) if deps.skills is not None else None
+        if skill is None:
+            raise HTTPException(404, f"no skill {name!r}")
+        body = skill.body()
+        return SkillBody(name=skill.name, body=body[:20000], files=skill.files())
+
+    async def skill_change(op: str, args: dict[str, Any]) -> SkillInfo | None:
+        """Add or remove through the gate at quiet: the operator's own click, audited."""
+        if deps.skills is None:
+            raise HTTPException(503, "skills are not available")
+        operation = next((o for o in deps.skills.operations() if o.name == op), None)
+        if operation is None:
+            raise HTTPException(500, f"no skills operation {op}")
+        try:
+            prepared = await operation.prepare(args)
+        except LookupError as e:
+            raise HTTPException(404, str(e)) from None
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+        try:
+            out = await deps.gate.apply_internal(
+                session_id=UI_SESSION,
+                ability="skills",
+                operation=op,
+                target=prepared.target,
+                changes=prepared.changes,
+                rationale=f"{op} from the desktop app",
+            )
+        except (GateError, PolicyError, ValueError) as e:
+            raise HTTPException(409, str(e)) from None
+        if out.status != "success":
+            raise HTTPException(409, out.error or "not applied")
+        deps.skills.refresh()
+        skill = deps.skills.get(prepared.target.name)
+        return skill_info(skill) if skill else None
+
+    @app.post("/skills", response_model=SkillInfo, tags=["skills"])
+    async def add_skill(req: SkillAdd) -> SkillInfo:
+        info = await skill_change(
+            "add", {"path": req.path, "name": req.name, "replace": req.replace}
+        )
+        if info is None:
+            raise HTTPException(500, "the skill was copied but could not be read back")
+        return info
+
+    @app.delete("/skills/{name}", response_model=Ack, tags=["skills"])
+    async def remove_skill(name: str) -> Ack:
+        await skill_change("remove", {"name": name})
+        return Ack(ok=True, detail=None)
+
+    # --- sources: what the gate knows (ADR 0022) ---------------------------------
+
+    @app.get("/sources", response_model=list[SourceInfo], tags=["sources"])
+    async def sources() -> list[SourceInfo]:
+        autonomy = deps.gate.autonomy
+
+        def ops(name: str, operations) -> list[OperationInfo]:
+            return [
+                OperationInfo(
+                    name=op.name,
+                    description=op.description,
+                    risk=op.risk,
+                    autonomy=autonomy.resolve(name, op.name, risk=op.risk).value,
+                    properties=op.properties,
+                    required=list(op.required),
+                )
+                for op in operations
+            ]
+
+        out = []
         if deps.conversations is not None:
-            # Ghost's own conversation operations (ADR 0014): built in, always on, and
-            # tunable in the policy file like any ability's.
-            from ghost_core.conversations import ABILITY as CONVERSATIONS
+            # The lines' own operations (ADR 0014): built in, always on, and tunable in
+            # the policy file like any server's.
+            from ghost_core.conversations import SOURCE as CONVERSATIONS
 
             out.append(
-                AbilityInfo(
+                SourceInfo(
                     name=CONVERSATIONS,
-                    version="built-in",
-                    description="Saved conversations: persona, voice, memory (ADR 0014)",
-                    enabled=True,
-                    loaded=True,
-                    passive=False,
-                    operations=[
-                        OperationInfo(
-                            name=op.name,
-                            description=op.description,
-                            risk=op.risk,
-                            autonomy=autonomy.resolve(CONVERSATIONS, op.name, risk=op.risk).value,
-                            properties=op.properties,
-                            required=list(op.required),
-                        )
-                        for op in deps.conversations.operations()
-                    ]
+                    kind="built-in",
+                    description="Your lines: persona, voice, memory, scope (ADR 0014)",
+                    operations=ops(CONVERSATIONS, deps.conversations.operations())
                     + [
                         OperationInfo(
                             name="switch",
-                            description="Patch the operator through to another conversation.",
+                            description="Patch the operator through to another line.",
                             risk="low",
                             autonomy=autonomy.resolve(CONVERSATIONS, "switch", risk="low").value,
                             properties={"name": {"type": "string"}},
@@ -379,6 +488,51 @@ def create_app(deps: Deps) -> FastAPI:
                         ReadToolInfo(name=t.name, description=t.description)
                         for t in deps.conversations.read_tools()
                     ],
+                )
+            )
+        listed = {s.name for s in deps.sources}
+        if deps.mcp is not None:
+            # A declared server that did not connect still has operations the policy
+            # names; show them (from the declaration alone) so their levels can be set.
+            for name, spec in deps.mcp.specs.items():
+                if name in listed or name in deps.mcp.servers:
+                    continue
+                out.append(
+                    SourceInfo(
+                        name=name,
+                        kind="server",
+                        description=f"Not connected: {deps.mcp.failed.get(name, 'unknown')}",
+                        operations=[
+                            OperationInfo(
+                                name=op,
+                                description=w.description or f"{w.tool} ({op})",
+                                risk=w.risk,
+                                autonomy=autonomy.resolve(name, op, risk=w.risk).value,  # type: ignore[arg-type]
+                                properties={},
+                                required=list(w.target),
+                            )
+                            for op, w in spec.writes.items()
+                        ],
+                        scope_kind=spec.scope.kind if spec.scope else None,
+                        scope_items=list(spec.scope.items) if spec.scope else [],
+                    )
+                )
+        for src in deps.sources:
+            if deps.conversations is not None and src.name == "conversations":
+                continue
+            out.append(
+                SourceInfo(
+                    name=src.name,
+                    kind="server",
+                    description=(src.prompt.split(". ", 1)[0] + ".") if src.prompt else src.name,
+                    operations=ops(src.name, src.operations),
+                    read_tools=[
+                        ReadToolInfo(name=t.name, description=t.description) for t in src.read_tools
+                    ],
+                    scope_kind=src.scope_kind,
+                    scope_items=list(src.scope_items())
+                    if src.scope_kind and src.scope_items
+                    else [],
                 )
             )
         return out
@@ -398,8 +552,6 @@ def create_app(deps: Deps) -> FastAPI:
                 s: {t: {op: lv.value for op, lv in ops.items()} for t, ops in ts.items()}
                 for s, ts in p.targets.items()
             },
-            enabled=list(p.enabled) if p.enabled is not None else None,
-            passive=list(p.passive),
         )
 
     @app.get("/policy", response_model=PolicyView, tags=["policy"])
@@ -411,7 +563,10 @@ def create_app(deps: Deps) -> FastAPI:
 
     @app.put("/policy", response_model=PolicyResult, tags=["policy"])
     async def put_policy(update: PolicyUpdate) -> PolicyResult:
-        before = AutonomyPolicy.load(deps.policy_path)
+        try:
+            before = AutonomyPolicy.load(deps.policy_path)  # the servers it declares
+        except ValueError:
+            before = AutonomyPolicy()  # a broken file: the text path below can repair it
         if update.text is not None:
             try:
                 policy = AutonomyPolicy.parse(update.text, source="request")
@@ -425,8 +580,7 @@ def create_app(deps: Deps) -> FastAPI:
                     default=update.default if update.default is not None else current.default,
                     skills=update.skills if update.skills is not None else current.skills,
                     targets=update.targets if update.targets is not None else current.targets,
-                    enabled=update.enabled if update.enabled is not None else current.enabled,
-                    passive=update.passive if update.passive is not None else current.passive,
+                    mcp=before.mcp,
                 )
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None
@@ -437,7 +591,6 @@ def create_app(deps: Deps) -> FastAPI:
         return PolicyResult(
             policy=policy_view(),
             applied=True,
-            restart_required=tuple(policy.enabled or ()) != tuple(before.enabled or ()),
         )
 
     # --- settings --------------------------------------------------------------------
@@ -453,7 +606,10 @@ def create_app(deps: Deps) -> FastAPI:
             settings_path=str(deps.settings_path),
             env_path=str(deps.env_path),
             values=values,
-            secrets=[SecretState(name=k, set=bool(env.get(k))) for k in SECRET_KEYS],
+            secrets=[
+                SecretState(name=k, set=bool(env.get(k)))
+                for k in [*SECRET_KEYS, *sorted(mcp_secret_names(values) - SECRET_KEYS_SET)]
+            ],
             vault_managed=deps.vault_env_path.exists(),
         )
 
@@ -475,7 +631,8 @@ def create_app(deps: Deps) -> FastAPI:
                 update_env(deps.env_path, update.values, mode=0o600)
                 applied = deps.control.apply_settings(update.values)
             if update.secrets:
-                bad = [k for k in update.secrets if k not in SECRET_KEYS_SET]
+                allowed = SECRET_KEYS_SET | mcp_secret_names(read_env(deps.settings_path))
+                bad = [k for k in update.secrets if k not in allowed]
                 if bad:
                     raise HTTPException(422, f"unknown secrets {bad}")
                 update_env(deps.env_path, update.secrets, mode=0o600)

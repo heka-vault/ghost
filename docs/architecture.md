@@ -18,7 +18,7 @@ flowchart LR
       STT --> LLM[LLM + skill tools]
       LLM --> TTS[Kokoro<br/>local]
     end
-    LLM --> SK[Abilities<br/>github_issues, ...]
+    LLM --> SK[MCP servers<br/>github, mobbin, ...]
     SK --> DOM[core<br/>gate, policy, audit]
     DOM --> DB[(SQLite WAL)]
   end
@@ -28,6 +28,14 @@ flowchart LR
 ```
 
 The phone app (`apps/mobile`, Expo, Android) is a second transport into the same pipeline (ADR 0005, ADR 0013), so the gate, the policy and Jev apply unchanged. It never uses the control API. A question from Ghost is answered by voice on the phone: there is no Confirm button there. Its screens read a small `Desk` interface (`apps/mobile/src/desk/types.ts`). With the screen off a session keeps the mic through a microphone foreground service (`apps/mobile/modules/ghost-call`, a local Expo module) with an End action in its notification, and routes audio to a car or headset when one is connected. It reaches the house through the phone listener below (ADR 0016): on the LAN directly, and from anywhere else through the operator's own WireGuard network, where the desk and the phone are peers of a hub that forwards only between the two (ADR 0020). Nothing public is added: no STUN, no TURN, no relay; the tunnel is the operator's.
+
+### MCP servers
+
+The operator lists MCP servers in the policy file (`[mcp.<name>]`: a streamable HTTP `url` with `headers`, or a stdio `command` with `args` and `env`; `$NAME` in either is a secret from the environment, filled at connect time and never logged). `ghostd` connects at start (`ghost_core.mcp`), reads each server's tools, and offers to the model the ones the server marks read-only or the operator lists under `reads`, as ordinary typed read tools under the server's name. A write is offered only once declared (`[mcp.<name>.writes.<op>]`: the tool, pinned arguments, the target arguments, the read that shows the target, the words that ask for it, risk and bounds); then it is a gate operation like any other, with its level from `[mcp.<name>.levels]`, the operator's plain request as the yes, snapshot, stale check, read-back and audit. A `scope` declaration says which arguments name the scoped item and lists the allowlist, so lines can be scoped to a server (ADR 0019). A server that fails to connect is logged and skipped; `ghostd check`, `GET /mcp` and the desktop's Servers screen show each server's state, reads, writes and levels. Everything a server sends is data: the model sees the first sentence of each description, results are trimmed, and nothing in them changes a level or a scope. See [mcp.md](mcp.md).
+
+### Skills
+
+A skill is a `SKILL.md` folder (ADR 0023): Ghost's own under `~/.config/ghost/skills/`, or a project's `.agents/skills/` read in place from the roots in `GHOST_SKILL_ROOTS`. `ghost_core.skills` finds them at start, puts an index (name and one line each) in the prompt, and offers `read_skill`, which returns a body or one of the files beside it, trimmed and inside the folder only. Adding and removing are gate operations (`skills.add`, `skills.remove`), so the desktop's drag-and-drop and "Ghost, add the invoicing skill from this folder" are the same audited write. Skill text shapes what the model does, never what it may do; nothing in a skill is run. See [skills.md](skills.md).
 
 ### The phone listener
 
@@ -44,8 +52,7 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 | `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021) |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
 | `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
-| `core` | The ability API and the write gate (ADR 0007, 0011, 0012): discovery and loading of abilities, the operator's autonomy policy, proposals over ability-defined targets and changes, confirmation classifiers (Jev or regex), idempotent execution, readback, and the audit log. The only code that can execute a write |
-| `abilities/*` | Installable capabilities (ADR 0012). Each contributes a prompt paragraph, read tools, write operations with a risk class and a writer, and optionally turn interceptors, pipeline processors, listeners and CLI commands. `github_issues` is the first one; third-party abilities use the same entry point |
+| `core` | The write gate and what feeds it (ADR 0007, 0011, 0022): tool sources (`ghost_core.source.ToolSource`), the MCP client with the write declaration (`ghost_core.mcp`), the operator's autonomy policy, proposals over typed targets and change sets, the confirmation classifier, the audit store, and the lines (ADR 0014). Imports nothing from the other packages. |
 | `core/conversations` | Named conversations (ADR 0014), now threads with a scope and a settled state (ADR 0019): the registry, the transcript, every compaction version, and the three Markdown files per conversation (`persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
 
@@ -61,12 +68,12 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 
 ### Threads scope work (ADR 0019)
 
-A conversation is a **thread** with a scope: per ability, the items it may touch
-(`{"github_issues": ["heka-vault/ghost"]}`), a subset of that ability's allowlist. An
-ability declares what it can be scoped by (`Contributions.scope_kind`, `scope_items`),
+A conversation is a **thread** with a scope: per server, the items it may touch
+(`{"github_heka": ["heka-vault/ghost"]}`), a subset of that server's allowlist. A
+server declares what it can be scoped by (`scope = { kind, arguments, items }`),
 and on every call the pipeline hands it the active thread's `ActiveScope` as the
 `_scope` argument, so read tools list only what the thread covers, a single-item thread
-stops asking for the item ("close seventeen"), and the ability's prompt paragraph names
+stops asking for the item ("close seventeen"), and the server's prompt paragraph names
 only the scoped items. The gate refuses a write whose `Target.scope()` is outside the
 active thread before policy or autonomy are consulted. Ghost is always unscoped.
 
@@ -92,13 +99,13 @@ user turn directly. `core` accepts a confirmation only from a transcript frame t
 pipeline produced for the current session, never from LLM output. How much Ghost does
 without asking is the operator's call (ADR 0011):
 
-1. The LLM calls `change` on an ability's operation: the operation's `prepare` turns the
+1. The LLM calls `change` on a source's operation (a server's declared write, or a line operation): the operation's `prepare` turns the
    arguments into a target and a typed change set.
-2. `core` checks the ability's own allowlist, then resolves the autonomy level for
-   this ability, operation, and target from `~/.config/ghost/policy.toml` (`deny`,
+2. `core` checks the source's own allowlist, then resolves the autonomy level for
+   this source, operation, and target from `~/.config/ghost/policy.toml` (`deny`,
    `confirm`, `announce`, `quiet`; a missing entry falls back to the operation's
    risk class).
-3. `core` fetches the target through the ability's writer and stores an immutable
+3. `core` fetches the target through the source's writer (for a server, the declared read) and stores an immutable
    proposal with that snapshot.
 4. At `announce` or `quiet` the proposal is executed at once. At `confirm` it waits
    up to 60 s for the next user turn; the classifier (Jev when configured, else the
@@ -116,17 +123,15 @@ without asking is the operator's call (ADR 0011):
 ```text
 ghost/
 ├── apps/
-│   ├── ghostd/          # Python daemon: wake, sessions, ability loading, control API server, phone listener
+│   ├── ghostd/          # Python daemon: wake, sessions, server connections, control API server, phone listener
 │   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, policy, audit, settings
 │   └── mobile/          # Expo + React Native, Android: Home, session, activity
 ├── packages/
-│   ├── core/            # Python: ability API, loader, context, gate, policy, confirmation, audit, conversations
+│   ├── core/            # Python: tool sources, MCP client and declaration, gate, policy, confirmation, audit, conversations
 │   ├── voice/           # Python: Pipecat pipeline factory, Parakeet, sounddevice transport, slots
 │   ├── api/             # Python: FastAPI on the Unix socket; openapi.json is the contract
 │   ├── client-ts/       # TypeScript: GENERATED from packages/api/openapi.json (pnpm gen)
 │   └── ui/              # TypeScript: React pieces shared by desktop and mobile
-├── abilities/
-│   └── github_issues/   # the first ability: issue reads, operations, GitHub writer, mock
 ├── packaging/           # Dockerfile.build, build-debs.sh, debian/ control files and unit
 ├── infra/
 │   ├── systemd/         # ghostd.service for a checkout + env renderer
@@ -139,10 +144,9 @@ TypeScript. They never import each other; the only crossing is
 `packages/api/openapi.json` → `packages/client-ts`, generated and checked by CI.
 
 Python 3.12. Import direction is strictly
-`ghostd -> {voice, api} -> core` and `abilities/* -> core`; `core` imports nothing from the
-others, and nothing imports an ability by name: `ghostd` finds them through the
-`ghost.abilities` entry point group and `~/.config/ghost/abilities/`. See
-[abilities.md](abilities.md) to write one.
+`ghostd -> {voice, api} -> core`; `core` imports nothing from the others, and nothing
+knows a server by name: `ghostd` connects to whatever the policy file declares. See
+[mcp.md](mcp.md) to declare one.
 
 ### How the gate is wired into the pipeline
 
@@ -152,9 +156,9 @@ transport.input -> [audio_in] -> Parakeet STT -> InterceptorProcessor -> Confirm
   -> transport.output
 ```
 
-The bracketed names are slots where enabled abilities' processors are spliced in, one
+The bracketed names are the slots Ghost's own processors sit in, one
 fresh instance per session. `InterceptorProcessor` offers each user turn to the
-abilities' turn interceptors first (and to Ghost's own fixed intents: a goodbye, "hang on",
+the turn interceptors first (Ghost's own fixed intents: a goodbye, "hang on",
 "never mind" while a change is pending); a handled turn is spoken to or
 acted on directly and never reaches the model.
 
@@ -164,7 +168,7 @@ Ghost's last reply as context: a clear yes executes, anything else cancels. Tran
 that arrive while Ghost is still speaking are not evidence at all: the operator has
 not heard the question yet, and the text may be Ghost's own voice. The verified
 outcome is appended to the context as a system note, so the model's next sentence
-describes what actually happened. The model's tools are the abilities' read tools,
+describes what actually happened. The model's tools are the servers' and the lines' read tools,
 `change`, `hang_up` and `hold`. There is no tool that bypasses the gate.
 
 The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the

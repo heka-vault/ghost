@@ -1,6 +1,6 @@
 /**
  * Owner: conversations. Page state that lives in the query string, so every state has a
- * URL (`?mock=session&tab=memory#/conversations/accounting`). The hash is the route and
+ * URL (`?mock=session&tab=memory#/lines/accounting`). The hash is the route and
  * takes one segment for the slug, so views and dialogs ride in the search part instead.
  *
  * The params belong to one line at a time. A direct load honors them for whichever line
@@ -47,7 +47,11 @@ export const focusOnOpen: { slug: string | null } = { slug: null };
  * A settled line to start the next one from (ADR 0019): set by a settled line's Memory tab
  * before navigating to the index, which opens New line with that line preselected, once.
  */
-export const newLineSeed: { slug: string | null } = { slug: null };
+/**
+ * Hand-offs into the Lines screen from elsewhere, read once on arrival: a line to seed a new
+ * one from, "open the New line dialog" (the sidebar's New line…), "open the Settled group".
+ */
+export const newLineSeed: { slug: string | null; open: boolean; settled: boolean } = { slug: null, open: false, settled: false };
 
 /**
  * Design mode only (`&fail=lines` or `&fail=line`): that page's loads fail until Try again
