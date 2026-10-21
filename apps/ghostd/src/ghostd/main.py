@@ -484,57 +484,7 @@ class Daemon:
         wake = self.build_wake(models)
 
         try:
-            while not self._stop.is_set():
-                logger.info("passive: waiting for wake word")
-                self.state.set_phase(Phase.PASSIVE)
-                self._rearm.clear()
-                wake_task = asyncio.ensure_future(wake.wait())
-                stop_task = asyncio.ensure_future(self._stop.wait())
-                rearm_task = asyncio.ensure_future(self._rearm.wait())
-                phone_task = asyncio.ensure_future(self._phone_q.get())
-                self._waiting = True
-                try:
-                    await asyncio.wait(
-                        {wake_task, stop_task, rearm_task, phone_task},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                finally:
-                    self._waiting = False
-                stop_task.cancel()
-                rearm_task.cancel()
-                phone = phone_task.result() if phone_task.done() else None
-                phone_task.cancel()
-                if phone is None and not self._phone_q.empty():  # accepted in the same tick
-                    phone = self._phone_q.get_nowait()
-                phone_conn, phone_line = phone if phone is not None else (None, GHOST)
-                if self._stop.is_set() or phone is not None or not wake_task.done():
-                    wake_task.cancel()
-                    await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
-                if self._stop.is_set():
-                    if phone_conn is not None:
-                        await _close_peer(phone_conn)
-                    break
-                if phone_conn is not None:  # the phone takes the session; the desk mic is free
-                    await self._conversation(
-                        models,
-                        tool_sources,
-                        gate,
-                        events,
-                        ducker,
-                        None,
-                        phone=phone_conn,
-                        start_in=phone_line,
-                    )
-                    continue
-                if not wake_task.done():  # settings changed: rebuild the listener
-                    continue
-                if is_dictating(self.cfg.dictation_flag):
-                    logger.info("wake ignored: dictation is active")
-                    continue
-                await events.emit("wake")
-                await self._conversation(
-                    models, tool_sources, gate, events, ducker, wake_task.result()
-                )
+            await self._passive(wake, models, tool_sources, gate, events, ducker)
         finally:
             wake.close()
             ducker.restore()
@@ -546,6 +496,69 @@ class Daemon:
             if jev:
                 await jev.aclose()
             store.close()
+
+    async def _passive(
+        self,
+        wake: WakeDetector,
+        models: Models,
+        tool_sources: Sequence[ToolSource],
+        gate: WriteGate,
+        events: Events,
+        ducker: Ducker,
+    ) -> None:
+        """Passive until stopped: a wake phrase, the manual trigger or a phone call
+        starts a session; a settings change rebuilds the listener."""
+        while not self._stop.is_set():
+            logger.info("passive: waiting for wake word")
+            self.state.set_phase(Phase.PASSIVE)
+            self._rearm.clear()
+            wake_task = asyncio.ensure_future(wake.wait())
+            stop_task = asyncio.ensure_future(self._stop.wait())
+            rearm_task = asyncio.ensure_future(self._rearm.wait())
+            phone_task = asyncio.ensure_future(self._phone_q.get())
+            self._waiting = True
+            try:
+                await asyncio.wait(
+                    {wake_task, stop_task, rearm_task, phone_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                self._waiting = False
+            stop_task.cancel()
+            rearm_task.cancel()
+            phone = phone_task.result() if phone_task.done() else None
+            phone_task.cancel()
+            if phone is None and not self._phone_q.empty():  # accepted in the same tick
+                phone = self._phone_q.get_nowait()
+            phone_conn, phone_line = phone if phone is not None else (None, GHOST)
+            # Decided before the cancel below, which makes a pending task done too.
+            woke = wake_task.done()
+            if self._stop.is_set() or phone is not None or not woke:
+                wake_task.cancel()
+                await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
+            if self._stop.is_set():
+                if phone_conn is not None:
+                    await _close_peer(phone_conn)
+                break
+            if phone_conn is not None:  # the phone takes the session; the desk mic is free
+                await self._conversation(
+                    models,
+                    tool_sources,
+                    gate,
+                    events,
+                    ducker,
+                    None,
+                    phone=phone_conn,
+                    start_in=phone_line,
+                )
+                continue
+            if not woke:  # settings changed: rebuild the listener
+                continue
+            if is_dictating(self.cfg.dictation_flag):
+                logger.info("wake ignored: dictation is active")
+                continue
+            await events.emit("wake")
+            await self._conversation(models, tool_sources, gate, events, ducker, wake_task.result())
 
     def _bind_voices(self, conversations: Conversations, models: Models) -> None:
         """Once Kokoro is loaded, the operations validate voice ids against its list."""
