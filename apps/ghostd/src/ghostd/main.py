@@ -48,6 +48,7 @@ from ghost_core.skills import Skills
 from ghost_core.templates import Templates
 from ghost_core.toolkits import Grant, merge
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
+from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
 from loguru import logger
@@ -465,6 +466,7 @@ class Daemon:
         )
         for problem in self.voice.llm_problems():
             logger.error(f"llm: {problem}")
+        logger.info(f"tts: {describe_tts(self.voice)}")
         for line in describe_mcp(mcp, autonomy):
             logger.info(line)
         logger.info(describe_skills(skills, set(mcp.servers)))
@@ -1087,6 +1089,8 @@ def cli(argv: list[str] | None = None) -> None:
         else:
             print(f"llm: {voice.llm_target().describe()}, thinking {voice.llm_thinking}")
             problems += voice.llm_problems()
+            print(f"tts: {describe_tts(voice)}")
+            problems += tts_problems(voice)
         autonomy = AutonomyPolicy()
         try:
             autonomy = AutonomyPolicy.load(cfg.policy_path)

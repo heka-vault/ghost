@@ -54,6 +54,7 @@ export const KEY_LABEL: Record<string, string> = {
   HF_TOKEN: "Hugging Face token",
   OPENROUTER_API_KEY: "OpenRouter key",
   TYPESAFE_API_KEY: "TypeSafe key",
+  ELEVENLABS_API_KEY: "ElevenLabs key",
 };
 
 export const KEY_SECTION: Record<string, SectionId> = {
@@ -72,7 +73,7 @@ export const KEY_SECTION: Record<string, SectionId> = {
 export const LIVE_KEYS = new Set(["GHOST_WAKE_PHRASES", "GHOST_WAKE_FUZZY"]);
 
 /** Secrets, in the order the page shows them: what Ghost needs first, then the optional ones. */
-export const SECRET_ORDER = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "HF_TOKEN"];
+export const SECRET_ORDER = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "HF_TOKEN", "ELEVENLABS_API_KEY"];
 export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
@@ -81,6 +82,7 @@ export const SECRET_INFO: Record<string, { help: string; optional?: boolean; pla
   TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev keys are set.", optional: true, placeholder: "ts_…" },
   OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when the endpoint setting is openrouter.", optional: true, placeholder: "sk-or-…" },
   HF_TOKEN: { help: "Speeds up the first download of the voice models.", optional: true, placeholder: "hf_…" },
+  ELEVENLABS_API_KEY: { help: "Ghost speaks with an ElevenLabs voice when the voice engine is elevenlabs. Only what Ghost says is sent.", optional: true, placeholder: "sk_…" },
 };
 
 export const DEFAULT_MODEL = "claude-sonnet-5-5";

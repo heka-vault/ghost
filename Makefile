@@ -101,7 +101,7 @@ perf: ## latency harness: make perf [SCENARIO=lookup,chain] [RUNS=3] [MODEL=a,b]
 	  $(if $(SCENARIO),--scenario $(SCENARIO)) $(if $(MODEL),--model $(MODEL)) \
 	  $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(ARGS)
 
-perf-micro: ## component micro-benchmarks: STT, Kokoro first audio, Smart Turn, Jev
+perf-micro: ## component micro-benchmarks: STT, Kokoro (and ElevenLabs) first audio, Smart Turn, Jev
 	@$(load_env) $(UV) run ghostd perf micro $(ARGS)
 
 perf-llm: ## LLM TTFB per endpoint and model with Ghost's prompt and tools: make perf-llm [ARGS=...]

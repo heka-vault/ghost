@@ -977,6 +977,7 @@ SECRET_KEYS_SET = frozenset(
         "TYPESAFE_API_KEY",
         "OPENROUTER_API_KEY",
         "HF_TOKEN",
+        "ELEVENLABS_API_KEY",  # the cloud voice (GHOST_TTS_ENGINE=elevenlabs)
     )
 )
 SECRET_KEYS = tuple(sorted(SECRET_KEYS_SET))

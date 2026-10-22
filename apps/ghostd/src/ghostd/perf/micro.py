@@ -1,5 +1,6 @@
 """Component micro-benchmarks: STT by utterance length, Kokoro time to first audio by
-sentence length, the Jev confirmation classifier, and Smart Turn inference.
+sentence length (and ElevenLabs', when ELEVENLABS_API_KEY and GHOST_ELEVENLABS_VOICE are
+set: ghostd.perf.elevenlabs), the Jev confirmation classifier, and Smart Turn inference.
 
 Runs on the same CPU as everything else (and as a running ghostd, if there is one);
 the numbers are what a session sees under that load, not a clean-room figure.
@@ -101,6 +102,25 @@ async def run_micro(only: list[str], n: int, out: Path) -> int:
                 f"  {label:<10} audio {audio:4.1f}s  first p50 {s['first']['p50']:.3f} "
                 f"p95 {s['first']['p95']:.3f}  whole p50 {s['whole']['p50']:.3f}"
             )
+
+    if "tts" in only:
+        from ghostd.perf.elevenlabs import first_audio
+
+        el = await first_audio(settings, TTS_LINES, n, _stats)
+        results["tts_elevenlabs"] = el
+        if "skipped" in el or "failed" in el:
+            why = el.get("skipped") or f"failed: {el['failed']}"
+            lines.append(f"TTS (ElevenLabs): {why}")
+        else:
+            lines.append(
+                f"TTS (ElevenLabs {el['model']}, voice {settings.elevenlabs_voice}): "
+                f"connect {el['connect']:.3f}s; time to first audio / whole, warm socket"
+            )
+            for label, s in el["lines"].items():
+                lines.append(
+                    f"  {label:<10} audio {s['audio']:4.1f}s  first p50 {s['first']['p50']:.3f} "
+                    f"p95 {s['first']['p95']:.3f}  whole p50 {s['whole']['p50']:.3f}"
+                )
 
     if "turn" in only and models and voice:
         turn = models.turn

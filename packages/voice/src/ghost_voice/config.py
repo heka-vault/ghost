@@ -11,6 +11,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLM_ENDPOINTS = ("proxy", "openrouter")
+TTS_ENGINES = ("kokoro", "elevenlabs")
 OPENROUTER_ANTHROPIC_URL = "https://openrouter.ai/api"  # OpenRouter's Anthropic Messages API
 _CLAUDE_ID = re.compile(r"^(claude-[a-z]+)-(\d+)(?:-(\d{1,2}))?$")
 
@@ -116,6 +117,23 @@ class VoiceSettings(BaseSettings):
     # plays, about 0.23 s per second of speech. False: whole sentences.
     tts_clauses: bool = True
     tts_clause_min_words: int = 4
+    # The voice engine (proposed ADR 0026). kokoro: local, the default. elevenlabs: Flash
+    # v2.5 over ElevenLabs' websocket, with Kokoro loaded beside it to speak instead when
+    # the key or voice is missing or the socket fails (ghost_voice.elevenlabs). Only the
+    # reply text goes there, never microphone audio. The key is never in a repr or a log.
+    tts_engine: str = "kokoro"
+    elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY", repr=False)
+    elevenlabs_voice: str = ""  # voice id for every line
+    elevenlabs_voices: str = ""  # per line slug, "accounting=<voice id>,..."; others use the above
+    elevenlabs_model: str = "eleven_flash_v2_5"
+
+    @field_validator("tts_engine")
+    @classmethod
+    def _known_engine(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in TTS_ENGINES:
+            raise ValueError(f"GHOST_TTS_ENGINE must be one of {', '.join(TTS_ENGINES)}")
+        return v
 
     # Turn taking. VAD values default to Pipecat's; raise confidence/min_volume
     # if a noisy room still triggers turns.

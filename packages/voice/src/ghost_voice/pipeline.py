@@ -43,6 +43,7 @@ from ghost_voice.config import VoiceSettings
 from ghost_voice.confirmation import ConfirmationProcessor
 from ghost_voice.conversation import ConversationRuntime
 from ghost_voice.echo import EchoFilter
+from ghost_voice.elevenlabs import session_tts
 from ghost_voice.hold import HoldGate
 from ghost_voice.intents import QuickIntents
 from ghost_voice.intercept import InterceptorProcessor
@@ -593,10 +594,14 @@ def build_session(
                 (Slot.BEFORE_TTS, AssistantTap(on_turn, runtime.on_marker if runtime else None)),
                 (
                     Slot.AUDIO_OUT,
-                    models.tts.fork(
+                    # Kokoro, or ElevenLabs with Kokoro behind it (ghost_voice.elevenlabs)
+                    session_tts(
+                        settings,
+                        models.tts,
                         clause_min_words=settings.tts_clause_min_words
                         if settings.tts_clauses
-                        else None
+                        else None,
+                        line=(lambda: runtime.active.slug) if runtime else None,
                     ),
                 ),
                 (None, ThinkingSoundCut()),
