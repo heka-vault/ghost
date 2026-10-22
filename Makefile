@@ -113,6 +113,12 @@ record: ## record a 4 s wake-phrase clip from ghost.mic and the raw mic: make re
 wake-eval: ## what Parakeet hears in .scratch/clips/*.wav and whether the wake matcher fires
 	@$(UV) run python docs/benchmarks/scripts/wake_eval.py $(CLIPS)
 
+record-takes: ## guided recording of the wake test set (docs/wake-recording.md): make record-takes [BLOCKS=A,C,F] [ARGS=--dry-run]
+	@$(UV) run python scripts/record-wake-takes.py $(if $(BLOCKS),--blocks $(BLOCKS)) $(ARGS)
+
+wake-takes-eval: ## score the wake takes, transcript wake against the trained detector: make wake-takes-eval [TAKES=dir]
+	@$(UV) run python docs/benchmarks/scripts/wake_takes_eval.py $(if $(TAKES),--takes $(TAKES)) $(ARGS)
+
 desktop-dev: ## the desktop app from the checkout (Vite hot reload) against whichever ghostd owns the socket; no .deb needed
 	@pnpm tauri dev
 
