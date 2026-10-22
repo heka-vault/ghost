@@ -50,7 +50,8 @@ from ghostd.perf.scenarios import Line, Scenario
 #   prompt_lines    the system prompt without the lead-short and parallel-lookup lines
 #   system_cache    no cache marker on the system prompt
 #   shared_client   a new AsyncAnthropic per session, as before
-ABLATIONS = ("tts_clauses", "prompt_lines", "system_cache", "shared_client")
+#   speculate       the model waits out the turn grace (GHOST_TURN_SPECULATE=false)
+ABLATIONS = ("tts_clauses", "prompt_lines", "system_cache", "shared_client", "speculate")
 # A plausible record of earlier sessions, for --history: generic, like the seed issues.
 HISTORY = (
     ("user", "What's waiting for triage?"),
@@ -172,6 +173,8 @@ def make_settings(cfg: RunConfig) -> VoiceSettings:
     update["llm_endpoint"] = cfg.endpoint
     if "tts_clauses" in cfg.ablate:
         update["tts_clauses"] = False
+    if "speculate" in cfg.ablate:
+        update["turn_speculate"] = False
     for k, v in cfg.overrides.items():
         if k not in VoiceSettings.model_fields:
             raise SystemExit(f"unknown setting {k!r}")

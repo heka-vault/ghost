@@ -87,6 +87,11 @@ class LatencyProbe:
     def kept_open(self) -> None:
         """The operator went on during the grace hold; the turn stayed open."""
 
+    def speculation(self, outcome: str) -> None:
+        """An answer started during the grace hold: ``started``, then ``kept`` (it was the
+        answer), ``withdrawn`` (the operator went on), ``missed`` (the words changed) or
+        ``tool`` (it reached a tool call and the confirmed turn ran again)."""
+
     def intercepted(self, name: str, secs: float) -> None:
         """An interceptor (``name`` is its code name) handled the turn in ``secs``."""
 
@@ -163,6 +168,8 @@ class _Turn:
     # From the probe
     hold: float = 0.0
     kept_open: int = 0
+    speculation: dict[str, int] = field(default_factory=dict)
+    early_ttfb: float | None = None  # a held answer's first byte, before its call is seen
     pre: float = 0.0
     intercepted: str | None = None
     confirm: dict[str, Any] | None = None
@@ -281,7 +288,8 @@ class LatencyObserver(BaseObserver, LatencyProbe):
                 self._replace(self._new("system", t))
                 turn = self._turn
             assert turn is not None
-            turn.llm.append(_LLMCall(start=t, model=self.model))
+            turn.llm.append(_LLMCall(start=t, model=self.model, ttfb=turn.early_ttfb))
+            turn.early_ttfb = None
         elif isinstance(frame, LLMThoughtStartFrame) and isinstance(src, LLMService):
             call = self._turn.open_llm() if self._turn else None
             if call:
@@ -348,6 +356,10 @@ class LatencyObserver(BaseObserver, LatencyProbe):
                     if call and call.ttfb is None:
                         call.ttfb = d.value
                         call.model = d.model or call.model
+                    elif call is None and turn.speculation.get("started"):
+                        # A speculative answer is held until the turn is confirmed, so
+                        # its metrics arrive before the call that carries them.
+                        turn.early_ttfb = d.value
                 elif isinstance(src, TTSService):
                     if turn.tts_ttfb is None and turn.bot_started is None:
                         turn.tts_ttfb = d.value
@@ -411,6 +423,11 @@ class LatencyObserver(BaseObserver, LatencyProbe):
     def kept_open(self) -> None:
         if self._turn:
             self._turn.kept_open += 1
+
+    def speculation(self, outcome: str) -> None:
+        if self._turn:
+            counts = self._turn.speculation
+            counts[outcome] = counts.get(outcome, 0) + 1
 
     def intercepted(self, name: str, secs: float) -> None:
         if self._turn:
@@ -586,6 +603,8 @@ def build_record(
             "segments": turn.segments,
             "kept_open": turn.kept_open,
         }
+        if turn.speculation:
+            rec["hear"]["speculation"] = dict(turn.speculation)
         if turn.smart_turn:
             rec["hear"]["smart_turn"] = turn.smart_turn
     if turn.confirm:
@@ -696,7 +715,8 @@ def format_line(rec: dict[str, Any]) -> str:
         if hear.get("turn"):
             sub.append(f"turn {hear['turn']:.2f}")
         if hear.get("hold"):
-            sub.append(f"hold {hear['hold']:.2f}")
+            kept = (hear.get("speculation") or {}).get("kept")
+            sub.append(f"hold {hear['hold']:.2f}" + (", answered during it" if kept else ""))
         parts.append(f"hear {hear['total']:.2f} ({', '.join(s for s in sub if s)})")
     if rec.get("intercepted"):
         parts.append(f"intercepted {rec['intercepted']}")

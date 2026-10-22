@@ -363,3 +363,36 @@ def test_percentiles_and_summary():
     assert s["reply"]["p50"] == 2.0 and s["hear"]["n"] == 3
     assert cache_share([{"in": 10, "cache_read": 90, "cache_write": 0}]) == 0.9
     assert cache_share([]) is None
+
+
+async def test_an_answer_given_during_the_grace_is_timed_from_the_operator(tmp_path):
+    """A speculative answer is held in the LLM service until the turn is confirmed: its
+    first byte is reported before the call is seen, and the reply still counts from the
+    end of speech."""
+    obs, feed, records = observer(tmp_path)
+    await feed(0.0, BotStoppedSpeakingFrame())
+    obs._opening = False  # noqa: SLF001 - straight to a voice turn
+    obs._turn = None  # noqa: SLF001
+    await feed(1.0, VADUserStartedSpeakingFrame(start_secs=0.2))
+    await feed(1.0, UserStartedSpeakingFrame())
+    await feed(2.0, VADUserStoppedSpeakingFrame(stop_secs=0.2))  # operator silent at 1.8
+    await feed(2.15, said(), STT)
+    obs.speculation("started")
+    await feed(2.9, ttfb(0.7), LLM)  # the held answer's first byte
+    obs.held(0.8)
+    obs.speculation("kept")
+    await feed(3.0, UserStoppedSpeakingFrame())
+    await feed(3.0, LLMFullResponseStartFrame(), LLM)  # released by the confirmation
+    await feed(3.0, LLMTextFrame(f"It is {SECRET}."), LLM)
+    await feed(3.01, LLMFullResponseEndFrame(), LLM)
+    await feed(3.05, TTSStartedFrame(), TTS)
+    await feed(3.3, TTSAudioRawFrame(b"\0\0" * 240, 24000, 1), TTS)
+    await feed(3.35, BotStartedSpeakingFrame())
+    await feed(5.0, BotStoppedSpeakingFrame())
+
+    rec = records[-1]
+    assert rec["kind"] == "voice"
+    assert rec["hear"]["speculation"] == {"started": 1, "kept": 1}
+    assert rec["llm"]["calls"][0]["ttfb"] == 0.7
+    assert rec["reply"] == 1.55  # 1.8 -> 3.35
+    assert "answered during it" in format_line(rec)

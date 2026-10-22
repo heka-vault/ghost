@@ -23,7 +23,7 @@ its `stop_secs`) to `BotStartedSpeaking`, and the parts tile that interval:
 
 | part | from -> to | what is in it |
 |---|---|---|
-| `hear` | operator silent -> turn released | VAD silence (`vad`), STT (`stt`, and `stt_model` for the model alone), interceptors and the confirmation classifier (`pre`), Smart Turn and waiting for the transcript (`turn`), Ghost's grace hold (`hold`) |
+| `hear` | operator silent -> turn released | VAD silence (`vad`), STT (`stt`, and `stt_model` for the model alone), interceptors and the confirmation classifier (`pre`), Smart Turn and waiting for the transcript (`turn`), Ghost's grace hold (`hold`; `speculation` counts answers started during it and how each ended: `kept`, `withdrawn`, `missed`, `tool`) |
 | `llm` | each model call, start -> end | `ttfb`, `first_tool`, `first_text`, `dur`, tokens `in`/`out`/`cache_read`/`cache_write`, tools called |
 | `tools` | function call -> result | the part not overlapping a model call; per call the name, `op` for `change`, `status` (`ok`, `done:announce`, `done:request`, `needs_confirmation`, `error`), and `steps` (`read` = the ability's client, an external API for GitHub; `prepare`, `submit` = gate snapshot plus the write below `confirm`; `request` = ADR 0017's check that may execute) |
 | `tts` | last model call ends -> Ghost's voice | narration release (`wait`), Kokoro to first audio (`synth`), transport (`out`) |
@@ -63,7 +63,8 @@ Scripted conversations through `build_session`, headless:
   can be measured against Ghost without it in the same run: `tts_clauses` (whole sentences
   to Kokoro), `prompt_lines` (no "lead with a
   few words" and "parallel lookups" lines), `system_cache` (no cache marker on the system
-  prompt), `shared_client` (a client per session). `all` is Ghost before them, `none` after.
+  prompt), `shared_client` (a client per session), `speculate` (the model waits out the
+  turn grace, 2026-10-22). `all` is Ghost before them, `none` after.
 - **Interleaved:** every config runs a scenario before any runs it again, so a slow minute
   at the endpoint lands on all of them.
 - **State:** a fresh temp dir per run: its own SQLite, conversations, mock GitHub

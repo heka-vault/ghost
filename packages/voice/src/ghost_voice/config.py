@@ -160,6 +160,10 @@ class VoiceSettings(BaseSettings):
     # How long Ghost waits after the turn model says the operator is done before it
     # answers; speaking again in that time keeps the turn open. 0 answers at once.
     turn_grace_secs: float = 0.8
+    # Start the model at the turn model's verdict instead of after the grace, holding its
+    # answer until the turn is confirmed and dropping it if the operator goes on. Costs a
+    # discarded model call each time they do; no tool runs early.
+    turn_speculate: bool = True
     # Smart Turn's fallback: when it judges an utterance incomplete, the turn still closes
     # after this much silence. 3 s upstream; 1.6 s here because it fired on finished
     # sentences and goodbyes waited for nothing (docs/performance.md, 2026-10-20).

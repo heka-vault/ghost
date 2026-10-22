@@ -20,18 +20,20 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EagerEndOfTurnCancelFrame,
     Frame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
 )
-from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.types import ProcessFrameResult, UserTurnSpeculation
 from pipecat.turns.user_start import BaseUserTurnStartStrategy
 from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
     TurnAnalyzerUserTurnStopStrategy,
@@ -100,27 +102,62 @@ class PatientTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
     middle of a thought ("are there any other open issues I need to … look at"). Its
     verdict waits here a moment; if the operator starts speaking again it is dropped, the
     turn stays open, and the next words join it. ``grace_secs=0`` is Smart Turn as is.
+
+    With ``speculate`` the model starts answering at the verdict rather than after the
+    hold, so the hold costs nothing when the operator is done (Pipecat's speculative
+    inference). The answer is held inside the LLM service until the hold ends and the
+    turn is confirmed, and thrown away if the operator goes on. A speculative answer that
+    reaches a tool call withdraws itself and the confirmed turn runs the call, so nothing
+    is written for a turn that hadn't ended.
+
+    The speculation answers ``turn_text()``, the user aggregator's whole turn so far: the
+    analyzer's own ``_text`` is only the latest transcript, so a turn kept open across a
+    pause would be answered from its second half. Set it once the aggregator exists.
     """
 
     def __init__(
-        self, *, grace_secs: float = 0.0, probe: LatencyProbe | None = None, **kwargs
+        self,
+        *,
+        grace_secs: float = 0.0,
+        speculate: bool = False,
+        probe: LatencyProbe | None = None,
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._grace = grace_secs
+        self._speculate = speculate
         self._held: asyncio.Task | None = None
+        self._speculation: UserTurnSpeculation | None = None
         self._probe = probe or NULL_PROBE
+        self.turn_text: Callable[[], str] | None = None
+
+    def _heard(self) -> str:
+        return self.turn_text() if self.turn_text else self._text
 
     async def trigger_user_turn_stopped(self, **kwargs) -> None:
         if self._grace <= 0:
             await super().trigger_user_turn_stopped(**kwargs)
             return
         await self._release_hold()
+        heard = self._heard()
+        if self._speculate and heard.strip():
+            self._speculation = UserTurnSpeculation(text=heard)
+            self._probe.speculation("started")
+            await self.trigger_user_turn_inference_triggered(speculation=self._speculation)
 
         async def later() -> None:
             began = time.monotonic()
             await asyncio.sleep(self._grace)
             self._held = None
             self._probe.held(time.monotonic() - began)
+            speculation, self._speculation = self._speculation, None
+            if speculation is not None and speculation.text == self._heard():
+                self._probe.speculation("kept")
+                await self.trigger_user_turn_finalized(confirms_speculation=True, **kwargs)
+                return
+            if speculation is not None:  # the words changed (late, or an interceptor took them)
+                self._probe.speculation("missed")
+                await self.trigger_user_turn_speculation_cancelled()
             await TurnAnalyzerUserTurnStopStrategy.trigger_user_turn_stopped(self, **kwargs)
 
         self._held = self.task_manager.create_task(later(), f"{self}::grace")
@@ -129,12 +166,21 @@ class PatientTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
         if self._held is not None:
             held, self._held = self._held, None
             await self.task_manager.cancel_task(held)
+        if self._speculation is not None:
+            self._speculation = None
+            self._probe.speculation("withdrawn")
+            await self.trigger_user_turn_speculation_cancelled()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         if isinstance(frame, VADUserStartedSpeakingFrame) and self._held is not None:
             debug.audio("turn: kept open, the operator went on")
             self._probe.kept_open()
             await self._release_hold()
+        elif isinstance(frame, EagerEndOfTurnCancelFrame) and self._speculation is not None:
+            # The LLM service withdrew it: the answer reached a tool call. The confirmed
+            # turn has to run its own inference, which makes the call.
+            self._speculation = None
+            self._probe.speculation("tool")
         return await super().process_frame(frame)
 
     async def handle_user_turn_started(self) -> None:
@@ -146,6 +192,7 @@ class PatientTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
         await super().handle_user_turn_stopped()
 
     async def cleanup(self) -> None:
+        self._speculation = None  # the session is ending; nothing is left to withdraw it from
         await self._release_hold()
         await super().cleanup()
 

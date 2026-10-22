@@ -471,6 +471,12 @@ def build_session(
             ),
         )
 
+    turn_stop = PatientTurnStopStrategy(
+        turn_analyzer=models.turn.fork(),
+        grace_secs=settings.turn_grace_secs,
+        speculate=settings.turn_speculate,
+        probe=latency,
+    )
     user_agg, assistant_agg = LLMContextAggregatorPair(
         context,
         assistant_params=assistant_params,
@@ -485,13 +491,7 @@ def build_session(
             ),
             user_turn_strategies=UserTurnStrategies(
                 start=[BargeInUserTurnStartStrategy(min_words=settings.barge_in_min_words)],
-                stop=[
-                    PatientTurnStopStrategy(
-                        turn_analyzer=models.turn.fork(),
-                        grace_secs=settings.turn_grace_secs,
-                        probe=latency,
-                    )
-                ],
+                stop=[turn_stop],
             ),
             user_idle_timeout=settings.idle_timeout_secs,
             # A turn that opens on voice activity and ends with no words is echo or noise,
@@ -500,6 +500,8 @@ def build_session(
             empty_user_turn=EmptyUserTurnConfig(interrupted_prompt=None, idle_prompt=None),
         ),
     )
+
+    turn_stop.turn_text = user_agg.aggregation_string  # what a speculative answer answers
 
     @user_agg.event_handler("on_user_turn_idle")
     async def on_idle(_agg) -> None:
