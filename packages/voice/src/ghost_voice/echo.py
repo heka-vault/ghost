@@ -9,7 +9,9 @@ Ghost is speaking, or within ``window_secs`` after, and whose words are mostly a
 what Ghost just said, is dropped before anything else sees it.
 
 Short answers are never echo: a transcript under ``min_words`` always passes, so “yes” or
-“close it” after “Close it?” still reach the confirmation path.
+“close it” after “Close it?” still reach the confirmation path. An interim transcript
+(``parakeet.py``, only while Ghost speaks) serves nothing but barge-in, so two of Ghost's
+own words are enough to drop one; the final that follows is judged as above.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from ghost_voice import debug
 
 _WORD = re.compile(r"[a-z0-9']+")
+INTERIM_MIN_WORDS = 2  # an interim this long cuts Ghost off (GHOST_BARGE_IN_MIN_WORDS default)
 
 
 def words(text: str) -> list[str]:
@@ -70,8 +73,9 @@ class EchoFilter(FrameProcessor):
         if text.strip():
             self._spoken.append(text)
 
-    def is_echo(self, text: str) -> bool:
-        if not self._spoken or len(words(text)) < self._min_words:
+    def is_echo(self, text: str, *, min_words: int | None = None) -> bool:
+        least = self._min_words if min_words is None else min_words
+        if not self._spoken or len(words(text)) < least:
             return False
         recent = self._speaking or self._clock() - self._stopped_at <= self._window
         if not recent:
@@ -85,8 +89,9 @@ class EchoFilter(FrameProcessor):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._speaking = False
             self._stopped_at = self._clock()
-        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)) and self.is_echo(
-            frame.text
+        elif (isinstance(frame, TranscriptionFrame) and self.is_echo(frame.text)) or (
+            isinstance(frame, InterimTranscriptionFrame)
+            and self.is_echo(frame.text, min_words=INTERIM_MIN_WORDS)
         ):
             debug.audio(f"echo: dropped {frame.text!r}")
             return

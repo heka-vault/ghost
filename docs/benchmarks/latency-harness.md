@@ -32,7 +32,10 @@ its `stop_secs`) to `BotStartedSpeaking`, and the parts tile that interval:
 Other kinds: `opening` (pipeline start, or the phone connecting, to the greeting; `build` is
 `build_session` to pipeline start), `text` (a typed turn), `system` (a model run nobody
 spoke for, such as a desktop Confirm). Flags: `narration_dropped`, `interrupted` (the
-operator spoke again before Ghost answered), `barged_in`. A confirmation turn carries
+operator spoke again before Ghost answered), `barged_in`. A barged-in reply carries
+`barge_in`: from when the operator began talking over it (VAD start minus its `start_secs`)
+to the interruption; `docs/benchmarks/scripts/barge_in_bench.py` measures it headless, with
+interim transcripts off and on. A confirmation turn carries
 `confirm: {classifier: jev | guard | regex-fallback | regex-unsure | regex, classify, verdict, total}`.
 
 Records hold numbers, counts, model ids, tool and operation names and classifier verdicts.

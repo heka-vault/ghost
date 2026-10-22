@@ -17,6 +17,9 @@ A voice turn, end to end::
       tts    last model call ends -> narration released -> Kokoro first audio -> transport
     Ghost's voice starts (BotStartedSpeaking)
 
+A reply the operator talked over and cut off carries ``barge_in``: from when they began
+(the VAD start minus its start_secs) to the interruption.
+
 What is never recorded: transcripts, model text, tool arguments or results, persona or
 conversation names. The record holds numbers, counts, model ids, tool and operation
 names (identifiers in Ghost's own code), classifier names and verdicts. Passive audio
@@ -153,6 +156,8 @@ class _Turn:
     bot_started: float | None = None
     bot_stopped: float | None = None
     spoken_direct: bool = False  # TTSSpeakFrame: a greeting, an interceptor's line
+    over_at: float | None = None  # the operator began talking over this reply (VAD)
+    barge_in: float | None = None  # from then until the interruption
     smart_turn: list[dict[str, Any]] = field(default_factory=list)
     flags: set[str] = field(default_factory=set)
     # From the probe
@@ -173,6 +178,11 @@ class _Turn:
 
     def happened(self) -> bool:
         return bool(self.llm or self.bot_started is not None or self.intercepted or self.tools)
+
+
+def _speaking(turn: _Turn) -> bool:
+    """Ghost is saying this turn's reply."""
+    return turn.bot_started is not None and turn.bot_stopped is None
 
 
 # --- the observer -------------------------------------------------------------------
@@ -241,7 +251,14 @@ class LatencyObserver(BaseObserver, LatencyProbe):
             turn = self._turn
             if turn and turn.kind == "voice" and turn.released is None:
                 turn.flags.add("_segment_open")
+            if turn and _speaking(turn) and "_over" not in turn.flags:
+                # A segment over Ghost's voice; the latest one is what a barge-in cut in
+                # with. Timed from when the speech began, as a turn is from when it ended.
+                turn.flags.add("_over")
+                turn.over_at = t - frame.start_secs
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if self._turn and _speaking(self._turn):
+                self._turn.flags.discard("_over")
             self._vad_stop(t, frame.stop_secs)
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._user_started(t)
@@ -367,8 +384,10 @@ class LatencyObserver(BaseObserver, LatencyProbe):
         if turn is not None:
             if turn.bot_started is None and turn.happened():
                 turn.flags.add("interrupted")
-            elif turn.bot_started is not None and turn.bot_stopped is None:
+            elif _speaking(turn):
                 turn.flags.add("barged_in")
+                if turn.over_at is not None:
+                    turn.barge_in = t - turn.over_at
         self._replace(self._new("voice", t))
 
     def _vad_stop(self, t: float, stop_secs: float) -> None:
@@ -642,6 +661,8 @@ def build_record(
     if end is not None:
         parts = [hear_total or 0.0, llm_total or 0.0, tools_total or 0.0, tts_total or 0.0]
         rec["other"] = _r((end - anchor) - sum(parts))
+    if turn.barge_in is not None:
+        rec["barge_in"] = _r(turn.barge_in)
     flags = sorted(f for f in turn.flags if not f.startswith("_"))
     if flags:
         rec["flags"] = flags
@@ -710,6 +731,8 @@ def format_line(rec: dict[str, Any]) -> str:
     line = head + (" = " + " + ".join(parts) if parts and reply is not None else "")
     if reply is None and parts:
         line += ": " + ", ".join(parts)
+    if rec.get("barge_in") is not None:
+        line += f", cut off {rec['barge_in']:.2f}s after the operator began"
     if rec.get("flags"):
         line += f" [{', '.join(rec['flags'])}]"
     return line
@@ -788,6 +811,7 @@ def stage_values(rec: dict[str, Any]) -> dict[str, float | None]:
         "tts": tts.get("total"),
         "tts_synth": tts.get("synth"),
         "other": rec.get("other"),
+        "barge_in": rec.get("barge_in"),
     }
 
 
@@ -806,6 +830,7 @@ STAGES = (
     "tts",
     "tts_synth",
     "other",
+    "barge_in",
 )
 
 

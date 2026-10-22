@@ -555,7 +555,14 @@ def build_session(
         assemble(
             [
                 (Slot.AUDIO_IN, transport.input()),
-                (None, models.stt.fork()),
+                (
+                    None,
+                    models.stt.fork(
+                        interim_secs=settings.barge_in_interim_secs
+                        if settings.barge_in_min_words > 0
+                        else 0.0
+                    ),
+                ),
                 (None, hold_gate),  # on hold, nothing below hears the room (ADR 0021)
                 (None, echo),
                 (None, UserTap(on_turn, on_phase, held=lambda: hold_gate.on_hold)),

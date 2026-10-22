@@ -12,6 +12,8 @@ strategy is the backstop for when it leaks:
 - While Ghost is speaking, only a transcript of at least ``min_words`` words
   starts (and so interrupts) the turn. Shorter fragments are discarded so they
   never leak into the next turn. ``min_words=0`` disables barge-in entirely.
+  An interim transcript counts (``parakeet.py`` re-reads the operator's open
+  segment while Ghost speaks), so the operator needn't pause to cut Ghost off.
 """
 
 from __future__ import annotations
@@ -66,10 +68,12 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 return ProcessFrameResult.STOP
             debug.audio("turn: VAD while Ghost speaks, waiting for words")
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
-            return await self._on_text(frame.text)
+            return await self._on_text(
+                frame.text, interim=isinstance(frame, InterimTranscriptionFrame)
+            )
         return ProcessFrameResult.CONTINUE
 
-    async def _on_text(self, text: str) -> ProcessFrameResult:
+    async def _on_text(self, text: str, *, interim: bool = False) -> ProcessFrameResult:
         words = len(text.split())
         if not self._bot_speaking:
             if words >= 1:
@@ -77,9 +81,11 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 return ProcessFrameResult.STOP
             return ProcessFrameResult.CONTINUE
         if self._min_words > 0 and words >= self._min_words:
-            debug.audio(f"turn: barge-in on {text!r}")
+            debug.audio(f"turn: barge-in on {'interim ' if interim else ''}{text!r}")
             await self.trigger_user_turn_started()
             return ProcessFrameResult.STOP
+        if interim:
+            return ProcessFrameResult.CONTINUE  # nothing was aggregated; the next may say more
         # Too short to be a deliberate interruption while the bot talks: most
         # likely the bot's own voice. Drop it rather than queue it.
         debug.audio(f"turn: dropped {text!r} while Ghost speaks")

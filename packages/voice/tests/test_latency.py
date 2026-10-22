@@ -312,6 +312,38 @@ async def test_a_new_turn_before_ghost_answered_marks_the_old_one_interrupted(tm
     assert turn["flags"] == ["interrupted"] and turn["reply"] is None
 
 
+async def test_a_barge_in_is_timed_from_when_the_operator_began(tmp_path):
+    obs, feed, records = observer(tmp_path)
+    await feed(0.0, TTSSpeakFrame("Yeah?"))
+    await feed(0.2, BotStartedSpeakingFrame())
+    # a blip of echo first: a segment that interrupted nothing
+    await feed(1.0, VADUserStartedSpeakingFrame(start_secs=0.2))
+    await feed(1.0, VADUserStartedSpeakingFrame(start_secs=0.2))  # the other broadcast copy
+    await feed(1.3, VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    await feed(1.3, VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    # the operator, from 2.0 (the VAD needs its start_secs to be sure)
+    await feed(2.2, VADUserStartedSpeakingFrame(start_secs=0.2))
+    await feed(2.21, VADUserStartedSpeakingFrame(start_secs=0.2))
+    await feed(2.9, UserStartedSpeakingFrame())  # two words heard: Ghost is cut off
+    await feed(2.91, UserStartedSpeakingFrame())
+    await feed(2.95, BotStoppedSpeakingFrame())
+    [opening] = records
+    assert opening["flags"] == ["barged_in"] and opening["barge_in"] == 0.9
+    assert "cut off 0.90s after the operator began" in format_line(opening)
+    assert summarize(records)["barge_in"]["p50"] == 0.9
+
+
+async def test_speech_while_ghost_is_quiet_is_no_barge_in(tmp_path):
+    obs, feed, records = observer(tmp_path)
+    await feed(0.0, TTSSpeakFrame("Yeah?"))
+    await feed(0.2, BotStartedSpeakingFrame())
+    await feed(0.6, BotStoppedSpeakingFrame())
+    await feed(1.2, VADUserStartedSpeakingFrame(start_secs=0.2))
+    await feed(1.2, UserStartedSpeakingFrame())
+    [opening] = records
+    assert "barge_in" not in opening and "flags" not in opening
+
+
 def test_rotation_keeps_one_generation(tmp_path):
     path = tmp_path / "latency.jsonl"
     for i in range(30):

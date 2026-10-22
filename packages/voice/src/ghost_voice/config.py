@@ -149,6 +149,11 @@ class VoiceSettings(BaseSettings):
     # Words the STT must hear before the operator can cut Ghost off mid-sentence.
     # Backstop against echo; 0 disables barge-in.
     barge_in_min_words: int = 2
+    # While Ghost speaks, Parakeet re-reads the operator's unfinished speech this often, so
+    # those words count before they pause (ghost_voice.parakeet). 0: only after the pause.
+    # 0.3 s cut Ghost off 1.0 s after the operator began instead of 2.4 s, for about 3.5
+    # cores while both talk (docs/benchmarks/scripts/barge_in_bench.py, 2026-10-22).
+    barge_in_interim_secs: float = 0.3
     # A transcript that mostly repeats what Ghost just said, heard while it speaks or this
     # long after, is its own voice coming back (late over the phone) and is dropped.
     echo_window_secs: float = 3.0

@@ -5,6 +5,7 @@ from ghost_voice.turns import BargeInUserTurnStartStrategy
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
 )
@@ -62,6 +63,18 @@ async def test_enough_words_while_bot_speaking_interrupts():
     s, events = strategy(min_words=2)
     await s.process_frame(BotStartedSpeakingFrame())
     assert await s.process_frame(said("stop that")) is ProcessFrameResult.STOP
+    assert events == ["started"]
+
+
+@pytest.mark.asyncio
+async def test_two_word_interim_while_bot_speaking_interrupts():
+    s, events = strategy(min_words=2)
+    await s.process_frame(BotStartedSpeakingFrame())
+    partial = InterimTranscriptionFrame(text="wait", user_id="op", timestamp="0")
+    assert await s.process_frame(partial) is ProcessFrameResult.CONTINUE
+    assert events == []  # nothing was aggregated to drop; the next interim may say more
+    more = InterimTranscriptionFrame(text="wait stop", user_id="op", timestamp="0")
+    assert await s.process_frame(more) is ProcessFrameResult.STOP
     assert events == ["started"]
 
 
