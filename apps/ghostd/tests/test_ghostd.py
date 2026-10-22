@@ -92,3 +92,49 @@ async def test_a_settings_change_rebuilds_the_listener_instead_of_waking(tmp_pat
     wake = Wake()
     await asyncio.wait_for(d._passive(wake, None, [], None, Events(), None), 5)
     assert wake.waits == 2 and sessions == []
+
+
+async def test_an_early_chime_without_a_session_restores_the_music(tmp_path, monkeypatch):
+    """The trained detector chimes and ducks before the operator finishes (ADR 0025). If
+    something else wins first (a settings change here), the music comes back up, and the
+    next session chimes as usual."""
+    import asyncio
+
+    from ghost_voice import VoiceSettings
+    from ghostd.config import GhostdSettings
+    from ghostd.main import Daemon
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    d = Daemon(GhostdSettings(data_dir=tmp_path, chime=False), VoiceSettings.model_construct())
+
+    class Ducker:
+        calls: list[str] = []
+
+        def duck(self):
+            self.calls.append("duck")
+
+        def restore(self):
+            self.calls.append("restore")
+
+    ducker = Ducker()
+    d._ducker = ducker  # noqa: SLF001
+
+    class Wake:
+        waits = 0
+
+        async def wait(self):
+            self.waits += 1
+            if self.waits == 1:
+                await d._heard_early()  # noqa: SLF001 - the detector decided
+                await d._heard_early()  # noqa: SLF001 - once is enough
+                d._rearm.set()  # noqa: SLF001
+            else:
+                d._stop.set()  # noqa: SLF001
+            await asyncio.Event().wait()
+
+    class Events:
+        async def emit(self, *a, **k): ...
+
+    await asyncio.wait_for(d._passive(Wake(), None, [], None, Events(), ducker), 5)  # noqa: SLF001
+    assert ducker.calls == ["duck", "restore"]
+    assert d._chimed is False  # noqa: SLF001

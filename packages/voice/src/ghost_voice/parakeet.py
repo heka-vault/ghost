@@ -121,13 +121,24 @@ class ParakeetSTTService(SegmentedSTTService):
             self._model_name, quantization=self._quantization, sess_options=so
         )
 
-    def _recognize(self, pcm: np.ndarray, *, wait: bool = True) -> str | None:
+    def recognize(self, pcm: np.ndarray) -> str:
+        """Transcribe float32 16 kHz PCM in the calling thread (call it off the event loop),
+        taking its turn on the shared model. The wake detector's check (ADR 0025)."""
+        if self._model is None:
+            self.load()
+        # Called on the loaded template, which never runs in a pipeline: its sample_rate
+        # is only set when one starts, so use the rate it was built for.
+        return (self._recognize(pcm, rate=self._init_sample_rate) or "").strip()
+
+    def _recognize(
+        self, pcm: np.ndarray, *, wait: bool = True, rate: int | None = None
+    ) -> str | None:
         """In a worker thread. None, without running, if ``wait`` is off and the model is busy."""
         if not self._busy.acquire(blocking=wait):
             return None
         try:
             assert self._model is not None
-            return self._model.recognize(pcm, sample_rate=self.sample_rate)
+            return self._model.recognize(pcm, sample_rate=rate or self.sample_rate)
         finally:
             self._busy.release()
 

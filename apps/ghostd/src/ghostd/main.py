@@ -51,13 +51,14 @@ from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
+from ghost_voice.wakeword import DEFAULT_MODEL_NAME, DETECTOR_PHRASE, Detector, WakeWordScorer
 from loguru import logger
 
 from ghostd.audio import Ducker, chime, restore_from_state
 from ghostd.config import GhostdSettings, runtime_dir
 from ghostd.dictation import is_dictating
 from ghostd.phone import PhoneListener, PhoneStore, Refusal
-from ghostd.wake import FileWakeDetector, TranscriptWakeDetector, WakeDetector
+from ghostd.wake import FileWakeDetector, SpokenWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
@@ -106,6 +107,8 @@ class Daemon:
         self._manual: FileWakeDetector | None = None
         self._listener: WakeListener | None = None
         self._rearm = asyncio.Event()  # set when the passive listener must be rebuilt
+        self._ducker: Ducker | None = None
+        self._chimed = False  # the detector's early chime played; the session won't repeat it
         self.conversations: Conversations | None = None
         self.skills: Skills | None = None
         self.templates: Templates | None = None
@@ -355,14 +358,60 @@ class Daemon:
                 fuzzy=self.cfg.wake_fuzzy,
             )
             self._listener = listener
-            return TranscriptWakeDetector(listener, manual)
+            return SpokenWakeDetector(listener, manual)
         if self.cfg.wake_mode == "file":
             return manual
         if self.cfg.wake_mode == "onnx":
-            raise NotImplementedError(
-                "GHOST_WAKE_MODE=onnx needs the trained model adapter from the wake-word spike"
-            )
+            return self._detector_wake(models, manual)
         raise ValueError(f"unknown GHOST_WAKE_MODE {self.cfg.wake_mode!r}")
+
+    def wake_model_path(self) -> Path:
+        return self.cfg.wake_model_path or self.voice.cache_dir / "wake" / DEFAULT_MODEL_NAME
+
+    def _detector_wake(self, models: Models, manual: FileWakeDetector) -> WakeDetector:
+        """The trained "hey ghost" detector (ADR 0025): that phrase only, no transcript
+        fallback. Without its model file Ghost would be deaf, so it says so loudly and
+        listens by transcript instead."""
+        path = self.wake_model_path()
+        if not path.exists():
+            logger.error(
+                f"wake: GHOST_WAKE_MODE=onnx but there is no model at {path}; "
+                "listening by transcript instead (set GHOST_WAKE_MODEL_PATH)"
+            )
+            self.cfg.wake_mode = self.state.wake_mode = "transcript"
+            return self.build_wake(models)
+        check = "Parakeet checks each hit" if self.cfg.wake_verify else "no check"
+        logger.info(
+            f"wake: trained detector {path.name}, {DETECTOR_PHRASE!r} only, "
+            f"threshold {self.cfg.wake_threshold:g}, {check}"
+        )
+        detector = Detector(
+            scorer=WakeWordScorer(path),
+            recognize=models.stt.recognize,
+            threshold=self.cfg.wake_threshold,
+            verify=self.cfg.wake_verify,
+            cooldown_secs=self.cfg.wake_cooldown_secs,
+        )
+        listener = build_wake_listener(
+            self.voice,
+            stt_factory=models.stt.fork,
+            phrases=(DETECTOR_PHRASE,),
+            fuzzy=self.cfg.wake_fuzzy,
+            detector=detector,
+        )
+        self._listener = listener
+        return SpokenWakeDetector(listener, manual, on_heard=self._heard_early)
+
+    async def _heard_early(self) -> None:
+        """The detector decided while the operator may still be talking ("hey ghost, what
+        needs..."): duck and chime now, as a smart speaker does. The session starts once
+        they finish, without a second chime."""
+        if self._chimed or self._ducker is None:
+            return
+        self._chimed = True
+        self._ducker.duck()
+        if self.cfg.chime:
+            asyncio.ensure_future(asyncio.to_thread(chime, True, self.voice.output_device))
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
@@ -484,6 +533,7 @@ class Daemon:
 
         ducker = Ducker(self.cfg.duck_apps, self.cfg.duck_level, self.rt / DUCK_STATE)
         restore_from_state(self.rt / DUCK_STATE)  # undo a previous crash
+        self._ducker = ducker
         wake = self.build_wake(models)
 
         try:
@@ -539,6 +589,9 @@ class Daemon:
             if self._stop.is_set() or phone is not None or not woke:
                 wake_task.cancel()
                 await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
+            if self._chimed and (phone is not None or not woke):
+                ducker.restore()  # the early chime played, then something else came first
+                self._chimed = False
             if self._stop.is_set():
                 if phone_conn is not None:
                     await _close_peer(phone_conn)
@@ -559,6 +612,9 @@ class Daemon:
                 continue
             if is_dictating(self.cfg.dictation_flag):
                 logger.info("wake ignored: dictation is active")
+                if self._chimed:
+                    ducker.restore()
+                    self._chimed = False
                 continue
             await events.emit("wake")
             await self._conversation(models, tool_sources, gate, events, ducker, wake_task.result())
@@ -650,10 +706,11 @@ class Daemon:
         session's events go to it over RTVI (ADR 0016). ``start_in`` is the thread the
         session opens in: Ghost, or the one the phone called directly."""
         origin = "phone" if phone is not None else "desk"
-        if phone is None:
+        if phone is None and not self._chimed:
             ducker.duck()
             if self.cfg.chime:
                 await asyncio.to_thread(chime, True, self.voice.output_device)
+        self._chimed = False
         connected = asyncio.Event()
         peer_gone = asyncio.Event()
         transport_factory = (
@@ -1091,6 +1148,14 @@ def cli(argv: list[str] | None = None) -> None:
             problems += voice.llm_problems()
             print(f"tts: {describe_tts(voice)}")
             problems += tts_problems(voice)
+            if cfg.wake_mode == "onnx":
+                model = cfg.wake_model_path or voice.cache_dir / "wake" / DEFAULT_MODEL_NAME
+                check = "Parakeet checks each hit" if cfg.wake_verify else "no check"
+                print(f"wake: trained detector {model}, threshold {cfg.wake_threshold:g}, {check}")
+                if not model.exists():
+                    problems.append(f"GHOST_WAKE_MODE=onnx but there is no model at {model}")
+            else:
+                print(f"wake: {cfg.wake_mode}")
         autonomy = AutonomyPolicy()
         try:
             autonomy = AutonomyPolicy.load(cfg.policy_path)

@@ -586,6 +586,7 @@ version = "0.1.0"
 source = { editable = "packages/voice" }
 dependencies = [
     { name = "ghost-core" },
+    { name = "livekit-wakeword" },
     { name = "numpy" },
     { name = "onnx-asr", extra = ["hub"] },
     { name = "onnxruntime" },
@@ -599,6 +600,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "ghost-core", editable = "packages/core" },
+    { name = "livekit-wakeword", specifier = "==0.3.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "onnx-asr", extras = ["hub"], specifier = ">=0.12" },
     { name = "onnxruntime", specifier = ">=1.20" },
@@ -891,6 +893,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/8f/347d4677eefb57cd9f8e01d95a1dcee9a91b4e44e664173c32ff6f3752e5/librt-0.16.0-cp312-cp312-win32.whl", hash = "sha256:c17194318e4c0c0348b36f36c2ec7534436fe0a4c15582403162a4f08c80797a", size = 106158, upload-time = "2026-09-29T00:53:02.031Z" },
     { url = "https://files.pythonhosted.org/packages/f0/2c/5193dc81127cd5ddfad031391b046bf32dda219b38463ab872407ca30646/librt-0.16.0-cp312-cp312-win_amd64.whl", hash = "sha256:25a58a19ea8d83b68209f04912df765e9260635ef77646542ed4b4abe6bc7940", size = 126176, upload-time = "2026-09-29T00:53:03.445Z" },
     { url = "https://files.pythonhosted.org/packages/ff/3d/9668a400c8dd81d162eba38b33fa49fa6205f1a64493570a13fbb815c3ee/librt-0.16.0-cp312-cp312-win_arm64.whl", hash = "sha256:f7be7cf555bc30ec12622e9447299cc4a9b8ff307548b634794353db0c2065dc", size = 116572, upload-time = "2026-09-29T00:53:04.815Z" },
+]
+
+[[package]]
+name = "livekit-wakeword"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/9a/3af06750535bbe90e2b0c65018ddc514465e76398ab4f2a4d7f0c625c0e9/livekit_wakeword-0.3.0.tar.gz", hash = "sha256:0a5d22e3434fa87cc09ce8ee3c6a140790971b64a6a1c084e3a390e3b6c2ec0e", size = 1895594, upload-time = "2026-09-30T21:07:42.039Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/33/cc1682755d3e626faefa1def3b761f6b6826a0498a514246b54bd5e9ecbc/livekit_wakeword-0.3.0-py3-none-any.whl", hash = "sha256:6bb00b832c21720ebb94410e005854740b2d36b20970c7cecc74b5e889d94f4b", size = 1917287, upload-time = "2026-09-30T21:07:37.831Z" },
 ]
 
 [[package]]

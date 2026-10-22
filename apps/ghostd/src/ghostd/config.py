@@ -76,16 +76,24 @@ class GhostdSettings(BaseSettings):
     phone_listen: str = ""
 
     # Wake. transcript: local VAD + Parakeet while passive, looking for a phrase
-    # (ADR 0010); file: `ghostd wake` / SIGUSR1 only; onnx: trained model (pending).
-    # `ghostd wake` works in every mode.
-    wake_mode: str = "transcript"  # transcript | file | onnx
+    # (ADR 0010); onnx: the trained "hey ghost" detector, that phrase only, with no
+    # transcript fallback (ADR 0025, ghost_voice.wakeword); file: `ghostd wake` /
+    # SIGUSR1 only. `ghostd wake` works in every mode.
+    wake_mode: str = "transcript"  # transcript | onnx | file
     wake_phrases: str = ""  # comma-separated; empty = ghost_voice.wake.DEFAULT_WAKE_PHRASES
     # Phonetic near-miss threshold for the wake phrase; 0 = exact only. 0.8 also took "he
     # set off", "her guests" and "hey guys" (2.1 false wakes an hour of read speech); 0.9
     # had none and kept the "he ghost" spellings (docs/benchmarks/2026-10-21-wake.md).
     wake_fuzzy: float = 0.9
+    # onnx mode. The model; None: hey_ghost.onnx under the voice cache's wake/ folder.
     wake_model_path: Path | None = None
-    wake_threshold: float = 0.5
+    # The detector's score (0-1) that counts as hearing "hey ghost". With the check on,
+    # a low threshold only costs Parakeet runs; with it off, it is the whole decision.
+    # Provisional until the full model's tables (.scratch/wake-train/results).
+    wake_threshold: float = 0.3
+    # Parakeet confirms each hit (match_wake at wake_fuzzy) before Ghost wakes; false:
+    # the detector alone decides, and the chime plays the moment it fires.
+    wake_verify: bool = True
     wake_cooldown_secs: float = 2.0
 
     # Audio

@@ -1,10 +1,12 @@
 """Wake by transcript: a local STT pass over passive audio, looking for a phrase.
 
-Interim wake path until the trained ONNX wake model exists (ADR 0010). While
-passive, the microphone goes through VAD and Parakeet on this machine only.
-Transcripts that do not contain a wake phrase are dropped on the spot: not
-logged, not stored, not sent anywhere. A match returns the words that followed
-the phrase, so "hey ghost, what needs my sign-off" becomes the first turn.
+The default wake path (ADR 0010). While passive, the microphone goes through VAD and
+Parakeet on this machine only. Transcripts that do not contain a wake phrase are dropped
+on the spot: not logged, not stored, not sent anywhere. A match returns the words that
+followed the phrase, so "hey ghost, what needs my sign-off" becomes the first turn.
+
+With a ``Detector`` the same listener wakes on the trained "hey ghost" model instead
+(ADR 0025, ``ghost_voice.wakeword``), and Parakeet only checks its hits.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -34,6 +37,9 @@ from pipecat.workers.runner import WorkerRunner
 from ghost_voice import debug
 from ghost_voice.config import VoiceSettings
 from ghost_voice.transport import SoundDeviceTransport, SoundDeviceTransportParams
+
+if TYPE_CHECKING:
+    from ghost_voice.wakeword import Detector
 
 DEFAULT_WAKE_PHRASES = (
     "hey ghost",
@@ -193,14 +199,17 @@ class WakeListener:
         phrases: tuple[str, ...],
         transport_factory: Callable[[], BaseTransport] | None = None,
         fuzzy: float = 0.0,
+        detector: Detector | None = None,
     ) -> None:
         self._settings = settings
         self._stt_factory = stt_factory
         self._phrases = phrases
         self._fuzzy = fuzzy
+        self._detector = detector
         self._transport_factory = transport_factory or self._default_transport
         self._runner: WorkerRunner | None = None
         self._run_task: asyncio.Task | None = None
+        self._on_heard: Callable[[], Awaitable[None]] | None = None
 
     def set_phrases(self, phrases: tuple[str, ...], fuzzy: float | None = None) -> None:
         """Change what the next passive pipeline listens for. Takes effect when the
@@ -220,24 +229,38 @@ class WakeListener:
 
     def _build(self, on_match: Callable[[WakeMatch], Awaitable[None]]) -> PipelineWorker:
         s = self._settings
+        # The detector decides on sound, so the VAD only says when the operator paused:
+        # the session's short stop lets the check run at once, and the processor waits
+        # out the rest of wake_vad_stop_secs before it ends their utterance.
+        stop = s.vad_stop_secs if self._detector else s.wake_vad_stop_secs
         vad = VADProcessor(
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
                     confidence=s.vad_confidence,
                     start_secs=s.vad_start_secs,
-                    stop_secs=s.wake_vad_stop_secs,
+                    stop_secs=stop,
                     min_volume=s.vad_min_volume,
                 )
             )
         )
-        pipeline = Pipeline(
-            [
-                self._transport_factory().input(),
-                vad,
+        if self._detector:
+            from ghost_voice.wakeword import DetectorWakeProcessor
+
+            last: list[FrameProcessor] = [
+                DetectorWakeProcessor(
+                    self._detector,
+                    on_match,
+                    on_heard=self._on_heard,
+                    fuzzy=self._fuzzy,
+                    end_secs=max(0.0, s.wake_vad_stop_secs - stop),
+                )
+            ]
+        else:
+            last = [
                 self._stt_factory(),
                 WakeMatchProcessor(self._phrases, on_match, fuzzy=self._fuzzy),
             ]
-        )
+        pipeline = Pipeline([self._transport_factory().input(), vad, *last])
         return PipelineWorker(
             pipeline,
             params=PipelineParams(audio_in_sample_rate=16000),
@@ -247,7 +270,11 @@ class WakeListener:
             idle_timeout_secs=None,
         )
 
-    async def wait(self) -> WakeMatch:
+    async def wait(self, on_heard: Callable[[], Awaitable[None]] | None = None) -> WakeMatch:
+        """Until a phrase matches. ``on_heard`` runs when the detector has decided, before
+        the operator finishes speaking (detector mode only; transcript wake decides at the
+        end of the utterance, so it never calls it)."""
+        self._on_heard = on_heard
         matched = asyncio.Event()
         result: list[WakeMatch] = []
 
@@ -301,6 +328,7 @@ def build_wake_listener(
     phrases: tuple[str, ...],
     transport_factory: Callable[[], BaseTransport] | None = None,
     fuzzy: float = 0.0,
+    detector: Detector | None = None,
 ) -> WakeListener:
     return WakeListener(
         settings,
@@ -308,4 +336,5 @@ def build_wake_listener(
         phrases=phrases,
         transport_factory=transport_factory,
         fuzzy=fuzzy,
+        detector=detector,
     )
