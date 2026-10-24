@@ -14,11 +14,12 @@ listens for one thing (``model_meaning``):
 
 A model's score at or above its threshold is a hit, decided the moment its phrase ends:
 
-- with the check on (``GHOST_WAKE_VERIFY``, the default), Parakeet transcribes from just
-  before the phrase to the operator's first pause, or 1 s after the hit if they keep
-  talking, and the model's phrase must be in it: ``match_wake`` for "hey ghost" (the same
-  strict matcher transcript wake uses), ``match_opening`` for "Ghost, …", which must
-  open what was said. A hit it doesn't confirm is dropped;
+- with the check on (``GHOST_WAKE_VERIFY``, the default), Parakeet transcribes from where
+  the operator started talking (at least from just before the phrase) to their first
+  pause, or 1 s after the hit if they keep talking, and the model's phrase must be in it:
+  ``match_wake`` for "hey ghost" (the same strict matcher transcript wake uses),
+  ``match_opening`` for "Ghost, …", which must open a sentence. A hit it doesn't confirm
+  is read once more, whole, when they finish, and dropped only if that fails too;
 - with the check off the hit alone wakes Ghost.
 
 Either way ``on_heard`` runs as soon as it is decided, so the chime can play while the
@@ -59,6 +60,13 @@ PRE_SECS = 2.0  # audio before the hit that the check and the first turn are rea
 # a little more makes sure the transcript has the name.
 OPENING_PRE_SECS = 2.5
 CHECK_SECS = 1.0  # the check runs this long after the hit at the latest
+# Where the operator started talking: a pause shorter than RUN_GAP_SECS (the comma after
+# "Ghost") doesn't start anew, and the VAD says "started" about SPEECH_PAD_SECS after the
+# first sound. Spoken slowly, "Ghost, I need you" put the hit more than 2.5 s after the
+# name (2026-10-24). The check reads no further back than MAX_PRE_SECS before the hit.
+RUN_GAP_SECS = 1.0
+SPEECH_PAD_SECS = 0.5
+MAX_PRE_SECS = 6.0
 MAX_LISTEN_SECS = 12.0  # after a hit, the most Ghost waits for the operator to finish
 # The detector already knew it heard "hey ghost"; finding where the phrase ends in the
 # transcript, to split off the first turn, may take a looser spelling ("he goes").
@@ -167,6 +175,8 @@ class DetectorWakeProcessor(FrameProcessor):
         self._scored = 0  # samples up to the last score
         self._speaking = False
         self._stopped_at: int | None = None  # where the VAD last said the operator stopped
+        self._run_start: int | None = None  # where their current run of speech began
+        self._checked = False  # the first check missed: read it all again when they finish
         self._hit: int | None = None
         self._model: WakeModel = detector.models[0]  # the model behind the hit
         self._last_hit = -(10**12)
@@ -179,12 +189,15 @@ class DetectorWakeProcessor(FrameProcessor):
             await self._audio(frame.audio)
             return  # passive audio ends here
         if isinstance(frame, VADUserStartedSpeakingFrame):
+            gap = RUN_GAP_SECS * SAMPLE_RATE
+            if self._stopped_at is None or self._n - self._stopped_at >= gap:
+                self._run_start = self._n - int(SPEECH_PAD_SECS * SAMPLE_RATE)
             self._speaking = True
             self._stopped_at = None
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             self._speaking = False
             self._stopped_at = self._n
-            if self._hit is not None and not self._woken:
+            if self._hit is not None and not self._woken and not self._checked:
                 await self._check()
         await self.push_frame(frame, direction)
 
@@ -206,11 +219,14 @@ class DetectorWakeProcessor(FrameProcessor):
                 await self._score(self._scored)
         if self._hit is None or self._done:
             return
-        if not self._woken and self._n - self._hit >= CHECK_SECS * SAMPLE_RATE:
-            await self._check()  # still talking a second after "ghost"
-        elif self._woken and (
-            self._finished() or self._n - self._hit >= MAX_LISTEN_SECS * SAMPLE_RATE
-        ):
+        ended = self._finished() or self._n - self._hit >= MAX_LISTEN_SECS * SAMPLE_RATE
+        if not self._woken and not self._checked:
+            if self._n - self._hit >= CHECK_SECS * SAMPLE_RATE:
+                await self._check()  # still talking a second after "ghost"
+        elif not self._woken:
+            if ended:
+                await self._check(final=True)
+        elif ended:
             await self._finish()
 
     def _finished(self) -> bool:
@@ -221,10 +237,14 @@ class DetectorWakeProcessor(FrameProcessor):
         )
 
     def _heard(self) -> np.ndarray:
-        """From just before the hit's phrase to now, as float32 for Parakeet."""
+        """From where the operator started talking, or just before the hit's phrase if
+        that is earlier, to now, as float32 for Parakeet."""
         assert self._hit is not None
         pre = OPENING_PRE_SECS if self._model.opening else PRE_SECS
-        start = max(0, self._hit - int(pre * SAMPLE_RATE) - self._base)
+        start = self._hit - int(pre * SAMPLE_RATE)
+        if self._run_start is not None:
+            start = max(min(start, self._run_start), self._hit - int(MAX_PRE_SECS * SAMPLE_RATE))
+        start = max(0, start - self._base)
         return self._buf[start:].astype(np.float32) / 32768.0
 
     # --- decisions ------------------------------------------------------------------
@@ -245,27 +265,39 @@ class DetectorWakeProcessor(FrameProcessor):
         if not (self._d.verify if model.verify is None else model.verify):
             await self._wake()
 
-    async def _check(self) -> None:
+    async def _check(self, *, final: bool = False) -> None:
+        """Parakeet's reading of the hit. The first reading is of the stretch around it, so
+        the chime can play while the operator is still talking; live, Parakeet often wrote
+        nothing for that stretch while their whole sentence read fine, so a miss is read
+        again, whole, once they finish (``final``), and only that drops the hit."""
         text = await asyncio.to_thread(self._d.recognize, self._heard())
         if self._model.match(text, self._fuzzy):
-            logger.info("wake: confirmed")
+            logger.info("wake: confirmed" + (" once they finished" if final else ""))
             await self._wake()
-            if self._finished():
+            if final:
+                await self._finish(text)
+            elif self._finished():
                 await self._finish()
-        else:
-            # Transcripts are logged only under GHOST_DEBUG_AUDIO (ghost_voice.debug).
-            debug.audio(f"passive: detector hit not confirmed: {text!r}")
-            logger.info("wake: not confirmed")
-            self._hit = None
+            return
+        # Transcripts are logged only under GHOST_DEBUG_AUDIO (ghost_voice.debug).
+        debug.audio(f"passive: detector hit not confirmed: {text!r}")
+        if not final:
+            logger.info("wake: not confirmed yet; reading it all when they finish")
+            self._checked = True
+            return
+        logger.info("wake: not confirmed")
+        self._hit = None
+        self._checked = False
 
     async def _wake(self) -> None:
         self._woken = True
         if self._on_heard:
             await self._on_heard()
 
-    async def _finish(self) -> None:
+    async def _finish(self, text: str | None = None) -> None:
         self._done = True
-        text = await asyncio.to_thread(self._d.recognize, self._heard())
+        if text is None:
+            text = await asyncio.to_thread(self._d.recognize, self._heard())
         model = self._model
         fuzzy = min(self._fuzzy, REMAINDER_FUZZY)
         # hey_ghost also fires on the bare name ("Ghost, let's work on …" scored 0.74 on

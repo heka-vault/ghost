@@ -167,8 +167,10 @@ OPENING_LEAD = frozenset(
 
 
 def match_opening(text: str, phrase: str, *, fuzzy: float = 0.0) -> WakeMatch | None:
-    """``phrase`` as the first words said, or after one interjection ("so, Ghost, …"):
-    the operator addressing Ghost by name. The words after it are the request.
+    """``phrase`` opening a sentence, or after one interjection ("so, Ghost, …"): the
+    operator addressing Ghost by name. The words after it are the request. Any sentence
+    counts, since what was heard can start a sentence before they turned to Ghost ("Let
+    me try again. Ghost, I need you …").
 
     Unlike ``match_wake`` the name inside a sentence ("the ghost story") is no match.
     ``fuzzy`` compares phonetic keys as ``match_wake`` does: at 0.8 "goes" is "ghost".
@@ -177,15 +179,16 @@ def match_opening(text: str, phrase: str, *, fuzzy: float = 0.0) -> WakeMatch | 
     pw = phrase.split()
     n = len(pw)
     key = "".join(_phonetic(w) for w in pw)
-    starts = [0, 1] if words and words[0] in OPENING_LEAD else [0]
-    for i in starts:
-        window = words[i : i + n]
-        if len(window) < n:
-            break
-        if window == pw or (
-            fuzzy > 0 and _similar("".join(_phonetic(w) for w in window), key) >= fuzzy
-        ):
-            return WakeMatch(phrase=phrase, remainder=_after(text, i + n))
+    sentences = [0] + [len(_words(text[: m.end()])) for m in re.finditer(r"[.!?]+\s+", text)]
+    for s in dict.fromkeys(sentences):
+        for i in [s, s + 1] if s < len(words) and words[s] in OPENING_LEAD else [s]:
+            window = words[i : i + n]
+            if len(window) < n:
+                break
+            if window == pw or (
+                fuzzy > 0 and _similar("".join(_phonetic(w) for w in window), key) >= fuzzy
+            ):
+                return WakeMatch(phrase=phrase, remainder=_after(text, i + n))
     return None
 
 

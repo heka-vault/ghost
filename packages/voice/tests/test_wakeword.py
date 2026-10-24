@@ -44,9 +44,11 @@ class Recognizer:
     def __init__(self, *texts: str) -> None:
         self.texts = list(texts)
         self.calls = 0
+        self.secs: list[float] = []  # how much audio each call got
 
     def __call__(self, pcm) -> str:
         self.calls += 1
+        self.secs.append(len(pcm) / RATE)
         return self.texts[min(self.calls, len(self.texts)) - 1]
 
 
@@ -95,7 +97,44 @@ async def test_an_unconfirmed_hit_is_dropped():
         [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(1.0)],
     )
     assert events == []
-    assert recognize.calls == 1
+    assert recognize.calls == 2  # at the pause, then the whole utterance once it ended
+
+
+@pytest.mark.asyncio
+async def test_a_hit_the_first_check_missed_is_checked_again_when_they_finish():
+    """Live, Parakeet often wrote nothing for the stretch around the hit while the whole
+    sentence read fine ("Ghost, I need you to make wake words work"): the hit waits for
+    the end of what was said, and Ghost wakes then (2026-10-24)."""
+    recognize = Recognizer("", "Ghost, I need you to make wake words work.")
+    events = await run(
+        detector(Scorer({3}, model="ghost_address"), recognize),
+        [VADUserStartedSpeakingFrame(), *audio(3.4), VADUserStoppedSpeakingFrame(), *audio(0.4)],
+    )
+    assert events == ["heard", "match:ghost|I need you to make wake words work."]
+    assert recognize.calls == 2  # the first turn reuses the second reading
+
+
+@pytest.mark.asyncio
+async def test_the_check_reads_from_where_the_operator_started_talking():
+    """Spoken slowly, "Ghost, I need you" puts the hit more than 2.5 s after the name.
+    The check starts where the speech did; the comma's short pause doesn't count."""
+    recognize = Recognizer("Ghost, I need you to look at the build.")
+    events = await run(
+        detector(Scorer({26}, model="ghost_address"), recognize),  # the hit at 4.0 s
+        [
+            *audio(0.5),
+            VADUserStartedSpeakingFrame(),  # "Ghost," from about 0.3 s
+            *audio(0.4),
+            VADUserStoppedSpeakingFrame(),
+            *audio(0.24),
+            VADUserStartedSpeakingFrame(),  # "I need you to look at the build"
+            *audio(3.5),
+            VADUserStoppedSpeakingFrame(),
+            *audio(0.4),
+        ],
+    )
+    assert events == ["heard", "match:ghost|I need you to look at the build."]
+    assert recognize.secs[0] >= 4.4  # from the start of the speech, not 2.5 s before the hit
 
 
 @pytest.mark.asyncio
@@ -249,7 +288,7 @@ async def test_a_model_can_be_checked_while_the_others_are_not():
         [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(1.0)],
     )
     assert events == []  # checked, and turned down
-    assert recognize.calls == 1
+    assert recognize.calls == 2  # at the pause, then whole
 
 
 def test_the_listener_builds_the_detector_pipeline(monkeypatch):

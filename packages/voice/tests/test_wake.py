@@ -255,6 +255,14 @@ def test_the_name_must_open_what_was_said(heard):
     assert match_opening(heard, "ghost", fuzzy=0.8) is None
 
 
+def test_the_name_may_open_a_later_sentence():
+    """The check reads from where the operator started talking, which can be a sentence
+    before they turned to Ghost."""
+    m = match_opening("Let me try again. Ghost, I need you to look.", "ghost", fuzzy=0.9)
+    assert m == WakeMatch("ghost", "I need you to look.")
+    assert match_opening("I read it. The ghost story was good.", "ghost", fuzzy=0.9) is None
+
+
 def test_a_looser_opening_takes_the_names_near_spellings():
     """The check stays strict; splitting off the request may take "goes" for "ghost"."""
     assert match_opening("Goes, I need you.", "ghost", fuzzy=0.9) is None
