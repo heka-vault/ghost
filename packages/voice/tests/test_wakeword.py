@@ -84,7 +84,7 @@ async def test_a_confirmed_hit_wakes_with_what_followed():
         detector(scorer, recognize),
         [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(0.4)],
     )
-    assert events == ["heard", "match:hey ghost|what needs my sign off"]
+    assert events == ["heard", "match:hey ghost|what needs my sign-off?"]
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_without_the_check_the_hit_alone_wakes_at_once():
             *audio(0.4),
         ],
     )
-    assert events == ["heard", "match:hey ghost|what needs my sign off"]
+    assert events == ["heard", "match:hey ghost|what needs my sign-off?"]
     assert heard_before_stop == [True]
     assert recognize.calls == 1  # only to split off the first turn
 
@@ -146,7 +146,7 @@ async def test_a_pause_after_the_phrase_doesnt_end_the_utterance():
             *audio(0.4),
         ],
     )
-    assert events == ["heard", "match:hey ghost|any new issues today"]
+    assert events == ["heard", "match:hey ghost|any new issues today?"]
     assert recognize.calls == 2
 
 
@@ -181,7 +181,7 @@ async def test_addressing_ghost_by_name_wakes_with_the_whole_request():
         detector(Scorer({3}, model="ghost_address"), recognize),
         [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(0.4)],
     )
-    assert events == ["heard", "match:ghost|what is the status of the infra repo"]
+    assert events == ["heard", "match:ghost|what is the status of the infra repo?"]
 
 
 @pytest.mark.asyncio
@@ -203,7 +203,7 @@ async def test_without_the_check_a_misheard_name_keeps_the_request():
         detector(Scorer({3}, model="ghost_address"), recognize, verify=False),
         [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(0.4)],
     )
-    assert events == ["heard", "match:ghost|coast let s work on the wake word"]
+    assert events == ["heard", "match:ghost|Coast, let's work on the wake word."]
 
 
 @pytest.mark.asyncio

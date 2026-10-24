@@ -21,8 +21,8 @@ PHRASES = ("hey ghost", "ghost you there", "ghost are you there", "okay ghost")
         ("hey, ghost!", "hey ghost", ""),
         ("Ghost, you there?", "ghost you there", ""),
         ("Ghost, are you there?", "ghost are you there", ""),
-        ("Okay Ghost, what needs my sign-off?", "okay ghost", "what needs my sign off"),
-        ("um hey ghost what's pending", "hey ghost", "what s pending"),
+        ("Okay Ghost, what needs my sign-off?", "okay ghost", "what needs my sign-off?"),
+        ("um hey ghost what's pending", "hey ghost", "what's pending"),
     ],
 )
 def test_matches(text, phrase, remainder):
@@ -169,7 +169,7 @@ async def test_listener_rebuilds_when_pipeline_ends_without_match(monkeypatch):
         ("Hey guys.", "hey ghost", ""),  # what Parakeet made of "hey ghost" through the AEC
         ("There he goes.", "hey ghost", ""),
         ("Hey ghosts.", "hey ghost", ""),
-        ("He goes what a fear is.", "hey ghost", "what a fear is"),
+        ("He goes what a fear is.", "hey ghost", "what a fear is."),
         ("okay goes", "okay ghost", ""),
     ],
 )
@@ -233,8 +233,8 @@ def test_exact_match_wins_over_fuzzy():
 @pytest.mark.parametrize(
     ("heard", "asked"),
     [
-        ("Ghost, what is the status of the infra repo?", "what is the status of the infra repo"),
-        ("So, Ghost, let's work on the wake word.", "let s work on the wake word"),
+        ("Ghost, what is the status of the infra repo?", "what is the status of the infra repo?"),
+        ("So, Ghost, let's work on the wake word.", "let's work on the wake word."),
         ("Ghost.", ""),
     ],
 )
@@ -259,4 +259,4 @@ def test_a_looser_opening_takes_the_names_near_spellings():
     """The check stays strict; splitting off the request may take "goes" for "ghost"."""
     assert match_opening("Goes, I need you.", "ghost", fuzzy=0.9) is None
     loose = match_opening("Goes, I need you.", "ghost", fuzzy=0.8)
-    assert loose == WakeMatch("ghost", "i need you")
+    assert loose == WakeMatch("ghost", "I need you.")

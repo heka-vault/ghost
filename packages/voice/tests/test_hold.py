@@ -16,9 +16,9 @@ from pipecat.processors.frame_processor import FrameDirection
 @pytest.mark.parametrize(
     "text,expect",
     [
-        ("Ghost, we have a solution.", "we have a solution"),
+        ("Ghost, we have a solution.", "we have a solution."),
         ("okay ghost, close seventeen", "close seventeen"),
-        ("Alright, so, Ghost: what did we decide?", "what did we decide"),
+        ("Alright, so, Ghost: what did we decide?", "what did we decide?"),
         ("hey ghost", ""),
         ("Ghost?", ""),
         # the room talking about Ghost, not to it

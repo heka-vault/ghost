@@ -62,6 +62,13 @@ def _words(text: str) -> list[str]:
     return re.sub(r"[^\w\s]", " ", text.lower()).split()
 
 
+def _after(text: str, k: int) -> str:
+    """``text`` from its ``k``-th word (as ``_words`` counts them) on, as it was written:
+    the request keeps its case and punctuation ("let's", not "let s")."""
+    starts = [m.start() for m in re.finditer(r"\w+", text)]
+    return text[starts[k] :].strip() if k < len(starts) else ""
+
+
 def parse_phrases(spec: str | None) -> tuple[str, ...]:
     """Comma-separated phrases from the environment, normalised; empty -> defaults."""
     if not spec or not spec.strip():
@@ -129,7 +136,7 @@ def match_wake(
         n = len(pw)
         for i in range(len(words) - n + 1):
             if words[i : i + n] == pw:
-                return WakeMatch(phrase=phrase, remainder=" ".join(words[i + n :]))
+                return WakeMatch(phrase=phrase, remainder=_after(text, i + n))
     if fuzzy <= 0:
         return None
     best: tuple[float, WakeMatch] | None = None
@@ -145,7 +152,7 @@ def match_wake(
                 continue  # "see you there" is not "ghost you there"
             score = _similar("".join(window), key)
             if score >= fuzzy and (best is None or score > best[0]):
-                best = (score, WakeMatch(phrase=phrase, remainder=" ".join(words[i + n :])))
+                best = (score, WakeMatch(phrase=phrase, remainder=_after(text, i + n)))
     if best:
         debug.audio(f"passive: fuzzy wake {best[0]:.2f} for {text!r}")
         return best[1]
@@ -178,7 +185,7 @@ def match_opening(text: str, phrase: str, *, fuzzy: float = 0.0) -> WakeMatch | 
         if window == pw or (
             fuzzy > 0 and _similar("".join(_phonetic(w) for w in window), key) >= fuzzy
         ):
-            return WakeMatch(phrase=phrase, remainder=" ".join(words[i + n :]))
+            return WakeMatch(phrase=phrase, remainder=_after(text, i + n))
     return None
 
 

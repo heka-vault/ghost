@@ -33,7 +33,6 @@ and decisions, never words.
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -274,7 +273,7 @@ class DetectorWakeProcessor(FrameProcessor):
         elif model.opening:
             # The model heard "Ghost, <opener>" but the transcript lost the name ("Coast,
             # what is…"): the request is still all of it, which beats dropping it.
-            remainder = " ".join(re.sub(r"[^\w\s]", " ", text.lower()).split())
+            remainder = text.strip()
         else:
             remainder = ""
         await self._on_match(WakeMatch(phrase=model.phrase, remainder=remainder))
