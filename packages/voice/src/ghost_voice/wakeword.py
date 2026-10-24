@@ -65,6 +65,7 @@ MAX_LISTEN_SECS = 12.0  # after a hit, the most Ghost waits for the operator to 
 REMAINDER_FUZZY = 0.8
 
 DETECTOR_PHRASE = "hey ghost"
+ADDRESS_PHRASE = "ghost"  # what a ghost_*.onnx model hears: the name opening a request
 DEFAULT_MODEL_NAME = "hey_ghost.onnx"
 ADDRESS_MODEL_GLOB = "ghost_*.onnx"  # Ghost addressed by name: one model, or one per opener
 
@@ -73,7 +74,7 @@ def model_meaning(stem: str) -> tuple[str, bool]:
     """A model file's stem (how livekit-wakeword names its score) -> the phrase the check
     and the first turn go by, and whether that phrase must open what was said."""
     if stem.startswith("ghost_"):
-        return "ghost", True
+        return ADDRESS_PHRASE, True
     return DETECTOR_PHRASE, False
 
 
@@ -266,7 +267,10 @@ class DetectorWakeProcessor(FrameProcessor):
         self._done = True
         text = await asyncio.to_thread(self._d.recognize, self._heard())
         model = self._model
-        m = model.match(text, min(self._fuzzy, REMAINDER_FUZZY))
+        fuzzy = min(self._fuzzy, REMAINDER_FUZZY)
+        # hey_ghost also fires on the bare name ("Ghost, let's work on …" scored 0.74 on
+        # the replay, ahead of the opener's own model): what follows the name is the request.
+        m = model.match(text, fuzzy) or match_opening(text, ADDRESS_PHRASE, fuzzy=fuzzy)
         debug.audio(f"passive: woken by {model.name}, heard {text!r}")
         if m:
             remainder = m.remainder

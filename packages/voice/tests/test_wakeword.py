@@ -195,6 +195,19 @@ async def test_the_name_inside_a_sentence_is_not_addressing_ghost():
 
 
 @pytest.mark.asyncio
+async def test_hey_ghost_firing_on_the_name_keeps_the_request():
+    """hey_ghost also fires on the name ("Ghost, let's work on …" scored 0.74 on the
+    replay), before an opener model gets there; with no "hey ghost" in the transcript the
+    request is still what follows the name, not a greeting that drops it."""
+    recognize = Recognizer("Ghost, let's work on the wake word.")
+    events = await run(
+        detector(Scorer({3}), recognize, verify=False),
+        [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(0.4)],
+    )
+    assert events == ["heard", "match:hey ghost|let's work on the wake word."]
+
+
+@pytest.mark.asyncio
 async def test_without_the_check_a_misheard_name_keeps_the_request():
     """The model heard "Ghost, …" but Parakeet wrote "Coast": the request is all of it,
     rather than a greeting that drops what the operator asked."""
