@@ -51,7 +51,14 @@ from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
-from ghost_voice.wakeword import DEFAULT_MODEL_NAME, DETECTOR_PHRASE, Detector, WakeWordScorer
+from ghost_voice.wakeword import (
+    ADDRESS_MODEL_GLOB,
+    DEFAULT_MODEL_NAME,
+    DETECTOR_PHRASE,
+    Detector,
+    WakeModel,
+    WakeWordScorer,
+)
 from loguru import logger
 
 from ghostd.audio import Ducker, chime, restore_from_state
@@ -90,6 +97,18 @@ def quiet_phone_teardown(record: Any) -> bool:
         return True
     message = record["message"]
     return not any(noise in message for noise in _TEARDOWN_NOISE)
+
+
+def wake_model_paths(cfg: GhostdSettings, voice: VoiceSettings) -> tuple[Path, list[Path]]:
+    """The "hey ghost" model and the "Ghost, …" ones there are, as set or in the voice
+    cache."""
+    wake_dir = voice.cache_dir / "wake"
+    hey = cfg.wake_model_path or wake_dir / DEFAULT_MODEL_NAME
+    if cfg.wake_address_model_path:
+        address = [cfg.wake_address_model_path]
+    else:
+        address = sorted(wake_dir.glob(ADDRESS_MODEL_GLOB))
+    return hey, [p for p in address if p.exists() and p != hey]
 
 
 class Daemon:
@@ -366,13 +385,13 @@ class Daemon:
         raise ValueError(f"unknown GHOST_WAKE_MODE {self.cfg.wake_mode!r}")
 
     def wake_model_path(self) -> Path:
-        return self.cfg.wake_model_path or self.voice.cache_dir / "wake" / DEFAULT_MODEL_NAME
+        return wake_model_paths(self.cfg, self.voice)[0]
 
     def _detector_wake(self, models: Models, manual: FileWakeDetector) -> WakeDetector:
-        """The trained "hey ghost" detector (ADR 0025): that phrase only, no transcript
-        fallback. Without its model file Ghost would be deaf, so it says so loudly and
-        listens by transcript instead."""
-        path = self.wake_model_path()
+        """The trained detectors (ADR 0025): "hey ghost", and "Ghost, …" when its model
+        is there; no transcript fallback. Without the "hey ghost" model Ghost would be
+        deaf, so it says so loudly and listens by transcript instead."""
+        path, address = wake_model_paths(self.cfg, self.voice)
         if not path.exists():
             logger.error(
                 f"wake: GHOST_WAKE_MODE=onnx but there is no model at {path}; "
@@ -380,15 +399,20 @@ class Daemon:
             )
             self.cfg.wake_mode = self.state.wake_mode = "transcript"
             return self.build_wake(models)
-        check = "Parakeet checks each hit" if self.cfg.wake_verify else "no check"
-        logger.info(
-            f"wake: trained detector {path.name}, {DETECTOR_PHRASE!r} only, "
-            f"threshold {self.cfg.wake_threshold:g}, {check}"
-        )
+        wake_models = [WakeModel.known(path, self.cfg.detector_threshold)]
+        wake_models += [
+            WakeModel.known(p, self.cfg.address_threshold, verify=self.cfg.address_verify)
+            for p in address
+        ]
+        for m in wake_models:
+            checked = self.cfg.wake_verify if m.verify is None else m.verify
+            check = "Parakeet checks each hit" if checked else "no check"
+            logger.info(f"wake: trained detector {m.name}, threshold {m.threshold:g}, {check}")
+        logger.info("wake: those phrases only")
         detector = Detector(
-            scorer=WakeWordScorer(path),
+            scorer=WakeWordScorer([path, *address]),
             recognize=models.stt.recognize,
-            threshold=self.cfg.wake_threshold,
+            models=tuple(wake_models),
             verify=self.cfg.wake_verify,
             cooldown_secs=self.cfg.wake_cooldown_secs,
         )
@@ -1149,9 +1173,13 @@ def cli(argv: list[str] | None = None) -> None:
             print(f"tts: {describe_tts(voice)}")
             problems += tts_problems(voice)
             if cfg.wake_mode == "onnx":
-                model = cfg.wake_model_path or voice.cache_dir / "wake" / DEFAULT_MODEL_NAME
+                model, address = wake_model_paths(cfg, voice)
                 check = "Parakeet checks each hit" if cfg.wake_verify else "no check"
-                print(f"wake: trained detector {model}, threshold {cfg.wake_threshold:g}, {check}")
+                threshold = cfg.detector_threshold
+                print(f"wake: trained detector {model}, threshold {threshold:g}, {check}")
+                check = "Parakeet checks each hit" if cfg.address_verify else "no check"
+                for p in address:
+                    print(f"wake: and {p}, threshold {cfg.address_threshold:g}, {check}")
                 if not model.exists():
                     problems.append(f"GHOST_WAKE_MODE=onnx but there is no model at {model}")
             else:

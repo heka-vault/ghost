@@ -87,14 +87,43 @@ class GhostdSettings(BaseSettings):
     wake_fuzzy: float = 0.9
     # onnx mode. The model; None: hey_ghost.onnx under the voice cache's wake/ folder.
     wake_model_path: Path | None = None
-    # The detector's score (0-1) that counts as hearing "hey ghost". With the check on,
-    # a low threshold only costs Parakeet runs; with it off, it is the whole decision.
-    # Provisional until the full model's tables (.scratch/wake-train/results).
-    wake_threshold: float = 0.3
+    # The detector's score (0-1) that counts as hearing "hey ghost". Unset: 0.3 with the
+    # check on, where it only decides how often Parakeet runs (0.1 to 0.3 woke on the
+    # same takes); 0.7 with it off, where it is the whole decision: every "hey ghost" at
+    # the desk and no false wakes in 6 h of read speech, where 0.5 had two
+    # (docs/benchmarks/2026-10-22-wake-detector.md).
+    wake_threshold: float | None = None
     # Parakeet confirms each hit (match_wake at wake_fuzzy) before Ghost wakes; false:
     # the detector alone decides, and the chime plays the moment it fires.
     wake_verify: bool = True
     wake_cooldown_secs: float = 2.0
+
+    # Models for addressing Ghost by name with a request ("Ghost, let's work on …"): this
+    # file, or None for every ghost_*.onnx beside hey_ghost.onnx (one per opener).
+    wake_address_model_path: Path | None = None
+    # Parakeet checks their hits; unset: as wake_verify. The check lets them fire at a
+    # low score: on the replay the per-opener models heard far more at 0.3 with it than
+    # at 0.7 without it, and it turned down every false hit, so "hey ghost" can wake at
+    # once while "Ghost, …" is checked (docs/benchmarks/2026-10-23-ghost-openers.md).
+    wake_address_verify: bool | None = None
+    # Their score that counts as a hit. Unset: 0.3 when they are checked, 0.7 when not.
+    wake_address_threshold: float | None = None
+
+    @property
+    def detector_threshold(self) -> float:
+        if self.wake_threshold is not None:
+            return self.wake_threshold
+        return 0.3 if self.wake_verify else 0.7
+
+    @property
+    def address_verify(self) -> bool:
+        return self.wake_verify if self.wake_address_verify is None else self.wake_address_verify
+
+    @property
+    def address_threshold(self) -> float:
+        if self.wake_address_threshold is not None:
+            return self.wake_address_threshold
+        return 0.3 if self.address_verify else 0.7
 
     # Audio
     duck_apps: list[str] = ["spotify"]  # matched against sink-input application names

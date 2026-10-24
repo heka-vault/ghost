@@ -3,7 +3,13 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from ghost_voice.wake import DEFAULT_WAKE_PHRASES, WakeMatch, match_wake, parse_phrases
+from ghost_voice.wake import (
+    DEFAULT_WAKE_PHRASES,
+    WakeMatch,
+    match_opening,
+    match_wake,
+    parse_phrases,
+)
 
 PHRASES = ("hey ghost", "ghost you there", "ghost are you there", "okay ghost")
 
@@ -222,3 +228,35 @@ def test_fuzzy_off_by_default():
 def test_exact_match_wins_over_fuzzy():
     m = match_wake("hey ghost close it", DEFAULT_WAKE_PHRASES, fuzzy=0.8)
     assert m == WakeMatch(phrase="hey ghost", remainder="close it")
+
+
+@pytest.mark.parametrize(
+    ("heard", "asked"),
+    [
+        ("Ghost, what is the status of the infra repo?", "what is the status of the infra repo"),
+        ("So, Ghost, let's work on the wake word.", "let s work on the wake word"),
+        ("Ghost.", ""),
+    ],
+)
+def test_addressing_ghost_opens_with_the_name(heard, asked):
+    assert match_opening(heard, "ghost", fuzzy=0.9) == WakeMatch("ghost", asked)
+
+
+@pytest.mark.parametrize(
+    "heard",
+    [
+        "The ghost story was good.",  # the name inside a sentence
+        "We should fix that bug in Ghost.",
+        "Coast, I need you.",  # not the name's sound
+        "",
+    ],
+)
+def test_the_name_must_open_what_was_said(heard):
+    assert match_opening(heard, "ghost", fuzzy=0.8) is None
+
+
+def test_a_looser_opening_takes_the_names_near_spellings():
+    """The check stays strict; splitting off the request may take "goes" for "ghost"."""
+    assert match_opening("Goes, I need you.", "ghost", fuzzy=0.9) is None
+    loose = match_opening("Goes, I need you.", "ghost", fuzzy=0.8)
+    assert loose == WakeMatch("ghost", "i need you")

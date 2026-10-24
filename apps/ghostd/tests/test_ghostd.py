@@ -59,6 +59,27 @@ def test_restore_sets_saved_volumes(tmp_path, monkeypatch):
     assert calls == [(7, [0.8, 0.8])] and not f.exists()
 
 
+def test_the_detector_threshold_follows_the_check(monkeypatch):
+    """With Parakeet's check the threshold only decides how often it runs; without it the
+    threshold is the whole decision, so it sits higher unless the operator set one."""
+    from ghostd.config import GhostdSettings
+
+    for name in (
+        "GHOST_WAKE_THRESHOLD",
+        "GHOST_WAKE_VERIFY",
+        "GHOST_WAKE_ADDRESS_THRESHOLD",
+        "GHOST_WAKE_ADDRESS_VERIFY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    assert GhostdSettings().detector_threshold == 0.3
+    assert GhostdSettings(wake_verify=False).detector_threshold == 0.7
+    assert GhostdSettings(wake_verify=False, wake_threshold=0.5).detector_threshold == 0.5
+    assert GhostdSettings(wake_verify=False).address_threshold == 0.7
+    assert GhostdSettings(wake_address_threshold=0.6).address_threshold == 0.6
+    checked = GhostdSettings(wake_verify=False, wake_address_verify=True)
+    assert (checked.detector_threshold, checked.address_threshold) == (0.7, 0.3)
+
+
 async def test_a_settings_change_rebuilds_the_listener_instead_of_waking(tmp_path, monkeypatch):
     """A live wake setting re-arms the passive loop: the pending wait is cancelled and a
     new one starts. It once fell through to the cancelled task's result and killed

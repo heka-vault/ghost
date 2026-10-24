@@ -84,12 +84,11 @@ The acceptance question for ADR 0025 is whether Two-stage beats Transcript wake 
 
    ```sh
    GHOST_WAKE_MODE=onnx            # the trained detector: "hey ghost" only, no transcript fallback
-   GHOST_WAKE_THRESHOLD=0.3        # the detector's first-stage score
    GHOST_WAKE_VERIFY=true          # Parakeet confirms each hit
    ```
 
    - `GHOST_WAKE_VERIFY=true`: Parakeet confirms each hit. Ghost chimes when you pause after "ghost", or 1 s after the hit.
    - `GHOST_WAKE_VERIFY=false`: the detector alone decides, and Ghost chimes the moment it fires.
-   - Pick `GHOST_WAKE_THRESHOLD` from the report: the lowest threshold with no false wakes, read from the two-stage columns with verify on and the detector columns with it off.
+   - `GHOST_WAKE_THRESHOLD` is the detector's score that counts as a hit. Unset, it is 0.3 with the check and 0.7 without, from the [replay](benchmarks/2026-10-22-wake-detector.md). Once your takes are scored, pick it from the report: the lowest threshold with no false wakes, read from the two-stage columns with verify on and the detector columns with it off.
 3. Restart Ghost: `systemctl --user restart ghostd`.
 4. To go back to transcript wake, set `GHOST_WAKE_MODE=transcript` and restart again.
