@@ -49,12 +49,19 @@ from ghost_core.store import Store
 SOURCE = "conversations"  # the gate, policy and audit key for the lines' operations
 DEFAULT_VOICE = "af_heart"
 SUMMARY_TEMPLATE = "What this conversation has covered so far: {summary}"
+NEXT_SESSION = "(next session)"
+RECORD_END = "(end of the record)"
 # Earlier turns arrive as a record, not as replayed chat: replayed, the model sees its own
 # past claims with none of the tool calls behind them and "corrects" lookups that were real.
+# Sessions are marked and the record's end is spelled out: unmarked, a request that opened
+# a session ("Ghost, let's work on …") read as the tail of the last one's goodbye, and
+# Ghost said "talk soon" and hung up (2026-10-24).
 RECENT_TEMPLATE = (
-    "The record of what was said earlier in this conversation, oldest first. The lookups "
-    "and changes in it really happened; their results are not repeated here, so look "
-    "again if you need current details. What follows the record is live.\n\n{record}"
+    "The record of what was said earlier in this conversation, oldest first, with "
+    f"{NEXT_SESSION} where one session ended and a later one began. The lookups and changes "
+    "in it really happened; their results are not repeated here, so look again if you need "
+    "current details. A goodbye in it ended that earlier session, not this one. What "
+    f"follows {RECORD_END} is live.\n\n{{record}}\n{RECORD_END}"
 )
 
 _STOP = {
@@ -106,7 +113,11 @@ class ResumeContext:
                 }
             )
         lines = []
+        session = None
         for t in self.recent:
+            if lines and t.session_id != session:
+                lines.append(NEXT_SESSION)
+            session = t.session_id
             if t.role == "user":
                 lines.append(f"Operator: {t.text}")
             elif t.role == "assistant":

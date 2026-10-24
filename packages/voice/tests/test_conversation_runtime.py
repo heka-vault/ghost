@@ -144,7 +144,7 @@ def test_prompt_and_seed_follow_the_active_conversation(world):
     assert msgs[0]["content"].startswith(SUMMARY_TEMPLATE.split("{")[0])
     assert "Sam owns payroll" in msgs[0]["content"]
     assert msgs[-1]["role"] == "user"
-    assert msgs[-1]["content"].endswith("Operator: hello\nYou: Hi.")
+    assert msgs[-1]["content"].endswith("Operator: hello\nYou: Hi.\n(end of the record)")
 
 
 async def test_switch_tool_transfers_with_announce_tone_voice_and_context(world):

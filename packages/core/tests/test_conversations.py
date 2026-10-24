@@ -133,6 +133,20 @@ async def test_remember_and_forget(world):
         await run(gate, convs, "forget", text="nothing like this")
 
 
+def test_the_record_marks_where_each_session_ended(world):
+    """A request that opens a session follows a marked end, not the last goodbye: run
+    together, "let's work on the wake word" got "talk soon" and a hang-up (2026-10-24)."""
+    _, convs, _ = world
+    convs.record(GHOST, "s1", "user", "You can hang up now.")
+    convs.record(GHOST, "s1", "assistant", "Glad it's working, talk soon!")
+    convs.record(GHOST, "s2", "user", "What time is it?")
+    record = convs.resume(GHOST).messages()[0]["content"]
+    assert record.endswith(
+        "Operator: You can hang up now.\nYou: Glad it's working, talk soon!\n"
+        "(next session)\nOperator: What time is it?\n(end of the record)"
+    )
+
+
 async def test_turns_resume_compaction_and_prune(world):
     store, convs, gate = world
     convs.record(GHOST, "s1", "user", "what needs my sign-off")
@@ -150,6 +164,7 @@ async def test_turns_resume_compaction_and_prune(world):
     assert "Operator: what needs my sign-off" in record
     assert "(you called list_issues(repo=acme/app))" in record
     assert "You: Two issues are waiting." in record
+    assert record.endswith("Operator: label the first one bug\n(end of the record)")
 
     # an automatic compaction through the internal path
     out = await gate.apply_internal(
