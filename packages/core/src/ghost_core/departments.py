@@ -39,7 +39,7 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -369,8 +369,23 @@ class Department:
         return self.declarations.get(server, Declaration())
 
     def spec_for_use(self, ghost_spec: ServerSpec) -> ServerSpec:
-        """Ghost's server seen through this department's declaration."""
-        return self.declared(ghost_spec.name).applied_to(ghost_spec)
+        """Ghost's server seen through this department's declaration. The allowlist never
+        widens: no scope here means Ghost's, no items here means Ghost's items, and items
+        Ghost does not allow are dropped (an empty result falls back to Ghost's)."""
+        decl = self.declared(ghost_spec.name)
+        spec = decl.applied_to(ghost_spec)
+        gs, ds = ghost_spec.scope, decl.scope
+        if gs is None:
+            return spec
+        if ds is None:
+            return replace(spec, scope=gs)
+        if not gs.items:
+            return spec
+        if not ds.items:
+            return replace(spec, scope=replace(ds, items=tuple(gs.items)))
+        allowed = {i.lower() for i in gs.items}
+        items = tuple(i for i in ds.items if i.lower() in allowed) or tuple(gs.items)
+        return replace(spec, scope=replace(ds, items=items))
 
     def policy(self, base: AutonomyPolicy) -> AutonomyPolicy:
         """The policy a session in this department runs under: the file's ``[defaults]``
@@ -409,12 +424,15 @@ def _read_text(path: Path, cap: int) -> str:
     return text if len(text) <= cap else text[:cap].rstrip() + "…"
 
 
-def _root_of(value: object, where: str) -> Path | None:
+def _root_of(value: object, where: str, base: Path) -> Path | None:
+    """``root`` as a path: ``~`` expanded, a relative one taken from the department's
+    folder (never from the daemon's working directory)."""
     if value in (None, ""):
         return None
     if not isinstance(value, str):
         raise DepartmentError(f"{where}.root must be a path")
-    return Path(value).expanduser()
+    root = Path(value).expanduser()
+    return root if root.is_absolute() else (base / root).resolve()
 
 
 def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Department:
@@ -437,7 +455,7 @@ def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Departm
         problems.append(f"{file}: unknown key(s) {', '.join(unknown)} are ignored")
     root: Path | None = None
     try:
-        root = _root_of(data.get("root"), str(file))
+        root = _root_of(data.get("root"), str(file), path)
     except DepartmentError as e:
         problems.append(str(e))
     if root is not None and not root.is_dir():
@@ -446,6 +464,10 @@ def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Departm
     if is_ghost and root is not None:
         problems.append(f"{file}: Ghost keeps its resources here; root is ignored")
         root = None
+    for linked in (RULES_FILE, MEMORY_FILE):
+        at = (root or path) / linked if linked == RULES_FILE else path / linked
+        if at.is_symlink():
+            problems.append(f"{at}: a link; Ghost reads and writes only regular files here")
     title = str(data.get("title") or ("Ghost" if is_ghost else slug.replace("-", " ").title()))
     aliases_raw = data.get("aliases", [])
     aliases = tuple(
@@ -520,12 +542,39 @@ def discover(config_dir: Path) -> dict[str, Department]:
     for p in sorted(folder.iterdir()):
         if not p.is_dir():
             continue
-        slug = p.name.lower()
+        slug = p.name
         if slug == GHOST or not SLUG_RE.match(slug):
-            logger.warning(f"departments: {p} is not a department name; skipped")
+            logger.warning(f"departments: {p} is not a department name (lower-case slug); skipped")
             continue
         out[slug] = load_department(slug, p)
+    _check_uses(out)
     return out
+
+
+def _check_uses(departments: dict[str, Department]) -> None:
+    """A use names one of Ghost's servers, and its items stay inside Ghost's allowlist:
+    anything else is a problem the operator sees (``spec_for_use`` applies the same
+    limits whether or not the operator has read them)."""
+    ghost = departments[GHOST]
+    for d in departments.values():
+        if d.is_ghost:
+            continue
+        for name in d.uses:
+            gspec = ghost.servers.get(name)
+            if gspec is None:
+                d.problems.append(
+                    f"{d.path / MCP_FILE}: uses {name}, which Ghost's {MCP_FILE} does not start"
+                )
+                continue
+            ds, gs = d.declared(name).scope, gspec.scope
+            if ds is not None and gs is not None and gs.items and ds.items:
+                allowed = {i.lower() for i in gs.items}
+                extra = [i for i in ds.items if i.lower() not in allowed]
+                if extra:
+                    d.problems.append(
+                        f"{d.path / DEPARTMENT_FILE}: {name} items {', '.join(extra)} are "
+                        "outside Ghost's allowlist; ignored"
+                    )
 
 
 def _words(text: str) -> set[str]:
@@ -538,10 +587,14 @@ class Departments:
     def __init__(self, config_dir: Path) -> None:
         self.config_dir = Path(config_dir).expanduser()
         self._by_slug: dict[str, Department] = {}
+        # Called after every re-read (the gate rebuilds the departments' levels).
+        self.on_refresh: list[Callable[[], None]] = []
         self.refresh()
 
     def refresh(self) -> None:
         self._by_slug = discover(self.config_dir)
+        for hook in list(self.on_refresh):
+            hook()
 
     def ensure_layout(self) -> None:
         """The folders a fresh install needs: ``departments/`` and Ghost's ``agents/``."""
@@ -672,6 +725,13 @@ class Fleet:
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._starting: dict[str, asyncio.Future[Servers]] = {}
         self.started: dict[str, float] = {}  # slug -> how long the last start took
+        self._failed: dict[str, dict[str, str]] = {}  # slug -> server -> why, last start
+
+    def failures(self, slug: str) -> list[str]:
+        """The department's servers that did not connect at the last start, for the
+        operator (``GET /departments``, ``ghostd check``)."""
+        failed = self.own[slug].failed if slug in self.own else self._failed.get(slug, {})
+        return [f"{name}: not connected ({why})" for name, why in failed.items()]
 
     async def connect(self) -> None:
         """Ghost's servers, at daemon start."""
@@ -701,8 +761,18 @@ class Fleet:
         servers = Servers(d.servers, self._environ)
         try:
             await servers.connect()
-            self.own[slug] = servers
             self.started[slug] = time.perf_counter() - began
+            self._failed[slug] = dict(servers.failed)
+            if not servers.servers:
+                # Nothing came up: keep nothing, so the next transfer tries again.
+                logger.warning(
+                    f"department {slug}: no server connected "
+                    f"({'; '.join(f'{n}: {w}' for n, w in servers.failed.items())})"
+                )
+                await servers.close()
+                fut.set_result(servers)
+                return None
+            self.own[slug] = servers
             logger.info(
                 f"department {slug}: {len(servers.servers)} server(s) up in "
                 f"{self.started[slug]:.2f}s"
@@ -726,9 +796,16 @@ class Fleet:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        self._timers[slug] = loop.call_later(
-            self.idle_secs, lambda: asyncio.ensure_future(self.stop(slug))
-        )
+        timer_box: list[asyncio.TimerHandle] = []
+
+        def fire() -> None:
+            # Only the timer still on record stops the servers: a session that came
+            # back in the meantime cancelled and replaced it (so the handle differs).
+            if timer_box and self._timers.get(slug) is timer_box[0]:
+                asyncio.ensure_future(self.stop(slug))
+
+        timer_box.append(loop.call_later(self.idle_secs, fire))
+        self._timers[slug] = timer_box[0]
 
     async def stop(self, slug: str) -> None:
         self._cancel_timer(slug)
@@ -760,15 +837,6 @@ class Fleet:
             source = source_of(view)
             if source.read_tools or source.operations:
                 out.append(source)
-        return out
-
-    def operations_for(self, d: Department) -> list[tuple[str, list[Any]]]:
-        """Every operation a department's sources declare, by source name, for the gate's
-        registry: the declared writes exist as operations before the server is up, so a
-        department's levels can be shown and its writes registered at start."""
-        out: list[tuple[str, list[Any]]] = []
-        for src in self.sources_for(d):
-            out.append((src.name, src.operations))
         return out
 
     async def close(self) -> None:

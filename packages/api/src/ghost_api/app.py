@@ -427,7 +427,10 @@ def create_app(deps: Deps) -> FastAPI:
             skills=skills,
             docs=d.docs(),
             agents=agents,
-            problems=list(d.problems),
+            problems=[
+                *d.problems,
+                *(deps.fleet.failures(d.slug) if deps.fleet is not None else []),
+            ],
         )
 
     @app.get("/departments", response_model=list[DepartmentView], tags=["departments"])

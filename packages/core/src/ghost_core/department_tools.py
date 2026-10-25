@@ -5,7 +5,9 @@ Reads: a department's docs (``read_department_doc``) and its journal
 (``department_journal``: what each agent in it did and when, built from the audit tables,
 never a new store). Writes: ``departments.add_rule`` appends the operator's words,
 verbatim, to the department's ``AGENTS.md``, like a persona change (ADR 0014); Ghost never
-paraphrases, reorders or rewrites that file. ``departments.remember`` appends a line to
+paraphrases, reorders or rewrites that file, and the operation has no ``asked_by``, so the
+operator always hears the exact text read back and says yes (the words the model wrote are
+what gets written, so the readback is the check). ``departments.remember`` appends a line to
 the department's shared ``memory.md``, which every agent in it reads as data. A department
 whose resources live in a ``root`` keeps its rules there and Ghost does not write into a
 root: ``add_rule`` refuses and says where to edit. ``mcp.json`` and ``department.json``
@@ -147,6 +149,8 @@ def _read(path: Path) -> str:
 def _append(path: Path, text: str, *, heading: str | None = None, paragraph: bool = False) -> None:
     """Append ``text`` as its own line, or as its own paragraph (a rule) under ``heading``
     when the file is new."""
+    if path.is_symlink():
+        raise ValueError(f"{path} is a link; Ghost writes only regular files in its own folder")
     path.parent.mkdir(parents=True, exist_ok=True)
     current = _read(path)
     if not current.strip() and heading:
@@ -177,22 +181,33 @@ class DepartmentTools:
         self._conversations = conversations
         self.writer = DepartmentWriter(departments)
 
-    def _resolve(self, spoken: object, active: object) -> Department:
-        text = str(spoken or "").strip()
-        if text:
-            d = self.departments.get(text) or self.departments.resolve(text)
-            if d is None:
-                raise ValueError(
-                    f"there is no department called {text!r}; the departments are "
-                    + ", ".join(x.title for x in self.departments.list())
-                )
-            return d
+    def _active_department(self, active: object) -> Department:
         slug = str(active or GHOST)
         if self._conversations is not None:
             p = self._conversations.get(slug)
             if p is not None:
                 return self._conversations.department_of(p)
         return self.departments.get(slug) or self.departments.ghost
+
+    def _resolve(self, spoken: object, active: object) -> Department:
+        """The department named, else the active agent's. A session in a department
+        reaches only its own folder; Ghost, unscoped, reaches every department's."""
+        here = self._active_department(active)
+        text = str(spoken or "").strip()
+        if not text:
+            return here
+        d = self.departments.get(text) or self.departments.resolve(text)
+        if d is None:
+            raise ValueError(
+                f"there is no department called {text!r}; the departments are "
+                + ", ".join(x.title for x in self.departments.list())
+            )
+        if not here.is_ghost and d.slug != here.slug:
+            raise ValueError(
+                f"you are in {here.title}; only Ghost reaches {d.title}'s files, so offer "
+                "to transfer back to Ghost"
+            )
+        return d
 
     def journal(self, slug: str, *, limit: int = JOURNAL_LIMIT) -> list[dict[str, Any]]:
         """What the department's agents did: executed writes from the audit, newest first."""
@@ -296,7 +311,8 @@ class DepartmentTools:
                 (
                     "Add a standing rule to a department's AGENTS.md, in the operator's own "
                     "words, verbatim: 'add a rule to marketing: always use UK dates'. Never "
-                    "paraphrase, never rewrite what is there."
+                    "paraphrase, never rewrite what is there. The operator hears the exact "
+                    "text back and says yes before it is written."
                 ),
                 {"department": dept_prop, "text": {"type": "string"}},
                 ["text"],
@@ -304,7 +320,6 @@ class DepartmentTools:
                 writer=w,
                 risk="medium",
                 allowed=w.allowed,
-                asked_by=("rule",),
             ),
             Operation(
                 "remember",

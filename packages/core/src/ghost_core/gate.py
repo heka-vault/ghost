@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from ghost_core.confirmation import (
     ConfirmationClassifier,
@@ -90,31 +91,66 @@ class WriteGate:
         self._classifier = classifier or RegexClassifier()
         self._log = on_decision or (lambda _msg: None)
         self._ops: dict[tuple[str, str], Operation] = {}
+        # ADR 0024: a department sees a server it uses through its own declaration, so
+        # its operations (allowlist, pinned arguments, bounds, asked_by) are registered
+        # under the department and looked up there first; Ghost's are the fallback.
+        self._department_ops: dict[str, dict[tuple[str, str], Operation]] = {}
+        self._departments: Any = None
         self.last_classification: Classification | None = None
 
     # --- registry ------------------------------------------------------
 
-    def register(self, ability: str, operations: Iterable[Operation]) -> None:
+    def register(
+        self, ability: str, operations: Iterable[Operation], *, department: str | None = None
+    ) -> None:
+        table = self._ops if department is None else self._department_ops.setdefault(department, {})
         for op in operations:
-            self._ops[(ability, op.name)] = op
+            table[(ability, op.name)] = op
 
-    def operation(self, ability: str, name: str) -> Operation:
-        try:
-            return self._ops[(ability, name)]
-        except KeyError:
-            raise GateError(f"unknown operation {ability}.{name}") from None
+    def _lookup(self, ability: str, name: str, department: str | None) -> Operation | None:
+        if department is not None:
+            op = self._department_ops.get(department, {}).get((ability, name))
+            if op is not None:
+                return op
+        return self._ops.get((ability, name))
 
-    def operations(self, ability: str) -> list[Operation]:
-        return [op for (a, _), op in self._ops.items() if a == ability]
+    def operation(self, ability: str, name: str, department: str | None = None) -> Operation:
+        op = self._lookup(ability, name, department)
+        if op is None:
+            raise GateError(f"unknown operation {ability}.{name}")
+        return op
+
+    def operations(self, ability: str, department: str | None = None) -> list[Operation]:
+        table: dict[tuple[str, str], Operation] = dict(self._ops)
+        if department is not None:
+            table.update(self._department_ops.get(department, {}))
+        return [op for (a, _), op in table.items() if a == ability]
 
     @property
     def autonomy(self) -> AutonomyPolicy:
         return self._autonomy
 
     def set_autonomy(self, policy: AutonomyPolicy) -> None:
-        """Swap the operator's policy live (the file was edited through the UI)."""
+        """Swap the operator's policy live (the file was edited through the UI). The
+        departments' levels are laid over the new file again."""
         self._autonomy = policy
         self._log(f"gate: autonomy policy reloaded from {policy.source}")
+        self.refresh_departments()
+
+    def attach_departments(self, departments: Any) -> None:
+        """Follow the department folders (``ghost_core.departments.Departments``): their
+        levels are rebuilt now and every time the registry re-reads the folders, so a
+        ``department.json`` edited by hand applies at the next refresh."""
+        self._departments = departments
+        departments.on_refresh.append(self.refresh_departments)
+        self.refresh_departments()
+
+    def refresh_departments(self) -> None:
+        if self._departments is None:
+            return
+        self._department_policies = {
+            d.slug: d.policy(self._autonomy) for d in self._departments.list()
+        }
 
     def set_department_policies(self, policies: Mapping[str, AutonomyPolicy]) -> None:
         """The merged policy per department (``Department.policy(base)``), replaced whole
@@ -133,7 +169,7 @@ class WriteGate:
         target: Target | None = None,
         department: str | None = None,
     ) -> Autonomy:
-        op = self.operation(ability, operation)
+        op = self.operation(ability, operation, department)
         return self.policy_for(department).resolve(
             ability, operation, target.scope() if target else "", risk=op.risk
         )
@@ -158,7 +194,7 @@ class WriteGate:
         ``conversation`` is the agent the session is in and ``department`` where it
         works (ADR 0024), kept on the proposal for the audit; the department's own
         levels decide the autonomy."""
-        op = self.operation(ability, operation)
+        op = self.operation(ability, operation, department)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
         if scope is not None:
@@ -253,7 +289,7 @@ class WriteGate:
         conversation: str | None = None,
         department: str | None = None,
     ) -> Proposal:
-        writer = self.operation(ability, operation).writer
+        writer = self.operation(ability, operation, department).writer
         # One pending proposal at a time: a new one replaces the old.
         self._store.cancel_pending(session_id)
         snapshot = await writer.fetch(target)
@@ -360,7 +396,7 @@ class WriteGate:
         p = self.pending(session_id, now)
         if p is None:
             return None
-        op = self._ops.get((p.ability, p.operation))
+        op = self._lookup(p.ability, p.operation, p.department)
         if op is None or not op.asked_by:
             return None
         if not asked_for(
@@ -394,7 +430,7 @@ class WriteGate:
 
     async def _execute(self, p: Proposal, now: datetime | None = None) -> Outcome:
         now = now or utcnow()
-        writer = self.operation(p.ability, p.operation).writer
+        writer = self.operation(p.ability, p.operation, p.department).writer
         # Stale check: the target must not have changed since the snapshot.
         current = await writer.fetch(p.target)
         if current.version != p.snapshot.version:

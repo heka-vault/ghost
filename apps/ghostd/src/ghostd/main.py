@@ -6,7 +6,7 @@ import asyncio
 import json
 import signal
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -133,6 +133,8 @@ class Daemon:
         self.departments: Departments | None = None
         self.fleet: Fleet | None = None
         self._reach: Callable[[Profile], list[ToolSource]] | None = None
+        self._enter: Callable[[Profile], Awaitable[None]] | None = None
+        self._leave: Callable[[Profile], None] | None = None
         self._models: Models | None = None
         self._deps: Deps | None = None
         # The phone (ADR 0016). An accepted offer's connection goes on the queue; the
@@ -209,14 +211,10 @@ class Daemon:
         """The file, and every department's levels over it (ADR 0024), re-read together:
         a department.json edited by hand applies at the next write."""
         policy = AutonomyPolicy.load(self.cfg.policy_path)
-        if self.departments is not None:
-            self.departments.refresh()
         if self.gate is not None:
             self.gate.set_autonomy(policy)
-            if self.departments is not None:
-                self.gate.set_department_policies(
-                    {d.slug: d.policy(policy) for d in self.departments.list()}
-                )
+        if self.departments is not None:
+            self.departments.refresh()  # the gate's hook rebuilds the departments' levels
         logger.info(f"policy reloaded from {policy.source}")
         return policy
 
@@ -492,7 +490,7 @@ class Daemon:
             classifier=classifier,
             on_decision=debug.audio,
         )
-        gate.set_department_policies({d.slug: d.policy(autonomy) for d in departments.list()})
+        gate.attach_departments(departments)  # levels follow the folders (ADR 0024)
         for a in tool_sources:  # declared writes go through the gate
             gate.register(a.name, a.operations)
         self.gate = gate
@@ -515,7 +513,7 @@ class Daemon:
             if d is None:
                 return
             for src in fleet.sources_for(d):
-                gate.register(src.name, src.operations)
+                gate.register(src.name, src.operations, department=slug)
 
         async def enter(p: Profile) -> None:
             """A transfer into an agent was decided (ADR 0024): its department's servers
@@ -781,6 +779,11 @@ class Daemon:
                 # From here the phone may close the call before the desk's last write lands.
                 _PHONE_TEARDOWN["on"] = True
 
+        start_profile = self.conversations.get(start_in) if self.conversations else None
+        if start_profile is not None and not start_profile.is_ghost and self._enter is not None:
+            # A call straight into an agent (phone, desktop): its department's servers
+            # come up and their operations join the gate before the tools are built.
+            await self._enter(start_profile)
         session = build_session(
             self.voice,
             models=models,
@@ -806,9 +809,6 @@ class Daemon:
         self.session = session
         self._origin = origin
         self.state.set_phase(Phase.LISTENING, session.session_id, origin=origin)
-        start_profile = self.conversations.get(start_in) if self.conversations else None
-        if start_profile is not None and not start_profile.is_ghost and self.fleet is not None:
-            await self.fleet.enter(start_profile.department)  # a call straight into an agent
         self.state.set_conversation(
             start_in, department=start_profile.department if start_profile else GHOST
         )

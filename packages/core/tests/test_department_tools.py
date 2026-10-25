@@ -54,15 +54,19 @@ async def submit(gate, tools, op, **args):
     )
 
 
-async def test_add_rule_appends_verbatim_at_confirm_and_the_request_is_the_yes(world):
+async def test_add_rule_appends_verbatim_at_confirm_after_a_spoken_yes(world):
     cfg, departments, store, convs, tools, gate = world
     sub = await submit(
         gate, tools, "add_rule", department="the marketers", text="Always use UK dates."
     )
     assert sub.autonomy is Autonomy.CONFIRM and sub.outcome is None  # medium risk: ask
     assert sub.proposal.preview == "On Marketing: add the rule: Always use UK dates.."
-    # "add a rule to marketing" is the yes (ADR 0017)
+    # The request is never the yes here: the text the model wrote is read back, and the
+    # operator's yes to that exact text is what writes it (nothing in code can tell a
+    # paraphrase from the operator's words).
     out = await gate.confirm_by_request("s1", "ghost, add a rule to marketing: always use UK dates")
+    assert out is None
+    _, out = await gate.on_user_turn("s1", "yes")
     assert out is not None and out.status == "success"
     rules = (cfg / "departments" / "marketing" / "AGENTS.md").read_text()
     assert rules == "# Marketing\n\nBe warm.\n\nAlways use UK dates.\n"

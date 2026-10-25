@@ -190,13 +190,17 @@ class Conversations:
         problems: list[str] = []
         seen: set[str] = set()
         rows = {p.slug: p for p in self._store.list_conversations(include_retired=True)}
+        ids = {p.id for p in rows.values()}
         for d in self.departments.list():
-            self._ensure_default(d, rows)
+            ids.add(self._ensure_default(d, rows).id)
             seen.add(d.slug)
             if not d.agents_dir.is_dir():
                 continue
             for folder in sorted(p for p in d.agents_dir.iterdir() if p.is_dir()):
                 slug = folder.name.lower()
+                if folder.name != slug:
+                    problems.append(f"{folder}: an agent folder is lower-case; not read")
+                    continue
                 if slug in seen:
                     if slug != d.slug:
                         problems.append(f"{folder}: another agent is already called {slug}")
@@ -208,9 +212,18 @@ class Conversations:
                         problems.append(f"{folder}: no agent.json; not an agent")
                         continue
                     data = existing.agent_json()
+                # The row's id wins over agent.json (an edited or restored file); an id
+                # another agent already has (a copied folder) is a new agent.
+                file_id = str(data.get("id") or "")
+                if existing is not None:
+                    agent_id = existing.id
+                elif file_id and file_id not in ids:
+                    agent_id = file_id
+                else:
+                    agent_id = Profile(slug=slug, name=slug).id
+                ids.add(agent_id)
                 p = Profile(
-                    id=str(data.get("id") or (existing.id if existing else ""))
-                    or Profile(slug=slug, name=slug).id,
+                    id=agent_id,
                     slug=slug,
                     name=str(
                         data.get("name")
@@ -834,7 +847,7 @@ class Conversations:
                 writer=w,
                 risk="medium",
                 allowed=w.allowed,
-                asked_by=("move", "transfer", "send"),
+                asked_by=("move",),
             ),
         ]
 
