@@ -189,7 +189,12 @@ class Conversations:
         a row whose folder is gone is marked deleted. Returns the problems found."""
         problems: list[str] = []
         seen: set[str] = set()
-        rows = {p.slug: p for p in self._store.list_conversations(include_retired=True)}
+        # Deleted rows are kept (slug is unique): a folder made again under an old slug
+        # takes its row and id back instead of colliding with it.
+        rows = {
+            p.slug: p
+            for p in self._store.list_conversations(include_retired=True, include_deleted=True)
+        }
         ids = {p.id for p in rows.values()}
         for d in self.departments.list():
             ids.add(self._ensure_default(d, rows).id)
@@ -199,7 +204,7 @@ class Conversations:
             for folder in sorted(p for p in d.agents_dir.iterdir() if p.is_dir()):
                 slug = folder.name.lower()
                 if folder.name != slug:
-                    problems.append(f"{folder}: an agent folder is lower-case; not read")
+                    problems.append(f"{folder}: an agent folder's name is not lower-case; not read")
                     continue
                 if slug in seen:
                     if slug != d.slug:
@@ -238,6 +243,7 @@ class Conversations:
                     updated_at=existing.updated_at if existing else utcnow(),
                     last_active_at=existing.last_active_at if existing else None,
                     retired_at=existing.retired_at if existing else None,
+                    deleted_at=None,
                 )
                 if existing is None or existing.model_dump() != p.model_dump():
                     self._store.upsert_conversation(p)
@@ -259,6 +265,9 @@ class Conversations:
         data = read_agent_json(folder) or {}
         if existing is not None and existing.deleted_at is None and folder.is_dir():
             return existing
+        if existing is not None and existing.deleted_at is not None and not folder.is_dir():
+            # A department made again under an old slug: its agent comes back with its id.
+            data = {}
         name = "Ghost" if d.is_ghost else d.title
         p = Profile(
             id=str(data.get("id") or (existing.id if existing else ""))

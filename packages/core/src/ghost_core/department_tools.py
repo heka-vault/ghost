@@ -162,6 +162,14 @@ def _append(path: Path, text: str, *, heading: str | None = None, paragraph: boo
     path.write_text(f"{current}{text.strip()}\n")
 
 
+def _said(text: str, request: str) -> bool:
+    """Whether ``text`` is in the operator's request, word for word (case, punctuation
+    and spacing aside). The spoken path passes the request; the desktop, where the
+    operator typed the rule, does not."""
+    norm = lambda s: " ".join(re.findall(r"[a-z0-9']+", s.lower()))  # noqa: E731
+    return bool(norm(text)) and norm(text) in norm(request)
+
+
 def _version(rules: str, memory: str) -> str:
     import hashlib
 
@@ -286,6 +294,11 @@ class DepartmentTools:
                 raise ValueError(
                     f"{d.title}'s rules live in its project folder ({d.root}); "
                     "Ghost does not write there"
+                )
+            if "_request" in args and not _said(text, str(args.get("_request") or "")):
+                raise ValueError(
+                    "a rule is written in the operator's words: pass exactly what they "
+                    "said after 'add a rule', nothing rephrased"
                 )
             return Prepared(
                 target=DepartmentTarget(slug=d.slug, title=d.title),

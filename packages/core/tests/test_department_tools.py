@@ -77,6 +77,25 @@ async def test_add_rule_appends_verbatim_at_confirm_after_a_spoken_yes(world):
     # the active agent's department when none is named
     sub = await submit(gate, tools, "add_rule", _active="marketing", text="Say hi.")
     assert sub.proposal.target.spoken() == "Marketing"
+    # by voice the rule must be what the operator said, word for word
+    with pytest.raises(ValueError, match="operator's words"):
+        await submit(
+            gate,
+            tools,
+            "add_rule",
+            _active="marketing",
+            text="Use British dates.",
+            _request="ghost, add a rule to marketing: always use UK dates",
+        )
+    sub = await submit(
+        gate,
+        tools,
+        "add_rule",
+        _active="marketing",
+        text="Always use UK dates",
+        _request="Ghost, add a rule to marketing: Always use UK dates!",
+    )
+    assert sub.proposal.preview.endswith("Always use UK dates.")
     # a department whose rules live in a project folder is not written to
     with pytest.raises(ValueError, match="does not write there"):
         await submit(gate, tools, "add_rule", department="heka", text="x")

@@ -95,6 +95,7 @@ class WriteGate:
         # its operations (allowlist, pinned arguments, bounds, asked_by) are registered
         # under the department and looked up there first; Ghost's are the fallback.
         self._department_ops: dict[str, dict[tuple[str, str], Operation]] = {}
+        self._department_abilities: dict[str, set[str]] = {}  # sources a department owns
         self._departments: Any = None
         self.last_classification: Classification | None = None
 
@@ -104,6 +105,8 @@ class WriteGate:
         self, ability: str, operations: Iterable[Operation], *, department: str | None = None
     ) -> None:
         table = self._ops if department is None else self._department_ops.setdefault(department, {})
+        if department is not None:
+            self._department_abilities.setdefault(department, set()).add(ability)
         for op in operations:
             table[(ability, op.name)] = op
 
@@ -112,6 +115,10 @@ class WriteGate:
             op = self._department_ops.get(department, {}).get((ability, name))
             if op is not None:
                 return op
+            if ability in self._department_abilities.get(department, ()):
+                # The department sees this source through its own declaration: Ghost's
+                # operation of the same name is never a stand-in for one it lacks.
+                return None
         return self._ops.get((ability, name))
 
     def operation(self, ability: str, name: str, department: str | None = None) -> Operation:

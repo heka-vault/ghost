@@ -209,6 +209,11 @@ def test_a_root_is_read_in_place_and_agents_stay_home(tmp_path: Path):
     write(folder, DEPARTMENT_FILE, {"root": str(repo)})
     d = load_department("heka", folder)
     assert d.root == repo and d.rules_lead() == "Heka" and d.docs() == ["runbook.md"]
+    # the repository's own server file starts nothing until the operator says so: it
+    # names commands to run and the secrets to hand them
+    assert d.servers == {} and len(d.problems) == 1 and "root_servers" in d.problems[0]
+    write(folder, DEPARTMENT_FILE, {"root": str(repo), "root_servers": True})
+    d = load_department("heka", folder)
     assert set(d.servers) == {"gh"} and d.problems == []
     assert [str(p.relative_to(repo)) for p, _ in d.skill_places()] == [
         ".agents/skills",

@@ -515,6 +515,17 @@ class Daemon:
             for src in fleet.sources_for(d):
                 gate.register(src.name, src.operations, department=slug)
 
+        def register_all() -> None:
+            """Every department's reachable sources, again: after the folders are
+            re-read, a declaration edited by hand is what the gate runs, never Ghost's
+            operation of the same name."""
+            for d in departments.list():
+                if not d.is_ghost:
+                    register_department(d.slug)
+
+        register_all()
+        departments.on_refresh.append(register_all)
+
         async def enter(p: Profile) -> None:
             """A transfer into an agent was decided (ADR 0024): its department's servers
             start now, and the announcement covers the wait."""

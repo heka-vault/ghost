@@ -35,9 +35,10 @@ and a rule appended verbatim to `AGENTS.md`. The model never writes `mcp.json` o
   Ghost's own `AGENTS.md` is Ghost's and is not repeated in other departments. "Accounting,
   add a rule: always say the currency" appends the text as the operator said it
   (`departments.add_rule`, medium risk, `confirm` unless the policy file says otherwise).
-  The operator's request is never the yes for this one: Ghost reads the exact text back
-  and the spoken yes writes it, since nothing in code can tell the operator's words from a
-  paraphrase. Capped at 8,000 characters in the prompt. A linked `AGENTS.md` or
+  By voice the text must be in the operator's request word for word (case, punctuation
+  and spacing aside) or the gate refuses it; the request is never the yes for this one,
+  Ghost reads the text back and the spoken yes writes it. In the desktop the operator
+  types the rule. Capped at 8,000 characters in the prompt. A linked `AGENTS.md` or
   `memory.md` is a problem the folder reports; Ghost reads and writes only regular files.
 - **`mcp.json`** is its servers, in the shape other clients share: `{"mcpServers":
   {"<name>": {"command", "args", "env"}}}` for stdio, `{"type": "http", "url", "headers"}`
@@ -52,22 +53,27 @@ and a rule appended verbatim to `AGENTS.md`. The model never writes `mcp.json` o
   stays private to it.
 - **`skills/`** are the department's own skills, nearest first ([skills.md](skills.md));
   **`docs/`** are files the model reads on demand through `read_department_doc`.
-- **`root`** (optional) points the department at a repository: its `AGENTS.md`, `mcp.json`
-  or `.mcp.json`, skills and `docs/` are read there in place, so a project's own folder is
-  the department's. The agents stay under `~/.config/ghost`. Ghost does not append to a
-  rooted department's files.
+- **`root`** (optional) points the department at a repository: its `AGENTS.md`, skills
+  and `docs/` are read there in place, so a project's own folder is the department's. The
+  repository's `mcp.json` or `.mcp.json` names commands to run and the secrets to hand
+  them, so it starts nothing until `department.json` also says `"root_servers": true`;
+  until then the department's own `mcp.json` is read and the root's is listed as a
+  problem. The agents stay under `~/.config/ghost`. Ghost does not append to a rooted
+  department's files.
 
 Ghost's own folder is the config root. Its `department.json` carries the declarations for
 Ghost's servers. A department that `use`s one of them reaches it through its own
 declaration: its own `reads` and `writes` for that server, and its own `levels` and
 `targets`, which `Department.policy` lays over the policy file's `[defaults]` for a session
-in that department. Its allowlist never widens Ghost's: no `scope` of its own means
-Ghost's, no `items` means Ghost's items, and an item Ghost does not allow is dropped and
+in that department. Its allowlist never widens Ghost's: the scope's kind and arguments are always Ghost's,
+no `items` of its own means Ghost's items, and an item Ghost does not allow is dropped and
 reported as a problem. The gate keeps each department's operations apart, so a used
 server's pinned arguments, bounds and allowlist are the department's own in its sessions
 and Ghost's in Ghost's. Both files are the operator's; the model writes neither. A level
-edited by hand applies at the next refresh of the folders: the desktop's Departments
-screen, a policy-file reload, or a daemon restart.
+or a declaration edited by hand applies at the next refresh of the folders (the desktop's
+Departments screen, a policy-file reload, a daemon restart): the levels are rebuilt and
+every department's operations are registered again, and a department never runs Ghost's
+operation in place of one its own declaration lacks.
 
 ## Agents
 

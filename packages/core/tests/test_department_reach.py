@@ -293,3 +293,58 @@ async def test_a_start_that_brings_nothing_up_is_retried_and_reported(tmp_path):
     fleet.leave("marketing")
     await asyncio.sleep(0.1)
     assert not fleet.is_up("marketing")
+
+
+def test_a_use_keeps_ghost_s_scope_kind_and_arguments(tmp_path):
+    """A department cannot change how an item is read off a call: with its own
+    ``arguments`` the read check would never run (the tool's arguments differ)."""
+    cfg = layout(tmp_path)
+    data = json.loads((cfg / "departments" / "marketing" / "department.json").read_text())
+    data["servers"]["github"]["scope"] = {
+        "kind": "org",
+        "arguments": ["org"],
+        "items": ["acme/web"],
+    }
+    write(cfg / "departments" / "marketing" / "department.json", data)
+    deps = Departments(cfg)
+    m = deps.get("marketing")
+    assert any("kind and arguments are ignored" in p for p in m.problems)
+    spec = m.spec_for_use(deps.ghost.servers["github"])
+    assert spec.scope is not None
+    assert spec.scope.kind == "repository" and spec.scope.arguments == ("owner", "repo")
+    assert spec.scope.items == ("acme/web",)
+
+
+def test_a_folder_made_again_under_an_old_slug_takes_its_row_back(tmp_path):
+    cfg = tmp_path / "ghost"
+    write(cfg / "departments" / "marketing" / "department.json", {"title": "Marketing"})
+    write(cfg / "departments" / "marketing" / "agents" / "brand" / "agent.json", {"name": "Brand"})
+    db = tmp_path / "g.db"
+    convs = Conversations(Store(db), Departments(cfg))
+    ids = {s: convs.get(s).id for s in ("marketing", "brand")}
+    shutil.rmtree(cfg / "departments" / "marketing")
+    convs = Conversations(Store(db), Departments(cfg))  # restart: rows marked deleted
+    assert convs.get("marketing") is None and convs.get("brand") is None
+    write(cfg / "departments" / "marketing" / "department.json", {"title": "Marketing"})
+    write(cfg / "departments" / "marketing" / "agents" / "brand" / "agent.json", {"name": "Brand"})
+    convs = Conversations(Store(db), Departments(cfg))  # restart again: no collision
+    assert convs.get("marketing").id == ids["marketing"]
+    assert convs.get("brand").id == ids["brand"]
+
+
+async def test_a_department_never_falls_back_to_ghost_s_operation_of_the_same_name(tmp_path):
+    deps = Departments(layout(tmp_path))
+    async with connected(deps.ghost.servers["github"]) as (server, _):
+        fleet = await fleet_over(deps, server)
+        gate = WriteGate(Store(), autonomy=AutonomyPolicy())
+        gate.attach_departments(deps)
+        for src in fleet.sources_for(deps.ghost):
+            gate.register(src.name, src.operations)
+        # marketing registered its github view without a reopen; Ghost's reopen is no
+        # stand-in, while Ghost's own sources (conversations, ...) still are reachable
+        gate.register("github", [], department="marketing")
+        gate.register("conversations", gate.operations("github")[:1], department=None)
+        assert gate.operation("github", "close", "ghost")
+        with pytest.raises(Exception, match="unknown operation github.close"):
+            gate.operation("github", "close", "marketing")
+        assert gate.operation("conversations", "close", "marketing")

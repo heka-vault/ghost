@@ -80,7 +80,16 @@ MAX_DOCS_LISTED = 40
 _TRANSPORTS = {"stdio", "http", "streamable-http", "streamable_http", "streamableHttp"}
 _SERVER_KEYS = {"type", "command", "args", "env", "url", "headers"}
 _DECLARATION_KEYS = {"reads", "scope", "writes", "levels", "targets"}
-_DEPARTMENT_KEYS = {"title", "aliases", "voice", "speed", "model", "root", "servers"}
+_DEPARTMENT_KEYS = {
+    "title",
+    "aliases",
+    "voice",
+    "speed",
+    "model",
+    "root",
+    "root_servers",
+    "servers",
+}
 # A literal that is probably a token: a known prefix, or a bearer value with no reference.
 _SECRET_SHAPES = re.compile(r"^(ghp_|github_pat_|gho_|sk-|xox[abp]-|AKIA|glpat-|Bearer\s+\S{16,})")
 _STOP = {"the", "a", "an", "to", "me", "department", "dept", "team", "office", "desk", "folks"}
@@ -377,15 +386,13 @@ class Department:
         gs, ds = ghost_spec.scope, decl.scope
         if gs is None:
             return spec
-        if ds is None:
+        # The kind and the arguments are Ghost's (they say how an item is read off a
+        # call); the department only ever narrows the items.
+        if ds is None or not ds.items or not gs.items:
             return replace(spec, scope=gs)
-        if not gs.items:
-            return spec
-        if not ds.items:
-            return replace(spec, scope=replace(ds, items=tuple(gs.items)))
         allowed = {i.lower() for i in gs.items}
         items = tuple(i for i in ds.items if i.lower() in allowed) or tuple(gs.items)
-        return replace(spec, scope=replace(ds, items=items))
+        return replace(spec, scope=replace(gs, items=items))
 
     def policy(self, base: AutonomyPolicy) -> AutonomyPolicy:
         """The policy a session in this department runs under: the file's ``[defaults]``
@@ -495,10 +502,21 @@ def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Departm
         except (DepartmentError, ValueError) as e:
             problems.append(str(e))
 
-    resources = root or path
-    mcp_path = next(
-        (p for p in (resources / MCP_FILE, resources / ALT_MCP_FILE) if p.is_file()), None
-    )
+    # A repository's own server file (root) names commands to run and secrets to hand
+    # them, so it counts only when department.json says root_servers: true; otherwise
+    # the department's own mcp.json is read and the root's is a problem to see.
+    candidates: list[Path] = []
+    if root is not None:
+        in_root = [p for p in (root / MCP_FILE, root / ALT_MCP_FILE) if p.is_file()]
+        if data.get("root_servers") is True:
+            candidates.extend(in_root)
+        elif in_root:
+            problems.append(
+                f"{in_root[0]}: a server file in the root; its servers are not started "
+                f'until {file} says "root_servers": true'
+            )
+    candidates.append(path / MCP_FILE)
+    mcp_path = next((p for p in candidates if p.is_file()), None)
     mcp = McpFile()
     if mcp_path is not None:
         try:
@@ -567,6 +585,16 @@ def _check_uses(departments: dict[str, Department]) -> None:
                 )
                 continue
             ds, gs = d.declared(name).scope, gspec.scope
+            if (
+                ds is not None
+                and gs is not None
+                and (ds.kind, ds.arguments) != (gs.kind, gs.arguments)
+            ):
+                d.problems.append(
+                    f"{d.path / DEPARTMENT_FILE}: {name} scope is {gs.kind} by "
+                    f"{', '.join(gs.arguments)} (Ghost's); the department's kind and "
+                    "arguments are ignored"
+                )
             if ds is not None and gs is not None and gs.items and ds.items:
                 allowed = {i.lower() for i in gs.items}
                 extra = [i for i in ds.items if i.lower() not in allowed]
@@ -723,7 +751,7 @@ class Fleet:
         self.ghost = Servers(departments.ghost.servers, environ)
         self.own: dict[str, Servers] = {}
         self._timers: dict[str, asyncio.TimerHandle] = {}
-        self._starting: dict[str, asyncio.Future[Servers]] = {}
+        self._starting: dict[str, asyncio.Future[Servers | None]] = {}
         self.started: dict[str, float] = {}  # slug -> how long the last start took
         self._failed: dict[str, dict[str, str]] = {}  # slug -> server -> why, last start
 
@@ -755,7 +783,7 @@ class Fleet:
         if slug in self._starting:
             return await self._starting[slug]
         loop = asyncio.get_running_loop()
-        fut: asyncio.Future[Servers] = loop.create_future()
+        fut: asyncio.Future[Servers | None] = loop.create_future()
         self._starting[slug] = fut
         began = time.perf_counter()
         servers = Servers(d.servers, self._environ)
@@ -770,7 +798,7 @@ class Fleet:
                     f"({'; '.join(f'{n}: {w}' for n, w in servers.failed.items())})"
                 )
                 await servers.close()
-                fut.set_result(servers)
+                fut.set_result(None)
                 return None
             self.own[slug] = servers
             logger.info(

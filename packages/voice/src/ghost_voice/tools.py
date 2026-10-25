@@ -230,6 +230,8 @@ def register_tools(
         record(f"{aname}.{op_name}", args)
         if aname in (CONVERSATIONS, DEPARTMENTS) and conversations is not None:
             args["_active"] = conversations.active.slug
+        if aname == DEPARTMENTS:
+            args["_request"] = last_request()[0]  # a rule must be the operator's words
         scope = scope_now(reach_now, aname)
         if scope is not None:
             args[SCOPE_ARG] = scope
