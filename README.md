@@ -94,13 +94,13 @@ through the official GitHub server; `ghost-mock-github` stands in before a token
 
 `apps/desktop` is a Tauri 2 app (React) that talks to the daemon over its socket. Speaking
 is the product; the app is the companion: the live session with a Confirm card for changes
-that need your okay, your saved lines and their voices, what Ghost may do on its own, the
-audit log, servers, and settings. It follows the system's light or dark theme.
+that need your okay, your agents grouped by department and their voices, the departments
+themselves, what Ghost may do on its own, the audit log, servers, skills and settings. It follows the system's light or dark theme.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/session.webp" alt="A live session on the Accounting line"><br><sub><b>Session.</b> A live session, patched through to the Accounting line.</sub></td>
-    <td width="50%"><img src="docs/screenshots/conversations.webp" alt="The Accounting line: voice, persona, memory and pinned notes"><br><sub><b>Conversations.</b> Each line keeps its own voice, persona and memory.</sub></td>
+    <td width="50%"><img src="docs/screenshots/session.webp" alt="A live session with the Accounting agent"><br><sub><b>Session.</b> A live session, transferred to Accounting.</sub></td>
+    <td width="50%"><img src="docs/screenshots/conversations.webp" alt="The Accounting agent: voice, persona, memory and pinned notes"><br><sub><b>Agents.</b> Each agent keeps its own voice, persona and memory, in its department.</sub></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/policy.webp" alt="Per-operation autonomy levels"><br><sub><b>What Ghost may do.</b> One level per operation, from not allowed to quietly.</sub></td>
