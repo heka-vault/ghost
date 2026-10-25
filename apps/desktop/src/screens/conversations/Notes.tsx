@@ -64,7 +64,7 @@ export function Notes({ notes, onChange, onPin, pinning, disabled, saved }: Note
 
       {notes.length === 0 ? (
         <Card padding="none">
-          <EmptyState size="compact" title="No pinned notes" description="Pin what this line must never forget. Notes stay word for word, however long the line runs." />
+          <EmptyState size="compact" title="No pinned notes" description="Pin what this agent must never forget. Notes stay word for word, however long it works." />
         </Card>
       ) : (
         <Card list ref={listRef}>

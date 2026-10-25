@@ -41,11 +41,15 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
           <p className="skl-detail__meta">
             <span className="t-mono">{s.name}</span>
             <span aria-hidden>·</span>
-            <span>{ghosts ? "Ghost’s own" : `read in place from ${rootName(s.source)}`}</span>
+            <span>{ghosts ? "Ghost’s own" : s.source === "home" ? "yours, in ~/.agents/skills" : `read in place from ${rootName(s.source)}`}</span>
           </p>
         </div>
         <div className="skl-detail__control">
-          {s.missing.length > 0 ? (
+          {s.problem ? (
+            <Badge tone="danger" dot>
+              Not offered
+            </Badge>
+          ) : s.missing.length > 0 ? (
             <Badge tone="warn" dot>
               Needs {needs}
             </Badge>
@@ -66,10 +70,14 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
       <p className="skl-detail__meta">
         <span className="t-mono">{tildePath(s.path)}</span>
       </p>
+      {s.problem && (
+        <Notice tone="danger" title="Ghost doesn’t offer this skill" className="skl-detail__notice">
+          <p className="skl-notice__p">{s.problem} Fix the folder and Ghost picks it up on its next look.</p>
+        </Notice>
+      )}
       {!ghosts && (
         <p className="skl-detail__why">
-          Read in place from <span className="t-mono">{tildePath(s.source)}</span>, so Ghost can’t remove it. To take it out, remove the folder there, or the root from Project skill roots
-          under Settings.
+          Read in place from <span className="t-mono">{tildePath(s.path)}</span>, so Ghost can’t remove it. To take it out, remove the folder there.
         </p>
       )}
 

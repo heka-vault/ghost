@@ -403,11 +403,18 @@ function SkillList({ skills, current, onSelect }: { skills: SkillInfo[]; current
                   </span>
                   <span className="skl-list__from">
                     {sourceWord(s)}
-                    {s.missing.length > 0 && (
+                    {s.problem ? (
                       <>
                         {" · "}
-                        <span className="skl-list__needs">{needsWords(s.missing)}</span>
+                        <span className="skl-list__needs">not offered</span>
                       </>
+                    ) : (
+                      s.missing.length > 0 && (
+                        <>
+                          {" · "}
+                          <span className="skl-list__needs">{needsWords(s.missing)}</span>
+                        </>
+                      )
                     )}
                   </span>
                 </>

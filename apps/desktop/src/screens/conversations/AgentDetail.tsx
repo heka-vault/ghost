@@ -1,14 +1,15 @@
 /**
- * Owner: conversations. One line (#/lines/:slug): its persona and voice, its
- * memory and pinned notes, its transcript and every version of its memory. Edits collect
- * in a draft and go in with Save; each field Ghost writes is an audited gate
- * write, the same as if it had been said. Pinning a note, compacting, switching, reset and
- * delete happen at once. Call opens a session on this line and Hang up ends it; the composer
- * in the dock types to the line, opening the session when there is none (2026-10-24).
+ * Owner: conversations. One agent (#/agents/:slug): its persona and voice, its department
+ * and job, its memory and pinned notes, its transcript and every version of its memory.
+ * Edits collect in a draft and go in with Save; each field Ghost writes is an audited gate
+ * write, the same as if it had been said. Pinning a note, compacting, switching, moving,
+ * retiring, reset and delete happen at once. Call opens a session with this agent and Hang
+ * up ends it; the composer in the dock types to the agent, opening the session when there
+ * is none. Open folder reveals the agent's files (ADR 0024).
  */
-import { type CompactionView, type ConversationDetail, type ConversationView, type ToolkitView, type TurnView } from "@ghost/client-ts";
+import { type CompactionView, type ConversationDetail, type ConversationView, type DepartmentView, type TurnView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, FileOutput, Layers, MoreHorizontal, Phone, PhoneOff, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeftRight, ArrowRightLeft, Brain, Building2, ChevronLeft, Clock, CloudOff, FolderOpen, Layers, MoreHorizontal, Phone, PhoneOff, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
@@ -16,6 +17,7 @@ import { useDesign } from "../../design/context";
 import {
   Button,
   Card,
+  Dialog,
   EmptyState,
   Field,
   IconButton,
@@ -28,12 +30,13 @@ import {
   Notice,
   Page,
   Section,
+  Select,
   Skeleton,
   SkeletonText,
   Slider,
   Textarea,
+  agentName,
   errorText,
-  lineName,
   quoted,
   relativeTime,
   useConfirm,
@@ -45,29 +48,28 @@ import { useAutoRows } from "./autosize";
 import { aliasExample, MEMORY_EXAMPLE, PERSONA_EXAMPLE } from "./examples";
 import { LineStateText, lineState } from "./lineState";
 import { History } from "./History";
-import { ToolkitPicker } from "./NewLineDialog";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
-import { ScopePicker } from "./ScopePicker";
 import { Composer } from "../session/Composer";
-import { type ScopedSource, departmentName, departmentOf, isDepartment, narrowSources, scopedSources, settleLine, settledAt, toolkitsOf, unsettleLine } from "./threads";
+import { departmentTitle, moveAgent, rehireAgent, retireAgent, retiredAt } from "./threads";
 import { Transcript } from "./Transcript";
 // The composer's styles live with the session screen, which may not have been opened yet.
 import "../session/session.css";
-import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newLineSeed, readParam, writeParam } from "./url";
+import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
 import { PlayingBars, VoicePicker, voiceTitle } from "./VoicePicker";
 import { type Voice, parseVoice, voiceKind } from "./voices";
+import { revealFolder } from "../departments/model";
 
 type TabId = "persona" | "memory" | "transcript" | "history";
 const TABS: TabId[] = ["persona", "memory", "transcript", "history"];
 const TURN_LIMIT = 200;
-const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "voice", "speed", "persona", "scope", "toolkits"];
+const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "persona"];
 const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 
-export function LineDetail({ slug }: { slug: string }) {
+export function AgentDetail({ slug }: { slug: string }) {
   const { client, status, conversationsVersion, turns: sessionTurns, pending } = useGhost();
   const { online, connection, phase, loadingModels } = useLive();
   const design = useDesign();
@@ -80,11 +82,10 @@ export function LineDetail({ slug }: { slug: string }) {
   const [turns, setTurns] = useState<TurnView[]>([]);
   const [versions, setVersions] = useState<CompactionView[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
-  const [sources, setSources] = useState<ScopedSource[] | null>(null);
-  /** The toolkits the policy file declares (ADR 0023): a department's choices, and what narrows a topic line's scope. */
-  const [toolkitList, setToolkitList] = useState<ToolkitView[] | null>(null);
-  /** Every line, for a topic line's department (its name and toolkits). */
-  const [lines, setLines] = useState<ConversationView[]>([]);
+  /** The departments (ADR 0024): the agent's own, for its title and voice, and the destinations of a move. */
+  const [departments, setDepartments] = useState<DepartmentView[]>([]);
+  /** Every agent, for the live one's name in the composer. */
+  const [agents, setAgents] = useState<ConversationView[]>([]);
   const [missing, setMissing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -94,10 +95,12 @@ export function LineDetail({ slug }: { slug: string }) {
     return t && TABS.includes(t) ? t : "transcript";
   });
   const [picker, setPicker] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [moveTo, setMoveTo] = useState("");
   const [saving, setSaving] = useState(false);
   const [hearing, setHearing] = useState<string | null>(null);
   const [pinning, setPinning] = useState(false);
-  const [acting, setActing] = useState<"switch" | "compact" | "settle" | "unsettle" | "export" | "call" | "hangup" | "send" | null>(null);
+  const [acting, setActing] = useState<"switch" | "compact" | "retire" | "rehire" | "move" | "call" | "hangup" | "send" | null>(null);
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -105,29 +108,28 @@ export function LineDetail({ slug }: { slug: string }) {
   const liveSlug = inSession ? (status?.conversation ?? "ghost") : null;
   const live = liveSlug === slug;
   const isGhost = slug === "ghost";
-  const name = lineName(slug, detail?.name);
-  // Settled (ADR 0019): out of voice routing and the active list, everything readable, nothing editable.
-  const settled = settledAt(detail);
-  const readOnly = settled !== null;
-  // Where the line sits (ADR 0023): a department of its own, or a topic line inside one.
-  const department = departmentOf(detail);
-  const dept = isDepartment(detail);
-  const deptLine = department ? (lines.find((l) => l.slug === department) ?? null) : null;
-  const deptName = departmentName(department, lines);
-  const deptToolkits = deptLine ? toolkitsOf(deptLine) : [];
+  const name = agentName(slug, detail?.name);
+  // Retired (ADR 0024): off the roster and voice routing, everything readable, nothing editable.
+  const retired = retiredAt(detail);
+  const readOnly = retired !== null;
+  // The department's own agent (named for it) keeps its name and cannot move, retire or be deleted.
+  const isDefault = !!detail?.is_default;
+  const department = detail?.department ?? "ghost";
+  const dept = departments.find((d) => d.slug === department) ?? null;
+  const deptName = departmentTitle(department, departments);
 
   const setTab = (t: TabId) => {
     setTabState(t);
     writeParam("tab", t === "transcript" ? null : t, slug);
   };
-  // The view and dialog params belong to this line: another line's leftovers are dropped on
+  // The view and dialog params belong to this agent: another agent's leftovers are dropped on
   // the way in, and nothing outlives the screen on the way out.
   useEffect(() => {
     claimParams(slug);
   }, [slug]);
   useEffect(
     () => () => {
-      if (!window.location.hash.startsWith("#/lines/")) clearParams();
+      if (!window.location.hash.startsWith("#/agents/")) clearParams();
     },
     [],
   );
@@ -148,7 +150,7 @@ export function LineDetail({ slug }: { slug: string }) {
       setDetail(d);
       setBase(next);
       setDraftState(merged);
-      if (dirtyKeys(merged, next, d.is_ghost).length) drafts.set(slug, { draft: merged, base: next });
+      if (dirtyKeys(merged, next, d.is_default).length) drafts.set(slug, { draft: merged, base: next });
       else drafts.delete(slug);
     },
     [slug],
@@ -159,7 +161,7 @@ export function LineDetail({ slug }: { slug: string }) {
     const next = { ...draftRef.current, ...patch };
     draftRef.current = next;
     setDraftState(next);
-    if (dirtyKeys(next, baseRef.current, detail.is_ghost).length) drafts.set(slug, { draft: next, base: baseRef.current });
+    if (dirtyKeys(next, baseRef.current, detail.is_default).length) drafts.set(slug, { draft: next, base: baseRef.current });
     else drafts.delete(slug);
   };
 
@@ -179,7 +181,7 @@ export function LineDetail({ slug }: { slug: string }) {
 
   const load = useCallback(async () => {
     try {
-      if (designFail(design, "line")) throw new Error("Ghost couldn’t read the conversations database (database is locked).");
+      if (designFail(design, "agent")) throw new Error("Ghost couldn’t read the agent (database is locked).");
       const [d, t, c] = await Promise.all([
         client.conversation(slug),
         client.conversationTurns(slug, TURN_LIMIT),
@@ -197,7 +199,7 @@ export function LineDetail({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, slug, apply]);
 
-  // While this line is live its transcript grows with the session.
+  // While this agent is live its transcript grows with the session.
   const liveTurns = live ? sessionTurns.length : 0;
   useEffect(() => {
     void load();
@@ -210,32 +212,27 @@ export function LineDetail({ slug }: { slug: string }) {
       .catch(() => setVoices([]));
   }, [client, status?.models_ready]);
 
-  // Which servers can be scoped, and their allowlists: the choices in the Scope section. With
-  // them, the toolkits the file declares and the other lines (a topic line's department).
   useEffect(() => {
-    if (isGhost) return;
     let on = true;
     client
-      .sources()
-      .then((a) => on && setSources(scopedSources(a)))
-      .catch(() => on && setSources([]));
-    client
-      .toolkits()
-      .then((t) => on && setToolkitList(t))
-      .catch(() => on && setToolkitList([]));
+      .departments()
+      .then((d) => on && setDepartments(d))
+      .catch(() => on && setDepartments([]));
     client
       .conversations()
-      .then((l) => on && setLines(l))
+      .then((l) => on && setAgents(l))
       .catch(() => {});
     return () => {
       on = false;
     };
-  }, [client, isGhost, conversationsVersion]);
+  }, [client, conversationsVersion]);
 
   // ---------------------------------------------------------------- derived
-  const dirty = useMemo(() => (draft && base && detail ? dirtyKeys(draft, base, detail.is_ghost) : []), [draft, base, detail]);
-  const voice = draft ? (voices.find((v) => v.id === draft.voice) ?? parseVoice(draft.voice)) : null;
-  const pickable = useMemo(() => (draft && !voices.some((v) => v.id === draft.voice) ? [...voices, parseVoice(draft.voice)] : voices), [voices, draft]);
+  const dirty = useMemo(() => (draft && base && detail ? dirtyKeys(draft, base, detail.is_default) : []), [draft, base, detail]);
+  // The voice heard: the agent's own when it has one, else its department's (the detail reports the one in force).
+  const heardId = draft?.voice || detail?.voice || "af_heart";
+  const voice = draft ? (voices.find((v) => v.id === heardId) ?? parseVoice(heardId)) : null;
+  const pickable = useMemo(() => (draft && !voices.some((v) => v.id === heardId) ? [...voices, parseVoice(heardId)] : voices), [voices, draft, heardId]);
   const hearBlocked = !online ? "Ghost isn’t answering right now." : !status?.models_ready ? "Hear it works once the voice models finish loading." : null;
   const lastVersion = [...versions].sort((a, b) => b.at.localeCompare(a.at))[0];
 
@@ -248,11 +245,7 @@ export function LineDetail({ slug }: { slug: string }) {
     setNotice(null);
     const words = listWords(dirty);
     try {
-      // A department's toolkits have their own route (ADR 0023); every other field goes in one PATCH.
-      const rest = dirty.filter((k) => k !== "toolkits");
-      let d = rest.length ? await client.updateConversation(slug, updateBody(draft, rest)) : null;
-      if (dirty.includes("toolkits")) d = await client.setConversationToolkits(slug, draft.toolkits);
-      if (!d) return;
+      const d = await client.updateConversation(slug, updateBody(draft, dirty));
       drafts.delete(slug);
       apply(d, false);
       toast({ title: "Saved", description: `${name}’s ${words} ${dirty.length === 1 && !["notes", "aliases"].includes(dirty[0]) ? "is" : "are"} updated. Each change is in the audit log.`, tone: "ok" });
@@ -312,7 +305,7 @@ export function LineDetail({ slug }: { slug: string }) {
     }
   };
 
-  // Call: a session on this line, the way a wake is one on Ghost. Hang up ends whichever is live.
+  // Call: a session with this agent, the way a wake is one with Ghost. Hang up ends whichever is live.
   const modelsReady = !!status?.models_ready && !loadingModels;
   const call = async () => {
     setActing("call");
@@ -335,7 +328,7 @@ export function LineDetail({ slug }: { slug: string }) {
       setActing(null);
     }
   };
-  // Typed to this line: into the live session when it is here, else a new session on this line.
+  // Typed to this agent: into the live session when it is here, else a new session with this agent.
   const send = async () => {
     const t = text.trim();
     if (!t || acting) return;
@@ -357,12 +350,12 @@ export function LineDetail({ slug }: { slug: string }) {
   };
 
   const switchTo = async (target: string) => {
-    const to = target === slug ? name : lineName(target);
+    const to = target === slug ? name : agentName(target);
     setActing("switch");
     try {
       const r = await client.switchConversation(target);
       if (r.ok === false) setNotice({ title: `Couldn’t switch to ${to}`, text: r.detail ?? "Ghost didn’t take the switch. Try again, or say it." });
-      else toast({ title: `Patched through to ${to}`, description: target === "ghost" ? "You’re back on the main line." : `The session is on the ${to} line now.` });
+      else toast({ title: `Transferred to ${to}`, description: target === "ghost" ? "You’re back with Ghost." : `The session is with ${to} now.` });
     } catch (e) {
       fail(`Couldn’t switch to ${to}`, e);
     } finally {
@@ -385,7 +378,7 @@ export function LineDetail({ slug }: { slug: string }) {
   const reset = async () => {
     const ok = await confirm({
       title: `Reset ${name}?`,
-      description: `Ghost forgets ${name}’s memory, pinned notes and transcript. The name, voice and persona stay.`,
+      description: `Ghost forgets ${name}’s memory, pinned notes and transcript. The name, job, voice and persona stay.`,
       confirmLabel: `Reset ${name}`,
       tone: "danger",
     });
@@ -402,37 +395,36 @@ export function LineDetail({ slug }: { slug: string }) {
     }
   };
 
-  // Settle: announce-level, nothing destroyed (ADR 0019). Unsaved edits can't be kept on a
-  // read-only line, so they are dropped with the settle; the dialog says so when there are any.
-  const settle = async () => {
+  // Retire: announce-level, nothing destroyed (ADR 0024). Unsaved edits can't be kept on a
+  // read-only agent, so they are dropped with the retire; the dialog says so when there are any.
+  const retire = async () => {
     const ok = await confirm({
-      title: `Settle ${name}?`,
-      description: `${name} leaves voice routing and the list of lines you can patch through to. Its transcript, memory and notes stay here to read, and Unsettle brings it back.${dirty.length ? " Your unsaved changes here are dropped." : ""}`,
-      confirmLabel: `Settle ${name}`,
+      title: `Retire ${name}?`,
+      description: `${name} leaves voice routing and the roster. Its transcript, memory and notes stay here to read, and Rehire brings it back.${dirty.length ? " Your unsaved changes here are dropped." : ""}`,
+      confirmLabel: `Retire ${name}`,
     });
     if (!ok) return;
-    setActing("settle");
+    setActing("retire");
     try {
-      // The route answers with an Ack, so the line is read back; the conversation event refreshes the lists.
-      await settleLine(client, slug);
+      await retireAgent(client, slug);
       drafts.delete(slug);
       baseRef.current = null;
       draftRef.current = null;
       await load();
-      toast({ title: `Settled ${name}`, description: "It stays readable here and is out of voice routing. Unsettle brings it back." });
+      toast({ title: `Retired ${name}`, description: "It stays readable here and is out of voice routing. Rehire brings it back." });
     } catch (e) {
-      fail(`Couldn’t settle ${name}`, e);
+      fail(`Couldn’t retire ${name}`, e);
     } finally {
       setActing(null);
     }
   };
 
-  const unsettle = async () => {
-    setActing("unsettle");
+  const rehire = async () => {
+    setActing("rehire");
     try {
-      await unsettleLine(client, slug);
+      await rehireAgent(client, slug);
       await load();
-      toast({ title: `${name} is back`, description: `Say ${quoted(`patch me to ${name.toLowerCase()}`)} to reach it again.` });
+      toast({ title: `${name} is back`, description: `Say ${quoted(`transfer me to ${name.toLowerCase()}`)} to reach it again.` });
     } catch (e) {
       fail(`Couldn’t bring ${name} back`, e);
     } finally {
@@ -440,23 +432,33 @@ export function LineDetail({ slug }: { slug: string }) {
     }
   };
 
-  // A department written back out as one of the operator's own templates (ADR 0023).
-  const exportTemplate = async () => {
-    setActing("export");
+  // Move (ADR 0024): the agent's folder goes into another department; it keeps its name,
+  // persona, memory and transcript and works with that department's tools from then on.
+  const move = async () => {
+    if (!moveTo || moveTo === department) return;
+    setActing("move");
     try {
-      const t = await client.exportTemplate(slug);
-      toast({ title: "Saved as a template", description: `${t.title} is in ${t.path.replace(/^(?:\/home\/[^/]+|\/Users\/[^/]+|\/root)(?=\/|$)/, "~")}. New line can start a department from it.`, tone: "ok" });
+      const d = await moveAgent(client, slug, moveTo);
+      setMoving(false);
+      apply(d, false);
+      toast({ title: `Moved ${name} to ${departmentTitle(moveTo, departments)}`, description: "It works with that department’s servers, rules and memory from now on." });
     } catch (e) {
-      fail("Couldn’t save it as a template", e);
+      fail(`Couldn’t move ${name}`, e);
     } finally {
       setActing(null);
     }
   };
 
+  const openFolder = async () => {
+    if (!detail) return;
+    const r = await revealFolder(detail.dir);
+    if (!r.ok) toast({ title: "The agent’s folder", description: `${r.path} (open it in your file manager; this build can’t open folders itself).` });
+  };
+
   const remove = async () => {
     const ok = await confirm({
       title: `Delete ${name}?`,
-      description: `The line goes, with its persona, memory, pinned notes and transcript.`,
+      description: `The agent goes, with its folder: persona, memory, pinned notes and transcript. Retire keeps them.`,
       confirmLabel: `Delete ${name}`,
       tone: "danger",
     });
@@ -465,7 +467,7 @@ export function LineDetail({ slug }: { slug: string }) {
       await client.deleteConversation(slug);
       drafts.delete(slug);
       toast({ title: `Deleted ${name}` });
-      navigate("/lines");
+      navigate("/agents");
     } catch (e) {
       fail(`Couldn’t delete ${name}`, e);
     }
@@ -486,7 +488,7 @@ export function LineDetail({ slug }: { slug: string }) {
   }, []);
 
   // Design mode: open a dialog or make a draft from the URL, for screenshots of each state.
-  // The destructive dialogs open only with the mock, and never over a line Ghost is on.
+  // The destructive dialogs open only with the mock, and never over an agent Ghost is with.
   const opened = useRef(false);
   useEffect(() => {
     if (!detail || opened.current) return;
@@ -495,8 +497,8 @@ export function LineDetail({ slug }: { slug: string }) {
     if (o === "voice") setPicker(true);
     if (import.meta.env.DEV && design && !live) {
       if (o === "reset") void reset();
-      if (o === "delete" && !isGhost) void remove();
-      if (o === "settle" && !isGhost && !readOnly) void settle();
+      if (o === "delete" && !isDefault) void remove();
+      if (o === "retire" && !isDefault && !readOnly) void retire();
     }
     if (design && readParam("dirty") && draftRef.current) {
       setDraft({ persona: `${draftRef.current.persona}\nRead amounts in dollars, never cents.`.trim(), voice: "bm_lewis" });
@@ -504,7 +506,7 @@ export function LineDetail({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
 
-  // A line just created opens with focus in its persona (set by the index before navigating).
+  // An agent just hired opens with focus in its persona (set by the index before navigating).
   const personaRef = useRef<HTMLTextAreaElement>(null);
   const memoryRef = useRef<HTMLTextAreaElement>(null);
   const personaRows = useAutoRows(personaRef, draft?.persona ?? "", 2, 16);
@@ -519,7 +521,7 @@ export function LineDetail({ slug }: { slug: string }) {
 
   const retry = async () => {
     setRetrying(true);
-    designRetry("line");
+    designRetry("agent");
     await load();
     setRetrying(false);
   };
@@ -527,13 +529,13 @@ export function LineDetail({ slug }: { slug: string }) {
   // ---------------------------------------------------------------- render
   if (missing) {
     return (
-      <Page width="default" title="Line not found" bare>
+      <Page width="default" title="Agent not found" bare>
         <EmptyState
           size="page"
           icon={<SearchX />}
-          title={`There’s no line called ${quoted(slug)}`}
+          title={`There’s no agent called ${quoted(slug)}`}
           description="It may have been deleted, or the link has a typo."
-          actions={<Button href="#/lines">See all lines</Button>}
+          actions={<Button href="#/agents">See all agents</Button>}
         />
       </Page>
     );
@@ -541,19 +543,21 @@ export function LineDetail({ slug }: { slug: string }) {
 
   const meta: string[] = [];
   if (detail) {
-    if (isGhost) meta.push("Main line");
-    if (department) meta.push(`a line in ${deptName}`);
-    if (settled) meta.push(`settled ${relativeTime(settled)}`);
+    if (isGhost) meta.push("Every wake lands here");
+    else if (isDefault) meta.push(`the ${deptName} department’s own agent`);
+    else meta.push(`in ${deptName}`);
+    if (detail.job && !isDefault) meta.push(detail.job);
+    if (retired) meta.push(`retired ${relativeTime(retired)}`);
     if (!live) meta.push(detail.last_active_at ? `last used ${relativeTime(detail.last_active_at)}` : "not used yet");
     if (detail.turn_count) {
       meta.push(plural(detail.turn_count, "turn"));
       meta.push(detail.compactions ? `compacted ${times(detail.compactions)}` : "never compacted");
     }
   }
-  // The page status is the line's own state while it is live, in the sidebar's words
+  // The page status is the agent's own state while it is live, in the sidebar's words
   // ("Waiting on your okay" in amber while a change waits here, else "Live · listening"), and
   // Ghost's state otherwise, like every other screen. Either way it stays in the compact bar
-  // when the header scrolls away. The description keeps the line's facts.
+  // when the header scrolls away. The description keeps the agent's facts.
   const state = lineState({ live, pending: !!pending, connection, phase, lastActive: detail?.last_active_at ?? null });
   const waiting = state.tone === "waiting";
   const pageStatus = live ? <LineStateText state={state} connection={connection} phase={phase} /> : <LiveStatus />;
@@ -565,32 +569,31 @@ export function LineDetail({ slug }: { slug: string }) {
     </span>
   );
 
-  // Reset and delete need the session elsewhere. On the live line the menu says so and offers
-  // the way out (back to Ghost). Every line, Ghost included, keeps them behind the same More
-  // menu; Ghost has no Delete, and while Ghost is live its Reset is disabled with the reason.
-  // The conversation is the page; its settings (voice and persona, memory, history) live
-  // behind the same More menu as the actions (the operator's call, 2026-10-20).
+  // Reset and delete need the session elsewhere. On the live agent the menu says so and offers
+  // the way out (back to Ghost). Every agent keeps them behind the same More menu; a
+  // department's own agent has no Move, Retire or Delete, and while it is live its Reset is
+  // disabled with the reason.
   const mark = (keys: DraftKey[]) => (dirty.some((k) => keys.includes(k)) ? " (unsaved)" : "");
   const settingsItems: MenuItem[] = [
     { heading: "Settings" },
     { label: `Voice and persona${mark(PERSONA_KEYS)}`, icon: <SlidersHorizontal />, onSelect: () => setTab("persona") },
     { label: `Memory${mark(MEMORY_KEYS)}`, icon: <Brain />, onSelect: () => setTab("memory") },
     { label: "History", icon: <Clock />, onSelect: () => setTab("history") },
+    { label: "Open folder", icon: <FolderOpen />, onSelect: () => void openFolder() },
     "separator",
-    // A department can be written out as a template: its persona, toolkits and skills, to start another from (ADR 0023).
-    ...(dept && !readOnly ? ([{ label: "Save as template", icon: <FileOutput />, onSelect: () => void exportTemplate() }, "separator"] as MenuItem[]) : []),
   ];
+  const busyHere = { disabled: true, reason: "Ghost is with this agent" };
   const menu = detail && (
     <Menu
       align="end"
       trigger={<IconButton label={`More for ${name}`} icon={<MoreHorizontal />} variant="secondary" disabled={!online} />}
       items={[
         ...settingsItems,
-        ...((isGhost
-          ? [live ? { label: "Reset Ghost…", icon: <RotateCcw />, onSelect: () => void reset(), disabled: true, reason: "Ghost is on this line" } : { label: "Reset Ghost…", icon: <RotateCcw />, onSelect: () => void reset() }]
+        ...((isDefault
+          ? [live ? { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset(), ...busyHere } : { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset() }]
           : readOnly
             ? [
-                { label: `Unsettle ${name}`, icon: <ArchiveRestore />, onSelect: () => void unsettle() },
+                { label: `Rehire ${name}`, icon: <ArchiveRestore />, onSelect: () => void rehire() },
                 "separator",
                 { label: `Delete ${name}…`, icon: <Trash2 />, danger: true, onSelect: () => void remove() },
               ]
@@ -599,12 +602,14 @@ export function LineDetail({ slug }: { slug: string }) {
                 { label: "Switch to Ghost", icon: <ArrowLeftRight />, onSelect: () => void switchTo("ghost") },
                 "separator",
                 // Not red while it can't be chosen: a red label reads as available.
-                { label: `Settle ${name}…`, icon: <Archive />, onSelect: () => void settle(), disabled: true, reason: "Ghost is on this line" },
-                { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset(), disabled: true, reason: "Ghost is on this line" },
-                { label: `Delete ${name}…`, icon: <Trash2 />, onSelect: () => void remove(), disabled: true, reason: "Ghost is on this line" },
+                { label: `Move ${name}…`, icon: <ArrowRightLeft />, onSelect: () => setMoving(true), disabled: true, reason: "Ghost is with this agent; say “move this to …” instead" },
+                { label: `Retire ${name}…`, icon: <Archive />, onSelect: () => void retire(), ...busyHere },
+                { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset(), ...busyHere },
+                { label: `Delete ${name}…`, icon: <Trash2 />, onSelect: () => void remove(), ...busyHere },
               ]
             : [
-                { label: `Settle ${name}…`, icon: <Archive />, onSelect: () => void settle() },
+                { label: `Move ${name}…`, icon: <ArrowRightLeft />, onSelect: () => setMoving(true) },
+                { label: `Retire ${name}…`, icon: <Archive />, onSelect: () => void retire() },
                 { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset() },
                 "separator",
                 { label: `Delete ${name}…`, icon: <Trash2 />, danger: true, onSelect: () => void remove() },
@@ -621,7 +626,7 @@ export function LineDetail({ slug }: { slug: string }) {
           Review the change
         </Button>
       )}
-      {/* Nothing live: Call opens a session here. Live here: Hang up. Live elsewhere: patch it through. */}
+      {/* Nothing live: Call opens a session here. Live here: Hang up. Live elsewhere: transfer it. */}
       {!inSession && !readOnly && (
         <Button
           variant={waiting || dirty.length ? "secondary" : "primary"}
@@ -639,10 +644,10 @@ export function LineDetail({ slug }: { slug: string }) {
           Switch to {name}
         </Button>
       )}
-      {/* On a settled line, bringing it back is the one thing to do here. */}
+      {/* On a retired agent, bringing it back is the one thing to do here. */}
       {readOnly && (
-        <Button variant="primary" leadingIcon={<ArchiveRestore />} loading={acting === "unsettle"} disabled={!online} onClick={() => void unsettle()}>
-          Unsettle
+        <Button variant="primary" leadingIcon={<ArchiveRestore />} loading={acting === "rehire"} disabled={!online} onClick={() => void rehire()}>
+          Rehire
         </Button>
       )}
       {live && (
@@ -667,8 +672,8 @@ export function LineDetail({ slug }: { slug: string }) {
       </>
     ) : null;
 
-  // Typing to the line: on when the session is here or there is none; while Ghost is on
-  // another line the field says so, and Switch in the header is the way over.
+  // Typing to the agent: on when the session is here or there is none; while Ghost is with
+  // another agent the field says so, and Switch in the header is the way over.
   const elsewhere = inSession && !live;
   const canType = online && modelsReady && !elsewhere && (!inSession || live);
   const composerDock = detail && !readOnly && tab === "transcript" && (
@@ -680,7 +685,7 @@ export function LineDetail({ slug }: { slug: string }) {
         onSubmit={() => void send()}
         disabled={!canType || (acting !== null && acting !== "send")}
         sending={acting === "send"}
-        placeholder={!online ? "Reconnecting…" : elsewhere ? `Ghost is on the ${lineName(liveSlug!, lines.find((l) => l.slug === liveSlug)?.name)} line` : `Type to ${name}…`}
+        placeholder={!online ? "Reconnecting…" : elsewhere ? `Ghost is with ${agentName(liveSlug!, agents.find((l) => l.slug === liveSlug)?.name)}` : `Type to ${name}…`}
         label={`Message ${name}`}
         presence={live ? phase : undefined}
       />
@@ -698,6 +703,8 @@ export function LineDetail({ slug }: { slug: string }) {
       />
     ) : composerDock || undefined;
 
+  const destinations = departments.filter((d) => d.slug !== department);
+
   return (
     <Page
       width="default"
@@ -705,9 +712,9 @@ export function LineDetail({ slug }: { slug: string }) {
       title={name}
       leading={<LineGlyph slug={slug} name={name} size="xl" />}
       crumb={
-        <Link to="/lines">
+        <Link to="/agents">
           <ChevronLeft size={14} aria-hidden />
-          Lines
+          Agents
         </Link>
       }
       status={pageStatus}
@@ -721,11 +728,11 @@ export function LineDetail({ slug }: { slug: string }) {
         </Notice>
       )}
 
-      {settled && (
+      {retired && (
         <p className="conv-settled t-small">
           <Archive size={14} aria-hidden />
           <span>
-            Settled {relativeTime(settled)}. Read-only until you bring it back: {quoted(`patch me to ${name.toLowerCase()}`)} does nothing, and nothing here can change.
+            Retired {relativeTime(retired)}. Read-only until you bring it back: {quoted(`transfer me to ${name.toLowerCase()}`)} does nothing, and nothing here can change.
           </span>
         </p>
       )}
@@ -737,7 +744,7 @@ export function LineDetail({ slug }: { slug: string }) {
             title={`Couldn’t load ${name}`}
             description={
               <>
-                Ghost didn’t send this line. Try again in a moment.
+                Ghost didn’t send this agent. Try again in a moment.
                 <span className="conv-error-detail t-small t-3">{loadError}</span>
               </>
             }
@@ -769,7 +776,9 @@ export function LineDetail({ slug }: { slug: string }) {
               title="Persona"
               description={
                 isGhost ? (
-                  <>Ghost is the main line: every wake starts here, and {quoted("back to Ghost")} returns here. Its persona is in your words and goes into the prompt as written; Ghost never rewrites it.</>
+                  <>Ghost is where every wake starts, and {quoted("back to Ghost")} returns here. Its persona is in your words and goes into the prompt as written; Ghost never rewrites it.</>
+                ) : isDefault ? (
+                  <>The department’s own agent speaks as the department’s rules (its AGENTS.md). A persona here adds to that, in your words, as written.</>
                 ) : (
                   "In your words. It goes into the prompt as written; Ghost never rewrites it."
                 )
@@ -788,74 +797,61 @@ export function LineDetail({ slug }: { slug: string }) {
               />
             </Section>
 
-            {dept && (
-              <Section id="conv-toolkits" title="Toolkits" description={<>What this department and its lines may reach: the union of its toolkits. Nothing checked reaches everything, like Ghost. Design toolkits on the <Link to="/toolkits">Toolkits</Link> screen.</>}>
-                <ToolkitPicker toolkits={toolkitList} value={draft.toolkits} onChange={(toolkits) => setDraft({ toolkits })} disabled={readOnly} idPrefix="conv-toolkit" />
-              </Section>
-            )}
-            {department && (
-              <Section id="conv-department" title="Department" description="A topic line: it reaches what its department reaches, and its scope below can only narrow that.">
-                <Card padding="none">
-                  <div className="conv-dept">
-                    <p className="conv-dept__lead">
-                      A line in <Link to={`/lines/${department}`}>{deptName}</Link>.
-                    </p>
-                    <p className="conv-dept__sub">
-                      {deptLine ? (deptToolkits.length ? <>Reaches what {deptToolkits.length === 1 ? "the toolkit" : "the toolkits"} <span className="t-mono">{deptToolkits.join(", ")}</span> {deptToolkits.length === 1 ? "grants" : "grant"}.</> : `${deptName} reaches everything, like Ghost, so this line does too.`) : "Reaches what the department reaches."}
-                    </p>
-                  </div>
-                </Card>
-              </Section>
-            )}
             <Section
-              id="conv-scope"
-              title="Scope"
+              id="conv-department"
+              title="Department"
               description={
-                isGhost ? (
-                  "Ghost is the main line and sees everything: every repository and anything else a server allows."
-                ) : department ? (
-                  <>What this line may read and change, within what {deptName} reaches. Outside its scope, Ghost says it belongs to another line. Ghost never writes outside it.</>
-                ) : (
-                  <>What this line may read and change. Outside its scope, Ghost says it belongs to another line; Settings decides whether it answers read-only or patches you through. Ghost never writes outside it.</>
-                )
+                isGhost ? "Ghost is a department too: its servers, rules and skills live in its own folder." : `What this agent reaches: ${deptName}’s servers, skills and rules, and what ${deptName} knows.`
               }
+              actions={!isDefault && !readOnly && !live ? <Button size="sm" variant="secondary" leadingIcon={<ArrowRightLeft />} onClick={() => setMoving(true)}>Move…</Button> : undefined}
             >
-              {isGhost ? (
-                <Card>
-                  <p className="conv-scope__all t-body">Ghost sees everything.</p>
-                </Card>
-              ) : (
-                <ScopePicker sources={sources && department ? narrowSources(sources, deptToolkits, toolkitList) : sources} value={draft.scope} onChange={(scope) => setDraft({ scope })} disabled={readOnly} idPrefix="conv-scope" />
-              )}
+              <Card padding="none">
+                <div className="conv-dept">
+                  <p className="conv-dept__lead">
+                    <Building2 size={14} aria-hidden /> <Link to={`/departments/${department}`}>{deptName}</Link>
+                  </p>
+                  <p className="conv-dept__sub">
+                    {dept
+                      ? [dept.servers.length ? `${plural(dept.servers.length, "server")}${dept.uses.length ? ` and ${plural(dept.uses.length, "shared one")}` : ""}` : dept.uses.length ? plural(dept.uses.length, "shared server") : "no servers", plural(dept.skills.length, "skill"), dept.rules_lead ? `rules: ${dept.rules_lead}` : "no rules yet"].join(" · ")
+                      : "Loading the department…"}
+                  </p>
+                </div>
+              </Card>
             </Section>
 
-            <Section id="conv-voice" title="Voice">
+            <Section id="conv-voice" title="Voice" description={draft.voice ? "Its own voice." : `${deptName}’s voice: a move changes it, so a move can be heard.`}>
               <Card list>
                 <div className="conv-voice">
                   <IconButton
                     variant="secondary"
                     className="conv-voice__play"
-                    label={hearing === draft.voice ? `Playing ${voice ? voiceTitle(voice, voices) : draft.voice}` : `Hear ${voice ? voiceTitle(voice, voices) : draft.voice}`}
-                    icon={hearing === draft.voice ? <PlayingBars /> : <Play />}
-                    disabled={!!hearBlocked || (hearing != null && hearing !== draft.voice)}
-                    onClick={() => void hear(draft.voice)}
+                    label={hearing === heardId ? `Playing ${voice ? voiceTitle(voice, voices) : heardId}` : `Hear ${voice ? voiceTitle(voice, voices) : heardId}`}
+                    icon={hearing === heardId ? <PlayingBars /> : <Play />}
+                    disabled={!!hearBlocked || (hearing != null && hearing !== heardId)}
+                    onClick={() => void hear(heardId)}
                   />
                   <div className="conv-voice__text">
                     <p className="t-medium">{voice && voiceTitle(voice, voices)}</p>
                     <p className="t-small t-2" aria-live="polite">
-                      {hearing === draft.voice && !picker ? (
+                      {hearing === heardId && !picker ? (
                         <span className="conv-playing">Playing on your speakers…</span>
                       ) : (
                         <>
                           {voice && voiceKind(voice)}
                           <span className="t-3"> · </span>
-                          <span className="t-mono t-3">{draft.voice}</span>
+                          <span className="t-mono t-3">{heardId}</span>
+                          {!draft.voice && <span className="t-3"> · the department’s</span>}
                         </>
                       )}
                     </p>
                   </div>
+                  {draft.voice && !isGhost && !isDefault && (
+                    <Button variant="ghost" disabled={readOnly} onClick={() => setDraft({ voice: "" })}>
+                      Use the department’s
+                    </Button>
+                  )}
                   <Button variant="secondary" disabled={readOnly} onClick={() => setPicker(true)}>
-                    Change voice
+                    {draft.voice ? "Change voice" : "Give it a voice"}
                   </Button>
                 </div>
                 <Field layout="inline" label="Speed" help="1.00× is the voice’s natural pace." className="conv-cell">
@@ -865,18 +861,30 @@ export function LineDetail({ slug }: { slug: string }) {
               {hearBlocked && <p className="t-small t-3">{hearBlocked}</p>}
             </Section>
 
-            {!isGhost && (
-              <Section id="conv-name" title="How you reach it" description={<>What you say in a session: {quoted(`patch me to ${(draft.name.trim() || name).toLowerCase()}`)}.</>}>
-                <Card list>
-                  <Field layout="inline" label="Name" className="conv-cell" error={draft.name.trim() ? undefined : "A line needs a name."}>
+            <Section id="conv-name" title="How you reach it" description={<>What you say in a session: {quoted(`transfer me to ${(draft.name.trim() || name).toLowerCase()}`)}.</>}>
+              <Card list>
+                {!isDefault && (
+                  <Field layout="inline" label="Name" className="conv-cell" error={draft.name.trim() ? undefined : "An agent needs a name."}>
                     <Input value={draft.name} placeholder={name} disabled={readOnly} onChange={(e) => setDraft({ name: e.target.value })} />
                   </Field>
+                )}
+                {!isDefault && (
                   <Field layout="inline" label="Also answers to" help="Other names, separated by commas." className="conv-cell">
                     <Input value={draft.aliases} placeholder={aliasExample(draft.name || name)} disabled={readOnly} onChange={(e) => setDraft({ aliases: e.target.value })} />
                   </Field>
-                </Card>
-              </Section>
-            )}
+                )}
+                {!isDefault && (
+                  <Field layout="inline" label="Job" help="What it was hired for, in a line." className="conv-cell">
+                    <Input value={draft.job} placeholder="brand design" maxLength={200} disabled={readOnly} onChange={(e) => setDraft({ job: e.target.value })} />
+                  </Field>
+                )}
+                {isDefault && (
+                  <div className="conv-cell">
+                    <p className="t-small t-2">{isGhost ? "Ghost keeps its name." : `Named for its department: ${quoted(`transfer me to ${deptName.toLowerCase()}`)} lands here.`}</p>
+                  </div>
+                )}
+              </Card>
+            </Section>
           </>
         ) : tab === "memory" ? (
           <>
@@ -885,8 +893,8 @@ export function LineDetail({ slug }: { slug: string }) {
               title="Memory"
               description={
                 readOnly
-                  ? `The summary this line ended with. Start a new line from it to carry it on.${lastVersion ? ` Updated ${relativeTime(lastVersion.at)}.` : ""}`
-                  : `The running summary Ghost keeps for this line. Compacting rewrites it; your edits are folded into the next version.${lastVersion ? ` Updated ${relativeTime(lastVersion.at)}.` : ""}`
+                  ? `The summary this agent ended with. Start a new agent from it to carry it on.${lastVersion ? ` Updated ${relativeTime(lastVersion.at)}.` : ""}`
+                  : `The running summary Ghost keeps for this agent. Compacting rewrites it; your edits are folded into the next version.${lastVersion ? ` Updated ${relativeTime(lastVersion.at)}.` : ""}`
               }
             >
               <Textarea
@@ -905,11 +913,11 @@ export function LineDetail({ slug }: { slug: string }) {
                   <Button
                     variant="secondary"
                     onClick={() => {
-                      newLineSeed.slug = slug;
-                      navigate("/lines");
+                      newAgentSeed.slug = slug;
+                      navigate("/agents");
                     }}
                   >
-                    Start a line from this memory
+                    Start an agent from this memory
                   </Button>
                 </div>
               )}
@@ -918,7 +926,7 @@ export function LineDetail({ slug }: { slug: string }) {
               <Notes notes={draft.notes} saved={base?.notes ?? []} onChange={(notes) => setDraft({ notes })} onPin={pin} pinning={pinning} disabled={!online || readOnly} />
             </Section>
             <p className="conv-files t-small t-3">
-              Persona, memory and notes are files in <span className="t-mono">{detail.dir}</span>
+              Persona, memory and notes are files in <span className="t-mono">{detail.dir}</span>. {dept && !isGhost ? <>What the whole department knows is on <Link to={`/departments/${department}`}>its page</Link>.</> : null}
             </p>
           </>
         ) : tab === "transcript" ? (
@@ -951,13 +959,35 @@ export function LineDetail({ slug }: { slug: string }) {
           }}
           lineName={name}
           voices={pickable}
-          value={draft.voice}
+          value={heardId}
           onPick={(id) => setDraft({ voice: id })}
           hearBlocked={hearBlocked}
           hearing={hearing}
           onHear={(id) => void hear(id)}
         />
       )}
+      <Dialog
+        open={moving}
+        onClose={() => setMoving(false)}
+        dismissible={acting !== "move"}
+        size="sm"
+        title={`Move ${name}`}
+        description={`${name} keeps its name, persona, memory and transcript, and works with the destination’s servers, rules and shared memory from then on. There is no undo; moving back is another move.`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setMoving(false)} disabled={acting === "move"}>
+              Cancel
+            </Button>
+            <Button variant="primary" loading={acting === "move"} disabled={!moveTo || moveTo === department || !online} onClick={() => void move()}>
+              Move to {moveTo ? departmentTitle(moveTo, departments) : "…"}
+            </Button>
+          </>
+        }
+      >
+        <Field label="Department">
+          <Select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} options={[{ value: "", label: "Pick a department" }, ...destinations.map((d) => ({ value: d.slug, label: d.title }))]} />
+        </Field>
+      </Dialog>
       {dialog}
     </Page>
   );

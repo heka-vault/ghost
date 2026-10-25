@@ -37,12 +37,13 @@ export default function Home() {
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const line = status?.conversation && status.conversation !== "ghost" ? `${lineName(status.conversation)} line` : "main line";
-  const lines = conversations.filter((c) => !c.settled_at);
-  // The dial pad groups by department (ADR 0023): Ghost, then a key per department; its topic
-  // lines sit behind the key, in a sheet, so the pad stays one screen of big keys.
-  const keys = lines.filter((c) => c.is_ghost || !c.department);
-  const topicsOf = (slug: string) => lines.filter((c) => c.department === slug);
+  const line = status?.conversation && status.conversation !== "ghost" ? `${lineName(status.conversation)} agent` : "Ghost";
+  const lines = conversations.filter((c) => !c.retired_at);
+  // The dial pad groups by department (ADR 0024): Ghost, then a key per department (its own
+  // agent); the agents hired into it sit behind the key, in a sheet, so the pad stays one
+  // screen of big keys.
+  const keys = lines.filter((c) => c.is_default);
+  const topicsOf = (slug: string) => lines.filter((c) => c.department === slug && !c.is_default);
   const [opened, setOpened] = useState<string | null>(null);
   const openedLine = opened ? (lines.find((c) => c.slug === opened) ?? null) : null;
   const colors = useColors();
@@ -102,9 +103,9 @@ export default function Home() {
   } else if (inSession && pending) {
     hero = { presence: phase, title: "Ghost is waiting on you", body: splitSummary(pending).text, question: true };
   } else if (inSession) {
-    hero = { presence: phase, title: "You’re in a session", body: `On the ${line}. The mic is open on this phone.` };
+    hero = { presence: phase, title: "You’re in a session", body: `With ${line}. The mic is open on this phone.` };
   } else if (deskBusy) {
-    hero = { presence: phase, title: "Ghost is busy at your desk", body: `A session is running on the ${line} at ${workstation}. Start here once it ends.` };
+    hero = { presence: phase, title: "Ghost is busy at your desk", body: `A session is running with ${line} at ${workstation}. Start here once it ends.` };
   } else if (link === "reconnecting") {
     hero = { presence: "offline", title: "Lost your desk for a moment", body: "Start comes back as soon as the phone reaches it again." };
   } else if (loadingModels) {
@@ -184,8 +185,8 @@ export default function Home() {
                 <Pressable
                   key={c.slug}
                   accessibilityRole="button"
-                  accessibilityLabel={topics.length ? `${name}: ${topics.length === 1 ? "one line" : `${topics.length} lines`}` : `Call the ${name} line`}
-                  accessibilityHint={topics.length ? "Shows the department and its lines; pick one to call" : "Opens the mic on this phone, on that line"}
+                  accessibilityLabel={topics.length ? `${name}: ${topics.length === 1 ? "one line" : `${topics.length} agents`}` : `Call ${name}`}
+                  accessibilityHint={topics.length ? "Shows the department and its agents; pick one to call" : "Opens the mic on this phone, with that agent"}
                   accessibilityState={{ disabled: !ready }}
                   disabled={!ready}
                   onPress={() => (topics.length ? setOpened(c.slug) : void start(c.slug))}
@@ -209,7 +210,7 @@ export default function Home() {
                   </Text>
                   {topics.length > 0 ? (
                     <Text size="sm" color="text3" align="center" numberOfLines={1}>
-                      {topics.length === 1 ? "1 line" : `${topics.length} lines`}
+                      {topics.length === 1 ? "1 agent" : `${topics.length} agents`}
                     </Text>
                   ) : null}
                 </Pressable>
@@ -238,8 +239,8 @@ export default function Home() {
                         <Row
                           leading={<GhostGlyph size={28} color={colors.hue[lineHue(c.slug)].fg} />}
                           title={name}
-                          support={<Text size="md" color="text2">{i === 0 ? "The department’s own line" : `A line in ${lineName(openedLine.slug, openedLine.name)}`}</Text>}
-                          accessibilityLabel={`Call the ${name} line`}
+                          support={<Text size="md" color="text2">{i === 0 ? "The department’s own agent" : `An agent in ${lineName(openedLine.slug, openedLine.name)}`}</Text>}
+                          accessibilityLabel={`Call ${name}`}
                           onPress={() => {
                             setOpened(null);
                             void start(c.slug);

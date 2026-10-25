@@ -77,7 +77,7 @@ const MESSAGES: Record<string, string> = {
   closing: "Your last session is still closing on the desk. Try again in a few seconds.",
   not_ready: "Ghost is still loading its voice models. Try again in a moment.",
   unauthorized: "Your desk doesn’t recognise this phone any more. Pair it again in Settings.",
-  no_such_line: "That line isn’t there any more. Pull the list again and try another.",
+  no_such_line: "That agent isn’t there any more. Pull the list again and try another.",
 };
 
 export class LiveDesk implements Desk {
@@ -263,7 +263,7 @@ export class LiveDesk implements Desk {
   /** The threads a call can start in; Ghost first. Refreshed with the audit, and when one changes. */
   private async loadLines() {
     const lines = await this.request<ConversationView[]>("GET", "/conversations");
-    this.set({ conversations: lines.filter((c) => !c.settled_at) });
+    this.set({ conversations: lines.filter((c) => !c.retired_at) });
   }
 
   async loadAudit(limit: number) {
@@ -488,8 +488,8 @@ export class LiveDesk implements Desk {
   /** The notification's second line. */
   private callBody(): string {
     const conv = this.state.status?.conversation;
-    const line = `${conv && conv !== "ghost" ? lineName(conv) : "main"} line`;
-    return this.state.status?.phase === "hold" ? `Checked out of the ${line}. Say “Ghost” to bring it back.` : `In a session on the ${line}`;
+    const line = conv && conv !== "ghost" ? lineName(conv) : "Ghost";
+    return this.state.status?.phase === "hold" ? `Checked out from ${line}. Say “Ghost” to bring it back.` : `In a session with ${line}`;
   }
 
   /**

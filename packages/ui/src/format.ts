@@ -25,12 +25,15 @@ export function phaseText(phase: GhostPhase): string {
   return phaseLabel(phase);
 }
 
-/** Display name for a conversation slug when only the slug is known. */
-export function lineName(slug: string | null | undefined, name?: string): string {
+/** Display name for an agent (or a department) slug when only the slug is known. */
+export function agentName(slug: string | null | undefined, name?: string): string {
   if (!slug || slug === "ghost") return "Ghost";
   if (name) return name;
   return slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/** The older name of agentName, kept for the phone app. */
+export const lineName = agentName;
 
 /**
  * Short relative time for meta lines, written out by hand so it reads cleanly at 12px:

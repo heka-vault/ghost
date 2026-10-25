@@ -53,8 +53,8 @@ export function Transcript({ items, nameOf, thinkingAs }: TranscriptProps) {
           case "transfer":
             return (
               <Caption key={it.key} glyph={<LineGlyph slug={it.to} name={nameOf(it.to)} size="sm" />} rule>
-                {/* Without the line's own sentence (a switch seen only on the status stream) the marker keeps the same shape, timed by the new line's first words. */}
-                <span data-user-content>{it.text || (it.to === "ghost" ? "Back to Ghost" : `Patched through to ${nameOf(it.to)}`)}</span>
+                {/* Without the agent's own sentence (a switch seen only on the status stream) the marker keeps the same shape, timed by the new agent's first words. */}
+                <span data-user-content>{it.text || (it.to === "ghost" ? "Back to Ghost" : `Transferred to ${nameOf(it.to)}`)}</span>
                 {it.at && (
                   <>
                     {" · "}

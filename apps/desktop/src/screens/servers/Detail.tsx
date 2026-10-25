@@ -71,8 +71,8 @@ export function Detail({ server: s, source, headerAnchor }: DetailProps) {
           title="Scope"
           description={
             scope && words
-              ? `A line can be limited to ${words.many} on this server. The ${argumentWords(scope.arguments)} ${many ? "arguments name" : "argument names"} which one a call touches.`
-              : "No scope declared, so a line can’t be limited on this server: every line sees everything it offers. Add a scope to its declaration to change that."
+              ? `The declaration allows these ${words.many} on this server. The ${argumentWords(scope.arguments)} ${many ? "arguments name" : "argument names"} which one a call touches.`
+              : "No scope declared, so nothing limits this server: every call sees everything it offers. Add a scope to its declaration to change that."
           }
         >
           {scope && words ? (
@@ -86,7 +86,7 @@ export function Detail({ server: s, source, headerAnchor }: DetailProps) {
               </Card>
             ) : (
               <p className="srv-none">
-                The declaration lists no {words.many} yet, so no line can be limited here. Add them under <span className="t-mono">scope</span> in the policy file.
+                The declaration lists no {words.many} yet, so nothing is allowed here. Add them under <span className="t-mono">scope</span> in department.json.
               </p>
             )
           ) : null}

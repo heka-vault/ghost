@@ -1,17 +1,16 @@
 /**
- * Owner: conversations. Lines with their persona, memory, pinned notes, transcript
- * history and compactions; plus the Kokoro voice list. Extend freely.
+ * Owner: conversations. Agents (ADR 0024) with their persona, job, department, memory,
+ * pinned notes, transcript history and compactions; plus the Kokoro voice list. Each
+ * department's own agent is named for it; the rest are hired into one. Extend freely.
  */
-import type { CompactionView, TurnView, VoiceInfo } from "@ghost/client-ts";
+import type { CompactionView, ConversationDetail, TurnView, VoiceInfo } from "@ghost/client-ts";
 
-import type { Scope, ThreadDetail } from "../../../screens/conversations/threads";
 import { ago, type Scenario, seeded } from "../scenarios";
+import { CONFIG_DIR } from "./departments";
 import { SESSION_ID } from "./session";
 
-const HOME = "~/.local/share/ghost/conversations";
-
-export interface LineRecord {
-  detail: ThreadDetail;
+export interface AgentRecord {
+  detail: ConversationDetail;
   turns: TurnView[];
   compactions: CompactionView[];
 }
@@ -20,8 +19,13 @@ interface Seed {
   slug: string;
   name: string;
   aliases: string[];
-  voice: string;
-  speed: number;
+  /** The department it works in; absent: Ghost. */
+  department?: string;
+  /** What it was hired for, in a line. The department's own agent has none. */
+  job?: string;
+  /** Its own voice; absent: the department's (ADR 0024). */
+  voice?: string;
+  speed?: number;
   persona: string;
   memory: string;
   notes: string[];
@@ -29,27 +33,22 @@ interface Seed {
   lastActiveMin: number | null;
   turns: [TurnView["role"], string][];
   compactions: number;
-  /** What the line may touch, per server (ADR 0019). Absent: unscoped, it sees everything. */
-  scope?: Scope;
-  /** Settled this many days ago (ADR 0019): out of voice routing and the active list, still readable. */
-  settledDaysAgo?: number;
-  /** The department this line is a topic line of (ADR 0023). Absent: the line is a department itself. */
-  department?: string;
-  /** A department's toolkits (ADR 0023). Absent or empty: it reaches everything, like Ghost. */
-  toolkits?: string[];
+  /** Retired this many days ago (ADR 0024): off the roster and voice routing, still readable. */
+  retiredDaysAgo?: number;
   /**
    * Each version's summary, oldest first, one per compaction; the newest is `memory`.
-   * Aliases never repeat the line's own name or slug: ghost_core matches on (name, *aliases).
+   * Aliases never repeat the agent's own name or slug: ghost_core matches on (name, *aliases).
    */
   history?: string[];
 }
+
+/** The voice heard when an agent has none of its own: its department's, else Ghost's default. */
+const DEPARTMENT_VOICE: Record<string, string> = { ghost: "af_heart", accounting: "bm_george", infra: "am_onyx", app: "af_sky", legal: "bf_emma" };
 
 const GHOST: Seed = {
   slug: "ghost",
   name: "Ghost",
   aliases: ["main line", "primary"],
-  voice: "af_heart",
-  speed: 1.0,
   persona: "Short answers. Tell me what changed and what's waiting on me, then stop talking.",
   memory:
     "Operator triages ghost-mock/app and ghost-mock/infra most mornings around 9.\n" +
@@ -76,13 +75,14 @@ const GHOST: Seed = {
   compactions: 6,
 };
 
+/** Accounting's own agent: named for the department, speaks as its rules. */
 const ACCOUNTING: Seed = {
   slug: "accounting",
   name: "Accounting",
   aliases: ["billing", "the books"],
-  voice: "bm_george",
+  department: "accounting",
   speed: 1.05,
-  persona: "You're the accounting desk. Keep me straight on invoices, vendor renewals and the billing bugs in ghost-mock/app. Numbers first, no small talk.",
+  persona: "",
   memory:
     "Billing bugs live in ghost-mock/app under the billing label; the ledger export is ghost-mock/infra.\n" +
     "Q3 close finished October 9. Two refunds still open with finance (Northwind, Halcyon).\n" +
@@ -94,16 +94,14 @@ const ACCOUNTING: Seed = {
   ],
   createdDaysAgo: 18,
   lastActiveMin: 3,
-  scope: { github_issues: ["ghost-mock/app", "ghost-mock/infra"] },
-  toolkits: ["finance"],
   turns: [
     ["system", "transferred from Ghost"],
-    ["assistant", "Accounting line."],
+    ["assistant", "Accounting here."],
     ["user", "What's waiting on me in billing?"],
-    ["call", "github_issues.search(label=billing, repo=ghost-mock/app, state=open)"],
+    ["call", "github_search_issues(label=billing, repo=ghost-mock/app, state=open)"],
     ["assistant", "Three issues: app 212, app 208 and infra 77."],
     ["user", "Label 212 as a bug and high priority."],
-    ["call", "change(operation=github_issues.label, target=ghost-mock/app#212)"],
+    ["call", "change(operation=github.set_labels, target=ghost-mock/app#212)"],
     ["assistant", "Done. 212 now has bug and priority high."],
     ["user", "Approve 208, Dana's fix looks right to me."],
     ["assistant", "Approved app 208 and left your note."],
@@ -111,41 +109,131 @@ const ACCOUNTING: Seed = {
   compactions: 3,
 };
 
-const LEGAL: Seed = {
-  slug: "legal",
-  name: "Legal",
-  aliases: ["compliance", "counsel"],
-  voice: "bf_emma",
-  speed: 0.95,
-  persona: "Careful and precise. Licenses, data-processing agreements and anything that could be a compliance problem. Quote exactly; never guess at what a contract says.",
-  memory:
-    "License audit is tracked in ghost-mock/infra #91. Two AGPL tools in the build image are build-time only.\n" +
-    "DPA with Northwind renews in January; counsel is Marco.",
-  notes: ["The Northwind DPA renews in January.", "Anything touching customer data exports needs-legal-review."],
-  createdDaysAgo: 12,
-  lastActiveMin: 60 * 26,
+/** Hired into Accounting for one job, with its own voice (ADR 0024). */
+const Q3_AUDIT: Seed = {
+  slug: "q3-audit",
+  name: "Q3 audit",
+  aliases: ["the audit", "auditors"],
+  department: "accounting",
+  job: "the auditors’ questions",
+  voice: "bm_lewis",
+  speed: 1.0,
+  persona: "The auditors’ questions on the Q3 books. Exact figures, the ticket for each one, and who answered it. Nothing about Q4.",
+  memory: "Auditors are Hale & Rowe; Marta is their contact.\nOpen: the euro rounding on invoice PDFs (app 212) is on their list; the ledger export gap is explained by infra 77.",
+  notes: ["Every answer to the auditors goes through Marta first."],
+  createdDaysAgo: 6,
+  lastActiveMin: 60 * 8,
   turns: [
-    ["assistant", "Legal line."],
-    ["user", "Anything new on the license audit?"],
-    ["assistant", "Infra 91 flags two packages under AGPL in the build image."],
-    ["user", "They don't ship. Comment that and add needs-legal-review."],
-    ["assistant", "Commented on infra 91 and added needs-legal-review."],
+    ["assistant", "Q3 audit here."],
+    ["user", "What did Hale and Rowe ask about this week?"],
+    ["call", "github_search_issues(label=audit, repo=ghost-mock/app, state=open)"],
+    ["assistant", "Two things: the euro rounding on invoice PDFs, that’s app 212, and the gap in the September ledger export, which is infra 77."],
+    ["user", "Tell them 212 is fixed in 4.12 and the export gap is the timeout."],
+    ["assistant", "That goes through Marta first. Want me to draft it for her?"],
   ],
   compactions: 1,
 };
 
-/** Months of the Legal line (busy): each version resolves something and picks up something new. */
-const LEGAL_HISTORY = [
-  "License audit opened as ghost-mock/infra #91. Two AGPL tools found in the build image; not yet clear whether they ship.",
-  "License audit is ghost-mock/infra #91. Two AGPL tools in the build image; Priya is checking whether they ship.\nNorthwind wants a DPA. Counsel is Jordan; first draft expected at the end of the month.",
-  "License audit is ghost-mock/infra #91. The AGPL tools are build-time only since infra #88.\nNorthwind DPA: Jordan handed it to Marco. Redlines due Tuesday.",
-  "License audit is ghost-mock/infra #91. Two AGPL tools in the build image are build-time only.\nNorthwind DPA: Marco sent redlines. Open points: retention and the subprocessor list.\nData exports need your sign-off, then Marco's (decided on app #150).",
-];
+/** A retired agent (ADR 0024): the Q3 close is done, so it left the roster; everything stays readable. */
+const Q3_CLOSE: Seed = {
+  slug: "q3-close",
+  name: "Q3 close",
+  aliases: ["the close", "quarter close"],
+  department: "accounting",
+  job: "the Q3 books",
+  voice: "bf_alice",
+  persona: "The Q3 books. Refunds, the ledger export and anything finance is waiting on. Numbers first.",
+  memory:
+    "Q3 close finished October 9.\n" +
+    "Refunds: Brightline paid October 8; Northwind and Halcyon still open with finance.\n" +
+    "Ledger export (infra 77) stays blocked on the row limit; finance used the manual export for the close.\n" +
+    "Decided: next quarter, start the close on the first business day, not the fifth.",
+  notes: ["Halcyon refund: wait for their PO number before approving anything."],
+  createdDaysAgo: 40,
+  lastActiveMin: 60 * 24 * 9,
+  retiredDaysAgo: 9,
+  turns: [
+    ["assistant", "Q3 close."],
+    ["user", "Where are we?"],
+    ["assistant", "The close finished on the ninth. Two refunds are still open with finance: Northwind and Halcyon."],
+    ["user", "Good. That's the quarter, then."],
+    ["assistant", "Noted. Retire me when you're ready and start Q4 fresh."],
+  ],
+  compactions: 2,
+  history: [
+    "Q3 close is running, target October 9. Three refunds open with finance (Northwind, Halcyon, Brightline).",
+    "Q3 close finished October 9.\nRefunds: Brightline paid October 8; Northwind and Halcyon still open with finance.",
+  ],
+};
 
+const INFRA: Seed = {
+  slug: "infra",
+  name: "Infra",
+  aliases: ["the infra repo", "ops"],
+  department: "infra",
+  persona: "",
+  memory: "Infra 77, the ledger export, times out past 10k rows; Priya is on it and it's labeled blocked.\nThe nightly deploy moved to 02:00 after the October 6 outage.",
+  notes: ["Never close an infra issue without asking."],
+  createdDaysAgo: 9,
+  lastActiveMin: 60 * 5,
+  turns: [
+    ["assistant", "Infra here."],
+    ["user", "What's open on the ledger export?"],
+    ["call", "github_search_issues(label=export, state=open)"],
+    ["assistant", "One: 77, the timeout past ten thousand rows. Priya has it and it's still blocked."],
+    ["user", "Leave it. Anything from last night's deploy?"],
+    ["assistant", "Nothing new. The 02:00 deploy went through clean."],
+  ],
+  compactions: 1,
+};
+
+const APP: Seed = {
+  slug: "app",
+  name: "App",
+  aliases: ["the app repo", "frontend"],
+  department: "app",
+  persona: "",
+  memory: "App 151 is the Safari login loop; likely a duplicate of 148, whose fix is in review with Dana.\nDecided: duplicates get closed with a link to the older issue, no other comment.",
+  notes: [],
+  createdDaysAgo: 9,
+  lastActiveMin: 60 * 2,
+  turns: [
+    ["assistant", "App here."],
+    ["user", "Anything new since yesterday?"],
+    ["call", "github_list_issues(repo=ghost-mock/app, state=open)"],
+    ["assistant", "Two need your sign-off: 151, the Safari login loop, and 162, the CSV export."],
+    ["user", "Is 151 the same as 148?"],
+    ["assistant", "It looks like it. 148 is the Safari cookie bug, and its fix is in review."],
+  ],
+  compactions: 1,
+};
+
+/** Hired into App: one job, the department's voice. */
+const RELEASE_NOTES: Seed = {
+  slug: "release-notes",
+  name: "Release notes",
+  aliases: ["the notes"],
+  department: "app",
+  job: "release notes for each tag",
+  persona: "Turn the commits since the last tag into notes a customer can read. Short, no internal names.",
+  memory: "4.12 shipped with the Safari cookie fix and the euro rounding fix. 4.13 is open.",
+  notes: [],
+  createdDaysAgo: 4,
+  lastActiveMin: 60 * 30,
+  turns: [
+    ["assistant", "Release notes here."],
+    ["user", "Draft the notes for 4.12."],
+    ["assistant", "Two fixes: Safari sign-in after a password reset, and euro totals on invoice PDFs. Want them as a comment on the release?"],
+  ],
+  compactions: 0,
+};
+
+/** Hired with Ghost: no department of its own. */
 const STANDUP: Seed = {
   slug: "standup",
   name: "Standup",
   aliases: ["daily", "morning update"],
+  job: "the morning update",
   voice: "am_michael",
   speed: 1.15,
   persona: "Every morning: what moved overnight, what's blocked, who's waiting on me. Ninety seconds, tops.",
@@ -161,129 +249,53 @@ const STANDUP: Seed = {
   compactions: 0,
 };
 
-/** Scoped to one repository each (ADR 0019): the voice alone says which project is in play. */
-const INFRA: Seed = {
-  slug: "infra",
-  name: "Infra",
-  aliases: ["the infra repo", "ops"],
-  voice: "am_onyx",
-  speed: 1.0,
-  persona: "The infra repo only. Deploys, the ledger export, anything paging. Say what broke, what changed, and who's on it.",
-  memory: "Infra 77, the ledger export, times out past 10k rows; Priya is on it and it's labeled blocked.\nThe nightly deploy moved to 02:00 after the October 6 outage.",
-  notes: ["Never close an infra issue without asking."],
-  scope: { github_issues: ["ghost-mock/infra"] },
-  toolkits: ["ops"],
-  createdDaysAgo: 9,
-  lastActiveMin: 60 * 5,
-  turns: [
-    ["assistant", "Infra line."],
-    ["user", "What's open on the ledger export?"],
-    ["call", "github_issues.search(label=export, state=open)"],
-    ["assistant", "One: 77, the timeout past ten thousand rows. Priya has it and it's still blocked."],
-    ["user", "Leave it. Anything from last night's deploy?"],
-    ["assistant", "Nothing new. The 02:00 deploy went through clean."],
-  ],
-  compactions: 1,
-};
-
-const APP: Seed = {
-  slug: "app",
-  name: "App",
-  aliases: ["the app repo", "frontend"],
-  voice: "af_sky",
-  speed: 1.05,
-  persona: "The app repo only. Bugs first, then what's waiting on my sign-off. Read issue numbers plain.",
-  memory: "App 151 is the Safari login loop; likely a duplicate of 148, whose fix is in review with Dana.\nDecided: duplicates get closed with a link to the older issue, no other comment.",
-  notes: [],
-  scope: { github_issues: ["ghost-mock/app"] },
-  toolkits: ["code"],
-  createdDaysAgo: 9,
-  lastActiveMin: 60 * 2,
-  turns: [
-    ["assistant", "App line."],
-    ["user", "Anything new since yesterday?"],
-    ["call", "github_issues.list_awaiting_signoff()"],
-    ["assistant", "Two need your sign-off: 151, the Safari login loop, and 162, the CSV export."],
-    ["user", "Is 151 the same as 148?"],
-    ["assistant", "It looks like it. 148 is the Safari cookie bug, and its fix is in review."],
-  ],
-  compactions: 1,
-};
-
-/** A settled line (ADR 0019): the Q3 close is done, so it left voice routing; everything stays readable. */
-const Q3_CLOSE: Seed = {
-  slug: "q3-close",
-  name: "Q3 close",
-  aliases: ["the close", "quarter close"],
-  voice: "bf_alice",
-  speed: 1.0,
-  persona: "The Q3 books. Refunds, the ledger export and anything finance is waiting on. Numbers first.",
+const LEGAL: Seed = {
+  slug: "legal",
+  name: "Legal",
+  aliases: ["compliance", "counsel"],
+  department: "legal",
+  persona: "",
   memory:
-    "Q3 close finished October 9.\n" +
-    "Refunds: Brightline paid October 8; Northwind and Halcyon still open with finance.\n" +
-    "Ledger export (infra 77) stays blocked on the row limit; finance used the manual export for the close.\n" +
-    "Decided: next quarter, start the close on the first business day, not the fifth.",
-  notes: ["Halcyon refund: wait for their PO number before approving anything."],
-  scope: { github_issues: ["ghost-mock/app"] },
-  department: "accounting",
-  createdDaysAgo: 40,
-  lastActiveMin: 60 * 24 * 9,
-  settledDaysAgo: 9,
+    "License audit is tracked in ghost-mock/infra #91. Two AGPL tools in the build image are build-time only.\n" +
+    "DPA with Northwind renews in January; counsel is Marco.",
+  notes: ["The Northwind DPA renews in January.", "Anything touching customer data exports needs-legal-review."],
+  createdDaysAgo: 12,
+  lastActiveMin: 60 * 26,
   turns: [
-    ["assistant", "Q3 close."],
-    ["user", "Where are we?"],
-    ["assistant", "The close finished on the ninth. Two refunds are still open with finance: Northwind and Halcyon."],
-    ["user", "Good. That's the quarter, then."],
-    ["assistant", "Noted. Settle this line when you're ready and start Q4 fresh."],
-  ],
-  compactions: 2,
-  history: [
-    "Q3 close is running, target October 9. Three refunds open with finance (Northwind, Halcyon, Brightline).",
-    "Q3 close finished October 9.\nRefunds: Brightline paid October 8; Northwind and Halcyon still open with finance.",
-  ],
-};
-
-/** A topic line inside Accounting (ADR 0023): it reaches what the department reaches, narrowed to one repository. */
-const Q3_AUDIT: Seed = {
-  slug: "q3-audit",
-  name: "Q3 audit",
-  aliases: ["the audit", "auditors"],
-  voice: "bm_george",
-  speed: 1.05,
-  persona: "The auditors’ questions on the Q3 books. Exact figures, the ticket for each one, and who answered it. Nothing about Q4.",
-  memory: "Auditors are Hale & Rowe; Marta is their contact.\nOpen: the euro rounding on invoice PDFs (app 212) is on their list; the ledger export gap is explained by infra 77.",
-  notes: ["Every answer to the auditors goes through Marta first."],
-  department: "accounting",
-  scope: { github_issues: ["ghost-mock/app"] },
-  createdDaysAgo: 6,
-  lastActiveMin: 60 * 8,
-  turns: [
-    ["assistant", "Q3 audit."],
-    ["user", "What did Hale and Rowe ask about this week?"],
-    ["call", "github_issues.search(label=audit, repo=ghost-mock/app, state=open)"],
-    ["assistant", "Two things: the euro rounding on invoice PDFs, that’s app 212, and the gap in the September ledger export, which is infra 77."],
-    ["user", "Tell them 212 is fixed in 4.12 and the export gap is the timeout."],
-    ["assistant", "That goes through Marta first. Want me to draft it for her?"],
+    ["assistant", "Legal here."],
+    ["user", "Anything new on the license audit?"],
+    ["assistant", "Infra 91 flags two packages under AGPL in the build image."],
+    ["user", "They don't ship. Comment that and add needs-legal-review."],
+    ["assistant", "Commented on infra 91 and added needs-legal-review."],
   ],
   compactions: 1,
 };
 
-/** Busy only: a second settled line, so the group shows more than one. */
+/** Months of the Legal agent (busy): each version resolves something and picks up something new. */
+const LEGAL_HISTORY = [
+  "License audit opened as ghost-mock/infra #91. Two AGPL tools found in the build image; not yet clear whether they ship.",
+  "License audit is ghost-mock/infra #91. Two AGPL tools in the build image; Priya is checking whether they ship.\nNorthwind wants a DPA. Counsel is Jordan; first draft expected at the end of the month.",
+  "License audit is ghost-mock/infra #91. The AGPL tools are build-time only since infra #88.\nNorthwind DPA: Jordan handed it to Marco. Redlines due Tuesday.",
+  "License audit is ghost-mock/infra #91. Two AGPL tools in the build image are build-time only.\nNorthwind DPA: Marco sent redlines. Open points: retention and the subprocessor list.\nData exports need your sign-off, then Marco's (decided on app #150).",
+];
+
+/** Busy only: a second retired agent, so the group shows more than one. */
 const LAUNCH: Seed = {
   slug: "launch",
   name: "Launch",
   aliases: ["the launch"],
+  department: "app",
+  job: "the September launch",
   voice: "am_adam",
   speed: 1.1,
   persona: "The September launch. Blockers only; skip anything that can wait a week.",
   memory: "Shipped September 24. Two follow-ups filed against the app repo: 170 (onboarding copy) and 171 (pricing page cache).",
   notes: [],
-  scope: { github_issues: ["ghost-mock/app", "ghost-mock/docs"] },
   createdDaysAgo: 48,
   lastActiveMin: 60 * 24 * 24,
-  settledDaysAgo: 23,
+  retiredDaysAgo: 23,
   turns: [
-    ["assistant", "Launch line."],
+    ["assistant", "Launch here."],
     ["user", "Anything blocking?"],
     ["assistant", "Nothing. Both follow-ups are filed and labeled."],
   ],
@@ -300,15 +312,15 @@ const BUSY_ALIASES: Record<string, string[]> = {
   Personal: ["errands"],
 };
 
-const BUSY_EXTRA: [string, string, string][] = [
-  ["Hiring", "Short. Candidate pipeline for the platform role; never repeat names out loud.", "af_nicole"],
-  ["Infra on-call", "Pager context. What's on fire, what changed, who's on call.", "am_onyx"],
-  ["Design review", "Read me the open design-review issues and who asked.", "af_sky"],
-  ["Release train", "What's in the next release, what's still open against the milestone.", "bm_daniel"],
-  ["Security", "CVEs, dependabot, anything labeled security. Be blunt.", "am_fenrir"],
-  ["Customer escalations", "Escalations from support, newest first, with the customer name.", "af_bella"],
-  ["Roadmap", "Long-horizon items only. Don't bring up bugs here.", "bf_alice"],
-  ["Personal", "Not work. Reminders and errands.", "af_river"],
+const BUSY_EXTRA: [string, string, string, string][] = [
+  ["Hiring", "Short. Candidate pipeline for the platform role; never repeat names out loud.", "af_nicole", "ghost"],
+  ["Infra on-call", "Pager context. What's on fire, what changed, who's on call.", "am_onyx", "infra"],
+  ["Design review", "Read me the open design-review issues and who asked.", "af_sky", "app"],
+  ["Release train", "What's in the next release, what's still open against the milestone.", "bm_daniel", "app"],
+  ["Security", "CVEs, dependabot, anything labeled security. Be blunt.", "am_fenrir", "infra"],
+  ["Customer escalations", "Escalations from support, newest first, with the customer name.", "af_bella", "ghost"],
+  ["Roadmap", "Long-horizon items only. Don't bring up bugs here.", "bf_alice", "ghost"],
+  ["Personal", "Not work. Reminders and errands.", "af_river", "ghost"],
 ];
 
 /** Earlier exchanges, already folded into memory. Cycled to give older history its length. */
@@ -326,19 +338,19 @@ const LEGAL_OLDER: [TurnView["role"], string][][] = [
   [["user", "Who signs off on data exports?"], ["assistant", "You do, then Marco. That's what we decided on app 150."], ["user", "Remind me when 162 is ready."], ["assistant", "I'll bring up app 162 when it's ready for review."]],
 ];
 
-/** Turn ids are the store's global AUTOINCREMENT ids, shared by every line, so they're large and have gaps. */
+/** Turn ids are the store's global AUTOINCREMENT ids, shared by every agent, so they're large and have gaps. */
 let nextId = 4120;
 
-function build(seed: Seed, live: boolean, older = seed.compactions * 4): LineRecord {
+function build(seed: Seed, live: boolean, older = seed.compactions * 4): AgentRecord {
   const rand = seeded(seed.slug.length * 97 + seed.createdDaysAgo);
   const id = () => (nextId += 1 + Math.floor(rand() * 4));
-  // The live line's latest turns are the current session's: minutes old, not yesterday's.
+  // The live agent's latest turns are the current session's: minutes old, not yesterday's.
   const lastMin = live ? 1 : (seed.lastActiveMin ?? 60);
   const startMin = lastMin + seed.turns.length * 0.4;
   // When each version was written, oldest first. Version i folded the older turns up to
   // `covered(i)`; those turns were said in a session shortly before it.
   const at = Array.from({ length: seed.compactions }, (_, i) => 60 * 24 * (seed.compactions - i) * 1.5 + rand() * 120);
-  // The newest version of a line compacted more than once is the operator's edit, which folds no turns.
+  // The newest version of an agent compacted more than once is the operator's edit, which folds no turns.
   const folds = seed.compactions > 1 ? seed.compactions - 1 : 1;
   const covered = (i: number) => Math.min(older, Math.max(1, Math.round(((i + 1) / folds) * older)));
   const old: TurnView[] = [];
@@ -374,29 +386,32 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): LineRec
       through_turn_id: source === "edit" || !old.length ? null : all[Math.min(covered(i), old.length) - 1].id,
     };
   }).reverse();
+  const department = seed.department ?? "ghost";
+  const isDefault = seed.slug === department;
+  const own = !!seed.voice;
   return {
     detail: {
+      id: `a${seed.slug.replace(/[^a-z0-9]/g, "")}${String(seed.createdDaysAgo).padStart(2, "0")}`.padEnd(32, "0"),
       slug: seed.slug,
       name: seed.name,
       aliases: seed.aliases,
-      voice: seed.voice,
-      speed: seed.speed,
+      department,
+      job: seed.job ?? "",
+      voice: seed.voice ?? DEPARTMENT_VOICE[department] ?? "af_heart",
+      speed: seed.speed ?? 1,
+      own_voice: own,
       persona: seed.persona,
       memory: seed.memory,
       notes: seed.notes,
       created_at: ago(60 * 24 * seed.createdDaysAgo),
       last_active_at: seed.lastActiveMin == null && !live ? null : ago(lastMin),
+      retired_at: seed.retiredDaysAgo != null ? ago(60 * 24 * seed.retiredDaysAgo) : null,
       active: false,
       is_ghost: seed.slug === "ghost",
+      is_default: isDefault,
       turn_count: all.length,
       compactions: seed.compactions,
-      dir: `${HOME}/${seed.slug}`,
-      scope: structuredClone(seed.scope ?? {}),
-      settled_at: seed.settledDaysAgo != null ? ago(60 * 24 * seed.settledDaysAgo) : null,
-      // ADR 0023: a line with no department is one (Ghost aside); its toolkits are its reach.
-      department: seed.department ?? null,
-      is_department: seed.slug !== "ghost" && !seed.department,
-      toolkits: seed.department ? [] : [...(seed.toolkits ?? [])],
+      dir: department === "ghost" ? `${CONFIG_DIR}/agents/${seed.slug}` : `${CONFIG_DIR}/departments/${department}/agents/${seed.slug}`,
     },
     turns: all,
     compactions,
@@ -404,7 +419,7 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): LineRec
 }
 
 export interface ConversationsFixture {
-  lines: LineRecord[];
+  agents: AgentRecord[];
   voices: VoiceInfo[];
 }
 
@@ -416,17 +431,20 @@ export default function conversations(s: Scenario): ConversationsFixture {
     seeds = [
       GHOST,
       ACCOUNTING,
+      Q3_AUDIT,
+      Q3_CLOSE,
       { ...LEGAL, createdDaysAgo: 34, compactions: 5, history: LEGAL_HISTORY },
       STANDUP,
       INFRA,
       APP,
-      Q3_AUDIT,
-      Q3_CLOSE,
+      RELEASE_NOTES,
       LAUNCH,
-      ...BUSY_EXTRA.map(([name, persona, voice], i) => ({
+      ...BUSY_EXTRA.map(([name, persona, voice, department], i) => ({
         slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
         name,
         aliases: BUSY_ALIASES[name] ?? [],
+        department,
+        job: persona.split(".")[0].toLowerCase(),
         voice,
         speed: 1,
         persona,
@@ -434,18 +452,18 @@ export default function conversations(s: Scenario): ConversationsFixture {
         notes: [],
         createdDaysAgo: 30 - i * 3,
         lastActiveMin: 60 * (5 + i * 9),
-        turns: [["assistant", `${name} line.`]] as [TurnView["role"], string][],
+        turns: [["assistant", `${name} here.`]] as [TurnView["role"], string][],
         compactions: i % 3,
       })),
     ];
   } else {
-    seeds = [GHOST, ACCOUNTING, LEGAL, STANDUP, INFRA, APP, Q3_AUDIT, Q3_CLOSE];
+    seeds = [GHOST, ACCOUNTING, Q3_AUDIT, Q3_CLOSE, STANDUP, INFRA, APP, RELEASE_NOTES];
   }
   nextId = 4120;
-  // Busy: months on the Legal line, more than the 200 turns the screen asks for.
-  const lines = seeds.map((seed) => build(seed, !!s.session && seed.slug === s.session, s.data === "busy" && seed.slug === "legal" ? 236 : undefined));
-  for (const l of lines) l.detail.active = !!s.session && l.detail.slug === s.session;
-  return { lines, voices: VOICES };
+  // Busy: months with the Legal agent, more than the 200 turns the screen asks for.
+  const agents = seeds.map((seed) => build(seed, !!s.session && seed.slug === s.session, s.data === "busy" && seed.slug === "legal" ? 236 : undefined));
+  for (const l of agents) l.detail.active = !!s.session && l.detail.slug === s.session;
+  return { agents, voices: VOICES };
 }
 
 /** The 54 Kokoro v1.0 voices, labeled the way ghostd's voice_label() does. */

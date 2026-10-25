@@ -1,7 +1,7 @@
 /**
- * Owner: conversations. A line's state in words, the way the sidebar's line rows say it:
- * "Waiting on your okay" on the live line while a change waits (amber, the one state that
- * needs the operator), "Live · listening" on the live line otherwise, else when it was last
+ * Owner: conversations. An agent's state in words, the way the sidebar's agent rows say it:
+ * "Waiting on your okay" on the live agent while a change waits (amber, the one state that
+ * needs the operator), "Live · listening" on the live agent otherwise, else when it was last
  * used. The sidebar computes the same mapping inline (src/app/Sidebar.tsx); keep the two in
  * step until the foundation exports one helper for both (shared request).
  */
@@ -20,7 +20,7 @@ export function lineState(o: { live: boolean; pending: boolean; connection: Conn
   return { tone: "idle", words: o.lastActive ? relativeTime(o.lastActive) : "Not used yet" };
 }
 
-/** The dot and words for a live line: amber for a waiting okay, the phase dot otherwise (still: the page status already moves). */
+/** The dot and words for a live agent: amber for a waiting okay, the phase dot otherwise (still: the page status already moves). */
 export function LineStateText({ state, connection, phase }: { state: LineState; connection: ConnectionState; phase: GhostPhase }) {
   return (
     <span className={state.tone === "waiting" ? "conv-state is-waiting" : "conv-state"}>

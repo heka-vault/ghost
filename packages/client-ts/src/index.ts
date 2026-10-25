@@ -39,10 +39,12 @@ export type SettingsUpdate = Schemas["SettingsUpdate"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
 export type Ack = Schemas["Ack"];
+/** An agent (ADR 0024): a conversation with a persona and a job, in a department. The wire keeps the word conversation. */
 export type ConversationView = Schemas["ConversationView"];
 export type ConversationDetail = Schemas["ConversationDetail"];
 export type ConversationCreate = Schemas["ConversationCreate"];
 export type ConversationUpdate = Schemas["ConversationUpdate"];
+export type ConversationMove = Schemas["ConversationMove"];
 export type TurnView = Schemas["TurnView"];
 export type CompactionView = Schemas["CompactionView"];
 export type VoiceInfo = Schemas["VoiceInfo"];
@@ -52,11 +54,10 @@ export type PhonePairing = Schemas["PhonePairing"];
 export type SkillInfo = Schemas["SkillInfo"];
 export type SkillBody = Schemas["SkillBody"];
 export type SkillAdd = Schemas["SkillAdd"];
-export type ToolkitView = Schemas["ToolkitView"];
-export type ToolkitUpdate = Schemas["ToolkitUpdate"];
-export type ToolkitsUpdate = Schemas["ToolkitsUpdate"];
-export type GrantView = Schemas["GrantView"];
-export type TemplateView = Schemas["TemplateView"];
+export type DepartmentView = Schemas["DepartmentView"];
+export type DepartmentCreate = Schemas["DepartmentCreate"];
+export type JournalEntry = Schemas["JournalEntry"];
+export type RuleAdd = Schemas["RuleAdd"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -101,7 +102,7 @@ export class GhostClient {
   status() {
     return unwrap(this.api.GET("/status"));
   }
-  /** Open a session: in Ghost, or in the line `conversation` names (a Call from its page). */
+  /** Open a session: with Ghost, or with the agent `conversation` names (a Call from its page). */
   wake(text?: string, conversation?: string) {
     const body = text || conversation ? { text: text || null, conversation: conversation || null } : undefined;
     return unwrap(this.api.POST("/wake", { body }));
@@ -109,9 +110,9 @@ export class GhostClient {
   sleep() {
     return unwrap(this.api.POST("/sleep"));
   }
-  /** Type to the live line; with no session running, open one (in `conversation`, or Ghost) with these words as its first turn. */
+  /** Type to the live agent; with no session running, open one (with `conversation`, or Ghost) with these words as its first turn. */
   say(text: string, conversation?: string) {
-    return unwrap(this.api.POST("/session/say", { body: { text, conversation: conversation || null } }));
+    return unwrap(this.api.POST("/session/say", { body: conversation ? { text, conversation } : { text } }));
   }
   turns() {
     return unwrap(this.api.GET("/session/turns")) as Promise<Turn[]>;
@@ -132,13 +133,13 @@ export class GhostClient {
   }
 
   // --- configuration ---------------------------------------------------------------
-  /** Every source of tools the gate knows (ADR 0022): the lines, built in, and each MCP
-   *  server, with its operations at their resolved levels and what a line can be scoped to. */
+  /** Every source of tools the gate knows (ADR 0022): the agents and the departments, built in,
+   *  and each MCP server, with its operations at their resolved levels and its allowlist. */
   sources() {
     return unwrap(this.api.GET("/sources"));
   }
-  /** The MCP servers the policy file declares: connected or not, their tools, and the
-   *  writes declared for the gate. Read-only; the file is the one place to change them. */
+  /** Every declared MCP server (ADR 0024): Ghost's and each department's own, connected or not,
+   *  their tools, and the writes declared for the gate. Read-only; the folders are the place to change them. */
   mcp() {
     return unwrap(this.api.GET("/mcp"));
   }
@@ -164,19 +165,19 @@ export class GhostClient {
     return unwrap(this.api.GET("/setup/models"));
   }
 
-  // --- conversations (ADR 0014) -------------------------------------------------------
-  /** Every live thread, Ghost first; settled ones have `settled_at` set (ADR 0019).
-   *  Pass `settled` to get only the settled or only the open ones. */
-  conversations(settled?: boolean) {
-    return unwrap(
-      this.api.GET("/conversations", {
-        params: { query: settled === undefined ? {} : { settled } },
-      }),
-    );
+  // --- agents (ADR 0014, ADR 0024) ---------------------------------------------------------
+  /** Every agent, Ghost first; retired ones have `retired_at` set. Pass `retired` to get only
+   *  the retired or only the working ones, and `department` for one roster. */
+  conversations(retired?: boolean, department?: string) {
+    const query: { retired?: boolean; department?: string } = {};
+    if (retired !== undefined) query.retired = retired;
+    if (department) query.department = department;
+    return unwrap(this.api.GET("/conversations", { params: { query } }));
   }
   conversation(slug: string) {
     return unwrap(this.api.GET("/conversations/{slug}", { params: { path: { slug } } }));
   }
+  /** Hire an agent into a department. */
   createConversation(body: ConversationCreate) {
     return unwrap(this.api.POST("/conversations", { body }));
   }
@@ -197,14 +198,19 @@ export class GhostClient {
   switchConversation(slug: string) {
     return unwrap(this.api.POST("/conversations/{slug}/switch", { params: { path: { slug } } }));
   }
-  /** Mark a thread done (ADR 0019): out of voice routing and the active list, everything kept.
-   *  409 for Ghost or for the thread the session is in. */
-  settleConversation(slug: string) {
-    return unwrap(this.api.POST("/conversations/{slug}/settle", { params: { path: { slug } } }));
+  /** Retire an agent (ADR 0024): off the roster and voice routing, everything kept.
+   *  409 for a department's own agent or for the agent the session is with. */
+  retireConversation(slug: string) {
+    return unwrap(this.api.POST("/conversations/{slug}/retire", { params: { path: { slug } } }));
   }
-  unsettleConversation(slug: string) {
+  rehireConversation(slug: string) {
+    return unwrap(this.api.POST("/conversations/{slug}/rehire", { params: { path: { slug } } }));
+  }
+  /** Move an agent's folder into another department (ADR 0024). 409 for a department's own
+   *  agent, the agent the session is with, or the department it is already in. */
+  moveConversation(slug: string, department: string) {
     return unwrap(
-      this.api.POST("/conversations/{slug}/unsettle", { params: { path: { slug } } }),
+      this.api.POST("/conversations/{slug}/move", { params: { path: { slug } }, body: { department } }),
     );
   }
   compactConversation(slug: string) {
@@ -232,6 +238,27 @@ export class GhostClient {
     );
   }
 
+  // --- departments (ADR 0024) --------------------------------------------------------------
+  /** Every department, Ghost first: its folder, rules, servers, skills, agents and problems. */
+  departments() {
+    return unwrap(this.api.GET("/departments"));
+  }
+  department(slug: string) {
+    return unwrap(this.api.GET("/departments/{slug}", { params: { path: { slug } } }));
+  }
+  /** A new department folder with its AGENTS.md, mcp.json and department.json. 409 when the name is taken. */
+  createDepartment(body: DepartmentCreate) {
+    return unwrap(this.api.POST("/departments", { body }));
+  }
+  /** Append a rule to the department's AGENTS.md, verbatim, through the gate. 409 when its rules live in a project folder. */
+  addRule(slug: string, text: string) {
+    return unwrap(this.api.POST("/departments/{slug}/rules", { params: { path: { slug } }, body: { text } }));
+  }
+  /** What the department's agents did, newest first, from the audit. */
+  departmentJournal(slug: string, limit = 30) {
+    return unwrap(this.api.GET("/departments/{slug}/journal", { params: { path: { slug }, query: { limit } } }));
+  }
+
   // --- phone (ADR 0016) ----------------------------------------------------------------
   /** The phone listener's address (null when GHOST_PHONE_LISTEN is unset) and the paired phone. */
   phone() {
@@ -246,9 +273,9 @@ export class GhostClient {
     return unwrap(this.api.DELETE("/phone"));
   }
 
-  // --- skills (ADR 0023) ---------------------------------------------------------------
-  /** Every SKILL.md folder Ghost reads: its own and each project root's, with the servers
-   *  it needs and which of those aren't connected. */
+  // --- skills (ADR 0023, ADR 0024) -----------------------------------------------------------
+  /** Every SKILL.md folder Ghost reads for itself: its own and the operator's, with the servers
+   *  each needs, which of those aren't connected, and any problem that keeps it from being offered. */
   skills() {
     return unwrap(this.api.GET("/skills"));
   }
@@ -261,49 +288,9 @@ export class GhostClient {
   addSkill({ path, name, replace }: { path: string; name?: string | null; replace?: boolean }) {
     return unwrap(this.api.POST("/skills", { body: { path, name: name ?? null, replace: replace ?? false } }));
   }
-  /** Delete one of Ghost's own skills. 409 for a project's, which is read in place. */
+  /** Delete one of Ghost's own skills. 409 for one read in place from elsewhere. */
   removeSkill(name: string) {
     return unwrap(this.api.DELETE("/skills/{name}", { params: { path: { name } } }));
-  }
-
-  // --- toolkits (ADR 0023) -------------------------------------------------------------
-  /** Every `[toolkit.<name>]` in the policy file: what each grants, and what is wrong with it
-   *  against the file (a looser level, a server or skill it doesn't have). */
-  toolkits() {
-    return unwrap(this.api.GET("/toolkits"));
-  }
-  /** Write one toolkit into the policy file (new or replaced) and read it back with its
-   *  problems. 422 when the name isn't letters, digits, _ or -, or a level isn't one. */
-  putToolkit(name: string, update: ToolkitUpdate) {
-    return unwrap(this.api.PUT("/toolkits/{name}", { params: { path: { name } }, body: update }));
-  }
-  /** Remove a toolkit from the policy file. 404 when there is none by that name. */
-  deleteToolkit(name: string) {
-    return unwrap(this.api.DELETE("/toolkits/{name}", { params: { path: { name } } }));
-  }
-  /** Set a department's toolkits, an audited write. 422 for a name the file doesn't declare,
-   *  for Ghost (it reaches everything) and for a line inside a department. */
-  setConversationToolkits(slug: string, toolkits: string[]) {
-    return unwrap(
-      this.api.PUT("/conversations/{slug}/toolkits", { params: { path: { slug } }, body: { toolkits } }),
-    );
-  }
-
-  // --- department templates (ADR 0023) -------------------------------------------------
-  /** The templates a department can be started from: the ones Ghost ships and the operator's
-   *  own, with what each one still needs (a server the file doesn't declare). */
-  templates() {
-    return unwrap(this.api.GET("/templates"));
-  }
-  /** Start a department from a template: its toolkits go into the policy file, its skills are
-   *  copied, and the department is created, named after the template unless `name` says
-   *  otherwise. 404 for no such template, 409 with a message when it can't be applied. */
-  applyTemplate(name: string, newName?: string | null) {
-    return unwrap(this.api.POST("/templates/{name}/apply", { params: { path: { name } }, body: { name: newName ?? null } }));
-  }
-  /** Write a department back out as one of the operator's own templates. */
-  exportTemplate(slug: string) {
-    return unwrap(this.api.POST("/conversations/{slug}/export", { params: { path: { slug } } }));
   }
 }
 

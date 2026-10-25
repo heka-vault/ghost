@@ -747,7 +747,6 @@ export default function SettingsScreen(_: RouteProps) {
   const setFuzzy = (n: number) => setValue(FUZZY, parseFuzzy(storedFuzzy) === n && parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : n.toFixed(2));
   const jev = v.GHOST_JEV || "auto";
   const jevStatus = jevNow(jev, s, draft.secrets);
-  const crossAnswers = truthy(v.GHOST_CROSS_DEPARTMENT_ANSWERS);
   const routing = truthy(v.GHOST_DEPARTMENT_ROUTING);
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
   const secretNames = s
@@ -917,27 +916,14 @@ export default function SettingsScreen(_: RouteProps) {
                 )}
               </Section>
 
-              {/* ----------------------------------------------------------- Lines */}
+              {/* ----------------------------------------------------------- Departments */}
               <Section
-                id={sectionDomId("lines")}
-                title={SECTION_TITLE.lines}
-                description="What a scoped line does when you ask about something outside its scope. It never changes anything outside it, whatever you choose here."
+                id={sectionDomId("departments")}
+                title={SECTION_TITLE.departments}
+                description="What an agent does when you ask about something another department’s servers cover. It never changes anything outside its department, whatever you choose here."
                 className="set-section"
               >
                 <Card list>
-                  <Row className="set-practice">
-                    <Checkbox
-                      id={fieldId("GHOST_CROSS_DEPARTMENT_ANSWERS")}
-                      checked={crossAnswers}
-                      onChange={(on) => setValue("GHOST_CROSS_DEPARTMENT_ANSWERS", on ? "1" : "0")}
-                      label={
-                        <span className="set-practice__label">
-                          Cross-department answers <span className="set-detail">GHOST_CROSS_DEPARTMENT_ANSWERS</span>
-                        </span>
-                      }
-                      description={waits("GHOST_CROSS_DEPARTMENT_ANSWERS", "A line may look things up outside its scope to answer you. It never changes them.")}
-                    />
-                  </Row>
                   <Row className="set-practice">
                     <Checkbox
                       id={fieldId("GHOST_DEPARTMENT_ROUTING")}
@@ -948,12 +934,12 @@ export default function SettingsScreen(_: RouteProps) {
                           Department routing <span className="set-detail">GHOST_DEPARTMENT_ROUTING</span>
                         </span>
                       }
-                      description={waits("GHOST_DEPARTMENT_ROUTING", "When a request belongs to another line, Ghost patches you through to it instead of telling you where it belongs.")}
+                      description={waits("GHOST_DEPARTMENT_ROUTING", "When a request belongs to another department, Ghost transfers you there instead of telling you where it belongs.")}
                     />
                   </Row>
                 </Card>
                 <p className="set-note">
-                  Both off: Ghost says which line it belongs to and offers to switch. Ghost itself is never scoped.
+                  Off: Ghost says which department it belongs to and offers to transfer. Each department’s servers and their allowlists are its folder’s (<a href="#/departments">Departments</a>).
                 </p>
               </Section>
 

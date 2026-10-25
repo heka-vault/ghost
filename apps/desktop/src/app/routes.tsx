@@ -8,7 +8,7 @@
 import {
   AudioLines,
   BookOpen,
-  Briefcase,
+  Building2,
   Ghost,
   Inbox,
   LayoutGrid,
@@ -27,7 +27,7 @@ import { type ComponentType, lazy, type LazyExoticComponent } from "react";
 import { matchPath } from "./router";
 
 export interface RouteProps {
-  /** Path parameters, e.g. { slug: "legal" } for #/lines/legal. */
+  /** Path parameters, e.g. { slug: "legal" } for #/agents/legal. */
   params: Record<string, string>;
 }
 
@@ -70,15 +70,27 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "conversations",
-    patterns: ["/lines/:slug?"],
-    path: "/lines",
+    patterns: ["/agents/:slug?"],
+    path: "/agents",
     owner: "conversations",
-    title: "Lines",
+    title: "Agents",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Lines", icon: MessagesSquare, group: "main" },
+    nav: { label: "Agents", icon: MessagesSquare, group: "main" },
     component: lazy(() => import("../screens/conversations")),
+  },
+  {
+    id: "departments",
+    patterns: ["/departments/:slug?"],
+    path: "/departments",
+    owner: "departments",
+    title: "Departments",
+    kind: "screen",
+    chrome: "app",
+    needsDaemon: true,
+    nav: { label: "Departments", icon: Building2, group: "main" },
+    component: lazy(() => import("../screens/departments")),
   },
   {
     id: "policy",
@@ -127,18 +139,6 @@ export const ROUTES: RouteDef[] = [
     needsDaemon: true,
     nav: { label: "Skills", icon: BookOpen, group: "settings" },
     component: lazy(() => import("../screens/skills")),
-  },
-  {
-    id: "toolkits",
-    patterns: ["/toolkits"],
-    path: "/toolkits",
-    owner: "toolkits",
-    title: "Toolkits",
-    kind: "screen",
-    chrome: "app",
-    needsDaemon: true,
-    nav: { label: "Toolkits", icon: Briefcase, group: "settings" },
-    component: lazy(() => import("../screens/toolkits")),
   },
   {
     id: "settings",

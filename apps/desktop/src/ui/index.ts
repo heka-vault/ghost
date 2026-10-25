@@ -46,7 +46,7 @@ export { GhostGlyph, GhostMark, GlyphSizeContext, LineGlyph, lineHue, GHOST_PATH
 export type { LineGlyphProps } from "./Brand";
 export { Mascot } from "./Mascot";
 export type { MascotProps } from "./Mascot";
-export { phaseOf, phaseText, lineName, relativeTime, formatTime, formatDateTime, errorText, formatShortcut, shortcutKeys, quoted, statusLabel, statusTone } from "./format";
+export { phaseOf, phaseText, agentName, lineName, relativeTime, formatTime, formatDateTime, errorText, formatShortcut, shortcutKeys, quoted, statusLabel, statusTone } from "./format";
 export { scrollIntoPanel, scrollPanelToTop } from "./scroll";
 export { LiveContext, LiveStatus, liveLabel, useLive, useSetupPromptHere } from "./live";
 export type { ConnectionState, LiveState } from "./live";

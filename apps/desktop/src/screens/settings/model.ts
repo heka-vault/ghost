@@ -6,14 +6,14 @@
 import type { DevicesView, SettingsView } from "@ghost/client-ts";
 
 /** Page sections, in order. The id is also the `?section=` deep link. */
-export type SectionId = "setup" | "secrets" | "model" | "github" | "lines" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
+export type SectionId = "setup" | "secrets" | "model" | "github" | "departments" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
   secrets: "Secrets",
   model: "Model",
   github: "GitHub",
-  lines: "Lines",
+  departments: "Departments",
   skills: "Skills",
   voice: "Voice and wake",
   audio: "Microphone and speakers",
@@ -29,7 +29,6 @@ export const sectionDomId = (id: SectionId) => `set-${id}`;
 export const VALUE_KEYS = [
   "ANTHROPIC_BASE_URL",
   "GHOST_LLM_MODEL",
-  "GHOST_CROSS_DEPARTMENT_ANSWERS",
   "GHOST_DEPARTMENT_ROUTING",
   "GHOST_SKILL_ROOTS",
   "GHOST_INPUT_DEVICE",
@@ -42,7 +41,6 @@ export type ValueKey = (typeof VALUE_KEYS)[number];
 export const KEY_LABEL: Record<string, string> = {
   ANTHROPIC_BASE_URL: "Model endpoint",
   GHOST_LLM_MODEL: "Model",
-  GHOST_CROSS_DEPARTMENT_ANSWERS: "Cross-department answers",
   GHOST_DEPARTMENT_ROUTING: "Department routing",
   GHOST_SKILL_ROOTS: "Project skill roots",
   GHOST_INPUT_DEVICE: "Microphone",
@@ -60,8 +58,7 @@ export const KEY_LABEL: Record<string, string> = {
 export const KEY_SECTION: Record<string, SectionId> = {
   ANTHROPIC_BASE_URL: "model",
   GHOST_LLM_MODEL: "model",
-  GHOST_CROSS_DEPARTMENT_ANSWERS: "lines",
-  GHOST_DEPARTMENT_ROUTING: "lines",
+  GHOST_DEPARTMENT_ROUTING: "departments",
   GHOST_SKILL_ROOTS: "skills",
   GHOST_INPUT_DEVICE: "audio",
   GHOST_WAKE_PHRASES: "voice",

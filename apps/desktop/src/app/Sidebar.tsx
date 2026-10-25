@@ -4,13 +4,11 @@ import { ChevronDown } from "lucide-react";
 import { type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { GhostMark, type GhostPhase, LineGlyph, StatusDot, cx, lineName, liveLabel, phaseText, relativeTime, useLive } from "../ui";
-import { groupByDepartment } from "../screens/conversations/threads";
-import { newLineSeed } from "../screens/conversations/url";
+import { GhostMark, type GhostPhase, LineGlyph, StatusDot, agentName, cx, liveLabel, phaseText, relativeTime, useLive } from "../ui";
+import { groupByDepartment, isRetired } from "../screens/conversations/threads";
+import { newAgentSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
-
-/** Ghost, the live line, then the most recent: six rows, then a link to all of them. */
 
 /** Design-mode chrome, compiled only in development; null in production builds. */
 const MockBadge = import.meta.env.DEV ? lazy(() => import("../design/chrome").then((m) => ({ default: m.MockBadge }))) : null;
@@ -39,7 +37,7 @@ export function Sidebar() {
   const design = useDesign();
   const { client, status, connected, pending, conversationsVersion } = useGhost();
   const { connection: state, phase } = useLive();
-  const [lines, setLines] = useState<ConversationView[]>([]);
+  const [agents, setAgents] = useState<ConversationView[]>([]);
   const scroller = useRef<HTMLDivElement>(null);
   // The Prototypes group: open by default on a tall window, collapsed on a short one (under
   // 840px) so Settings never pins over it; the operator's last choice wins for the session.
@@ -68,21 +66,21 @@ export function Sidebar() {
     ro.observe(el);
     for (const c of Array.from(el.children)) ro.observe(c);
     return () => ro.disconnect();
-  }, [measure, lines.length, design, protosOpen]);
+  }, [measure, agents.length, design, protosOpen]);
 
   useEffect(() => {
     if (!connected) return;
     let live = true;
     client
       .conversations()
-      .then((l) => live && setLines(l))
+      .then((l) => live && setAgents(l))
       .catch(() => {});
     return () => {
       live = false;
     };
   }, [client, connected, conversationsVersion]);
 
-  // Lines are the section below, not a nav item: one word, one place (GLOSSARY.md). The
+  // Agents are the section below, not a nav item: one word, one place (GLOSSARY.md). The
   // session and the configuration screens fold under the pinned Settings row (2026-10-24).
   const main = ROUTES.filter((r) => r.component && r.nav?.group === "main" && r.id !== "conversations");
   const footer = ROUTES.filter((r) => r.component && r.nav?.group === "footer");
@@ -104,7 +102,7 @@ export function Sidebar() {
 
   const inSession = !!status?.session_id;
   const active = status?.conversation ?? null;
-  const activeLine = lines.find((l) => l.slug === active);
+  const activeAgent = agents.find((l) => l.slug === active);
   // The card says "Not running" only once the shell says offline, the same moment the Offline
   // page appears. Until then it is a neutral, still "Connecting…": never a false alarm. The
   // same liveLabel() feeds every page's <LiveStatus />, so the two never disagree.
@@ -124,22 +122,20 @@ export function Sidebar() {
           : inSession
             ? status?.session_origin === "phone"
               ? "On your phone"
-              : active && active !== "ghost" ? `On the ${lineName(active, activeLine?.name)} line` : "On the main line"
+              : active && active !== "ghost" ? `With ${agentName(active, activeAgent?.name)}` : "With Ghost"
             : "Nothing leaves this computer";
-  // Where the eye starts: Ghost, then the line Ghost is on right now (which is also the one
-  // holding any pending okay), then the rest by recency. The live line is never buried.
+  // Where the eye starts: Ghost, then the agent Ghost is with right now (which is also the one
+  // holding any pending okay), then the rest by recency. The live agent is never buried.
   const rank = (l: ConversationView) => (l.is_ghost ? 0 : inSession && l.slug === active ? 1 : 2);
-  // A settled line (ADR 0019) has left the active list; the Lines screen keeps it in its Settled group.
-  const unsettled = lines.filter((l) => !(l as { settled_at?: string | null }).settled_at);
-  const sortedLines = [...unsettled].sort((a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? ""));
-  // Exactly one current row. When the open line has its own row, that row is current and
-  // Lines drops to a quiet "section active" state (no tile, no aria-current).
-  // Every live line, right here: the sidebar is the list, not a preview of one (the operator's call, 2026-10-20).
-  const shownLines = state !== "offline" ? sortedLines : [];
-  // Topic lines sit under their department (ADR 0023); a group takes the place of its first member, so the live line still pulls its department up.
-  const groups = groupByDepartment(shownLines).flatMap((g) => [{ line: g.head, topic: false }, ...g.lines.map((l) => ({ line: l, topic: true }))]);
-  const settledCount = lines.filter((l) => !!(l as { settled_at?: string | null }).settled_at).length;
-  const lineIsCurrent = shownLines.some((l) => path === `/lines/${l.slug}`);
+  // A retired agent (ADR 0024) has left the roster; the Agents screen keeps it in its Retired group.
+  const working = agents.filter((l) => !isRetired(l));
+  const sortedAgents = [...working].sort((a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? ""));
+  // Every working agent, right here: the sidebar is the list, not a preview of one (the operator's call, 2026-10-20).
+  const shownAgents = state !== "offline" ? sortedAgents : [];
+  // Agents sit under their department's own agent (ADR 0024), one glyph column in; a group takes the place of its first member, so the live agent still pulls its department up.
+  const groups = groupByDepartment(shownAgents).flatMap((g) => [...(g.head ? [{ agent: g.head, member: false }] : []), ...g.agents.map((l) => ({ agent: l, member: !!g.head }))]);
+  const retiredCount = agents.filter(isRetired).length;
+  const agentIsCurrent = shownAgents.some((l) => path === `/agents/${l.slug}`);
 
   return (
     <aside className="sidebar">
@@ -158,24 +154,22 @@ export function Sidebar() {
         {main.length > 0 && (
           <ul className="sidebar__group" role="list">
             {main.map((r) => (
-              <NavItem key={r.id} route={r} current={current === r.id && !(lineIsCurrent && r.id === "conversations")} section={lineIsCurrent && r.id === "conversations"} />
+              <NavItem key={r.id} route={r} current={current === r.id && !(agentIsCurrent && r.id === "conversations")} section={agentIsCurrent && r.id === "conversations"} />
             ))}
           </ul>
         )}
 
-        {/* Lines stay on screen while reconnecting: stale, never cleared. */}
-        {state !== "offline" && sortedLines.length > 0 && (
+        {/* Agents stay on screen while reconnecting: stale, never cleared. */}
+        {state !== "offline" && sortedAgents.length > 0 && (
           <div className="sidebar__section">
-            {/* The heading is the way to the Lines screen (all lines, settled ones, New line). */}
-            <a className="sidebar__label sidebar__label--link" id="sidebar-lines" href={hrefFor("/lines")} aria-current={path === "/lines" ? "page" : undefined}>
-              Lines
+            {/* The heading is the way to the Agents screen (every agent, retired ones, New agent). */}
+            <a className="sidebar__label sidebar__label--link" id="sidebar-agents" href={hrefFor("/agents")} aria-current={path === "/agents" ? "page" : undefined}>
+              Agents
             </a>
-            <ul className="sidebar__group" role="list" aria-labelledby="sidebar-lines">
-              {groups.map(({ line: l, topic }) => {
-                const to = `/lines/${l.slug}`;
+            <ul className="sidebar__group" role="list" aria-labelledby="sidebar-agents">
+              {groups.map(({ agent: l, member }) => {
+                const to = `/agents/${l.slug}`;
                 const live = inSession && l.slug === active;
-                // No room for scope chips at this density: the items ride on the row's tooltip.
-                const scope = Object.values(((l as { scope?: Record<string, string[]> }).scope ?? {})).flat();
                 const waiting = live && !!pending;
                 const sub = waiting
                   ? "Waiting on your okay"
@@ -187,10 +181,10 @@ export function Sidebar() {
                 return (
                   <li key={l.slug}>
                     <a
-                      className={cx("sidebar__item sidebar__item--line", topic && "sidebar__item--topic", path === to && "is-current")}
+                      className={cx("sidebar__item sidebar__item--line", member && "sidebar__item--topic", path === to && "is-current")}
                       href={hrefFor(to)}
                       aria-current={path === to ? "page" : undefined}
-                      title={scope.length ? `Scope: ${scope.join(", ")}` : undefined}
+                      title={l.job || undefined}
                     >
                       <LineGlyph slug={l.slug} name={l.name} size="sm" />
                       <span className="sidebar__line-text">
@@ -211,24 +205,24 @@ export function Sidebar() {
               <li>
                 <a
                   className="sidebar__item sidebar__item--more"
-                  href={hrefFor("/lines")}
+                  href={hrefFor("/agents")}
                   onClick={() => {
-                    newLineSeed.open = true;
+                    newAgentSeed.open = true;
                   }}
                 >
-                  <span className="sidebar__item-label">New line…</span>
+                  <span className="sidebar__item-label">New agent…</span>
                 </a>
               </li>
-              {settledCount > 0 && (
+              {retiredCount > 0 && (
                 <li>
                   <a
                     className="sidebar__item sidebar__item--more"
-                    href={hrefFor("/lines")}
+                    href={hrefFor("/agents")}
                     onClick={() => {
-                      newLineSeed.settled = true;
+                      newAgentSeed.retired = true;
                     }}
                   >
-                    <span className="sidebar__item-label">Settled · {settledCount}</span>
+                    <span className="sidebar__item-label">Retired · {retiredCount}</span>
                   </a>
                 </li>
               )}
@@ -283,7 +277,7 @@ export function Sidebar() {
           </Suspense>
         )}
         {/* Always one row tall, so the footer holds still. Empty until Ghost first answers. */}
-        <div className="sidebar__version t-caption t-3 t-num" aria-hidden={version.current ? undefined : true}>{version.current ? `Ghost ${version.current}` : "\u00a0"}</div>
+        <div className="sidebar__version t-caption t-3 t-num" aria-hidden={version.current ? undefined : true}>{version.current ? `Ghost ${version.current}` : " "}</div>
       </div>
     </aside>
   );

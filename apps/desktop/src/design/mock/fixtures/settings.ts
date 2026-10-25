@@ -37,7 +37,6 @@ export default function settings(s: Scenario): SettingsFixture {
         GHOST_WAKE_FUZZY: "0.8",
         GHOST_JEV: "auto",
         // Threads (ADR 0019): both crossing-streams settings off by default; no per-owner tokens yet.
-        GHOST_CROSS_DEPARTMENT_ANSWERS: "0",
         GHOST_DEPARTMENT_ROUTING: "0",
         // Skills (ADR 0023): the heka checkout's .agents/skills are read in place; the skills fixture shows them.
         GHOST_SKILL_ROOTS: "~/projects/heka",
@@ -46,7 +45,6 @@ export default function settings(s: Scenario): SettingsFixture {
               GHOST_LLM_MODEL: "claude-sonnet-5-5",
               GHOST_WAKE_PHRASES: "hey ghost,okay ghost,ghost wake up",
               // Months in: scoped lines answer read-only across streams.
-              GHOST_CROSS_DEPARTMENT_ANSWERS: "1",
               GHOST_SKILL_ROOTS: "~/projects/heka,~/projects/fleet",
             }
           : {}),

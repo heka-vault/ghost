@@ -5,12 +5,13 @@ import type { SkillInfo } from "@ghost/client-ts";
 export const GHOST_SKILLS_DIR = "~/.config/ghost/skills";
 
 export const isGhosts = (s: SkillInfo) => s.source === "ghost";
+export const isHome = (s: SkillInfo) => s.source === "home";
 
-/** "~/projects/heka" → "heka": the project a skill is read from, by its folder's name. */
+/** "~/projects/heka" → "heka": a folder's name, when a source is a path. */
 export const rootName = (source: string) => tildePath(source).replace(/\/+$/, "").split("/").pop() || source;
 
-/** Where a skill comes from, in a word or two: "Ghost's", or the project folder's name. */
-export const sourceWord = (s: SkillInfo) => (isGhosts(s) ? "Ghost’s" : rootName(s.source));
+/** Where a skill comes from, in a word or two: "Ghost's", "yours" (~/.agents/skills), or the department's name (ADR 0024). */
+export const sourceWord = (s: SkillInfo) => (isGhosts(s) ? "Ghost’s" : isHome(s) ? "yours" : s.source.includes("/") ? rootName(s.source) : s.source.replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase()));
 
 /** A path as the design system writes it: the operator's home collapsed to ~. */
 export function tildePath(path: string | null | undefined): string {
@@ -45,10 +46,9 @@ export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n ===
 /** Whether a refusal means the name is already installed, so adding again with `replace` would go through. */
 export const saysInstalled = (message: string) => /already installed/i.test(message);
 
-/** Settings, at its Skills group: where GHOST_SKILL_ROOTS is set. The query keeps the mock scenario. */
+/** The Departments screen: a project's skills come in through a department's root (ADR 0024). The query keeps the mock scenario. */
 export function settingsHref(): string {
   const q = new URLSearchParams(window.location.search);
   q.delete("show");
-  q.set("section", "skills");
-  return `${window.location.pathname}?${q.toString()}#/settings`;
+  return `${window.location.pathname}${q.size ? `?${q.toString()}` : ""}#/departments`;
 }

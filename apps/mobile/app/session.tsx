@@ -184,7 +184,7 @@ export default function Session() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: space[3], flexShrink: 1 }}>
           <LineGlyph slug={slug} name={name} size="lg" />
           <View>
-            <Text size="xl" weight="semibold" accessibilityRole="header" accessibilityLabel={`Session on the ${name} line`}>
+            <Text size="xl" weight="semibold" accessibilityRole="header" accessibilityLabel={`Session with ${name}`}>
               {name}
             </Text>
             <Text size="md" color="text2" num accessibilityLabel={`Elapsed ${elapsed}`}>

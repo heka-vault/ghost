@@ -20,8 +20,8 @@ type Line = [role: Turn["role"], text: string, minutesAgo: number, via?: Turn["v
 const TRANSCRIPTS: Record<string, Line[]> = {
   accounting: [
     ["assistant", "Ghost here.", 6.4],
-    ["user", "Patch me through to accounting.", 6.3],
-    ["assistant", "Patching you through to Accounting.", 6.25],
+    ["user", "Transfer me to accounting.", 6.3],
+    ["assistant", "Transferring you to Accounting.", 6.25],
     ["assistant", "Accounting here. Three billing issues are waiting on your sign-off, and the Stripe renewal note is still pinned.", 6.2],
     ["user", "What are the three?", 5.6],
     ["assistant", "App 212, invoice PDFs round euro totals down a cent. App 208, the annual plan shows the monthly price on the receipt. And infra 77, the nightly ledger export failed twice this week.", 5.5],
@@ -43,8 +43,8 @@ const TRANSCRIPTS: Record<string, Line[]> = {
   ],
   legal: [
     ["assistant", "Ghost here.", 9.4],
-    ["user", "Legal line, please.", 9.3],
-    ["assistant", "Patching you through to Legal.", 9.25],
+    ["user", "Get me legal, please.", 9.3],
+    ["assistant", "Transferring you to Legal.", 9.25],
     ["assistant", "Legal here. Nothing new since yesterday except Marco\u2019s question on the license audit.", 9.2],
     ["user", "Anything new on the license audit?", 8.7],
     ["assistant", "Infra 91 flags two packages under AGPL in the build image: a PDF renderer and a font tool. Marco asked whether they ship to customers.", 8.5],

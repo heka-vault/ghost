@@ -70,14 +70,15 @@ export const STATUS_ORDER = ["executed", "pending", "claimed", "failed", "partia
 
 /* ---------------------------------------------------------------------------- words */
 
-/** "github_heka.close": the source (a server's name in the policy file, or the lines) and the operation. */
+/** "github_heka.close": the source (a server's name, the agents or the departments) and the operation. */
 export function opName(e: AuditEntry): string {
   return `${e.ability}.${e.operation}`;
 }
 
-/** Source names read as words in the filter: the built-in one is "Lines", a server goes by its humanized name ("GitHub heka"). */
+/** Source names read as words in the filter: the built-in ones are "Agents" and "Departments", a server goes by its humanized name ("GitHub heka"; a department's own as "marketing/figma"). */
 export function sourceLabel(name: string): string {
-  if (name === "conversations") return "Lines";
+  if (name === "conversations") return "Agents";
+  if (name === "departments") return "Departments";
   const s = name.replace(/[_-]+/g, " ");
   return (s[0].toUpperCase() + s.slice(1)).replace(/\bgithub\b/i, "GitHub");
 }
@@ -88,7 +89,7 @@ export function sourceLabel(name: string): string {
  * and the colon go, so the column reads as a list of things, not a repeated prefix.
  */
 export interface SummaryParts {
-  /** What it was done to, at medium weight: "ghost-mock/app#151", "Standup line". Empty when the summary names none. */
+  /** What it was done to, at medium weight: "ghost-mock/app#151", "Standup". Empty when the summary names none. */
   subject: string;
   /** What Ghost did, in --text-1. */
   action: string;
@@ -143,8 +144,14 @@ export function stepView(raw: string): StepView {
   if (s === "request_changes") return { done: "Requested changes", todo: "request changes", known: true };
   if (s === "comment") return { done: "Comment added", todo: "add the comment", known: true };
   if (s === "set_labels") return { done: "Labels changed", todo: "change the labels", known: true };
-  // conversations
-  if ((m = /^start conversation\s+(.+)$/.exec(s))) return { done: `Started the ${unquote(m[1])} line`, todo: `start the ${unquote(m[1])} line`, known: true };
+  // agents (ADR 0024)
+  if ((m = /^hire\s+(.+?)\s+in\s+(\S+)(.*)$/.exec(s))) return { done: `Hired ${unquote(m[1])} in ${m[2]}`, todo: `hire ${unquote(m[1])}`, known: true };
+  if ((m = /^start conversation\s+(.+)$/.exec(s))) return { done: `Started ${unquote(m[1])}`, todo: `start ${unquote(m[1])}`, known: true };
+  if (s === "retire the agent") return { done: "Retired", todo: "retire the agent", known: true };
+  if (s === "bring the agent back") return { done: "Rehired", todo: "rehire the agent", known: true };
+  if ((m = /^move to\s+(.+)$/.exec(s))) return { done: `Moved to ${m[1]}`, todo: `move it to ${m[1]}`, known: true };
+  if ((m = /^add the rule:\s*([\s\S]*)$/.exec(s))) return { done: "Rule added", todo: "add the rule", quote: m[1] || undefined, known: true };
+  if ((m = /^the department remembers:\s*([\s\S]*)$/.exec(s))) return { done: "The department remembers", todo: "add the shared fact", quote: m[1] || undefined, known: true };
   if ((m = /^rename to\s+(.+)$/.exec(s))) return { done: `Renamed to ${unquote(m[1])}`, todo: `rename it to ${unquote(m[1])}`, known: true };
   if ((m = /^voice\s+(\S+)\s+at\s+(\S+?)x$/.exec(s))) return { done: `Voice set to ${m[1]} at ${m[2]}×`, todo: `set the voice to ${m[1]}`, known: true };
   if ((m = /^persona:\s*([\s\S]*)$/.exec(s))) return { done: "Persona set", todo: "set the persona", quote: unquote(m[1]) || undefined, known: true };
@@ -153,8 +160,9 @@ export function stepView(raw: string): StepView {
   if (s === "update notes") return { done: "Updated the notes", todo: "update the notes", known: true };
   if (s === "compact") return { done: "Compacted the memory", todo: "compact the memory", known: true };
   if (s === "edit memory") return { done: "Edited the memory", todo: "edit the memory", known: true };
-  if (s === "reset: forget everything") return { done: "Reset · forgot everything", todo: "reset the line", known: true };
-  if (s === "delete the conversation") return { done: "Deleted the line", todo: "delete the line", known: true };
+  if (s === "reset: forget everything") return { done: "Reset · forgot everything", todo: "reset the agent", known: true };
+  if (s === "delete the agent" || s === "delete the conversation") return { done: "Deleted the agent", todo: "delete the agent", known: true };
+  if (s === "voice: the department's") return { done: "Voice set to the department's", todo: "set the voice to the department's", known: true };
   return { done: upperFirst(s), todo: s, known: false };
 }
 
@@ -192,7 +200,7 @@ export function cancelReason(reason: string): { short: string; title: string } |
     case "session ended":
       return { short: "Ghost went to sleep", title: "Canceled when Ghost went to sleep" };
     case "switched conversation":
-      return { short: "you switched lines", title: "Canceled when you switched lines" };
+      return { short: "you switched agents", title: "Canceled when you switched agents" };
     case "ui":
     case "cancelled from the desktop app":
       return { short: "you clicked Cancel", title: "Canceled from the app" };
@@ -347,7 +355,6 @@ export function haystack(e: AuditEntry, ctx: OutcomeContext = {}): string {
     ...levelParts(e, o),
     sourceLabel(e.ability),
     e.department ?? "",
-    e.toolkit ?? "",
     e.id,
     ...e.events.flatMap((ev) => {
       const v = describeEvent(ev, e);

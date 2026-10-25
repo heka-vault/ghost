@@ -1,5 +1,5 @@
 /**
- * Hash routing. URLs look like `/?mock=session#/lines/legal`: the query (mock
+ * Hash routing. URLs look like `/?mock=session#/agents/legal`: the query (mock
  * scenario) survives navigation, the hash is the route. Tauri serves a single file, so
  * hash routing needs no server support.
  */

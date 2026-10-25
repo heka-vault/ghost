@@ -1,178 +1,83 @@
 /**
- * Owner: conversations. The ADR 0019 additions to a line (scope, settled, seed_from) as the
- * generated client carries them, plus the helpers every screen reads them through: a daemon
- * that predates the fields still renders (no scope reads as unscoped, no settled_at as
- * active), and GET /sources is narrowed to the sources that can be scoped (ADR 0022).
+ * Owner: conversations. The agent fields the generated client carries (ADR 0024) and the
+ * helpers every screen reads them through: which department an agent works in, whether it
+ * is the department's own, retired or not, and how a list groups by department.
  */
-import type { ConversationCreate, ConversationDetail, ConversationUpdate, ConversationView, GhostClient, SourceInfo, ToolkitView } from "@ghost/client-ts";
+import type { ConversationCreate, ConversationDetail, ConversationUpdate, ConversationView, GhostClient } from "@ghost/client-ts";
 
-/** Per source (a server's name in the policy file), the items this line may touch: `{ github_heka: ["heka-vault/ghost"] }`. */
-export type Scope = Record<string, string[]>;
+export type AgentView = ConversationView;
+export type AgentDetail = ConversationDetail;
+export type AgentCreate = ConversationCreate;
+export type AgentUpdate = ConversationUpdate;
 
-/** The two fields a line record always carries in the mock (the API marks settled_at optional). */
-export interface ThreadFields {
-  scope: Scope;
-  /** When the line was settled (left voice routing and the active list), or null. */
-  settled_at: string | null;
-}
-export type ThreadDetail = ConversationDetail & ThreadFields;
-export type ThreadCreate = ConversationCreate;
-export type ThreadUpdate = ConversationUpdate;
-
-/** A source that can be scoped: how ("repository"), and the whole allowlist a scope picks from. */
-export interface ScopedSource {
-  name: string;
-  scope_kind: string;
-  scope_items: string[];
-}
-
-// `object`, not an all-optional shape: a ConversationView typed without the fields must pass
-// the weak-type check until the generated client carries them.
-type MaybeThread = object;
-const field = (d: MaybeThread | null | undefined, k: "scope" | "settled_at"): unknown => (d ? (d as Record<string, unknown>)[k] : undefined);
-
-export function scopeOf(d: MaybeThread | null | undefined): Scope {
-  const raw = field(d, "scope");
-  if (!raw || typeof raw !== "object") return {};
-  const out: Scope = {};
-  for (const [source, items] of Object.entries(raw as Record<string, unknown>)) {
-    if (Array.isArray(items)) out[source] = items.filter((i): i is string => typeof i === "string");
-  }
-  return out;
-}
-
-export function settledAt(d: MaybeThread | null | undefined): string | null {
-  const v = field(d, "settled_at");
+/** When the agent was retired (left the roster and voice routing), or null. */
+export function retiredAt(d: Pick<AgentView, "retired_at"> | null | undefined): string | null {
+  const v = d?.retired_at;
   return typeof v === "string" && v ? v : null;
 }
 
-export const isSettled = (d: MaybeThread | null | undefined) => settledAt(d) !== null;
+export const isRetired = (d: Pick<AgentView, "retired_at"> | null | undefined) => retiredAt(d) !== null;
 
-/** Every item in a scope, across sources, in a stable order: what a row or a tooltip lists. */
-export function scopeItems(scope: Scope): string[] {
-  return Object.keys(scope)
-    .sort()
-    .flatMap((k) => [...scope[k]].sort());
+/** The department an agent works in: its slug ("ghost" for Ghost's own). */
+export const departmentOf = (a: Pick<AgentView, "department"> | null | undefined): string => a?.department || "ghost";
+
+/** The department's own agent, named for it: where a transfer lands; it cannot move, retire or be deleted. */
+export const isDefault = (a: Pick<AgentView, "is_default"> | null | undefined): boolean => !!a?.is_default;
+
+/** A department's title as the operator says it, from the departments list when loaded, else from the slug. */
+export function departmentTitle(slug: string | null | undefined, departments: Pick<DepartmentLike, "slug" | "title">[] = []): string {
+  if (!slug || slug === "ghost") return "Ghost";
+  return departments.find((d) => d.slug === slug)?.title ?? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/** Scopes with the same sources and items, in any order. */
-export function sameScope(a: Scope, b: Scope): boolean {
-  return scopeKey(a) === scopeKey(b);
+/** What this screen needs of a department: the generated DepartmentView carries these. */
+export interface DepartmentLike {
+  slug: string;
+  title: string;
 }
 
-/** A stable string for a scope, for comparisons and grouping. Empty lists count as no entry. */
-export function scopeKey(scope: Scope): string {
-  return Object.keys(scope)
-    .filter((k) => scope[k].length)
-    .sort()
-    .map((k) => `${k}:${[...scope[k]].sort().join(",")}`)
-    .join(";");
+export interface DepartmentGroup<T extends AgentView> {
+  /** The department's slug. */
+  slug: string;
+  /** Its own agent, when it is in the list. */
+  head: T | null;
+  /** The agents hired into it, in the order given. */
+  agents: T[];
 }
 
-/** The sources a scope can name, from GET /sources: the servers that declare a scope, with the items they allow. */
-export function scopedSources(sources: SourceInfo[]): ScopedSource[] {
-  return sources.flatMap((a) => {
-    if (typeof a.scope_kind !== "string" || !a.scope_kind) return [];
-    const items = Array.isArray(a.scope_items) ? a.scope_items.filter((i): i is string => typeof i === "string") : [];
-    return [{ name: a.name, scope_kind: a.scope_kind, scope_items: items }];
-  });
+/**
+ * Agents grouped the way the sidebar and the phone show them: Ghost first, then each
+ * department with its own agent at the head and the agents hired into it under it. Order
+ * follows the input: a group sits where its first member would have.
+ */
+export function groupByDepartment<T extends AgentView>(agents: T[]): DepartmentGroup<T>[] {
+  const groups = new Map<string, DepartmentGroup<T>>();
+  for (const a of agents) {
+    const slug = departmentOf(a);
+    let g = groups.get(slug);
+    if (!g) {
+      g = { slug, head: null, agents: [] };
+      groups.set(slug, g);
+    }
+    if (isDefault(a)) g.head = a;
+    else g.agents.push(a);
+  }
+  const out = [...groups.values()];
+  return out.sort((a, b) => (a.slug === "ghost" ? -1 : b.slug === "ghost" ? 1 : firstIndex(a, agents) - firstIndex(b, agents)));
 }
+const firstIndex = <T extends AgentView>(g: DepartmentGroup<T>, agents: T[]) => Math.min(...[g.head, ...g.agents].filter((x): x is T => !!x).map((a) => agents.indexOf(a)));
 
-/** What a scope kind's items are called: "repository" / "repositories". */
-export function kindWords(kind: string): { one: string; many: string } {
-  const KNOWN: Record<string, [string, string]> = {
-    repository: ["repository", "repositories"],
-    directory: ["folder", "folders"],
-    workspace: ["workspace", "workspaces"],
-  };
-  const k = KNOWN[kind];
-  return k ? { one: k[0], many: k[1] } : { one: kind, many: `${kind}s` };
-}
-
-/** "GitHub heka" for github_heka: the server's name in words, used as a card heading. */
+/** "GitHub heka" for github_heka: the source's name in words, used as a card heading. */
 export function sourceWords(name: string): string {
-  if (name === "conversations") return "Lines";
+  if (name === "conversations") return "Agents";
+  if (name === "departments") return "Departments";
   const s = name.replace(/[_-]+/g, " ");
   return s.charAt(0).toUpperCase() + s.slice(1).replace(/\bgithub\b/i, "GitHub");
 }
 
-/* ------------------------------------------------------------------ departments (ADR 0023) */
-
-/** The fields a line carries about its department; a daemon that predates them reads as a department with no toolkits. */
-export type DepartmentFields = Pick<ConversationView, "slug" | "is_ghost"> & Partial<Pick<ConversationView, "department" | "is_department" | "toolkits">>;
-
-/** The department a topic line is in (its slug), or null for a department itself and for Ghost. */
-export const departmentOf = (l: DepartmentFields | null | undefined): string | null => (l && typeof l.department === "string" && l.department ? l.department : null);
-
-/** A department: its own primary line (ADR 0023). Ghost is line zero, not a department. */
-export const isDepartment = (l: DepartmentFields | null | undefined): boolean => !!l && !l.is_ghost && departmentOf(l) === null;
-
-/** A department's toolkits; empty means it reaches everything, like Ghost. */
-export const toolkitsOf = (l: DepartmentFields | null | undefined): string[] => (l && Array.isArray(l.toolkits) ? l.toolkits.filter((t): t is string => typeof t === "string") : []);
-
-/** A department's name as the operator says it: the line's name. */
-export function departmentName(slug: string | null, lines: Pick<ConversationView, "slug" | "name">[]): string {
-  if (!slug) return "Ghost";
-  return lines.find((l) => l.slug === slug)?.name ?? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-export interface DepartmentGroup<T extends DepartmentFields> {
-  /** The department's primary line, or an orphan topic line whose department is gone. */
-  head: T;
-  /** Its topic lines, in the order given. */
-  lines: T[];
-}
-
-/**
- * Lines grouped the way the sidebar and the phone show them: Ghost alone, then each
- * department with its topic lines under it. A topic line whose department isn't in the list
- * (settled, deleted, or filtered out) stands on its own so it is never lost. Order follows
- * the input: a group sits where its first member (head or line) would have.
- */
-export function groupByDepartment<T extends DepartmentFields>(lines: T[]): DepartmentGroup<T>[] {
-  const heads = new Map<string, DepartmentGroup<T>>();
-  const order: DepartmentGroup<T>[] = [];
-  const pending = new Map<string, T[]>();
-  const slugs = new Set(lines.map((l) => l.slug));
-  for (const l of lines) {
-    const dept = departmentOf(l);
-    if (dept && slugs.has(dept) && dept !== l.slug) {
-      const g = heads.get(dept);
-      if (g) g.lines.push(l);
-      else pending.set(dept, [...(pending.get(dept) ?? []), l]);
-      continue;
-    }
-    const g: DepartmentGroup<T> = { head: l, lines: pending.get(l.slug) ?? [] };
-    pending.delete(l.slug);
-    heads.set(l.slug, g);
-    order.push(g);
-  }
-  // A group whose topic line came first in the input moves up to where that line was.
-  return order.sort((a, b) => firstIndex(a, lines) - firstIndex(b, lines));
-}
-const firstIndex = <T extends DepartmentFields>(g: DepartmentGroup<T>, lines: T[]) => Math.min(lines.indexOf(g.head), ...g.lines.map((l) => lines.indexOf(l)));
-
-/**
- * The scope choices a topic line gets (ADR 0023): only what its department's toolkits grant,
- * where that can be read off the toolkits. A department with no toolkits reaches everything,
- * so the sources stay as they are; a toolkit that grants a server with `items: null` grants
- * every item; a server no toolkit grants is out of reach and not offered. Without the toolkit
- * list (not loaded, or failed) the sources are left as they are.
- */
-export function narrowSources(sources: ScopedSource[], toolkitNames: string[], toolkits: ToolkitView[] | null): ScopedSource[] {
-  if (!toolkitNames.length || !toolkits) return sources;
-  const granted = toolkits.filter((t) => toolkitNames.includes(t.name));
-  if (!granted.length) return sources;
-  return sources.flatMap((src) => {
-    const grants = granted.flatMap((t) => t.grants.filter((g) => g.server === src.name));
-    if (!grants.length) return [];
-    if (grants.some((g) => g.items == null)) return [src];
-    const items = new Set(grants.flatMap((g) => g.items ?? []));
-    return [{ ...src, scope_items: src.scope_items.filter((i) => items.has(i)) }];
-  });
-}
-
-/** Settle a line: it leaves voice routing and the active list; everything stays readable. */
-export const settleLine = (client: GhostClient, slug: string) => client.settleConversation(slug);
-/** Bring a settled line back. */
-export const unsettleLine = (client: GhostClient, slug: string) => client.unsettleConversation(slug);
+/** Retire an agent: it leaves voice routing and the roster; everything stays readable. */
+export const retireAgent = (client: GhostClient, slug: string) => client.retireConversation(slug);
+/** Bring a retired agent back. */
+export const rehireAgent = (client: GhostClient, slug: string) => client.rehireConversation(slug);
+/** Move an agent's folder into another department. */
+export const moveAgent = (client: GhostClient, slug: string, department: string) => client.moveConversation(slug, department);

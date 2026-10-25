@@ -53,7 +53,7 @@ function seedAudit(): AuditEntry[] {
       ],
     }),
     entry("ghost-mock/app#199", "reopen", "On ghost-mock/app#199: reopened the issue.", "executed", 60 * 3 + 5, { conversation: "heka-workshop", department: "heka-workshop" }),
-    entry("ghost-mock/app#212", "set_labels", "On ghost-mock/app#212: labels: add bug, priority-high.", "executed", 60 * 3 + 6, { conversation: "q3-audit", department: "accounting", toolkit: "finance" }),
+    entry("ghost-mock/app#212", "set_labels", "On ghost-mock/app#212: labels: add bug, priority-high.", "executed", 60 * 3 + 6, { conversation: "q3-audit", department: "accounting" }),
     entry("ghost-mock/app#199", "close", "On ghost-mock/app#199: closed the issue.", "executed", 60 * 3 + 9),
     entry("ghost-mock/infra#64", "close", "On ghost-mock/infra#64: close the issue, with a comment: “Duplicate of #61.”", "expired", 60 * 26, {
       autonomy: "confirm",
@@ -65,12 +65,12 @@ function seedAudit(): AuditEntry[] {
 export type MockAct = "ask" | "yes" | "no" | "talk" | "drop" | "deskDown" | "deskUp" | "deskSession";
 
 const MOCK_LINES: ConversationView[] = [
-  { slug: "ghost", name: "Ghost", aliases: [], voice: "af_heart", speed: 1, scope: {}, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", settled_at: null, active: false, is_ghost: true, is_department: false, toolkits: [] },
-  { slug: "heka-workshop", name: "Heka workshop", aliases: ["workshop"], voice: "am_adam", speed: 1, scope: { github_issues: ["heka-vault/ghost"] }, created_at: "2026-10-18T09:00:00Z", last_active_at: "2026-10-20T11:00:00Z", settled_at: null, active: false, is_ghost: false, is_department: true, toolkits: [] },
-  { slug: "quotient-research", name: "Quotient research", aliases: [], voice: "bf_emma", speed: 1, scope: { github_issues: ["quotient-research/quotient-app", "quotient-research/website"] }, created_at: "2026-10-19T09:00:00Z", last_active_at: "2026-10-19T18:00:00Z", settled_at: null, active: false, is_ghost: false, is_department: true, toolkits: [] },
-  // A department with a toolkit and a topic line inside it (ADR 0023): the dial pad shows one key, which opens both.
-  { slug: "accounting", name: "Accounting", aliases: ["the books"], voice: "bm_george", speed: 1.05, scope: { github_issues: ["heka-vault/ghost"] }, created_at: "2026-10-02T09:00:00Z", last_active_at: "2026-10-20T09:00:00Z", settled_at: null, active: false, is_ghost: false, is_department: true, toolkits: ["finance"] },
-  { slug: "q3-audit", name: "Q3 audit", aliases: ["the audit"], voice: "bm_george", speed: 1.05, scope: { github_issues: ["heka-vault/ghost"] }, created_at: "2026-10-14T09:00:00Z", last_active_at: "2026-10-19T15:00:00Z", settled_at: null, active: false, is_ghost: false, is_department: false, department: "accounting", toolkits: [] },
+  { id: "a0", slug: "ghost", name: "Ghost", aliases: [], department: "ghost", job: "", voice: "af_heart", speed: 1, own_voice: false, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", retired_at: null, active: false, is_ghost: true, is_default: true },
+  { id: "a1", slug: "heka-workshop", name: "Heka workshop", aliases: ["workshop"], department: "ghost", job: "the workshop", voice: "am_adam", speed: 1, own_voice: true, created_at: "2026-10-18T09:00:00Z", last_active_at: "2026-10-20T11:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: false },
+  { id: "a2", slug: "quotient-research", name: "Quotient research", aliases: [], department: "ghost", job: "", voice: "bf_emma", speed: 1, own_voice: true, created_at: "2026-10-19T09:00:00Z", last_active_at: "2026-10-19T18:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: false },
+  // A department's own agent and an agent hired into it (ADR 0024): the dial pad shows one key, which opens both.
+  { id: "a3", slug: "accounting", name: "Accounting", aliases: ["the books"], department: "accounting", job: "", voice: "bm_george", speed: 1.05, own_voice: false, created_at: "2026-10-02T09:00:00Z", last_active_at: "2026-10-20T09:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: true },
+  { id: "a4", slug: "q3-audit", name: "Q3 audit", aliases: ["the audit"], department: "accounting", job: "the auditors’ questions", voice: "bm_george", speed: 1.05, own_voice: false, created_at: "2026-10-14T09:00:00Z", last_active_at: "2026-10-19T15:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: false },
 ];
 
 export class MockDesk implements Desk {

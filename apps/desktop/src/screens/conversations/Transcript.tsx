@@ -60,10 +60,10 @@ export function Transcript({ turns, lineName, limit, total }: TranscriptProps) {
     return (
       <EmptyState
         icon={<MessagesSquare />}
-        title="Nothing said on this line yet"
+        title="Nothing said with this agent yet"
         description={
           <>
-            {lineName === "Ghost" ? <>Say {quoted("Hey Ghost")}, press Call, or type below.</> : <>Press Call, type below, or say {quoted(`patch me to ${lineName.toLowerCase()}`)} in a session.</>} What you both say is kept here.
+            {lineName === "Ghost" ? <>Say {quoted("Hey Ghost")}, press Call, or type below.</> : <>Press Call, type below, or say {quoted(`transfer me to ${lineName.toLowerCase()}`)} in a session.</>} What you both say is kept here.
           </>
         }
       />

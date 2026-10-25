@@ -100,68 +100,42 @@ describe("GhostClient", () => {
     expect(removed).toBe("month-close");
   });
 
-  it("designs toolkits and gives them to a department (ADR 0023)", async () => {
-    const put: Record<string, string> = {};
-    let deleted = "";
-    const view = {
-      name: "finance",
-      description: "The books.",
-      skills: ["month-close"],
-      grants: [{ server: "github_heka", reads: null, writes: ["comment", "set_labels"], items: ["ghost-mock/app"], levels: { set_labels: "announce" } }],
-      problems: ["toolkit finance: no skill named month-close"],
-    };
-    const line = { slug: "accounting", name: "Accounting", aliases: [], voice: "bm_george", speed: 1, persona: "", memory: "", notes: [], created_at: "x", last_active_at: null, active: false, is_ghost: false, turn_count: 0, compactions: 0, dir: "~", scope: {}, settled_at: null, department: null, is_department: true, toolkits: ["finance"] };
+  it("retires, rehires and moves an agent, and reads the departments (ADR 0024)", async () => {
+    const posts: Record<string, string> = {};
+    const agent = { id: "a1", slug: "brand", name: "Brand", aliases: [], department: "marketing", job: "the look", voice: "bm_george", speed: 1, own_voice: false, persona: "", memory: "", notes: [], created_at: "x", last_active_at: null, retired_at: null, active: false, is_ghost: false, is_default: false, turn_count: 0, compactions: 0, dir: "~" };
+    const dept = { slug: "marketing", title: "Marketing", aliases: [], path: "~/.config/ghost/departments/marketing", root: null, voice: null, is_ghost: false, rules_lead: "Marketing", rules: "# Marketing\n", memory: "", servers: [], uses: ["github"], servers_up: false, skills: [], docs: [], agents: ["marketing", "brand"], problems: [] };
     const client = new GhostClient(
       fakeTransport({
-        "GET /toolkits": () => [view],
-        "PUT /toolkits/finance": (body) => {
-          put["finance"] = body;
-          return view;
+        "POST /conversations/brand/retire": () => ({ ok: true, detail: null }),
+        "POST /conversations/brand/rehire": () => ({ ok: true, detail: "not retired" }),
+        "POST /conversations/brand/move": (body) => {
+          posts.move = body;
+          return { ...agent, department: "sales" };
         },
-        "DELETE /toolkits/finance": () => {
-          deleted = "finance";
-          return { ok: true, detail: null };
+        "GET /departments": () => [dept],
+        "GET /departments/marketing": () => dept,
+        "POST /departments": (body) => {
+          posts.department = body;
+          return dept;
         },
-        "PUT /conversations/accounting/toolkits": (body) => {
-          put["accounting"] = body;
-          return line;
+        "POST /departments/marketing/rules": (body) => {
+          posts.rule = body;
+          return { ...dept, rules: "# Marketing\n\nUK dates.\n" };
         },
+        "GET /departments/marketing/journal": () => [{ at: "x", agent: "Brand", operation: "github.comment", target: "acme/web#7", what: "On acme/web#7: comment." }],
       }),
     );
-    const all = await client.toolkits();
-    expect(all[0].grants[0].reads).toBeNull();
-    expect(all[0].problems).toHaveLength(1);
-    const saved = await client.putToolkit("finance", { description: view.description, skills: view.skills, grants: view.grants });
-    expect(saved.grants[0].levels.set_labels).toBe("announce");
-    expect(JSON.parse(put.finance).grants[0].items).toEqual(["ghost-mock/app"]);
-    expect((await client.deleteToolkit("finance")).ok).toBe(true);
-    expect(deleted).toBe("finance");
-    const d = await client.setConversationToolkits("accounting", ["finance"]);
-    expect(d.is_department).toBe(true);
-    expect(d.toolkits).toEqual(["finance"]);
-    expect(JSON.parse(put.accounting)).toEqual({ toolkits: ["finance"] });
-  });
-
-  it("lists, applies and exports department templates (ADR 0023)", async () => {
-    let applied = "";
-    const tpl = { name: "accounting", title: "Accounting", description: "The books.", source: "shipped", path: "/usr/share/ghost/templates/accounting", aliases: ["the books"], voice: "bm_george", toolkits: ["finance"], skills: ["month-close"], needs: ["quickbooks"] };
-    const line = { slug: "accounting", name: "Accounting", aliases: ["the books"], voice: "bm_george", speed: 1, persona: "", memory: "", notes: [], created_at: "x", last_active_at: null, active: false, is_ghost: false, turn_count: 0, compactions: 0, dir: "~", scope: {}, settled_at: null, department: null, is_department: true, toolkits: ["finance"] };
-    const client = new GhostClient(
-      fakeTransport({
-        "GET /templates": () => [tpl],
-        "POST /templates/accounting/apply": (body) => {
-          applied = body;
-          return line;
-        },
-        "POST /conversations/accounting/export": () => ({ ...tpl, source: "ghost" }),
-      }),
-    );
-    expect((await client.templates())[0].needs).toEqual(["quickbooks"]);
-    expect((await client.applyTemplate("accounting", "Books")).toolkits).toEqual(["finance"]);
-    expect(JSON.parse(applied)).toEqual({ name: "Books" });
-    await client.applyTemplate("accounting");
-    expect(JSON.parse(applied)).toEqual({ name: null });
-    expect((await client.exportTemplate("accounting")).source).toBe("ghost");
+    expect((await client.retireConversation("brand")).ok).toBe(true);
+    expect((await client.rehireConversation("brand")).detail).toBe("not retired");
+    expect((await client.moveConversation("brand", "sales")).department).toBe("sales");
+    expect(JSON.parse(posts.move)).toEqual({ department: "sales" });
+    expect((await client.departments())[0].uses).toEqual(["github"]);
+    expect((await client.department("marketing")).agents).toEqual(["marketing", "brand"]);
+    await client.createDepartment({ name: "Marketing", aliases: ["the marketers"], voice: null });
+    expect(JSON.parse(posts.department).aliases).toEqual(["the marketers"]);
+    expect((await client.addRule("marketing", "UK dates.")).rules).toContain("UK dates");
+    expect(JSON.parse(posts.rule)).toEqual({ text: "UK dates." });
+    expect((await client.departmentJournal("marketing"))[0].agent).toBe("Brand");
   });
 
   it("posts a typed turn and surfaces errors", async () => {

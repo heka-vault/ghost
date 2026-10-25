@@ -305,7 +305,7 @@ export default function SessionScreen(_: RouteProps) {
               <PendingChange
                 summary={pending.summary}
                 rationale={pending.rationale}
-                operation={[`${pending.ability}.${pending.operation}`, status?.department ? `in ${lineName(status.department)}` : null, status?.toolkit ?? null].filter(Boolean).join(" · ")}
+                operation={[`${pending.ability}.${pending.operation}`, status?.department && status.department !== "ghost" ? `in ${lineName(status.department)}` : null].filter(Boolean).join(" · ")}
                 expiresAt={pending.expires_at}
                 busy={busy === "confirm" ? "confirm" : busy === "cancel" ? "cancel" : busy !== null}
                 disabled={!online}
@@ -355,7 +355,7 @@ export default function SessionScreen(_: RouteProps) {
                   <div className="session-start__row">
                     {wakeButton}
                     {showLast && (
-                      <Link to={`/lines/${lastSession.slug}`} className="session-start__last">
+                      <Link to={`/agents/${lastSession.slug}`} className="session-start__last">
                         <span>
                           Last session · {nameOf(lastSession.slug)} · <time dateTime={lastSession.at}>{relativeTime(lastSession.at)}</time>
                         </span>

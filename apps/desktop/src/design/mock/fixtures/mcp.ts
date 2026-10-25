@@ -41,6 +41,7 @@ function githubHeka(repos: string[]): ServerFixture {
       transport: "stdio",
       connected: true,
       error: null,
+      department: null,
       tools: [
         { name: "issue_read", description: "Get details of a specific issue in a GitHub repository: title, body, state, labels, assignees, comments and sub-issues.", offered: true },
         { name: "list_issues", description: "List issues in a GitHub repository. Filter by state, labels, since and ordering; paginated.", offered: true },

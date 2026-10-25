@@ -1,12 +1,12 @@
 /**
  * Owner: session. Turns the flat turn list into what the transcript shows: groups of
- * consecutive turns by one speaker, transfer markers between lines, and system notes.
+ * consecutive turns by one speaker, transfer markers between agents, and system notes.
  *
- * Who spoke an assistant turn is worked out by walking the session: it starts on Ghost
- * (every wake lands there, ADR 0014), and each transfer line the old line speaks
- * ("Patching you through to Accounting.", "Back to Ghost.") hands the voice to the new
- * one. A switch seen only as a status change (no spoken line yet) is placed where it
- * happened, so a transfer never goes unmarked.
+ * Who spoke an assistant turn is worked out by walking the session: it starts with Ghost
+ * (every wake lands there, ADR 0014), and each transfer sentence the old agent speaks
+ * ("Transferring you to Accounting.", "Back to Ghost.", and after a move "Moved to
+ * Infra.") hands the voice to the new one. A switch seen only as a status change (no
+ * spoken sentence yet) is placed where it happened, so a transfer never goes unmarked.
  */
 import type { Turn } from "@ghost/client-ts";
 
@@ -14,7 +14,7 @@ export interface LineInfo {
   slug: string;
   name: string;
   aliases: string[];
-  /** When the line was last used, from GET /conversations. */
+  /** When the agent was last used, from GET /conversations. */
   lastActive?: string | null;
 }
 
@@ -49,10 +49,10 @@ export type Item =
   | { kind: "ghost"; key: string; slug: string; turns: Turn[] }
   | { kind: "you"; key: string; typed: boolean; turns: Turn[] };
 
-const PATCH = /^patching you through to (.+?)[.!]?$/i;
+const PATCH = /^(?:transferring you to|patching you through to) (.+?)[.!]?$/i;
 const BACK = /^back to ghost[.!]?$/i;
 
-/** The line a transfer sentence hands over to, or null if the turn isn't one. */
+/** The agent a transfer sentence hands over to, or null if the turn isn't one. */
 export function transferTarget(text: string, lines: LineInfo[]): string | null {
   const t = text.trim();
   if (BACK.test(t)) return "ghost";
@@ -69,7 +69,7 @@ export function resolveLine(spoken: string, lines: LineInfo[]): string {
 
 export function buildTranscript(turns: Turn[], current: string, lines: LineInfo[], observed: ObservedSwitch[], decisions: Decision[] = []): Item[] {
   const spokenAt = turns.map((t) => (t.role === "assistant" ? transferTarget(t.text, lines) : null));
-  // An observed switch is dropped when the line's own transfer sentence sits within two
+  // An observed switch is dropped when the agent's own transfer sentence sits within two
   // turns of it (the status event and the spoken line arrive in either order).
   const extra = observed.filter((s) => {
     const i = s.afterAt == null ? -1 : turns.findIndex((t) => t.at === s.afterAt);
