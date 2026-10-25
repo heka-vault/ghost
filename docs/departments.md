@@ -1,5 +1,11 @@
 # Departments, toolkits and templates
 
+> **Superseded by [ADR 0024](adr/0024-a-department-is-a-folder.md), accepted 2026-10-25,
+> not yet built.** There a department is a folder under `~/.config/ghost/departments/`
+> with its own `AGENTS.md`, `mcp.json`, `department.json`, skills, docs and shared
+> `memory.md`; agents are hired into it, moved between departments and retired; toolkits
+> and templates go. This page describes what runs today and is rewritten with the code.
+
 How Ghost is organised above the servers and skills (ADR 0023). Five levels, each only
 narrowing the one above: standards (servers, skills), **toolkits**, **departments**,
 **lines**, and Ghost.

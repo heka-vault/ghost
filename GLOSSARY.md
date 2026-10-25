@@ -1,5 +1,13 @@
 # Glossary
 
+> **Changing (ADR 0024, accepted 2026-10-25, not yet built).** When the department
+> work lands, three words replace the phone metaphor below: an **agent** is what the
+> operator hires, talks to, moves and fires (its own persona, job, voice and private
+> memory); a **department** is the folder it works in (rules, servers, skills, docs and a
+> shared memory every agent in it reads); **conversation** stays as the storage name for
+> an agent in the code and the control API. *Line*, *toolkit* and *template* go. The
+> table below describes what runs today and is rewritten with the code.
+
 The words Ghost uses, one meaning each. In the apps and in speech the phone metaphor
 is the one that holds: you call a line, and what is said on it is the conversation.
 
