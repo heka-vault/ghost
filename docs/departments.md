@@ -31,11 +31,14 @@ and a rule appended verbatim to `AGENTS.md`. The model never writes `mcp.json` o
 
 ## A department's folder
 
-- **`AGENTS.md`** is the department's rules. Every agent in it gets the text in its prompt,
-  after Ghost's own `AGENTS.md` (so Ghost's rules apply everywhere). "Accounting, add a
-  rule: always say the currency" appends the operator's words as they were said
-  (`departments.add_rule`, medium risk, so `confirm` unless the policy file says
-  otherwise). Capped at 8,000 characters in the prompt.
+- **`AGENTS.md`** is the department's rules. Every agent in it gets the text in its prompt;
+  Ghost's own `AGENTS.md` is Ghost's and is not repeated in other departments. "Accounting,
+  add a rule: always say the currency" appends the text as the operator said it
+  (`departments.add_rule`, medium risk, `confirm` unless the policy file says otherwise).
+  The operator's request is never the yes for this one: Ghost reads the exact text back
+  and the spoken yes writes it, since nothing in code can tell the operator's words from a
+  paraphrase. Capped at 8,000 characters in the prompt. A linked `AGENTS.md` or
+  `memory.md` is a problem the folder reports; Ghost reads and writes only regular files.
 - **`mcp.json`** is its servers, in the shape other clients share: `{"mcpServers":
   {"<name>": {"command", "args", "env"}}}` for stdio, `{"type": "http", "url", "headers"}`
   for streamable HTTP, secrets as `${NAME}`. `"use": ["github"]` reaches one of Ghost's
@@ -56,9 +59,15 @@ and a rule appended verbatim to `AGENTS.md`. The model never writes `mcp.json` o
 
 Ghost's own folder is the config root. Its `department.json` carries the declarations for
 Ghost's servers. A department that `use`s one of them reaches it through its own
-declaration: its own `reads`, `scope` and `writes` for that server, and its own `levels`
-and `targets`, which `Department.policy` lays over the policy file's `[defaults]` for a
-session in that department. Both files are the operator's; the model writes neither.
+declaration: its own `reads` and `writes` for that server, and its own `levels` and
+`targets`, which `Department.policy` lays over the policy file's `[defaults]` for a session
+in that department. Its allowlist never widens Ghost's: no `scope` of its own means
+Ghost's, no `items` means Ghost's items, and an item Ghost does not allow is dropped and
+reported as a problem. The gate keeps each department's operations apart, so a used
+server's pinned arguments, bounds and allowlist are the department's own in its sessions
+and Ghost's in Ghost's. Both files are the operator's; the model writes neither. A level
+edited by hand applies at the next refresh of the folders: the desktop's Departments
+screen, a policy-file reload, or a daemon restart.
 
 ## Agents
 
@@ -86,18 +95,22 @@ memory, servers, skills, docs, agents, journal, Add rule, New department, Open f
 ## A session in a department
 
 Every session opens in Ghost. "Transfer me to accounting" or an agent's name moves it: the
-prompt becomes that agent's (Ghost's rules, the department's rules and shared memory, the
-agent's persona and memory, the roster of agents it can hand off to), the voice changes,
-and the tools become what the department reaches: its own servers and the ones it `use`s,
-its skills, its docs, and the agents' tools. Nothing else is in the prompt or callable. A
-department with no servers reaches nothing outside; Ghost reaches its own servers.
+prompt becomes that agent's (the department's rules and shared memory, the agent's
+persona and memory), the voice changes, and the tools become what the department reaches:
+its own servers and the ones it `use`s, its skills, its own docs and journal, and the
+agents' tools. Nothing else is in the prompt or callable; a department's session cannot
+read or write another department's files (only Ghost, unscoped, can, and Ghost alone
+carries the roster of departments and agents). A department with no servers reaches
+nothing outside; Ghost reaches its own servers. A call straight into an agent from the
+phone or the desktop enters its department the same way before the session is built.
 
 A department's own servers start on the first transfer into it and stay up for
 `department_idle_secs` (600) after the last session leaves (`ghost_core.departments.Fleet`);
 the start is measured and logged with the transfer, since it is a cost on that turn
 ([performance.md](performance.md)). Ghost's servers connect at start. A server that fails
 to connect is a problem the department reports (`ghostd check`, `GET /departments`, the
-Departments screen) and is skipped.
+Departments screen) and is skipped; a start that brings nothing up is tried again at the
+next transfer.
 
 A request about an item another department owns (a repository in its allowlist) gets a
 tool result that names the owner, and Ghost offers to transfer; with

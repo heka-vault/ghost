@@ -5,7 +5,9 @@ declares in its folder (ADR 0024): `mcp.json` says how to reach it, `department.
 says what the gate may do with it. Ghost's own servers are declared in `~/.config/ghost/`
 itself and connect at start; a department's connect on the first transfer into it. There
 is no code to write for a new service and nothing to install into Ghost: pick a server,
-declare it, restart (or transfer).
+declare it, and restart Ghost (a department's folder is re-read when the desktop's
+Departments screen refreshes or the policy file reloads; its servers start at the next
+transfer into it).
 
 ## A server
 
@@ -41,7 +43,8 @@ Claude unchanged:
   variable.
 - **`use`** (a department's `mcp.json` only) reaches one of Ghost's servers under its own
   name instead of starting another process; the department's own `department.json` entry
-  for it says what that department may read and write and at what level.
+  for it says what that department may read and write and at what level, and its
+  allowlist can only be Ghost's or a subset of it.
 - A server that fails to connect is logged, reported as a problem of its department, and
   skipped; the daemon runs without it. `ghostd check` connects to Ghost's servers and
   prints what each one gave and every department's problems; the control API's `GET /mcp`
