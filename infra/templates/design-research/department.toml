@@ -1,9 +1,0 @@
-title = "Design research"
-description = "Looks up how other apps do a screen or a flow, on Mobbin."
-aliases = ["design", "research"]
-toolkits = ["design-research"]
-
-[toolkit.design-research]
-description = "Read-only: search Mobbin for screens, flows and sections."
-
-[toolkit.design-research.servers.mobbin]

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mobbin": {
+      "type": "http",
+      "url": "http://proxy.lan:8318/mobbin/mcp",
+      "headers": { "Authorization": "Bearer ${MCP_PROXY_KEY}" }
+    }
+  }
+}

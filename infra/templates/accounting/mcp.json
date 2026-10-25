@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "books": {
+      "command": "your-books-mcp-server",
+      "args": [],
+      "env": { "BOOKS_TOKEN": "${BOOKS_TOKEN}" }
+    }
+  }
+}
