@@ -41,7 +41,7 @@ export function EntryTitle({ e, lines }: { e: AuditEntry; lines?: number }) {
   );
 }
 
-/** Where an entry was made, in words (ADR 0023): the department, then the topic line when it was one of its lines. */
+/** Where an entry was made, in words (ADR 0024): the department, then the agent when it was not the department's own. */
 export function whereMade(e: AuditEntry): string {
   const line = entryLine(e);
   if (!e.department || e.department === line) return lineName(line);

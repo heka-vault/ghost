@@ -30,7 +30,6 @@ export const VALUE_KEYS = [
   "ANTHROPIC_BASE_URL",
   "GHOST_LLM_MODEL",
   "GHOST_DEPARTMENT_ROUTING",
-  "GHOST_SKILL_ROOTS",
   "GHOST_INPUT_DEVICE",
   "GHOST_WAKE_PHRASES",
   "GHOST_WAKE_FUZZY",
@@ -42,7 +41,6 @@ export const KEY_LABEL: Record<string, string> = {
   ANTHROPIC_BASE_URL: "Model endpoint",
   GHOST_LLM_MODEL: "Model",
   GHOST_DEPARTMENT_ROUTING: "Department routing",
-  GHOST_SKILL_ROOTS: "Project skill roots",
   GHOST_INPUT_DEVICE: "Microphone",
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
@@ -59,7 +57,6 @@ export const KEY_SECTION: Record<string, SectionId> = {
   ANTHROPIC_BASE_URL: "model",
   GHOST_LLM_MODEL: "model",
   GHOST_DEPARTMENT_ROUTING: "departments",
-  GHOST_SKILL_ROOTS: "skills",
   GHOST_INPUT_DEVICE: "audio",
   GHOST_WAKE_PHRASES: "voice",
   GHOST_WAKE_FUZZY: "voice",
@@ -156,8 +153,6 @@ export function validate(d: Draft, s: SettingsView | null): Record<string, strin
   if ((d.values.GHOST_JEV || "auto") === "on" && !jevNow("on", s, d.secrets).ok) e.GHOST_JEV = jevNow("on", s, d.secrets).label;
   if (d.values.GHOST_WAKE_PHRASES != null && d.values.GHOST_WAKE_PHRASES !== "" && splitList(d.values.GHOST_WAKE_PHRASES).length === 0)
     e.GHOST_WAKE_PHRASES = "Add at least one phrase.";
-  const bad = splitList(d.values.GHOST_SKILL_ROOTS).find(badRoot);
-  if (bad) e.GHOST_SKILL_ROOTS = `Use a full path for ${bad}, like ~/projects/heka.`;
   return e;
 }
 

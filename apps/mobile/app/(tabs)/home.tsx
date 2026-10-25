@@ -170,7 +170,7 @@ export default function Home() {
         )}
       </View>
 
-      {/* The dial pad: Ghost and a key per department. A press calls straight into it; a department with topic lines opens them in a sheet first. */}
+      {/* The dial pad: Ghost and a key per department. A press calls its default agent; a department with more agents opens them in a sheet first. */}
       {keys.length > 1 && !inSession && link !== "connecting" ? (
         <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
           <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[3], marginLeft: space[1] }}>
@@ -221,7 +221,7 @@ export default function Home() {
       ) : null}
       </ScrollView>
 
-      {/* A department's lines: the department's own line first, then each topic line; a tap calls it. */}
+      {/* A department's agents: its default agent first, then the rest; a tap calls it. */}
       <Modal visible={!!openedLine} transparent animationType="fade" onRequestClose={() => setOpened(null)} statusBarTranslucent>
         <Pressable accessible={false} onPress={() => setOpened(null)} style={{ flex: 1, backgroundColor: colors.bgOverlay, justifyContent: "flex-end" }}>
           <Pressable accessible={false} onPress={() => {}} style={{ backgroundColor: colors.bgRaised, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: space[5], paddingBottom: space[8], gap: space[3], borderWidth: 1, borderColor: colors.border }}>

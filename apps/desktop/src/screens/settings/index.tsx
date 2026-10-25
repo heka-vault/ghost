@@ -950,27 +950,10 @@ export default function SettingsScreen(_: RouteProps) {
                 description="Where Ghost finds skills: the SKILL.md folders that tell it how to do a kind of task."
                 className="set-section"
               >
-                <Card list>
-                  <Row>
-                    <Field
-                      id={fieldId("GHOST_SKILL_ROOTS")}
-                      label="Project skill roots"
-                      detail="GHOST_SKILL_ROOTS"
-                      help={help(
-                        "GHOST_SKILL_ROOTS",
-                        <>
-                          One folder per line. Ghost reads each one’s <span className="t-mono">.agents/skills</span> in place, without copying. Its own skills live in{" "}
-                          <span className="t-mono">~/.config/ghost/skills</span>.
-                        </>,
-                      )}
-                      error={err("GHOST_SKILL_ROOTS")}
-                    >
-                      <LinesInput value={v.GHOST_SKILL_ROOTS ?? ""} placeholder="~/projects/heka" onChange={(next) => setValue("GHOST_SKILL_ROOTS", next)} />
-                    </Field>
-                  </Row>
-                </Card>
                 <p className="set-note">
-                  What Ghost found, and what each skill needs, is under <a href={hrefFor("/skills")}>Skills</a>.
+                  Nearest first: a department’s own <span className="t-mono">skills</span> folder (or its root’s), then yours in <span className="t-mono">~/.agents/skills</span>, then Ghost’s own in{" "}
+                  <span className="t-mono">~/.config/ghost/skills</span>. Nothing is copied. What Ghost found, where each came from and what it needs is under{" "}
+                  <a href={hrefFor("/skills")}>Skills</a>.
                 </p>
               </Section>
 

@@ -1,7 +1,7 @@
 /**
  * Owner: skills. The SKILL.md folders Ghost reads (ADR 0023), as GET /skills reports them:
- * Ghost's own under ~/.config/ghost/skills, and a project's .agents/skills read in place from
- * each root in GHOST_SKILL_ROOTS. `missing` is worked out here from the servers the mock has
+ * Ghost's own under ~/.config/ghost/skills, the operator's under ~/.agents/skills, and a
+ * department's own read in place (ADR 0024). `missing` is worked out here from the servers the mock has
  * connected, so a skill that needs a server no scenario declares (quickbooks) shows as missing
  * everywhere, and one that needs the calendar is ready only in Busy, where that server exists.
  */
