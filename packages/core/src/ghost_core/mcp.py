@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import os
@@ -71,7 +72,8 @@ MAX_RESULT_TEXT = 1200  # a string in a result, so one issue body never fills th
 MAX_RESULT_ITEMS = 30
 BRIEF_MAX = 240
 RISKS = ("low", "medium", "high")
-_SECRET = re.compile(r"\$(\{)?([A-Z][A-Z0-9_]*)(?(1)\})")
+# $NAME, ${NAME} or ${env:NAME} (the shape other clients' mcp.json files use, ADR 0024)
+_SECRET = re.compile(r"\$\{(?:env:)?([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)")
 SERVER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "no.")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s")
@@ -360,12 +362,17 @@ def _expand_args(args: Sequence[str]) -> list[str]:
     return [os.path.expanduser(a) for a in args]
 
 
+def secret_names(value: str) -> list[str]:
+    """The environment names a value refers to."""
+    return [m.group(1) or m.group(2) for m in _SECRET.finditer(value)]
+
+
 def fill_secrets(value: str, environ: Mapping[str, str]) -> str:
-    """``$NAME`` or ``${NAME}`` from the environment. A missing name raises so a
-    misconfigured server fails loudly at connect time, not silently at first use."""
+    """``$NAME``, ``${NAME}`` or ``${env:NAME}`` from the environment. A missing name raises
+    so a misconfigured server fails loudly at connect time, not silently at first use."""
 
     def one(m: re.Match[str]) -> str:
-        name = m.group(2)
+        name = m.group(1) or m.group(2)
         if name not in environ:
             raise KeyError(name)
         return environ[name]
@@ -615,6 +622,16 @@ def _coerce(value: Any, schema: Mapping[str, Any]) -> Any:
 # --- a server ----------------------------------------------------------------------
 
 
+@dataclass
+class _Link:
+    """What a connected server shares with its views: the session, the tools it listed,
+    and why it is no longer connected, if it isn't."""
+
+    session: Any = None
+    tools: list[ToolInfo] = field(default_factory=list)
+    failed: str | None = None
+
+
 class Server:
     """A connected server: its session, its tools, and calls with a timeout.
 
@@ -627,16 +644,50 @@ class Server:
     def __init__(self, spec: ServerSpec, environ: Mapping[str, str] | None = None) -> None:
         self.spec = spec
         self._environ = dict(environ if environ is not None else os.environ)
-        self.failed: str | None = None  # why it is no longer connected, if it isn't
-        self._session: Any = None
+        self._link = _Link()  # the connection; shared with every view of this server
         self._task: asyncio.Task[None] | None = None
         self._ready: asyncio.Future[None] | None = None
         self._closing = asyncio.Event()
-        self.tools: list[ToolInfo] = []
 
     @property
     def name(self) -> str:
         return self.spec.name
+
+    # The connection state lives in the link, so a ``view`` with another declaration sees
+    # the same session, the same tools and the same failure.
+    @property
+    def _session(self) -> Any:
+        return self._link.session
+
+    @_session.setter
+    def _session(self, value: Any) -> None:
+        self._link.session = value
+
+    @property
+    def tools(self) -> list[ToolInfo]:
+        return self._link.tools
+
+    @tools.setter
+    def tools(self, value: list[ToolInfo]) -> None:
+        self._link.tools = value
+
+    @property
+    def failed(self) -> str | None:
+        return self._link.failed
+
+    @failed.setter
+    def failed(self, value: str | None) -> None:
+        self._link.failed = value
+
+    def view(self, declared: ServerSpec) -> Server:
+        """The same connection seen through another declaration (ADR 0024: a department
+        that ``use``s one of Ghost's servers declares its own reads, scope and writes).
+        ``declared`` must name the same server; its transport fields are ignored."""
+        if declared.name != self.spec.name:
+            raise ValueError(f"a view of {self.spec.name} cannot be called {declared.name}")
+        other = copy.copy(self)
+        other.spec = declared
+        return other
 
     async def connect(self) -> None:
         loop = asyncio.get_running_loop()
