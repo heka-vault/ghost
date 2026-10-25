@@ -263,6 +263,37 @@ def test_the_name_may_open_a_later_sentence():
     assert match_opening("I read it. The ghost story was good.", "ghost", fuzzy=0.9) is None
 
 
+OPENERS = ("i need you", "let's work on", "what's the status of")
+
+
+@pytest.mark.parametrize(
+    ("heard", "asked"),
+    [
+        # Parakeet's own spelling of the operator's "Ghost" on 2026-10-24.
+        ("Coach, I need you to work on the build.", "I need you to work on the build."),
+        ("Coast, let's work on the wake word.", "let's work on the wake word."),
+        ("Go. What's the status of the infra repo?", "What's the status of the infra repo?"),
+        ("So, goes, I need you.", "I need you."),
+    ],
+)
+def test_a_word_shaped_like_the_name_counts_when_an_opener_follows(heard, asked):
+    assert match_opening(heard, "ghost", fuzzy=0.9, openers=OPENERS) == WakeMatch("ghost", asked)
+
+
+@pytest.mark.parametrize(
+    "heard",
+    [
+        "Coach, can you check the build.",  # the name's shape, but not an opener
+        "Dave, I need you to look at this.",  # an opener, but nothing like the name
+        "I need you to work on some things.",  # no name at all
+        "Close the door, I need you to.",
+    ],
+)
+def test_the_names_shape_alone_is_not_the_name(heard):
+    assert match_opening(heard, "ghost", fuzzy=0.9, openers=OPENERS) is None
+    assert match_opening(heard, "ghost", fuzzy=0.9) is None
+
+
 def test_a_looser_opening_takes_the_names_near_spellings():
     """The check stays strict; splitting off the request may take "goes" for "ghost"."""
     assert match_opening("Goes, I need you.", "ghost", fuzzy=0.9) is None

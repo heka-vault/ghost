@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
@@ -166,7 +166,27 @@ OPENING_LEAD = frozenset(
 )
 
 
-def match_opening(text: str, phrase: str, *, fuzzy: float = 0.0) -> WakeMatch | None:
+# What Parakeet writes for "Ghost" as the first word of an utterance, in the operator's
+# voice: "Coach" (2026-10-24), "goes", "coast". The g/k onset and the o vowel come through;
+# the end doesn't. A word of that shape counts as the name only when an opener follows it.
+NAME_SHAPE = re.compile(r"^[gkc]h?o[a-z]{0,4}$")
+
+
+def _opener_follows(words: list[str], openers: Sequence[str]) -> bool:
+    """``words`` begin with one of ``openers``, each word exact or a phonetic near-miss."""
+    for opener in openers:
+        ow = _words(opener)
+        if len(words) >= len(ow) and all(
+            w == o or _similar(_phonetic(w), _phonetic(o)) >= 0.8
+            for w, o in zip(words[: len(ow)], ow, strict=True)
+        ):
+            return True
+    return False
+
+
+def match_opening(
+    text: str, phrase: str, *, fuzzy: float = 0.0, openers: Sequence[str] = ()
+) -> WakeMatch | None:
     """``phrase`` opening a sentence, or after one interjection ("so, Ghost, …"): the
     operator addressing Ghost by name. The words after it are the request. Any sentence
     counts, since what was heard can start a sentence before they turned to Ghost ("Let
@@ -174,6 +194,9 @@ def match_opening(text: str, phrase: str, *, fuzzy: float = 0.0) -> WakeMatch | 
 
     Unlike ``match_wake`` the name inside a sentence ("the ghost story") is no match.
     ``fuzzy`` compares phonetic keys as ``match_wake`` does: at 0.8 "goes" is "ghost".
+    With ``openers``, a first word merely shaped like the name (``NAME_SHAPE``, "Coach")
+    also counts when one of them follows it: the detector heard the name, and the opener's
+    words are the part Parakeet gets right.
     """
     words = _words(text)
     pw = phrase.split()
@@ -189,6 +212,9 @@ def match_opening(text: str, phrase: str, *, fuzzy: float = 0.0) -> WakeMatch | 
                 fuzzy > 0 and _similar("".join(_phonetic(w) for w in window), key) >= fuzzy
             ):
                 return WakeMatch(phrase=phrase, remainder=_after(text, i + n))
+            shaped = n == 1 and openers and NAME_SHAPE.match(window[0])
+            if shaped and _opener_follows(words[i + 1 :], openers):
+                return WakeMatch(phrase=phrase, remainder=_after(text, i + 1))
     return None
 
 

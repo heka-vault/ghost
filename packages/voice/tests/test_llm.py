@@ -1,15 +1,33 @@
 """Which endpoint Ghost's model calls go to, that keys never show, the system-prompt cache
-marker, and the one client per process."""
+marker, the one client per process, every tool call of a reply, and a reply cut off at the
+output cap."""
 
 from __future__ import annotations
+
+import json
+from types import SimpleNamespace
 
 import pytest
 from ghost_voice import llm as llm_module
 from ghost_voice.config import OPENROUTER_ANTHROPIC_URL, VoiceSettings, openrouter_model
-from ghost_voice.llm import GhostAnthropicLLMService, shared_client, with_system_breakpoint
+from ghost_voice.llm import (
+    GhostAnthropicLLMService,
+    LLMReplyCutFrame,
+    shared_client,
+    with_system_breakpoint,
+)
+from ghost_voice.thinking import ThinkingStartFrame
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import (
+    FunctionCallFromLLM,
+    LLMFullResponseEndFrame,
+    LLMMessagesAppendFrame,
+    TTSSpeakFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.llm_service import LLMService
 
 PROXY_TOKEN = "sk-proxy-0123456789abcdef"
 OR_KEY = "sk-or-v1-fedcba9876543210"
@@ -141,3 +159,216 @@ async def test_one_client_per_endpoint_and_key(env):
         assert shared_client(s.llm_target()) is not a
     finally:
         llm_module.SHARE_CLIENT = True
+
+
+# --- every tool call of a reply, and a reply cut off at the output cap --------------------
+
+
+def events(*blocks, stop: str = "tool_use") -> list:
+    """A streamed Anthropic reply: its content blocks, then the stop reason."""
+    out = [
+        SimpleNamespace(
+            type="message_start",
+            message=SimpleNamespace(usage=SimpleNamespace(input_tokens=8, output_tokens=1)),
+        )
+    ]
+    for i, block in enumerate(blocks):
+        out += block(i)
+    out.append(
+        SimpleNamespace(
+            type="message_delta",
+            delta=SimpleNamespace(stop_reason=stop, stop_sequence=None),
+            usage=SimpleNamespace(output_tokens=400),
+        )
+    )
+    out.append(SimpleNamespace(type="message_stop"))
+    return out
+
+
+def text(s: str):
+    def block(i: int) -> list:
+        return [
+            SimpleNamespace(
+                type="content_block_start",
+                index=i,
+                content_block=SimpleNamespace(type="text", text=""),
+            ),
+            SimpleNamespace(type="content_block_delta", index=i, delta=SimpleNamespace(text=s)),
+            SimpleNamespace(type="content_block_stop", index=i),
+        ]
+
+    return block
+
+
+def tool(name: str, *json_parts: str, id: str = ""):
+    """A ``tool_use`` block whose arguments stream in ``json_parts``."""
+
+    def block(i: int) -> list:
+        return [
+            SimpleNamespace(
+                type="content_block_start",
+                index=i,
+                content_block=SimpleNamespace(
+                    type="tool_use", id=id or f"toolu_{name}_{i}", name=name, input={}
+                ),
+            ),
+            *[
+                SimpleNamespace(
+                    type="content_block_delta", index=i, delta=SimpleNamespace(partial_json=p)
+                )
+                for p in json_parts
+            ],
+            SimpleNamespace(type="content_block_stop", index=i),
+        ]
+
+    return block
+
+
+def pipecat_like(evs: list):
+    """What Pipecat 1.12's streaming loop does with a reply: it keeps the last ``tool_use``
+    block only, and runs it only when the stop reason is ``tool_use``."""
+
+    async def api_call(**params):
+        async def stream():
+            for e in evs:
+                yield e
+
+        return stream()
+
+    async def process(self, context):
+        last, acc, calls = None, "", []
+        async for e in await self._create_message_stream(api_call, {}):
+            if e.type == "content_block_start" and e.content_block.type == "tool_use":
+                last, acc = e.content_block, ""
+            elif e.type == "content_block_delta" and hasattr(e.delta, "partial_json") and last:
+                acc += e.delta.partial_json
+            elif e.type == "message_delta" and e.delta.stop_reason == "tool_use" and last:
+                calls.append(
+                    FunctionCallFromLLM(
+                        context=context,
+                        tool_call_id=last.id,
+                        function_name=last.name,
+                        arguments=json.loads(acc) if acc else {},
+                    )
+                )
+        await self.run_function_calls(calls)
+        await self.push_frame(LLMFullResponseEndFrame())
+
+    return process
+
+
+async def reply(monkeypatch, evs: list, svc: GhostAnthropicLLMService | None = None):
+    """Stream one reply through the service: the tool calls Pipecat was handed to run, and
+    the frames the service pushed."""
+    svc = svc or service()
+    ran: list[list[FunctionCallFromLLM]] = []
+    pushed: list = []
+
+    async def run(self, function_calls):
+        ran.append(list(function_calls))
+
+    async def push(frame, direction=None):
+        pushed.append(frame)
+
+    monkeypatch.setattr(LLMService, "run_function_calls", run)
+    monkeypatch.setattr(AnthropicLLMService, "_process_context", pipecat_like(evs))
+    svc.push_frame = push  # type: ignore[method-assign]
+    await svc._process_context(context())  # noqa: SLF001
+    return svc, ran, pushed
+
+
+def names(ran: list[list[FunctionCallFromLLM]]) -> list[tuple[str, str, dict]]:
+    return [(c.tool_call_id, c.function_name, dict(c.arguments)) for calls in ran for c in calls]
+
+
+async def test_every_tool_call_in_a_reply_runs(monkeypatch):
+    # The prompt asks for independent lookups together; Pipecat alone ran only the last.
+    _, ran, _ = await reply(
+        monkeypatch,
+        events(
+            text("Checking."),
+            tool("list_issues", '{"repo": ', '"ghost"}', id="t1"),
+            tool("list_issues", '{"repo": "ecosystem"}', id="t2"),
+            tool("issue_read", id="t3"),
+        ),
+    )
+    assert names(ran) == [
+        ("t1", "list_issues", {"repo": "ghost"}),
+        ("t2", "list_issues", {"repo": "ecosystem"}),
+        ("t3", "issue_read", {}),
+    ]
+    assert ran[0][0].context is not None
+
+
+async def test_one_tool_call_runs_as_pipecat_hands_it_over(monkeypatch):
+    _, ran, _ = await reply(monkeypatch, events(tool("issue_read", '{"n": 8}', id="t1")))
+    assert names(ran) == [("t1", "issue_read", {"n": 8})]
+
+
+async def test_an_answer_without_tools_is_untouched(monkeypatch):
+    _, ran, pushed = await reply(monkeypatch, events(text("Three."), stop="end_turn"))
+    assert ran == [[]]
+    assert not any(isinstance(f, LLMReplyCutFrame) for f in pushed)
+
+
+async def test_a_reply_cut_off_inside_its_tool_calls_is_redone_in_smaller_steps(monkeypatch):
+    # The car on 2026-10-24: four comments in one reply at a 400-token cap. Two complete,
+    # the third cut mid-arguments; Pipecat saw ``max_tokens`` and ran none, silently.
+    _, ran, pushed = await reply(
+        monkeypatch,
+        events(
+            tool("change", '{"op": "comment", "n": 390}', id="t1"),
+            tool("change", '{"op": "comment", "n": 389}', id="t2"),
+            tool("change", '{"op": "comm', id="t3"),
+            stop="max_tokens",
+        ),
+    )
+    assert ran == []  # half a batch is not run
+    assert [f.tool_calls for f in pushed if isinstance(f, LLMReplyCutFrame)] == [3]
+    kinds = [type(f).__name__ for f in pushed]
+    assert (
+        kinds.index("LLMFullResponseEndFrame")
+        < kinds.index("ThinkingStartFrame")
+        < kinds.index("LLMMessagesAppendFrame")
+    )
+    note = next(f for f in pushed if isinstance(f, LLMMessagesAppendFrame))
+    assert note.run_llm is True
+    assert note.messages == [{"role": "user", "content": llm_module.CUT_OFF_NOTE}]
+    assert "smaller steps" in llm_module.CUT_OFF_NOTE
+    assert not any(isinstance(f, TTSSpeakFrame) for f in pushed)
+
+
+async def test_a_redo_cut_off_again_is_said_not_retried(monkeypatch):
+    cut = events(
+        tool("change", '{"n": 1}', id="t1"), tool("change", '{"n": ', id="t2"), stop="max_tokens"
+    )
+    svc, _, pushed = await reply(monkeypatch, cut)
+    assert any(isinstance(f, LLMMessagesAppendFrame) for f in pushed)
+    _, ran, pushed = await reply(monkeypatch, cut, svc=svc)
+    assert ran == []
+    assert not any(isinstance(f, LLMMessagesAppendFrame) for f in pushed)
+    assert [f.text for f in pushed if isinstance(f, TTSSpeakFrame)] == [llm_module.CUT_OFF_LINE]
+
+
+async def test_a_redo_that_completes_lets_the_next_cut_be_redone(monkeypatch):
+    cut = events(tool("change", '{"n": ', id="t1"), stop="max_tokens")
+    svc, _, _ = await reply(monkeypatch, cut)
+    await reply(monkeypatch, events(tool("change", '{"n": 1}', id="t1")), svc=svc)  # whole
+    _, _, pushed = await reply(monkeypatch, cut, svc=svc)
+    assert any(isinstance(f, LLMMessagesAppendFrame) for f in pushed)
+    assert not any(isinstance(f, TTSSpeakFrame) for f in pushed)
+
+
+async def test_a_long_answer_cut_short_is_only_flagged(monkeypatch):
+    _, ran, pushed = await reply(
+        monkeypatch, events(text("Fifty-four open issues. The first"), stop="max_tokens")
+    )
+    assert ran == []
+    assert [f.tool_calls for f in pushed if isinstance(f, LLMReplyCutFrame)] == [0]
+    assert not any(
+        isinstance(f, (LLMMessagesAppendFrame, TTSSpeakFrame, ThinkingStartFrame)) for f in pushed
+    )
+
+
+def test_the_output_cap_leaves_room_for_a_batch_of_tool_calls(env):
+    assert VoiceSettings().llm_max_tokens >= 1500

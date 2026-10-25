@@ -56,15 +56,17 @@ SAMPLE_RATE = 16000
 STEP = 1280  # 80 ms: how often the detector scores
 WINDOW = 32000  # 2 s: what each score covers
 PRE_SECS = 2.0  # audio before the hit that the check and the first turn are read from
-# An opener ("Ghost, what did we leave off on") can fill the detector's whole 2 s window;
-# a little more makes sure the transcript has the name.
-OPENING_PRE_SECS = 2.5
+# An opener ("Ghost, what did we leave off on") can fill the detector's whole 2 s window,
+# and the operator may pause after the name ("Ghost. I need you …"): the name, a pause of
+# up to 2 s and the opener must all fit (.scratch/wake-train/results/leading-name.md).
+OPENING_PRE_SECS = 4.5
 CHECK_SECS = 1.0  # the check runs this long after the hit at the latest
-# Where the operator started talking: a pause shorter than RUN_GAP_SECS (the comma after
-# "Ghost") doesn't start anew, and the VAD says "started" about SPEECH_PAD_SECS after the
-# first sound. Spoken slowly, "Ghost, I need you" put the hit more than 2.5 s after the
-# name (2026-10-24). The check reads no further back than MAX_PRE_SECS before the hit.
-RUN_GAP_SECS = 1.0
+# Where the operator started talking: a pause shorter than RUN_GAP_SECS (after "Ghost.",
+# before the request) doesn't start anew, and the VAD says "started" about SPEECH_PAD_SECS
+# after the first sound. At 1 s a pause after the name started a new run and the check
+# began at the request, without the name (2026-10-24). The check reads no further back
+# than MAX_PRE_SECS before the hit.
+RUN_GAP_SECS = 3.0
 SPEECH_PAD_SECS = 0.5
 MAX_PRE_SECS = 6.0
 MAX_LISTEN_SECS = 12.0  # after a hit, the most Ghost waits for the operator to finish
@@ -74,6 +76,16 @@ REMAINDER_FUZZY = 0.8
 
 DETECTOR_PHRASE = "hey ghost"
 ADDRESS_PHRASE = "ghost"  # what a ghost_*.onnx model hears: the name opening a request
+# The openers the ghost_* models were trained on (docs/benchmarks/2026-10-23-ghost-openers.md):
+# after a first word that is only shaped like the name, one of these must follow.
+OPENERS = (
+    "i need you",
+    "let's work on",
+    "what is the status of",
+    "what's the status of",
+    "what did we leave off",
+    "where did we leave off",
+)
 DEFAULT_MODEL_NAME = "hey_ghost.onnx"
 ADDRESS_MODEL_GLOB = "ghost_*.onnx"  # Ghost addressed by name: one model, or one per opener
 
@@ -128,7 +140,7 @@ class WakeModel:
 
     def match(self, text: str, fuzzy: float) -> WakeMatch | None:
         if self.opening:
-            return match_opening(text, self.phrase, fuzzy=fuzzy)
+            return match_opening(text, self.phrase, fuzzy=fuzzy, openers=OPENERS)
         return match_wake(text, (self.phrase,), fuzzy=fuzzy)
 
 
@@ -176,6 +188,7 @@ class DetectorWakeProcessor(FrameProcessor):
         self._speaking = False
         self._stopped_at: int | None = None  # where the VAD last said the operator stopped
         self._run_start: int | None = None  # where their current run of speech began
+        self._heard_from = 0  # where the last reading started, for the debug log
         self._checked = False  # the first check missed: read it all again when they finish
         self._hit: int | None = None
         self._model: WakeModel = detector.models[0]  # the model behind the hit
@@ -245,7 +258,17 @@ class DetectorWakeProcessor(FrameProcessor):
         if self._run_start is not None:
             start = max(min(start, self._run_start), self._hit - int(MAX_PRE_SECS * SAMPLE_RATE))
         start = max(0, start - self._base)
+        self._heard_from = start + self._base
         return self._buf[start:].astype(np.float32) / 32768.0
+
+    def _describe(self, audio: np.ndarray) -> str:
+        """What a reading covered, for the debug log: numbers only."""
+        assert self._hit is not None
+        rms = float(np.sqrt(np.mean(audio**2))) if len(audio) else 0.0
+        level = 20 * np.log10(max(rms, 1e-9))
+        before = (self._hit - self._heard_from) / SAMPLE_RATE
+        secs = len(audio) / SAMPLE_RATE
+        return f"{secs:.1f}s from {before:.1f}s before the hit, {level:.0f} dBFS"
 
     # --- decisions ------------------------------------------------------------------
 
@@ -270,7 +293,9 @@ class DetectorWakeProcessor(FrameProcessor):
         the chime can play while the operator is still talking; live, Parakeet often wrote
         nothing for that stretch while their whole sentence read fine, so a miss is read
         again, whole, once they finish (``final``), and only that drops the hit."""
-        text = await asyncio.to_thread(self._d.recognize, self._heard())
+        audio = self._heard()
+        text = await asyncio.to_thread(self._d.recognize, audio)
+        debug.audio(f"passive: check{' (final)' if final else ''} read {self._describe(audio)}")
         if self._model.match(text, self._fuzzy):
             logger.info("wake: confirmed" + (" once they finished" if final else ""))
             await self._wake()
@@ -297,12 +322,16 @@ class DetectorWakeProcessor(FrameProcessor):
     async def _finish(self, text: str | None = None) -> None:
         self._done = True
         if text is None:
-            text = await asyncio.to_thread(self._d.recognize, self._heard())
+            audio = self._heard()
+            text = await asyncio.to_thread(self._d.recognize, audio)
+            debug.audio(f"passive: first turn read {self._describe(audio)}")
         model = self._model
         fuzzy = min(self._fuzzy, REMAINDER_FUZZY)
         # hey_ghost also fires on the bare name ("Ghost, let's work on …" scored 0.74 on
         # the replay, ahead of the opener's own model): what follows the name is the request.
-        m = model.match(text, fuzzy) or match_opening(text, ADDRESS_PHRASE, fuzzy=fuzzy)
+        m = model.match(text, fuzzy) or match_opening(
+            text, ADDRESS_PHRASE, fuzzy=fuzzy, openers=OPENERS
+        )
         debug.audio(f"passive: woken by {model.name}, heard {text!r}")
         if m:
             remainder = m.remainder

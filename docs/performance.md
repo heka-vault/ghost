@@ -51,7 +51,10 @@ Delay added on purpose counts against the budget like any other. Today that is t
 0.8 s turn grace, so a pause doesn't end the operator's turn (the model answers during it
 since 2026-10-22, so it costs time only when the operator goes on), and holding a short
 reply until it is complete, so narration before a lookup is never spoken. Each one is a
-setting, and the harness shows what it costs.
+setting, and the harness shows what it costs. One more is conditional: a reply that hits
+the model's output cap (`GHOST_LLM_MAX_TOKENS`, 2000 tokens, tool calls included) is
+redone in smaller steps, one extra model call, because the alternative is losing the calls
+it held (`ghost_voice.llm`; the turn is flagged `cut_off` in `latency.jsonl`).
 
 ## How we work on it
 

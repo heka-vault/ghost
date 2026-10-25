@@ -72,6 +72,7 @@ _SPOKEN_WITH = frozenset({"hang_up", "hold"})
 # The thinking sound processor's frame; matched by name to keep this module free of
 # a dependency on ghost_voice.thinking.
 _THINKING_START = "ThinkingStartFrame"
+_REPLY_CUT = "LLMReplyCutFrame"  # ghost_voice.llm: the reply hit the output cap
 
 
 # --- what Ghost's own processors report -------------------------------------------
@@ -282,6 +283,9 @@ class LatencyObserver(BaseObserver, LatencyProbe):
         elif type(frame).__name__ == _THINKING_START:
             if self._turn is None or self._turn.bot_started is not None:
                 self._replace(self._new("text", t))
+        elif type(frame).__name__ == _REPLY_CUT:
+            if self._turn is not None:
+                self._turn.flags.add("cut_off")
         elif isinstance(frame, LLMFullResponseStartFrame) and isinstance(src, LLMService):
             turn = self._turn
             if turn is None or (turn.bot_started is not None and not turn.busy()):

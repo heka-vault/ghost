@@ -115,6 +115,45 @@ async def test_a_hit_the_first_check_missed_is_checked_again_when_they_finish():
 
 
 @pytest.mark.asyncio
+async def test_a_pause_after_the_name_keeps_it_in_the_check():
+    """ "Ghost." then a 1.5 s pause, then the request: the hit comes a second into the
+    request, and the check still starts before the name. With the run gap at 1 s the pause
+    started a new run and the name was gone (2026-10-24)."""
+    recognize = Recognizer("Ghost. I need you to look at the build.")
+    events = await run(
+        detector(Scorer({14}, model="ghost_address"), recognize),  # the hit at 3.04 s
+        [
+            *audio(0.5),
+            VADUserStartedSpeakingFrame(),  # "Ghost." from about 0.3 s
+            *audio(0.4),
+            VADUserStoppedSpeakingFrame(),
+            *audio(1.5),
+            VADUserStartedSpeakingFrame(),  # "I need you to look at the build"
+            *audio(1.0),
+            VADUserStoppedSpeakingFrame(),
+            *audio(0.4),
+        ],
+    )
+    assert events == ["heard", "match:ghost|I need you to look at the build."]
+    assert recognize.secs[0] >= 3.3  # from before the name, not from the request
+
+
+@pytest.mark.asyncio
+async def test_a_misspelled_name_passes_when_the_opener_follows():
+    """Live, Parakeet wrote "Coach, I need you to work on" for the first reading and
+    dropped the name from the whole one (2026-10-24): the first reading wakes Ghost, and
+    the request is the whole sentence."""
+    recognize = Recognizer(
+        "Coach, I need you to work on", "I need you to work on some of the things."
+    )
+    events = await run(
+        detector(Scorer({3}, model="ghost_address"), recognize),
+        [VADUserStartedSpeakingFrame(), *audio(3.4), VADUserStoppedSpeakingFrame(), *audio(0.4)],
+    )
+    assert events == ["heard", "match:ghost|I need you to work on some of the things."]
+
+
+@pytest.mark.asyncio
 async def test_the_check_reads_from_where_the_operator_started_talking():
     """Spoken slowly, "Ghost, I need you" puts the hit more than 2.5 s after the name.
     The check starts where the speech did; the comma's short pause doesn't count."""
@@ -248,14 +287,21 @@ async def test_hey_ghost_firing_on_the_name_keeps_the_request():
 
 @pytest.mark.asyncio
 async def test_without_the_check_a_misheard_name_keeps_the_request():
-    """The model heard "Ghost, …" but Parakeet wrote "Coast": the request is all of it,
+    """The model heard "Ghost, …" but Parakeet wrote something else: shaped like the name
+    with an opener after it, the request is what follows; otherwise it is all of it,
     rather than a greeting that drops what the operator asked."""
     recognize = Recognizer("Coast, let's work on the wake word.")
     events = await run(
         detector(Scorer({3}, model="ghost_address"), recognize, verify=False),
         [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(0.4)],
     )
-    assert events == ["heard", "match:ghost|Coast, let's work on the wake word."]
+    assert events == ["heard", "match:ghost|let's work on the wake word."]
+    recognize = Recognizer("Toast, can you check the build.")
+    events = await run(
+        detector(Scorer({3}, model="ghost_address"), recognize, verify=False),
+        [VADUserStartedSpeakingFrame(), *audio(2.6), VADUserStoppedSpeakingFrame(), *audio(0.4)],
+    )
+    assert events == ["heard", "match:ghost|Toast, can you check the build."]
 
 
 @pytest.mark.asyncio

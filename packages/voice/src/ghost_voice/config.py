@@ -13,6 +13,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 LLM_ENDPOINTS = ("proxy", "openrouter")
 TTS_ENGINES = ("kokoro", "elevenlabs")
 OPENROUTER_ANTHROPIC_URL = "https://openrouter.ai/api"  # OpenRouter's Anthropic Messages API
+# Output cap per reply, tool calls included: four comments asked for together are about
+# 600 tokens, and the scaffold's 400 cut them off (ghost_voice.llm redoes a cut reply).
+LLM_MAX_TOKENS = 2000
 _CLAUDE_ID = re.compile(r"^(claude-[a-z]+)-(\d+)(?:-(\d{1,2}))?$")
 
 
@@ -62,7 +65,7 @@ class VoiceSettings(BaseSettings):
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY", repr=False)
     llm_model: str = "claude-sonnet-5-5"
     llm_thinking: str = "between_tools"  # Sonnet 5.5's thinking-off setting
-    llm_max_tokens: int = 400
+    llm_max_tokens: int = LLM_MAX_TOKENS
 
     @field_validator("llm_endpoint")
     @classmethod

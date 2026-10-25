@@ -29,8 +29,8 @@ from typing import Any
 from ghost_core import AutonomyPolicy, Store, WriteGate
 from ghost_core.mcp import Servers
 from ghost_voice import VoiceSettings
+from ghost_voice.config import LLM_MAX_TOKENS, openrouter_model
 from ghost_voice.config import OPENROUTER_ANTHROPIC_URL as OPENROUTER_ANTHROPIC
-from ghost_voice.config import openrouter_model
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.tools import register_tools
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -140,7 +140,7 @@ async def _anthropic_call(
     s = Sample()
     params: dict[str, Any] = {
         "model": model,
-        "max_tokens": 400,
+        "max_tokens": LLM_MAX_TOKENS,
         # Pipecat sends the system prompt as a string with no cache marker; with
         # system_breakpoint it carries one, so tools + system are cached across sessions.
         "system": (
@@ -220,7 +220,7 @@ async def _openai_call(
             model=model,
             messages=[{"role": "system", "content": system}, *messages],
             tools=tools,
-            max_tokens=400,
+            max_tokens=LLM_MAX_TOKENS,
             stream=True,
             stream_options={"include_usage": True},
         )
