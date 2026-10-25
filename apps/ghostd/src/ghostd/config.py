@@ -45,17 +45,13 @@ class GhostdSettings(BaseSettings):
     # here; the transcript and the registry are in the database. Summarized turns older
     # than the retention window are pruned daily.
     conversations_dir: Path = Path.home() / ".local" / "share" / "ghost" / "conversations"
-    # Skills (ADR 0023): Ghost's own SKILL.md folders, plus project roots whose
-    # .agents/skills are read in place: GHOST_SKILL_ROOTS=~/projects/x,~/projects/y
+    # Skills (ADR 0024): Ghost's own SKILL.md folders, and the operator's, read after a
+    # department's own (a project's skills come in through a department's root).
     skills_dir: Path = Path.home() / ".config" / "ghost" / "skills"
-    skill_roots: str = ""
+    home_skills_dir: Path = Path.home() / ".agents" / "skills"
     # Department templates (ADR 0023): the operator's own; Ghost's shipped ones are in
     # infra/templates.
     templates_dir: Path = Path.home() / ".config" / "ghost" / "templates"
-
-    @property
-    def skill_root_paths(self) -> list[Path]:
-        return [Path(p.strip()).expanduser() for p in self.skill_roots.split(",") if p.strip()]
 
     turn_retention_days: int = 90
 

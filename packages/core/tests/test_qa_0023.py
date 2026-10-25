@@ -66,7 +66,7 @@ async def test_a_department_with_lines_cannot_be_deleted(tmp_path: Path):
         await convs.writer.apply(prep.target, prep.changes.steps[0], "k")
 
 
-def test_a_narrowed_skills_view_reads_only(tmp_path: Path):
-    s = Skills(tmp_path / "skills")
+def test_a_department_skills_view_reads_only(tmp_path: Path):
+    s = Skills(tmp_path / "skills", None)
     assert {o.name for o in s.source().operations} == {"add", "remove"}
-    assert s.source(["month-close"]).operations == []
+    assert s.source([(tmp_path / "dept", "dept")], writes=False).operations == []

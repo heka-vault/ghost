@@ -455,7 +455,7 @@ class Daemon:
         autonomy = AutonomyPolicy.load(self.cfg.policy_path)
         mcp = Servers(autonomy.mcp)  # ADR 0022: the servers the policy file declares
         await mcp.connect()
-        skills = Skills(self.cfg.skills_dir, self.cfg.skill_root_paths)  # ADR 0023
+        skills = Skills(self.cfg.skills_dir, self.cfg.home_skills_dir)  # ADR 0024
         self.skills = skills
         templates = Templates(self.cfg.infra_dir / "templates", self.cfg.templates_dir)
         self.templates = templates
@@ -1003,10 +1003,13 @@ def _without(source: ToolSource, ops: frozenset[str]) -> ToolSource:
 
 def describe_skills(skills: Skills, servers: set[str]) -> str:
     items = []
-    for s in skills.list():
+    for s in skills.all():
         missing = s.missing(servers)
         where = "" if s.source == "ghost" else f" ({s.source})"
-        items.append(f"{s.name}{where}" + (f" [needs {', '.join(missing)}]" if missing else ""))
+        note = f" [problem: {s.problem}]" if s.problem else ""
+        if missing:
+            note += f" [needs {', '.join(missing)}]"
+        items.append(f"{s.name}{where}{note}")
     return f"skills: {', '.join(items) if items else 'none'} (in {skills.ghost_dir})"
 
 
@@ -1217,7 +1220,7 @@ def cli(argv: list[str] | None = None) -> None:
                 print(line)
                 if "not connected" in line:
                     problems.append(line.strip())
-        print(describe_skills(Skills(cfg.skills_dir, cfg.skill_root_paths), set(autonomy.mcp)))
+        print(describe_skills(Skills(cfg.skills_dir, cfg.home_skills_dir), set(autonomy.mcp)))
         try:
             jev = build_jev(cfg)
             how = f"jev via {jev.provider} (regex fallback)" if jev else "regex"

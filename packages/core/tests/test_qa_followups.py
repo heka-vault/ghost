@@ -111,7 +111,7 @@ async def test_symlinks_never_enter_a_skill(tmp_path: Path):
     folder = make_skill(root / ".agents" / "skills" / "linked", "linked", "Has a link.")
     (folder / "leak.txt").symlink_to(secret)
     (folder / "ok.txt").write_text("fine")
-    skills = Skills(tmp_path / "skills", [root])
+    skills = Skills(tmp_path / "skills", root / ".agents" / "skills")
     skill = skills.get("linked")
     assert skill is not None and skill.files() == ["ok.txt"]
     out = await skills.read_tool().handler({"name": "linked", "file": "leak.txt"})

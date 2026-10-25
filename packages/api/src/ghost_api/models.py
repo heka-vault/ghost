@@ -236,11 +236,12 @@ class SkillInfo(BaseModel):
 
     name: str
     description: str
-    source: str  # "ghost" for Ghost's own directory, else the project root it sits under
+    source: str  # "ghost" for Ghost's own folder, "home" for the operator's, else a department
     path: str
     requires: list[str] = []  # "mcp:<server>" names it needs
     missing: list[str] = []  # the required servers that are not connected
     files: list[str] = []  # the files beside SKILL.md
+    problem: str | None = None  # why it is not offered to the model (ADR 0024), if it is not
 
 
 class SkillBody(BaseModel):

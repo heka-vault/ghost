@@ -629,6 +629,7 @@ def create_app(deps: Deps) -> FastAPI:
             requires=list(skill.requires),
             missing=skill.missing(servers),
             files=skill.files(),
+            problem=skill.problem,
         )
 
     @app.get("/skills", response_model=list[SkillInfo], tags=["skills"])
@@ -636,7 +637,7 @@ def create_app(deps: Deps) -> FastAPI:
         if deps.skills is None:
             return []
         deps.skills.refresh()
-        return [skill_info(s) for s in deps.skills.list()]
+        return [skill_info(s) for s in deps.skills.all()]
 
     @app.get("/skills/{name}", response_model=SkillBody, tags=["skills"])
     async def skill_body(name: str) -> SkillBody:

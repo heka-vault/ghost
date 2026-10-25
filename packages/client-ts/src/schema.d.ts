@@ -1440,6 +1440,8 @@ export interface components {
             name: string;
             /** Path */
             path: string;
+            /** Problem */
+            problem?: string | null;
             /**
              * Requires
              * @default []

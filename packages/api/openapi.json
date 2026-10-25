@@ -1920,6 +1920,17 @@
             "title": "Path",
             "type": "string"
           },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
           "requires": {
             "default": [],
             "items": {
