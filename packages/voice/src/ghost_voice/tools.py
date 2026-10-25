@@ -79,9 +79,9 @@ def register_tools(
         return lambda: conversations.scope_for(source.name)
 
     async def out_of_scope(params: FunctionCallParams, e: OutOfScope) -> None:
-        """A request about something another thread owns (ADR 0019). With department
-        routing on, patch the operator through and let that thread handle it; off, tell
-        the model which thread it belongs to so Ghost can offer."""
+        """A request about something another department covers (ADR 0019). With
+        department routing on, transfer the operator and let that department handle it;
+        off, tell the model which department it belongs to so Ghost can offer."""
         owner = conversations.owner_of(e.ability, e.item) if conversations else None
         if (
             owner is not None
@@ -105,24 +105,27 @@ def register_tools(
         result: dict[str, Any] = {"error": str(e), "item": e.item}
         if owner is not None:
             result["belongs_to"] = owner.name
-            result["hint"] = f"offer to patch them through to {owner.name}"
+            result["hint"] = f"offer to transfer them to {owner.name}"
         await params.result_callback(result)
 
     def active_sources() -> list[ToolSource]:
-        """What the active line reaches (ADR 0023): its department's sources, or every
+        """What the active agent reaches (ADR 0024): its department's sources, or every
         source when the session was built without departments."""
         if conversations is not None and conversations.has_reach:
             return conversations.sources_for(conversations.active)
         return list(sources)
 
+    def department() -> str | None:
+        return conversations.department_slug() if conversations is not None else None
+
     def offered_ops(srcs: Sequence[ToolSource]) -> dict[str, dict[str, Operation]]:
-        """Operations the policy (and the granting toolkit) does not deny outright."""
+        """Operations the department's policy does not deny outright."""
         out: dict[str, dict[str, Operation]] = {}
         for a in srcs:
             offered = {
                 op.name: op
                 for op in a.operations
-                if gate.level(a.name, op.name, toolkit=a.toolkit) is not Autonomy.DENY
+                if gate.level(a.name, op.name, department=department()) is not Autonomy.DENY
             }
             if offered:
                 out[a.name] = offered
@@ -177,14 +180,16 @@ def register_tools(
         return out
 
     # Every read tool any source offers is registered once; a call goes to the version
-    # the active line reaches, or is refused when that line does not reach it.
+    # the active agent reaches, or is refused when its department does not reach it.
     def dispatch(name: str):
         async def run(params: FunctionCallParams) -> None:
             current = {t.name: (t, a) for a in active_sources() for t in a.read_tools}
             hit = current.get(name)
             if hit is None:
                 record(name, dict(params.arguments))
-                await params.result_callback({"error": f"{name} is not available on this line"})
+                await params.result_callback(
+                    {"error": f"{name} is not available in this department"}
+                )
                 return
             tool, a = hit
             await _wrap_read(
@@ -202,7 +207,6 @@ def register_tools(
     async def change(params: FunctionCallParams) -> None:
         reach_now = active_sources()
         ops = offered_ops(reach_now)
-        toolkit_of: dict[str, str | None] = {a.name: a.toolkit for a in reach_now}
         a = params.arguments
         aname = str(a.get("ability") or a.get("skill") or "")  # "skill" for older contexts
         op_name = str(a.get("operation") or "")
@@ -240,8 +244,7 @@ def register_tools(
                 rationale=str(a.get("rationale") or prepared.rationale),
                 scope=scope,
                 conversation=conversations.active.slug if conversations else None,
-                department=conversations.department_slug() if conversations else None,
-                toolkit=toolkit_of.get(aname),
+                department=department(),
             )
             probe.tool_step(call_id, "submit", time.perf_counter() - began)
         except OutOfScope as e:
@@ -273,8 +276,8 @@ def register_tools(
                     else "only if asked, or if it failed"
                 ),
             }
-            # "Save this as accounting": a created conversation is switched into at
-            # once, carrying this session's turns along (ADR 0014).
+            # "Save this as accounting": a hired agent is switched into at once,
+            # carrying this session's turns along (ADR 0014).
             if (
                 aname == CONVERSATIONS
                 and op.name == "create"
@@ -292,35 +295,37 @@ def register_tools(
                         handoff="",
                         result=result,
                         outcome=(
-                            f"The conversation {target.name!r} was just created at their "
-                            "request and they are now on it; that is done, do not create "
-                            "or switch again."
+                            f"The agent {target.name!r} was just hired at their request "
+                            "and they are now with it; that is done, do not hire or "
+                            "switch again."
                         ),
                     )
                     await events.emit(
                         "outcome", ability=aname, operation=op.name, status=sub.outcome.status
                     )
                     return
-            # A settled thread leaves voice routing (ADR 0019): settling the one the
-            # operator is in hands them back to Ghost.
+            # A retired agent leaves voice routing (ADR 0024): retiring the one the
+            # operator is with hands them to its department's own agent, else to Ghost.
             if (
                 aname == CONVERSATIONS
-                and op.name == "settle"
+                and op.name == "retire"
                 and conversations is not None
                 and sub.outcome.status == "success"
                 and sub.proposal.target.scope() == conversations.active.slug
             ):
-                ghost = conversations.conversations.get(GHOST)
-                if ghost is not None:
+                home = conversations.conversations.default_agent(
+                    conversations.active.department
+                ) or conversations.conversations.get(GHOST)
+                if home is not None:
                     await _transfer(
                         params,
                         conversations,
-                        ghost,
+                        home,
                         handoff="",
                         result=result,
                         outcome=(
-                            f"They just settled the {conversations.active.name!r} thread at "
-                            "their request; that is done, do not settle or switch again."
+                            f"They just retired the agent {conversations.active.name!r} at "
+                            "their request; that is done, do not retire or switch again."
                         ),
                     )
                     await events.emit(
@@ -367,15 +372,15 @@ def register_tools(
             FunctionSchema(
                 name=SWITCH_TOOL,
                 description=(
-                    "Patch the operator through to another saved conversation by name "
-                    '("accounting", "legal", "ghost" to come back). The transfer is '
-                    "announced and the other line greets them; say nothing else yourself. "
-                    "If no conversation matches, the result says so: then ask in one short "
-                    "sentence whether to start one, and on yes call change with "
+                    "Transfer the operator to a department or to one of its agents by name "
+                    '("marketing", "the brand agent", "ghost" to come back). The transfer is '
+                    "announced and the agent greets them; say nothing else yourself. "
+                    "If nothing matches, the result says so: then ask in one short "
+                    "sentence whether to hire an agent for it, and on yes call change with "
                     "conversations.create."
                 ),
                 properties={
-                    "name": {"type": "string", "description": "The conversation to go to."},
+                    "name": {"type": "string", "description": "The department or agent to go to."},
                     "handoff": {
                         "type": "string",
                         "description": "One line for the other side about what the operator "
@@ -399,7 +404,7 @@ def register_tools(
                     {
                         "status": "no_match",
                         "known": names,
-                        "hint": "ask whether to start a conversation with that name",
+                        "hint": "ask whether to hire an agent with that name",
                     }
                 )
                 return

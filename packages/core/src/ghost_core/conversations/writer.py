@@ -1,8 +1,11 @@
-"""Applies conversation changes: the row in SQLite plus the files on disk."""
+"""Applies agent changes: the folder in its department plus the mirror row in SQLite."""
 
 from __future__ import annotations
 
+import shutil
 import uuid
+from collections.abc import Callable
+from pathlib import Path
 
 from ghost_core.conversations.files import MEMORY, NOTES, PERSONA, ConversationFiles
 from ghost_core.conversations.models import (
@@ -13,26 +16,35 @@ from ghost_core.conversations.models import (
     ConversationTarget,
     Create,
     Delete,
+    Move,
     Profile,
+    Rehire,
     Rename,
     Reset,
+    Retire,
     SetMemory,
     SetNotes,
     SetPersona,
-    SetScope,
-    Settle,
-    SetToolkits,
     SetVoice,
-    Unsettle,
+    slugify,
 )
 from ghost_core.models import Change, Snapshot, Target, utcnow
 from ghost_core.store import Store
 
 
 class ConversationWriter:
-    def __init__(self, store: Store, files: ConversationFiles) -> None:
+    def __init__(
+        self,
+        store: Store,
+        files: ConversationFiles,
+        *,
+        agents_dir: Callable[[str], Path | None],
+    ) -> None:
+        """``agents_dir`` gives a department's ``agents/`` folder, or None for a department
+        that does not exist."""
         self._store = store
         self._files = files
+        self._agents_dir = agents_dir
 
     def allowed(self, target: Target) -> bool:
         return isinstance(target, ConversationTarget) and bool(target.slug)
@@ -42,18 +54,20 @@ class ConversationWriter:
         p = self._store.get_conversation(target.slug, include_deleted=True)
         if p is None:
             return ConversationSnapshot.missing()
+        deleted = p.deleted_at is not None
         return ConversationSnapshot.of(
             name=p.name,
             aliases=p.aliases,
+            department=p.department,
+            job=p.job,
             voice=p.voice,
             speed=p.speed,
-            persona=self._files.persona(p.slug),
-            memory=self._files.memory(p.slug),
-            notes=self._files.notes(p.slug),
-            turns=self._store.turn_count(p.slug),
-            deleted=p.deleted_at is not None,
-            scope=p.scope,
-            settled=p.settled,
+            persona=self._files.persona(p.slug) if not deleted else "",
+            memory=self._files.memory(p.slug) if not deleted else "",
+            notes=self._files.notes(p.slug) if not deleted else "",
+            turns=self._store.turn_count(p.id),
+            deleted=deleted,
+            retired=p.retired,
         )
 
     async def apply(self, target: Target, change: Change, idempotency_key: str) -> None:
@@ -64,93 +78,93 @@ class ConversationWriter:
             case Create(
                 name=name,
                 aliases=aliases,
+                department=department,
+                job=job,
                 voice=voice,
                 speed=speed,
                 persona=persona,
-                scope=scope,
                 memory=memory,
-                toolkits=toolkits,
-                department=department,
             ):
-                if store.get_conversation(slug) is not None:
+                if self._agents_dir(department) is None:
+                    raise ValueError(f"there is no department called {department!r}")
+                if store.get_conversation(slug, include_deleted=True) is not None:
                     raise ValueError(f"{name!r} already exists")
-                if slug == GHOST and scope:
-                    raise ValueError("Ghost cannot be scoped")
-                if department:
-                    parent = store.get_conversation(department)
-                    if parent is None or parent.is_ghost or parent.department:
-                        raise ValueError(f"{department!r} is not a department")
-                    if toolkits:
-                        raise ValueError("a topic line reaches what its department reaches")
-                store.upsert_conversation(
-                    Profile(
-                        slug=slug,
-                        name=name,
-                        aliases=aliases,
-                        voice=voice,
-                        speed=speed,
-                        scope=scope,
-                        toolkits=toolkits,
-                        department=department or None,
-                    )
+                folder = self._agents_dir(department) / slug  # type: ignore[operator]
+                if folder.exists():
+                    raise ValueError(f"{folder} already exists; pick another name")
+                p = Profile(
+                    slug=slug,
+                    name=name,
+                    aliases=aliases,
+                    department=department,
+                    job=job,
+                    voice=voice,
+                    speed=speed,
                 )
-                files.ensure(slug)
+                store.upsert_conversation(p)
+                files.write_agent(slug, p.agent_json())
                 files.write(slug, PERSONA, persona)
                 if memory.strip():
                     files.write(slug, MEMORY, memory)
                     store.add_compaction(
                         Compaction(
                             id=uuid.uuid4().hex,
-                            conversation=slug,
+                            conversation=p.id,
                             summary=memory,
                             through_turn_id=None,
                             at=utcnow(),
                             source="manual",
                         )
                     )
-            case SetScope(scope=scope):
-                if slug == GHOST:
-                    raise ValueError("Ghost is unscoped and cannot be given a scope")
+            case Retire():
                 p = self._live(slug)
+                if p.is_default:
+                    raise ValueError(f"{p.name} is its department's own agent; it stays")
+                if not p.retired:
+                    self._save(
+                        p.model_copy(update={"retired_at": utcnow(), "updated_at": utcnow()})
+                    )
+            case Rehire():
+                p = self._live(slug)
+                if p.retired:
+                    self._save(p.model_copy(update={"retired_at": None, "updated_at": utcnow()}))
+            case Move(department=department):
+                p = self._live(slug)
+                if p.is_default:
+                    raise ValueError(f"{p.name} is its department's own agent; it cannot move")
+                dest = self._agents_dir(department)
+                if dest is None:
+                    raise ValueError(f"there is no department called {department!r}")
+                if department == p.department:
+                    raise ValueError(f"{p.name} is already in {department}")
+                if (dest / slug).exists():
+                    raise ValueError(f"{dest / slug} already exists")
+                src = files.dir(slug)
+                dest.mkdir(parents=True, exist_ok=True)
+                if src.is_dir():
+                    shutil.move(str(src), str(dest / slug))
                 store.upsert_conversation(
-                    p.model_copy(update={"scope": scope, "updated_at": utcnow()})
+                    p.model_copy(update={"department": department, "updated_at": utcnow()})
                 )
-            case SetToolkits(toolkits=toolkits):
-                if slug == GHOST:
-                    raise ValueError("Ghost reaches everything; it takes no toolkits")
-                p = self._live(slug)
-                if p.department:
-                    raise ValueError(
-                        f"{p.name} is a line in the {p.department} department; set the "
-                        "department's toolkits"
-                    )
-                store.upsert_conversation(
-                    p.model_copy(update={"toolkits": toolkits, "updated_at": utcnow()})
-                )
-            case Settle():
-                if slug == GHOST:
-                    raise ValueError("Ghost cannot be settled")
-                p = self._live(slug)
-                if not p.settled:
-                    store.upsert_conversation(
-                        p.model_copy(update={"settled_at": utcnow(), "updated_at": utcnow()})
-                    )
-            case Unsettle():
-                p = self._live(slug)
-                if p.settled:
-                    store.upsert_conversation(
-                        p.model_copy(update={"settled_at": None, "updated_at": utcnow()})
-                    )
-            case Rename(name=name, aliases=aliases):
+            case Rename(name=name, aliases=aliases, job=job):
                 if slug == GHOST:
                     raise ValueError("Ghost keeps its name")
                 p = self._live(slug)
-                store.upsert_conversation(
-                    p.model_copy(update={"name": name, "aliases": aliases, "updated_at": utcnow()})
+                if p.is_default and slugify(name) != slug:
+                    raise ValueError(f"{p.name} is named for its department")
+                self._save(
+                    p.model_copy(
+                        update={
+                            "name": name,
+                            "aliases": aliases,
+                            "job": p.job if job is None else job,
+                            "updated_at": utcnow(),
+                        }
+                    )
                 )
             case SetVoice(voice=voice, speed=speed):
                 p = self._live(slug)
-                store.upsert_conversation(
+                self._save(
                     p.model_copy(update={"voice": voice, "speed": speed, "updated_at": utcnow()})
                 )
             case SetPersona(text=text):
@@ -167,13 +181,13 @@ class ConversationWriter:
                 self._live(slug)
                 files.write(slug, NOTES, text)
             case SetMemory(text=text, through_turn_id=through, source=source):
-                self._live(slug)
+                p = self._live(slug)
                 files.write(slug, MEMORY, text)
                 cid = uuid.uuid4().hex
                 store.add_compaction(
                     Compaction(
                         id=cid,
-                        conversation=slug,
+                        conversation=p.id,
                         summary=text,
                         through_turn_id=through,
                         at=utcnow(),
@@ -181,27 +195,31 @@ class ConversationWriter:
                     )
                 )
                 if through is not None:
-                    store.mark_compacted(slug, through, cid)
+                    store.mark_compacted(p.id, through, cid)
             case Reset():
-                self._live(slug)
+                p = self._live(slug)
                 files.write(slug, MEMORY, "")
                 files.write(slug, NOTES, "")
-                store.tag_turns(slug, idempotency_key)
+                store.tag_turns(p.id, idempotency_key)
             case Delete():
-                if slug == GHOST:
-                    raise ValueError("Ghost cannot be deleted")
                 p = self._live(slug)
-                if any(
-                    q.department == slug for q in store.list_conversations(include_settled=True)
-                ):
-                    raise ValueError(f"{p.name} still has lines; delete or move them first")
+                if p.is_default:
+                    raise ValueError(f"{p.name} is its department's own agent; it stays")
+                folder = files.dir(slug)
                 store.upsert_conversation(p.model_copy(update={"deleted_at": utcnow()}))
-                store.tag_turns(slug, idempotency_key)
+                store.tag_turns(p.id, idempotency_key)
+                if folder.is_dir():
+                    shutil.rmtree(folder)
             case _:
                 raise TypeError(f"ConversationWriter cannot apply {type(change).__name__}")
+
+    def _save(self, p: Profile) -> None:
+        """Identity changes land in both places: the row and the folder's agent.json."""
+        self._store.upsert_conversation(p)
+        self._files.write_agent(p.slug, p.agent_json())
 
     def _live(self, slug: str) -> Profile:
         p = self._store.get_conversation(slug)
         if p is None:
-            raise ValueError(f"no conversation {slug!r}")
+            raise ValueError(f"no agent {slug!r}")
         return p

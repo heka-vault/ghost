@@ -1,11 +1,12 @@
-"""The active conversation inside one session (ADR 0014).
+"""The active agent inside one session (ADR 0014, ADR 0024).
 
-``ConversationRuntime`` knows which conversation the session is in, builds the
-system prompt with that conversation's persona, seeds the LLM context from its
-memory, notes and recent turns, records what is said, and performs a transfer:
-Ghost's voice announces it, a short tone plays, the TTS voice changes, the context
-is replaced, and the new line greets with a one-line recap. A transfer cancels any
-proposal still waiting for a yes.
+``ConversationRuntime`` knows which agent the session is in, builds the system prompt
+from what its department reaches plus the department's rules and shared memory and the
+agent's persona, seeds the LLM context from its memory, notes and recent turns, records
+what is said, and performs a transfer: the department's servers are started if they are
+not up, Ghost's voice announces it, a short tone plays, the TTS voice changes, the context
+is replaced, and the agent greets with a one-line recap. A transfer cancels any proposal
+still waiting for a yes. A move re-homes the session the same way, in place.
 
 Compaction persistence lives here too: when Pipecat's summarizer applies a summary,
 the text is written to ``memory.md`` through the gate as a quiet, audited write.
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,7 +29,6 @@ from ghost_core.conversations import (
     Conversations,
     ConversationTarget,
     Profile,
-    describe_scope,
 )
 from ghost_core.conversations.models import SetMemory
 from ghost_core.models import ChangeSet
@@ -49,17 +49,27 @@ from pipecat.frames.frames import (
 from ghost_voice.prompt import build_system_prompt
 
 HANDOFF_NOTE = (
-    "[system] The operator was just patched through to you from {origin}.{outcome} "
+    "[system] The operator was just transferred to you from {origin}.{outcome} "
     "Greet them in one short sentence as yourself and say in a few words where this "
     "conversation left off, or that it is new. Then handle whatever they say next as "
-    "usual, including asking to be patched somewhere else.{handoff}"
+    "usual, including asking to be transferred somewhere else.{handoff}"
 )
+MOVED_NOTE = (
+    "[system] This conversation was just moved to the {department} department at the "
+    "operator's request; that is done, do not move it again. You now work with that "
+    "department's tools, rules and memory. Say in a few words that you are in {department} "
+    "now, then carry on where you left off."
+)
+
+Reach = Callable[[Profile], list[ToolSource]]
+OnEnter = Callable[[Profile], Awaitable[None]]
+OnLeave = Callable[[Profile], None]
 
 
 @dataclass
 class ConversationMarkerFrame(ControlFrame):
     """Travels with the transfer frames so that text spoken after it is recorded under
-    the new conversation and text before it under the old one, whatever the timing."""
+    the new agent and text before it under the old one, whatever the timing."""
 
     slug: str = ""
 
@@ -92,26 +102,25 @@ class ConversationRuntime:
         keep_messages: int = 20,
         start: str = GHOST,
         on_switch: Callable[[Profile], Awaitable[None]] | None = None,
-        scoped_prompts: Mapping[str, Callable[[ActiveScope | None], str]] | None = None,
-        reach: Callable[[Profile], list[ToolSource]] | None = None,
-        reads_wider: bool = False,
+        reach: Reach | None = None,
         routing: bool = False,
+        on_enter: OnEnter | None = None,
+        on_leave: OnLeave | None = None,
     ) -> None:
-        """``scoped_prompts`` are the scoped sources' ``ToolSource.scoped_prompt``
-        by ability name, rebuilt for the active thread; ``reads_wider`` and ``routing``
-        are the operator's crossing-streams settings (ADR 0019)."""
+        """``reach(agent)`` gives the sources a session in that agent's department gets
+        (ADR 0024); None means every session gets ``fragments`` and whatever tools were
+        registered, as before departments. ``on_enter`` runs before a transfer's frames are
+        built (the department's servers start then); ``on_leave`` after one, with the
+        agent left. ``routing`` is the operator's department-routing setting (ADR 0019)."""
         self._conversations = conversations
         self._gate = gate
         self._session_id = session_id
         self._fragments = list(fragments)
-        self._scoped_prompts = dict(scoped_prompts or {})
-        # ADR 0023: what a department's sessions reach. ``reach(department)`` returns the
-        # sources (narrowed by its toolkits) a line in it gets; None: every session gets
-        # ``fragments`` and whatever tools were registered, as before departments.
         self._reach = reach
+        self._on_enter = on_enter
+        self._on_leave = on_leave
         # Set by register_tools: the schemas for a list of sources, for a transfer.
         self.tool_schemas: Callable[[list[ToolSource]], list[Any]] | None = None
-        self.reads_wider = reads_wider
         self.routing = routing
         self._tts_settings = tts_settings
         self._llm_settings = llm_settings
@@ -121,7 +130,7 @@ class ConversationRuntime:
         p = conversations.get(start) or conversations.ensure_ghost()
         self.active: Profile = p
         self._speaking_as: str = p.slug  # follows the marker frames through the pipeline
-        # Cleared from the start of a transfer until the new line has greeted; a
+        # Cleared from the start of a transfer until the new agent has greeted; a
         # typed turn that arrives in that window waits (bounded), or it would run on
         # the old context and race the greeting.
         self.settled = asyncio.Event()
@@ -139,19 +148,35 @@ class ConversationRuntime:
         return self._reach is not None
 
     def sources_for(self, profile: Profile | None = None) -> list[ToolSource]:
-        """The sources a session in this line reaches (ADR 0023): its department's, from
-        the live policy on every call, so an edit in the designer applies at once."""
+        """The sources a session in this agent reaches (ADR 0024): its department's, read
+        on every call, so a server that came up since is seen at once."""
         if self._reach is None:
             return []
-        p = profile or self.active
-        return list(self._reach(self._conversations.department_of(p)))
+        return list(self._reach(profile or self.active))
+
+    def roster(self) -> str:
+        """Ghost's listing: each department by name with the first line of its rules, and
+        its agents by name and job."""
+        lines = []
+        for d in self._conversations.departments.list():
+            if d.is_ghost:
+                continue
+            agents = [
+                p.name + (f" ({p.job})" if p.job else "")
+                for p in self._conversations.agents_of(d.slug)
+                if not p.is_default
+            ]
+            about = d.rules_lead()
+            line = f"- {d.title}" + (f": {about}" if about else "")
+            if agents:
+                line += f". Agents: {', '.join(agents)}"
+            lines.append(line)
+        return "\n".join(lines)
 
     def system_prompt(self, profile: Profile | None = None) -> str:
         p = profile or self.active
         if self._reach is None:
             fragments = list(self._fragments)
-            for ability, fn in self._scoped_prompts.items():
-                fragments.append(fn(self.scope_for(ability, p)))
         else:
             fragments = []
             for src in self.sources_for(p):
@@ -159,51 +184,46 @@ class ConversationRuntime:
                     fragments.append(src.scoped_prompt(self.scope_for(src.name, p)))
                 elif src.prompt:
                     fragments.append(src.prompt)
-        persona = self._conversations.files.persona(p.slug)
-        if not persona.strip() and p.department:  # a topic line speaks as its department
-            persona = self._conversations.files.persona(p.department)
+        d = self._conversations.department_of(p)
         return build_system_prompt(
             [f for f in fragments if f],
-            persona=persona,
+            persona=self._conversations.files.persona(p.slug),
             name=p.name,
             is_ghost=p.is_ghost,
-            scope=describe_scope(p.scope) if p.scope and not p.is_ghost else "",
+            department=d.title,
+            job=p.job,
+            is_default=p.is_default,
+            rules=d.rules(),
+            rules_from_root=d.root is not None,
+            memory=d.memory(),
+            roster=self.roster() if p.is_ghost else "",
             routing=self.routing,
         )
 
     # --- scope (ADR 0019) -------------------------------------------------------------
 
     def scope_for(self, ability: str, profile: Profile | None = None) -> ActiveScope:
-        """The active thread's scope for one ability, as the pipeline hands it to the
-        ability on each call. Unscoped (``items`` None) for Ghost and for a thread
-        with no scope for that ability."""
+        """What the pipeline hands a scoped source on each call: unscoped (the server's own
+        allowlist is the limit), naming the departments that cover an item outside it."""
         p = profile or self.active
         convs = self._conversations
+        server = ability.rpartition("/")[2]
 
         def owners(item: str) -> list[str]:
-            return [q.name for q in convs.scope_of(ability, item) if q.slug != p.slug]
+            return [q.name for q in convs.owners_of(server, item) if q.department != p.department]
 
-        return ActiveScope(
-            ability=ability,
-            thread=p.name,
-            items=p.scope_for(ability),
-            reads_wider=self.reads_wider,
-            owners=owners,
-        )
+        return ActiveScope(ability=ability, thread=p.name, items=None, owners=owners)
 
-    def department_slug(self) -> str | None:
-        """The department the active line belongs to (ADR 0023): the line itself when it
-        is a department, its parent when it is a topic line, None for Ghost."""
-        p = self.active
-        if p.is_ghost:
-            return None
-        return p.department or p.slug
+    def department_slug(self) -> str:
+        """The department the active agent works in (ADR 0024), for the audit."""
+        return self.active.department
 
     def owner_of(self, ability: str, item: str) -> Profile | None:
-        """The thread to route a request about ``item`` to: the first live thread
-        whose scope covers it, other than the active one."""
-        for q in self._conversations.scope_of(ability, item):
-            if q.slug != self.active.slug:
+        """The agent to route a request about ``item`` to: the default agent of the first
+        other department whose declaration covers it."""
+        server = ability.rpartition("/")[2]
+        for q in self._conversations.owners_of(server, item):
+            if q.department != self.active.department:
                 return q
         return None
 
@@ -212,18 +232,18 @@ class ConversationRuntime:
         return self._conversations.resume(p.slug).messages()
 
     def start_frames(self) -> list[Frame]:
-        """Set the TTS voice for the conversation the session opens in."""
+        """Set the TTS voice for the agent the session opens in."""
         return [self._voice_frame(self.active)]
 
     # --- records --------------------------------------------------------------------
 
     def record(self, role: str, text: str) -> None:
-        """User turns belong to the conversation the session is in now; assistant text
+        """User turns belong to the agent the session is in now; assistant text
         belongs to the one that was speaking when it was generated (see the marker)."""
         slug = self._speaking_as if role == "assistant" else self.active.slug
         self._conversations.record(slug, self._session_id, role, text)
         if role == "assistant" and slug == self.active.slug and not self.settled.is_set():
-            self.settled.set()  # the new line has greeted; turns may flow again
+            self.settled.set()  # the new agent has greeted; turns may flow again
 
     def on_marker(self, frame: ConversationMarkerFrame) -> None:
         self._speaking_as = frame.slug
@@ -241,7 +261,14 @@ class ConversationRuntime:
     # --- transfer --------------------------------------------------------------------
 
     def resolve(self, spoken: str) -> Profile | None:
-        return self._conversations.resolve(spoken)
+        """An agent by name, or a department by name (its own agent)."""
+        p = self._conversations.resolve(spoken)
+        if p is not None:
+            return p
+        d = self._conversations.departments.resolve(spoken)
+        if d is not None:
+            return self._conversations.default_agent(d.slug)
+        return None
 
     def switch_allowed(self) -> bool:
         try:
@@ -250,33 +277,57 @@ class ConversationRuntime:
             return True
         return level is not Autonomy.DENY
 
-    async def switch(self, target: Profile, *, handoff: str = "", outcome: str = "") -> list[Frame]:
+    async def switch(
+        self,
+        target: Profile,
+        *,
+        handoff: str = "",
+        outcome: str = "",
+        rehome: bool = False,
+    ) -> list[Frame]:
         """Perform the transfer and return the frames that carry it out, in order:
         the announce line, the tone, the voice change, the marker, the new system
-        prompt, and the context replacement that makes the new line greet. The caller
-        feeds them in at the pipeline source once any in-flight tool result has been
-        appended to the context (``settled`` is cleared until then). ``outcome`` is
-        what just happened (a created conversation), told to the new line so it does
-        not redo it."""
+        prompt, the new tool list, and the context replacement that makes the agent
+        greet. The caller feeds them in at the pipeline source once any in-flight tool
+        result has been appended to the context (``settled`` is cleared until then).
+        ``outcome`` is what just happened (a created agent), told to the new agent so it
+        does not redo it. ``rehome`` re-enters the same agent after a move (ADR 0024):
+        the destination's servers, rules, memory and voice, in place."""
         origin = self.active
-        if target.slug == origin.slug:
+        if target.slug == origin.slug and not rehome:
             return []
         if self._gate.pending(self._session_id) is not None:
             self._gate.cancel(self._session_id, "switched conversation")
         self.settled.clear()
-        line = "Back to Ghost." if target.is_ghost else f"Patching you through to {target.name}."
-        self.record("system", f"transferred to {target.name}")
+        if self._on_enter is not None:
+            await self._on_enter(target)  # the department's servers, before anything is said
+        dept = self._conversations.department_of(target)
+        if rehome:
+            line = f"Moved to {dept.title}."
+            self.record("system", f"moved to {dept.title}")
+        else:
+            line = "Back to Ghost." if target.is_ghost else f"Transferring you to {target.name}."
+            self.record("system", f"transferred to {target.name}")
         self.active = target
         self._conversations.touch(target.slug)
-        self.record("system", f"transferred from {origin.name}")
+        if not rehome:
+            self.record("system", f"transferred from {origin.name}")
         if self._on_switch:
             await self._on_switch(target)
-        note = HANDOFF_NOTE.format(
-            origin=origin.name,
-            outcome=f" {outcome.strip()}" if outcome.strip() else "",
-            handoff=f" Handoff from {origin.name}: {handoff.strip()}" if handoff.strip() else "",
-        )
-        messages = self.initial_messages(target) + [{"role": "user", "content": note}]
+        if self._on_leave is not None and origin.department != target.department:
+            self._on_leave(origin)
+        if rehome:
+            note = MOVED_NOTE.format(department=dept.title)
+            messages = self.initial_messages(target) + [{"role": "user", "content": note}]
+        else:
+            note = HANDOFF_NOTE.format(
+                origin=origin.name,
+                outcome=f" {outcome.strip()}" if outcome.strip() else "",
+                handoff=f" Handoff from {origin.name}: {handoff.strip()}"
+                if handoff.strip()
+                else "",
+            )
+            messages = self.initial_messages(target) + [{"role": "user", "content": note}]
         return [
             TTSSpeakFrame(line, append_to_context=False),  # the tap records it
             OutputAudioRawFrame(
@@ -299,21 +350,22 @@ class ConversationRuntime:
 
     def transfer_done(self) -> None:
         """The transfer frames are in the pipeline. ``settled`` is set when the new
-        line's greeting has been generated (see ``record``); a caller that could not
+        agent's greeting has been generated (see ``record``); a caller that could not
         queue the frames releases it here so nothing waits forever."""
         if self._speaking_as == self.active.slug:
             self.settled.set()
 
     def _voice_frame(self, p: Profile) -> Frame:
-        return TTSUpdateSettingsFrame(delta=self._tts_settings(voice=p.voice, speed=p.speed))
+        voice, speed = self._conversations.voice_for(p)
+        return TTSUpdateSettingsFrame(delta=self._tts_settings(voice=voice, speed=speed))
 
     # --- compaction --------------------------------------------------------------------
 
     async def on_summary_applied(self, messages: Sequence[dict[str, Any]]) -> None:
         """Called after Pipecat replaced older messages with a summary. The summary is
-        the first non-system message; persist it as the conversation's memory and mark
-        the turns it stands in for. Which turns is approximate: everything but the
-        last ``keep_messages`` spoken turns, which errs toward keeping more raw."""
+        the first non-system message; persist it as the agent's memory and mark the
+        turns it stands in for. Which turns is approximate: everything but the last
+        ``keep_messages`` spoken turns, which errs toward keeping more raw."""
         summary = _summary_text(messages)
         if not summary:
             return

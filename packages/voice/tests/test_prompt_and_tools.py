@@ -208,10 +208,36 @@ async def test_hang_up_calls_back(wired):
     assert llm.pushed == []  # the model's own goodbye is spoken, not a fixed word
 
 
-def test_prompt_scope_note_follows_the_routing_setting():
-    assert "This thread covers only" not in build_system_prompt(["F"])
-    offer = build_system_prompt(["F"], scope="github_issues: acme/app", routing=False)
-    assert "This thread covers only: github_issues: acme/app" in offer
-    assert "ask whether to patch them through" in offer
-    routed = build_system_prompt(["F"], scope="github_issues: acme/app", routing=True)
-    assert "patches the operator through to it by itself" in routed
+def test_prompt_carries_the_department_and_follows_the_routing_setting():
+    plain = build_system_prompt(["F"])
+    assert "standing instructions" not in plain and "ask whether to transfer them" in plain
+    agent = build_system_prompt(
+        ["F"],
+        name="Brand",
+        is_ghost=False,
+        department="Marketing",
+        job="brand design",
+        rules="# Marketing\n\nUK dates.",
+        rules_from_root=True,
+        memory="The client is Acme.",
+        persona="Warm.",
+    )
+    assert (
+        "You are Brand, an agent in the operator's Marketing department, hired for brand design"
+        in agent
+    )
+    assert "Marketing department's standing instructions, read from its project folder" in agent
+    assert "UK dates." in agent and "What the Marketing department knows" in agent
+    assert (
+        "The client is Acme." in agent and "Who you are, in the operator's words:\nWarm." in agent
+    )
+    default = build_system_prompt(
+        ["F"], name="Marketing", is_ghost=False, department="Marketing", is_default=True
+    )
+    assert "You are Marketing, the operator's Marketing department" in default
+    ghost = build_system_prompt(
+        ["F"], roster="- Marketing: the brand. Agents: Brand (brand design)"
+    )
+    assert "The departments, each with its agents" in ghost and "Brand (brand design)" in ghost
+    routed = build_system_prompt(["F"], routing=True)
+    assert "transfers the operator there by itself" in routed

@@ -1,9 +1,20 @@
-"""Conversation routes (ADR 0014): registry, edits through the gate, switch and
-compact delegated to the daemon, voices and samples."""
+"""Agent routes (ADR 0014, ADR 0024): registry, edits through the gate, switch and
+compact delegated to the daemon, voices and samples, retire and move."""
 
 from __future__ import annotations
 
+import json
+
 from ghost_api import Phase
+
+
+def make_department(deps, name: str, **extra) -> None:
+    folder = deps.departments.config_dir / "departments" / name
+    folder.mkdir(parents=True)
+    (folder / "department.json").write_text(json.dumps({"title": name.title(), **extra}))
+    (folder / "AGENTS.md").write_text(f"# {name.title()}\n")
+    deps.departments.refresh()
+    deps.conversations.sync()
 
 
 def test_ghost_listed_first_and_status_carries_active(world):
@@ -11,7 +22,9 @@ def test_ghost_listed_first_and_status_carries_active(world):
     r = client.get("/conversations")
     assert r.status_code == 200
     assert [c["slug"] for c in r.json()] == ["ghost"]
-    assert r.json()[0]["is_ghost"] and not r.json()[0]["active"]
+    ghost = r.json()[0]
+    assert ghost["is_ghost"] and ghost["is_default"] and not ghost["active"]
+    assert ghost["department"] == "ghost" and ghost["voice"] == "af_heart"
     assert client.get("/status").json()["conversation"] is None
 
 
@@ -19,12 +32,18 @@ def test_create_get_update_and_delete(world):
     client, state, control, gate, writer, loaded, deps = world
     r = client.post(
         "/conversations",
-        json={"name": "Accounting", "aliases": ["the accountants"], "voice": "am_adam"},
+        json={
+            "name": "Accounting",
+            "aliases": ["the accountants"],
+            "voice": "am_adam",
+            "job": "the books",
+        },
     )
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["slug"] == "accounting" and d["voice"] == "am_adam" and d["turn_count"] == 0
-    assert d["dir"].endswith("conversations/accounting")
+    assert d["own_voice"] is True and d["job"] == "the books" and d["department"] == "ghost"
+    assert d["dir"].endswith("agents/accounting") and d["id"]
 
     # a duplicate is a conflict, an unknown voice is a validation error
     assert client.post("/conversations", json={"name": "accounting"}).status_code == 409
@@ -34,6 +53,7 @@ def test_create_get_update_and_delete(world):
         "/conversations/accounting",
         json={
             "name": "Finance",
+            "job": "the money",
             "persona": "Dry and precise.",
             "memory": "We were reconciling September.",
             "notes": ["books close on the fifth", "  ", "Sam owns payroll"],
@@ -42,7 +62,7 @@ def test_create_get_update_and_delete(world):
     )
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["name"] == "Finance" and d["slug"] == "accounting"
+    assert d["name"] == "Finance" and d["slug"] == "accounting" and d["job"] == "the money"
     assert d["persona"].strip() == "Dry and precise."
     assert d["memory"].strip() == "We were reconciling September."
     assert d["notes"] == ["books close on the fifth", "Sam owns payroll"]
@@ -50,6 +70,9 @@ def test_create_get_update_and_delete(world):
     assert d["compactions"] == 1  # the memory edit is a version
     files = deps.conversations.files
     assert files.persona("accounting").strip() == "Dry and precise."
+    # an empty voice means the department's
+    r = client.patch("/conversations/accounting", json={"voice": ""})
+    assert r.json()["own_voice"] is False and r.json()["voice"] == "af_heart"
 
     r = client.post("/conversations/accounting/notes", json={"text": "  call   Pat  "})
     assert r.json()["notes"][-1] == "call Pat"
@@ -91,7 +114,7 @@ def test_switch_and_compact_need_a_session(world):
     assert client.get("/status").json()["conversation"] == "legal"
     legal = [c for c in client.get("/conversations").json() if c["slug"] == "legal"][0]
     assert legal["active"] is True
-    # the active conversation cannot be reset or deleted from under the session
+    # the active agent cannot be reset or deleted from under the session
     assert client.post("/conversations/legal/reset").status_code == 409
     assert client.delete("/conversations/legal").status_code == 409
     assert client.post("/conversations/ghost/compact").status_code == 409
@@ -109,60 +132,108 @@ def test_voices_and_sample(world):
     assert client.post("/voices/zz_nobody/sample").status_code == 404
 
 
-# --- scope and settle (ADR 0019) -------------------------------------------------------
+# --- departments (ADR 0024) --------------------------------------------------------------
 
 
-def test_scope_round_trips_and_is_validated(world):
+def test_departments_have_their_own_agent_and_agents_are_hired_into_them(world):
     client, state, control, gate, writer, loaded, deps = world
-    deps.conversations._scopes = {"fake": lambda: ["acme/app", "acme/infra"]}  # noqa: SLF001
-    r = client.post("/conversations", json={"name": "App", "scope": {"fake": ["ACME/app"]}})
+    make_department(deps, "marketing", voice="bm_george", aliases=["the marketers"])
+    rows = {c["slug"]: c for c in client.get("/conversations").json()}
+    assert set(rows) == {"ghost", "marketing"}
+    assert rows["marketing"]["is_default"] and rows["marketing"]["voice"] == "bm_george"
+    assert rows["marketing"]["own_voice"] is False
+    r = client.post(
+        "/conversations", json={"name": "Brand", "department": "the marketers", "job": "the look"}
+    )
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["scope"] == {"fake": ["acme/app"]} and d["settled_at"] is None
-    assert d["voice"] == "am_adam"  # an unused voice when none is given
-    assert client.get("/conversations/app").json()["scope"] == {"fake": ["acme/app"]}
-    # outside the allowlist, an unknown ability, and Ghost: validation errors
-    r = client.post("/conversations", json={"name": "Bad", "scope": {"fake": ["acme/x"]}})
-    assert r.status_code == 422 and "acme/x" in r.json()["detail"]
-    r = client.post("/conversations", json={"name": "Bad", "scope": {"nope": ["x"]}})
-    assert r.status_code == 422
-    r = client.patch("/conversations/ghost", json={"scope": {"fake": ["acme/app"]}})
-    assert r.status_code == 422 and "Ghost" in r.json()["detail"]
-    # update replaces the whole map; {} makes it unscoped
-    r = client.patch("/conversations/app", json={"scope": {"fake": ["acme/infra", "acme/app"]}})
-    assert r.json()["scope"] == {"fake": ["acme/infra", "acme/app"]}
-    r = client.patch("/conversations/app", json={"scope": {}})
-    assert r.json()["scope"] == {}
-    ghost = client.get("/conversations/ghost").json()
-    assert ghost["scope"] == {} and ghost["settled_at"] is None
+    assert d["department"] == "marketing" and d["voice"] == "bm_george" and d["job"] == "the look"
+    assert d["dir"].endswith("departments/marketing/agents/brand")
+    assert [
+        c["slug"] for c in client.get("/conversations", params={"department": "marketing"}).json()
+    ] == [
+        "brand",
+        "marketing",
+    ]
+    assert (
+        client.post("/conversations", json={"name": "X", "department": "sales"}).status_code == 422
+    )
+    assert client.post("/conversations", json={"name": "Marketing"}).status_code == 422
+    # the department's own agent stays
+    assert client.delete("/conversations/marketing").status_code == 409
+    assert client.post("/conversations/marketing/retire").status_code == 409
+    # the departments listing
+    deps_view = {d["slug"]: d for d in client.get("/departments").json()}
+    assert set(deps_view) == {"ghost", "marketing"}
+    m = deps_view["marketing"]
+    assert m["title"] == "Marketing" and m["agents"] == ["marketing", "brand"]
+    assert m["rules_lead"] == "Marketing" and m["servers"] == [] and m["problems"] == []
+    assert m["path"].endswith("departments/marketing")
+    assert client.get("/departments/marketing").json()["slug"] == "marketing"
+    assert client.get("/departments/nope").status_code == 404
 
 
-def test_settle_unsettle_and_seed_from(world):
+def test_create_department_from_the_desktop(world):
+    client, state, control, gate, writer, loaded, deps = world
+    r = client.post("/departments", json={"name": "Design Research", "aliases": ["research"]})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["slug"] == "design-research" and d["agents"] == ["design-research"]
+    folder = deps.departments.config_dir / "departments" / "design-research"
+    assert (folder / "AGENTS.md").is_file() and (folder / "mcp.json").is_file()
+    assert client.post("/departments", json={"name": "design research"}).status_code == 409
+    assert ("reload_policy",) in control.calls
+    assert client.get("/conversations/design-research").json()["is_default"]
+
+
+def test_move_an_agent_between_departments(world):
+    client, state, control, gate, writer, loaded, deps = world
+    make_department(deps, "marketing")
+    make_department(deps, "sales")
+    r = client.post("/conversations", json={"name": "Brand", "department": "marketing"})
+    agent_id = r.json()["id"]
+    deps.conversations.record("brand", "s1", "user", "the logo")
+    r = client.post("/conversations/brand/move", json={"department": "sales"})
+    assert r.status_code == 200, r.text
+    assert r.json()["department"] == "sales" and r.json()["id"] == agent_id
+    assert r.json()["dir"].endswith("departments/sales/agents/brand")
+    assert [t["text"] for t in client.get("/conversations/brand/turns").json()] == ["the logo"]
+    assert client.post("/conversations/brand/move", json={"department": "sales"}).status_code == 409
+    assert client.post("/conversations/brand/move", json={"department": "nope"}).status_code == 422
+    assert (
+        client.post("/conversations/marketing/move", json={"department": "sales"}).status_code
+        == 409
+    )
+    audit = client.get("/audit", params={"ability": "conversations"}).json()
+    assert any(e["operation"] == "move" for e in audit["items"])
+
+
+def test_retire_rehire_and_seed_from(world):
     client, state, control, gate, writer, loaded, deps = world
     client.post("/conversations", json={"name": "Heka New"})
     client.patch("/conversations/heka-new", json={"memory": "Shipped v1."})
-    assert client.post("/conversations/ghost/settle").status_code == 409
-    r = client.post("/conversations/heka-new/settle")
+    assert client.post("/conversations/ghost/retire").status_code == 409
+    r = client.post("/conversations/heka-new/retire")
     assert r.json() == {"ok": True, "detail": None}
     d = client.get("/conversations/heka-new").json()
-    assert d["settled_at"] is not None and d["memory"].strip() == "Shipped v1."  # readable
-    assert client.post("/conversations/heka-new/settle").json()["detail"] == "already settled"
-    # listed, with settled_at, so the app can group it; filterable
+    assert d["retired_at"] is not None and d["memory"].strip() == "Shipped v1."  # readable
+    assert client.post("/conversations/heka-new/retire").json()["detail"] == "already retired"
+    # listed, with retired_at, so the app can group it; filterable
     rows = client.get("/conversations").json()
     assert [c["slug"] for c in rows] == ["ghost", "heka-new"]
-    assert [c["slug"] for c in client.get("/conversations", params={"settled": "true"}).json()] == [
+    assert [c["slug"] for c in client.get("/conversations", params={"retired": "true"}).json()] == [
         "heka-new"
     ]
     assert [
-        c["slug"] for c in client.get("/conversations", params={"settled": "false"}).json()
+        c["slug"] for c in client.get("/conversations", params={"retired": "false"}).json()
     ] == ["ghost"]
     assert deps.conversations.resolve("heka new") is None  # out of voice routing
-    # the session cannot be switched into a settled thread
+    # the session cannot be switched to a retired agent
     state.set_phase(Phase.PASSIVE)
     client.post("/wake")
     assert client.post("/conversations/heka-new/switch").status_code == 409
 
-    # a new thread seeded from the settled one's memory
+    # a new agent seeded from the retired one's memory
     r = client.post("/conversations", json={"name": "Heka Workshop", "seed_from": "heka-new"})
     assert r.status_code == 200, r.text
     assert r.json()["memory"].strip() == "Shipped v1." and r.json()["compactions"] == 1
@@ -176,14 +247,14 @@ def test_settle_unsettle_and_seed_from(world):
     r = client.patch("/conversations/heka-workshop", json={"seed_from": "heka-new"})
     assert r.json()["memory"].strip() == "Shipped v1. Then v2."
 
-    r = client.post("/conversations/heka-new/unsettle")
+    r = client.post("/conversations/heka-new/rehire")
     assert r.json()["ok"] is True
-    assert client.get("/conversations/heka-new").json()["settled_at"] is None
-    assert client.post("/conversations/heka-new/unsettle").json()["detail"] == "not settled"
+    assert client.get("/conversations/heka-new").json()["retired_at"] is None
+    assert client.post("/conversations/heka-new/rehire").json()["detail"] == "not retired"
     assert deps.conversations.resolve("heka new").slug == "heka-new"
-    # settling the conversation the session is in is refused
+    # retiring the agent the session is with is refused
     client.post("/conversations/heka-new/switch")
-    assert client.post("/conversations/heka-new/settle").status_code == 409
+    assert client.post("/conversations/heka-new/retire").status_code == 409
 
     audit = client.get("/audit", params={"ability": "conversations"}).json()
-    assert {e["operation"] for e in audit["items"]} >= {"settle", "unsettle", "create"}
+    assert {e["operation"] for e in audit["items"]} >= {"retire", "rehire", "create"}

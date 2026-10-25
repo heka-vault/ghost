@@ -1,0 +1,61 @@
+{
+  "servers": {
+    "github": {
+      "reads": ["issue_read", "list_issues", "search_issues"],
+      "scope": {
+        "kind": "repository",
+        "arguments": ["owner", "repo"],
+        "items": ["ghost-mock/app", "ghost-mock/infra"]
+      },
+      "writes": {
+        "comment": {
+          "tool": "add_issue_comment",
+          "args": ["owner", "repo", "issue_number", "body"],
+          "target": ["owner", "repo", "issue_number"],
+          "read": {"tool": "issue_read", "with": {"method": "get"}},
+          "asked_by": ["comment", "reply", "note"],
+          "risk": "low",
+          "key_in": "body",
+          "description": "Add a comment to an issue."
+        },
+        "set_labels": {
+          "tool": "issue_write",
+          "with": {"method": "update"},
+          "args": ["owner", "repo", "issue_number", "labels"],
+          "target": ["owner", "repo", "issue_number"],
+          "read": {"tool": "issue_read", "with": {"method": "get"}},
+          "asked_by": ["label", "tag", "mark"],
+          "risk": "low",
+          "bound": {"labels": 10},
+          "description": "Set an issue's labels to the full new list (read it first: labels replaces them all)."
+        },
+        "close": {
+          "tool": "issue_write",
+          "with": {"method": "update", "state": "closed"},
+          "args": ["owner", "repo", "issue_number", "state_reason"],
+          "target": ["owner", "repo", "issue_number"],
+          "read": {"tool": "issue_read", "with": {"method": "get"}},
+          "asked_by": ["close", "shut"],
+          "risk": "high",
+          "description": "Close an issue (state_reason: completed, not_planned or duplicate)."
+        },
+        "reopen": {
+          "tool": "issue_write",
+          "with": {"method": "update", "state": "open"},
+          "args": ["owner", "repo", "issue_number"],
+          "target": ["owner", "repo", "issue_number"],
+          "read": {"tool": "issue_read", "with": {"method": "get"}},
+          "asked_by": ["reopen", "open"],
+          "risk": "medium",
+          "description": "Reopen a closed issue."
+        }
+      },
+      "levels": {
+        "comment": "announce",
+        "set_labels": "announce",
+        "close": "confirm",
+        "reopen": "confirm"
+      }
+    }
+  }
+}

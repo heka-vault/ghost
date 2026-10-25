@@ -18,6 +18,7 @@ from ghost_core import (
 )
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.conversations import Conversations
+from ghost_core.departments import Departments
 
 
 class FakeControl:
@@ -172,11 +173,12 @@ def world(tmp_path: Path):
     policy_path = tmp_path / "policy.toml"
     gate = WriteGate(store, autonomy=AutonomyPolicy.load(policy_path))
     gate.register("fake", loaded.operations)
+    departments = Departments(tmp_path / "config")
+    departments.ensure_layout()
     conversations = Conversations(
         store,
-        tmp_path / "conversations",
+        departments,
         default_voice="af_heart",
-        toolkits=lambda: list(gate.autonomy.toolkits),
         voices=("af_heart", "am_adam", "bf_emma"),
     )
     gate.register(CONVERSATIONS, conversations.operations())
@@ -202,6 +204,7 @@ def world(tmp_path: Path):
         output_device=None,
         stt_model="parakeet",
         conversations=conversations,
+        departments=departments,
     )
     app = create_app(deps)
     client = TestClient(app)

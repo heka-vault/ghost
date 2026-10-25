@@ -1,7 +1,7 @@
-"""Conversation routes (ADR 0014). Edits made here are the operator's own, applied
-through the gate's internal path so they land in the same files Ghost writes, with
-the same snapshot and audit row. Switching and compacting need a running
-session and are delegated to the daemon."""
+"""Agent routes (ADR 0014, ADR 0024), still ``/conversations`` on the wire. Edits made
+here are the operator's own, applied through the gate's internal path so they land in the
+same files Ghost writes, with the same snapshot and audit row. Switching and compacting
+need a running session and are delegated to the daemon."""
 
 from __future__ import annotations
 
@@ -13,15 +13,16 @@ from ghost_core.conversations import SOURCE, Conversations, ConversationTarget, 
 from ghost_core.conversations.models import (
     AppendNote,
     Create,
+    Delete,
+    Move,
+    Rehire,
     Rename,
+    Reset,
+    Retire,
     SetMemory,
     SetNotes,
     SetPersona,
-    SetScope,
-    Settle,
-    SetToolkits,
     SetVoice,
-    Unsettle,
     slugify,
 )
 from ghost_core.models import Change, ChangeSet
@@ -33,10 +34,10 @@ from ghost_api.models import (
     CompactionView,
     ConversationCreate,
     ConversationDetail,
+    ConversationMove,
     ConversationUpdate,
     ConversationView,
     SampleRequest,
-    ToolkitsUpdate,
     TurnView,
     VoiceInfo,
 )
@@ -64,30 +65,32 @@ def voice_label(voice_id: str) -> str:
     return f"{lang} {sex}: {name.capitalize()}".strip()
 
 
-def conversation_view(p: Profile, active: str | None) -> ConversationView:
-    """The control API's view of a thread; the phone listener serves the same one."""
+def conversation_view(convs: Conversations, p: Profile, active: str | None) -> ConversationView:
+    """The control API's view of an agent; the phone listener serves the same one."""
+    voice, speed = convs.voice_for(p)
     return ConversationView(
+        id=p.id,
         slug=p.slug,
         name=p.name,
         aliases=list(p.aliases),
-        voice=p.voice,
-        speed=p.speed,
-        scope={a: list(items) for a, items in p.scope.items()},
+        department=p.department,
+        job=p.job,
+        voice=voice,
+        speed=speed,
+        own_voice=p.voice is not None,
         created_at=p.created_at,
         last_active_at=p.last_active_at,
-        settled_at=p.settled_at,
+        retired_at=p.retired_at,
         active=active == p.slug,
         is_ghost=p.is_ghost,
-        toolkits=list(p.toolkits),
-        department=p.department,
-        is_department=p.is_department,
+        is_default=p.is_default,
     )
 
 
 def conversation_detail(convs: Conversations, p: Profile, active: str | None) -> ConversationDetail:
-    """The full view of a line: the profile plus its files and counts."""
+    """The full view of an agent: the profile plus its files and counts."""
     return ConversationDetail(
-        **conversation_view(p, active).model_dump(),
+        **conversation_view(convs, p, active).model_dump(),
         persona=convs.files.persona(p.slug),
         memory=convs.files.memory(p.slug),
         notes=convs.files.note_lines(p.slug),
@@ -102,27 +105,15 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
     st = deps.state
 
     def view(p: Profile) -> ConversationView:
-        return conversation_view(p, st.conversation)
+        return conversation_view(convs, p, st.conversation)
 
-    def validated_scope(slug: str, scope: dict[str, list[str]]) -> dict[str, tuple[str, ...]]:
-        try:
-            return convs.validate_scope(slug, scope)
-        except ValueError as e:
-            raise HTTPException(422, str(e)) from None
-
-    def validated_toolkits(names: list[str]) -> tuple[str, ...]:
-        try:
-            return convs.validate_toolkits(names)
-        except ValueError as e:
-            raise HTTPException(422, str(e)) from None
-
-    def validated_department(slug: str | None) -> str | None:
+    def validated_department(slug: str | None) -> str:
         if not slug:
-            return None
-        parent = convs.get(slug)
-        if parent is None or parent.is_ghost or parent.department:
-            raise HTTPException(422, f"{slug!r} is not a department")
-        return parent.slug
+            return "ghost"
+        d = convs.departments.get(slug) or convs.departments.resolve(slug)
+        if d is None:
+            raise HTTPException(422, f"there is no department called {slug!r}")
+        return d.slug
 
     def seed_memory(seed: str | None) -> str:
         if not seed:
@@ -138,7 +129,7 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
     def get(slug: str) -> Profile:
         p = convs.get(slug)
         if p is None:
-            raise HTTPException(404, f"no conversation {slug!r}")
+            raise HTTPException(404, f"no agent {slug!r}")
         return p
 
     async def apply(slug: str, op: str, change: Change, rationale: str = "") -> None:
@@ -158,21 +149,26 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
         st.set_conversation(st.conversation, changed=slug)
 
     @app.get("/conversations", response_model=list[ConversationView], tags=["conversations"])
-    async def list_conversations(settled: bool | None = None) -> list[ConversationView]:
-        """Every live thread, Ghost first, settled ones included (``settled_at`` set) so
-        the app can show its Settled group. ``settled=true`` or ``false`` filters."""
-        out = [view(p) for p in convs.list(include_settled=True)]
-        if settled is not None:
-            out = [c for c in out if (c.settled_at is not None) == settled]
+    async def list_conversations(
+        retired: bool | None = None, department: str | None = None
+    ) -> list[ConversationView]:
+        """Every agent, Ghost first, retired ones included (``retired_at`` set) so the app
+        can show its Retired group. ``retired=true`` or ``false`` filters; ``department``
+        narrows to one roster."""
+        out = [view(p) for p in convs.list(include_retired=True, department=department)]
+        if retired is not None:
+            out = [c for c in out if (c.retired_at is not None) == retired]
         return out
 
     @app.post("/conversations", response_model=ConversationDetail, tags=["conversations"])
     async def create_conversation(req: ConversationCreate) -> ConversationDetail:
+        """Hire an agent into a department."""
         slug = slugify(req.name)
         voices = convs.voices()
         if req.voice and voices and req.voice not in voices:
             raise HTTPException(422, f"{req.voice!r} is not an installed voice")
-        scope = validated_scope(slug, req.scope)
+        if convs.departments.get(slug) is not None:
+            raise HTTPException(422, f"{req.name!r} is a department's name; pick another")
         memory = seed_memory(req.seed_from)
         await apply(
             slug,
@@ -180,13 +176,12 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
             Create(
                 name=req.name.strip(),
                 aliases=tuple(a.strip() for a in req.aliases if a.strip()),
-                voice=req.voice or convs.unused_voice(),
-                speed=req.speed if req.speed is not None else convs.default_speed,
-                persona=req.persona,
-                scope=scope,
-                memory=memory,
-                toolkits=validated_toolkits(req.toolkits),
                 department=validated_department(req.department),
+                job=" ".join(req.job.split()),
+                voice=req.voice or None,
+                speed=req.speed,
+                persona=req.persona,
+                memory=memory,
             ),
         )
         return detail(get(slug))
@@ -195,19 +190,10 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
     async def get_conversation(slug: str) -> ConversationDetail:
         return detail(get(slug))
 
-    @app.put(
-        "/conversations/{slug}/toolkits", response_model=ConversationDetail, tags=["conversations"]
-    )
-    async def set_toolkits(slug: str, req: ToolkitsUpdate) -> ConversationDetail:
-        """A department's toolkits (ADR 0023): an audited write like the others."""
-        p = get(slug)
-        await apply(p.slug, "set_toolkits", SetToolkits(toolkits=validated_toolkits(req.toolkits)))
-        return detail(get(slug))
-
     @app.patch("/conversations/{slug}", response_model=ConversationDetail, tags=["conversations"])
     async def update_conversation(slug: str, req: ConversationUpdate) -> ConversationDetail:
         p = get(slug)
-        if req.name is not None or req.aliases is not None:
+        if req.name is not None or req.aliases is not None or req.job is not None:
             await apply(
                 slug,
                 "rename",
@@ -218,24 +204,24 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
                         for a in (req.aliases if req.aliases is not None else p.aliases)
                         if a.strip()
                     ),
+                    job=" ".join(req.job.split()) if req.job is not None else None,
                 ),
             )
         if req.voice is not None or req.speed is not None:
-            voice = req.voice or p.voice
+            voice = req.voice if req.voice else None  # "" means the department's
             voices = convs.voices()
-            if voices and voice not in voices:
+            if voice and voices and voice not in voices:
                 raise HTTPException(422, f"{voice!r} is not an installed voice")
             await apply(
                 slug,
                 "set_voice",
-                SetVoice(voice=voice, speed=req.speed if req.speed is not None else p.speed),
+                SetVoice(
+                    voice=voice if req.voice is not None else p.voice,
+                    speed=req.speed if req.speed is not None else p.speed,
+                ),
             )
         if req.persona is not None:
             await apply(slug, "set_persona", SetPersona(text=req.persona))
-        if req.scope is not None:
-            if p.is_ghost and any(req.scope.values()):
-                raise HTTPException(422, "Ghost is unscoped and cannot be given a scope")
-            await apply(slug, "set_scope", SetScope(scope=validated_scope(slug, req.scope)))
         if req.seed_from is not None:
             await apply(
                 slug,
@@ -273,12 +259,10 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
     @app.delete("/conversations/{slug}", response_model=Ack, tags=["conversations"])
     async def delete_conversation(slug: str) -> Ack:
         p = get(slug)
-        if p.is_ghost:
-            raise HTTPException(409, "Ghost cannot be deleted; reset it instead")
+        if p.is_default:
+            raise HTTPException(409, f"{p.name} is its department's own agent; it stays")
         if st.conversation == slug:
-            raise HTTPException(409, "the session is in this conversation; switch first")
-        from ghost_core.conversations.models import Delete
-
+            raise HTTPException(409, "the session is with this agent; switch first")
         await apply(slug, "delete", Delete())
         return Ack(ok=True)
 
@@ -286,38 +270,53 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
     async def reset_conversation(slug: str) -> Ack:
         get(slug)
         if st.conversation == slug:
-            raise HTTPException(409, "the session is in this conversation; switch or sleep first")
-        from ghost_core.conversations.models import Reset
-
+            raise HTTPException(409, "the session is with this agent; switch or sleep first")
         await apply(slug, "reset", Reset())
         return Ack(ok=True)
 
-    @app.post("/conversations/{slug}/settle", response_model=Ack, tags=["conversations"])
-    async def settle_conversation(slug: str) -> Ack:
-        """Mark the thread done (ADR 0019): out of voice routing, everything kept."""
+    @app.post("/conversations/{slug}/retire", response_model=Ack, tags=["conversations"])
+    async def retire_conversation(slug: str) -> Ack:
+        """Retire the agent (ADR 0024): off the roster and voice routing, everything kept."""
         p = get(slug)
-        if p.is_ghost:
-            raise HTTPException(409, "Ghost cannot be settled")
+        if p.is_default:
+            raise HTTPException(409, f"{p.name} is its department's own agent; it stays")
         if st.conversation == slug:
-            raise HTTPException(409, "the session is in this conversation; switch first")
-        if p.settled:
-            return Ack(ok=True, detail="already settled")
-        await apply(slug, "settle", Settle())
+            raise HTTPException(409, "the session is with this agent; switch first")
+        if p.retired:
+            return Ack(ok=True, detail="already retired")
+        await apply(slug, "retire", Retire())
         return Ack(ok=True)
 
-    @app.post("/conversations/{slug}/unsettle", response_model=Ack, tags=["conversations"])
-    async def unsettle_conversation(slug: str) -> Ack:
+    @app.post("/conversations/{slug}/rehire", response_model=Ack, tags=["conversations"])
+    async def rehire_conversation(slug: str) -> Ack:
         p = get(slug)
-        if not p.settled:
-            return Ack(ok=True, detail="not settled")
-        await apply(slug, "unsettle", Unsettle())
+        if not p.retired:
+            return Ack(ok=True, detail="not retired")
+        await apply(slug, "rehire", Rehire())
         return Ack(ok=True)
+
+    @app.post(
+        "/conversations/{slug}/move", response_model=ConversationDetail, tags=["conversations"]
+    )
+    async def move_conversation(slug: str, req: ConversationMove) -> ConversationDetail:
+        """Move the agent's folder into another department (ADR 0024). The desktop's
+        drag; a move of the agent the session is with is the session's to make."""
+        p = get(slug)
+        if p.is_default:
+            raise HTTPException(409, f"{p.name} is its department's own agent; it cannot move")
+        if st.conversation == slug:
+            raise HTTPException(409, "the session is with this agent; ask Ghost to move it")
+        department = validated_department(req.department)
+        if department == p.department:
+            raise HTTPException(409, f"{p.name} is already in {department}")
+        await apply(slug, "move", Move(department=department))
+        return detail(get(slug))
 
     @app.post("/conversations/{slug}/switch", response_model=Ack, tags=["conversations"])
     async def switch_conversation(slug: str) -> Ack:
         p = get(slug)
-        if p.settled:
-            raise HTTPException(409, "that thread is settled; bring it back first")
+        if p.retired:
+            raise HTTPException(409, "that agent is retired; rehire it first")
         if not st.session_id:
             raise HTTPException(409, "no session; wake Ghost first")
         ok = await deps.control.switch_conversation(slug)
@@ -327,7 +326,7 @@ def add_conversation_routes(app: FastAPI, deps: Deps) -> None:
     async def compact_conversation(slug: str) -> Ack:
         get(slug)
         if not st.session_id or st.conversation != slug:
-            raise HTTPException(409, "compacting needs a session in this conversation")
+            raise HTTPException(409, "compacting needs a session with this agent")
         ok = await deps.control.compact_conversation(slug)
         return Ack(ok=ok)
 

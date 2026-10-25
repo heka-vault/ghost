@@ -213,7 +213,7 @@ items; preferences about how the operator likes things done. Fold in any earlier
 that is still true. Drop greetings, small talk, and tool chatter. Do not invent anything. \
 Write only the memory, no preamble."""
 
-# A thread called directly (ADR 0014; the phone can start in one) answers as itself.
+# An agent called directly (ADR 0014; the phone can start in one) answers as itself.
 THREAD_GREETINGS = ("{name} here.", "{name}. Go ahead.", "{name}, what do you need?")
 GREETINGS = (
     "Ghost. What do you need?",
@@ -254,6 +254,8 @@ def build_session(
     latency_log: Path | None = None,
     on_latency: Callable[[dict[str, Any]], None] | None = None,
     reach: Callable[[Any], list[ToolSource]] | None = None,
+    on_enter: Callable[[Any], Awaitable[None]] | None = None,
+    on_leave: Callable[[Any], None] | None = None,
 ) -> GhostSession:
     """Build one session. ``first_utterance`` is what the operator said right after
     the wake phrase; when given it is the first user turn and there is no greeting.
@@ -272,7 +274,9 @@ def build_session(
 
     ``on_hang_up`` is called when the session is ending (a goodbye, the idle timeout, a
     hold that ran out). ``wake_phrases`` are what brings a session back from hold (ADR
-    0021); the desk's wake phrases by default."""
+    0021); the desk's wake phrases by default. ``reach``, ``on_enter`` and ``on_leave``
+    are the departments (ADR 0024): what an agent's session reaches, and the hooks that
+    start a department's servers on a transfer and release them after."""
     session_id = uuid.uuid4().hex
     target = settings.llm_target()  # GHOST_LLM_ENDPOINT: the proxy or OpenRouter
     latency = (
@@ -290,10 +294,7 @@ def build_session(
     ended = asyncio.Event()
     sources = list(sources)
     runtime: ConversationRuntime | None = None
-    # A scoped source's paragraph is rebuilt for the active thread (ADR 0019); the
-    # rest are fixed for the session.
-    scoped = {a.name: a.scoped_prompt for a in sources if a.scope_kind and a.scoped_prompt}
-    fragments = [a.prompt for a in sources if a.prompt and a.name not in scoped]
+    fragments = [a.prompt for a in sources if a.prompt]
     if conversations is not None:
         sources.append(conversations_source(conversations))
 
@@ -312,13 +313,11 @@ def build_session(
             keep_messages=settings.compact_keep_messages,
             start=start_in,
             on_switch=switched,
-            scoped_prompts=scoped,
-            reads_wider=settings.cross_department_answers,
             routing=settings.department_routing,
-            reach=reach,  # ADR 0023: a department's sources, narrowed by its toolkits
+            reach=reach,  # ADR 0024: what the agent's department reaches
+            on_enter=on_enter,
+            on_leave=on_leave,
         )
-    else:
-        fragments += [fn(None) for fn in scoped.values()]
 
     mixer = None
     if settings.thinking_sound:

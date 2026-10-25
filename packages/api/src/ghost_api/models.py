@@ -45,9 +45,8 @@ class Status(BaseModel):
     wake_mode: str
     servers: list[str]  # the MCP servers connected at start (ADR 0022)
     pending: PendingProposal | None = None
-    conversation: str | None = None  # slug of the conversation the session is in (ADR 0014)
-    department: str | None = None  # ADR 0023
-    toolkit: str | None = None
+    conversation: str | None = None  # slug of the agent the session is with (ADR 0014)
+    department: str | None = None  # the department it works in (ADR 0024)
     # Where the live session's audio is: the workstation's mic and speaker, or the paired
     # phone over WebRTC (ADR 0016). None when there is no session.
     session_origin: Literal["desk", "phone"] | None = None
@@ -163,9 +162,8 @@ class AuditEntry(BaseModel):
     status: str
     created_at: datetime
     events: list[AuditEventView]
-    conversation: str | None = None  # the thread it was proposed in (ADR 0014); colours the entry
-    department: str | None = None  # ADR 0023
-    toolkit: str | None = None
+    conversation: str | None = None  # the agent it was proposed with (ADR 0014); colours the entry
+    department: str | None = None  # the department (ADR 0024)
 
 
 class AuditPage(BaseModel):
@@ -229,6 +227,7 @@ class McpServerInfo(BaseModel):
     tools: list[McpToolInfo] = []
     writes: list[McpWriteInfo] = []
     scope: McpScopeInfo | None = None
+    department: str | None = None  # the department whose own server this is; None: Ghost's
 
 
 class SkillInfo(BaseModel):
@@ -256,47 +255,33 @@ class SkillAdd(BaseModel):
     replace: bool = False
 
 
-class GrantView(BaseModel):
-    """A toolkit's grant on one server (ADR 0023). null lists mean everything."""
+class DepartmentView(BaseModel):
+    """A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
+    skills and agents. Ghost is one too."""
 
-    server: str
-    reads: list[str] | None = None
-    writes: list[str] | None = None
-    items: list[str] | None = None
-    levels: dict[str, str] = {}
-
-
-class ToolkitView(BaseModel):
-    name: str
-    description: str = ""
-    skills: list[str] = []
-    grants: list[GrantView] = []
-    problems: list[str] = []  # what the file does not allow or know about, from check_toolkits
-
-
-class ToolkitUpdate(BaseModel):
-    description: str = ""
-    skills: list[str] = []
-    grants: list[GrantView] = []
-
-
-class TemplateView(BaseModel):
-    """A department template (ADR 0023): shipped with Ghost or the operator's own."""
-
-    name: str
+    slug: str
     title: str
-    description: str = ""
-    source: str  # "shipped" or "ghost"
-    path: str
+    aliases: list[str] = []
+    path: str  # the folder the operator opens
+    root: str | None = None  # resources read in place from another folder, when set
+    voice: str | None = None
+    is_ghost: bool
+    rules_lead: str = ""  # the first line of AGENTS.md
+    rules: str = ""  # AGENTS.md, as the prompt carries it
+    memory: str = ""  # the shared memory every agent in it reads
+    servers: list[str] = []  # its own servers' names (mcp.json)
+    uses: list[str] = []  # Ghost's servers it reaches through its own declaration
+    servers_up: bool  # its own servers are connected now
+    skills: list[str] = []  # the skills its sessions read first
+    docs: list[str] = []
+    agents: list[str] = []  # slugs, the department's own first
+    problems: list[str] = []  # what is wrong in its files, for the operator
+
+
+class DepartmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
     aliases: list[str] = []
     voice: str | None = None
-    toolkits: list[str] = []
-    skills: list[str] = []
-    needs: list[str] = []  # what is missing for it to work as declared
-
-
-class TemplateApply(BaseModel):
-    name: str | None = None  # the department's name; default: the template's title
 
 
 class SourceInfo(BaseModel):
@@ -308,8 +293,9 @@ class SourceInfo(BaseModel):
     description: str
     operations: list[OperationInfo] = []
     read_tools: list[ReadToolInfo] = []
-    scope_kind: str | None = None  # what a thread can be scoped to for it (ADR 0019)
+    scope_kind: str | None = None  # how the source's allowlist names items (ADR 0019)
     scope_items: list[str] = []  # the whole allowlist, in Target.scope() form
+    department: str | None = None  # the department whose server this is; None for Ghost's
 
 
 class PolicyView(BaseModel):
@@ -403,23 +389,23 @@ class ModelsView(BaseModel):
 
 
 class ConversationView(BaseModel):
+    """An agent (ADR 0024): a conversation with a persona and a job, in a department."""
+
+    id: str
     slug: str
     name: str
     aliases: list[str]
-    voice: str
+    department: str  # the department it works in (its slug); Ghost's agents say "ghost"
+    job: str = ""
+    voice: str  # the voice heard: its own, else the department's
     speed: float
-    # ADR 0019: per ability, the items this thread may touch ({"github_issues":
-    # ["acme/app"]}); an ability absent here is unscoped. Always empty for Ghost.
-    scope: dict[str, list[str]] = {}
+    own_voice: bool = False  # True when the voice is the agent's own
     created_at: datetime
     last_active_at: datetime | None
-    settled_at: datetime | None = None  # set: done, out of voice routing, still readable
-    active: bool  # the running session is in it
+    retired_at: datetime | None = None  # set: off the roster and voice routing, still readable
+    active: bool  # the running session is with it
     is_ghost: bool
-    # ADR 0023: a department (no ``department``) and its toolkits, or a topic line in one.
-    toolkits: list[str] = []
-    department: str | None = None
-    is_department: bool = False
+    is_default: bool = False  # the department's own agent, named for it
 
 
 class ConversationDetail(ConversationView):
@@ -432,21 +418,22 @@ class ConversationDetail(ConversationView):
 
 
 class ConversationCreate(BaseModel):
+    """Hire an agent."""
+
     name: str = Field(min_length=1, max_length=80)
     aliases: list[str] = []
-    voice: str | None = None  # None: a voice no other thread uses
+    department: str | None = None  # None: Ghost
+    job: str = Field(default="", max_length=200)
+    voice: str | None = None  # None: the department's voice
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     persona: str = Field(default="", max_length=4000)
-    scope: dict[str, list[str]] = {}
-    # Slug of a thread (usually a settled one) whose memory.md becomes this one's first
-    # memory, as a handoff. Never Ghost.
+    # Slug of a retired agent whose memory.md becomes this one's first memory, as a
+    # handoff. Never Ghost.
     seed_from: str | None = None
-    department: str | None = None  # ADR 0023: start it as a topic line in this department
-    toolkits: list[str] = []  # ADR 0023: a new department's toolkits (none: everything)
 
 
-class ToolkitsUpdate(BaseModel):
-    toolkits: list[str] = []
+class ConversationMove(BaseModel):
+    department: str = Field(min_length=1, max_length=80)
 
 
 class ConversationUpdate(BaseModel):
@@ -454,13 +441,13 @@ class ConversationUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=80)
     aliases: list[str] | None = None
-    voice: str | None = None
+    job: str | None = Field(default=None, max_length=200)
+    voice: str | None = None  # "" means back to the department's voice
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     persona: str | None = Field(default=None, max_length=4000)
     memory: str | None = Field(default=None, max_length=20000)
     notes: list[str] | None = None
-    scope: dict[str, list[str]] | None = None  # the whole map; {} makes it unscoped
-    seed_from: str | None = None  # replace the memory with that thread's memory.md
+    seed_from: str | None = None  # replace the memory with that agent's memory.md
 
 
 class TurnView(BaseModel):

@@ -92,17 +92,6 @@
           "target": {
             "title": "Target",
             "type": "string"
-          },
-          "toolkit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Toolkit"
           }
         },
         "required": [
@@ -224,6 +213,7 @@
         "type": "object"
       },
       "ConversationCreate": {
+        "description": "Hire an agent.",
         "properties": {
           "aliases": {
             "default": [],
@@ -244,6 +234,12 @@
             ],
             "title": "Department"
           },
+          "job": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Job",
+            "type": "string"
+          },
           "name": {
             "maxLength": 80,
             "minLength": 1,
@@ -255,17 +251,6 @@
             "maxLength": 4000,
             "title": "Persona",
             "type": "string"
-          },
-          "scope": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "default": {},
-            "title": "Scope",
-            "type": "object"
           },
           "seed_from": {
             "anyOf": [
@@ -290,14 +275,6 @@
               }
             ],
             "title": "Speed"
-          },
-          "toolkits": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Toolkits",
-            "type": "array"
           },
           "voice": {
             "anyOf": [
@@ -340,28 +317,30 @@
             "type": "string"
           },
           "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
+            "title": "Department",
+            "type": "string"
           },
           "dir": {
             "title": "Dir",
             "type": "string"
           },
-          "is_department": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_default": {
             "default": false,
-            "title": "Is Department",
+            "title": "Is Default",
             "type": "boolean"
           },
           "is_ghost": {
             "title": "Is Ghost",
             "type": "boolean"
+          },
+          "job": {
+            "default": "",
+            "title": "Job",
+            "type": "string"
           },
           "last_active_at": {
             "anyOf": [
@@ -390,22 +369,16 @@
             "title": "Notes",
             "type": "array"
           },
+          "own_voice": {
+            "default": false,
+            "title": "Own Voice",
+            "type": "boolean"
+          },
           "persona": {
             "title": "Persona",
             "type": "string"
           },
-          "scope": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "default": {},
-            "title": "Scope",
-            "type": "object"
-          },
-          "settled_at": {
+          "retired_at": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -415,7 +388,7 @@
                 "type": "null"
               }
             ],
-            "title": "Settled At"
+            "title": "Retired At"
           },
           "slug": {
             "title": "Slug",
@@ -424,14 +397,6 @@
           "speed": {
             "title": "Speed",
             "type": "number"
-          },
-          "toolkits": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Toolkits",
-            "type": "array"
           },
           "turn_count": {
             "title": "Turn Count",
@@ -443,9 +408,11 @@
           }
         },
         "required": [
+          "id",
           "slug",
           "name",
           "aliases",
+          "department",
           "voice",
           "speed",
           "created_at",
@@ -500,6 +467,21 @@
         "title": "ConversationEvent",
         "type": "object"
       },
+      "ConversationMove": {
+        "properties": {
+          "department": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Department",
+            "type": "string"
+          }
+        },
+        "required": [
+          "department"
+        ],
+        "title": "ConversationMove",
+        "type": "object"
+      },
       "ConversationUpdate": {
         "description": "Each field present is applied as its own audited write.",
         "properties": {
@@ -516,6 +498,18 @@
               }
             ],
             "title": "Aliases"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
           },
           "memory": {
             "anyOf": [
@@ -568,23 +562,6 @@
             ],
             "title": "Persona"
           },
-          "scope": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope"
-          },
           "seed_from": {
             "anyOf": [
               {
@@ -625,6 +602,7 @@
         "type": "object"
       },
       "ConversationView": {
+        "description": "An agent (ADR 0024): a conversation with a persona and a job, in a department.",
         "properties": {
           "active": {
             "title": "Active",
@@ -643,24 +621,26 @@
             "type": "string"
           },
           "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
+            "title": "Department",
+            "type": "string"
           },
-          "is_department": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_default": {
             "default": false,
-            "title": "Is Department",
+            "title": "Is Default",
             "type": "boolean"
           },
           "is_ghost": {
             "title": "Is Ghost",
             "type": "boolean"
+          },
+          "job": {
+            "default": "",
+            "title": "Job",
+            "type": "string"
           },
           "last_active_at": {
             "anyOf": [
@@ -678,18 +658,12 @@
             "title": "Name",
             "type": "string"
           },
-          "scope": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "default": {},
-            "title": "Scope",
-            "type": "object"
+          "own_voice": {
+            "default": false,
+            "title": "Own Voice",
+            "type": "boolean"
           },
-          "settled_at": {
+          "retired_at": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -699,7 +673,7 @@
                 "type": "null"
               }
             ],
-            "title": "Settled At"
+            "title": "Retired At"
           },
           "slug": {
             "title": "Slug",
@@ -709,23 +683,17 @@
             "title": "Speed",
             "type": "number"
           },
-          "toolkits": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Toolkits",
-            "type": "array"
-          },
           "voice": {
             "title": "Voice",
             "type": "string"
           }
         },
         "required": [
+          "id",
           "slug",
           "name",
           "aliases",
+          "department",
           "voice",
           "speed",
           "created_at",
@@ -734,6 +702,167 @@
           "is_ghost"
         ],
         "title": "ConversationView",
+        "type": "object"
+      },
+      "DepartmentCreate": {
+        "properties": {
+          "aliases": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "DepartmentCreate",
+        "type": "object"
+      },
+      "DepartmentView": {
+        "description": "A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,\nskills and agents. Ghost is one too.",
+        "properties": {
+          "agents": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "aliases": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "docs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Docs",
+            "type": "array"
+          },
+          "is_ghost": {
+            "title": "Is Ghost",
+            "type": "boolean"
+          },
+          "memory": {
+            "default": "",
+            "title": "Memory",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root"
+          },
+          "rules": {
+            "default": "",
+            "title": "Rules",
+            "type": "string"
+          },
+          "rules_lead": {
+            "default": "",
+            "title": "Rules Lead",
+            "type": "string"
+          },
+          "servers": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Servers",
+            "type": "array"
+          },
+          "servers_up": {
+            "title": "Servers Up",
+            "type": "boolean"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "uses": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Uses",
+            "type": "array"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "path",
+          "is_ghost",
+          "servers_up"
+        ],
+        "title": "DepartmentView",
         "type": "object"
       },
       "DeviceInfo": {
@@ -829,70 +958,6 @@
         "title": "DevicesView",
         "type": "object"
       },
-      "GrantView": {
-        "description": "A toolkit's grant on one server (ADR 0023). null lists mean everything.",
-        "properties": {
-          "items": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Items"
-          },
-          "levels": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "default": {},
-            "title": "Levels",
-            "type": "object"
-          },
-          "reads": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reads"
-          },
-          "server": {
-            "title": "Server",
-            "type": "string"
-          },
-          "writes": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Writes"
-          }
-        },
-        "required": [
-          "server"
-        ],
-        "title": "GrantView",
-        "type": "object"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -971,6 +1036,17 @@
           "connected": {
             "title": "Connected",
             "type": "boolean"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
           },
           "error": {
             "anyOf": [
@@ -1956,6 +2032,17 @@
       "SourceInfo": {
         "description": "A source of tools the gate knows: the lines (built in) or an MCP server. The\npolicy screen edits levels per operation from this list.",
         "properties": {
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
           "description": {
             "title": "Description",
             "type": "string"
@@ -2096,17 +2183,6 @@
             ],
             "title": "Session Origin"
           },
-          "toolkit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Toolkit"
-          },
           "uptime_secs": {
             "title": "Uptime Secs",
             "type": "number"
@@ -2148,183 +2224,6 @@
           "status"
         ],
         "title": "StatusEvent",
-        "type": "object"
-      },
-      "TemplateApply": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "title": "TemplateApply",
-        "type": "object"
-      },
-      "TemplateView": {
-        "description": "A department template (ADR 0023): shipped with Ghost or the operator's own.",
-        "properties": {
-          "aliases": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Aliases",
-            "type": "array"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "needs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Needs",
-            "type": "array"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Skills",
-            "type": "array"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "toolkits": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Toolkits",
-            "type": "array"
-          },
-          "voice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Voice"
-          }
-        },
-        "required": [
-          "name",
-          "title",
-          "source",
-          "path"
-        ],
-        "title": "TemplateView",
-        "type": "object"
-      },
-      "ToolkitUpdate": {
-        "properties": {
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "grants": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/GrantView"
-            },
-            "title": "Grants",
-            "type": "array"
-          },
-          "skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Skills",
-            "type": "array"
-          }
-        },
-        "title": "ToolkitUpdate",
-        "type": "object"
-      },
-      "ToolkitView": {
-        "properties": {
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "grants": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/GrantView"
-            },
-            "title": "Grants",
-            "type": "array"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "problems": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Problems",
-            "type": "array"
-          },
-          "skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Skills",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "ToolkitView",
-        "type": "object"
-      },
-      "ToolkitsUpdate": {
-        "properties": {
-          "toolkits": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Toolkits",
-            "type": "array"
-          }
-        },
-        "title": "ToolkitsUpdate",
         "type": "object"
       },
       "Turn": {
@@ -2638,12 +2537,12 @@
     },
     "/conversations": {
       "get": {
-        "description": "Every live thread, Ghost first, settled ones included (``settled_at`` set) so\nthe app can show its Settled group. ``settled=true`` or ``false`` filters.",
+        "description": "Every agent, Ghost first, retired ones included (``retired_at`` set) so the app\ncan show its Retired group. ``retired=true`` or ``false`` filters; ``department``\nnarrows to one roster.",
         "operationId": "list_conversations_conversations_get",
         "parameters": [
           {
             "in": "query",
-            "name": "settled",
+            "name": "retired",
             "required": false,
             "schema": {
               "anyOf": [
@@ -2654,7 +2553,23 @@
                   "type": "null"
                 }
               ],
-              "title": "Settled"
+              "title": "Retired"
+            }
+          },
+          {
+            "in": "query",
+            "name": "department",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Department"
             }
           }
         ],
@@ -2690,6 +2605,7 @@
         ]
       },
       "post": {
+        "description": "Hire an agent into a department.",
         "operationId": "create_conversation_conversations_post",
         "requestBody": {
           "content": {
@@ -2949,10 +2865,10 @@
         ]
       }
     },
-    "/conversations/{slug}/export": {
+    "/conversations/{slug}/move": {
       "post": {
-        "description": "Write a department back out as one of the operator's own templates.",
-        "operationId": "export_template_conversations__slug__export_post",
+        "description": "Move the agent's folder into another department (ADR 0024). The desktop's\ndrag; a move of the agent the session is with is the session's to make.",
+        "operationId": "move_conversation_conversations__slug__move_post",
         "parameters": [
           {
             "in": "path",
@@ -2964,12 +2880,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationMove"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TemplateView"
+                  "$ref": "#/components/schemas/ConversationDetail"
                 }
               }
             },
@@ -2986,9 +2912,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Export Template",
+        "summary": "Move Conversation",
         "tags": [
-          "templates"
+          "conversations"
         ]
       }
     },
@@ -3046,6 +2972,48 @@
         ]
       }
     },
+    "/conversations/{slug}/rehire": {
+      "post": {
+        "operationId": "rehire_conversation_conversations__slug__rehire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rehire Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/conversations/{slug}/reset": {
       "post": {
         "operationId": "reset_conversation_conversations__slug__reset_post",
@@ -3088,10 +3056,10 @@
         ]
       }
     },
-    "/conversations/{slug}/settle": {
+    "/conversations/{slug}/retire": {
       "post": {
-        "description": "Mark the thread done (ADR 0019): out of voice routing, everything kept.",
-        "operationId": "settle_conversation_conversations__slug__settle_post",
+        "description": "Retire the agent (ADR 0024): off the roster and voice routing, everything kept.",
+        "operationId": "retire_conversation_conversations__slug__retire_post",
         "parameters": [
           {
             "in": "path",
@@ -3125,7 +3093,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Settle Conversation",
+        "summary": "Retire Conversation",
         "tags": [
           "conversations"
         ]
@@ -3168,59 +3136,6 @@
           }
         },
         "summary": "Switch Conversation",
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
-    "/conversations/{slug}/toolkits": {
-      "put": {
-        "description": "A department's toolkits (ADR 0023): an audited write like the others.",
-        "operationId": "set_toolkits_conversations__slug__toolkits_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ToolkitsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConversationDetail"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set Toolkits",
         "tags": [
           "conversations"
         ]
@@ -3282,26 +3197,49 @@
         ]
       }
     },
-    "/conversations/{slug}/unsettle": {
-      "post": {
-        "operationId": "unsettle_conversation_conversations__slug__unsettle_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
+    "/departments": {
+      "get": {
+        "operationId": "departments_departments_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Ack"
+                  "items": {
+                    "$ref": "#/components/schemas/DepartmentView"
+                  },
+                  "title": "Response Departments Departments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Departments",
+        "tags": [
+          "departments"
+        ]
+      },
+      "post": {
+        "description": "A new department folder: the operator's action, with a short AGENTS.md, an\nempty mcp.json and its department.json. The model never calls this.",
+        "operationId": "create_department_departments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DepartmentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentView"
                 }
               }
             },
@@ -3318,9 +3256,51 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Unsettle Conversation",
+        "summary": "Create Department",
         "tags": [
-          "conversations"
+          "departments"
+        ]
+      }
+    },
+    "/departments/{slug}": {
+      "get": {
+        "operationId": "department_departments__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Department",
+        "tags": [
+          "departments"
         ]
       }
     },
@@ -3400,6 +3380,7 @@
     },
     "/mcp": {
       "get": {
+        "description": "Ghost's servers, then each department's own (ADR 0024), connected or not.",
         "operationId": "mcp_servers_mcp_get",
         "responses": {
           "200": {
@@ -4015,201 +3996,6 @@
         "summary": "Get Status",
         "tags": [
           "session"
-        ]
-      }
-    },
-    "/templates": {
-      "get": {
-        "operationId": "templates_templates_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TemplateView"
-                  },
-                  "title": "Response Templates Templates Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Templates",
-        "tags": [
-          "templates"
-        ]
-      }
-    },
-    "/templates/{name}/apply": {
-      "post": {
-        "description": "The desktop's import: the template's toolkits into the policy file, its skills\ninto Ghost's skills, and a department line with its persona, each one audited.",
-        "operationId": "apply_template_templates__name__apply_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TemplateApply"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConversationDetail"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Apply Template",
-        "tags": [
-          "templates"
-        ]
-      }
-    },
-    "/toolkits": {
-      "get": {
-        "operationId": "toolkits_toolkits_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ToolkitView"
-                  },
-                  "title": "Response Toolkits Toolkits Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Toolkits",
-        "tags": [
-          "toolkits"
-        ]
-      }
-    },
-    "/toolkits/{name}": {
-      "delete": {
-        "operationId": "delete_toolkit_toolkits__name__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ack"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Toolkit",
-        "tags": [
-          "toolkits"
-        ]
-      },
-      "put": {
-        "operationId": "put_toolkit_toolkits__name__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ToolkitUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolkitView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Put Toolkit",
-        "tags": [
-          "toolkits"
         ]
       }
     },

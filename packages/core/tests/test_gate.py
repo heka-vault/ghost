@@ -243,13 +243,13 @@ async def test_scope_refuses_a_write_outside_the_thread_before_policy(gate, writ
             rationale="",
             scope=outside,
         )
-    assert str(e.value) == "acme/app is outside this thread; it belongs to the App thread"
+    assert str(e.value) == "acme/app is outside this department; it belongs to the App department"
     assert e.value.owners == ("App",)
     assert not any(c[0] == "set_labels" and c[1] == other for c in writer.calls)
     assert gate.pending("s1") is None  # nothing was even proposed
 
     nobody = ActiveScope("github_issues", "Infra", items=("acme/infra",))
-    with pytest.raises(PolicyError, match="acme/app is outside this thread$"):
+    with pytest.raises(PolicyError, match="acme/app is outside this department$"):
         await gate.prepare(
             session_id="s1",
             ability="github_issues",

@@ -1,10 +1,13 @@
 """Writes through the gate by declaration (ADR 0022), against an in-process server shaped
-like the official GitHub one: one ``issue_write`` tool multiplexed by ``method``."""
+like the official GitHub one: one ``issue_write`` tool multiplexed by ``method``. The
+declaration here is in the TOML shape the first increment used (``parse_servers``); a
+department's ``department.json`` carries the same keys (ADR 0024)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import tomllib
 from typing import Any
 
 import pytest
@@ -15,6 +18,8 @@ from ghost_core.mcp import (
     MCPTarget,
     Server,
     ServerSpec,
+    parse_servers,
+    render_server,
 )
 from ghost_core.policy import PolicyError
 from mcp.client.session import ClientSession
@@ -62,13 +67,18 @@ risk = "medium"
 tool = "no_such_tool"
 target = ["owner"]
 
-[mcp.github.levels]
+"""
+
+# The levels, as department.json carries them beside the declaration; here as the plain
+# policy section the merged policy ends up with.
+LEVELS = """
+[github]
 close = "confirm"
 set_labels = "announce"
 comment = "announce"
 retitle = "quiet"
 
-[mcp.github.targets."acme/web"]
+[github.targets."acme/web"]
 set_labels = "deny"
 """
 
@@ -174,11 +184,15 @@ async def connected(spec: ServerSpec, world: World | None = None):
 
 
 def policy() -> AutonomyPolicy:
-    return AutonomyPolicy.parse(POLICY)
+    return AutonomyPolicy.parse(LEVELS)
+
+
+def servers() -> dict[str, ServerSpec]:
+    return parse_servers(tomllib.loads(POLICY)["mcp"], "test")
 
 
 def spec() -> ServerSpec:
-    return policy().mcp["github"]
+    return servers()["github"]
 
 
 def gate_for(server: Server, autonomy: AutonomyPolicy | None = None) -> WriteGate:
@@ -196,7 +210,7 @@ def op(server: Server, name: str):
 
 def test_declaration_parses_and_levels_live_in_the_server_section():
     p = policy()
-    s = p.mcp["github"]
+    s = spec()
     assert s.scope is not None and s.scope.kind == "repository"
     assert s.scope.items == ("acme/app", "acme/web")
     close = s.writes["close"]
@@ -211,12 +225,12 @@ def test_declaration_parses_and_levels_live_in_the_server_section():
 
 
 def test_declaration_round_trips_through_to_toml():
+    s = spec()
+    text = "\n".join(render_server("github", s))
+    again = parse_servers(tomllib.loads(text)["mcp"], "again")["github"]
+    assert again == s
     p = policy()
-    again = AutonomyPolicy.parse(p.to_toml())
-    assert again.mcp == p.mcp
-    assert again.skills == p.skills
-    assert again.targets == p.targets
-    assert "[github]" not in p.to_toml()  # the server's levels stay in its section
+    assert AutonomyPolicy.parse(p.to_toml()).skills == p.skills
 
 
 @pytest.mark.parametrize(
@@ -234,7 +248,7 @@ def test_bad_declarations_are_rejected(body: str):
     if body.startswith("[mcp.x]") and "url" not in body:
         text = body + "\ncommand = 'c'"
     with pytest.raises(ValueError, match=r"mcp\.x"):
-        AutonomyPolicy.parse(text)
+        parse_servers(tomllib.loads(text)["mcp"], "test")
 
 
 # --- operations from the declaration -----------------------------------------------
@@ -357,12 +371,23 @@ async def test_bounds_from_the_declaration_and_the_defaults():
             )
 
 
-async def test_allowlist_and_thread_scope_refuse_before_policy():
+async def test_allowlist_and_department_scope_refuse_before_policy():
     async with connected(spec()) as (server, _):
         gate = gate_for(server)
         close = op(server, "close")
         with pytest.raises(ValueError, match="not an allowed repository"):
             await close.prepare({"owner": "evil", "repo": "corp", "issue_number": 1})
+        # outside the allowlist but covered by another department: OutOfScope names it,
+        # so the pipeline can route or offer (ADR 0019, ADR 0024)
+        routed = ActiveScope(
+            ability="github",
+            thread="Ghost",
+            owners=lambda item: ["Legal"] if "evil" in item else [],
+        )
+        with pytest.raises(OutOfScope, match="belongs to the Legal department"):
+            await close.prepare(
+                {"owner": "evil", "repo": "corp", "issue_number": 1, "_scope": routed}
+            )
         scope = ActiveScope(ability="github", thread="web", items=("acme/web",))
         with pytest.raises(OutOfScope):
             await close.prepare(
@@ -415,9 +440,9 @@ async def test_a_scoped_thread_fills_the_repository_in():
         read = next(t for t in server.read_tools() if t.name == "github_issue_read")
         out = await read.handler({"method": "get", "issue_number": 42, "_scope": scope})
         assert out["number"] == 42
-        # outside the thread: OutOfScope reaches the pipeline, which can route the request
-        # to the thread that owns the item (ADR 0019); with wider answers on, it reads
-        with pytest.raises(OutOfScope, match="outside this thread"):
+        # outside the view: OutOfScope reaches the pipeline, which can route the request
+        # to the department that covers the item (ADR 0019); with wider reads on, it reads
+        with pytest.raises(OutOfScope, match="outside this department"):
             await read.handler(
                 {
                     "method": "get",

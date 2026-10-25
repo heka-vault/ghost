@@ -41,17 +41,18 @@ class GhostdSettings(BaseSettings):
     def latency_path(self) -> Path:
         return self.latency_log or self.data_dir / "latency.jsonl"
 
-    # Conversations (ADR 0014): persona.md, memory.md and notes.md per conversation live
-    # here; the transcript and the registry are in the database. Summarized turns older
-    # than the retention window are pruned daily.
-    conversations_dir: Path = Path.home() / ".local" / "share" / "ghost" / "conversations"
+    # Departments (ADR 0024): everything the operator edits lives under config_dir: Ghost's
+    # AGENTS.md, mcp.json and department.json at the root, each department under
+    # departments/<slug>/, and every agent's persona.md, memory.md and notes.md under its
+    # department's agents/. The transcript and the registry mirror are in the database.
+    # Summarized turns older than the retention window are pruned daily.
+    config_dir: Path = Path.home() / ".config" / "ghost"
+    # A department's own servers stay up this long after a session leaves it.
+    department_idle_secs: float = 600.0
     # Skills (ADR 0024): Ghost's own SKILL.md folders, and the operator's, read after a
     # department's own (a project's skills come in through a department's root).
     skills_dir: Path = Path.home() / ".config" / "ghost" / "skills"
     home_skills_dir: Path = Path.home() / ".agents" / "skills"
-    # Department templates (ADR 0023): the operator's own; Ghost's shipped ones are in
-    # infra/templates.
-    templates_dir: Path = Path.home() / ".config" / "ghost" / "templates"
 
     turn_retention_days: int = 90
 

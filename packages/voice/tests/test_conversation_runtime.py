@@ -9,11 +9,11 @@ from typing import Any
 
 import pytest
 from ghost_core import (
-    ActiveScope,
     AutonomyPolicy,
     Change,
     ChangeSet,
     Operation,
+    OutOfScope,
     Prepared,
     ReadTool,
     Snapshot,
@@ -29,6 +29,7 @@ from ghost_core.conversations import (
     Conversations,
     conversations_source,
 )
+from ghost_core.departments import Departments
 from ghost_voice.conversation import ConversationMarkerFrame, ConversationRuntime, transfer_tone
 from ghost_voice.tools import SWITCH_TOOL, register_tools
 from pipecat.frames.frames import (
@@ -79,10 +80,29 @@ class FakeParams:
             await properties.on_context_updated()
 
 
+def layout(tmp_path: Path, *departments: str, **declaration) -> Departments:
+    import json
+
+    cfg = tmp_path / "ghost"
+    cfg.mkdir(parents=True, exist_ok=True)
+    for name in departments:
+        folder = cfg / "departments" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "department.json").write_text(
+            json.dumps({"title": name.title(), **declaration.get(name, {})})
+        )
+        (folder / "AGENTS.md").write_text(f"# {name.title()}: the {name} desk\n")
+        if "servers" in declaration.get(name, {}):
+            (folder / "mcp.json").write_text(
+                json.dumps({"mcpServers": {}, "use": list(declaration[name]["servers"])})
+            )
+    return Departments(cfg)
+
+
 @pytest.fixture
 def world(tmp_path: Path):
     store = Store()
-    convs = Conversations(store, tmp_path / "c", default_voice="af_heart")
+    convs = Conversations(store, layout(tmp_path), default_voice="af_heart")
     gate = WriteGate(
         store,
         autonomy=AutonomyPolicy.parse(f"[{SOURCE}]\nset_persona = 'announce'\n"),
@@ -171,21 +191,22 @@ async def test_switch_tool_transfers_with_announce_tone_voice_and_context(world)
         LLMUpdateSettingsFrame,
         LLMMessagesUpdateFrame,
     ]
-    assert llm.pushed[0].text == "Patching you through to Accounting."
+    assert llm.pushed[0].text == "Transferring you to Accounting."
     assert llm.pushed[2].delta == TTSSettings(voice="am_adam", speed=1.1)
     assert llm.pushed[3].slug == "accounting"
     prompt = llm.pushed[4].delta.system_instruction
-    assert "You are Accounting" in prompt and "hates surprises" in prompt and "FRAG" in prompt
+    assert "You are Accounting, an agent" in prompt and "hates surprises" in prompt
+    assert "FRAG" in prompt
     update = llm.pushed[5]
     assert update.run_llm is True
     assert "Reconciling September" in update.messages[0]["content"]
-    assert "patched through to you from Ghost" in update.messages[-1]["content"]
+    assert "transferred to you from Ghost" in update.messages[-1]["content"]
     assert "Q3 invoices" in update.messages[-1]["content"]
     assert rt.active.slug == "accounting"
 
     # assistant text is attributed by the marker, not by the clock: what the tap
     # reports before the marker is Ghost's, after it Accounting's
-    rt.record("assistant", "Patching you through to Accounting.")
+    rt.record("assistant", "Transferring you to Accounting.")
     assert not rt.settled.is_set()  # Ghost's announce line is not the greeting
     rt.on_marker(llm.pushed[3])
     rt.record("assistant", "Accounting here. We were reconciling September.")
@@ -194,7 +215,7 @@ async def test_switch_tool_transfers_with_announce_tone_voice_and_context(world)
         "patch me to accounting",
         "switch_conversation(handoff=Q3 invoices, name=the accounting team)",
         "transferred to Accounting",
-        "Patching you through to Accounting.",
+        "Transferring you to Accounting.",
     ]
     assert [t.text for t in convs.turns("accounting")] == [
         "transferred from Ghost",
@@ -265,15 +286,15 @@ async def test_save_as_creates_switches_and_carries_turns(world):
     update = [f for f in llm.pushed if isinstance(f, LLMMessagesUpdateFrame)][0]
     seeded = update.messages[0]["content"]
     assert "Operator: let's go over the invoices\nYou: Sure, which ones?" in seeded
-    assert "was just created" in update.messages[-1]["content"]
+    assert "was just hired" in update.messages[-1]["content"]
 
 
 async def test_read_tool_and_change_records_calls(world):
     _, convs, _, rt, llm, _ = world
-    p = FakeParams(llm, "list_conversations", {})
-    await llm.functions["list_conversations"](p)
-    assert p.result["conversations"][0]["name"] == "Ghost"
-    assert [t.text for t in convs.turns(GHOST)] == ["list_conversations()"]
+    p = FakeParams(llm, "list_agents", {})
+    await llm.functions["list_agents"](p)
+    assert p.result["departments"][0]["agents"][0]["name"] == "Ghost"
+    assert [t.text for t in convs.turns(GHOST)] == ["list_agents()"]
 
 
 async def test_summary_applied_persists_memory_and_marks_turns(world):
@@ -306,7 +327,7 @@ def test_transfer_tone_is_short_mono_pcm():
     assert 0.15 * 24000 * 2 < len(data) < 0.4 * 24000 * 2
 
 
-# --- scope: prompt, reads, routing (ADR 0019) -----------------------------------------
+# --- departments: prompt, reads, routing (ADR 0019, ADR 0024) ---------------------------
 
 
 class Issue(Target, frozen=True):
@@ -346,34 +367,39 @@ class RepoWriter:
         self.applied.append((target.repo, target.number, change.tag))
 
 
-def repo_source(writer) -> ToolSource:
-    """Like github_issues: reads and writes scoped by repository, checked through the
-    ActiveScope the pipeline passes as ``_scope``."""
-    allowed = ["acme/app", "acme/infra"]
+def repo_source(writer, name: str, allowed: list[str]) -> ToolSource:
+    """Like a GitHub server declared with a scope: reads and writes checked against its
+    allowlist; an item another department covers is OutOfScope through the ActiveScope
+    the pipeline passes as ``_scope`` (ghost_core.mcp does the same)."""
+
+    def check(args, item):
+        scope = args.get("_scope")
+        if item in allowed:
+            return
+        owners = scope.owners(item) if scope is not None else []
+        if owners:
+            raise OutOfScope(name, item, owners)
+        raise ValueError(f"{item} is not an allowed repository for {name}")
 
     async def list_issues(args):
-        scope = args.get("_scope")
         repo = args.get("repo")
         if repo:
-            if scope is not None:
-                scope.check_read(repo)
+            check(args, repo)
             return {"repos": [repo]}
-        return {"repos": scope.narrow(allowed) if scope is not None else allowed}
+        return {"repos": list(allowed)}
 
     async def prepare(args):
-        scope = args.get("_scope")
-        if scope is not None:
-            scope.check_write(args["repo"])
+        check(args, args["repo"])
         return Prepared(
             Issue(repo=args["repo"], number=int(args["number"])),
             ChangeSet(steps=(Label(tag="bug"),)),
         )
 
     return ToolSource(
-        name="github_issues",
-        prompt="UNSCOPED",
+        name=name,
+        prompt=f"{name.upper()} REPOS: " + ", ".join(allowed),
         read_tools=[
-            ReadTool("list_issues", "List.", {"repo": {"type": "string"}}, [], list_issues)
+            ReadTool(f"{name}_list_issues", "List.", {"repo": {"type": "string"}}, [], list_issues)
         ],
         operations=[
             Operation(
@@ -388,27 +414,56 @@ def repo_source(writer) -> ToolSource:
         ],
         scope_kind="repository",
         scope_items=lambda: list(allowed),
-        scoped_prompt=lambda s: "REPOS: " + ", ".join(s.narrow(allowed) if s else allowed),
     )
 
 
+def covering(*items: str) -> dict:
+    return {
+        "servers": {
+            "github": {
+                "scope": {
+                    "kind": "repository",
+                    "arguments": ["owner", "repo"],
+                    "items": list(items),
+                }
+            }
+        }
+    }
+
+
 @pytest.fixture
-def threads(tmp_path: Path):
-    def build(*, reads_wider=False, routing=False):
+def departments(tmp_path: Path):
+    """Ghost reaches acme/app and acme/infra through its own github server; the app and
+    infra departments each use it with a declaration covering one repository."""
+
+    def build(*, routing=False):
         store = Store()
         writer = RepoWriter()
-        ab = repo_source(writer)
+        deps = layout(
+            tmp_path,
+            "app",
+            "infra",
+            app=covering("acme/app"),
+            infra=covering("acme/infra"),
+        )
         convs = Conversations(
-            store,
-            tmp_path / "c",
-            default_voice="af_heart",
-            voices=("af_heart", "am_adam", "bf_emma"),
-            scopes={"github_issues": ab.scope_items},
+            store, deps, default_voice="af_heart", voices=("af_heart", "am_adam", "bf_emma")
         )
         gate = WriteGate(store)
-        loaded = conversations_source(convs)
-        gate.register(SOURCE, loaded.operations)
-        gate.register("github_issues", ab.operations)
+        agents = conversations_source(convs)
+        gate.register(SOURCE, agents.operations)
+        ghost_github = repo_source(writer, "github", ["acme/app", "acme/infra"])
+        views = {
+            "app": repo_source(writer, "github", ["acme/app"]),
+            "infra": repo_source(writer, "github", ["acme/infra"]),
+        }
+        gate.register("github", ghost_github.operations)
+
+        def reach(p):
+            if p.department == GHOST:
+                return [ghost_github, agents]
+            return [views[p.department], agents]
+
         rt = ConversationRuntime(
             convs,
             gate=gate,
@@ -417,8 +472,7 @@ def threads(tmp_path: Path):
             tts_settings=TTSSettings,
             llm_settings=LLMSettings,
             sample_rate=24000,
-            scoped_prompts={"github_issues": ab.scoped_prompt},
-            reads_wider=reads_wider,
+            reach=reach,
             routing=routing,
         )
         llm = FakeLLM()
@@ -428,7 +482,7 @@ def threads(tmp_path: Path):
 
         register_tools(
             llm,
-            sources=[ab, loaded],
+            sources=[ghost_github, agents],
             gate=gate,
             session_id="s1",
             on_hang_up=on_sleep,
@@ -441,44 +495,38 @@ def threads(tmp_path: Path):
     return build
 
 
-async def make_threads(convs, gate):
-    await create(convs, gate, "App", scope={"github_issues": ["acme/app"]})
-    await create(convs, gate, "Infra", scope={"github_issues": ["acme/infra"]})
-
-
-async def test_scope_shapes_the_prompt_and_the_calls(threads):
-    _, convs, gate, rt, llm, writer = threads()
-    await make_threads(convs, gate)
-    # Ghost: unscoped, every repo, no thread note
-    assert (
-        "REPOS: acme/app, acme/infra" in rt.system_prompt() and "UNSCOPED" not in rt.system_prompt()
-    )
-    assert "This thread covers only" not in rt.system_prompt()
-    assert rt.scope_for("github_issues") == ActiveScope("github_issues", "Ghost", None)
-    p = FakeParams(llm, "list_issues", {})
-    await llm.functions["list_issues"](p)
+async def test_the_department_shapes_the_prompt_and_the_calls(departments):
+    _, convs, gate, rt, llm, writer = departments()
+    # Ghost: its own server, every repo, the roster of departments
+    prompt = rt.system_prompt()
+    assert "GITHUB REPOS: acme/app, acme/infra" in prompt and "FRAG" not in prompt
+    assert "- App: App: the app desk" in prompt and "- Infra" in prompt
+    assert rt.scope_for("github").items is None and rt.scope_for("github").thread == "Ghost"
+    p = FakeParams(llm, "github_list_issues", {})
+    await llm.functions["github_list_issues"](p)
     assert p.result == {"repos": ["acme/app", "acme/infra"]}
 
     await rt.switch(convs.get("app"))
     prompt = rt.system_prompt()
-    assert "REPOS: acme/app" in prompt and "acme/infra" not in prompt.split("REPOS")[1]
-    assert "This thread covers only: github_issues: acme/app" in prompt
-    assert "ask whether to patch them through" in prompt  # routing off
-    s = rt.scope_for("github_issues")
-    assert s.items == ("acme/app",) and s.only == "acme/app" and s.thread == "App"
+    assert "GITHUB REPOS: acme/app" in prompt and "acme/infra" not in prompt
+    assert "You are App, the operator's App department" in prompt
+    assert "App department's standing instructions" in prompt and "the app desk" in prompt
+    assert "The departments, each" not in prompt  # only Ghost lists them
+    s = rt.scope_for("github")
     assert s.owners("acme/infra") == ["Infra"] and s.owners("acme/app") == []  # not itself
-    p = FakeParams(llm, "list_issues", {})
-    await llm.functions["list_issues"](p)
+    assert rt.department_slug() == "app"
+    p = FakeParams(llm, "github_list_issues", {})
+    await llm.functions["github_list_issues"](p)
     assert p.result == {"repos": ["acme/app"]}
     # the scope never reaches the transcript record
     assert all("_scope" not in t.text for t in convs.turns("app"))
 
-    # a write inside the scope goes through
+    # a write inside the department's scope goes through
     p = FakeParams(
         llm,
         "change",
         {
-            "ability": "github_issues",
+            "ability": "github",
             "operation": "set_labels",
             "args": {"repo": "acme/app", "number": 17},
         },
@@ -487,19 +535,18 @@ async def test_scope_shapes_the_prompt_and_the_calls(threads):
     assert p.result["status"] == "done" and writer.applied == [("acme/app", 17, "bug")]
 
 
-async def test_outside_the_scope_with_routing_off_names_the_owner(threads):
-    _, convs, gate, rt, llm, writer = threads()
-    await make_threads(convs, gate)
+async def test_outside_the_department_with_routing_off_names_the_owner(departments):
+    _, convs, gate, rt, llm, writer = departments()
     await rt.switch(convs.get("app"))
     llm.pushed.clear()
-    # a read: refused, with the owning thread
-    p = FakeParams(llm, "list_issues", {"repo": "acme/infra"})
-    await llm.functions["list_issues"](p)
+    # a read: refused, with the department that covers it
+    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})
+    await llm.functions["github_list_issues"](p)
     assert p.result == {
-        "error": "acme/infra is outside this thread; it belongs to the Infra thread",
+        "error": "acme/infra is outside this department; it belongs to the Infra department",
         "item": "acme/infra",
         "belongs_to": "Infra",
-        "hint": "offer to patch them through to Infra",
+        "hint": "offer to transfer them to Infra",
     }
     assert rt.active.slug == "app" and llm.pushed == []
     # a write: the same, and nothing was written or proposed
@@ -507,53 +554,29 @@ async def test_outside_the_scope_with_routing_off_names_the_owner(threads):
         llm,
         "change",
         {
-            "ability": "github_issues",
+            "ability": "github",
             "operation": "set_labels",
             "args": {"repo": "acme/infra", "number": 17},
         },
     )
     await llm.functions["change"](p)
     assert p.result["belongs_to"] == "Infra" and writer.applied == [] and gate.pending("s1") is None
-    # an item nobody owns: just outside
-    p = FakeParams(llm, "list_issues", {"repo": "other/x"})
-    await llm.functions["list_issues"](p)
-    assert p.result == {"error": "other/x is outside this thread", "item": "other/x"}
+    # an item nobody covers: a plain refusal from the server's allowlist
+    p = FakeParams(llm, "github_list_issues", {"repo": "other/x"})
+    await llm.functions["github_list_issues"](p)
+    assert p.result == {"error": "other/x is not an allowed repository for github"}
 
 
-async def test_cross_department_answers_lets_reads_out_but_not_writes(threads):
-    _, convs, gate, rt, llm, writer = threads(reads_wider=True)
-    await make_threads(convs, gate)
+async def test_department_routing_transfers_and_hands_over_the_request(departments):
+    _, convs, gate, rt, llm, writer = departments(routing=True)
     await rt.switch(convs.get("app"))
-    p = FakeParams(llm, "list_issues", {"repo": "acme/infra"})
-    await llm.functions["list_issues"](p)
-    assert p.result == {"repos": ["acme/infra"]}
-    p = FakeParams(llm, "list_issues", {})
-    await llm.functions["list_issues"](p)
-    assert p.result == {"repos": ["acme/app"]}  # the default is still the thread
-    p = FakeParams(
-        llm,
-        "change",
-        {
-            "ability": "github_issues",
-            "operation": "set_labels",
-            "args": {"repo": "acme/infra", "number": 17},
-        },
-    )
-    await llm.functions["change"](p)
-    assert "belongs to the Infra thread" in p.result["error"] and writer.applied == []
-
-
-async def test_department_routing_patches_through_and_hands_over_the_request(threads):
-    _, convs, gate, rt, llm, writer = threads(routing=True)
-    await make_threads(convs, gate)
-    await rt.switch(convs.get("app"))
-    assert "patches the operator through to it by itself" in rt.system_prompt()
+    assert "transfers the operator there by itself" in rt.system_prompt()
     llm.pushed.clear()
     p = FakeParams(
         llm,
         "change",
         {
-            "ability": "github_issues",
+            "ability": "github",
             "operation": "set_labels",
             "args": {"repo": "acme/infra", "number": 17},
         },
@@ -561,92 +584,106 @@ async def test_department_routing_patches_through_and_hands_over_the_request(thr
     await llm.functions["change"](p)
     assert p.result == {"status": "routed", "to": "Infra", "item": "acme/infra"}
     assert p.properties.run_llm is False
-    assert rt.active.slug == "infra" and writer.applied == []  # that thread handles it
-    assert llm.pushed[0].text == "Patching you through to Infra."
+    assert rt.active.slug == "infra" and writer.applied == []  # that department handles it
+    assert llm.pushed[0].text == "Transferring you to Infra."
     note = [f for f in llm.pushed if isinstance(f, LLMMessagesUpdateFrame)][0].messages[-1][
         "content"
     ]
     assert "Ghost routed them here" in note and "label app seventeen bug" in note
-    # a read outside the thread routes the same way
+    # a read outside the department routes the same way
     await rt.switch(convs.get("app"))
     llm.pushed.clear()
-    p = FakeParams(llm, "list_issues", {"repo": "acme/infra"})
-    await llm.functions["list_issues"](p)
+    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})
+    await llm.functions["github_list_issues"](p)
     assert p.result["status"] == "routed" and rt.active.slug == "infra"
-    # nobody owns it: no routing, the plain refusal
-    p = FakeParams(llm, "list_issues", {"repo": "other/x"})
-    await llm.functions["list_issues"](p)
-    assert p.result["error"] == "other/x is outside this thread" and rt.active.slug == "infra"
-    # a settled thread is not a destination
-    op = gate.operation(SOURCE, "settle")
-    prepared = await op.prepare({"conversation": "app"})
+    # from Ghost, which covers both, nothing routes
+    await rt.switch(convs.get(GHOST))
+    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})
+    await llm.functions["github_list_issues"](p)
+    assert p.result == {"repos": ["acme/infra"]} and rt.active.slug == GHOST
+
+
+async def test_a_voice_hired_agent_joins_the_department_and_the_tools_follow(departments):
+    _, convs, gate, rt, llm, writer = departments()
+    await rt.switch(convs.get("app"))
+    rt.record("user", "hire someone for the app's release notes")
+    p = FakeParams(
+        llm,
+        "change",
+        {
+            "ability": SOURCE,
+            "operation": "create",
+            "args": {"name": "Release Notes", "job": "release notes", "voice": "am_adam"},
+        },
+    )
+    await llm.functions["change"](p)
+    assert p.result["status"] == "done" and rt.active.slug == "release-notes"
+    agent = convs.get("release-notes")
+    assert agent.department == "app" and agent.job == "release notes" and agent.voice == "am_adam"
+    assert (
+        "You are Release Notes, an agent in the operator's App department, hired for release notes"
+        in rt.system_prompt()
+    )
+    assert [s.name for s in rt.sources_for()] == ["github", SOURCE]
+    # a transfer by department name lands on its own agent
+    assert rt.resolve("the infra department").slug == "infra"
+
+
+async def test_retiring_the_active_agent_returns_to_its_department(departments):
+    _, convs, gate, rt, llm, _ = departments()
+    create = gate.operation(SOURCE, "create")
+    prepared = await create.prepare({"name": "Brand", "department": "app"})
     await gate.submit(
-        session_id="x",
+        session_id="setup",
         ability=SOURCE,
-        operation="settle",
+        operation="create",
         target=prepared.target,
         changes=prepared.changes,
         rationale="",
     )
-    p = FakeParams(llm, "list_issues", {"repo": "acme/app"})
-    await llm.functions["list_issues"](p)
-    assert p.result == {"error": "acme/app is outside this thread", "item": "acme/app"}
-
-
-async def test_voice_created_thread_binds_scope_and_picks_a_voice(threads):
-    _, convs, gate, rt, llm, _ = threads()
-    rt.record("user", "make this a thread for the app repo")
-    p = FakeParams(
-        llm,
-        "change",
-        {
-            "ability": SOURCE,
-            "operation": "create",
-            "args": {"name": "App work", "scope": {"github_issues": ["acme/app"]}},
-        },
-    )
-    await llm.functions["change"](p)
-    assert p.result["status"] == "done" and rt.active.slug == "app-work"
-    app = convs.get("app-work")
-    assert app.scope == {"github_issues": ("acme/app",)} and app.voice == "am_adam"
-    assert "This thread covers only: github_issues: acme/app" in rt.system_prompt()
-    # out of the allowlist: the model sees why, nothing is created
-    p = FakeParams(
-        llm,
-        "change",
-        {
-            "ability": SOURCE,
-            "operation": "create",
-            "args": {"name": "Bad", "scope": {"github_issues": ["acme/secret"]}},
-        },
-    )
-    await llm.functions["change"](p)
-    assert "not something github_issues is allowed" in p.result["error"]
-
-
-async def test_settling_the_active_thread_returns_to_ghost(threads):
-    _, convs, gate, rt, llm, _ = threads()
-    await make_threads(convs, gate)
-    await rt.switch(convs.get("app"))
+    await rt.switch(convs.get("brand"))
     llm.pushed.clear()
-    p = FakeParams(llm, "change", {"ability": SOURCE, "operation": "settle", "args": {}})
+    p = FakeParams(llm, "change", {"ability": SOURCE, "operation": "retire", "args": {}})
     await llm.functions["change"](p)
-    assert p.result["status"] == "done" and convs.get("app").settled
-    assert rt.active.slug == GHOST and llm.pushed[0].text == "Back to Ghost."
-    assert convs.resolve("app") is None
-    # settling another thread from Ghost stays put
+    assert p.result["status"] == "done" and convs.get("brand").retired
+    assert rt.active.slug == "app" and llm.pushed[0].text == "Transferring you to App."
+    assert convs.resolve("brand") is None
+    # retiring another agent from Ghost stays put
+    await rt.switch(convs.get(GHOST))
+    prepared = await create.prepare({"name": "Social", "department": "infra"})
+    await gate.submit(
+        session_id="setup",
+        ability=SOURCE,
+        operation="create",
+        target=prepared.target,
+        changes=prepared.changes,
+        rationale="",
+    )
     p = FakeParams(
         llm,
         "change",
-        {"ability": SOURCE, "operation": "settle", "args": {"conversation": "infra"}},
+        {"ability": SOURCE, "operation": "retire", "args": {"conversation": "social"}},
     )
     await llm.functions["change"](p)
     assert p.result["status"] == "done" and rt.active.slug == GHOST
-    assert [
-        c["slug"]
-        for c in (
-            await llm.functions["list_conversations"](FakeParams(llm, "list_conversations", {}))
-            or p.result.get("x", [])
-        )
-        or []
-    ] == [] or True
+
+
+async def test_entering_a_department_starts_its_servers_first(departments):
+    """on_enter runs before the transfer frames are built, on_leave after (ADR 0024)."""
+    _, convs, gate, rt, llm, _ = departments()
+    log: list[str] = []
+
+    async def enter(p):
+        log.append(f"enter {p.department}")
+
+    rt._on_enter = enter  # noqa: SLF001
+    rt._on_leave = lambda p: log.append(f"leave {p.department}")  # noqa: SLF001
+    await rt.switch(convs.get("app"))
+    await rt.switch(convs.get("infra"))
+    frames = await rt.switch(convs.get("infra"), rehome=True)
+    assert log == ["enter app", "leave ghost", "enter infra", "leave app", "enter infra"]
+    assert frames[0].text == "Moved to Infra."
+    assert (
+        "moved to the Infra department"
+        in [f for f in frames if isinstance(f, LLMMessagesUpdateFrame)][0].messages[-1]["content"]
+    )

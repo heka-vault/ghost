@@ -73,6 +73,7 @@ class DaemonState:
         self.servers: list[str] = []
         self.pending: PendingProposal | None = None
         self.conversation: str | None = None
+        self.department: str | None = None  # the department the session's agent works in
         self.session_origin: str | None = None  # "desk" | "phone" while a session runs
         self.ending = False  # going to sleep; the goodbye may still be playing
         self.turns: deque[Turn] = deque(maxlen=200)
@@ -96,6 +97,7 @@ class DaemonState:
             self.ending = False
             self.pending = None
             self.conversation = None
+            self.department = None
             self.turns.clear()
         else:
             if session_id is not None:
@@ -122,8 +124,12 @@ class DaemonState:
         self.bus.publish(TurnEvent(turn=turn))
         return turn
 
-    def set_conversation(self, slug: str | None, changed: str | None = None) -> None:
+    def set_conversation(
+        self, slug: str | None, changed: str | None = None, department: str | None = None
+    ) -> None:
         self.conversation = slug if self.session_id else None
+        if department is not None or slug is None:
+            self.department = department if self.session_id else None
         self.bus.publish(ConversationEvent(active=self.conversation, changed=changed))
         self._publish_status()
 

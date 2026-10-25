@@ -56,15 +56,29 @@ async def test_stdio_child_gets_only_its_declared_environment(tmp_path: Path):
 
 
 def test_server_names_are_slugs():
+    from ghost_core.mcp import parse_servers
+
     with pytest.raises(ValueError, match="server name"):
-        AutonomyPolicy.parse('[mcp."github.heka"]\nurl = "http://x"\n')
+        parse_servers({"github.heka": {"url": "http://x"}}, "test")
 
 
-def test_plain_section_merges_with_server_levels():
-    p = AutonomyPolicy.parse(
-        '[mcp.github]\ncommand = "x"\n[mcp.github.levels]\nclose = "confirm"\n'
-        '[github]\ncomment = "quiet"\n'
+def test_department_levels_merge_over_the_plain_section():
+    """A department.json's levels for a server sit over the file's own section for it
+    (ADR 0024); the file's other operations stay."""
+    from pathlib import Path as P
+
+    from ghost_core.departments import Declaration
+    from ghost_core.departments import Department as Dept
+    from ghost_core.policy import Autonomy
+
+    base = AutonomyPolicy.parse('[github]\ncomment = "quiet"\nclose = "announce"\n')
+    d = Dept(
+        slug="ghost",
+        path=P("/nonexistent"),
+        title="Ghost",
+        declarations={"github": Declaration(levels={"close": Autonomy.CONFIRM})},
     )
+    p = d.policy(base)
     assert {k: v.value for k, v in p.skills["github"].items()} == {
         "close": "confirm",
         "comment": "quiet",

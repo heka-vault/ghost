@@ -1,19 +1,17 @@
 """``ghost-scripts``: the one way a skill's scripts run (ADR 0023), as an MCP server Ghost
 ships, so a run is a declared operation through the gate like any write.
 
-Declared in the policy file as a stdio server scoped by skill, so a toolkit's ``items``
-say whose scripts may run and the gate asks (``confirm`` by default)::
+Declared in a department's ``mcp.json`` as a stdio server and in its ``department.json``
+scoped by skill, so the declaration says whose scripts may run and the gate asks
+(``confirm`` by default, ADR 0024)::
 
-    [mcp.scripts]
-    command = "ghost-scripts"
-    args = ["--skills", "~/.config/ghost/skills", "--root", "~/projects/x"]
-    scope = { kind = "skill", arguments = ["skill"], items = ["month-close"] }
+    {"mcpServers": {"scripts": {"command": "ghost-scripts",
+                                "args": ["--skills", "~/.config/ghost/skills",
+                                         "--root", "~/projects/x"]}}}
 
-    [mcp.scripts.writes.run]
-    target = ["skill", "script"]
-    asked_by = ["run"]
-    risk = "high"
-    bound = { args = 12 }
+    "scripts": {"scope": {"kind": "skill", "arguments": ["skill"], "items": ["month-close"]},
+                "writes": {"run": {"target": ["skill", "script"], "asked_by": ["run"],
+                                   "risk": "high", "bound": {"args": 12}}}}
 
 A script runs with a minimal environment (no secrets unless the server's ``env`` names
 them), in its skill's folder, with a timeout and an output cap; the audit row carries the
@@ -45,7 +43,8 @@ class ScriptRunner:
         skill = skill.strip().lower()
         if not skill or "/" in skill or skill.startswith("."):
             raise ValueError(f"{skill!r} is not a skill name")
-        places = [self.skills_dir / skill] + [r / ".agents" / "skills" / skill for r in self.roots]
+        folders = ("skills", ".agents/skills", ".claude/skills")  # as ghost_core.departments
+        places = [self.skills_dir / skill] + [r / f / skill for r in self.roots for f in folders]
         for p in places:
             if (p / "SKILL.md").is_file():
                 return p

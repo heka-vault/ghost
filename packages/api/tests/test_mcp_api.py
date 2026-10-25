@@ -35,6 +35,7 @@ def test_mcp_route_lists_servers_and_tools(world):
         "tools": [],
         "writes": [],
         "scope": None,
+        "department": None,
     }
     assert by_name["fake"]["connected"] is True
     assert by_name["fake"]["error"] is None

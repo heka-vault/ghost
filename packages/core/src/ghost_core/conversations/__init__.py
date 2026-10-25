@@ -1,4 +1,5 @@
-"""Named conversations with their own persona, voice and memory (ADR 0014)."""
+"""Agents: named conversations with their own persona, job, voice and memory, in a
+department (ADR 0014, ADR 0024)."""
 
 from ghost_core.conversations.files import ConversationFiles
 from ghost_core.conversations.models import (
@@ -7,9 +8,7 @@ from ghost_core.conversations.models import (
     ConversationSnapshot,
     ConversationTarget,
     Profile,
-    Scope,
     TurnRecord,
-    describe_scope,
     slugify,
 )
 from ghost_core.conversations.service import (
@@ -35,9 +34,7 @@ __all__ = [
     "Conversations",
     "Profile",
     "ResumeContext",
-    "Scope",
     "TurnRecord",
     "conversations_source",
-    "describe_scope",
     "slugify",
 ]

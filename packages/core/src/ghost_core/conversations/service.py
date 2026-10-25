@@ -1,6 +1,6 @@
-"""The conversations facade (ADR 0014): the registry, name resolution, what a session
-loads on resume, turn and summary records, retention, and the operations the gate
-registers under the ``conversations`` ability name.
+"""The agents facade (ADR 0014, ADR 0024): the registry read from the department folders,
+name resolution, what a session loads on resume, turn and summary records, retention, and
+the operations the gate registers under the ``conversations`` source name.
 
 Switching is not here: it is a session action in ``ghost_voice``. Everything that
 changes a row or a file is an operation below, so it runs at the operator's level
@@ -9,15 +9,18 @@ and is audited."""
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from ghost_core.conversations.files import ConversationFiles
+from loguru import logger
+
+from ghost_core.conversations.files import ConversationFiles, read_agent_json
 from ghost_core.conversations.models import (
     GHOST,
+    MAX_JOB,
     MAX_NOTE,
     MAX_PERSONA,
     AppendNote,
@@ -25,28 +28,26 @@ from ghost_core.conversations.models import (
     ConversationTarget,
     Create,
     Delete,
+    Move,
     Profile,
+    Rehire,
     Rename,
     Reset,
-    Scope,
+    Retire,
     SetMemory,
     SetNotes,
     SetPersona,
-    SetScope,
-    Settle,
-    SetToolkits,
     SetVoice,
     TurnRecord,
-    Unsettle,
-    describe_scope,
     slugify,
 )
 from ghost_core.conversations.writer import ConversationWriter
+from ghost_core.departments import Department, Departments
 from ghost_core.models import ChangeSet, utcnow
 from ghost_core.source import Operation, Prepared, ReadTool, ToolSource
 from ghost_core.store import Store
 
-SOURCE = "conversations"  # the gate, policy and audit key for the lines' operations
+SOURCE = "conversations"  # the gate, policy and audit key for the agents' operations
 DEFAULT_VOICE = "af_heart"
 SUMMARY_TEMPLATE = "What this conversation has covered so far: {summary}"
 NEXT_SESSION = "(next session)"
@@ -76,18 +77,19 @@ _STOP = {
     "dept",
     "office",
     "desk",
-    "line",
+    "agent",
     "people",
     "folks",
     "group",
     "conversation",
+    "thread",
     "channel",
 }
 
 
 @dataclass(frozen=True)
 class ResumeContext:
-    """What a session loads when it enters a conversation."""
+    """What a session loads when it enters an agent."""
 
     profile: Profile
     persona: str
@@ -146,77 +148,163 @@ class Conversations:
     def __init__(
         self,
         store: Store,
-        root: Path,
+        departments: Departments,
         *,
         default_voice: str = DEFAULT_VOICE,
         default_speed: float = 1.0,
         voices: Sequence[str] = (),
         recent_limit: int = 40,
         retention: timedelta = timedelta(days=90),
-        scopes: Mapping[str, Callable[[], list[str]]] | None = None,
-        toolkits: Callable[[], list[str]] | None = None,
-        toolkit_items: Callable[[str, str], list[str] | None] | None = None,
-        templates: Any = None,
     ) -> None:
-        """``scopes`` is what a thread can be scoped to: ability name -> a function
-        returning that source's whole allowlist (``ToolSource.scope_items``). A
-        thread's scope must stay within it (ADR 0019). ``toolkits`` returns the names
-        the policy file declares; a department may only be given those (ADR 0023)."""
+        """The folders are the registry; the store mirrors them and holds what only Ghost
+        writes. ``sync`` reads the folders; every write below keeps both in step."""
         self._store = store
-        self.files = ConversationFiles(root)
-        self.writer = ConversationWriter(store, self.files)
+        self.departments = departments
+        self.files = ConversationFiles(self.dir_for)
+        self.writer = ConversationWriter(store, self.files, agents_dir=self._agents_dir)
         self.default_voice = default_voice
         self.default_speed = default_speed
         self._voices = tuple(voices)
         self._recent_limit = recent_limit
         self._retention = retention
-        self._scopes: dict[str, Callable[[], list[str]]] = dict(scopes or {})
-        self._toolkits: Callable[[], list[str]] = toolkits or (lambda: [])
-        # (toolkit, source) -> the items that toolkit grants on that source, None when it
-        # does not grant the source at all; routes a request to the department (ADR 0023).
-        self._toolkit_items: Callable[[str, str], list[str] | None] = toolkit_items or (
-            lambda _t, _s: None
-        )
-        # A ghost_core.templates.Templates registry (get, list), for "start a department
-        # from the X template" (ADR 0023); its toolkits must already be in the policy file.
-        self._templates: Any = templates
-        self.ensure_ghost()
+        self.sync()
 
     # --- registry ------------------------------------------------------------
 
+    def _agents_dir(self, department: str) -> Path | None:
+        d = self.departments.get(department)
+        return d.agents_dir if d is not None else None
+
+    def dir_for(self, slug: str) -> Path:
+        """An agent's folder: under its department's ``agents/``. A slug with no row yet
+        (a hire in progress) is placed by the department the writer just recorded."""
+        p = self._store.get_conversation(slug, include_deleted=True)
+        department = p.department if p is not None else GHOST
+        base = self._agents_dir(department) or self.departments.ghost.agents_dir
+        return base / slug
+
+    def sync(self) -> list[str]:
+        """Read every department's ``agents/`` folder into the store: a folder is an agent
+        (its ``agent.json`` is its identity), each department gets its default agent, and
+        a row whose folder is gone is marked deleted. Returns the problems found."""
+        problems: list[str] = []
+        seen: set[str] = set()
+        rows = {p.slug: p for p in self._store.list_conversations(include_retired=True)}
+        for d in self.departments.list():
+            self._ensure_default(d, rows)
+            seen.add(d.slug)
+            if not d.agents_dir.is_dir():
+                continue
+            for folder in sorted(p for p in d.agents_dir.iterdir() if p.is_dir()):
+                slug = folder.name.lower()
+                if slug in seen:
+                    if slug != d.slug:
+                        problems.append(f"{folder}: another agent is already called {slug}")
+                    continue
+                data = read_agent_json(folder)
+                existing = rows.get(slug)
+                if data is None:
+                    if existing is None:
+                        problems.append(f"{folder}: no agent.json; not an agent")
+                        continue
+                    data = existing.agent_json()
+                p = Profile(
+                    id=str(data.get("id") or (existing.id if existing else ""))
+                    or Profile(slug=slug, name=slug).id,
+                    slug=slug,
+                    name=str(
+                        data.get("name")
+                        or (existing.name if existing else slug.replace("-", " ").title())
+                    ),
+                    aliases=tuple(str(a) for a in data.get("aliases", []) if str(a).strip()),
+                    department=d.slug,
+                    job=str(data.get("job") or "")[:MAX_JOB],
+                    voice=str(data["voice"]) if data.get("voice") else None,
+                    speed=float(data["speed"]) if data.get("speed") is not None else None,
+                    created_at=existing.created_at if existing else utcnow(),
+                    updated_at=existing.updated_at if existing else utcnow(),
+                    last_active_at=existing.last_active_at if existing else None,
+                    retired_at=existing.retired_at if existing else None,
+                )
+                if existing is None or existing.model_dump() != p.model_dump():
+                    self._store.upsert_conversation(p)
+                if data != p.agent_json():  # a hand-made folder gets its id written back
+                    self.files.write_agent(slug, p.agent_json())
+                seen.add(slug)
+        for slug, p in rows.items():
+            if slug not in seen and p.deleted_at is None:
+                logger.warning(f"agents: {slug}'s folder is gone; marked deleted")
+                self._store.upsert_conversation(p.model_copy(update={"deleted_at": utcnow()}))
+        for problem in problems:
+            logger.warning(f"agents: {problem}")
+        return problems
+
+    def _ensure_default(self, d: Department, rows: dict[str, Profile]) -> Profile:
+        """Each department's own agent, named for it, where a transfer lands."""
+        existing = rows.get(d.slug)
+        folder = d.agents_dir / d.slug
+        data = read_agent_json(folder) or {}
+        if existing is not None and existing.deleted_at is None and folder.is_dir():
+            return existing
+        name = "Ghost" if d.is_ghost else d.title
+        p = Profile(
+            id=str(data.get("id") or (existing.id if existing else ""))
+            or Profile(slug=d.slug, name=name).id,
+            slug=d.slug,
+            name=str(data.get("name") or name),
+            aliases=tuple(str(a) for a in data.get("aliases", []))
+            or (("ghost", "primary", "main line") if d.is_ghost else d.aliases),
+            department=d.slug,
+            created_at=existing.created_at if existing else utcnow(),
+        )
+        self._store.upsert_conversation(p)
+        if not (folder / "agent.json").is_file():
+            self.files.write_agent(d.slug, p.agent_json())
+        rows[d.slug] = p
+        return p
+
     def ensure_ghost(self) -> Profile:
-        p = self._store.get_conversation(GHOST, include_deleted=True)
+        p = self._store.get_conversation(GHOST)
         if p is None:
-            p = Profile(
-                slug=GHOST,
-                name="Ghost",
-                aliases=("ghost", "primary", "main line"),
-                voice=self.default_voice,
-                speed=self.default_speed,
-            )
-            self._store.upsert_conversation(p)
-        elif p.deleted_at is not None:
-            p = p.model_copy(update={"deleted_at": None})
-            self._store.upsert_conversation(p)
-        self.files.ensure(GHOST)
+            self.sync()
+            p = self._store.get_conversation(GHOST)
+        assert p is not None
         return p
 
     def get(self, slug: str) -> Profile | None:
         return self._store.get_conversation(slug)
 
-    def list(self, *, include_settled: bool = False) -> list[Profile]:
-        """Live conversations, Ghost first. Settled threads (ADR 0019) are left out
-        unless asked for: they are readable, not routable."""
-        return self._store.list_conversations(include_settled=include_settled)
+    def by_id(self, id: str) -> Profile | None:
+        return self._store.get_conversation_by_id(id)
 
-    def resolve(self, spoken: str, *, include_settled: bool = False) -> Profile | None:
-        """The conversation the operator most likely means by ``spoken``: exact slug,
-        then any name or alias, then word overlap with filler words removed. A settled
-        thread is not a match unless ``include_settled`` (to bring it back)."""
+    def list(
+        self, *, include_retired: bool = False, department: str | None = None
+    ) -> list[Profile]:
+        """Live agents, Ghost first. Retired ones are left out unless asked for: they
+        are readable, not routable. ``department`` narrows to one roster."""
+        out = self._store.list_conversations(include_retired=include_retired)
+        if department is not None:
+            out = [p for p in out if p.department == department]
+        return out
+
+    def agents_of(self, department: str, *, include_retired: bool = False) -> list[Profile]:
+        return self.list(include_retired=include_retired, department=department)
+
+    def default_agent(self, department: str) -> Profile | None:
+        return self.get(department)
+
+    def department_of(self, p: Profile) -> Department:
+        """The department an agent works in; Ghost's when its folder is gone."""
+        return self.departments.get(p.department) or self.departments.ghost
+
+    def resolve(self, spoken: str, *, include_retired: bool = False) -> Profile | None:
+        """The agent the operator most likely means by ``spoken``: exact slug, then any
+        name or alias, then word overlap with filler words removed. A retired agent is
+        not a match unless ``include_retired`` (to bring it back)."""
         text = spoken.strip().lower()
         if not text:
             return None
-        profiles = self.list(include_settled=include_settled)
+        profiles = self.list(include_retired=include_retired)
         for p in profiles:
             if p.slug == slugify(text):
                 return p
@@ -237,104 +325,43 @@ class Conversations:
         return best[1] if best else None
 
     def touch(self, slug: str) -> None:
-        self._store.touch_conversation(slug)
+        p = self.get(slug)
+        if p is not None:
+            self._store.touch_conversation(p.id)
 
     def voices(self) -> tuple[str, ...]:
         return self._voices
 
+    def voice_for(self, p: Profile) -> tuple[str, float]:
+        """The voice heard: the agent's own, else its department's, else the default."""
+        d = self.department_of(p)
+        voice = p.voice or d.voice or self.default_voice
+        speed = (
+            p.speed
+            if p.speed is not None
+            else (d.speed if d.speed is not None else self.default_speed)
+        )
+        return voice, speed
+
     def unused_voice(self) -> str:
-        """A voice no live conversation uses yet, so a new thread sounds like itself.
-        The default when every installed voice is taken (or none is known)."""
-        taken = {p.voice for p in self.list(include_settled=True)}
+        """A voice no live agent or department uses yet, so a new agent sounds like
+        itself. The default when every installed voice is taken (or none is known)."""
+        taken = {p.voice for p in self.list(include_retired=True) if p.voice}
+        taken |= {d.voice for d in self.departments.list() if d.voice}
+        taken.add(self.default_voice)
         for v in self._voices:
             if v not in taken:
                 return v
         return self.default_voice
 
-    # --- scope (ADR 0019) -----------------------------------------------------------
-
-    def scope_kinds(self) -> dict[str, Callable[[], list[str]]]:
-        return dict(self._scopes)
-
-    def validate_scope(self, slug: str, scope: Mapping[str, Sequence[str]]) -> Scope:
-        """A thread's scope as it will be stored: each ability must be one that can be
-        scoped, each item within that ability's allowlist (spelled as the allowlist
-        spells it). Ghost is always unscoped. Empty item lists drop the ability."""
-        if slug == GHOST and any(scope.values()):
-            raise ValueError("Ghost is unscoped and cannot be given a scope")
-        out: Scope = {}
-        for ability, items in scope.items():
-            if ability not in self._scopes:
-                raise ValueError(f"{ability} cannot be scoped")
-            allowed = {a.lower(): a for a in self._scopes[ability]()}
-            kept: list[str] = []
-            for raw in items:
-                item = str(raw).strip()
-                if not item:
-                    continue
-                canonical = allowed.get(item.lower())
-                if canonical is None:
-                    raise ValueError(
-                        f"{item} is not something {ability} is allowed to touch; "
-                        f"it allows {', '.join(sorted(allowed.values())) or 'nothing'}"
-                    )
-                if canonical not in kept:
-                    kept.append(canonical)
-            if kept:
-                out[ability] = tuple(kept)
-        return out
-
-    def validate_toolkits(self, names: Sequence[str]) -> tuple[str, ...]:
-        """Toolkit names as they will be stored: each one the policy file declares."""
-        known = {n.lower(): n for n in self._toolkits()}
-        out: list[str] = []
-        for raw in names:
-            name = str(raw).strip()
-            if not name:
-                continue
-            canonical = known.get(name.lower())
-            if canonical is None:
-                raise ValueError(
-                    f"there is no toolkit called {name}; the policy file declares "
-                    + (", ".join(sorted(known.values())) or "none")
-                )
-            if canonical not in out:
-                out.append(canonical)
-        return tuple(out)
-
-    def _list_templates(self) -> list[Any]:
-        return list(self._templates.list()) if self._templates is not None else []
-
-    def department_of(self, p: Profile) -> Profile:
-        """The department a line belongs to: itself when it is one (or Ghost), its parent
-        when it is a topic line (the line itself if the parent is gone)."""
-        if not p.department:
-            return p
-        return self.get(p.department) or p
-
-    def lines_of(self, slug: str, *, include_settled: bool = False) -> list[Profile]:
-        """A department's topic lines."""
-        return [q for q in self.list(include_settled=include_settled) if q.department == slug]
-
-    def scope_of(self, ability: str, item: str) -> list[Profile]:
-        """The live threads whose scope covers ``item`` for ``ability``, and the
-        departments whose toolkits grant it (ADR 0023): where a request about it can be
-        routed. Ghost is never one of them."""
-        wanted = item.strip().lower()
+    def owners_of(self, server: str, item: str) -> list[Profile]:
+        """Where a request about ``item`` on ``server`` can be routed (ADR 0019): the
+        default agent of each department whose declaration covers it."""
         out: list[Profile] = []
-        for p in self.list():
-            if p.is_ghost:
-                continue
-            items = p.scope_for(ability)
-            if items is not None and wanted in {i.lower() for i in items}:
+        for d in self.departments.covering(server, item):
+            p = self.default_agent(d.slug)
+            if p is not None and not p.retired:
                 out.append(p)
-                continue
-            if p.is_department and p.toolkits:
-                for name in p.toolkits:
-                    granted = self._toolkit_items(name, ability)
-                    if granted is not None and wanted in {i.lower() for i in granted}:
-                        out.append(p)
-                        break
         return out
 
     # --- what a session loads -------------------------------------------------
@@ -342,35 +369,41 @@ class Conversations:
     def resume(self, slug: str) -> ResumeContext:
         p = self.get(slug)
         if p is None:
-            raise ValueError(f"no conversation {slug!r}")
+            raise ValueError(f"no agent {slug!r}")
         return ResumeContext(
             profile=p,
             persona=self.files.persona(slug),
             memory=self.files.memory(slug),
             notes=self.files.note_lines(slug),
-            recent=self._store.recent_turns(slug, limit=self._recent_limit, uncompacted=True),
+            recent=self._store.recent_turns(p.id, limit=self._recent_limit, uncompacted=True),
         )
 
     # --- transcript ------------------------------------------------------------
+
+    def _id(self, slug: str) -> str:
+        p = self._store.get_conversation(slug, include_deleted=True)
+        if p is None:
+            raise ValueError(f"no agent {slug!r}")
+        return p.id
 
     def record(self, slug: str, session_id: str, role: str, text: str) -> int | None:
         text = text.strip()
         if not text:
             return None
-        return self._store.add_turn(slug, session_id, role, text)
+        return self._store.add_turn(self._id(slug), session_id, role, text)
 
     def carry(self, session_id: str, src: str, dst: str) -> int:
         """Move the turns of one session from ``src`` to ``dst`` (save this as ...)."""
-        return self._store.move_session_turns(session_id, src, dst)
+        return self._store.move_session_turns(session_id, self._id(src), self._id(dst))
 
     def turns(self, slug: str, *, limit: int = 200) -> list[TurnRecord]:
-        return self._store.recent_turns(slug, limit=limit, uncompacted=False)
+        return self._store.recent_turns(self._id(slug), limit=limit, uncompacted=False)
 
     def compactions(self, slug: str) -> list[Compaction]:
-        return self._store.compactions(slug)
+        return self._store.compactions(self._id(slug))
 
     def last_turn_id(self, slug: str) -> int | None:
-        return self._store.last_turn_id(slug)
+        return self._store.last_turn_id(self._id(slug))
 
     def prune(self) -> int:
         """Drop summarized turns older than the retention window."""
@@ -379,52 +412,40 @@ class Conversations:
     # --- operations for the gate --------------------------------------------------
 
     def read_tools(self) -> list[ReadTool]:
-        async def list_conversations(_args: dict[str, Any]) -> dict[str, Any]:
+        async def list_agents(_args: dict[str, Any]) -> dict[str, Any]:
             return {
-                "conversations": [
+                "departments": [
                     {
-                        "name": p.name,
-                        "slug": p.slug,
-                        "aliases": list(p.aliases),
-                        "voice": p.voice,
-                        "scope": {a: list(items) for a, items in p.scope.items()} or "everything",
-                        "department": p.department or ("itself" if p.is_department else None),
-                        "toolkits": list(p.toolkits) or ("everything" if p.is_department else None),
-                        "last_active": p.last_active_at.isoformat() if p.last_active_at else None,
+                        "name": d.title,
+                        "slug": d.slug,
+                        "about": d.rules_lead(),
+                        "agents": [
+                            {
+                                "name": p.name,
+                                "slug": p.slug,
+                                "aliases": list(p.aliases),
+                                "job": p.job or None,
+                                "last_active": p.last_active_at.isoformat()
+                                if p.last_active_at
+                                else None,
+                            }
+                            for p in self.agents_of(d.slug)
+                        ],
                     }
-                    for p in self.list()
-                ]
-            }
-
-        async def list_templates(_args: dict[str, Any]) -> dict[str, Any]:
-            found = self._list_templates()
-            return {
-                "templates": [
-                    {"name": t.name, "title": t.title, "description": t.description} for t in found
+                    for d in self.departments.list()
                 ]
             }
 
         return [
             ReadTool(
-                name="list_conversations",
+                name="list_agents",
                 description=(
-                    "The saved conversations (threads, lines) the operator can be patched "
-                    "through to, with their names, aliases and what each one covers. Settled "
-                    "threads are not listed."
+                    "The departments and the agents in each, with names, aliases and jobs: "
+                    "who the operator can be transferred to. Retired agents are not listed."
                 ),
                 properties={},
                 required=[],
-                handler=list_conversations,
-            ),
-            ReadTool(
-                name="list_templates",
-                description=(
-                    "The department templates Ghost can start a department from (ADR 0023): "
-                    "name and what each is for. Use conversations.create with template=name."
-                ),
-                properties={},
-                required=[],
-                handler=list_templates,
+                handler=list_agents,
             ),
         ]
 
@@ -439,47 +460,20 @@ class Conversations:
             return prop
 
         async def create(args: dict[str, Any]) -> Prepared:
-            template = None
-            tname = str(args.get("template") or "").strip().lower()
-            if tname:
-                template = self._templates.get(tname) if self._templates is not None else None
-                if template is None:
-                    raise ValueError(f"there is no template called {tname}")
-                args = {
-                    "name": template.title,
-                    "aliases": list(template.aliases),
-                    "voice": template.voice,
-                    "persona": template.persona,
-                    "toolkits": list(template.toolkits),
-                    **{k: v for k, v in args.items() if v not in (None, "", [])},
-                }
             name = _name(args.get("name"))
             slug = slugify(name)
             if self._store.get_conversation(slug, include_deleted=True) is not None:
-                raise ValueError(f"there is already a conversation called {name!r}")
-            voice = _voice(args.get("voice"), voices) or self.unused_voice()
+                raise ValueError(f"there is already an agent called {name!r}")
+            if self.departments.get(slug) is not None:
+                raise ValueError(f"{name!r} is a department's name; pick another")
+            department = self._department_arg(args.get("department"), args.get("_active"))
+            voice = _voice(args.get("voice"), voices)
             persona = str(args.get("persona") or "").strip()
             if len(persona) > MAX_PERSONA:
                 raise ValueError("that persona is too long")
-            scope = self.validate_scope(slug, _scope_arg(args.get("scope")))
-            department = ""
-            dep_raw = str(args.get("department") or "").strip()
-            if dep_raw:
-                parent = self.get(dep_raw) or self.resolve(dep_raw)
-                if parent is None or parent.is_ghost or parent.department:
-                    raise ValueError(f"{dep_raw} is not a department")
-                department = parent.slug
-            try:
-                toolkits = self.validate_toolkits(_names_arg(args.get("toolkits")))
-            except ValueError as e:
-                if template is not None:
-                    raise ValueError(
-                        f"{e}; import the {template.title} template in the desktop app "
-                        "first, which adds its toolkits to the policy file"
-                    ) from None
-                raise
-            if department and toolkits:
-                raise ValueError("a line in a department reaches what the department reaches")
+            job = " ".join(str(args.get("job") or "").split())
+            if len(job) > MAX_JOB:
+                raise ValueError("keep the job to a line")
             memory = ""
             seed = str(args.get("seed_from") or "").strip()
             if seed:
@@ -491,85 +485,55 @@ class Conversations:
                         Create(
                             name=name,
                             aliases=_aliases(args.get("aliases")),
+                            department=department.slug,
+                            job=job,
                             voice=voice,
-                            speed=_speed(args.get("speed"), self.default_speed),
+                            speed=_speed(args.get("speed"), None),
                             persona=persona,
-                            scope=scope,
                             memory=memory,
-                            toolkits=toolkits,
-                            department=department or None,
                         ),
                     )
                 ),
-                rationale=f"start a conversation called {name}",
+                rationale=f"hire {name} in {department.title}",
             )
 
-        async def set_scope(args: dict[str, Any]) -> Prepared:
+        async def retire(args: dict[str, Any]) -> Prepared:
             p = self._target(args)
-            if p.is_ghost:
-                raise ValueError("Ghost is unscoped and cannot be given a scope")
-            ability = str(args.get("ability") or "").strip()
-            if not ability:
-                raise ValueError("which ability's scope? (for example github_issues)")
-            items = args.get("items")
-            if isinstance(items, str):
-                items = [s for s in re.split(r"[,;]", items)]
-            if items is None:
-                items = []
-            if not isinstance(items, list):
-                raise ValueError("items must be a list")
-            merged = {a: list(v) for a, v in p.scope.items()}
-            merged[ability] = [str(i) for i in items]
-            scope = self.validate_scope(p.slug, merged)
+            if p.is_default:
+                raise ValueError(f"{p.name} is its department's own agent and stays")
+            if p.retired:
+                raise ValueError(f"{p.name} is already retired")
             return Prepared(
-                target=ConversationTarget(slug=p.slug),
-                changes=ChangeSet(steps=(SetScope(scope=scope),)),
-                rationale=f"{p.name} now covers {describe_scope(scope)}",
+                target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Retire(),))
             )
 
-        async def set_toolkits(args: dict[str, Any]) -> Prepared:
-            p = self._target(args)
-            if p.is_ghost:
-                raise ValueError("Ghost reaches everything; it takes no toolkits")
-            if p.department:
-                raise ValueError(f"{p.name} is a line in a department; set the department's")
-            toolkits = self.validate_toolkits(_names_arg(args.get("toolkits")))
+        async def rehire(args: dict[str, Any]) -> Prepared:
+            p = self._target(args, include_retired=True)
+            if not p.retired:
+                raise ValueError(f"{p.name} is not retired")
             return Prepared(
-                target=ConversationTarget(slug=p.slug),
-                changes=ChangeSet(steps=(SetToolkits(toolkits=toolkits),)),
-                rationale=f"{p.name} now has " + (", ".join(toolkits) or "no toolkits"),
-            )
-
-        async def settle(args: dict[str, Any]) -> Prepared:
-            p = self._target(args)
-            if p.is_ghost:
-                raise ValueError("Ghost cannot be settled")
-            if p.settled:
-                raise ValueError(f"{p.name} is already settled")
-            return Prepared(
-                target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Settle(),))
-            )
-
-        async def unsettle(args: dict[str, Any]) -> Prepared:
-            p = self._target(args, include_settled=True)
-            if not p.settled:
-                raise ValueError(f"{p.name} is not settled")
-            return Prepared(
-                target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Unsettle(),))
+                target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Rehire(),))
             )
 
         async def rename(args: dict[str, Any]) -> Prepared:
             p = self._target(args)
             name = _name(args.get("name", p.name))
             aliases = _aliases(args.get("aliases")) if "aliases" in args else p.aliases
+            job = (
+                " ".join(str(args["job"]).split())
+                if "job" in args and args["job"] is not None
+                else None
+            )
+            if job is not None and len(job) > MAX_JOB:
+                raise ValueError("keep the job to a line")
             return Prepared(
                 target=ConversationTarget(slug=p.slug),
-                changes=ChangeSet(steps=(Rename(name=name, aliases=aliases),)),
+                changes=ChangeSet(steps=(Rename(name=name, aliases=aliases, job=job),)),
             )
 
         async def set_voice(args: dict[str, Any]) -> Prepared:
             p = self._target(args)
-            voice = _voice(args.get("voice"), voices) or p.voice
+            voice = _voice(args.get("voice"), voices) if "voice" in args else p.voice
             return Prepared(
                 target=ConversationTarget(slug=p.slug),
                 changes=ChangeSet(
@@ -635,75 +599,78 @@ class Conversations:
             )
 
         async def delete(args: dict[str, Any]) -> Prepared:
-            p = self._target(args)
-            if p.is_ghost:
-                raise ValueError("Ghost cannot be deleted; reset it instead")
+            p = self._target(args, include_retired=True)
+            if p.is_default:
+                raise ValueError(f"{p.name} is its department's own agent; it cannot be deleted")
             return Prepared(
                 target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Delete(),))
             )
 
+        async def move(args: dict[str, Any]) -> Prepared:
+            p = self._target(args)
+            if p.is_default:
+                raise ValueError(
+                    f"{p.name} is its department's own agent and cannot move; hire an agent "
+                    "there instead"
+                )
+            text = str(args.get("department") or "").strip()
+            if not text:
+                raise ValueError("which department?")
+            d = self.departments.get(text) or self.departments.resolve(text)
+            if d is None:
+                raise ValueError(
+                    f"there is no department called {text!r}; the departments are "
+                    + ", ".join(x.title for x in self.departments.list())
+                )
+            if d.slug == p.department:
+                raise ValueError(f"{p.name} is already in {d.title}")
+            return Prepared(
+                target=ConversationTarget(slug=p.slug),
+                changes=ChangeSet(steps=(Move(department=d.slug),)),
+                rationale=f"move {p.name} to {d.title}",
+            )
+
         conv = {
             "type": "string",
-            "description": "Which conversation, by name. Omit for the one you are in.",
-        }
-        scope_prop = {
-            "type": "object",
-            "description": (
-                "What the thread covers, per ability: {ability: [item, ...]}, for example "
-                '{"github_issues": ["acme/app"]}. Bind what the conversation was about; '
-                "omit for a thread that covers everything."
-                + (
-                    f" Scopable abilities: {', '.join(sorted(self._scopes))}."
-                    if self._scopes
-                    else ""
-                )
-            ),
-            "additionalProperties": {"type": "array", "items": {"type": "string"}},
+            "description": "Which agent, by name. Omit for the one you are in.",
         }
         return [
             Operation(
                 "create",
                 (
-                    "Start a new saved conversation (a thread, a line the operator can be "
-                    "patched to later). Use it at once, without asking, when the operator says "
-                    "'save this as X', 'make this a thread for X' or 'start a conversation "
-                    "called X'; it switches them to it. When the recent conversation was about "
-                    "particular repositories or items, put them in scope. Always write a "
-                    "persona. Leave voice out and one that no other thread uses is picked."
+                    "Hire a new agent: a conversation with its own persona and job, in a "
+                    "department. Use it at once, without asking, when the operator says 'save "
+                    "this as X', 'start an agent for X' or 'hire someone for X'; it switches "
+                    "them to it. Always write a persona and a one-line job. Leave voice out to "
+                    "inherit the department's."
                 ),
                 {
                     "name": {"type": "string"},
                     "aliases": {"type": "array", "items": {"type": "string"}},
+                    "department": {
+                        "type": "string",
+                        "description": "the department it works in; omit for the current one",
+                    },
+                    "job": {
+                        "type": "string",
+                        "description": "what it is for, in one line (brand design, the Q3 audit)",
+                    },
                     "voice": voice_prop(),
                     "speed": {"type": "number"},
                     "persona": {
                         "type": "string",
                         "description": (
-                            "Who this thread is, in two or three sentences, written for this "
-                            "thread from what the conversation has been about: its subject, how "
-                            "the operator talks about it, and a manner that fits (brisk for ops, "
-                            "careful for money, warm for people). Make it distinct from the other "
-                            "threads; never a generic assistant. The operator edits it later."
+                            "Who this agent is, in two or three sentences, written from what "
+                            "the conversation has been about: its subject, how the operator "
+                            "talks about it, and a manner that fits (brisk for ops, careful for "
+                            "money, warm for people). Distinct from the other agents; never a "
+                            "generic assistant. The operator edits it later."
                         ),
-                    },
-                    "scope": scope_prop,
-                    "department": {
-                        "type": "string",
-                        "description": "start it as a topic line inside this department",
-                    },
-                    "template": {
-                        "type": "string",
-                        "description": "a department template to start from (list_templates)",
-                    },
-                    "toolkits": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "the toolkits a new department gets (none: everything)",
                     },
                     "seed_from": {
                         "type": "string",
                         "description": (
-                            "Slug of a settled thread whose memory becomes this one's first "
+                            "Slug of a retired agent whose memory becomes this one's first "
                             "memory, as a handoff."
                         ),
                     },
@@ -713,73 +680,41 @@ class Conversations:
                 writer=w,
                 risk="low",
                 allowed=w.allowed,
+                asked_by=("hire", "start", "save"),
             ),
             Operation(
-                "set_scope",
+                "retire",
                 (
-                    "Set what a thread covers for one ability: the items it may read and "
-                    "change. An empty list makes it cover everything for that ability. "
-                    "Ghost itself always covers everything."
-                ),
-                {
-                    "conversation": conv,
-                    "ability": {"type": "string", "description": "github_issues, ..."},
-                    "items": {"type": "array", "items": {"type": "string"}},
-                },
-                ["ability", "items"],
-                prepare=set_scope,
-                writer=w,
-                risk="low",
-                allowed=w.allowed,
-            ),
-            Operation(
-                "set_toolkits",
-                (
-                    "Give a department its toolkits: the bundles of servers and skills its "
-                    "lines reach (the policy file declares them). An empty list means it "
-                    "reaches everything, like Ghost."
-                ),
-                {
-                    "conversation": conv,
-                    "toolkits": {"type": "array", "items": {"type": "string"}},
-                },
-                ["toolkits"],
-                prepare=set_toolkits,
-                writer=w,
-                risk="medium",
-                allowed=w.allowed,
-            ),
-            Operation(
-                "settle",
-                (
-                    "Mark a thread done: it leaves voice routing and the active list but "
-                    "keeps its transcript and memory, and can be brought back. Nothing is "
-                    "deleted."
+                    "Retire an agent: it leaves the roster and voice routing but keeps its "
+                    "transcript and memory, and can be rehired. Nothing is deleted."
                 ),
                 {"conversation": conv},
                 [],
-                prepare=settle,
+                prepare=retire,
                 writer=w,
                 risk="low",
                 allowed=w.allowed,
+                asked_by=("retire", "fire", "let go"),
             ),
             Operation(
-                "unsettle",
-                "Bring a settled thread back into use.",
+                "rehire",
+                "Bring a retired agent back onto the roster.",
                 {"conversation": conv},
                 [],
-                prepare=unsettle,
+                prepare=rehire,
                 writer=w,
                 risk="low",
                 allowed=w.allowed,
+                asked_by=("rehire", "bring back"),
             ),
             Operation(
                 "rename",
-                "Rename a conversation or change what it answers to.",
+                "Rename an agent, change what it answers to, or restate its job.",
                 {
                     "conversation": conv,
                     "name": {"type": "string"},
                     "aliases": {"type": "array", "items": {"type": "string"}},
+                    "job": {"type": "string"},
                 },
                 [],
                 prepare=rename,
@@ -789,7 +724,7 @@ class Conversations:
             ),
             Operation(
                 "set_voice",
-                "Change the voice or speaking speed of a conversation.",
+                "Change an agent's voice or speaking speed; no voice means the department's.",
                 {
                     "conversation": conv,
                     "voice": voice_prop(),
@@ -803,10 +738,7 @@ class Conversations:
             ),
             Operation(
                 "set_persona",
-                (
-                    "Set who this conversation is, in the operator's own words, verbatim. "
-                    "Never paraphrase."
-                ),
+                ("Set who this agent is, in the operator's own words, verbatim. Never paraphrase."),
                 {"conversation": conv, "text": {"type": "string"}},
                 ["text"],
                 prepare=set_persona,
@@ -840,7 +772,7 @@ class Conversations:
             Operation(
                 "compact",
                 (
-                    "Replace this conversation's rolling memory with a fresh summary you write: "
+                    "Replace this agent's rolling memory with a fresh summary you write: "
                     "facts, decisions, open items. Only when the operator asks."
                 ),
                 {"conversation": conv, "summary": {"type": "string"}},
@@ -853,8 +785,8 @@ class Conversations:
             Operation(
                 "reset",
                 (
-                    "Forget everything in a conversation: its memory, notes and transcript. "
-                    "Keeps the name and voice."
+                    "Forget everything an agent knows: its memory, notes and transcript. "
+                    "Keeps the name, job and voice."
                 ),
                 {"conversation": conv},
                 [],
@@ -865,7 +797,7 @@ class Conversations:
             ),
             Operation(
                 "delete",
-                "Remove a saved conversation entirely. Ghost itself cannot be deleted.",
+                "Remove an agent entirely, its folder included. Retire is the usual way.",
                 {"conversation": conv},
                 [],
                 prepare=delete,
@@ -873,51 +805,68 @@ class Conversations:
                 risk="high",
                 allowed=w.allowed,
             ),
+            Operation(
+                "move",
+                (
+                    "Move an agent to another department (ADR 0024): it keeps its name, "
+                    "persona, memory and transcript and works with that department's tools, "
+                    "rules and memory from then on. The one you are with, by default. A "
+                    "department's own agent cannot move."
+                ),
+                {
+                    "conversation": conv,
+                    "department": {"type": "string", "description": "the destination"},
+                },
+                ["department"],
+                prepare=move,
+                writer=w,
+                risk="medium",
+                allowed=w.allowed,
+                asked_by=("move", "transfer", "send"),
+            ),
         ]
 
     def handoff_memory(self, seed: str) -> str:
-        """The memory a new thread starts with when seeded from ``seed`` (a slug or a
-        name): that thread's current ``memory.md``. Ghost's memory stays private to
+        """The memory a new agent starts with when seeded from ``seed`` (a slug or a
+        name): that agent's current ``memory.md``. Ghost's memory stays private to
         Ghost (ADR 0014), so it can never be the seed."""
-        p = self.get(seed) or self.resolve(seed, include_settled=True)
+        p = self.get(seed) or self.resolve(seed, include_retired=True)
         if p is None:
-            raise ValueError(f"no thread {seed!r} to seed from")
+            raise ValueError(f"no agent {seed!r} to seed from")
         if p.is_ghost:
             raise ValueError(
                 "Ghost's memory is private; a handoff from Ghost is a summary you write"
             )
         return self.files.memory(p.slug)
 
-    def _target(self, args: dict[str, Any], *, include_settled: bool = False) -> Profile:
-        """The conversation an operation is about: ``conversation`` by name, else the
-        active one the caller put in ``_active``."""
+    def _department_arg(self, spoken: object, active: object) -> Department:
+        """The department an operation names, else the active agent's."""
+        text = str(spoken or "").strip()
+        if text:
+            d = self.departments.get(text) or self.departments.resolve(text)
+            if d is None:
+                raise ValueError(
+                    f"there is no department called {text!r}; the departments are "
+                    + ", ".join(x.title for x in self.departments.list())
+                )
+            return d
+        p = self.get(str(active or GHOST))
+        return self.department_of(p) if p is not None else self.departments.ghost
+
+    def _target(self, args: dict[str, Any], *, include_retired: bool = False) -> Profile:
+        """The agent an operation is about: ``conversation`` by name, else the active
+        one the caller put in ``_active``."""
         spoken = args.get("conversation")
         if spoken:
-            p = self.resolve(str(spoken), include_settled=include_settled)
+            p = self.resolve(str(spoken), include_retired=include_retired)
             if p is None:
-                raise ValueError(f"no conversation called {spoken!r}")
+                raise ValueError(f"no agent called {spoken!r}")
             return p
         slug = str(args.get("_active") or GHOST)
         p = self.get(slug)
         if p is None:
-            raise ValueError(f"no conversation {slug!r}")
+            raise ValueError(f"no agent {slug!r}")
         return p
-
-
-def _scope_arg(value: object) -> dict[str, list[str]]:
-    """The model's ``scope`` argument: a map of ability -> items, or nothing."""
-    if value is None or value == "" or value == {}:
-        return {}
-    if not isinstance(value, Mapping):
-        raise ValueError("scope must be a map of ability to items")
-    out: dict[str, list[str]] = {}
-    for ability, items in value.items():
-        if isinstance(items, str):
-            items = [s for s in re.split(r"[,;]", items)]
-        if not isinstance(items, list):
-            raise ValueError(f"scope for {ability} must be a list")
-        out[str(ability)] = [str(i) for i in items]
-    return out
 
 
 def _words(text: str) -> set[str]:
@@ -959,7 +908,7 @@ def _voice(value: object, voices: Sequence[str]) -> str | None:
     return v
 
 
-def _speed(value: object, default: float) -> float:
+def _speed(value: object, default: float | None) -> float | None:
     if value is None or value == "":
         return default
     try:
@@ -972,7 +921,7 @@ def _speed(value: object, default: float) -> float:
 
 
 def conversations_source(convs: Conversations) -> ToolSource:
-    """The lines' own read tools and operations as a tool source, so the gate, the policy
+    """The agents' own read tools and operations as a tool source, so the gate, the policy
     file and the audit treat them like any server's (ADR 0014)."""
     return ToolSource(
         name=SOURCE,
@@ -982,7 +931,7 @@ def conversations_source(convs: Conversations) -> ToolSource:
     )
 
 
-def _names_arg(value: Any) -> list[str]:
+def names_arg(value: Any) -> list[str]:
     """A list argument the model may pass as a list or a comma-separated string."""
     if value is None:
         return []

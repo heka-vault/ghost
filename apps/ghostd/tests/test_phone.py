@@ -48,7 +48,7 @@ class FakeHost:
     def audit(self, limit: int, offset: int) -> AuditPage:
         return AuditPage(items=[], total=0, limit=limit, offset=offset)
 
-    def lines(self):
+    def agents(self):
         return []
 
     def admit_phone(self):
@@ -274,8 +274,8 @@ async def test_offer_refused_while_busy_or_not_ready(phone):
     assert host.started == []
 
 
-async def test_lines_are_served_and_a_call_can_start_in_one(phone):
-    """ADR 0014 on the phone: the listener lists the threads and an offer may name one."""
+async def test_agents_are_served_and_a_call_can_start_with_one(phone):
+    """ADR 0014 on the phone: the listener lists the agents and an offer may name one."""
     listener, host, client, _ = phone
     creds = await pair(listener, client)
     r, nonce = await signed(client, creds, "GET", "/conversations")

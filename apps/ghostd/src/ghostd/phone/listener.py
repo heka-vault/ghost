@@ -59,7 +59,7 @@ class PhoneHost(Protocol):
 
     def status(self) -> Status: ...
     def audit(self, limit: int, offset: int) -> AuditPage: ...
-    def lines(self) -> list[ConversationView]: ...  # the threads a call can start in
+    def agents(self) -> list[ConversationView]: ...  # the agents a call can start with
     def admit_phone(self) -> Refusal | None: ...  # a cheap check before negotiating
     async def start_phone(
         self, connection: Any, conversation: str | None = None
@@ -108,7 +108,7 @@ class OfferRequest(BaseModel):
     type: Literal["offer"]
     pc_id: str | None = None
     restart_pc: bool | None = None
-    # The thread to start in (a slug from /conversations); Ghost when absent.
+    # The agent to start with (a slug from /conversations); Ghost when absent.
     conversation: str | None = Field(default=None, max_length=80)
 
 
@@ -373,7 +373,7 @@ class PhoneListener:
         @app.get("/conversations")
         async def conversations() -> JSONResponse:
             # Every thread a call may start in: Ghost first, settled ones left out.
-            return _json(200, [c.model_dump(mode="json") for c in self.host.lines()])
+            return _json(200, [c.model_dump(mode="json") for c in self.host.agents()])
 
         @app.get("/audit")
         async def audit(

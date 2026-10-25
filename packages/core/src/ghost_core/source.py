@@ -127,11 +127,11 @@ EventListener = Callable[[Event], Awaitable[None]]
 @dataclass
 class ToolSource:
     """One source of tools, as the pipeline and the gate take it. ``name`` is the key the
-    policy file, the gate registry and the audit use (``[mcp.github.levels]``,
-    ``github.close``). ``scope_kind`` and ``scope_items`` say what a thread can be scoped
-    to for this source (ADR 0019); a scoped source gets an ``ActiveScope`` as the
-    ``_scope`` argument of every read tool and ``prepare`` call, and may give
-    ``scoped_prompt`` to narrow its paragraph to the active thread."""
+    policy, the gate registry and the audit use (``github.close``; a department's own
+    server is ``marketing/figma``, ADR 0024). ``scope_kind`` and ``scope_items`` say what
+    the source's allowlist is (ADR 0019); a scoped source gets an ``ActiveScope`` as the
+    ``_scope`` argument of every read tool and ``prepare`` call, which names the
+    departments that cover an item outside it, and may give ``scoped_prompt``."""
 
     name: str
     prompt: str = ""
@@ -143,4 +143,3 @@ class ToolSource:
     scope_kind: str | None = None
     scope_items: Callable[[], list[str]] | None = None
     scoped_prompt: Callable[[Any], str] | None = None  # ActiveScope | None -> paragraph
-    toolkit: str | None = None  # the toolkit that granted this view of the source (ADR 0023)

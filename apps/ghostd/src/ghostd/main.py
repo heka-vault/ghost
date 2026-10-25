@@ -7,7 +7,6 @@ import json
 import signal
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -42,11 +41,10 @@ from ghost_core import (
 )
 from ghost_core.conversations import GHOST, Conversations, Profile, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
+from ghost_core.departments import Departments, Fleet, all_sources
 from ghost_core.jev import JevClassifier, JevClient
-from ghost_core.mcp import Servers, source_of
+from ghost_core.mcp import Servers
 from ghost_core.skills import Skills
-from ghost_core.templates import Templates
-from ghost_core.toolkits import Grant, merge
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
@@ -131,7 +129,8 @@ class Daemon:
         self._chimed = False  # the detector's early chime played; the session won't repeat it
         self.conversations: Conversations | None = None
         self.skills: Skills | None = None
-        self.templates: Templates | None = None
+        self.departments: Departments | None = None
+        self.fleet: Fleet | None = None
         self._reach: Callable[[Profile], list[ToolSource]] | None = None
         self._models: Models | None = None
         self._deps: Deps | None = None
@@ -154,7 +153,7 @@ class Daemon:
             return False
         if conversation is not None and conversation != GHOST:
             target = self.conversations.get(conversation) if self.conversations else None
-            if target is None or target.settled:
+            if target is None or target.retired:
                 return False
         self._start_in = conversation or GHOST
         self._manual.trigger(first_utterance)
@@ -206,9 +205,17 @@ class Daemon:
         return True
 
     def reload_policy(self) -> AutonomyPolicy:
+        """The file, and every department's levels over it (ADR 0024), re-read together:
+        a department.json edited by hand applies at the next write."""
         policy = AutonomyPolicy.load(self.cfg.policy_path)
+        if self.departments is not None:
+            self.departments.refresh()
         if self.gate is not None:
             self.gate.set_autonomy(policy)
+            if self.departments is not None:
+                self.gate.set_department_policies(
+                    {d.slug: d.policy(policy) for d in self.departments.list()}
+                )
         logger.info(f"policy reloaded from {policy.source}")
         return policy
 
@@ -217,10 +224,7 @@ class Daemon:
         and the near-miss threshold are picked up by rebuilding the passive listener; the
         crossing-streams toggles (ADR 0019) by the next session, which reads them."""
         applied: list[str] = []
-        for key, attr in (
-            ("GHOST_CROSS_DEPARTMENT_ANSWERS", "cross_department_answers"),
-            ("GHOST_DEPARTMENT_ROUTING", "department_routing"),
-        ):
+        for key, attr in (("GHOST_DEPARTMENT_ROUTING", "department_routing"),):
             if key in values:
                 on = str(values[key] or "").strip().lower() in ("1", "true", "yes", "on")
                 setattr(self.voice, attr, on)
@@ -344,18 +348,18 @@ class Daemon:
             return "busy"
         return None
 
-    def lines(self) -> list[ConversationView]:
-        """The threads a phone call can start in: Ghost first, settled ones left out."""
+    def agents(self) -> list[ConversationView]:
+        """The agents a phone call can start with: Ghost first, retired ones left out."""
         if self.conversations is None:
             return []
-        profiles = self.conversations.list(include_settled=False)
-        return [conversation_view(p, self.state.conversation) for p in profiles]
+        profiles = self.conversations.list(include_retired=False)
+        return [conversation_view(self.conversations, p, self.state.conversation) for p in profiles]
 
     async def start_phone(self, connection: Any, conversation: str | None = None) -> Refusal | None:
         line = conversation or GHOST
         if line != GHOST:
             profile = self.conversations.get(line) if self.conversations else None
-            if profile is None or profile.settled:
+            if profile is None or profile.retired:
                 return "no_such_line"
         refusal = self.admit_phone()
         if refusal is None:
@@ -453,13 +457,20 @@ class Daemon:
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         store = Store(self.cfg.db_path)
         autonomy = AutonomyPolicy.load(self.cfg.policy_path)
-        mcp = Servers(autonomy.mcp)  # ADR 0022: the servers the policy file declares
-        await mcp.connect()
+        # ADR 0024: the departments are folders; Ghost's servers connect now, a department's
+        # when a session enters it.
+        departments = Departments(self.cfg.config_dir)
+        departments.ensure_layout()
+        self.departments = departments
+        for problem in departments.problems():
+            logger.warning(f"departments: {problem}")
+        fleet = Fleet(departments, idle_secs=self.cfg.department_idle_secs)
+        self.fleet = fleet
+        await fleet.connect()
+        mcp = fleet.ghost
         skills = Skills(self.cfg.skills_dir, self.cfg.home_skills_dir)  # ADR 0024
         self.skills = skills
-        templates = Templates(self.cfg.infra_dir / "templates", self.cfg.templates_dir)
-        self.templates = templates
-        # What a session's model may call: every server's offered reads and declared
+        # What Ghost's own sessions may call: its servers' offered reads and declared
         # writes, and the skills (the index, read_skill, add and remove).
         tool_sources: list[ToolSource] = [*mcp.sources(), skills.source()]
         jev = build_jev(self.cfg)
@@ -480,57 +491,47 @@ class Daemon:
             classifier=classifier,
             on_decision=debug.audio,
         )
+        gate.set_department_policies({d.slug: d.policy(autonomy) for d in departments.list()})
         for a in tool_sources:  # declared writes go through the gate
             gate.register(a.name, a.operations)
         self.gate = gate
         conversations = Conversations(
             store,
-            self.cfg.conversations_dir,
+            departments,
             default_voice=self.voice.tts_voice,
             default_speed=self.voice.tts_speed,
             retention=timedelta(days=self.cfg.turn_retention_days),
-            # What a thread can be scoped to (ADR 0019): each scoped server's allowlist.
-            scopes={a.name: a.scope_items for a in tool_sources if a.scope_kind and a.scope_items},
-            # What a department can be given (ADR 0023): the policy file's toolkits, live,
-            # and what each one grants on a server, so a request routes to the department.
-            toolkits=lambda: list(gate.autonomy.toolkits),
-            toolkit_items=lambda name, server: _granted_items(gate.autonomy, name, server),
-            templates=templates,
         )
         gate.register(CONVERSATIONS, conversations_source(conversations).operations)
         self.conversations = conversations
 
-        def reach(department: Profile) -> list[ToolSource]:
-            """What a session in this department reaches (ADR 0023): everything for
-            Ghost and for a department with no toolkits; else the toolkits' grants on
-            the connected servers plus their skills. The lines' own tools always."""
-            lines = conversations_source(conversations)
-            if department.department:  # a topic line whose department is gone: nothing
-                return [_without(lines, WIDENING)]
-            if department.is_ghost or not department.toolkits:
-                return [*tool_sources, lines]
-            policy = gate.autonomy
-            grants: dict[str, list[Grant]] = {}
-            names: list[str] = []
-            skill_names: set[str] = set()
-            for name in department.toolkits:
-                t = policy.toolkits.get(name)
-                if t is None:
-                    logger.warning(f"department {department.slug}: no toolkit {name}; skipped")
-                    continue
-                names.append(name)
-                for server, g in t.grants.items():
-                    grants.setdefault(server, []).append(g)
-                skill_names |= set(t.skills)
-            out: list[ToolSource] = []
-            for server, gs in grants.items():
-                live = mcp.servers.get(server)
-                if live is not None:
-                    out.append(source_of(live, merge(gs), "+".join(names)))
-            out.append(skills.source(sorted(skill_names)))
-            # A narrowed department cannot widen itself: no new lines, no toolkit changes,
-            # no deletes from inside it; those happen from Ghost or the desktop.
-            out.append(_without(lines, WIDENING))
+        def register_department(slug: str) -> None:
+            """A department's own servers came up: their declared writes join the gate."""
+            d = departments.get(slug)
+            if d is None:
+                return
+            for src in fleet.sources_for(d):
+                gate.register(src.name, src.operations)
+
+        async def enter(p: Profile) -> None:
+            """A transfer into an agent was decided (ADR 0024): its department's servers
+            start now, and the announcement covers the wait."""
+            await fleet.enter(p.department)
+            register_department(p.department)
+
+        def leave(p: Profile) -> None:
+            fleet.leave(p.department)
+
+        self._enter, self._leave = enter, leave
+
+        def reach(p: Profile) -> list[ToolSource]:
+            """What a session with this agent reaches (ADR 0024): its department's own
+            servers and the ones it uses, the skills nearest first, and the agents' own
+            tools. Ghost reaches its own servers and every skill, with the skill writes."""
+            d = conversations.department_of(p)
+            out: list[ToolSource] = list(fleet.sources_for(d))
+            out.append(skills.source(d.skill_places(), writes=d.is_ghost))
+            out.append(conversations_source(conversations))
             return out
 
         self._reach = reach
@@ -539,7 +540,7 @@ class Daemon:
             logger.info(f"conversations: pruned {pruned} summarized turns past retention")
         self.state.servers = list(mcp.servers)
         events = Events()
-        api = await self._start_api(gate, store, tool_sources, mcp, skills, templates)
+        api = await self._start_api(gate, store, all_sources(fleet), mcp, skills)
         await self._start_phone()
         logger.info(f"autonomy policy: {autonomy.source}")
         logger.info(
@@ -548,7 +549,7 @@ class Daemon:
         for problem in self.voice.llm_problems():
             logger.error(f"llm: {problem}")
         logger.info(f"tts: {describe_tts(self.voice)}")
-        for line in describe_mcp(mcp, autonomy):
+        for line in describe_mcp(fleet, gate):
             logger.info(line)
         logger.info(describe_skills(skills, set(mcp.servers)))
         logger.info(
@@ -577,7 +578,7 @@ class Daemon:
                 await self.phone_listener.stop()
             if api:
                 await api.stop()
-            await mcp.close()
+            await fleet.close()
             if jev:
                 await jev.aclose()
             store.close()
@@ -669,7 +670,6 @@ class Daemon:
         sources: Sequence[ToolSource],
         mcp: Servers | None = None,
         skills: Skills | None = None,
-        templates: Templates | None = None,
     ) -> ApiServer | None:
         socket_path = self.cfg.api_socket or default_socket_path()
         deps = Deps(
@@ -680,7 +680,8 @@ class Daemon:
             sources=sources,
             mcp=mcp,
             skills=skills,
-            templates=templates,
+            departments=self.departments,
+            fleet=self.fleet,
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,
@@ -764,7 +765,8 @@ class Daemon:
                 self._refresh_pending()
 
         async def on_conversation(slug: str) -> None:
-            self.state.set_conversation(slug)
+            p = self.conversations.get(slug) if self.conversations else None
+            self.state.set_conversation(slug, department=p.department if p else None)
             self._refresh_pending()
 
         async def on_hang_up() -> None:
@@ -784,6 +786,8 @@ class Daemon:
             on_phase=on_phase,
             conversations=self.conversations,
             reach=self._reach,
+            on_enter=getattr(self, "_enter", None),
+            on_leave=getattr(self, "_leave", None),
             start_in=start_in,
             on_conversation=on_conversation,
             transport_factory=transport_factory,
@@ -796,7 +800,12 @@ class Daemon:
         self.session = session
         self._origin = origin
         self.state.set_phase(Phase.LISTENING, session.session_id, origin=origin)
-        self.state.set_conversation(start_in)
+        start_profile = self.conversations.get(start_in) if self.conversations else None
+        if start_profile is not None and not start_profile.is_ghost and self.fleet is not None:
+            await self.fleet.enter(start_profile.department)  # a call straight into an agent
+        self.state.set_conversation(
+            start_in, department=start_profile.department if start_profile else GHOST
+        )
         if first_utterance:
             self.state.add_turn("user", first_utterance, via=self._first_via)
         self._first_via = "voice"
@@ -846,6 +855,8 @@ class Daemon:
             elif self.cfg.chime:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
+            if session.conversation is not None and self.fleet is not None:
+                self.fleet.leave(session.conversation.active.department)
             self.session = None
             self._origin = None
             logger.info(f"session {session.session_id} end")
@@ -981,26 +992,6 @@ async def _close_peer(conn: Any) -> None:
         logger.debug("phone: peer already closed")
 
 
-def _granted_items(policy: AutonomyPolicy, toolkit: str, server: str) -> list[str] | None:
-    """The scope items a toolkit grants on a server: its own list, else the server's whole
-    allowlist; None when the toolkit does not grant the server."""
-    t = policy.toolkits.get(toolkit)
-    g = t.grant(server) if t else None
-    if g is None:
-        return None
-    if g.items is not None:
-        return list(g.items)
-    spec = policy.mcp.get(server)
-    return list(spec.scope.items) if spec and spec.scope else []
-
-
-WIDENING = frozenset({"create", "set_toolkits", "delete"})
-
-
-def _without(source: ToolSource, ops: frozenset[str]) -> ToolSource:
-    return replace(source, operations=[o for o in source.operations if o.name not in ops])
-
-
 def describe_skills(skills: Skills, servers: set[str]) -> str:
     items = []
     for s in skills.all():
@@ -1013,8 +1004,12 @@ def describe_skills(skills: Skills, servers: set[str]) -> str:
     return f"skills: {', '.join(items) if items else 'none'} (in {skills.ghost_dir})"
 
 
-def describe_mcp(mcp: Servers, autonomy: AutonomyPolicy) -> list[str]:
+def describe_mcp(fleet: Fleet, gate: WriteGate) -> list[str]:
+    """Ghost's servers as connected, then each department's as declared (they start when
+    a session enters the department, ADR 0024)."""
     lines = []
+    mcp = fleet.ghost
+    ghost_policy = gate.policy_for(GHOST)
     for name, spec in mcp.specs.items():
         live = mcp.servers.get(name)
         if live is None:
@@ -1022,7 +1017,7 @@ def describe_mcp(mcp: Servers, autonomy: AutonomyPolicy) -> list[str]:
             continue
         offered = ", ".join(t.name for t in live.offered()) or "none"
         ops = {o.name: o for o in live.operations()}
-        levels = autonomy.describe(name, {n: o.risk for n, o in ops.items()})
+        levels = ghost_policy.describe(name, {n: o.risk for n, o in ops.items()})
         writes = ", ".join(f"{n}={lv.value}" for n, lv in levels.items())
         undeclared = [
             t.name
@@ -1037,6 +1032,21 @@ def describe_mcp(mcp: Servers, autonomy: AutonomyPolicy) -> list[str]:
                 f" [scoped by {spec.scope.kind}: {', '.join(spec.scope.items) or 'no allowlist'}]"
             )
         lines.append(line)
+    for d in fleet.departments.list():
+        if d.is_ghost:
+            continue
+        policy = gate.policy_for(d.slug)
+        for name, spec in d.servers.items():
+            levels = policy.describe(
+                d.source_name(name), {op: w.risk for op, w in spec.writes.items()}
+            )
+            writes = ", ".join(f"{n}={lv.value}" for n, lv in levels.items())
+            lines.append(
+                f"  mcp {d.slug}/{name} ({spec.transport}): starts on transfer; "
+                f"writes {writes or 'none'}"
+            )
+        for name in d.uses:
+            lines.append(f"  mcp {d.slug} uses {name} with its own declaration")
     return lines
 
 
@@ -1205,22 +1215,39 @@ def cli(argv: list[str] | None = None) -> None:
             print(f"autonomy policy: {autonomy.source}")
         except ValueError as e:
             problems.append(f"policy: {e}")
-        if autonomy.mcp:
+        departments = Departments(cfg.config_dir)
+        print(
+            "departments: "
+            + ", ".join(
+                f"{d.title} ({len(d.servers)} server(s), {len(d.uses)} used)"
+                for d in departments.list()
+            )
+        )
+        for problem in departments.problems():
+            print(f"  problem: {problem}")
+            problems.append(problem)
+        if departments.ghost.servers:
 
             async def probe() -> list[str]:
-                mcp = Servers(autonomy.mcp)
-                await mcp.connect()
+                fleet = Fleet(departments)
+                await fleet.connect()
+                gate = WriteGate(Store(), autonomy=autonomy)
+                gate.set_department_policies(
+                    {d.slug: d.policy(autonomy) for d in departments.list()}
+                )
                 try:
-                    return describe_mcp(mcp, autonomy)
+                    return describe_mcp(fleet, gate)
                 finally:
-                    await mcp.close()
+                    await fleet.close()
 
             print("mcp servers:")
             for line in asyncio.run(probe()):
                 print(line)
                 if "not connected" in line:
                     problems.append(line.strip())
-        print(describe_skills(Skills(cfg.skills_dir, cfg.home_skills_dir), set(autonomy.mcp)))
+        skills = Skills(cfg.skills_dir, cfg.home_skills_dir)
+        print(describe_skills(skills, set(departments.ghost.servers)))
+        problems += [f"skill {s.name}: {s.problem}" for s in skills.all() if s.problem]
         try:
             jev = build_jev(cfg)
             how = f"jev via {jev.provider} (regex fallback)" if jev else "regex"

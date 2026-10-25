@@ -67,19 +67,22 @@ def test_describe_lists_every_op():
     assert out == {"close": Autonomy.DENY, "comment": Autonomy.ANNOUNCE}
 
 
-def test_example_policy_parses():
+def test_example_layout_parses():
+    """infra/example is what `make env` seeds: the policy file and Ghost's folder."""
     from pathlib import Path
 
-    example = Path(__file__).parents[3] / "infra" / "policy.example.toml"
-    p = AutonomyPolicy.parse(example.read_text())
-    assert set(p.mcp) == {"github"} and set(p.mcp["github"].writes) == {
-        "comment",
-        "set_labels",
-        "close",
-        "reopen",
-    }
-    assert p.resolve("github", "set_labels") is Autonomy.ANNOUNCE
-    assert p.resolve("github", "close") is Autonomy.CONFIRM
+    from ghost_core.departments import load_department
+
+    infra = Path(__file__).parents[3] / "infra"
+    p = AutonomyPolicy.parse((infra / "policy.example.toml").read_text())
+    assert all(not ops for ops in p.skills.values()) and p.default is None
+    ghost = load_department("ghost", infra / "example", is_ghost=True)
+    assert ghost.problems == [] and set(ghost.servers) == {"github"}
+    assert set(ghost.servers["github"].writes) == {"comment", "set_labels", "close", "reopen"}
+    merged = ghost.policy(p)
+    assert merged.resolve("github", "set_labels") is Autonomy.ANNOUNCE
+    assert merged.resolve("github", "close") is Autonomy.CONFIRM
+    assert ghost.rules_lead() == "Ghost"
 
 
 def test_abilities_section_is_ignored():

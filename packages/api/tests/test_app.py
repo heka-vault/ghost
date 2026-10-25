@@ -113,7 +113,8 @@ def test_sources_listing(world):
     assert by["fake"]["scope_items"] == ["acme/app", "acme/infra"]
     assert by["conversations"]["kind"] == "built-in"
     conv_ops = {o["name"] for o in by["conversations"]["operations"]}
-    assert {"set_scope", "settle", "unsettle", "create"} <= conv_ops
+    assert {"retire", "rehire", "create", "rename"} <= conv_ops
+    assert by["fake"]["department"] is None
 
 
 def test_policy_round_trip_and_live_reload(world):

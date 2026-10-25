@@ -1,4 +1,7 @@
-"""SQLite (WAL) persistence for proposals and the audit log (ADR 0009)."""
+"""SQLite (WAL) persistence for proposals, the audit log (ADR 0009), and what Ghost
+writes about agents: the registry mirror, the transcript, every compaction (ADR 0014,
+ADR 0024). Transcripts and compactions are keyed by the agent's stable id, so an agent
+folder moved by hand keeps its history."""
 
 from __future__ import annotations
 
@@ -7,6 +10,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from loguru import logger
 
 from ghost_core.codec import dump_proposal, load_proposal
 from ghost_core.models import Proposal, ProposalStatus, utcnow
@@ -50,26 +55,28 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     PRIMARY KEY (session_id, key)
 );
 
--- Conversations (ADR 0014): the registry, the transcript, every compaction version.
+-- Agents (ADR 0014, ADR 0024): a mirror of each agent folder plus what only Ghost
+-- writes (timestamps, retired), the transcript, every compaction version. ``conversation``
+-- columns hold the agent's id.
 CREATE TABLE IF NOT EXISTS conversations (
-    slug            TEXT PRIMARY KEY,
+    id              TEXT PRIMARY KEY,
+    slug            TEXT NOT NULL UNIQUE,
+    department      TEXT NOT NULL,
     name            TEXT NOT NULL,
     aliases         TEXT NOT NULL DEFAULT '[]',
-    voice           TEXT NOT NULL,
-    speed           REAL NOT NULL DEFAULT 1.0,
+    job             TEXT NOT NULL DEFAULT '',
+    voice           TEXT,
+    speed           REAL,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     last_active_at  TEXT,
-    deleted_at      TEXT,
-    scope           TEXT NOT NULL DEFAULT '{}',  -- ADR 0019: {ability: [item, ...]}
-    settled_at      TEXT,
-    toolkits        TEXT NOT NULL DEFAULT '[]',  -- ADR 0023: a department's reach
-    department      TEXT                          -- ADR 0023: a topic line's department
+    retired_at      TEXT,
+    deleted_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS turns (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation    TEXT NOT NULL REFERENCES conversations(slug),
+    conversation    TEXT NOT NULL,
     session_id      TEXT NOT NULL,
     role            TEXT NOT NULL,
     text            TEXT NOT NULL,
@@ -81,7 +88,7 @@ CREATE INDEX IF NOT EXISTS turns_conversation ON turns(conversation, id);
 
 CREATE TABLE IF NOT EXISTS compactions (
     id              TEXT PRIMARY KEY,
-    conversation    TEXT NOT NULL REFERENCES conversations(slug),
+    conversation    TEXT NOT NULL,
     summary         TEXT NOT NULL,
     through_turn_id INTEGER,
     at              TEXT NOT NULL,
@@ -90,6 +97,9 @@ CREATE TABLE IF NOT EXISTS compactions (
 CREATE INDEX IF NOT EXISTS compactions_conversation ON compactions(conversation, at);
 """
 
+# The three tables the lines (ADR 0014 to 0023) lived in. ADR 0024 starts over: they are
+# moved aside under these names, never read again, for the operator to drop.
+_LINE_TABLES = ("conversations", "turns", "compactions")
 
 # Statuses older databases may hold. Ghost once had an undo feature that marked a
 # reversed proposal "undone"; the write did happen, and its reversal is its own row
@@ -106,28 +116,31 @@ class Store:
         self._conn = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._retire_line_tables()
         self._conn.executescript(_SCHEMA)
         self._migrate()
+
+    def _retire_line_tables(self) -> None:
+        """A database from before ADR 0024 keeps its lines in tables keyed by slug. They
+        are renamed ``retired_*`` so the new layout starts empty, as the ADR says, and
+        nothing of the operator's is deleted by code."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(conversations)")}
+        if not cols or "id" in cols:
+            return
+        stamp = utcnow().strftime("%Y%m%d")
+        for table in _LINE_TABLES:
+            self._conn.execute(f"ALTER TABLE {table} RENAME TO retired_{table}_{stamp}")
+        for index in ("turns_conversation", "compactions_conversation"):
+            self._conn.execute(f"DROP INDEX IF EXISTS {index}")
+        logger.warning(
+            "store: the lines of the earlier layout were moved aside as retired_* tables "
+            "(ADR 0024); agents start fresh"
+        )
 
     def _migrate(self) -> None:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(operations)")}
         if "readback_version" not in cols:
             self._conn.execute("ALTER TABLE operations ADD COLUMN readback_version TEXT")
-        # ADR 0019: scope and settled state. Older rows load as unscoped and open.
-        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(conversations)")}
-        if "scope" not in cols:
-            self._conn.execute(
-                "ALTER TABLE conversations ADD COLUMN scope TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "settled_at" not in cols:
-            self._conn.execute("ALTER TABLE conversations ADD COLUMN settled_at TEXT")
-        # ADR 0023: departments. Older rows load as departments with no toolkits.
-        if "toolkits" not in cols:
-            self._conn.execute(
-                "ALTER TABLE conversations ADD COLUMN toolkits TEXT NOT NULL DEFAULT '[]'"
-            )
-        if "department" not in cols:
-            self._conn.execute("ALTER TABLE conversations ADD COLUMN department TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -173,19 +186,32 @@ class Store:
         ability: str | None = None,
         status: str | None = None,
         session_id: str | None = None,
+        department: str | None = None,
+        conversation: str | None = None,
+        executed_only: bool = False,
     ) -> tuple[list[Proposal], int]:
-        """Newest first, for the audit view. Rows from an older schema are skipped."""
+        """Newest first, for the audit view and a department's journal. Rows from an
+        older schema are skipped."""
         where, args = [], []
         if status:
             raw = [status, *(k for k, v in _LEGACY_STATUS.items() if v.value == status)]
             where.append(f"status IN ({', '.join('?' * len(raw))})")
             args.extend(raw)
+        if executed_only:
+            where.append("status = ?")
+            args.append(ProposalStatus.EXECUTED.value)
         if session_id:
             where.append("session_id = ?")
             args.append(session_id)
         if ability:
             where.append("json_extract(body, '$.ability') = ?")
             args.append(ability)
+        if department:
+            where.append("json_extract(body, '$.department') = ?")
+            args.append(department)
+        if conversation:
+            where.append("json_extract(body, '$.conversation') = ?")
+            args.append(conversation)
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         total = self._conn.execute(f"SELECT COUNT(*) FROM proposals{clause}", args).fetchone()[0]
         rows = self._conn.execute(
@@ -291,32 +317,33 @@ class Store:
         ).fetchone()
         return row[0] if row else None
 
-    # conversations (ADR 0014)
+    # agents (ADR 0014, ADR 0024)
 
     def upsert_conversation(self, p: Profile) -> None:
         self._conn.execute(
-            "INSERT INTO conversations (slug, name, aliases, voice, speed, created_at, updated_at,"
-            " last_active_at, deleted_at, scope, settled_at, toolkits, department)"
+            "INSERT INTO conversations (id, slug, department, name, aliases, job, voice, speed,"
+            " created_at, updated_at, last_active_at, retired_at, deleted_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(slug) DO UPDATE SET name = excluded.name, aliases = excluded.aliases,"
-            " voice = excluded.voice, speed = excluded.speed, updated_at = excluded.updated_at,"
-            " last_active_at = excluded.last_active_at, deleted_at = excluded.deleted_at,"
-            " scope = excluded.scope, settled_at = excluded.settled_at,"
-            " toolkits = excluded.toolkits, department = excluded.department",
+            " ON CONFLICT(id) DO UPDATE SET slug = excluded.slug,"
+            " department = excluded.department, name = excluded.name,"
+            " aliases = excluded.aliases, job = excluded.job, voice = excluded.voice,"
+            " speed = excluded.speed, updated_at = excluded.updated_at,"
+            " last_active_at = excluded.last_active_at, retired_at = excluded.retired_at,"
+            " deleted_at = excluded.deleted_at",
             (
+                p.id,
                 p.slug,
+                p.department,
                 p.name,
                 json.dumps(list(p.aliases)),
+                p.job,
                 p.voice,
                 p.speed,
                 p.created_at.isoformat(),
                 p.updated_at.isoformat(),
                 p.last_active_at.isoformat() if p.last_active_at else None,
+                p.retired_at.isoformat() if p.retired_at else None,
                 p.deleted_at.isoformat() if p.deleted_at else None,
-                json.dumps({k: list(v) for k, v in p.scope.items()}),
-                p.settled_at.isoformat() if p.settled_at else None,
-                json.dumps(list(p.toolkits)),
-                p.department,
             ),
         )
 
@@ -331,18 +358,32 @@ class Store:
             return None
         return p
 
-    def list_conversations(self, *, include_settled: bool = False) -> list[Profile]:
-        where = "deleted_at IS NULL" + ("" if include_settled else " AND settled_at IS NULL")
+    def get_conversation_by_id(self, id: str) -> Profile | None:
+        row = self._conn.execute(
+            f"SELECT {_PROFILE_COLS} FROM conversations WHERE id = ?", (id,)
+        ).fetchone()
+        return _profile(row) if row else None
+
+    def list_conversations(
+        self, *, include_retired: bool = False, include_deleted: bool = False
+    ) -> list[Profile]:
+        where = ["1 = 1" if include_deleted else "deleted_at IS NULL"]
+        if not include_retired:
+            where.append("retired_at IS NULL")
         rows = self._conn.execute(
-            f"SELECT {_PROFILE_COLS} FROM conversations WHERE {where}"
+            f"SELECT {_PROFILE_COLS} FROM conversations WHERE {' AND '.join(where)}"
             " ORDER BY CASE WHEN slug = 'ghost' THEN 0 ELSE 1 END, lower(name)"
         ).fetchall()
         return [_profile(r) for r in rows]
 
-    def touch_conversation(self, slug: str) -> None:
+    def delete_conversation_row(self, id: str) -> None:
+        """Forget a mirror row whose folder is gone and whose history is empty."""
+        self._conn.execute("DELETE FROM conversations WHERE id = ?", (id,))
+
+    def touch_conversation(self, id: str) -> None:
         self._conn.execute(
-            "UPDATE conversations SET last_active_at = ? WHERE slug = ?",
-            (utcnow().isoformat(), slug),
+            "UPDATE conversations SET last_active_at = ? WHERE id = ?",
+            (utcnow().isoformat(), id),
         )
 
     def add_turn(self, conversation: str, session_id: str, role: str, text: str) -> int:
@@ -365,7 +406,7 @@ class Store:
         return [_turn(r) for r in reversed(rows)]
 
     def move_session_turns(self, session_id: str, src: str, dst: str) -> int:
-        """Carry this session's turns from one conversation to another (save-as)."""
+        """Carry this session's turns from one agent to another (save-as, a split move)."""
         cur = self._conn.execute(
             "UPDATE turns SET conversation = ? WHERE session_id = ? AND conversation = ?"
             " AND hidden_by IS NULL AND compaction_id IS NULL",
@@ -443,29 +484,28 @@ class Store:
 
 
 _PROFILE_COLS = (
-    "slug, name, aliases, voice, speed, created_at, updated_at, last_active_at, deleted_at,"
-    " scope, settled_at, toolkits, department"
+    "id, slug, department, name, aliases, job, voice, speed, created_at, updated_at,"
+    " last_active_at, retired_at, deleted_at"
 )
 
 
 def _profile(row) -> Profile:
     from ghost_core.conversations.models import Profile
 
-    scope = json.loads(row[9] or "{}")
     return Profile(
-        slug=row[0],
-        name=row[1],
-        aliases=tuple(json.loads(row[2] or "[]")),
-        voice=row[3],
-        speed=float(row[4]),
-        created_at=datetime.fromisoformat(row[5]),
-        updated_at=datetime.fromisoformat(row[6]),
-        last_active_at=datetime.fromisoformat(row[7]) if row[7] else None,
-        deleted_at=datetime.fromisoformat(row[8]) if row[8] else None,
-        scope={k: tuple(v) for k, v in scope.items() if v},
-        settled_at=datetime.fromisoformat(row[10]) if row[10] else None,
-        toolkits=tuple(json.loads(row[11] or "[]")),
-        department=row[12] or None,
+        id=row[0],
+        slug=row[1],
+        department=row[2],
+        name=row[3],
+        aliases=tuple(json.loads(row[4] or "[]")),
+        job=row[5] or "",
+        voice=row[6],
+        speed=float(row[7]) if row[7] is not None else None,
+        created_at=datetime.fromisoformat(row[8]),
+        updated_at=datetime.fromisoformat(row[9]),
+        last_active_at=datetime.fromisoformat(row[10]) if row[10] else None,
+        retired_at=datetime.fromisoformat(row[11]) if row[11] else None,
+        deleted_at=datetime.fromisoformat(row[12]) if row[12] else None,
     )
 
 

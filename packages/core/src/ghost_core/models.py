@@ -106,8 +106,7 @@ class Proposal(BaseModel, frozen=True):
     # The thread (ADR 0014) the session was in when the model proposed this; None before
     # it was recorded. The apps colour an audit entry by it.
     conversation: str | None = None
-    department: str | None = None  # the department the line belongs to (ADR 0023)
-    toolkit: str | None = None  # the toolkit that granted the operation (ADR 0023)
+    department: str | None = None  # the department the agent works in (ADR 0024)
     created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime = Field(default_factory=lambda: utcnow() + PROPOSAL_TTL)
     status: ProposalStatus = ProposalStatus.PENDING

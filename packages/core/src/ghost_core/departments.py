@@ -35,8 +35,10 @@ what Ghost writes (``memory.md``, a rule appended to ``AGENTS.md``) goes through
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -47,6 +49,7 @@ from loguru import logger
 from ghost_core.mcp import (
     SERVER_NAME_RE,
     ScopeSpec,
+    Servers,
     ServerSpec,
     WriteSpec,
     _parse_scope,
@@ -55,6 +58,7 @@ from ghost_core.mcp import (
     _str_table,
     _table,
     secret_names,
+    source_of,
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy
 
@@ -630,7 +634,9 @@ __all__ = [
     "Department",
     "DepartmentError",
     "Departments",
+    "Fleet",
     "McpFile",
+    "all_sources",
     "discover",
     "load_department",
     "looks_like_secret",
@@ -639,3 +645,145 @@ __all__ = [
     "render_mcp_json",
     "slugify",
 ]
+
+
+# --- the servers a department reaches ----------------------------------------------------
+
+
+class Fleet:
+    """Every department's servers (ADR 0024). Ghost's connect at daemon start; a
+    department's own start when a session enters it (``enter``) and stay up for the
+    session plus an idle timeout (``leave``). What a session reaches is ``sources_for``:
+    the department's own servers under ``<department>/<server>``, and the servers it
+    uses from Ghost's fleet, seen through its own declaration."""
+
+    def __init__(
+        self,
+        departments: Departments,
+        *,
+        environ: Mapping[str, str] | None = None,
+        idle_secs: float = 600.0,
+    ) -> None:
+        self.departments = departments
+        self._environ = environ
+        self.idle_secs = idle_secs
+        self.ghost = Servers(departments.ghost.servers, environ)
+        self.own: dict[str, Servers] = {}
+        self._timers: dict[str, asyncio.TimerHandle] = {}
+        self._starting: dict[str, asyncio.Future[Servers]] = {}
+        self.started: dict[str, float] = {}  # slug -> how long the last start took
+
+    async def connect(self) -> None:
+        """Ghost's servers, at daemon start."""
+        await self.ghost.connect()
+
+    def is_up(self, slug: str) -> bool:
+        return slug == GHOST or slug in self.own
+
+    async def enter(self, slug: str) -> Servers | None:
+        """The department's own servers, started now if they are not up (measured, on the
+        latency line: the announcement and tone cover the wait). None for Ghost and for
+        a department with no servers of its own."""
+        if slug == GHOST:
+            return None
+        d = self.departments.get(slug)
+        if d is None or not d.servers:
+            return None
+        self._cancel_timer(slug)
+        if slug in self.own:
+            return self.own[slug]
+        if slug in self._starting:
+            return await self._starting[slug]
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[Servers] = loop.create_future()
+        self._starting[slug] = fut
+        began = time.perf_counter()
+        servers = Servers(d.servers, self._environ)
+        try:
+            await servers.connect()
+            self.own[slug] = servers
+            self.started[slug] = time.perf_counter() - began
+            logger.info(
+                f"department {slug}: {len(servers.servers)} server(s) up in "
+                f"{self.started[slug]:.2f}s"
+                + (f"; not connected: {', '.join(servers.failed)}" if servers.failed else "")
+            )
+            fut.set_result(servers)
+        except BaseException as e:
+            fut.set_exception(e)
+            raise
+        finally:
+            self._starting.pop(slug, None)
+        return servers
+
+    def leave(self, slug: str) -> None:
+        """The session left the department: its servers stay up for ``idle_secs``, then
+        close, so a quick return costs nothing and an idle department costs nothing."""
+        if slug == GHOST or slug not in self.own:
+            return
+        self._cancel_timer(slug)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._timers[slug] = loop.call_later(
+            self.idle_secs, lambda: asyncio.ensure_future(self.stop(slug))
+        )
+
+    async def stop(self, slug: str) -> None:
+        self._cancel_timer(slug)
+        servers = self.own.pop(slug, None)
+        if servers is not None:
+            await servers.close()
+            logger.info(f"department {slug}: servers closed")
+
+    def _cancel_timer(self, slug: str) -> None:
+        timer = self._timers.pop(slug, None)
+        if timer is not None:
+            timer.cancel()
+
+    def sources_for(self, d: Department) -> list[Any]:
+        """What a session in ``d`` reaches from the servers that are up now: Ghost's whole
+        for Ghost; a department's own (prefixed) plus Ghost's servers it uses, through its
+        own declaration. A used server that is not connected is left out."""
+        if d.is_ghost:
+            return self.ghost.sources()
+        out: list[Any] = []
+        own = self.own.get(d.slug)
+        if own is not None:
+            out.extend(own.sources(prefix=d.slug))
+        for name in d.uses:
+            server = self.ghost.servers.get(name)
+            if server is None:
+                continue
+            view = server.view(d.spec_for_use(server.spec))
+            source = source_of(view)
+            if source.read_tools or source.operations:
+                out.append(source)
+        return out
+
+    def operations_for(self, d: Department) -> list[tuple[str, list[Any]]]:
+        """Every operation a department's sources declare, by source name, for the gate's
+        registry: the declared writes exist as operations before the server is up, so a
+        department's levels can be shown and its writes registered at start."""
+        out: list[tuple[str, list[Any]]] = []
+        for src in self.sources_for(d):
+            out.append((src.name, src.operations))
+        return out
+
+    async def close(self) -> None:
+        for slug in list(self.own):
+            await self.stop(slug)
+        await self.ghost.close()
+
+
+def all_sources(fleet: Fleet) -> list[Any]:
+    """Every source any department reaches, for registering operations with the gate and
+    for the control API's listing: Ghost's servers, each department's own (as they are
+    declared, connected or not), and each use."""
+    out: list[Any] = list(fleet.ghost.sources())
+    for d in fleet.departments.list():
+        if d.is_ghost:
+            continue
+        out.extend(fleet.sources_for(d))
+    return out

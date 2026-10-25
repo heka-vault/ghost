@@ -1,14 +1,17 @@
-"""MCP servers are core (ADR 0022): the policy file names them, Ghost offers their reads.
-Tested against an in-process SDK server over memory streams: no network, no subprocess."""
+"""MCP servers are core (ADR 0022): a department's mcp.json names them (ADR 0024), Ghost
+offers their reads. The TOML shape below is the first increment's, still read by
+``parse_servers``. Tested against an in-process SDK server over memory streams: no network,
+no subprocess."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import tomllib
 
 import pytest
 from ghost_core import AutonomyPolicy
-from ghost_core.mcp import Server, Servers, ServerSpec, fill_secrets, parse_servers
+from ghost_core.mcp import Server, Servers, ServerSpec, fill_secrets, parse_servers, render_server
 from mcp.client.session import ClientSession
 from mcp.server.mcpserver import MCPServer
 from mcp.shared.memory import create_client_server_memory_streams
@@ -17,8 +20,12 @@ from mcp.types import ToolAnnotations
 # --- the policy file ------------------------------------------------------------------
 
 
-def test_policy_parses_http_and_stdio_servers():
-    p = AutonomyPolicy.parse(
+def servers(text: str) -> dict[str, ServerSpec]:
+    return parse_servers(tomllib.loads(text)["mcp"], "test")
+
+
+def test_declaration_parses_http_and_stdio_servers():
+    mcp = servers(
         """
         [mcp.mobbin]
         url = "http://proxy.lan:8318/mobbin/mcp"
@@ -31,30 +38,34 @@ def test_policy_parses_http_and_stdio_servers():
         env = { GITHUB_PERSONAL_ACCESS_TOKEN = "$HEKA_ORG_TOKEN" }
         """
     )
-    assert set(p.mcp) == {"mobbin", "github"}
-    assert p.mcp["mobbin"].transport == "http"
-    assert p.mcp["mobbin"].reads == ("search_screens",)
-    assert p.mcp["github"].transport == "stdio"
-    assert p.mcp["github"].args == ("stdio",)
-    assert p.mcp["github"].reads is None  # whatever the server marks read-only
+    assert set(mcp) == {"mobbin", "github"}
+    assert mcp["mobbin"].transport == "http"
+    assert mcp["mobbin"].reads == ("search_screens",)
+    assert mcp["github"].transport == "stdio"
+    assert mcp["github"].args == ("stdio",)
+    assert mcp["github"].reads is None  # whatever the server marks read-only
 
 
-def test_policy_round_trips_servers_through_to_toml():
+def test_declaration_round_trips_through_toml():
     text = """
 [mcp.mobbin]
 url = "http://proxy.lan:8318/mobbin/mcp"
 headers = { Authorization = "Bearer $MCP_PROXY_KEY" }
-
-[github_issues]
-comment = "quiet"
 """
-    p = AutonomyPolicy.parse(text)
-    again = AutonomyPolicy.parse(p.to_toml())
-    assert again.mcp == p.mcp
-    assert again.skills == p.skills
-    # the structured update carries the servers along; a desktop save never drops them
-    kept = AutonomyPolicy.from_plain(default=None, skills={}, targets={}, mcp=p.mcp)
-    assert AutonomyPolicy.parse(kept.to_toml()).mcp == p.mcp
+    mcp = servers(text)
+    again = servers("\n".join(render_server("mobbin", mcp["mobbin"])))
+    assert again == mcp
+
+
+def test_policy_file_ignores_a_retired_server_section():
+    """An older policy.toml still loads: its [mcp.*] tables are warned about and skipped
+    (ADR 0024 moved them to mcp.json and department.json)."""
+    p = AutonomyPolicy.parse(
+        '[mcp.mobbin]\nurl = "http://x"\n[mcp.mobbin.levels]\nsearch = "quiet"\n'
+        '[github_issues]\ncomment = "quiet"\n'
+    )
+    assert set(p.skills) == {"github_issues"}
+    assert "[mcp" not in p.to_toml()
 
 
 @pytest.mark.parametrize(
@@ -67,9 +78,9 @@ comment = "quiet"
         "url = 'http://x'\nreads = 'search'",  # reads not a list
     ],
 )
-def test_policy_rejects_bad_server_tables(body: str):
+def test_declaration_rejects_bad_server_tables(body: str):
     with pytest.raises(ValueError, match=r"\[mcp\.bad\]"):
-        AutonomyPolicy.parse(f"[mcp.bad]\n{body}\n")
+        servers(f"[mcp.bad]\n{body}\n")
 
 
 def test_parse_servers_rejects_non_table():

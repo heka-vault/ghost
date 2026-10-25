@@ -29,6 +29,7 @@ from ghost_core import (
 )
 from ghost_core.conversations import GHOST, Conversations, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
+from ghost_core.departments import Departments, load_department
 from ghost_core.jev import JevClassifier, JevClient
 from ghost_core.mcp import Servers
 from ghost_voice import VoiceSettings, build_session
@@ -431,8 +432,12 @@ class Bench:
         store = Store(tmp / "ghost.db")
         # The example policy declares the mock GitHub server (ADR 0022); its state file
         # goes under this run's directory so every run starts from the seed.
-        autonomy = AutonomyPolicy.load(self.gdsettings.infra_dir / "policy.example.toml")
-        github = autonomy.mcp["github"]
+        # The example layout (infra/example) declares the mock GitHub server (ADR 0024).
+        example = load_department(GHOST, self.gdsettings.infra_dir / "example", is_ghost=True)
+        autonomy = example.policy(
+            AutonomyPolicy.load(self.gdsettings.infra_dir / "policy.example.toml")
+        )
+        github = example.servers["github"]
         servers = Servers(
             {"github": replace(github, args=("--state", str(tmp / "data" / "mock-github.json")))}
         )
@@ -463,9 +468,11 @@ class Bench:
         gate = WriteGate(store, autonomy=autonomy, classifier=classifier)
         for a in sources:
             gate.register(a.name, a.operations)
+        departments = Departments(tmp / "config")
+        departments.ensure_layout()
         conversations = Conversations(
             store,
-            tmp / "conversations",
+            departments,
             default_voice=settings.tts_voice,
             default_speed=settings.tts_speed,
         )

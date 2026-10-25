@@ -1,16 +1,16 @@
-"""The active thread's scope, as a source sees it (ADR 0019).
+"""What the active session may touch through a source, as the source sees it (ADR 0019,
+ADR 0024).
 
-A thread (ADR 0014's conversation) may be scoped per ability to a list of items: the
-repositories, directories or workspaces it may touch. A source declares how it can
-be scoped (``ToolSource.scope_kind``) and what the whole allowlist is
-(``ToolSource.scope_items``); a thread's scope is a subset. Scope items are
-compared against ``Target.scope()``, the same string a policy target rule matches, so
-the gate can refuse a write outside the thread without knowing the ability.
+A department's declaration of a server is the only scope: its ``scope.items`` are the
+repositories, directories or workspaces the server may touch there. Scope items are
+compared against ``Target.scope()``, the same string a policy target rule matches, so the
+gate can refuse a write outside it without knowing the source.
 
-The pipeline hands an ``ActiveScope`` to a scoped ability on every call as the
-``_scope`` argument of read tools and ``prepare``; the ability never holds it, so a
-switch between threads needs no hook and two sessions cannot see each other's scope.
-Ghost (line zero) is unscoped: ``items`` is None and every check passes.
+The pipeline hands an ``ActiveScope`` to a scoped source on every call as the ``_scope``
+argument of read tools and ``prepare``; the source never holds it. ``items`` is None for
+every session now (the allowlist is the server's own); what the scope carries is
+``owners``: which departments cover an item the active one does not, so a request about
+it can be routed there or offered (``OutOfScope``).
 """
 
 from __future__ import annotations
@@ -25,15 +25,15 @@ SCOPE_ARG = "_scope"
 
 
 class OutOfScope(PolicyError):
-    """An item is outside the active thread. Safe to show the model: it names the
-    thread(s) that cover the item so Ghost can offer to switch."""
+    """An item is outside what this department reaches. Safe to show the model: it names
+    the department(s) that cover the item so Ghost can offer to transfer."""
 
     def __init__(self, ability: str, item: str, owners: Iterable[str] = ()) -> None:
         self.ability = ability
         self.item = item
         self.owners = tuple(owners)
-        where = f"; it belongs to the {self.owners[0]} thread" if self.owners else ""
-        super().__init__(f"{item} is outside this thread{where}")
+        where = f"; it belongs to the {self.owners[0]} department" if self.owners else ""
+        super().__init__(f"{item} is outside this department{where}")
 
 
 def _no_owners(_item: str) -> list[str]:
@@ -42,10 +42,9 @@ def _no_owners(_item: str) -> list[str]:
 
 @dataclass(frozen=True)
 class ActiveScope:
-    """What the active thread may touch for one ability. ``items`` None means
-    unscoped (Ghost, or a thread with no scope for this ability). ``reads_wider`` is
-    the operator's cross-department-answers setting: reads may leave the scope,
-    writes never. ``owners`` names the threads that cover an item, for the message."""
+    """What the active session may touch for one source. ``items`` None means unscoped
+    (the server's own allowlist is the limit). ``reads_wider`` lets reads leave the
+    scope, writes never. ``owners`` names the departments that cover an item."""
 
     ability: str
     thread: str
@@ -59,14 +58,14 @@ class ActiveScope:
 
     @property
     def only(self) -> str | None:
-        """The one item, when the thread covers exactly one; tools may stop asking for it."""
+        """The one item, when exactly one is covered; tools may stop asking for it."""
         return self.items[0] if self.items is not None and len(self.items) == 1 else None
 
     def covers(self, item: str) -> bool:
         return self.items is None or item.strip().lower() in {i.lower() for i in self.items}
 
     def narrow(self, items: Iterable[str]) -> list[str]:
-        """The ability's allowlist cut down to this thread: what a list tool shows by
+        """The source's allowlist cut down to what is covered: what a list tool shows by
         default. Order is kept."""
         return [i for i in items if self.covers(i)]
 

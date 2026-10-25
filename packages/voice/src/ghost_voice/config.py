@@ -176,11 +176,8 @@ class VoiceSettings(BaseSettings):
     hold_timeout_secs: float = 1800.0
     smart_turn_threads: int = 2
 
-    # Crossing streams between scoped threads (ADR 0019); both off by default.
-    # cross_department_answers: a scoped thread may read outside its scope to answer a
-    # question, never write there. department_routing: a request that belongs to another
-    # thread patches the operator through to it; off, Ghost says which thread and offers.
-    cross_department_answers: bool = False
+    # Department routing (ADR 0019, ADR 0024): a request about an item another department's
+    # declaration covers transfers the operator there by itself; off, Ghost offers.
     department_routing: bool = False
 
     # Compaction (ADR 0014): Pipecat's in-session summarizer, tokens-only trigger. Gentle

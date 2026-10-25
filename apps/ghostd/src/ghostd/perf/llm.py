@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ghost_core import AutonomyPolicy, Store, WriteGate
+from ghost_core.departments import load_department
 from ghost_core.mcp import Servers
 from ghost_voice import VoiceSettings
 from ghost_voice.config import LLM_MAX_TOKENS, openrouter_model
@@ -103,8 +104,10 @@ async def ghost_prompt_and_tools() -> tuple[str, list[Any]]:
     server the example policy declares."""
     tmp = Path(tempfile.mkdtemp(prefix="ghost-perf-llm-"))
     store = Store(tmp / "ghost.db")
-    autonomy = AutonomyPolicy.load(GhostdSettings().infra_dir / "policy.example.toml")
-    github = autonomy.mcp["github"]
+    infra = GhostdSettings().infra_dir
+    example = load_department("ghost", infra / "example", is_ghost=True)
+    autonomy = example.policy(AutonomyPolicy.load(infra / "policy.example.toml"))
+    github = example.servers["github"]
     servers = Servers({"github": replace(github, args=("--state", str(tmp / "mock-github.json")))})
     await servers.connect()
     sources = servers.sources()

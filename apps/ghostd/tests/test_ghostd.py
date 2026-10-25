@@ -116,8 +116,8 @@ async def test_a_settings_change_rebuilds_the_listener_instead_of_waking(tmp_pat
 
 
 async def test_a_call_opens_the_session_in_that_line(tmp_path, monkeypatch):
-    """The desktop's Call button (2026-10-24): a manual wake names the line the session
-    opens in; a spoken wake still lands in Ghost, and a settled or unknown line is refused."""
+    """The desktop's Call button (2026-10-24): a manual wake names the agent the session
+    opens with; a spoken wake still lands in Ghost, and a retired or unknown agent is refused."""
     import asyncio
 
     from ghost_core.conversations import GHOST
@@ -134,14 +134,14 @@ async def test_a_call_opens_the_session_in_that_line(tmp_path, monkeypatch):
 
     monkeypatch.setattr(d, "_conversation", conversation)
 
-    class Lines:
+    class Agents:
         def get(self, slug):
             class P:
-                settled = slug == "old"
+                retired = slug == "old"
 
             return P() if slug in {"legal", "old"} else None
 
-    d.conversations = Lines()  # type: ignore[assignment]
+    d.conversations = Agents()  # type: ignore[assignment]
 
     class Manual:
         def trigger(self, text=None):
@@ -173,7 +173,7 @@ async def test_a_call_opens_the_session_in_that_line(tmp_path, monkeypatch):
 
     async def call_later():
         await passive_again.wait()
-        assert await d.wake(None, "old") is False  # settled
+        assert await d.wake(None, "old") is False  # retired
         assert await d.wake(None, "nope") is False  # unknown
         assert await d.wake(None, "legal") is True
 

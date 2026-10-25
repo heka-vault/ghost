@@ -21,7 +21,7 @@ from ghost_core.departments import (
     parse_mcp_json,
     render_mcp_json,
 )
-from ghost_core.mcp import fill_secrets, secret_names
+from ghost_core.mcp import ServerSpec, fill_secrets, secret_names
 from test_mcp_writes import connected, spec
 
 MCP = {
@@ -311,4 +311,4 @@ async def test_a_view_shares_the_connection_but_not_the_declaration():
         )
         assert out["title"] == "Typo"
         with pytest.raises(ValueError, match="cannot be called"):
-            server.view(spec().__class__(name="other", command="x"))
+            server.view(ServerSpec(name="other", command="x"))

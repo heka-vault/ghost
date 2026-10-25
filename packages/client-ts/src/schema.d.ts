@@ -30,12 +30,16 @@ export interface paths {
         };
         /**
          * List Conversations
-         * @description Every live thread, Ghost first, settled ones included (``settled_at`` set) so
-         *     the app can show its Settled group. ``settled=true`` or ``false`` filters.
+         * @description Every agent, Ghost first, retired ones included (``retired_at`` set) so the app
+         *     can show its Retired group. ``retired=true`` or ``false`` filters; ``department``
+         *     narrows to one roster.
          */
         get: operations["list_conversations_conversations_get"];
         put?: never;
-        /** Create Conversation */
+        /**
+         * Create Conversation
+         * @description Hire an agent into a department.
+         */
         post: operations["create_conversation_conversations_post"];
         delete?: never;
         options?: never;
@@ -96,7 +100,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/conversations/{slug}/export": {
+    "/conversations/{slug}/move": {
         parameters: {
             query?: never;
             header?: never;
@@ -106,10 +110,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Export Template
-         * @description Write a department back out as one of the operator's own templates.
+         * Move Conversation
+         * @description Move the agent's folder into another department (ADR 0024). The desktop's
+         *     drag; a move of the agent the session is with is the session's to make.
          */
-        post: operations["export_template_conversations__slug__export_post"];
+        post: operations["move_conversation_conversations__slug__move_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -133,6 +138,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations/{slug}/rehire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rehire Conversation */
+        post: operations["rehire_conversation_conversations__slug__rehire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations/{slug}/reset": {
         parameters: {
             query?: never;
@@ -150,7 +172,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/conversations/{slug}/settle": {
+    "/conversations/{slug}/retire": {
         parameters: {
             query?: never;
             header?: never;
@@ -160,10 +182,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Settle Conversation
-         * @description Mark the thread done (ADR 0019): out of voice routing, everything kept.
+         * Retire Conversation
+         * @description Retire the agent (ADR 0024): off the roster and voice routing, everything kept.
          */
-        post: operations["settle_conversation_conversations__slug__settle_post"];
+        post: operations["retire_conversation_conversations__slug__retire_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -187,26 +209,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/conversations/{slug}/toolkits": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Toolkits
-         * @description A department's toolkits (ADR 0023): an audited write like the others.
-         */
-        put: operations["set_toolkits_conversations__slug__toolkits_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/conversations/{slug}/turns": {
         parameters: {
             query?: never;
@@ -224,17 +226,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/conversations/{slug}/unsettle": {
+    "/departments": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Departments */
+        get: operations["departments_departments_get"];
         put?: never;
-        /** Unsettle Conversation */
-        post: operations["unsettle_conversation_conversations__slug__unsettle_post"];
+        /**
+         * Create Department
+         * @description A new department folder: the operator's action, with a short AGENTS.md, an
+         *     empty mcp.json and its department.json. The model never calls this.
+         */
+        post: operations["create_department_departments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/departments/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Department */
+        get: operations["department_departments__slug__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -285,7 +309,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Mcp Servers */
+        /**
+         * Mcp Servers
+         * @description Ghost's servers, then each department's own (ADR 0024), connected or not.
+         */
         get: operations["mcp_servers_mcp_get"];
         put?: never;
         post?: never;
@@ -579,79 +606,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/templates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Templates */
-        get: operations["templates_templates_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/templates/{name}/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Apply Template
-         * @description The desktop's import: the template's toolkits into the policy file, its skills
-         *     into Ghost's skills, and a department line with its persona, each one audited.
-         */
-        post: operations["apply_template_templates__name__apply_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/toolkits": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Toolkits */
-        get: operations["toolkits_toolkits_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/toolkits/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Put Toolkit */
-        put: operations["put_toolkit_toolkits__name__put"];
-        post?: never;
-        /** Delete Toolkit */
-        delete: operations["delete_toolkit_toolkits__name__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/voices": {
         parameters: {
             query?: never;
@@ -743,8 +697,6 @@ export interface components {
             summary: string;
             /** Target */
             target: string;
-            /** Toolkit */
-            toolkit?: string | null;
         };
         /** AuditEventView */
         AuditEventView: {
@@ -787,7 +739,10 @@ export interface components {
             /** Through Turn Id */
             through_turn_id: number | null;
         };
-        /** ConversationCreate */
+        /**
+         * ConversationCreate
+         * @description Hire an agent.
+         */
         ConversationCreate: {
             /**
              * Aliases
@@ -796,6 +751,11 @@ export interface components {
             aliases: string[];
             /** Department */
             department?: string | null;
+            /**
+             * Job
+             * @default
+             */
+            job: string;
             /** Name */
             name: string;
             /**
@@ -803,22 +763,10 @@ export interface components {
              * @default
              */
             persona: string;
-            /**
-             * Scope
-             * @default {}
-             */
-            scope: {
-                [key: string]: string[];
-            };
             /** Seed From */
             seed_from?: string | null;
             /** Speed */
             speed?: number | null;
-            /**
-             * Toolkits
-             * @default []
-             */
-            toolkits: string[];
             /** Voice */
             voice?: string | null;
         };
@@ -836,16 +784,23 @@ export interface components {
              */
             created_at: string;
             /** Department */
-            department?: string | null;
+            department: string;
             /** Dir */
             dir: string;
+            /** Id */
+            id: string;
             /**
-             * Is Department
+             * Is Default
              * @default false
              */
-            is_department: boolean;
+            is_default: boolean;
             /** Is Ghost */
             is_ghost: boolean;
+            /**
+             * Job
+             * @default
+             */
+            job: string;
             /** Last Active At */
             last_active_at: string | null;
             /** Memory */
@@ -854,26 +809,19 @@ export interface components {
             name: string;
             /** Notes */
             notes: string[];
+            /**
+             * Own Voice
+             * @default false
+             */
+            own_voice: boolean;
             /** Persona */
             persona: string;
-            /**
-             * Scope
-             * @default {}
-             */
-            scope: {
-                [key: string]: string[];
-            };
-            /** Settled At */
-            settled_at?: string | null;
+            /** Retired At */
+            retired_at?: string | null;
             /** Slug */
             slug: string;
             /** Speed */
             speed: number;
-            /**
-             * Toolkits
-             * @default []
-             */
-            toolkits: string[];
             /** Turn Count */
             turn_count: number;
             /** Voice */
@@ -894,6 +842,11 @@ export interface components {
              */
             type: "conversation";
         };
+        /** ConversationMove */
+        ConversationMove: {
+            /** Department */
+            department: string;
+        };
         /**
          * ConversationUpdate
          * @description Each field present is applied as its own audited write.
@@ -901,6 +854,8 @@ export interface components {
         ConversationUpdate: {
             /** Aliases */
             aliases?: string[] | null;
+            /** Job */
+            job?: string | null;
             /** Memory */
             memory?: string | null;
             /** Name */
@@ -909,10 +864,6 @@ export interface components {
             notes?: string[] | null;
             /** Persona */
             persona?: string | null;
-            /** Scope */
-            scope?: {
-                [key: string]: string[];
-            } | null;
             /** Seed From */
             seed_from?: string | null;
             /** Speed */
@@ -920,7 +871,10 @@ export interface components {
             /** Voice */
             voice?: string | null;
         };
-        /** ConversationView */
+        /**
+         * ConversationView
+         * @description An agent (ADR 0024): a conversation with a persona and a job, in a department.
+         */
         ConversationView: {
             /** Active */
             active: boolean;
@@ -932,38 +886,121 @@ export interface components {
              */
             created_at: string;
             /** Department */
-            department?: string | null;
+            department: string;
+            /** Id */
+            id: string;
             /**
-             * Is Department
+             * Is Default
              * @default false
              */
-            is_department: boolean;
+            is_default: boolean;
             /** Is Ghost */
             is_ghost: boolean;
+            /**
+             * Job
+             * @default
+             */
+            job: string;
             /** Last Active At */
             last_active_at: string | null;
             /** Name */
             name: string;
             /**
-             * Scope
-             * @default {}
+             * Own Voice
+             * @default false
              */
-            scope: {
-                [key: string]: string[];
-            };
-            /** Settled At */
-            settled_at?: string | null;
+            own_voice: boolean;
+            /** Retired At */
+            retired_at?: string | null;
             /** Slug */
             slug: string;
             /** Speed */
             speed: number;
-            /**
-             * Toolkits
-             * @default []
-             */
-            toolkits: string[];
             /** Voice */
             voice: string;
+        };
+        /** DepartmentCreate */
+        DepartmentCreate: {
+            /**
+             * Aliases
+             * @default []
+             */
+            aliases: string[];
+            /** Name */
+            name: string;
+            /** Voice */
+            voice?: string | null;
+        };
+        /**
+         * DepartmentView
+         * @description A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
+         *     skills and agents. Ghost is one too.
+         */
+        DepartmentView: {
+            /**
+             * Agents
+             * @default []
+             */
+            agents: string[];
+            /**
+             * Aliases
+             * @default []
+             */
+            aliases: string[];
+            /**
+             * Docs
+             * @default []
+             */
+            docs: string[];
+            /** Is Ghost */
+            is_ghost: boolean;
+            /**
+             * Memory
+             * @default
+             */
+            memory: string;
+            /** Path */
+            path: string;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+            /** Root */
+            root?: string | null;
+            /**
+             * Rules
+             * @default
+             */
+            rules: string;
+            /**
+             * Rules Lead
+             * @default
+             */
+            rules_lead: string;
+            /**
+             * Servers
+             * @default []
+             */
+            servers: string[];
+            /** Servers Up */
+            servers_up: boolean;
+            /**
+             * Skills
+             * @default []
+             */
+            skills: string[];
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /**
+             * Uses
+             * @default []
+             */
+            uses: string[];
+            /** Voice */
+            voice?: string | null;
         };
         /** DeviceInfo */
         DeviceInfo: {
@@ -994,27 +1031,6 @@ export interface components {
             input_device: string | null;
             /** Output Device */
             output_device: string | null;
-        };
-        /**
-         * GrantView
-         * @description A toolkit's grant on one server (ADR 0023). null lists mean everything.
-         */
-        GrantView: {
-            /** Items */
-            items?: string[] | null;
-            /**
-             * Levels
-             * @default {}
-             */
-            levels: {
-                [key: string]: string;
-            };
-            /** Reads */
-            reads?: string[] | null;
-            /** Server */
-            server: string;
-            /** Writes */
-            writes?: string[] | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1057,6 +1073,8 @@ export interface components {
         McpServerInfo: {
             /** Connected */
             connected: boolean;
+            /** Department */
+            department?: string | null;
             /** Error */
             error?: string | null;
             /** Name */
@@ -1456,6 +1474,8 @@ export interface components {
          *     policy screen edits levels per operation from this list.
          */
         SourceInfo: {
+            /** Department */
+            department?: string | null;
             /** Description */
             description: string;
             /** Kind */
@@ -1506,8 +1526,6 @@ export interface components {
             session_id: string | null;
             /** Session Origin */
             session_origin?: ("desk" | "phone") | null;
-            /** Toolkit */
-            toolkit?: string | null;
             /** Uptime Secs */
             uptime_secs: number;
             /** Version */
@@ -1523,103 +1541,6 @@ export interface components {
              * @enum {string}
              */
             type: "status";
-        };
-        /** TemplateApply */
-        TemplateApply: {
-            /** Name */
-            name?: string | null;
-        };
-        /**
-         * TemplateView
-         * @description A department template (ADR 0023): shipped with Ghost or the operator's own.
-         */
-        TemplateView: {
-            /**
-             * Aliases
-             * @default []
-             */
-            aliases: string[];
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /** Name */
-            name: string;
-            /**
-             * Needs
-             * @default []
-             */
-            needs: string[];
-            /** Path */
-            path: string;
-            /**
-             * Skills
-             * @default []
-             */
-            skills: string[];
-            /** Source */
-            source: string;
-            /** Title */
-            title: string;
-            /**
-             * Toolkits
-             * @default []
-             */
-            toolkits: string[];
-            /** Voice */
-            voice?: string | null;
-        };
-        /** ToolkitsUpdate */
-        ToolkitsUpdate: {
-            /**
-             * Toolkits
-             * @default []
-             */
-            toolkits: string[];
-        };
-        /** ToolkitUpdate */
-        ToolkitUpdate: {
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Grants
-             * @default []
-             */
-            grants: components["schemas"]["GrantView"][];
-            /**
-             * Skills
-             * @default []
-             */
-            skills: string[];
-        };
-        /** ToolkitView */
-        ToolkitView: {
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Grants
-             * @default []
-             */
-            grants: components["schemas"]["GrantView"][];
-            /** Name */
-            name: string;
-            /**
-             * Problems
-             * @default []
-             */
-            problems: string[];
-            /**
-             * Skills
-             * @default []
-             */
-            skills: string[];
         };
         /** Turn */
         Turn: {
@@ -1722,11 +1643,13 @@ export type SchemaCompactionView = components['schemas']['CompactionView'];
 export type SchemaConversationCreate = components['schemas']['ConversationCreate'];
 export type SchemaConversationDetail = components['schemas']['ConversationDetail'];
 export type SchemaConversationEvent = components['schemas']['ConversationEvent'];
+export type SchemaConversationMove = components['schemas']['ConversationMove'];
 export type SchemaConversationUpdate = components['schemas']['ConversationUpdate'];
 export type SchemaConversationView = components['schemas']['ConversationView'];
+export type SchemaDepartmentCreate = components['schemas']['DepartmentCreate'];
+export type SchemaDepartmentView = components['schemas']['DepartmentView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
-export type SchemaGrantView = components['schemas']['GrantView'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
 export type SchemaMcpScopeInfo = components['schemas']['McpScopeInfo'];
@@ -1759,11 +1682,6 @@ export type SchemaSkillInfo = components['schemas']['SkillInfo'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
-export type SchemaTemplateApply = components['schemas']['TemplateApply'];
-export type SchemaTemplateView = components['schemas']['TemplateView'];
-export type SchemaToolkitsUpdate = components['schemas']['ToolkitsUpdate'];
-export type SchemaToolkitUpdate = components['schemas']['ToolkitUpdate'];
-export type SchemaToolkitView = components['schemas']['ToolkitView'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
@@ -1810,7 +1728,8 @@ export interface operations {
     list_conversations_conversations_get: {
         parameters: {
             query?: {
-                settled?: boolean | null;
+                department?: string | null;
+                retired?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -2030,7 +1949,7 @@ export interface operations {
             };
         };
     };
-    export_template_conversations__slug__export_post: {
+    move_conversation_conversations__slug__move_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2039,7 +1958,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationMove"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2047,7 +1970,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TemplateView"];
+                    "application/json": components["schemas"]["ConversationDetail"];
                 };
             };
             /** @description Validation Error */
@@ -2098,6 +2021,37 @@ export interface operations {
             };
         };
     };
+    rehire_conversation_conversations__slug__rehire_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reset_conversation_conversations__slug__reset_post: {
         parameters: {
             query?: never;
@@ -2129,7 +2083,7 @@ export interface operations {
             };
         };
     };
-    settle_conversation_conversations__slug__settle_post: {
+    retire_conversation_conversations__slug__retire_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2191,41 +2145,6 @@ export interface operations {
             };
         };
     };
-    set_toolkits_conversations__slug__toolkits_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ToolkitsUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConversationDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     conversation_turns_conversations__slug__turns_get: {
         parameters: {
             query?: {
@@ -2259,7 +2178,60 @@ export interface operations {
             };
         };
     };
-    unsettle_conversation_conversations__slug__unsettle_post: {
+    departments_departments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentView"][];
+                };
+            };
+        };
+    };
+    create_department_departments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepartmentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    department_departments__slug__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2276,7 +2248,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ack"];
+                    "application/json": components["schemas"]["DepartmentView"];
                 };
             };
             /** @description Validation Error */
@@ -2851,147 +2823,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Status"];
-                };
-            };
-        };
-    };
-    templates_templates_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TemplateView"][];
-                };
-            };
-        };
-    };
-    apply_template_templates__name__apply_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TemplateApply"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConversationDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    toolkits_toolkits_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolkitView"][];
-                };
-            };
-        };
-    };
-    put_toolkit_toolkits__name__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ToolkitUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolkitView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_toolkit_toolkits__name__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Ack"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

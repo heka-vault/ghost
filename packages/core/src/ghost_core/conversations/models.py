@@ -1,10 +1,12 @@
-"""The write model for conversations (ADR 0014).
+"""The write model for agents (ADR 0014, ADR 0024).
 
-A conversation is a profile row in SQLite, three Markdown files, and a transcript.
-The gate edits it through the same ``Target`` / ``Snapshot`` / ``Change`` shapes an
-ability uses, so rename, reset and friends are snapshotted, bounded and audited.
-The snapshot carries the full file texts: they are small, and the audit row then
-keeps what was there before a reset or a compaction.
+An agent is a conversation with a persona and a job: a folder in its department
+(``agent.json``, ``persona.md``, ``memory.md``, ``notes.md``), a mirror row in SQLite, and a
+transcript keyed by its stable id. The operator's word is *agent*; the code and the control
+API keep *conversation*. The gate edits it through the same ``Target`` / ``Snapshot`` /
+``Change`` shapes a server's writes use, so hire, retire, move and the rest are
+snapshotted, bounded and audited. The snapshot carries the full file texts: they are
+small, and the audit row then keeps what was there before a reset or a compaction.
 """
 
 from __future__ import annotations
@@ -12,16 +14,18 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from ghost_core.models import Change, Snapshot, Target, utcnow
 
-GHOST = "ghost"  # conversation zero: always present, undeletable, resettable
+GHOST = "ghost"  # agent zero and the department every wake lands in
 
 MAX_NAME = 80
+MAX_JOB = 200
 MAX_PERSONA = 4000
 MAX_MEMORY = 20000
 MAX_NOTES = 20000
@@ -31,34 +35,29 @@ Role = Literal["user", "assistant", "call", "system"]
 
 
 def slugify(name: str) -> str:
-    """``"Accounting (EMEA)"`` -> ``"accounting-emea"``. Fixed at creation (ADR 0014)."""
+    """``"Brand design (EMEA)"`` -> ``"brand-design-emea"``. Fixed at creation (ADR 0014)."""
     text = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     text = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return text[:MAX_NAME] or "conversation"
+    return text[:MAX_NAME] or "agent"
 
 
-Scope = dict[str, tuple[str, ...]]  # ability -> the items this thread may touch (ADR 0019)
+def new_id() -> str:
+    return uuid.uuid4().hex
 
 
 class Profile(BaseModel, frozen=True):
+    id: str = Field(default_factory=new_id)
     slug: str
     name: str
     aliases: tuple[str, ...] = ()
-    voice: str
-    speed: float = 1.0
-    # Per ability, what this thread may touch; an ability absent here is unscoped for
-    # it. Ghost is always unscoped. Empty for every thread until the operator sets one.
-    scope: Scope = Field(default_factory=dict)
-    # ADR 0023. A line with no ``department`` is a department: the toolkits it is given
-    # bound what its sessions reach (none: everything, like Ghost), and it is its own
-    # primary line. A line with a ``department`` is a topic line in that department: it
-    # reaches what the department reaches, with its own memory and scope.
-    toolkits: tuple[str, ...] = ()
-    department: str | None = None
+    department: str = GHOST  # the department whose folder it lives in
+    job: str = ""  # what it was hired for, in a line
+    voice: str | None = None  # None: the department's voice, so a move can be heard
+    speed: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     last_active_at: datetime | None = None
-    settled_at: datetime | None = None  # done: out of voice routing, still readable
+    retired_at: datetime | None = None  # off the roster and voice routing; files kept
     deleted_at: datetime | None = None
 
     @property
@@ -66,26 +65,35 @@ class Profile(BaseModel, frozen=True):
         return self.slug == GHOST
 
     @property
-    def is_department(self) -> bool:
-        return not self.is_ghost and self.department is None
+    def is_default(self) -> bool:
+        """The department's own agent, named for it, where a transfer lands. It speaks
+        as the department's AGENTS.md and cannot be moved, retired or deleted."""
+        return self.slug == self.department
 
     @property
-    def settled(self) -> bool:
-        return self.settled_at is not None
+    def retired(self) -> bool:
+        return self.retired_at is not None
 
     def spoken_names(self) -> tuple[str, ...]:
         return (self.name, *self.aliases)
 
-    def scope_for(self, ability: str) -> tuple[str, ...] | None:
-        """The items this thread may touch for ``ability``; None when unscoped."""
-        if self.is_ghost:
-            return None
-        return self.scope.get(ability)
+    def agent_json(self) -> dict[str, Any]:
+        """What the folder's ``agent.json`` carries: identity, never state."""
+        out: dict[str, Any] = {"id": self.id, "name": self.name}
+        if self.aliases:
+            out["aliases"] = list(self.aliases)
+        if self.job:
+            out["job"] = self.job
+        if self.voice:
+            out["voice"] = self.voice
+        if self.speed is not None:
+            out["speed"] = self.speed
+        return out
 
 
 class TurnRecord(BaseModel, frozen=True):
     id: int
-    conversation: str
+    conversation: str  # the agent's id
     session_id: str
     role: Role
     text: str
@@ -95,7 +103,7 @@ class TurnRecord(BaseModel, frozen=True):
 
 class Compaction(BaseModel, frozen=True):
     id: str
-    conversation: str
+    conversation: str  # the agent's id
     summary: str
     through_turn_id: int | None
     at: datetime
@@ -109,7 +117,7 @@ class ConversationTarget(Target, frozen=True):
     slug: str
 
     def key(self) -> str:
-        return f"conversation:{self.slug}"
+        return f"agent:{self.slug}"
 
     def scope(self) -> str:
         return self.slug
@@ -117,15 +125,20 @@ class ConversationTarget(Target, frozen=True):
     def spoken(self) -> str:
         return self.slug.replace("-", " ")
 
+    def mentions(self) -> set[str]:
+        words = set(self.slug.split("-"))
+        return {self.spoken()} | {w for w in words if len(w) > 2}
+
 
 class ConversationSnapshot(Snapshot, frozen=True):
     exists: bool
     name: str = ""
     aliases: tuple[str, ...] = ()
-    voice: str = ""
-    speed: float = 1.0
-    scope: Scope = Field(default_factory=dict)
-    settled: bool = False
+    department: str = GHOST
+    job: str = ""
+    voice: str | None = None
+    speed: float | None = None
+    retired: bool = False
     persona: str = ""
     memory: str = ""
     notes: str = ""
@@ -141,23 +154,32 @@ class ConversationSnapshot(Snapshot, frozen=True):
         *,
         name: str,
         aliases: tuple[str, ...],
-        voice: str,
-        speed: float,
+        department: str,
+        job: str,
+        voice: str | None,
+        speed: float | None,
         persona: str,
         memory: str,
         notes: str,
         turns: int,
         deleted: bool = False,
-        scope: Scope | None = None,
-        settled: bool = False,
+        retired: bool = False,
     ) -> ConversationSnapshot:
-        scope = scope or {}
         h = hashlib.sha256()
-        for part in (name, ",".join(aliases), voice, f"{speed:g}", persona, memory, notes):
+        for part in (
+            name,
+            ",".join(aliases),
+            department,
+            job,
+            voice or "",
+            f"{speed:g}" if speed is not None else "",
+            persona,
+            memory,
+            notes,
+        ):
             h.update(part.encode())
             h.update(b"\0")
-        h.update(describe_scope(scope).encode())
-        h.update(b"settled" if settled else b"open")
+        h.update(b"retired" if retired else b"active")
         h.update(str(turns).encode())
         h.update(b"deleted" if deleted else b"live")
         return cls(
@@ -165,10 +187,11 @@ class ConversationSnapshot(Snapshot, frozen=True):
             exists=not deleted,
             name=name,
             aliases=aliases,
+            department=department,
+            job=job,
             voice=voice,
             speed=speed,
-            scope=scope,
-            settled=settled,
+            retired=retired,
             persona=persona,
             memory=memory,
             notes=notes,
@@ -178,98 +201,87 @@ class ConversationSnapshot(Snapshot, frozen=True):
     def spoken(self) -> str:
         if not self.exists:
             return "does not exist"
-        bits = [f"voice {self.voice}", f"{self.turns} turns on record"]
-        if self.scope:
-            bits.append("scoped to " + describe_scope(self.scope))
-        if self.settled:
-            bits.append("settled")
+        bits = [f"in {self.department}", f"{self.turns} turns on record"]
+        if self.job:
+            bits.insert(1, self.job)
+        if self.voice:
+            bits.append(f"voice {self.voice}")
+        if self.retired:
+            bits.append("retired")
         if self.notes.strip():
             bits.append(f"{self.notes.count(chr(10)) + 1} notes")
         return f"{self.name}: " + ", ".join(bits)
 
 
-def describe_scope(scope: Scope) -> str:
-    """``github_issues: acme/app, acme/infra; notes: work`` or ``everything``."""
-    parts = [f"{ab}: {', '.join(items)}" for ab, items in sorted(scope.items()) if items]
-    return "; ".join(parts) if parts else "everything"
-
-
 class Create(Change, frozen=True):
+    """Hire: a new agent in a department, with a persona and a job."""
+
     kind: Literal["create"] = "create"
     name: str = Field(min_length=1, max_length=MAX_NAME)
     aliases: tuple[str, ...] = ()
-    voice: str
-    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    department: str = GHOST
+    job: str = Field(default="", max_length=MAX_JOB)
+    voice: str | None = None
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
     persona: str = Field(default="", max_length=MAX_PERSONA)
-    scope: Scope = Field(default_factory=dict)
-    # A handoff: the first memory, copied from a settled thread's memory.md (ADR 0019).
+    # The first memory: a handoff from a retired agent, or the summary a split move writes.
     memory: str = Field(default="", max_length=MAX_MEMORY)
-    toolkits: tuple[str, ...] = ()  # ADR 0023: a department's reach
-    department: str | None = None  # ADR 0023: a topic line's department
 
     def describe(self) -> str:
-        extra = f" scoped to {describe_scope(self.scope)}" if self.scope else ""
-        if self.department:
-            extra += f" in the {self.department} department"
-        if self.toolkits:
-            extra += " with the " + ", ".join(self.toolkits) + " toolkit(s)"
+        job = f" for {self.job}" if self.job.strip() else ""
         seed = " with a handoff memory" if self.memory.strip() else ""
-        return f"start conversation {self.name!r}{extra}{seed}"
+        return f"hire {self.name!r} in {self.department}{job}{seed}"
 
 
-class SetToolkits(Change, frozen=True):
-    """Replace a department's toolkits (ADR 0023). Empty: everything, like Ghost."""
+class Retire(Change, frozen=True):
+    """Fire: off the roster, out of voice routing and the prompt; everything kept."""
 
-    kind: Literal["set_toolkits"] = "set_toolkits"
-    toolkits: tuple[str, ...] = ()
-
-    def describe(self) -> str:
-        return "toolkits: " + (", ".join(self.toolkits) or "none, so everything")
-
-
-class SetScope(Change, frozen=True):
-    """Replace the thread's whole scope map. Ghost cannot be scoped."""
-
-    kind: Literal["set_scope"] = "set_scope"
-    scope: Scope = Field(default_factory=dict)
+    kind: Literal["retire"] = "retire"
 
     def describe(self) -> str:
-        return f"scope: {describe_scope(self.scope)}"
+        return "retire the agent"
 
 
-class Settle(Change, frozen=True):
-    """Mark the thread done: out of voice routing and the active list, everything kept."""
-
-    kind: Literal["settle"] = "settle"
+class Rehire(Change, frozen=True):
+    kind: Literal["rehire"] = "rehire"
 
     def describe(self) -> str:
-        return "settle the thread"
+        return "bring the agent back"
 
 
-class Unsettle(Change, frozen=True):
-    kind: Literal["unsettle"] = "unsettle"
+class Move(Change, frozen=True):
+    """Whole move: the agent's folder goes into another department (ADR 0024). A split
+    move is a Create there plus the carried turns, composed by the runtime."""
+
+    kind: Literal["move"] = "move"
+    department: str
 
     def describe(self) -> str:
-        return "bring the thread back"
+        return f"move to {self.department}"
 
 
 class Rename(Change, frozen=True):
     kind: Literal["rename"] = "rename"
     name: str = Field(min_length=1, max_length=MAX_NAME)
     aliases: tuple[str, ...] = ()
+    job: str | None = Field(default=None, max_length=MAX_JOB)  # None: unchanged
 
     def describe(self) -> str:
         extra = f" (also {', '.join(self.aliases)})" if self.aliases else ""
-        return f"rename to {self.name!r}{extra}"
+        job = f", job: {self.job}" if self.job is not None else ""
+        return f"rename to {self.name!r}{extra}{job}"
 
 
 class SetVoice(Change, frozen=True):
     kind: Literal["set_voice"] = "set_voice"
-    voice: str
-    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    voice: str | None = None  # None: back to the department's voice
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
 
     def describe(self) -> str:
-        return f"voice {self.voice} at {self.speed:g}x"
+        if self.voice is None:
+            return "voice: the department's"
+        speed = f" at {self.speed:g}x" if self.speed is not None else ""
+        return f"voice {self.voice}{speed}"
 
 
 class SetPersona(Change, frozen=True):
@@ -321,7 +333,10 @@ class Reset(Change, frozen=True):
 
 
 class Delete(Change, frozen=True):
+    """Remove the agent: its folder goes, its transcript is hidden. The operator's, in
+    the desktop; retire is the usual way."""
+
     kind: Literal["delete"] = "delete"
 
     def describe(self) -> str:
-        return "delete the conversation"
+        return "delete the agent"
