@@ -20,9 +20,18 @@ from ghost_voice.prompt import build_system_prompt
 from ghost_voice.tools import register_tools
 
 
+class _Functions(dict):
+    """Pipecat's table: a name not registered on its own goes to the catch-all (None)."""
+
+    def __missing__(self, name):
+        if None in self:
+            return self[None]
+        raise KeyError(name)
+
+
 class FakeLLM:
     def __init__(self) -> None:
-        self.functions: dict[str, Any] = {}
+        self.functions: dict[str, Any] = _Functions()
         self.pushed: list[Any] = []
 
     def register_function(self, name, handler, **_):

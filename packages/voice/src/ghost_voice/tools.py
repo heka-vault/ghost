@@ -180,30 +180,30 @@ def register_tools(
         out.extend(session_schemas)
         return out
 
-    # Every read tool any source offers is registered once; a call goes to the version
-    # the active agent reaches, or is refused when its department does not reach it.
-    def dispatch(name: str):
-        async def run(params: FunctionCallParams) -> None:
-            current = {t.name: (t, a) for a in active_sources() for t in a.read_tools}
-            hit = current.get(name)
-            if hit is None:
-                record(name, dict(params.arguments))
-                await params.result_callback(
-                    {"error": f"{name} is not available in this department"}
-                )
-                return
-            tool, a = hit
-            if a.name == DEPARTMENTS and conversations is not None:
-                params.arguments = {**params.arguments, "_active": conversations.active.slug}
-            await _wrap_read(
-                tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope
-            )(params)
+    # Every read tool is one catch-all handler: a call goes to the version the active
+    # agent reaches now (a department's own servers come up after the session was built,
+    # ADR 0024), or is refused when its department does not reach it.
+    async def dispatch(params: FunctionCallParams) -> None:
+        name = params.function_name
+        current = {t.name: (t, a) for a in active_sources() for t in a.read_tools}
+        hit = current.get(name)
+        if hit is None:
+            record(name, dict(params.arguments))
+            await params.result_callback({"error": f"{name} is not available in this department"})
+            return
+        tool, a = hit
+        if a.name == DEPARTMENTS and conversations is not None:
+            params.arguments = {**params.arguments, "_active": conversations.active.slug}
+        await _wrap_read(tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope)(
+            params
+        )
 
-        return run
+    llm.register_function(None, dispatch)
 
-    for name in {t.name for a in sources for t in a.read_tools}:
-        llm.register_function(name, dispatch(name))
-    scopes = {a.name: scope_for(a) for a in sources}
+    def scope_now(srcs: Sequence[ToolSource], aname: str) -> ActiveScope | None:
+        src = next((s for s in srcs if s.name == aname), None)
+        return scope_for(src)() if src is not None else None
+
     any_ops = any(a.operations for a in sources)
     session_schemas: list[FunctionSchema] = []  # switch, hang_up, hold; filled below
 
@@ -230,7 +230,7 @@ def register_tools(
         record(f"{aname}.{op_name}", args)
         if aname in (CONVERSATIONS, DEPARTMENTS) and conversations is not None:
             args["_active"] = conversations.active.slug
-        scope = scopes.get(aname, lambda: None)()
+        scope = scope_now(reach_now, aname)
         if scope is not None:
             args[SCOPE_ARG] = scope
         try:
