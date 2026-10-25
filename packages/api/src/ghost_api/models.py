@@ -284,6 +284,22 @@ class DepartmentCreate(BaseModel):
     voice: str | None = None
 
 
+class RuleAdd(BaseModel):
+    """A rule appended to a department's AGENTS.md, verbatim (ADR 0024)."""
+
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class JournalEntry(BaseModel):
+    """One thing an agent did in a department: an executed write from the audit."""
+
+    at: datetime
+    agent: str  # the agent's name, or its slug when it is gone
+    operation: str  # "github.close"
+    target: str
+    what: str  # the proposal's preview
+
+
 class SourceInfo(BaseModel):
     """A source of tools the gate knows: the lines (built in) or an MCP server. The
     policy screen edits levels per operation from this list."""

@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from ghost_core import (
     AutonomyPolicy,
+    ChangeSet,
     GateError,
     Outcome,
     Proposal,
@@ -39,6 +40,7 @@ from ghost_api.models import (
     DeviceInfo,
     DevicesView,
     Event,
+    JournalEntry,
     McpScopeInfo,
     McpServerInfo,
     McpToolInfo,
@@ -53,6 +55,7 @@ from ghost_api.models import (
     PolicyUpdate,
     PolicyView,
     ReadToolInfo,
+    RuleAdd,
     SayRequest,
     SecretState,
     SettingsResult,
@@ -112,12 +115,14 @@ class Deps:
         skills: Any = None,  # ghost_core.skills.Skills
         departments: Any = None,  # ghost_core.departments.Departments
         fleet: Any = None,  # ghost_core.departments.Fleet
+        department_tools: Any = None,  # ghost_core.department_tools.DepartmentTools
     ) -> None:
         self.conversations = conversations
         self.mcp = mcp
         self.skills = skills
         self.departments = departments
         self.fleet = fleet
+        self.department_tools = department_tools
         self.state = state
         self.control = control
         self.gate = gate
@@ -439,6 +444,46 @@ def create_app(deps: Deps) -> FastAPI:
             raise HTTPException(404, f"no department {slug!r}")
         return department_view(d)
 
+    @app.post("/departments/{slug}/rules", response_model=DepartmentView, tags=["departments"])
+    async def add_rule(slug: str, req: RuleAdd) -> DepartmentView:
+        """Append a rule to the department's AGENTS.md, verbatim, through the gate: the
+        operator's own click, audited like the spoken form (ADR 0024)."""
+        from ghost_core.department_tools import SOURCE as DEPARTMENTS
+        from ghost_core.department_tools import AddRule, DepartmentTarget
+
+        d = deps.departments.get(slug) if deps.departments is not None else None
+        if d is None:
+            raise HTTPException(404, f"no department {slug!r}")
+        if deps.department_tools is None:
+            raise HTTPException(503, "departments are not available")
+        try:
+            out = await deps.gate.apply_internal(
+                session_id=UI_SESSION,
+                ability=DEPARTMENTS,
+                operation="add_rule",
+                target=DepartmentTarget(slug=d.slug, title=d.title),
+                changes=ChangeSet(steps=(AddRule(text=req.text.strip()),)),
+                rationale="a rule added in the desktop app",
+            )
+        except (GateError, PolicyError, ValueError) as e:
+            raise HTTPException(409, str(e)) from None
+        if out.status != "success":
+            raise HTTPException(409, out.error or "not applied")
+        deps.departments.refresh()
+        return department_view(deps.departments.get(slug))
+
+    @app.get("/departments/{slug}/journal", response_model=list[JournalEntry], tags=["departments"])
+    async def department_journal(
+        slug: str, limit: int = Query(30, ge=1, le=200)
+    ) -> list[JournalEntry]:
+        """What the department's agents did, newest first, from the audit."""
+        d = deps.departments.get(slug) if deps.departments is not None else None
+        if d is None:
+            raise HTTPException(404, f"no department {slug!r}")
+        if deps.department_tools is None:
+            return []
+        return [JournalEntry(**e) for e in deps.department_tools.journal(slug, limit=limit)]
+
     @app.post("/departments", response_model=DepartmentView, tags=["departments"])
     async def create_department(req: DepartmentCreate) -> DepartmentView:
         """A new department folder: the operator's action, with a short AGENTS.md, an
@@ -575,6 +620,21 @@ def create_app(deps: Deps) -> FastAPI:
                     read_tools=[
                         ReadToolInfo(name=t.name, description=t.description)
                         for t in deps.conversations.read_tools()
+                    ],
+                )
+            )
+        if deps.department_tools is not None:
+            from ghost_core.department_tools import SOURCE as DEPARTMENTS
+
+            out.append(
+                SourceInfo(
+                    name=DEPARTMENTS,
+                    kind="built-in",
+                    description="Your departments: a rule added, a shared fact (ADR 0024)",
+                    operations=ops(DEPARTMENTS, deps.department_tools.operations()),
+                    read_tools=[
+                        ReadToolInfo(name=t.name, description=t.description)
+                        for t in deps.department_tools.read_tools()
                     ],
                 )
             )

@@ -971,6 +971,41 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "JournalEntry": {
+        "description": "One thing an agent did in a department: an executed write from the audit.",
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "agent",
+          "operation",
+          "target",
+          "what"
+        ],
+        "title": "JournalEntry",
+        "type": "object"
+      },
       "LogEvent": {
         "properties": {
           "at": {
@@ -1724,6 +1759,22 @@
           "description"
         ],
         "title": "ReadToolInfo",
+        "type": "object"
+      },
+      "RuleAdd": {
+        "description": "A rule appended to a department's AGENTS.md, verbatim (ADR 0024).",
+        "properties": {
+          "text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "RuleAdd",
         "type": "object"
       },
       "SampleRequest": {
@@ -3299,6 +3350,118 @@
           }
         },
         "summary": "Department",
+        "tags": [
+          "departments"
+        ]
+      }
+    },
+    "/departments/{slug}/journal": {
+      "get": {
+        "description": "What the department's agents did, newest first, from the audit.",
+        "operationId": "department_journal_departments__slug__journal_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JournalEntry"
+                  },
+                  "title": "Response Department Journal Departments  Slug  Journal Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Department Journal",
+        "tags": [
+          "departments"
+        ]
+      }
+    },
+    "/departments/{slug}/rules": {
+      "post": {
+        "description": "Append a rule to the department's AGENTS.md, verbatim, through the gate: the\noperator's own click, audited like the spoken form (ADR 0024).",
+        "operationId": "add_rule_departments__slug__rules_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Rule",
         "tags": [
           "departments"
         ]

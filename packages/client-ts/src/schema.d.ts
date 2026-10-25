@@ -265,6 +265,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/departments/{slug}/journal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Department Journal
+         * @description What the department's agents did, newest first, from the audit.
+         */
+        get: operations["department_journal_departments__slug__journal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/departments/{slug}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Rule
+         * @description Append a rule to the department's AGENTS.md, verbatim, through the gate: the
+         *     operator's own click, audited like the spoken form (ADR 0024).
+         */
+        post: operations["add_rule_departments__slug__rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/devices": {
         parameters: {
             query?: never;
@@ -1037,6 +1078,25 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * JournalEntry
+         * @description One thing an agent did in a department: an executed write from the audit.
+         */
+        JournalEntry: {
+            /** Agent */
+            agent: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Operation */
+            operation: string;
+            /** Target */
+            target: string;
+            /** What */
+            what: string;
+        };
         /** LogEvent */
         LogEvent: {
             /**
@@ -1342,6 +1402,14 @@ export interface components {
             description: string;
             /** Name */
             name: string;
+        };
+        /**
+         * RuleAdd
+         * @description A rule appended to a department's AGENTS.md, verbatim (ADR 0024).
+         */
+        RuleAdd: {
+            /** Text */
+            text: string;
         };
         /** SampleRequest */
         SampleRequest: {
@@ -1651,6 +1719,7 @@ export type SchemaDepartmentView = components['schemas']['DepartmentView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
+export type SchemaJournalEntry = components['schemas']['JournalEntry'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
 export type SchemaMcpScopeInfo = components['schemas']['McpScopeInfo'];
 export type SchemaMcpServerInfo = components['schemas']['McpServerInfo'];
@@ -1670,6 +1739,7 @@ export type SchemaPolicyResult = components['schemas']['PolicyResult'];
 export type SchemaPolicyUpdate = components['schemas']['PolicyUpdate'];
 export type SchemaPolicyView = components['schemas']['PolicyView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
+export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];
 export type SchemaSecretState = components['schemas']['SecretState'];
@@ -2241,6 +2311,74 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    department_journal_departments__slug__journal_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalEntry"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_rule_departments__slug__rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleAdd"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

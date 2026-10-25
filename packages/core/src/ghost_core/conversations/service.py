@@ -474,7 +474,7 @@ class Conversations:
             job = " ".join(str(args.get("job") or "").split())
             if len(job) > MAX_JOB:
                 raise ValueError("keep the job to a line")
-            memory = ""
+            memory = " ".join(str(args.get("memory") or "").split())
             seed = str(args.get("seed_from") or "").strip()
             if seed:
                 memory = self.handoff_memory(seed)
@@ -610,8 +610,11 @@ class Conversations:
             p = self._target(args)
             if p.is_default:
                 raise ValueError(
-                    f"{p.name} is its department's own agent and cannot move; hire an agent "
-                    "there instead"
+                    f"{p.name} is long-lived and about many things, so it does not move. To "
+                    "move this conversation, hire an agent in the destination (change, "
+                    "conversations.create with department, a job, a persona and a memory "
+                    "that summarizes this session); the session's turns go with it and the "
+                    "operator is transferred there. Say the agent's name."
                 )
             text = str(args.get("department") or "").strip()
             if not text:
@@ -672,6 +675,15 @@ class Conversations:
                         "description": (
                             "Slug of a retired agent whose memory becomes this one's first "
                             "memory, as a handoff."
+                        ),
+                    },
+                    "memory": {
+                        "type": "string",
+                        "description": (
+                            "The new agent's first memory: a summary you write of this "
+                            "session so far, when the operator moves a conversation out of "
+                            "Ghost or a department's own agent (a split move, ADR 0024). "
+                            "Facts, decisions, open items."
                         ),
                     },
                 },

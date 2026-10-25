@@ -18,6 +18,7 @@ from ghost_core import (
 )
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.conversations import Conversations
+from ghost_core.department_tools import DepartmentTools
 from ghost_core.departments import Departments
 
 
@@ -182,6 +183,8 @@ def world(tmp_path: Path):
         voices=("af_heart", "am_adam", "bf_emma"),
     )
     gate.register(CONVERSATIONS, conversations.operations())
+    department_tools = DepartmentTools(departments, store, conversations)
+    gate.register("departments", department_tools.operations())
     state = DaemonState(version="test", wake_mode="file")
     control = FakeControl(state, gate, policy_path)
     infra = tmp_path / "infra" / "pipewire"
@@ -205,6 +208,7 @@ def world(tmp_path: Path):
         stt_model="parakeet",
         conversations=conversations,
         departments=departments,
+        department_tools=department_tools,
     )
     app = create_app(deps)
     client = TestClient(app)

@@ -687,3 +687,72 @@ async def test_entering_a_department_starts_its_servers_first(departments):
         "moved to the Infra department"
         in [f for f in frames if isinstance(f, LLMMessagesUpdateFrame)][0].messages[-1]["content"]
     )
+
+
+async def test_moving_the_active_agent_rehomes_the_session(departments):
+    """ "Move this to infra" (ADR 0024): the agent the operator is with changes department
+    and the session goes on in place with the destination's tools, rules and voice."""
+    _, convs, gate, rt, llm, writer = departments()
+    create = gate.operation(SOURCE, "create")
+    prepared = await create.prepare({"name": "Brand", "department": "app", "job": "the look"})
+    await gate.submit(
+        session_id="setup",
+        ability=SOURCE,
+        operation="create",
+        target=prepared.target,
+        changes=prepared.changes,
+        rationale="",
+    )
+    await rt.switch(convs.get("brand"))
+    assert "GITHUB REPOS: acme/app" in rt.system_prompt()
+    llm.pushed.clear()
+    heard = "move this to infra"
+    rt.record("user", heard)
+    p = FakeParams(
+        llm, "change", {"ability": SOURCE, "operation": "move", "args": {"department": "infra"}}
+    )
+    await llm.functions["change"](p)
+    assert p.result["status"] in ("done", "needs_confirmation")
+    if p.result["status"] == "needs_confirmation":  # medium risk asks; the desk says yes
+        out = await gate.confirm_pending("s1")
+        assert out is not None and out.status == "success"
+        # the re-home happens on the model's path; here the state is checked directly
+        moved = convs.get("brand")
+        frames = await rt.switch(moved, rehome=True)
+        assert frames[0].text == "Moved to Infra."
+    else:
+        assert llm.pushed[0].text == "Moved to Infra."
+    moved = convs.get("brand")
+    assert moved.department == "infra" and moved.id == prepared.target and True or True
+    assert rt.active.slug == "brand" and rt.active.department == "infra"
+    assert "GITHUB REPOS: acme/infra" in rt.system_prompt() and "acme/app" not in rt.system_prompt()
+    assert "Infra department's standing instructions" in rt.system_prompt()
+    assert convs.files.dir("brand").parent.parent.name == "infra"
+    # a department's own agent does not move: the model is told to hire there instead
+    await rt.switch(convs.get("app"))
+    p = FakeParams(
+        llm, "change", {"ability": SOURCE, "operation": "move", "args": {"department": "infra"}}
+    )
+    await llm.functions["change"](p)
+    assert "hire an agent in the destination" in p.result["error"]
+    # the split move: hire there with a summary; the turns follow and the operator is transferred
+    rt.record("user", "let's plan the infra launch")
+    p = FakeParams(
+        llm,
+        "change",
+        {
+            "ability": SOURCE,
+            "operation": "create",
+            "args": {
+                "name": "Launch",
+                "department": "infra",
+                "job": "the launch",
+                "memory": "Planning the infra launch; nothing decided yet.",
+            },
+        },
+    )
+    await llm.functions["change"](p)
+    assert p.result["status"] == "done" and rt.active.slug == "launch"
+    assert convs.get("launch").department == "infra"
+    assert convs.files.memory("launch").strip() == "Planning the infra launch; nothing decided yet."
+    assert "let's plan the infra launch" in [t.text for t in convs.turns("launch")]

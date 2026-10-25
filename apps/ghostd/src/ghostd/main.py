@@ -41,6 +41,7 @@ from ghost_core import (
 )
 from ghost_core.conversations import GHOST, Conversations, Profile, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
+from ghost_core.department_tools import DepartmentTools, departments_source
 from ghost_core.departments import Departments, Fleet, all_sources
 from ghost_core.jev import JevClassifier, JevClient
 from ghost_core.mcp import Servers
@@ -504,6 +505,9 @@ class Daemon:
         )
         gate.register(CONVERSATIONS, conversations_source(conversations).operations)
         self.conversations = conversations
+        department_tools = DepartmentTools(departments, store, conversations)
+        gate.register(departments_source(department_tools).name, department_tools.operations())
+        self.department_tools = department_tools
 
         def register_department(slug: str) -> None:
             """A department's own servers came up: their declared writes join the gate."""
@@ -532,6 +536,7 @@ class Daemon:
             out: list[ToolSource] = list(fleet.sources_for(d))
             out.append(skills.source(d.skill_places(), writes=d.is_ghost))
             out.append(conversations_source(conversations))
+            out.append(departments_source(department_tools))
             return out
 
         self._reach = reach
@@ -682,6 +687,7 @@ class Daemon:
             skills=skills,
             departments=self.departments,
             fleet=self.fleet,
+            department_tools=getattr(self, "department_tools", None),
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,

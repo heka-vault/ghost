@@ -28,6 +28,7 @@ from ghost_core import (
 )
 from ghost_core.conversations import GHOST
 from ghost_core.conversations import SOURCE as CONVERSATIONS
+from ghost_core.department_tools import SOURCE as DEPARTMENTS
 from ghost_core.policy import PolicyError
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -192,6 +193,8 @@ def register_tools(
                 )
                 return
             tool, a = hit
+            if a.name == DEPARTMENTS and conversations is not None:
+                params.arguments = {**params.arguments, "_active": conversations.active.slug}
             await _wrap_read(
                 tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope
             )(params)
@@ -225,7 +228,7 @@ def register_tools(
         probe.tool_operation(call_id, f"{aname}.{op.name}")
         args = dict(a.get("args") or {})
         record(f"{aname}.{op_name}", args)
-        if aname == CONVERSATIONS and conversations is not None:
+        if aname in (CONVERSATIONS, DEPARTMENTS) and conversations is not None:
             args["_active"] = conversations.active.slug
         scope = scopes.get(aname, lambda: None)()
         if scope is not None:
@@ -299,6 +302,25 @@ def register_tools(
                             "and they are now with it; that is done, do not hire or "
                             "switch again."
                         ),
+                    )
+                    await events.emit(
+                        "outcome", ability=aname, operation=op.name, status=sub.outcome.status
+                    )
+                    return
+            # "Move this to accounting" (ADR 0024): the agent the operator is with moved
+            # departments, so the session is re-homed in place: that department's servers,
+            # rules, memory and voice, and "Moved to Accounting."
+            if (
+                aname == CONVERSATIONS
+                and op.name == "move"
+                and conversations is not None
+                and sub.outcome.status == "success"
+                and sub.proposal.target.scope() == conversations.active.slug
+            ):
+                moved = conversations.conversations.get(conversations.active.slug)
+                if moved is not None:
+                    await _transfer(
+                        params, conversations, moved, handoff="", result=result, rehome=True
                     )
                     await events.emit(
                         "outcome", ability=aname, operation=op.name, status=sub.outcome.status
@@ -482,6 +504,7 @@ async def _transfer(
     handoff: str,
     result: dict[str, Any],
     outcome: str = "",
+    rehome: bool = False,
 ) -> None:
     """Return the tool result without a model run, then, once the aggregator has
     appended it to the context, feed the transfer frames in at the pipeline source.
@@ -489,7 +512,7 @@ async def _transfer(
     itself (the system prompt would not change), and anything pushed downstream
     queues behind the audio being played."""
     worker = getattr(params, "pipeline_worker", None)
-    frames = await conversations.switch(target, handoff=handoff, outcome=outcome)
+    frames = await conversations.switch(target, handoff=handoff, outcome=outcome, rehome=rehome)
 
     async def on_context_updated() -> None:
         try:
