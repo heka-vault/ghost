@@ -1337,6 +1337,11 @@ export interface components {
         };
         /** SayRequest */
         SayRequest: {
+            /**
+             * Conversation
+             * @description With no session running, the line the new one opens in; Ghost when unset.
+             */
+            conversation?: string | null;
             /** Text */
             text: string;
         };
@@ -1689,6 +1694,11 @@ export interface components {
         };
         /** WakeRequest */
         WakeRequest: {
+            /**
+             * Conversation
+             * @description The line the session opens in; Ghost when unset.
+             */
+            conversation?: string | null;
             /**
              * Text
              * @description Words to treat as the first turn.

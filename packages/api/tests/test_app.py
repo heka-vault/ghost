@@ -32,6 +32,16 @@ def test_status_and_wake_sleep(world):
     assert control.calls[-1] == ("wake", "what's up")
     assert client.get("/status").json()["session_id"] == "sess1"
     assert client.post("/wake").json()["ok"] is False  # already awake
+
+
+def test_wake_can_open_the_session_in_a_line(world):
+    """A Call button on a line's page (2026-10-24): the session starts there, not in Ghost."""
+    client, state, control, *_ = world
+    state.set_phase(Phase.PASSIVE)
+    r = client.post("/wake", json={"conversation": "legal"})
+    assert r.json()["ok"] is True
+    assert control.calls[-1] == ("wake", None, "legal")
+    assert client.get("/status").json()["conversation"] == "legal"
     assert client.post("/sleep").json()["ok"] is True
     assert client.get("/status").json()["phase"] == "passive"
 

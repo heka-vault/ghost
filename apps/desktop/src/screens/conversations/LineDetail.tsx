@@ -3,11 +3,12 @@
  * memory and pinned notes, its transcript and every version of its memory. Edits collect
  * in a draft and go in with Save; each field Ghost writes is an audited gate
  * write, the same as if it had been said. Pinning a note, compacting, switching, reset and
- * delete happen at once.
+ * delete happen at once. Call opens a session on this line and Hang up ends it; the composer
+ * in the dock types to the line, opening the session when there is none (2026-10-24).
  */
 import { type CompactionView, type ConversationDetail, type ConversationView, type ToolkitView, type TurnView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, FileOutput, Layers, MoreHorizontal, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, FileOutput, Layers, MoreHorizontal, Phone, PhoneOff, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
@@ -48,8 +49,11 @@ import { ToolkitPicker } from "./NewLineDialog";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
 import { ScopePicker } from "./ScopePicker";
+import { Composer } from "../session/Composer";
 import { type ScopedSource, departmentName, departmentOf, isDepartment, narrowSources, scopedSources, settleLine, settledAt, toolkitsOf, unsettleLine } from "./threads";
 import { Transcript } from "./Transcript";
+// The composer's styles live with the session screen, which may not have been opened yet.
+import "../session/session.css";
 import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newLineSeed, readParam, writeParam } from "./url";
 import { PlayingBars, VoicePicker, voiceTitle } from "./VoicePicker";
 import { type Voice, parseVoice, voiceKind } from "./voices";
@@ -65,7 +69,7 @@ const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times
 
 export function LineDetail({ slug }: { slug: string }) {
   const { client, status, conversationsVersion, turns: sessionTurns, pending } = useGhost();
-  const { online, connection, phase } = useLive();
+  const { online, connection, phase, loadingModels } = useLive();
   const design = useDesign();
   const toast = useToast();
   const { confirm, dialog } = useConfirm();
@@ -93,7 +97,9 @@ export function LineDetail({ slug }: { slug: string }) {
   const [saving, setSaving] = useState(false);
   const [hearing, setHearing] = useState<string | null>(null);
   const [pinning, setPinning] = useState(false);
-  const [acting, setActing] = useState<"switch" | "compact" | "settle" | "unsettle" | "export" | null>(null);
+  const [acting, setActing] = useState<"switch" | "compact" | "settle" | "unsettle" | "export" | "call" | "hangup" | "send" | null>(null);
+  const [text, setText] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const inSession = !!status?.session_id;
   const liveSlug = inSession ? (status?.conversation ?? "ghost") : null;
@@ -303,6 +309,50 @@ export function LineDetail({ slug }: { slug: string }) {
       return false;
     } finally {
       setPinning(false);
+    }
+  };
+
+  // Call: a session on this line, the way a wake is one on Ghost. Hang up ends whichever is live.
+  const modelsReady = !!status?.models_ready && !loadingModels;
+  const call = async () => {
+    setActing("call");
+    try {
+      const r = await client.wake(undefined, slug);
+      if (r.ok === false) setNotice({ title: `Couldn’t call ${name}`, text: r.detail ?? "Ghost didn’t take the call. Try again." });
+    } catch (e) {
+      fail(`Couldn’t call ${name}`, e);
+    } finally {
+      setActing(null);
+    }
+  };
+  const hangUp = async () => {
+    setActing("hangup");
+    try {
+      await client.sleep();
+    } catch (e) {
+      fail("Couldn’t hang up", e);
+    } finally {
+      setActing(null);
+    }
+  };
+  // Typed to this line: into the live session when it is here, else a new session on this line.
+  const send = async () => {
+    const t = text.trim();
+    if (!t || acting) return;
+    setText("");
+    setActing("send");
+    try {
+      const r = live ? await client.say(t) : await client.say(t, slug);
+      if (r.ok === false) {
+        setText((now) => now || t);
+        setNotice({ title: `Couldn’t send to ${name}`, text: r.detail ?? "Ghost didn’t take it. Try again." });
+      }
+    } catch (e) {
+      setText((now) => now || t);
+      fail(`Couldn’t send to ${name}`, e);
+    } finally {
+      setActing(null);
+      composerRef.current?.focus();
     }
   };
 
@@ -571,6 +621,19 @@ export function LineDetail({ slug }: { slug: string }) {
           Review the change
         </Button>
       )}
+      {/* Nothing live: Call opens a session here. Live here: Hang up. Live elsewhere: patch it through. */}
+      {!inSession && !readOnly && (
+        <Button
+          variant={waiting || dirty.length ? "secondary" : "primary"}
+          leadingIcon={<Phone />}
+          loading={acting === "call"}
+          disabled={!online || !modelsReady || (acting !== null && acting !== "call")}
+          title={!online ? "Ghost is reconnecting" : !modelsReady ? "Ghost is still loading its voice models" : undefined}
+          onClick={() => void call()}
+        >
+          Call {name}
+        </Button>
+      )}
       {inSession && !live && !readOnly && (
         <Button variant="secondary" leadingIcon={<ArrowLeftRight />} loading={acting === "switch"} disabled={!online} onClick={() => void switchTo(slug)}>
           Switch to {name}
@@ -587,6 +650,11 @@ export function LineDetail({ slug }: { slug: string }) {
           Compact now
         </Button>
       )}
+      {live && (
+        <Button variant="secondary" leadingIcon={<PhoneOff />} loading={acting === "hangup"} disabled={!online || (acting !== null && acting !== "hangup")} onClick={() => void hangUp()}>
+          Hang up
+        </Button>
+      )}
       {menu}
     </>
   );
@@ -599,6 +667,25 @@ export function LineDetail({ slug }: { slug: string }) {
       </>
     ) : null;
 
+  // Typing to the line: on when the session is here or there is none; while Ghost is on
+  // another line the field says so, and Switch in the header is the way over.
+  const elsewhere = inSession && !live;
+  const canType = online && modelsReady && !elsewhere && (!inSession || live);
+  const composerDock = detail && !readOnly && tab === "transcript" && (
+    <div className="conv-dock">
+      <Composer
+        ref={composerRef}
+        value={text}
+        onChange={setText}
+        onSubmit={() => void send()}
+        disabled={!canType || (acting !== null && acting !== "send")}
+        sending={acting === "send"}
+        placeholder={!online ? "Reconnecting…" : elsewhere ? `Ghost is on the ${lineName(liveSlug!, lines.find((l) => l.slug === liveSlug)?.name)} line` : `Type to ${name}…`}
+        label={`Message ${name}`}
+        presence={live ? phase : undefined}
+      />
+    </div>
+  );
   const dock =
     dirty.length > 0 ? (
       <SaveBar
@@ -609,7 +696,7 @@ export function LineDetail({ slug }: { slug: string }) {
         onDiscard={discard}
         onSave={() => void save()}
       />
-    ) : undefined;
+    ) : composerDock || undefined;
 
   return (
     <Page

@@ -101,14 +101,17 @@ export class GhostClient {
   status() {
     return unwrap(this.api.GET("/status"));
   }
-  wake(text?: string) {
-    return unwrap(this.api.POST("/wake", { body: text ? { text } : undefined }));
+  /** Open a session: in Ghost, or in the line `conversation` names (a Call from its page). */
+  wake(text?: string, conversation?: string) {
+    const body = text || conversation ? { text: text || null, conversation: conversation || null } : undefined;
+    return unwrap(this.api.POST("/wake", { body }));
   }
   sleep() {
     return unwrap(this.api.POST("/sleep"));
   }
-  say(text: string) {
-    return unwrap(this.api.POST("/session/say", { body: { text } }));
+  /** Type to the live line; with no session running, open one (in `conversation`, or Ghost) with these words as its first turn. */
+  say(text: string, conversation?: string) {
+    return unwrap(this.api.POST("/session/say", { body: { text, conversation: conversation || null } }));
   }
   turns() {
     return unwrap(this.api.GET("/session/turns")) as Promise<Turn[]>;

@@ -78,9 +78,9 @@ from ghost_api.state import DaemonState, now
 class Controller(Protocol):
     """What the daemon lets the API do. Every method is safe to call at any time."""
 
-    async def wake(self, first_utterance: str | None) -> bool: ...
+    async def wake(self, first_utterance: str | None, conversation: str | None = None) -> bool: ...
     async def sleep(self) -> bool: ...
-    async def say(self, text: str) -> bool: ...
+    async def say(self, text: str, conversation: str | None = None) -> bool: ...
     async def confirm_pending(self) -> Outcome | None: ...
     async def cancel_pending(self) -> bool: ...
     def reload_policy(self) -> AutonomyPolicy: ...
@@ -261,8 +261,8 @@ def create_app(deps: Deps) -> FastAPI:
 
     @app.post("/wake", response_model=Ack, tags=["session"])
     async def wake(req: WakeRequest | None = None) -> Ack:
-        ok = await deps.control.wake(req.text if req else None)
-        return Ack(ok=ok, detail=None if ok else "not passive")
+        ok = await deps.control.wake(req.text if req else None, req.conversation if req else None)
+        return Ack(ok=ok, detail=None if ok else "not passive, or no such line")
 
     @app.post("/sleep", response_model=Ack, tags=["session"])
     async def sleep() -> Ack:
@@ -271,7 +271,7 @@ def create_app(deps: Deps) -> FastAPI:
 
     @app.post("/session/say", response_model=Ack, tags=["session"])
     async def say(req: SayRequest) -> Ack:
-        ok = await deps.control.say(req.text)
+        ok = await deps.control.say(req.text, req.conversation)
         return Ack(ok=ok, detail=None if ok else "daemon is still starting")
 
     @app.get("/session/turns", response_model=list[Any], tags=["session"])

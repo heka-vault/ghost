@@ -63,7 +63,7 @@ export function Transcript({ turns, lineName, limit, total }: TranscriptProps) {
         title="Nothing said on this line yet"
         description={
           <>
-            {lineName === "Ghost" ? <>Say {quoted("Hey Ghost")}.</> : <>Wake Ghost and say {quoted(`patch me to ${lineName.toLowerCase()}`)}.</>} What you both say is kept here.
+            {lineName === "Ghost" ? <>Say {quoted("Hey Ghost")}, press Call, or type below.</> : <>Press Call, type below, or say {quoted(`patch me to ${lineName.toLowerCase()}`)} in a session.</>} What you both say is kept here.
           </>
         }
       />

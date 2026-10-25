@@ -125,10 +125,17 @@ Event = Annotated[
 
 class WakeRequest(BaseModel):
     text: str | None = Field(default=None, description="Words to treat as the first turn.")
+    conversation: str | None = Field(
+        default=None, description="The line the session opens in; Ghost when unset."
+    )
 
 
 class SayRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+    conversation: str | None = Field(
+        default=None,
+        description="With no session running, the line the new one opens in; Ghost when unset.",
+    )
 
 
 class Ack(BaseModel):

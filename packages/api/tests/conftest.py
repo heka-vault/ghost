@@ -29,11 +29,13 @@ class FakeControl:
         self.policy_path = policy_path
         self.calls: list[tuple] = []
 
-    async def wake(self, first_utterance):
-        self.calls.append(("wake", first_utterance))
+    async def wake(self, first_utterance, conversation=None):
+        call = ("wake", first_utterance)
+        self.calls.append(call if conversation is None else (*call, conversation))
         if self.state.phase is not Phase.PASSIVE:
             return False
         self.state.set_phase(Phase.LISTENING, "sess1")
+        self.state.set_conversation(conversation or "ghost")
         return True
 
     async def sleep(self):
@@ -43,7 +45,7 @@ class FakeControl:
         self.state.set_phase(Phase.PASSIVE)
         return True
 
-    async def say(self, text):
+    async def say(self, text, conversation=None):
         self.calls.append(("say", text))
         if self.state.phase is Phase.STARTING:
             return False

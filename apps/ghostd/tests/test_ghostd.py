@@ -115,6 +115,74 @@ async def test_a_settings_change_rebuilds_the_listener_instead_of_waking(tmp_pat
     assert wake.waits == 2 and sessions == []
 
 
+async def test_a_call_opens_the_session_in_that_line(tmp_path, monkeypatch):
+    """The desktop's Call button (2026-10-24): a manual wake names the line the session
+    opens in; a spoken wake still lands in Ghost, and a settled or unknown line is refused."""
+    import asyncio
+
+    from ghost_core.conversations import GHOST
+    from ghost_voice import VoiceSettings
+    from ghostd.config import GhostdSettings
+    from ghostd.main import Daemon
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    d = Daemon(GhostdSettings(data_dir=tmp_path, chime=False), VoiceSettings.model_construct())
+    opened: list[str] = []
+
+    async def conversation(*args, **kwargs):
+        opened.append(kwargs.get("start_in", GHOST))
+
+    monkeypatch.setattr(d, "_conversation", conversation)
+
+    class Lines:
+        def get(self, slug):
+            class P:
+                settled = slug == "old"
+
+            return P() if slug in {"legal", "old"} else None
+
+    d.conversations = Lines()  # type: ignore[assignment]
+
+    class Manual:
+        def trigger(self, text=None):
+            manual.set()
+
+    manual = asyncio.Event()
+    d._manual = Manual()  # noqa: SLF001
+
+    passive_again = asyncio.Event()  # the loop is waiting for its second wake
+
+    class Wake:
+        waits = 0
+
+        async def wait(self):
+            self.waits += 1
+            if self.waits == 1:
+                return None  # spoken: Ghost
+            if self.waits == 2:
+                passive_again.set()
+                await manual.wait()
+                return None
+            d._stop.set()  # noqa: SLF001
+            await asyncio.Event().wait()
+
+    class Events:
+        async def emit(self, *a, **k): ...
+
+    wake = Wake()
+
+    async def call_later():
+        await passive_again.wait()
+        assert await d.wake(None, "old") is False  # settled
+        assert await d.wake(None, "nope") is False  # unknown
+        assert await d.wake(None, "legal") is True
+
+    task = asyncio.ensure_future(call_later())
+    await asyncio.wait_for(d._passive(wake, None, [], None, Events(), None), 5)  # noqa: SLF001
+    await task
+    assert opened == [GHOST, "legal"]
+
+
 async def test_an_early_chime_without_a_session_restores_the_music(tmp_path, monkeypatch):
     """The trained detector chimes and ducks before the operator finishes (ADR 0025). If
     something else wins first (a settings change here), the music comes back up, and the

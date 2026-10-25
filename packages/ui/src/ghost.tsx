@@ -80,6 +80,17 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
           if (!cancelled) timer = setTimeout(connect, 1500);
         },
       );
+      // The daemon sends its snapshot when the bridge's socket opens, not when this page
+      // (re)loads; ask once so a reloaded page is online before the next event.
+      client
+        .status()
+        .then((m) => {
+          if (cancelled) return;
+          setConnected(true);
+          setStatus(m);
+          setPending(m.pending ?? null);
+        })
+        .catch(() => {});
     };
     connect();
     return () => {

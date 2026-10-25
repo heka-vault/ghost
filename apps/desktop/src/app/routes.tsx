@@ -47,7 +47,8 @@ export interface RouteDef {
   chrome: "app" | "bare";
   /** Show the "Ghost isn't running" state instead of the screen when the daemon is down. */
   needsDaemon: boolean;
-  nav?: { label: string; icon: LucideIcon; group: "main" | "footer" | "prototype" };
+  /** `settings`: under the pinned Settings row, folded (the operator's call, 2026-10-24). */
+  nav?: { label: string; icon: LucideIcon; group: "main" | "footer" | "settings" | "prototype" };
   /** Null when the route is not part of this build (prototypes in production). */
   component: LazyExoticComponent<ComponentType<RouteProps>> | null;
 }
@@ -64,7 +65,7 @@ export const ROUTES: RouteDef[] = [
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Session", icon: AudioLines, group: "main" },
+    nav: { label: "Session", icon: AudioLines, group: "settings" },
     component: lazy(() => import("../screens/session")),
   },
   {
@@ -88,7 +89,7 @@ export const ROUTES: RouteDef[] = [
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "What Ghost may do", icon: ShieldCheck, group: "main" },
+    nav: { label: "What Ghost may do", icon: ShieldCheck, group: "settings" },
     component: lazy(() => import("../screens/policy")),
   },
   {
@@ -100,7 +101,7 @@ export const ROUTES: RouteDef[] = [
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Audit log", icon: ScrollText, group: "main" },
+    nav: { label: "Audit log", icon: ScrollText, group: "settings" },
     component: lazy(() => import("../screens/audit")),
   },
   {
@@ -112,7 +113,7 @@ export const ROUTES: RouteDef[] = [
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Servers", icon: Server, group: "main" },
+    nav: { label: "Servers", icon: Server, group: "settings" },
     component: lazy(() => import("../screens/servers")),
   },
   {
@@ -124,7 +125,7 @@ export const ROUTES: RouteDef[] = [
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Skills", icon: BookOpen, group: "main" },
+    nav: { label: "Skills", icon: BookOpen, group: "settings" },
     component: lazy(() => import("../screens/skills")),
   },
   {
@@ -136,7 +137,7 @@ export const ROUTES: RouteDef[] = [
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Toolkits", icon: Briefcase, group: "main" },
+    nav: { label: "Toolkits", icon: Briefcase, group: "settings" },
     component: lazy(() => import("../screens/toolkits")),
   },
   {

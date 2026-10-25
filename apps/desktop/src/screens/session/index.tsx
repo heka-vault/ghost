@@ -6,7 +6,7 @@
  * it, sitting at the optical center of the panel (AirOps, Gumloop, Unify). The presence only
  * shows state; waking is the composer's labeled voice control (Mic, “Wake Ghost”), because
  * that is where audio stops being local-only and it must never look like decoration. In a
- * session the same control reads “Go to sleep” (Moon). The sidebar's status card already says
+ * session the same control reads “Hang up” (PhoneOff). The sidebar's status card already says
  * what Ghost is doing, so the page doesn't repeat it. Once there is a transcript it takes over
  * the page in a centered reading column under the line's header, and the composer moves to
  * the Page dock with the live presence at its leading edge; a change waiting for the
@@ -15,7 +15,7 @@
  * isn’t running” is the shell's (src/app/Offline.tsx).
  */
 import { useGhost } from "@ghost/ui";
-import { ArrowDown, ArrowRight, AudioLines, Mic, Moon, PhoneOff, TriangleAlert, X } from "lucide-react";
+import { ArrowDown, ArrowRight, AudioLines, Mic, PhoneOff, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link } from "../../app/router";
@@ -217,7 +217,7 @@ export default function SessionScreen(_: RouteProps) {
   // session keeps the header (the line, its state, Go to sleep) even before the first turn.
   const startOnly = !hasTranscript && !inSession && !pending;
 
-  // The one voice control. Go to sleep (Moon) sits in the composer in a session. Wake is where
+  // The one voice control. Hang up (PhoneOff) sits in the composer in a session. Wake is where
   // audio stops being local-only, so in the start state it is a labeled button under the
   // composer (a mic inside a composer reads as dictation everywhere else); only in the dock,
   // where space is tight, is it the Session icon alone, with its label as the tooltip.
@@ -227,7 +227,7 @@ export default function SessionScreen(_: RouteProps) {
   const voice: VoiceControl | undefined = inSession
     ? onPhone
       ? { label: "End the phone session", icon: <PhoneOff />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
-      : { label: "Hang up", icon: <Moon />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
+      : { label: "Hang up", icon: <PhoneOff />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
     : showDock
       ? { label: wakeWhy, icon: <AudioLines />, onClick: wake, loading: busy === "wake", disabled: wakeOff }
       : undefined;

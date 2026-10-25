@@ -26,13 +26,14 @@ export function GhostGlyph({ size = 16, className, title }: { size?: number; cla
 }
 
 /**
- * The app mark: the glyph on an accent tile. Sizes 20, 24, 28, 40, 64. Pass `hovered` (and
- * optionally `trigger`) to make it the live mascot, which plays and settles back to this mark.
+ * The app mark: Wisp saying hello, bare, no tile (the tile read as the old icon; the
+ * operator, 2026-10-20). Pass `hovered` (and optionally `trigger`) to make it the live
+ * mascot, which plays and settles back to this mark.
  */
 export function GhostMark({ size = 24, hovered, trigger, className }: { size?: number; hovered?: boolean; trigger?: number; className?: string }) {
-  const glyph = Math.round(size * 0.66);
+  const glyph = size;
   return (
-    <span className={cx("g-mark", className)} style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }} aria-hidden>
+    <span className={cx("g-mark", className)} style={{ width: size, height: size }} aria-hidden>
       {/* Still: Wisp saying hello at any size. While hovered (or playing), the live mascot. */}
       {hovered || (trigger !== undefined && trigger > 0) ? <Mascot size={glyph} hovered={hovered} trigger={trigger} /> : <GhostGlyph size={glyph} />}
     </span>

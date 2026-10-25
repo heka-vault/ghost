@@ -5,7 +5,7 @@
  * a new line, Escape clears), then scrolls under a soft top fade. In a live session the
  * presence sits at its leading edge, so the voice state stays in view next to the place you'd
  * type. At the trailing edge, before Send, sits the voice control: Wake Ghost (Mic) while Ghost
- * waits for its wake phrase, Go to sleep (Moon) in a session. Waking is where audio stops being
+ * waits for its wake phrase, Hang up (PhoneOff) in a session. Waking is where audio stops being
  * local-only, so it is always a labeled button, never the logo (Dash, Gumloop, Copilot).
  *
  * The composer moves between the start state and the dock as the transcript appears or
@@ -18,7 +18,7 @@ import { forwardRef, type ReactElement, useImperativeHandle, useLayoutEffect, us
 import { IconButton, VoicePresence, cx, type GhostPhase } from "../../ui";
 
 export interface VoiceControl {
-  /** The accessible name and tooltip: “Wake Ghost”, “Go to sleep”, or why it's off. */
+  /** The accessible name and tooltip: “Wake Ghost”, “Hang up”, or why it’s off. */
   label: string;
   icon: ReactElement;
   onClick: () => void;

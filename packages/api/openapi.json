@@ -1677,6 +1677,18 @@
       },
       "SayRequest": {
         "properties": {
+          "conversation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With no session running, the line the new one opens in; Ghost when unset.",
+            "title": "Conversation"
+          },
           "text": {
             "maxLength": 4000,
             "minLength": 1,
@@ -2472,6 +2484,18 @@
       },
       "WakeRequest": {
         "properties": {
+          "conversation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The line the session opens in; Ghost when unset.",
+            "title": "Conversation"
+          },
           "text": {
             "anyOf": [
               {

@@ -123,6 +123,7 @@ class Daemon:
         self.session: GhostSession | None = None
         self.gate: WriteGate | None = None
         self._first_via = "voice"  # how the wake-time utterance arrived
+        self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
         self._listener: WakeListener | None = None
         self._rearm = asyncio.Event()  # set when the passive listener must be rebuilt
@@ -144,11 +145,18 @@ class Daemon:
 
     # --- Controller (called by the API) -------------------------------------
 
-    async def wake(self, first_utterance: str | None) -> bool:
+    async def wake(self, first_utterance: str | None, conversation: str | None = None) -> bool:
+        """``conversation``: the line the session opens in (the desktop's Call button);
+        Ghost when unset. A settled or unknown line is refused."""
         if self.state.phase is not Phase.PASSIVE or self._manual is None:
             return False
         if not self._phone_q.empty():  # a phone session is about to start
             return False
+        if conversation is not None and conversation != GHOST:
+            target = self.conversations.get(conversation) if self.conversations else None
+            if target is None or target.settled:
+                return False
+        self._start_in = conversation or GHOST
         self._manual.trigger(first_utterance)
         return True
 
@@ -159,12 +167,12 @@ class Daemon:
         await self.session.end()
         return True
 
-    async def say(self, text: str) -> bool:
+    async def say(self, text: str, conversation: str | None = None) -> bool:
         if self.state.phase is Phase.STARTING:
             return False
         if self.session is None:
             self._first_via = "text"
-            return await self.wake(text)
+            return await self.wake(text, conversation)
         self.state.add_turn("user", text, via="text")
         await self.session.say_text(text)
         return True
@@ -589,6 +597,7 @@ class Daemon:
             logger.info("passive: waiting for wake word")
             self.state.set_phase(Phase.PASSIVE)
             self._rearm.clear()
+            self._start_in = GHOST  # a spoken wake lands in Ghost; a Call sets it
             wake_task = asyncio.ensure_future(wake.wait())
             stop_task = asyncio.ensure_future(self._stop.wait())
             rearm_task = asyncio.ensure_future(self._rearm.wait())
@@ -641,7 +650,10 @@ class Daemon:
                     self._chimed = False
                 continue
             await events.emit("wake")
-            await self._conversation(models, tool_sources, gate, events, ducker, wake_task.result())
+            first = wake_task.result()
+            await self._conversation(
+                models, tool_sources, gate, events, ducker, first, start_in=self._start_in
+            )
 
     def _bind_voices(self, conversations: Conversations, models: Models) -> None:
         """Once Kokoro is loaded, the operations validate voice ids against its list."""

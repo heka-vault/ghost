@@ -235,19 +235,23 @@ export class MockDaemon {
   private requireReady() {
     if (!this.status.models_ready) throw new HttpError(409, "Ghost is still loading its voice models.");
   }
-  private wake() {
+  /** A session opens in Ghost, or in the line a Call names; a settled or unknown line is refused, as the daemon does. */
+  private wake(conversation?: string | null) {
     this.requireReady();
     if (this.status.session_id) return;
+    const slug = conversation || "ghost";
+    const target = this.lines.get(slug)?.detail;
+    if (!target || target.settled_at) throw new HttpError(409, `There's no live line called ${slug}.`);
     this.turns = [];
-    this.setActive("ghost");
-    this.pushStatus({ session_id: newId(), phase: "listening", conversation: "ghost", department: null, toolkit: null, session_origin: "desk" });
-    this.addTurn("assistant", "Ghost here.", "system");
+    this.setActive(slug);
+    this.pushStatus({ session_id: newId(), phase: "listening", conversation: slug, department: this.departmentOf(target), toolkit: null, session_origin: "desk" });
+    this.addTurn("assistant", target.is_ghost ? "Ghost here." : `${target.name} here.`, "system");
   }
   private setActive(slug: string | null) {
     for (const l of this.lines.values()) l.detail.active = l.detail.slug === slug;
   }
-  private say(text: string) {
-    if (!this.status.session_id) this.wake();
+  private say(text: string, conversation?: string | null) {
+    if (!this.status.session_id) this.wake(conversation);
     this.addTurn("user", text, "text");
     this.pushStatus({ phase: "thinking" });
     this.later(900, () => {
@@ -545,14 +549,14 @@ export class MockDaemon {
 
     if (method === "GET" && path === "/status") return this.snapshot();
     if (method === "POST" && path === "/wake") {
-      this.wake();
+      this.wake(typeof b.conversation === "string" ? b.conversation : null);
       if (typeof b.text === "string" && b.text) this.say(b.text);
       return { ok: true };
     }
     if (method === "POST" && path === "/sleep") return this.sleepNow(), { ok: true };
     if (method === "POST" && path === "/session/say") {
       this.requireReady();
-      this.say(String(b.text ?? ""));
+      this.say(String(b.text ?? ""), typeof b.conversation === "string" ? b.conversation : null);
       return { ok: true };
     }
     if (method === "GET" && path === "/session/turns") return this.turns;

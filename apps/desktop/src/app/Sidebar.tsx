@@ -1,6 +1,6 @@
 import type { ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
@@ -19,13 +19,14 @@ const Switcher = import.meta.env.DEV ? lazy(() => import("../design/chrome").the
 /** Below this window height the Prototypes group starts collapsed, so the nav fits without scrolling. */
 const SHORT_WINDOW = 840;
 const PROTOS_KEY = "ghost.sidebar.prototypes";
+const SETTINGS_KEY = "ghost.sidebar.settings";
 
 /** The mark and the name. Pointing at it plays the mascot; its state stays here, not in Sidebar. */
 function Brand({ children }: { children?: ReactNode }) {
   const [hovered, setHovered] = useState(false);
   return (
     <div className="sidebar__brand" onPointerEnter={(e) => e.pointerType === "mouse" && setHovered(true)} onPointerLeave={() => setHovered(false)}>
-      <GhostMark size={22} hovered={hovered} />
+      <GhostMark size={28} hovered={hovered} />
       <span className="sidebar__brand-name">Ghost</span>
       {children}
     </div>
@@ -81,10 +82,25 @@ export function Sidebar() {
     };
   }, [client, connected, conversationsVersion]);
 
-  // Lines are the section below, not a nav item: one word, one place (GLOSSARY.md).
-const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filter((r) => r.id !== "conversations");
+  // Lines are the section below, not a nav item: one word, one place (GLOSSARY.md). The
+  // session and the configuration screens fold under the pinned Settings row (2026-10-24).
+  const main = ROUTES.filter((r) => r.component && r.nav?.group === "main" && r.id !== "conversations");
   const footer = ROUTES.filter((r) => r.component && r.nav?.group === "footer");
+  const under = ROUTES.filter((r) => r.component && r.nav?.group === "settings");
   const protos = design ? ROUTES.filter((r) => r.component && r.nav?.group === "prototype") : [];
+  const inSettings = under.some((r) => r.id === current) || footer.some((r) => r.id === current);
+  // The Settings group: open while one of its screens is the page, else as the operator last
+  // left it (closed to start). Landing on one of them opens it; Settings itself doesn't.
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(() => sessionStorage.getItem(SETTINGS_KEY) === "open");
+  const toggleSettings = () => {
+    const next = !settingsOpen;
+    setSettingsOpen(next);
+    sessionStorage.setItem(SETTINGS_KEY, next ? "open" : "closed");
+  };
+  useEffect(() => {
+    if (under.some((r) => r.id === current)) setSettingsOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
 
   const inSession = !!status?.session_id;
   const active = status?.conversation ?? null;
@@ -139,17 +155,13 @@ const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filt
 
       <nav className="sidebar__nav" aria-label="Main">
       <div className="sidebar__scroll" ref={scroller} onScroll={measure}>
-        <ul className="sidebar__group" role="list">
-          {main.map((r) => (
-            <NavItem
-              key={r.id}
-              route={r}
-              current={current === r.id && !(lineIsCurrent && r.id === "conversations")}
-              section={lineIsCurrent && r.id === "conversations"}
-              badge={r.id === "session" && pending && connected ? 1 : undefined}
-            />
-          ))}
-        </ul>
+        {main.length > 0 && (
+          <ul className="sidebar__group" role="list">
+            {main.map((r) => (
+              <NavItem key={r.id} route={r} current={current === r.id && !(lineIsCurrent && r.id === "conversations")} section={lineIsCurrent && r.id === "conversations"} />
+            ))}
+          </ul>
+        )}
 
         {/* Lines stay on screen while reconnecting: stale, never cleared. */}
         {state !== "offline" && sortedLines.length > 0 && (
@@ -227,7 +239,7 @@ const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filt
         {protos.length > 0 && (
           <div className="sidebar__section">
             <button type="button" className={cx("sidebar__label sidebar__label--toggle", protosOpen && "is-open")} id="sidebar-protos" aria-expanded={protosOpen} aria-controls="sidebar-protos-list" onClick={toggleProtos}>
-              <ChevronRight size={12} aria-hidden />
+              <ChevronDown size={12} aria-hidden className="sidebar__label-chevron" />
               Prototypes
               {!protosOpen && protos.some((r) => current === r.id) && <span className="sidebar__label-dot" aria-hidden />}
             </button>
@@ -247,8 +259,22 @@ const main = (ROUTES.filter((r) => r.component && r.nav?.group === "main")).filt
         <nav aria-label="Settings">
           <ul className="sidebar__group" role="list">
             {footer.map((r) => (
-              <NavItem key={r.id} route={r} current={current === r.id} />
+              <NavItem
+                key={r.id}
+                route={r}
+                current={current === r.id}
+                section={inSettings && current !== r.id}
+                // A waiting okay stays visible while the Session row is folded away.
+                badge={!settingsOpen && pending && connected ? 1 : undefined}
+                fold={
+                  under.length
+                    ? { open: settingsOpen, onToggle: toggleSettings, controls: "sidebar-settings-list", label: settingsOpen ? "Hide the settings screens" : "Show the settings screens" }
+                    : undefined
+                }
+              />
             ))}
+            {settingsOpen &&
+              under.map((r) => <NavItem key={r.id} route={r} current={current === r.id} sub badge={r.id === "session" && pending && connected ? 1 : undefined} />)}
           </ul>
         </nav>
         {design && Switcher && (
@@ -278,11 +304,19 @@ export function StatusCard({ phase, title, sub }: { phase: GhostPhase; title: st
   );
 }
 
-function NavItem({ route, current, section, badge }: { route: RouteDef; current: boolean; section?: boolean; badge?: number }) {
+/** A fold control at the row's end: the row still navigates; the chevron opens or closes the group under it. */
+interface Fold {
+  open: boolean;
+  onToggle: () => void;
+  controls: string;
+  label: string;
+}
+
+function NavItem({ route, current, section, badge, sub, fold }: { route: RouteDef; current: boolean; section?: boolean; badge?: number; sub?: boolean; fold?: Fold }) {
   const Icon = route.nav!.icon;
   return (
-    <li>
-      <a className={cx("sidebar__item", current && "is-current", section && "is-section")} href={hrefFor(route.path)} aria-current={current ? "page" : undefined}>
+    <li className={cx(fold && "sidebar__head")}>
+      <a className={cx("sidebar__item", sub && "sidebar__item--sub", current && "is-current", section && "is-section")} href={hrefFor(route.path)} aria-current={current ? "page" : undefined}>
         <Icon size={16} aria-hidden />
         <span className="sidebar__item-label">{route.nav!.label}</span>
         {badge != null && (
@@ -291,6 +325,11 @@ function NavItem({ route, current, section, badge }: { route: RouteDef; current:
           </span>
         )}
       </a>
+      {fold && (
+        <button type="button" className={cx("sidebar__fold", fold.open && "is-open")} aria-expanded={fold.open} aria-controls={fold.controls} aria-label={fold.label} onClick={fold.onToggle}>
+          <ChevronDown size={14} aria-hidden />
+        </button>
+      )}
     </li>
   );
 }
