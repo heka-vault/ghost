@@ -74,17 +74,18 @@ Say "what needs my sign-off", talk it through, and "go to sleep" when done. How 
 Ghost may do without asking is in `~/.config/ghost/policy.toml` (seeded by `make env`
 from `infra/policy.example.toml`): per operation, `deny`, `confirm`, `announce`, or
 `quiet`. Every write is logged; to reverse one, ask Ghost and it proposes the opposite change.
-The same file lists the MCP servers Ghost connects to (`[mcp.<name>]`, a streamable HTTP
-`url` or a stdio `command`; `$NAME` in a header or env value is a secret from the
-environment). Their read-only tools are offered to the model; `ghostd check` and the
-control API's `/mcp` show what each server gave. Ctrl+C stops the daemon; a goodbye only
+Ghost's MCP servers are in `~/.config/ghost/mcp.json` (seeded from `infra/example/`; a
+streamable HTTP `url` or a stdio `command`, `${NAME}` in a header or env value is a secret
+from the environment) and what the gate may do with them in `department.json` beside it.
+Their read-only tools are offered to the model; `ghostd check` and the control API's
+`/mcp` show what each server gave. Ctrl+C stops the daemon; a goodbye only
 ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
 cancellation with [infra/pipewire/](infra/pipewire/). To teach Ghost something new,
-declare an MCP server in the policy file ([docs/mcp.md](docs/mcp.md)): its reads are
-offered to the model, its writes by declaration through the gate. Group what a department
-may reach into toolkits and start departments from templates
+declare an MCP server in a department's `mcp.json` ([docs/mcp.md](docs/mcp.md)): its
+reads are offered to the model, its writes by declaration through the gate. A department
+is a folder with its rules, servers, skills and agents
 ([docs/departments.md](docs/departments.md)); skills are folders of instructions
 ([docs/skills.md](docs/skills.md)). GitHub issues come
 through the official GitHub server; `ghost-mock-github` stands in before a token exists.

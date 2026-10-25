@@ -26,6 +26,9 @@ starts, broken into stages:
 
 Outside a turn: Start on the phone → greeting heard; pairing; the phone's `/hello` and
 `/audit`; control API calls from the desktop app; daemon start → models ready.
+A transfer into a department whose own servers are not up starts them on that turn
+(ADR 0024): `Fleet.enter` logs the start with its seconds, and the servers stay up for
+`department_idle_secs` after the last session leaves, so only the first transfer pays.
 
 Every live turn writes its timeline, timings only and never text, to
 `~/.local/share/ghost/latency.jsonl`, with one line in the daemon log. `make latency`

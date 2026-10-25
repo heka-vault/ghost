@@ -1,32 +1,31 @@
 # Glossary
 
-> **Changing (ADR 0024, accepted 2026-10-25, not yet built).** When the department
-> work lands, three words replace the phone metaphor below: an **agent** is what the
-> operator hires, talks to, moves and fires (its own persona, job, voice and private
-> memory); a **department** is the folder it works in (rules, servers, skills, docs and a
-> shared memory every agent in it reads); **conversation** stays as the storage name for
-> an agent in the code and the control API. *Line*, *toolkit* and *template* go. The
-> table below describes what runs today and is rewritten with the code.
-
-The words Ghost uses, one meaning each. In the apps and in speech the phone metaphor
-is the one that holds: you call a line, and what is said on it is the conversation.
+The words Ghost uses, one meaning each. The operator hires an **agent** into a
+**department** and talks to it; what is said is the **conversation**. The phone metaphor
+of the first increment (*line*, *patch me through*) is gone (ADR 0024).
 
 | Term | Meaning | Not |
 |---|---|---|
-| **Line** | A named thing you can call: its own name, voice, persona, memory, scope and transcript. Ghost is line zero and unscoped; every other line is scoped (ADR 0019). The desktop's Lines screen and the phone's dial pad list them. The code and ADRs 0014/0019 call the same object a *conversation* (`ghost_core.conversations`, `/conversations` in the control API); the operator also says *thread* and *department*. Those are the same thing; the word to show is **line**. | A session. |
-| **Conversation** | What is said on a line: its transcript, with Ghost's memory of it. Opening a line in the desktop app shows the conversation first; the line's settings sit behind the More menu. | The line itself (see above). |
-| **Session** | One stretch with the mic open, from a wake or a call to a hang-up. A session starts in one line (Ghost at the desk; on the phone, Ghost or the line you called) and can be patched to another. | |
-| **Call** | A phone session, started from the phone's Home: the ghost for Ghost, a key on the dial pad for a line. | |
-| **Patch (me) through / switch** | Moving a running session to another live line; "back to Ghost" returns. Settled lines are out of reach by voice. | |
-| **Settled** | A line that is done: out of voice routing and the active list, still readable, can be unsettled (ADR 0019). | Deleted. |
-| **Scope** | What a line may touch per server (for GitHub, repositories); the gate refuses writes outside it (ADR 0019). | |
+| **Agent** | What the operator hires, talks to, moves and retires: its own name, job, persona, voice, private memory, notes and transcript, working in one department. Ghost is agent zero. The desktop's Agents screen and the phone's Home list them. The code and the control API call the same object a *conversation* (`ghost_core.conversations`, `/conversations`); the word to show is **agent**. | A session; a department. |
+| **Department** | A folder under `~/.config/ghost/departments/` (Ghost's is the config folder itself): its rules (`AGENTS.md`), servers (`mcp.json`), what the gate may do with them (`department.json`), skills, docs and a shared memory every agent in it reads (ADR 0024). Each has a default agent named after it; "transfer me to accounting" lands there. A session in a department reaches only what its folder gives. | A permission bundle on its own (that was a *toolkit*, retired). |
+| **Conversation** | What is said with an agent: its transcript, with the agent's memory of it. Opening an agent in the desktop shows the conversation first; the agent's settings sit behind it. In code, also the storage name for the agent. | |
+| **Session** | One stretch with the mic open, from a wake or a call to a hang-up. A session starts in one agent (Ghost at the desk; on the phone, Ghost or the agent you called) and can be transferred to another. | |
+| **Call** | A phone session, started from the phone's Home: the ghost for Ghost, a key for a department or an agent. | |
+| **Transfer / switch** | Moving a running session to another agent; "back to Ghost" returns. Retired agents are out of reach by voice. | A *move* (below). |
+| **Move** | Putting an agent in another department: its folder, memory and transcript go with it; a running session in it follows (ADR 0024). A department's default agent is not moved; a new one is hired in the destination with a summary. | A transfer, which moves the session. |
+| **Hire / retire / rehire** | Create an agent in a department; take it out of voice routing and the active list, transcript and audit kept; bring it back. Delete removes it for good. | |
+| **Rule** | A line of a department's `AGENTS.md`, in every one of its agents' prompts. "Add a rule" appends the operator's words verbatim through the gate. | A persona, which is one agent's. |
+| **Owner** | The department whose server allowlist names an item (a repository). A request about it from elsewhere gets the owner's name and an offer to transfer. | |
 | **Checked out (hold)** | "Hang on, Ghost": the session stays, Ghost stops listening until addressed by name at the start of an utterance; nothing heard meanwhile is kept (ADR 0021). | Hung up. |
 | **Hang up** | A goodbye ends the session; Ghost says a short goodbye and the desk returns to passive (ADR 0021). The End button on the phone ends it silently. | "Go to sleep" (gone). |
 | **Passive** | The desk listening locally for the wake phrase only; nothing leaves the machine (ADR 0010). | |
 | **Gate** | The one path for every write: policy level, snapshot, bounds, read-back, audit (ADR 0007, 0011). | |
-| **Department** | A line that has toolkits: its sessions reach only what they grant (none: everything, like Ghost). It is its own primary line, and topic lines can be started in it (ADR 0023). "Transfer me to accounting" lands on it. | Ghost, which is unscoped. |
-| **Toolkit** | A named bundle of permissions a department is given: which servers (which tools, which items, at what level, never looser than the policy file) and which skills (ADR 0023). Designed in the desktop, stored in the policy file. | An *ability* (the retired packages). |
-| **Skill** | A `SKILL.md` folder: instructions the model reads on demand through `read_skill`, never a source of permission. Scripts in it run only through the gated scripts server (ADR 0023). | |
-| **Template** | A folder that creates a department with its toolkits and skills in one step. The operator's earlier word was *workspace*, now dropped (ADR 0023). | A live department. |
-| **Server** | An MCP server the operator declares in the policy file: its reads are offered to the model, its writes by declaration through the gate (ADR 0022). Also *source*: a server or the lines, as the gate and the audit know them (the audit's `ability` field holds the source's name). | An *ability*: the installable packages Ghost had until 2026-10-20 (ADR 0012, superseded). |
-| **Wisp** | Ghost's mascot and the only ghost drawing in the apps; a line is shown as Wisp in the line's colour. | |
+| **Skill** | A `SKILL.md` folder: instructions the model reads on demand through `read_skill`, never a source of permission. Read nearest first: the department's, the operator's `~/.agents/skills`, Ghost's own. Scripts in it run only through the gated scripts server (ADR 0023). | |
+| **Server** | An MCP server a department declares in its `mcp.json`, with its reads, scope, writes and levels in `department.json`: its reads are offered to the model, its writes by declaration through the gate (ADR 0022, ADR 0024). A department may `use` one of Ghost's. Also *source*: a server, the agents or the departments, as the gate and the audit know them (the audit's `ability` field holds the source's name). | An *ability*: the installable packages Ghost had until 2026-10-20 (ADR 0012, superseded). |
+| **Journal** | A department's writes in the audit, by any of its agents, newest first. | |
+| **Wisp** | Ghost's mascot and the only ghost drawing in the apps; an agent is shown as Wisp in the agent's colour. | |
+
+Retired words, so old notes still read: a **line** was an agent; a **toolkit** was a
+permission bundle in the policy file and a **template** a folder that stamped one out,
+both replaced by the department folder; a **settled** line is a retired agent; a thread's
+**scope** is now its department's allowlists.
