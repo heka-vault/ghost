@@ -84,8 +84,8 @@ Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
 cancellation with [infra/pipewire/](infra/pipewire/). To teach Ghost something new,
 connect an app ([docs/apps.md](docs/apps.md)): from the desktop's catalog (sign in, an API
 key, or a package that runs on this computer), by address, or by pasting another tool's
-config. A department is a folder with its rules, permissions, skills and agents
-([docs/departments.md](docs/departments.md)); skills are folders of instructions
+config. Ghost's folder holds the rules every agent reads, what it watches, what it makes
+and its agents ([docs/folder.md](docs/folder.md)); skills are folders of instructions
 ([docs/skills.md](docs/skills.md)). `ghost-mock-github` stands in for GitHub before you
 connect the real one.
 
@@ -93,14 +93,14 @@ connect the real one.
 
 `apps/desktop` is a Tauri 2 app (React) that talks to the daemon over its socket. Speaking
 is the product; the app is the companion: the live session with a Confirm card for changes
-that need your okay, your agents grouped by department and their voices, the departments
-themselves, the apps you connect and the catalog to connect more, permissions, the audit
+that need your okay, what needs you, your agents and their voices, what Ghost watches, the
+apps you connect and the catalog to connect more, permissions, the audit
 log, skills and settings. It follows the system's light or dark theme.
 
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/session.webp" alt="A live session with the Accounting agent"><br><sub><b>Session.</b> A live session, transferred to Accounting.</sub></td>
-    <td width="50%"><img src="docs/screenshots/conversations.webp" alt="The Accounting agent: voice, persona, memory and pinned notes"><br><sub><b>Agents.</b> Each agent keeps its own voice, persona and memory, in its department.</sub></td>
+    <td width="50%"><img src="docs/screenshots/conversations.webp" alt="The Accounting agent: voice, persona, memory and pinned notes"><br><sub><b>Agents.</b> Each agent keeps its own voice, persona and memory.</sub></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/policy.webp" alt="Permissions"><br><sub><b>Permissions.</b> Everything runs unless you block it or want to be asked first.</sub></td>

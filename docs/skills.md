@@ -22,21 +22,15 @@ requires: [app:quickbooks]          # optional: apps it needs; the desktop shows
 
 ## Where skills come from
 
-Nearest first, and the first folder with a name wins:
+In this order, and the first folder with a name wins:
 
-1. **The department's own:** `skills/`, `.agents/skills/` or `.claude/skills/` under the
-   department's folder, or under its `root` when it has one (a repository's own skills,
-   read in place, never copied). See [departments.md](departments.md).
-2. **The operator's:** `~/.agents/skills/<name>/` (`home_skills_dir`), the folder other
+1. **The operator's:** `~/.agents/skills/<name>/` (`home_skills_dir`), the folder other
    agents on the machine share. Read in place.
-3. **Ghost's own:** `~/.config/ghost/skills/<name>/` (`skills_dir`). The desktop adds here
+2. **Ghost's own:** `~/.config/ghost/skills/<name>/` (`skills_dir`). The desktop adds here
    by drag-and-drop or by path, and removes; Ghost does the same by voice ("add the
    invoicing skill from my downloads") as the `skills.add` and `skills.remove` operations
    through the gate, `confirm` unless the policy file says otherwise. A skill installed
    under a new name has its `name` rewritten to match the folder.
-
-A session in Ghost sees the operator's and Ghost's own; a session in a department sees the
-department's first, then those.
 
 ## Problems
 
@@ -58,7 +52,7 @@ between tools is common); links inside a skill are not.
 Skill text is untrusted like issue text. It cannot name an app the session does not have
 and cannot change a permission. A skill's scripts never run from its text: they run only
 through `ghost-scripts`, an app whose `run` goes through the gate like any change
-([departments.md](departments.md#scripts-run-only-through-the-gate)).
+([folder.md](folder.md#scripts-run-only-through-the-gate)).
 
 `ghostd check` lists the skills found, where each came from, any problem, and any app it
 requires that is not connected (`mcp:<name>`, the older form, still reads); `GET /skills` on the control API and the desktop's Skills

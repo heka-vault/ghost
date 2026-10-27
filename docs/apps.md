@@ -3,8 +3,7 @@
 You connect an app to Ghost once (GitHub, Linear, Notion, your bookkeeping), and from then
 on Ghost uses it: it looks things up, and it makes the changes you ask for and tells you
 what it did. What you don't want is a permission: block it, or have Ghost ask first
-(ADR 0034). Every department reaches every app; a department can narrow that for its own
-agents.
+(ADR 0034). Every agent reaches every app, and there is one set of permissions (ADR 0035).
 
 ## Connecting an app
 
@@ -94,24 +93,9 @@ allow = []                                     # exceptions, when mode is ask or
   the mode.
 
 Ghost's own operations take the same rules: `conversations.*` (the agents), `skills.*`,
-`departments.*` (a rule or a shared fact) and `outputs.*` (files it makes). An older
+`rules.add` (a line appended to `AGENTS.md`) and `outputs.*` (files it makes). An older
 policy file with a table per source (`[conversations] delete = "confirm"`) still reads, as
 rules.
-
-### A department narrows
-
-A department's `department.json` may add `block`, `ask` and `quiet` rules for its own
-agents. It can never add `allow`:
-
-```json
-{
-  "title": "Site",
-  "permissions": {
-    "block": ["github.*(repo!=site)", "stripe"],
-    "ask": ["github.issue_write(state=closed)"]
-  }
-}
-```
 
 ## The files
 
@@ -136,7 +120,7 @@ connect or disconnect; you can edit it by hand too.
 ```
 
 - **Its name** is lowercase letters, digits, dashes and underscores, never one of
-  Ghost's own (`conversations`, `skills`, `departments`, `outputs`, …), whose operations
+  Ghost's own (`conversations`, `skills`, `rules`, `outputs`, …), whose operations
   it would shadow. Ghost writes `apps.json` for you only (0600), and edits only the entry it
   connects or disconnects; a file that isn't JSON is never overwritten.
 - **How it is reached.** Either `url`, with `headers`, which Ghost signs in to when
@@ -162,8 +146,8 @@ under `ghostd check` and on the Apps screen. The daemon runs without it.
 ## Watches and webhooks
 
 A watch (ADR 0028) or a webhook's check at the source (ADR 0027) names an `app` and one
-of its read-only tools. A watch's department's `block` rules apply to it. Older
-declarations that say `server` still read.
+of its read-only tools. The permissions' `block` rules apply to it as to the model's
+reads. Older declarations that say `server` still read ([folder.md](folder.md#watches)).
 
 ## Before a token exists
 
