@@ -355,7 +355,7 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
               compact
               summary={shown.proposal.summary}
               rationale={shown.proposal.rationale}
-              operation={`${shown.proposal.ability}.${shown.proposal.operation}`}
+              operation={`${shown.proposal.source}.${shown.proposal.operation}`}
               expiresAt={shown.proposal.expires_at}
               busy={busy === "confirm" ? "confirm" : busy === "cancel" ? "cancel" : shown.phase === "deciding"}
               disabled={!online || shown.phase === "expired"}
@@ -461,7 +461,7 @@ function Outcome({ proposal, decision }: { proposal: PendingProposal; decision: 
       <p className="tray-outcome__summary" data-user-content>
         {proposal.summary}
       </p>
-      <p className="tray-outcome__operation">{`${proposal.ability}.${proposal.operation}`}</p>
+      <p className="tray-outcome__operation">{`${proposal.source}.${proposal.operation}`}</p>
       {proposal.rationale && (
         <p className="tray-outcome__rationale" data-user-content>
           {proposal.rationale}

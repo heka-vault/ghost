@@ -21,14 +21,14 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query
 from ghost_core.apps import (
-    APP_NAME_RE,
     APPS_FILE,
+    RESERVED_NAMES,
     AppSpec,
+    app_name_problem,
+    edit_apps,
     extract_secrets,
-    load_apps,
     parse_apps_json,
     secret_name,
-    write_apps,
 )
 from ghost_core.catalog import CatalogEntry, CatalogError, connect
 from ghost_core.levels import Autonomy
@@ -181,7 +181,9 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         )
 
     def free_name(base: str) -> str:
+        """``base``, or ``base-2`` and on when an app has it or Ghost's own tools do."""
         taken = set(deps.apps.specs) if deps.apps is not None else set()
+        taken |= RESERVED_NAMES
         if base not in taken:
             return base
         n = 2
@@ -228,24 +230,38 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         update_env(apps_env_path(deps), dict(secrets), mode=0o600)
         os.environ.update(secrets)
 
-    def forget_secrets(name: str) -> None:
-        """The keys Ghost made for this app when it was connected (``GHOST_APP_<NAME>_*``);
-        a name the operator chose themselves stays."""
+    def forget_secrets(spec: AppSpec) -> None:
+        """The keys Ghost kept for this app: the ``GHOST_APP_`` names its own entry refers
+        to and no other app's does. A name the operator chose themselves stays, and so
+        does every other app's key (``github-2``'s are not ``github``'s)."""
+        others = {n for s in deps.apps.specs.values() if s.name != spec.name for n in s.secrets()}
         path = apps_env_path(deps)
-        prefix = secret_name(name, "") + "_"
-        gone = [k for k in read_env(path) if k.startswith(prefix)]
+        kept = read_env(path)
+        gone = [k for k in spec.secrets() if k.startswith("GHOST_APP_") and k not in others]
+        gone = [k for k in gone if k in kept]
         if gone:
             update_env(path, dict.fromkeys(gone), mode=0o600)
             for k in gone:
                 os.environ.pop(k, None)
 
+    def clash(spec: AppSpec, secrets: dict[str, str]) -> str | None:
+        """Another app whose keys this one's would overwrite: ``my-app`` and ``my_app``
+        keep theirs under the same names."""
+        prefix = secret_name(spec.name, "")
+        for other in deps.apps.specs.values():
+            if other.name == spec.name:
+                continue
+            if secret_name(other.name, "") == prefix or set(secrets) & set(other.secrets()):
+                return other.name
+        return None
+
     def save(specs: list[AppSpec], *, remove: str | None = None) -> None:
-        current = dict(load_apps(apps_path()).apps)
-        if remove is not None:
-            current.pop(remove, None)
-        for spec in specs:
-            current[spec.name] = spec
-        write_apps(apps_path(), current)
+        """Only these entries change in apps.json (``edit_apps``); a file that isn't JSON
+        is refused, never overwritten."""
+        try:
+            edit_apps(apps_path(), specs, remove=remove)
+        except ValueError as e:
+            raise HTTPException(409, f"{APPS_FILE} can't be changed: {e}") from None
 
     async def start(specs: list[AppSpec]) -> str | None:
         """Connect each now, in the background; wait a little for a connection or for a
@@ -269,21 +285,26 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
             await asyncio.sleep(0.1)
         return None
 
-    def specs_from(req: AppConnect) -> tuple[list[AppSpec], dict[str, str]]:
+    def specs_from(req: AppConnect) -> tuple[list[AppSpec], dict[str, str], list[str]]:
+        """The apps to connect, the secrets to keep, and what to tell the operator."""
         values = req.values or {}
         if req.config is not None:
             try:
                 parsed = parse_apps_json(req.config, "the pasted config")
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None
-            if not parsed.apps:
+            if not parsed.apps or parsed.left_out:
+                # Every entry, or none: one left out silently is one the operator thinks
+                # is connected.
                 raise HTTPException(422, "; ".join(parsed.problems) or "no apps in it")
             specs, secrets = [], {}
             for spec in parsed.apps.values():
                 moved, found = extract_secrets(spec)
                 specs.append(moved)
                 secrets.update(found)
-            return specs, secrets
+            # A key written into the paste is moved, not a problem left to fix.
+            notes = [p for p in parsed.problems if "looks like a key" not in p]
+            return specs, secrets, notes
         if req.url is not None:
             u = urlparse(req.url)
             if u.scheme not in ("https", "http") or not u.netloc:
@@ -304,7 +325,7 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
                 headers=headers,
                 sign_in=not key,
             )
-            return [spec], secrets
+            return [spec], secrets, []
         if req.catalog is None or req.option is None:
             raise HTTPException(422, "give catalog and option, a url, or a config")
         entry = deps.catalog.get(req.catalog) if deps.catalog is not None else None
@@ -316,23 +337,29 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
             )
         except CatalogError as e:
             raise HTTPException(422, str(e)) from None
-        return [spec], secrets
+        return [spec], secrets, []
 
     @app.post("/apps", response_model=AppConnectResult, tags=["apps"])
     async def connect_app(req: AppConnect) -> AppConnectResult:
         """Connect an app now and keep it in apps.json. An app that signs in comes back
         with the address the browser should open; the desktop opens it."""
         need_apps()
-        specs, secrets = specs_from(req)
+        specs, secrets, notes = specs_from(req)
         for spec in specs:
-            if not APP_NAME_RE.match(spec.name):
-                raise HTTPException(422, f"{spec.name!r}: a name is lower-case letters and -")
+            if why := app_name_problem(spec.name):
+                raise HTTPException(422, f"{spec.name!r}: {why}")
             if spec.name in deps.apps.specs and not req.replace:
                 raise HTTPException(409, f"an app is already connected as {spec.name}")
+            if other := clash(spec, secrets):
+                raise HTTPException(
+                    409, f"{spec.name} would share its keys with {other}; give it another name"
+                )
+        save(specs)  # first: a file that won't take the entry changes nothing
         keep_secrets(secrets)
-        save(specs)
         url = await start(specs)
-        return AppConnectResult(apps=[app_view(s.name) for s in specs], sign_in_url=url)
+        return AppConnectResult(
+            apps=[app_view(s.name) for s in specs], sign_in_url=url, problems=notes
+        )
 
     @app.post("/apps/{name}/sign-in", response_model=AppConnectResult, tags=["apps"])
     async def sign_in(name: str) -> AppConnectResult:
@@ -351,13 +378,14 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         """Disconnect: it leaves the tools at once and apps.json; its sign-in and the keys
         Ghost kept for it are forgotten."""
         need_apps()
-        if name not in deps.apps.specs:
+        spec = deps.apps.specs.get(name)
+        if spec is None:
             raise HTTPException(404, f"no app called {name!r}")
+        save([], remove=name)  # first: a file that won't take the change leaves it connected
         await deps.apps.remove(name)
         if deps.signins is not None:
             deps.signins.forget(name)
-        save([], remove=name)
-        forget_secrets(name)
+        forget_secrets(spec)
         deps.state.publish_apps(changed=name)
         return Ack(ok=True, detail=None)
 

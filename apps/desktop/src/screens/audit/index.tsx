@@ -6,7 +6,7 @@
  * search run over what is loaded, and every count says so; "Show older" loads more.
  *
  * URL states (query before the hash): status=<all|attention|executed|pending|…>,
- * ability=<source name>, q=<text>, open=<first|id>, fail=audit (mock only: every request fails),
+ * source=<an app or one of Ghost's own>, q=<text>, open=<first|id>, fail=audit (mock only: every request fails),
  * fail=audit-more (mock only: the first page loads, "Show older" fails).
  */
 import type { AuditEntry } from "@ghost/client-ts";
@@ -56,7 +56,7 @@ export default function AuditScreen(_: RouteProps) {
     ? {
         summary: pending.summary,
         rationale: pending.rationale,
-        operation: `${pending.ability}.${pending.operation}`,
+        operation: `${pending.source}.${pending.operation}`,
         expiresAt: pending.expires_at,
         busy: answering ?? false,
         disabled: !online,
@@ -67,7 +67,7 @@ export default function AuditScreen(_: RouteProps) {
     : null;
 
   const [status, setStatus] = useState(init.status);
-  const [ability, setAbility] = useState(init.ability);
+  const [source, setSource] = useState(init.source);
   const [query, setQuery] = useState(init.q);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [cursor, setCursor] = useState<string | null>(null);
@@ -104,25 +104,25 @@ export default function AuditScreen(_: RouteProps) {
     const c = new Map<string, number>();
     let attention = 0;
     for (const e of log.items) {
-      if (ability !== "all" && e.ability !== ability) continue;
+      if (source !== "all" && e.source !== source) continue;
       const o = outcomeOf(e, ctx);
       c.set(o, (c.get(o) ?? 0) + 1);
       if (ATTENTION.has(o)) attention++;
     }
     return { by: c, attention };
-  }, [log.items, ability, ctx]);
+  }, [log.items, source, ctx]);
 
-  const abilities = useMemo(() => [...new Set(log.items.map((e) => e.ability))].sort(), [log.items]);
+  const sources = useMemo(() => [...new Set(log.items.map((e) => e.source))].sort(), [log.items]);
 
   const filtered = useMemo(() => {
     const q = query.trim();
     return log.items.filter((e) => {
-      if (ability !== "all" && e.ability !== ability) return false;
+      if (source !== "all" && e.source !== source) return false;
       const o = outcomeOf(e, ctx);
       if (status === "attention" ? !ATTENTION.has(o) : status !== "all" && o !== status) return false;
       return !q || matches(hay.get(e.id) ?? "", q);
     });
-  }, [log.items, ability, status, query, hay, ctx]);
+  }, [log.items, source, status, query, hay, ctx]);
 
   const groups = useMemo(() => groupByDay(filtered), [filtered]);
 
@@ -135,7 +135,7 @@ export default function AuditScreen(_: RouteProps) {
     if (id) setOpen(new Set([id]));
   }, [init.open, log.items, filtered]);
 
-  const filtering = status !== "all" || ability !== "all" || query.trim() !== "";
+  const filtering = status !== "all" || source !== "all" || query.trim() !== "";
   const more = log.items.length < log.total;
   const left = Math.min(PAGE, log.total - log.items.length);
 
@@ -151,11 +151,11 @@ export default function AuditScreen(_: RouteProps) {
     }
     if (!log.loadingMore) log.loadMore();
   }, [searching, filtered.length, more, online, log]);
-  useEffect(() => setSearching(false), [filterKeyOf(status, ability, query)]);
+  useEffect(() => setSearching(false), [filterKeyOf(status, source, query)]);
 
   const reset = () => {
     setStatus("all");
-    setAbility("all");
+    setSource("all");
     setQuery("");
   };
   // From a button that is about to unmount: keep the keyboard user's place.
@@ -194,7 +194,7 @@ export default function AuditScreen(_: RouteProps) {
   // Filter results, announced once the operator stops typing; never the "Updated" time.
   const [matchText, setMatchText] = useState("");
   const firstFilter = useRef(true);
-  const filterKey = filterKeyOf(status, ability, query);
+  const filterKey = filterKeyOf(status, source, query);
   const matchCount = filtered.length;
   useEffect(() => {
     if (firstFilter.current) {
@@ -202,7 +202,7 @@ export default function AuditScreen(_: RouteProps) {
       return;
     }
     const t = setTimeout(() => {
-      if (status === "all" && ability === "all" && !query.trim()) setMatchText("Showing every loaded change");
+      if (status === "all" && source === "all" && !query.trim()) setMatchText("Showing every loaded change");
       else setMatchText(matchCount === 0 ? "No loaded changes match" : `${matchCount} ${matchCount === 1 ? "change matches" : "changes match"}`);
     }, 450);
     return () => clearTimeout(t);
@@ -224,7 +224,7 @@ export default function AuditScreen(_: RouteProps) {
   // The automatic search stops at the API's limit; past it, the regular "Show older" takes over.
   const atLimit = log.items.length >= MAX_LOADED;
   const noMatchDescription =
-    q && (status !== "all" || ability !== "all")
+    q && (status !== "all" || source !== "all")
       ? `The search only covers the status and source you picked.${more ? " Older changes may match too." : ""}`
       : more && atLimit
         ? `The newest ${log.items.length} were searched; older changes may match.`
@@ -245,9 +245,9 @@ export default function AuditScreen(_: RouteProps) {
       setQuery={setQuery}
       status={status}
       setStatus={setStatus}
-      ability={ability}
-      setAbility={setAbility}
-      abilities={abilities}
+      source={source}
+      setSource={setSource}
+      sources={sources}
       counts={counts}
       scope={more ? log.items.length : null}
     />
@@ -440,7 +440,7 @@ export default function AuditScreen(_: RouteProps) {
   );
 }
 
-const filterKeyOf = (status: string, ability: string, query: string) => `${status}|${ability}|${query.trim()}`;
+const filterKeyOf = (status: string, source: string, query: string) => `${status}|${source}|${query.trim()}`;
 
 /* ------------------------------------------------------------------------------ toolbar */
 
@@ -451,9 +451,9 @@ interface ToolbarProps {
   setQuery: (q: string) => void;
   status: string;
   setStatus: (s: string) => void;
-  ability: string;
-  setAbility: (a: string) => void;
-  abilities: string[];
+  source: string;
+  setSource: (a: string) => void;
+  sources: string[];
   counts: { by: Map<string, number>; attention: number };
   /** How many rows the counts cover when not every row is loaded; null when they cover the whole log. */
   scope: number | null;
@@ -463,13 +463,13 @@ interface ToolbarProps {
  * Search and the two filters, in the page's actions: they move into the compact bar as the
  * page scrolls (at size sm there), so filtering stays in reach down a 200-row log.
  */
-function AuditToolbar({ search, statusRef, query, setQuery, status, setStatus, ability, setAbility, abilities, counts, scope }: ToolbarProps) {
+function AuditToolbar({ search, statusRef, query, setQuery, status, setStatus, source, setSource, sources, counts, scope }: ToolbarProps) {
   const size = useContext(ButtonSizeContext) ?? "md";
   // The "/" hint shows only while the field is empty and unfocused: once focused, "/" types a slash.
   const [focused, setFocused] = useState(false);
-  const abilitySelect = useRef<HTMLSelectElement>(null);
+  const sourceSelect = useRef<HTMLSelectElement>(null);
   useFitSelect(statusRef, `${status}|${size}|${counts.attention}|${[...counts.by].join()}`);
-  useFitSelect(abilitySelect, `${ability}|${size}|${abilities.join()}`);
+  useFitSelect(sourceSelect, `${source}|${size}|${sources.join()}`);
   const statuses = STATUS_ORDER.filter((s) => counts.by.has(s) || s === status);
   const counted = (
     <>
@@ -506,15 +506,15 @@ function AuditToolbar({ search, statusRef, query, setQuery, status, setStatus, a
         {/* The counts cover what is loaded; say so once, where they are read. */}
         {scope != null ? <optgroup label={`Counted in the newest ${scope}`}>{counted}</optgroup> : counted}
       </Select>
-      {abilities.length > 1 && (
+      {sources.length > 1 && (
         <Select
-          ref={abilitySelect}
+          ref={sourceSelect}
           size={size}
           className="audit-filter"
           aria-label="Source"
-          value={ability}
-          onChange={(e) => setAbility(e.target.value)}
-          options={[{ value: "all", label: "All sources" }, ...abilities.map((a) => ({ value: a, label: sourceLabel(a) }))]}
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          options={[{ value: "all", label: "All sources" }, ...sources.map((a) => ({ value: a, label: sourceLabel(a) }))]}
         />
       )}
     </div>

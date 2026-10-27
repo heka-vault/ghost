@@ -57,7 +57,7 @@ export type OwnSettle = { id: string; action: "confirm" | "cancel" } | null;
  * The gate's summary as a phrase that fits after “You confirmed ·”: “On ghost-mock/app#163:
  * close the issue.” reads “close the issue on ghost-mock/app#163”, “On the Standup line:
  * persona set, in your words.” reads “persona set, in your words on the Standup line”.
- * Whatever the ability, the words are the gate's, never the operation id.
+ * Whatever the source, the words are the gate's, never the operation id.
  */
 export function shortSummary(summary: string): string {
   const s = summary.trim().replace(/\.$/, "");

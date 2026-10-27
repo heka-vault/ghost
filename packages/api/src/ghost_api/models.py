@@ -27,7 +27,7 @@ class Phase(enum.StrEnum):
 
 class PendingProposal(BaseModel):
     id: str
-    ability: str
+    source: str  # what it changes: an app, or Ghost's own (ghost_core.source.ToolSource)
     operation: str
     target: str
     summary: str
@@ -218,7 +218,7 @@ class AuditEventView(BaseModel):
 class AuditEntry(BaseModel):
     id: str
     session_id: str
-    ability: str
+    source: str  # an app, or Ghost's own (conversations, skills, ...)
     operation: str
     target: str
     summary: str
@@ -277,7 +277,7 @@ class AppView(BaseModel):
     title: str
     kind: Literal["sign_in", "key", "local", "custom"]
     state: Literal["connected", "connecting", "needs_sign_in", "failed", "stopped"]
-    problem: str | None = None  # why it is not connected; never a secret
+    problem: str | None = None  # not connected, or tools not offered, and why; never a secret
     catalog: str | None = None  # the catalog entry it came from
     icon: str | None = None
     actions: list[AppAction] = []
@@ -345,6 +345,8 @@ class AppConnect(BaseModel):
 class AppConnectResult(BaseModel):
     apps: list[AppView]
     sign_in_url: str | None = None
+    # What the operator should know about a pasted config: keys Ghost does not read.
+    problems: list[str] = []
 
 
 class PermissionsView(BaseModel):

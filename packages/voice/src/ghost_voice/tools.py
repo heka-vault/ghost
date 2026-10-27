@@ -11,6 +11,7 @@ the model asks for the reversing change. The model never applies a change itself
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,7 @@ from ghost_core import (
     ToolSource,
     WriteGate,
 )
+from ghost_core.apps import RESERVED_NAMES
 from ghost_core.conversations import GHOST
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.department_tools import SOURCE as DEPARTMENTS
@@ -46,6 +48,7 @@ OnCall = Callable[[str, dict[str, Any]], None]
 CHANGE_TOOL = "change"
 SWITCH_TOOL = "switch_conversation"
 BRING_UP_TOOL = "bring_up_change"
+_TOOL_NAME = re.compile(r"[a-zA-Z0-9_-]{1,64}")  # what the model API takes
 
 
 def register_tools(
@@ -101,6 +104,38 @@ def register_tools(
     def gate_offers_read(source: str, operation: str) -> bool:
         return gate.offers(source, operation, department(), read=True)
 
+    warned: set[str] = set()
+
+    def named_tools(srcs: Sequence[ToolSource]) -> dict[str, tuple[Any, ToolSource | str]]:
+        """Every read tool and app change offered, by the name the model calls it: a read
+        as (tool, source), a change as (operation, source name). Each name once, and only
+        a name the model API takes: it refuses the whole list over one bad name, which
+        would fail every turn. Ghost's own tools keep theirs in a clash, then the sources
+        in order (``ghost_core.apps`` already keeps two apps apart); a tool left out is
+        logged, once."""
+        own = {CHANGE_TOOL, *(s.name for s in session_schemas)}
+        ordered = sorted(srcs, key=lambda a: a.name not in RESERVED_NAMES)  # stable
+        out: dict[str, tuple[Any, ToolSource | str]] = {}
+
+        def add(name: str, entry: tuple[Any, ToolSource | str], source: str) -> None:
+            if name in own or name in out or not _TOOL_NAME.fullmatch(name):
+                if name not in warned:
+                    warned.add(name)
+                    logger.warning(
+                        f"tools: {source}'s {name[:80]!r} is not offered: another tool "
+                        "has the name, or the model can't take it"
+                    )
+                return
+            out[name] = entry
+
+        for tool, a in offered_reads(ordered):
+            add(tool.name, (tool, a), a.name)
+        for aname, aops in offered_ops(ordered).items():
+            for op in aops.values():
+                if op.tool_name is not None:
+                    add(op.tool_name, (op, aname), aname)
+        return out
+
     def change_schema(ops: dict[str, dict[str, Operation]]) -> FunctionSchema:
         own = {
             a: o
@@ -141,25 +176,14 @@ def register_tools(
         tools. A transfer advertises the new agent's."""
         out: list[FunctionSchema] = [
             FunctionSchema(
-                name=tool.name,
+                name=name,
                 description=tool.description,
                 properties=tool.properties,
                 required=tool.required,
             )
-            for tool, _ in offered_reads(srcs)
+            for name, (tool, _) in named_tools(srcs).items()
         ]
         ops = offered_ops(srcs)
-        for aops in ops.values():
-            for op in aops.values():
-                if op.tool_name is not None:
-                    out.append(
-                        FunctionSchema(
-                            name=op.tool_name,
-                            description=op.description,
-                            properties=op.properties,
-                            required=op.required,
-                        )
-                    )
         if any(op.tool_name is None for aops in ops.values() for op in aops.values()):
             out.append(change_schema(ops))
         out.extend(session_schemas)
@@ -171,20 +195,13 @@ def register_tools(
     async def dispatch(params: FunctionCallParams) -> None:
         name = params.function_name
         reach_now = active_sources()
-        changes = {
-            op.tool_name: (op, aname)
-            for aname, aops in offered_ops(reach_now).items()
-            for op in aops.values()
-            if op.tool_name is not None
-        }
-        if name in changes:
-            op, aname = changes[name]
+        hit = named_tools(reach_now).get(name)
+        if hit is not None and isinstance(hit[1], str):
+            op, aname = hit
             args = dict(params.arguments)
             rationale = str(args.pop("rationale", "") or "")
             await run_change(params, aname, op, args, rationale)
             return
-        current = {t.name: (t, a) for t, a in offered_reads(reach_now)}
-        hit = current.get(name)
         if hit is None:
             record(name, dict(params.arguments))
             await params.result_callback({"error": f"{name} is not available here"})

@@ -253,3 +253,58 @@ def test_prompt_carries_the_department_and_tells_ghost_to_use_its_tools():
         ["F"], roster="- Marketing: the brand. Agents: Brand (brand design)"
     )
     assert "The departments, each with its agents" in ghost and "Brand (brand design)" in ghost
+
+
+async def test_the_tool_list_never_names_a_tool_twice_or_badly():
+    """The model API refuses the whole list over one name twice or one it can't take, so
+    every turn failed. Ghost's own tools keep their names; a later clash isn't offered."""
+    import re
+
+    async def answer(tag):
+        async def handler(args):
+            return {"from": tag}
+
+        return handler
+
+    skills = ToolSource(
+        name="skills",
+        prompt="",
+        read_tools=[ReadTool("read_skill", "Ghost's.", {}, [], await answer("skills"))],
+        operations=[],
+    )
+    app = ToolSource(
+        name="read",
+        prompt="",
+        read_tools=[
+            ReadTool("read_skill", "An app's.", {}, [], await answer("app")),
+            ReadTool("hang_up", "An app's.", {}, [], await answer("app")),
+            ReadTool("bad.name", "Bad.", {}, [], await answer("app")),
+            ReadTool("x" * 65, "Long.", {}, [], await answer("app")),
+        ],
+        operations=[],
+    )
+    other = ToolSource(
+        name="other",
+        prompt="",
+        read_tools=[ReadTool("read_skill", "Another.", {}, [], await answer("other"))],
+        operations=[],
+    )
+    llm = FakeLLM()
+    gate = WriteGate(Store(), autonomy=AutonomyPolicy.parse(""))
+
+    async def on_sleep():
+        return None
+
+    schemas = register_tools(
+        llm, sources=[app, other, skills], gate=gate, session_id="s", on_hang_up=on_sleep
+    )
+    names = [s.name for s in schemas]
+    assert len(names) == len(set(names)), names
+    assert all(re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", n) for n in names), names
+    assert next(s for s in schemas if s.name == "read_skill").description == "Ghost's."
+    p = FakeParams("read_skill", {})
+    await llm.functions["read_skill"](p)
+    assert p.result == {"from": "skills"}
+    p = FakeParams("bad.name", {})
+    await llm.functions["bad.name"](p)
+    assert "not available" in p.result["error"]

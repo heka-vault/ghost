@@ -8,7 +8,7 @@ export interface PendingChangeProps {
   summary: string;
   /** Why Ghost proposed it (`pending.rationale`). Optional. */
   rationale?: string | null;
-  /** `ability.operation`, shown as mono detail (`github_issues.close`). */
+  /** `source.operation`, shown as mono detail (`github_issues.close`). */
   operation?: string;
   /** ISO time the proposal lapses (`pending.expires_at`). Never `expires_in_secs`: that is a snapshot. */
   expiresAt?: string | null;

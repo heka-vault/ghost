@@ -72,7 +72,7 @@ export const STATUS_ORDER = ["executed", "pending", "claimed", "failed", "partia
 
 /** "github.issue_write": the source (an app's name, the agents or the departments) and the operation. */
 export function opName(e: AuditEntry): string {
-  return `${e.ability}.${e.operation}`;
+  return `${e.source}.${e.operation}`;
 }
 
 /** Source names read as words in the filter: the built-in ones are "Agents" and "Departments", an app goes by its name in words ("GitHub", "Github acme"). */
@@ -353,7 +353,7 @@ export function haystack(e: AuditEntry, ctx: OutcomeContext = {}): string {
     o,
     outcomeLabel(o),
     ...levelParts(e, o),
-    sourceLabel(e.ability),
+    sourceLabel(e.source),
     e.department ?? "",
     e.id,
     ...e.events.flatMap((ev) => {
@@ -377,9 +377,9 @@ export function matches(hay: string, query: string): boolean {
  * `?mock=busy&status=attention&q=safari#/audit`. Read once on mount; never written back,
  * because the query survives navigation to other routes.
  */
-export function initialParams(): { status: string; ability: string; q: string; open: string | null; fail: boolean; failMore: boolean } {
+export function initialParams(): { status: string; source: string; q: string; open: string | null; fail: boolean; failMore: boolean } {
   const p = new URLSearchParams(window.location.search);
   const fail = p.get("fail");
-  return { status: p.get("status") ?? "all", ability: p.get("ability") ?? "all", q: p.get("q") ?? "", open: p.get("open"), fail: fail === "audit", failMore: fail === "audit-more" };
+  return { status: p.get("status") ?? "all", source: p.get("source") ?? "all", q: p.get("q") ?? "", open: p.get("open"), fail: fail === "audit", failMore: fail === "audit-more" };
 }
 

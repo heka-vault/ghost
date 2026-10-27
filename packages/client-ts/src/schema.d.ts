@@ -78,7 +78,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Audit */
+        /**
+         * Audit
+         * @description Proposals, newest first; source narrows to one app or one of Ghost's own.
+         */
         get: operations["audit_audit_get"];
         put?: never;
         post?: never;
@@ -343,8 +346,9 @@ export interface paths {
         put?: never;
         /**
          * Create Department
-         * @description A new department folder: the operator's action, with a short AGENTS.md, an
-         *     empty mcp.json and its department.json. The model never calls this.
+         * @description A new department folder: the operator's action, with a short AGENTS.md and
+         *     its department.json; it reaches every connected app (ADR 0034). The model never
+         *     calls this.
          */
         post: operations["create_department_departments_post"];
         delete?: never;
@@ -960,6 +964,11 @@ export interface components {
         AppConnectResult: {
             /** Apps */
             apps: components["schemas"]["AppView"][];
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
             /** Sign In Url */
             sign_in_url?: string | null;
         };
@@ -1020,8 +1029,6 @@ export interface components {
         };
         /** AuditEntry */
         AuditEntry: {
-            /** Ability */
-            ability: string;
             /** Autonomy */
             autonomy: string;
             /** Conversation */
@@ -1041,6 +1048,8 @@ export interface components {
             operation: string;
             /** Session Id */
             session_id: string;
+            /** Source */
+            source: string;
             /** Status */
             status: string;
             /** Summary */
@@ -1688,8 +1697,6 @@ export interface components {
         };
         /** PendingProposal */
         PendingProposal: {
-            /** Ability */
-            ability: string;
             /**
              * Expires At
              * Format: date-time
@@ -1703,6 +1710,8 @@ export interface components {
             operation: string;
             /** Rationale */
             rationale: string;
+            /** Source */
+            source: string;
             /** Summary */
             summary: string;
             /** Target */
@@ -2517,10 +2526,10 @@ export interface operations {
     audit_audit_get: {
         parameters: {
             query?: {
-                ability?: string | null;
                 limit?: number;
                 offset?: number;
                 session_id?: string | null;
+                source?: string | null;
                 status?: string | null;
             };
             header?: never;

@@ -8,7 +8,6 @@ rule), secret values (write-only), or a way for the model to reach any of it.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import os
 import subprocess
 from collections.abc import Sequence
@@ -28,7 +27,7 @@ from ghost_core import (
     WriteGate,
 )
 from ghost_core.outputs import list_outputs
-from ghost_core.policy import PolicyError
+from ghost_core.policy import PolicyError, write_routes
 from loguru import logger
 
 from ghost_api.files import read_env, update_env
@@ -193,7 +192,7 @@ def pending_view(p: Proposal, at: datetime | None = None) -> PendingProposal:
     at = at or now()
     return PendingProposal(
         id=p.id,
-        ability=p.ability,
+        source=p.ability,  # the store's column keeps its older name
         operation=p.operation,
         target=p.target.spoken(),
         summary=p.preview,
@@ -280,19 +279,19 @@ def audit_page(
     *,
     limit: int,
     offset: int,
-    ability: str | None = None,
+    source: str | None = None,
     status: str | None = None,
     session_id: str | None = None,
 ) -> AuditPage:
     """A page of the audit log, newest first. Shared by the control API and the phone."""
     rows, total = store.list_proposals(
-        limit=limit, offset=offset, ability=ability, status=status, session_id=session_id
+        limit=limit, offset=offset, ability=source, status=status, session_id=session_id
     )
     items = [
         AuditEntry(
             id=p.id,
             session_id=p.session_id,
-            ability=p.ability,
+            source=p.ability,
             operation=p.operation,
             target=p.target.spoken(),
             summary=p.preview,
@@ -302,13 +301,21 @@ def audit_page(
             conversation=p.conversation,
             department=p.department,
             events=[
-                AuditEventView(at=at, event=ev, detail=detail)
+                AuditEventView(at=at, event=ev, detail=_event_detail(detail))
                 for at, ev, detail in store.events(p.id)
             ],
         )
         for p in rows
     ]
     return AuditPage(items=items, total=total, limit=limit, offset=offset)
+
+
+def _event_detail(detail: dict[str, Any] | None) -> dict[str, Any] | None:
+    """An audit event's detail as the API says it: the source, where the store's rows
+    keep the older word (ability)."""
+    if not detail or "ability" not in detail:
+        return detail
+    return {("source" if k == "ability" else k): v for k, v in detail.items()}
 
 
 def create_app(deps: Deps) -> FastAPI:
@@ -413,15 +420,16 @@ def create_app(deps: Deps) -> FastAPI:
     async def audit(
         limit: int = Query(50, ge=1, le=500),
         offset: int = Query(0, ge=0),
-        ability: str | None = None,
+        source: str | None = None,
         status_: str | None = Query(None, alias="status"),
         session_id: str | None = None,
     ) -> AuditPage:
+        """Proposals, newest first; source narrows to one app or one of Ghost's own."""
         return audit_page(
             deps.store,
             limit=limit,
             offset=offset,
-            ability=ability,
+            source=source,
             status=status_,
             session_id=session_id,
         )
@@ -512,7 +520,7 @@ def create_app(deps: Deps) -> FastAPI:
         st = deps.watches.state.get(w.source) if deps.watches is not None else None
         return WatchInfo(
             name=w.name,
-            server=w.server,
+            app=w.app,
             read=w.read,
             every_secs=w.every,
             steps=["check", *(["jev"] if w.jev else []), *(["model"] if w.model else [])],
@@ -581,8 +589,9 @@ def create_app(deps: Deps) -> FastAPI:
 
     @app.post("/departments", response_model=DepartmentView, tags=["departments"])
     async def create_department(req: DepartmentCreate) -> DepartmentView:
-        """A new department folder: the operator's action, with a short AGENTS.md, an
-        empty mcp.json and its department.json. The model never calls this."""
+        """A new department folder: the operator's action, with a short AGENTS.md and
+        its department.json; it reaches every connected app (ADR 0034). The model never
+        calls this."""
         if deps.departments is None:
             raise HTTPException(503, "departments are not available")
         from ghost_core.departments import DepartmentError
@@ -807,28 +816,26 @@ def create_app(deps: Deps) -> FastAPI:
     async def put_policy(update: PolicyUpdate) -> PolicyResult:
         if update.text is not None:
             try:
-                policy = AutonomyPolicy.parse(update.text, source="request")
+                AutonomyPolicy.parse(update.text, source="request")  # never a file that won't read
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None
             text = update.text
         else:
             current = policy_view()
-            # The routes editor doesn't know the rest of the file: keep it as it was.
-            kept = AutonomyPolicy.parse(current.text) if current.text else AutonomyPolicy()
-            policy = kept
-            routes = kept.routes
-            if update.routes is not None:
-                from ghost_core.routes import RouteError, RoutePolicy
+            if update.routes is None:
+                return PolicyResult(policy=current, applied=False)
+            from ghost_core.routes import RouteError, RoutePolicy
 
-                raw = update.routes.model_dump(exclude={"available"})
-                if raw.get("quiet_hours") is None:
-                    raw.pop("quiet_hours")
-                try:
-                    routes = RoutePolicy.parse(raw)
-                except RouteError as e:
-                    raise HTTPException(422, str(e)) from None
-            policy = dataclasses.replace(policy, routes=routes)
-            text = policy.to_toml()
+            raw = update.routes.model_dump(exclude={"available"})
+            if raw.get("quiet_hours") is None:
+                raw.pop("quiet_hours")
+            try:
+                routes = RoutePolicy.parse(raw)
+                # The routes editor doesn't know the rest of the file: only [routes]
+                # changes, and everything else stays as written, comments included.
+                text = write_routes(current.text, routes)
+            except (RouteError, ValueError) as e:
+                raise HTTPException(422, str(e)) from None
         deps.policy_path.parent.mkdir(parents=True, exist_ok=True)
         deps.policy_path.write_text(text if text.endswith("\n") else text + "\n")
         deps.control.reload_policy()

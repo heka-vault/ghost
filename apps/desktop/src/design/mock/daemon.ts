@@ -186,14 +186,14 @@ export class MockDaemon {
       this.audit.unshift({
         id: this.pending.id,
         session_id: f.session.sessionId ?? "",
-        ability: this.pending.ability,
+        source: this.pending.source,
         operation: this.pending.operation,
         target: this.pending.target,
         summary: this.pending.summary,
         autonomy: "confirm",
         status: "pending",
         created_at: new Date(Date.now() - 8_000).toISOString(),
-        events: [{ at: new Date(Date.now() - 8_000).toISOString(), event: "prepared", detail: { ability: this.pending.ability, operation: this.pending.operation, target: `github:${this.pending.target}`, autonomy: "confirm" } }],
+        events: [{ at: new Date(Date.now() - 8_000).toISOString(), event: "prepared", detail: { source: this.pending.source, operation: this.pending.operation, target: `github:${this.pending.target}`, autonomy: "confirm" } }],
         conversation: this.status.conversation ?? null,
         department: this.status.department ?? null,
       });
@@ -299,9 +299,9 @@ export class MockDaemon {
     const where = { conversation: this.status.conversation ?? null, department: this.status.department ?? null };
     this.pending = { ...p, id: newId(), expires_at: new Date(Date.now() + 60_000).toISOString(), expires_in_secs: 60 };
     this.audit.unshift({
-      id: this.pending.id, session_id: this.status.session_id ?? "", ability: p.ability, operation: p.operation, target: p.target,
+      id: this.pending.id, session_id: this.status.session_id ?? "", source: p.source, operation: p.operation, target: p.target,
       summary: p.summary, autonomy: "confirm", status: "pending", created_at: now(),
-      events: [{ at: now(), event: "prepared", detail: { ability: p.ability, operation: p.operation, target: `github:${p.target}`, autonomy: "confirm" } }],
+      events: [{ at: now(), event: "prepared", detail: { source: p.source, operation: p.operation, target: `github:${p.target}`, autonomy: "confirm" } }],
       ...where,
     });
     this.emit({ type: "pending", pending: this.pending });
@@ -393,10 +393,10 @@ export class MockDaemon {
     this.pushStatus({ conversation: slug, department: target.detail.department });
     this.conversationEvent(slug);
   }
-  private audited(ability: string, operation: string, target: string, summary: string, autonomy = "announce", department?: string | null) {
+  private audited(source: string, operation: string, target: string, summary: string, autonomy = "announce", department?: string | null) {
     this.audit.unshift({
-      id: newId(), session_id: this.status.session_id ?? "ui", ability, operation, target, summary, autonomy, status: "executed", created_at: now(),
-      events: [{ at: now(), event: "prepared", detail: { ability, operation, target, autonomy } }, { at: now(), event: "claimed" }, { at: now(), event: "finished", detail: { status: "success" } }],
+      id: newId(), session_id: this.status.session_id ?? "ui", source, operation, target, summary, autonomy, status: "executed", created_at: now(),
+      events: [{ at: now(), event: "prepared", detail: { source, operation, target, autonomy } }, { at: now(), event: "claimed" }, { at: now(), event: "finished", detail: { status: "success" } }],
       conversation: this.status.conversation ?? null,
       department: department === undefined ? (this.status.department ?? null) : department,
     });
@@ -443,7 +443,7 @@ export class MockDaemon {
     return this.audit
       .filter((e) => e.status === "executed" && e.department === slug)
       .slice(0, limit)
-      .map((e) => ({ at: e.created_at, agent: e.conversation ? this.agents.get(e.conversation)?.detail.name ?? e.conversation : "", operation: `${e.ability}.${e.operation}`, target: e.target, what: e.summary }));
+      .map((e) => ({ at: e.created_at, agent: e.conversation ? this.agents.get(e.conversation)?.detail.name ?? e.conversation : "", operation: `${e.source}.${e.operation}`, target: e.target, what: e.summary }));
   }
 
   // ------------------------------------------------------------------ skills (ADR 0023)
@@ -653,7 +653,7 @@ export class MockDaemon {
       } else this.settle(f, 1400);
     }
     this.appsChanged(made[0]?.view.name ?? null, url);
-    return { apps: made.map((f) => this.appView(f)), sign_in_url: url };
+    return { apps: made.map((f) => this.appView(f)), sign_in_url: url, problems: [] };
   }
   /** POST /apps/{name}/sign-in: sign in again, or reconnect an app that isn't connected. */
   private signIn(f: AppFixture): AppConnectResult {
@@ -666,7 +666,7 @@ export class MockDaemon {
       this.settle(f, 7000);
     } else this.settle(f, 1500, { problem });
     this.appsChanged(f.view.name, url);
-    return { apps: [this.appView(f)], sign_in_url: url };
+    return { apps: [this.appView(f)], sign_in_url: url, problems: [] };
   }
   /** PUT /permissions: the mode, whole lists, or one rule moved; only [permissions] is rewritten. */
   private updatePermissions(u: PermissionsUpdate): PermissionsView {
@@ -734,8 +734,8 @@ export class MockDaemon {
     }
     if (method === "GET" && path === "/audit") {
       let items = this.audit;
-      const ability = query.get("ability"), status = query.get("status"), sid = query.get("session_id");
-      if (ability) items = items.filter((e) => e.ability === ability);
+      const source = query.get("source"), status = query.get("status"), sid = query.get("session_id");
+      if (source) items = items.filter((e) => e.source === source);
       if (status) items = items.filter((e) => e.status === status);
       if (sid) items = items.filter((e) => e.session_id === sid);
       const limit = Number(query.get("limit") ?? 50), offset = Number(query.get("offset") ?? 0);

@@ -168,6 +168,14 @@
             "title": "Apps",
             "type": "array"
           },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
           "sign_in_url": {
             "anyOf": [
               {
@@ -325,10 +333,6 @@
       },
       "AuditEntry": {
         "properties": {
-          "ability": {
-            "title": "Ability",
-            "type": "string"
-          },
           "autonomy": {
             "title": "Autonomy",
             "type": "string"
@@ -379,6 +383,10 @@
             "title": "Session Id",
             "type": "string"
           },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -395,7 +403,7 @@
         "required": [
           "id",
           "session_id",
-          "ability",
+          "source",
           "operation",
           "target",
           "summary",
@@ -1919,10 +1927,6 @@
       },
       "PendingProposal": {
         "properties": {
-          "ability": {
-            "title": "Ability",
-            "type": "string"
-          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -1944,6 +1948,10 @@
             "title": "Rationale",
             "type": "string"
           },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
           "summary": {
             "title": "Summary",
             "type": "string"
@@ -1955,7 +1963,7 @@
         },
         "required": [
           "id",
-          "ability",
+          "source",
           "operation",
           "target",
           "summary",
@@ -3648,6 +3656,7 @@
     },
     "/audit": {
       "get": {
+        "description": "Proposals, newest first; source narrows to one app or one of Ghost's own.",
         "operationId": "audit_audit_get",
         "parameters": [
           {
@@ -3675,7 +3684,7 @@
           },
           {
             "in": "query",
-            "name": "ability",
+            "name": "source",
             "required": false,
             "schema": {
               "anyOf": [
@@ -3686,7 +3695,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Ability"
+              "title": "Source"
             }
           },
           {
@@ -4547,7 +4556,7 @@
         ]
       },
       "post": {
-        "description": "A new department folder: the operator's action, with a short AGENTS.md, an\nempty mcp.json and its department.json. The model never calls this.",
+        "description": "A new department folder: the operator's action, with a short AGENTS.md and\nits department.json; it reaches every connected app (ADR 0034). The model never\ncalls this.",
         "operationId": "create_department_departments_post",
         "requestBody": {
           "content": {

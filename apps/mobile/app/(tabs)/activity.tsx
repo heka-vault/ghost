@@ -110,7 +110,7 @@ function ActivityRow({ e, open, onToggle }: { e: AuditEntry; open: boolean; onTo
           {e.department ? <Detail term="Department" value={lineName(e.department)} /> : null}
           <Detail term="Agent" value={lineName(entryLine(e))} />
           <Detail term="When" value={formatTime(e.created_at)} />
-          <Detail term="Operation" value={`${e.ability}.${e.operation}`} mono />
+          <Detail term="Operation" value={`${e.source}.${e.operation}`} mono />
         </View>
       )}
     </View>

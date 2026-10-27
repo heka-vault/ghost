@@ -32,7 +32,7 @@ def test_skills_routes(world, tmp_path: Path):
     # the add is audited like any write from the desktop
     audit = client.get("/audit").json()
     entries = audit if isinstance(audit, list) else audit.get("items", [])
-    assert any(e["ability"] == "skills" and e["operation"] == "add" for e in entries)
+    assert any(e["source"] == "skills" and e["operation"] == "add" for e in entries)
     again = client.post("/skills", json={"path": str(candidate)})
     assert again.status_code == 409
     assert client.delete("/skills/invoicing").json()["ok"] is True

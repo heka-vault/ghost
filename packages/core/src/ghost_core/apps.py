@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -46,7 +47,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from ghost_core.models import Change, ChangeSet, Snapshot, Target
-from ghost_core.request import number_mentions
+from ghost_core.request import number_mentions, words
 
 if TYPE_CHECKING:  # source imports policy; keep the runtime edge lazy
     from ghost_core.source import Operation, Prepared, ReadTool, ToolSource
@@ -65,6 +66,9 @@ MAX_FIELD_CHARS = 60  # an argument short enough to name what a change is about
 # $NAME, ${NAME} or ${env:NAME} (the shape other clients' config files use)
 _SECRET = re.compile(r"\$\{(?:env:)?([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)")
 APP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+# The names of Ghost's own tool sources (``ghost_core.source.ToolSource``): the gate, the
+# permissions (``skills.*``) and the audit key on them, so an app may not take one.
+RESERVED_NAMES = frozenset({"conversations", "departments", "outputs", "skills", "waiting"})
 _ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "no.")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s")
 _TRANSPORTS = {"stdio", "http", "streamable-http", "streamable_http", "streamableHttp"}
@@ -148,7 +152,12 @@ class AppSpec:
     def secrets(self) -> list[str]:
         """The environment names this app needs."""
         names: list[str] = []
-        for value in (*self.headers.values(), *self.env.values(), *(self.args or ())):
+        for value in (
+            self.url or "",
+            *self.headers.values(),
+            *self.env.values(),
+            *(self.args or ()),
+        ):
             names.extend(secret_names(value))
         return list(dict.fromkeys(names))
 
@@ -159,6 +168,16 @@ class AppsFile:
     problems: tuple[str, ...] = ()
     # The keys the file used: ``mcpServers`` from another client is read, not written.
     imported: bool = False
+    left_out: tuple[str, ...] = ()  # entries that did not read, named in ``problems``
+
+
+def app_name_problem(name: str) -> str | None:
+    """Why ``name`` can't name an app, or None."""
+    if not APP_NAME_RE.match(name):
+        return "an app's name is lower-case letters, digits, _ or - (up to 40)"
+    if name in RESERVED_NAMES:
+        return f"{name} is the name of Ghost's own tools; give the app another name"
+    return None
 
 
 def secret_names(value: str) -> list[str]:
@@ -217,19 +236,24 @@ def parse_apps_json(text: str, where: str) -> AppsFile:
         raise ValueError(f"{where}: apps must be an object of apps by name")
     problems: list[str] = []
     apps: dict[str, AppSpec] = {}
+    left_out: list[str] = []
     for name, body in entries.items():
         at = f"{where}: {name}"
-        if not APP_NAME_RE.match(str(name)):
-            problems.append(f"{at}: an app's name is lower-case letters, digits, _ or -")
+        if why := app_name_problem(str(name)):
+            problems.append(f"{at}: {why}")
+            left_out.append(str(name))
             continue
         try:
             apps[str(name)] = parse_app(str(name), body, at, problems)
         except ValueError as e:
             problems.append(str(e))
+            left_out.append(str(name))
     extra = sorted(set(raw) - {"apps", "mcpServers"})
     if extra:
         problems.append(f"{where}: unknown key(s) {', '.join(extra)} are ignored")
-    return AppsFile(apps=apps, problems=tuple(problems), imported=imported)
+    return AppsFile(
+        apps=apps, problems=tuple(problems), imported=imported, left_out=tuple(left_out)
+    )
 
 
 def parse_app(name: str, body: object, where: str, problems: list[str]) -> AppSpec:
@@ -248,20 +272,29 @@ def parse_app(name: str, body: object, where: str, problems: list[str]) -> AppSp
         raise ValueError(f"{where} needs exactly one of url or command")
     headers = _str_table(t.get("headers", {}), f"{where}.headers")
     env = _str_table(t.get("env", {}), f"{where}.env")
-    for label, table in (("headers", headers), ("env", env)):
-        for key, value in table.items():
-            if looks_like_secret(value):
-                problems.append(
-                    f"{where}: {label} {key} looks like a key written into the file; use "
-                    "${NAME} and set it in Ghost's environment"
-                )
+    args = _str_list(t.get("args", []), f"{where}.args")
+    found = [
+        *(
+            f"{label} {key}"
+            for label, table in (("headers", headers), ("env", env))
+            for key, value in table.items()
+            if looks_like_secret(value)
+        ),
+        *(f"argument {label}" for _, label, _, _ in _keys_in_args(args)),
+        *(f"the address's {param}" for param, _ in _keys_in_url(str(url or ""))),
+    ]
+    for what in found:
+        problems.append(
+            f"{where}: {what} looks like a key written into the file; use "
+            "${NAME} and set it in Ghost's environment"
+        )
     return AppSpec(
         name=name,
         title=str(t.get("title") or ""),
         url=str(url) if url else None,
         headers=headers,
         command=str(command) if command else None,
-        args=_str_list(t.get("args", []), f"{where}.args"),
+        args=args,
         env=env,
         catalog=str(t["catalog"]) if t.get("catalog") else None,
         sign_in=bool(t.get("sign_in", False)) and bool(url),
@@ -305,10 +338,42 @@ def load_apps(path: Path) -> AppsFile:
 
 
 def write_apps(path: Path, apps: Mapping[str, AppSpec]) -> None:
-    """The operator's action (connect, disconnect in the desktop); never the model's."""
+    """The whole file from ``apps`` (a new file, a test). Connecting and disconnecting
+    use ``edit_apps``, which keeps what Ghost can't read."""
+    _write_private(path, render_apps_json(apps))
+
+
+def edit_apps(path: Path, put: Sequence[AppSpec] = (), *, remove: str | None = None) -> None:
+    """The operator's action (connect, disconnect in the desktop); never the model's. Only
+    the entries named change: every other entry, one Ghost can't read included, and any
+    other key in the file stay as they are. A file that is not a JSON object of apps is
+    never overwritten: ``ValueError`` says why, and the operator fixes it by hand."""
+    text = path.read_text() if path.is_file() else ""
+    try:
+        raw = json.loads(text) if text.strip() else {}
+    except ValueError as e:
+        raise ValueError(f"{path} is not JSON ({e}); fix it by hand first") from None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} is not an object of apps; fix it by hand first")
+    key = "apps" if "apps" in raw or "mcpServers" not in raw else "mcpServers"
+    entries = raw.setdefault(key, {})
+    if not isinstance(entries, dict):
+        raise ValueError(f"{path}: {key} is not an object of apps; fix it by hand first")
+    if remove is not None:
+        entries.pop(remove, None)
+    for spec in put:
+        entries[spec.name] = render_app(spec)
+    _write_private(path, json.dumps(raw, indent=2) + "\n")
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Atomic, and 0600: an entry may hold a key the operator pasted before Ghost moved it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(render_apps_json(apps))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        os.fchmod(f.fileno(), 0o600)
+        f.write(text)
     tmp.replace(path)
 
 
@@ -502,14 +567,18 @@ class AppTarget(Target, frozen=True):
         return f"{self.title or self.app} {named}".strip()
 
     def mentions(self) -> set[str]:
+        """The words that name what the change is about (ADR 0017): the issue's number,
+        the file's path, the label. Where it happens (the owner, the repository, the
+        branch) never counts on its own, so "close seventeen in ghost" does not name #142
+        in ghost; a change named only by where it happens always asks."""
         out: set[str] = set()
-        for v in self.fields.values():
-            if isinstance(v, bool):
+        for k, v in self.fields.items():
+            if isinstance(v, bool) or _says_where(k):
                 continue
             if isinstance(v, int) or (isinstance(v, str) and v.isdigit()):
                 out |= number_mentions(int(v))
-            elif isinstance(v, str):
-                out.add(v.lower())
+            elif isinstance(v, str) and (said := " ".join(words(v))):
+                out.add(said)  # as the transcript has it: "README.md" is "readme md"
         return out
 
     def rule_args(self) -> dict[str, Any]:
@@ -598,6 +667,8 @@ class App:
         self._session: Any = None
         self.tools: list[ToolInfo] = []
         self.failed: str | None = None
+        self.taken_elsewhere: set[str] = set()  # model tool names another app offers first
+        self.withheld: dict[str, str] = {}  # tools not offered, with the name they'd have
         self._task: asyncio.Task[None] | None = None
         self._ready: asyncio.Future[None] | None = None
         self._closing = asyncio.Event()
@@ -642,8 +713,10 @@ class App:
                     auth = self._auth_for(spec, interactive) if self._auth_for else None
                     http = create_mcp_http_client(headers=headers, auth=auth)
                     await stack.enter_async_context(http)
+                    # A key moved out of the address's query is filled back in here.
+                    url = fill_secrets(spec.url, self.environ)
                     read, write, *_ = await stack.enter_async_context(
-                        streamable_http_client(spec.url, http_client=http)
+                        streamable_http_client(url, http_client=http)
                     )
                 else:
                     from mcp.client.stdio import (
@@ -765,13 +838,32 @@ class App:
 
     def public_name(self, tool: str) -> str:
         """Tool names are per app; two apps may both have ``search``."""
-        return f"{self.spec.name}_{tool}"
+        return model_tool_name(f"{self.spec.name}_{tool}")
+
+    def offered(self) -> dict[str, str]:
+        """Each tool offered to the model, by the app's name for it, with the model's. A
+        tool whose name for the model an earlier tool of this app, or another app
+        (``taken_elsewhere``, from ``Apps``), already has is not offered: it is in
+        ``withheld``, and the operator sees why. The model API refuses a whole list with
+        one name twice, which would fail every turn."""
+        out: dict[str, str] = {}
+        self.withheld = {}
+        for t in self.tools:
+            name = self.public_name(t.name)
+            if name in self.taken_elsewhere or name in out.values():
+                self.withheld[t.name] = name
+            else:
+                out[t.name] = name
+        return out
 
     def read_tools(self) -> list[ReadTool]:
         from ghost_core.source import ReadTool
 
         tools: list[ReadTool] = []
+        offered = self.offered()
         for t in self.reads():
+            if t.name not in offered:
+                continue
 
             async def handler(args: dict[str, Any], _t: ToolInfo = t) -> dict[str, Any]:
                 try:
@@ -781,7 +873,7 @@ class App:
 
             tools.append(
                 ReadTool(
-                    self.public_name(t.name),
+                    offered[t.name],
                     t.brief,
                     t.properties,
                     t.required,
@@ -796,6 +888,7 @@ class App:
         from ghost_core.source import Operation
 
         writer = AppWriter(self)
+        offered = self.offered()
         return [
             Operation(
                 name=t.name,
@@ -804,9 +897,10 @@ class App:
                 required=t.required,
                 prepare=lambda args, _t=t: self._prepare(_t, args),
                 writer=writer,
-                tool_name=self.public_name(t.name),
+                tool_name=offered[t.name],
             )
             for t in self.changes()
+            if t.name in offered
         ]
 
     async def _prepare(self, tool: ToolInfo, raw: dict[str, Any]) -> Prepared:
@@ -854,8 +948,9 @@ class App:
 
     def prompt(self) -> str:
         """The paragraph for the system prompt."""
-        reads = [self.public_name(t.name) for t in self.reads()]
-        changes = [self.public_name(t.name) for t in self.changes()]
+        offered = self.offered()
+        reads = [offered[t.name] for t in self.reads() if t.name in offered]
+        changes = [offered[t.name] for t in self.changes() if t.name in offered]
         text = f"{self.spec.shown} is connected."
         if reads:
             text += f" Look things up with {', '.join(reads)}."
@@ -890,6 +985,20 @@ class App:
         self._session = None
 
 
+_TOOL_NAME_BAD = re.compile(r"[^a-zA-Z0-9_-]+")
+MAX_TOOL_NAME = 64  # the model API's limit; its pattern is ^[a-zA-Z0-9_-]{1,64}$
+
+
+def model_tool_name(name: str) -> str:
+    """``name`` as the model API accepts it: other characters become ``_``, and a name
+    too long keeps its start and a short hash of the whole, so two long names stay two."""
+    clean = _TOOL_NAME_BAD.sub("_", name) or "tool"
+    if len(clean) <= MAX_TOOL_NAME:
+        return clean
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{clean[: MAX_TOOL_NAME - 9]}_{digest}"
+
+
 def _clean(args: Mapping[str, Any]) -> dict[str, Any]:
     """The model's arguments without Ghost's own (``rationale``, anything ``_``-led)."""
     return {k: v for k, v in args.items() if k != "rationale" and not str(k).startswith("_")}
@@ -911,6 +1020,24 @@ def _names_it(key: str, v: Any) -> bool:
     if isinstance(v, int):
         return True
     return isinstance(v, str) and 0 < len(v) <= MAX_FIELD_CHARS and not any(c.isspace() for c in v)
+
+
+# Arguments that say where a change happens rather than what it is about (ADR 0017): the
+# account, the repository, the branch. "ghost" is the repository and the wake word, and
+# "main" is every repository's branch, so naming them asks for nothing.
+_WHERE = frozenset(
+    """owner org organization organisation repo repository branch ref base head workspace
+    team account space site tenant region""".split()
+)
+_ID_WORDS = frozenset({"name", "id", "slug", "login", "full"})
+
+
+def _says_where(key: str) -> bool:
+    """``owner``, ``repo_name``, ``base_branch``, ``teamId``: every word of the argument's
+    name, past ``name`` and ``id``, is a place."""
+    parts = re.findall(r"[a-z]+", re.sub(r"([a-z])([A-Z])", r"\1_\2", key).lower())
+    parts = [p for p in parts if p not in _ID_WORDS]
+    return bool(parts) and all(p in _WHERE for p in parts)
 
 
 def source_of(app: App) -> ToolSource:
@@ -996,7 +1123,14 @@ class Apps:
     def problem(self, name: str) -> str | None:
         app = self.apps.get(name)
         if app is not None and app.connected:
-            return None
+            self._claim_names()
+            if not app.withheld:
+                return None
+            names = ", ".join(f"{t} (as {n})" for t, n in app.withheld.items())
+            return (
+                f"not offered: {names}; another tool already has that name. Give the app "
+                "another name to offer them"
+            )
         if name in self.failed:
             return self.failed[name]
         return app.failed if app is not None else None
@@ -1032,11 +1166,23 @@ class Apps:
         for hook in list(self.on_change):
             hook()
 
+    def _in_order(self) -> list[App]:
+        """Connected apps in the file's order: the first to name a tool keeps the name."""
+        order = [*self.specs, *(n for n in self.apps if n not in self.specs)]
+        return [a for n in order if (a := self.apps.get(n)) is not None and a.connected]
+
+    def _claim_names(self) -> None:
+        """Which app offers a tool name the model sees two apps give (``github`` with
+        ``issue_read``, ``github_issue`` with ``read``): the first in apps.json."""
+        taken: set[str] = set()
+        for app in self._in_order():
+            app.taken_elsewhere = set(taken)
+            taken |= set(app.offered().values())
+
     def sources(self) -> list[ToolSource]:
         out: list[ToolSource] = []
-        for app in self.apps.values():
-            if not app.connected:
-                continue
+        self._claim_names()
+        for app in self._in_order():
             source = source_of(app)
             if source.read_tools or source.operations:
                 out.append(source)
@@ -1085,22 +1231,82 @@ def secret_name(app: str, key: str) -> str:
 
 
 def extract_secrets(spec: AppSpec) -> tuple[AppSpec, dict[str, str]]:
-    """A pasted config with keys written into it: each literal that looks like a secret
-    moves into Ghost's environment under its own name, and the entry keeps a reference."""
+    """A pasted config with keys written into it: each literal that looks like a secret,
+    in a header, the environment, an argument (``--api-key X``, ``--token=X``) or the
+    address's query (``?api_key=X``), moves into Ghost's environment under its own name,
+    and the entry keeps a reference."""
     secrets: dict[str, str] = {}
 
-    def move(table: Mapping[str, str]) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for key, value in table.items():
-            if looks_like_secret(value):
-                name = secret_name(spec.name, key)
-                secrets[name] = value
-                out[key] = "${" + name + "}"
-            else:
-                out[key] = value
-        return out
+    def keep(key: str, value: str) -> str:
+        name = secret_name(spec.name, key)
+        n = 2
+        while name in secrets:
+            name = f"{secret_name(spec.name, key)}_{n}"
+            n += 1
+        secrets[name] = value
+        return "${" + name + "}"
 
-    return replace(spec, headers=move(spec.headers), env=move(spec.env)), secrets
+    def move(table: Mapping[str, str]) -> dict[str, str]:
+        return {k: keep(k, v) if looks_like_secret(v) else v for k, v in table.items()}
+
+    headers, env = move(spec.headers), move(spec.env)
+    args = list(spec.args)
+    for i, label, lead, value in _keys_in_args(spec.args):
+        args[i] = lead + keep(label, value)
+    url = spec.url
+    if url and _keys_in_url(url):
+        head, _, rest = url.partition("?")
+        query, hash_, fragment = rest.partition("#")
+        parts = []
+        for part in query.split("&"):
+            param, eq, value = part.partition("=")
+            if (param, value) in _keys_in_url(f"?{part}"):
+                # As written, still percent-encoded: filled back in, it is the address.
+                part = f"{param}={keep(param, value)}"
+            parts.append(part)
+        url = f"{head}?{'&'.join(parts)}{hash_}{fragment}"
+    return replace(spec, headers=headers, env=env, args=tuple(args), url=url), secrets
+
+
+# An argument or a query parameter named for a key: ``--api-key``, ``--token``, ``key=``.
+_KEY_WORD = r"(?:[a-z0-9]+[-_])*(?:api[-_]?key|apikey|key|token|secret|password|pat|auth)"
+_KEY_FLAG = re.compile(rf"^--?{_KEY_WORD}$", re.I)
+_KEY_PARAM = re.compile(rf"^{_KEY_WORD}$", re.I)
+
+
+def _is_path(value: str) -> bool:
+    return value.startswith(("/", "~", "./", "../"))
+
+
+def _keys_in_args(args: Sequence[str]) -> list[tuple[int, str, str, str]]:
+    """Keys written into an app's arguments: the value after ``--api-key``, the value in
+    ``--token=X``, and a value that is a key by its shape. Each as (index, a name for it,
+    what stays before it, the key). A reference or a path is not a key."""
+    out: list[tuple[int, str, str, str]] = []
+    for i, a in enumerate(args):
+        if secret_names(a):
+            continue
+        flag, eq, value = a.partition("=")
+        if eq and value and _KEY_FLAG.match(flag) and not _is_path(value):
+            out.append((i, flag.lstrip("-"), flag + "=", value))
+        elif i and _KEY_FLAG.match(args[i - 1]) and not a.startswith("-") and not _is_path(a):
+            out.append((i, args[i - 1].lstrip("-"), "", a))
+        elif bool(_SECRET_SHAPES.match(a)) or (
+            looks_like_secret(a) and not any(c in a for c in "/@:=.") and not a.startswith("-")
+        ):
+            out.append((i, f"arg_{i}", "", a))  # a package's name has / or @; a key doesn't
+    return out
+
+
+def _keys_in_url(url: str) -> list[tuple[str, str]]:
+    """Query parameters named for a key (``api_key=``, ``token=``), as written."""
+    query = url.partition("?")[2].partition("#")[0]
+    out: list[tuple[str, str]] = []
+    for part in query.split("&"):
+        param, eq, value = part.partition("=")
+        if eq and value and _KEY_PARAM.match(param) and not secret_names(value):
+            out.append((param, value))
+    return out
 
 
 __all__ = [
@@ -1113,10 +1319,14 @@ __all__ = [
     "AppWriter",
     "Apps",
     "AppsFile",
+    "edit_apps",
     "NeedsSignIn",
+    "RESERVED_NAMES",
     "ToolError",
     "ToolInfo",
+    "app_name_problem",
     "fill_secrets",
+    "model_tool_name",
     "load_apps",
     "looks_like_secret",
     "parse_app",

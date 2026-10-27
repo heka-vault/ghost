@@ -208,3 +208,147 @@ def test_without_apps_the_routes_say_so(world):
     client, *_ = world
     assert client.get("/apps").status_code == 503
     assert AutonomyPolicy().resolve("x", "y").value == "announce"
+
+
+SKILLS = {
+    "server": {
+        "name": "io.github.someone/skills",
+        "title": "Skills",
+        "version": "1",
+        "remotes": [{"type": "streamable-http", "url": "https://skills.example/mcp"}],
+    }
+}
+
+
+def test_an_app_never_takes_the_name_of_ghosts_own_tools(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+
+    async def fetch(url):
+        return {"servers": [] if "updated_since" in url else [SKILLS], "metadata": {}}
+
+    deps.catalog = Catalog(tmp_path / "catalog2.json", fetch=fetch)
+    client.get("/catalog")
+    entry = client.get("/catalog/io.github.someone/skills").json()
+    assert entry["suggested_name"] == "skills-app"
+    r = client.post("/apps", json={"catalog": "io.github.someone/skills", "option": "remote-0"})
+    assert r.status_code == 200 and r.json()["apps"][0]["name"] == "skills-app"
+    for name in ("skills", "conversations", "waiting"):
+        r = client.post("/apps", json={"url": "https://x.example/mcp", "name": name})
+        assert r.status_code == 422 and "Ghost's own" in r.json()["detail"]
+        assert name not in deps.apps.specs
+    pasted = json.dumps({"mcpServers": {"outputs": {"url": "https://x.example/mcp"}}})
+    r = client.post("/apps", json={"config": pasted})
+    assert r.status_code == 422 and "Ghost's own" in r.json()["detail"]
+
+
+def test_disconnecting_forgets_only_that_apps_own_keys(world, tmp_path, monkeypatch):
+    """``github-2`` is what the catalog suggests beside ``github``; disconnecting ``github``
+    used to delete every GHOST_APP_GITHUB_* key, ``github-2``'s too."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    for name, key in (("work", "k1"), ("work-2", "k2")):
+        r = client.post(
+            "/apps",
+            json={"url": "https://mcp.example.com/mcp", "name": name, "values": {"key": key}},
+        )
+        assert r.status_code == 200, r.text
+    apps_env = deps.env_path.parent / "apps.env"
+    apps_env.write_text(apps_env.read_text() + "GHOST_APP_WORK_MINE=kept\n")
+    assert client.delete("/apps/work").status_code == 200
+    left = apps_env.read_text()
+    assert "GHOST_APP_WORK_KEY=" not in left
+    assert "GHOST_APP_WORK_2_KEY=" in left  # another app's
+    assert "GHOST_APP_WORK_MINE=kept" in left  # the entry never named it
+
+
+def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
+    """``my-app`` and ``my_app`` keep their keys under the same names."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    url = "https://mcp.example.com/mcp"
+    first = client.post("/apps", json={"url": url, "name": "my-app", "values": {"key": "k1"}})
+    assert first.status_code == 200
+    again = client.post("/apps", json={"url": url, "name": "my_app", "values": {"key": "k2"}})
+    assert again.status_code == 409 and "my-app" in again.json()["detail"]
+    assert "k1" in (deps.env_path.parent / "apps.env").read_text()
+    assert "my_app" not in deps.apps.specs
+
+
+def test_connecting_never_rewrites_entries_ghost_could_not_read(world, tmp_path, monkeypatch):
+    """apps.json is edited one entry at a time: an entry Ghost can't read (a bad name, a
+    key it doesn't know) stays as the operator wrote it, and so does a key at the top."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    path = deps.policy_path.parent / "apps.json"
+    theirs = {
+        "Bad Name": {"url": "https://bad.example/mcp"},
+        "later": {"command": "later-app", "disabled": True},
+        "both": {"url": "https://x", "command": "y"},
+    }
+    path.write_text(json.dumps({"apps": theirs, "note": "mine"}))
+    url = "https://mcp.notion.com/mcp"
+    assert client.post("/apps", json={"url": url, "name": "notion"}).status_code == 200
+    raw = json.loads(path.read_text())
+    assert raw["note"] == "mine"
+    assert {k: v for k, v in raw["apps"].items() if k != "notion"} == theirs
+    assert raw["apps"]["notion"]["url"] == url
+    assert client.delete("/apps/notion").status_code == 200
+    assert json.loads(path.read_text()) == {"apps": theirs, "note": "mine"}
+
+
+def test_a_file_that_is_not_json_is_never_overwritten(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    path = deps.policy_path.parent / "apps.json"
+    broken = '{"apps": {"github": {"command": "github-mcp-server",}}'  # a stray comma
+    path.write_text(broken)
+    r = client.post("/apps", json={"url": "https://mcp.notion.com/mcp", "name": "notion"})
+    assert r.status_code == 409 and "apps.json" in r.json()["detail"]
+    assert path.read_text() == broken and started == [] and "notion" not in deps.apps.specs
+    r = client.delete("/apps/github")
+    assert r.status_code == 409 and path.read_text() == broken
+    assert "github" in deps.apps.specs  # still connected: nothing changed
+
+
+def test_a_pasted_config_names_the_entries_it_leaves_out(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    pasted = json.dumps(
+        {
+            "mcpServers": {
+                "good": {"url": "https://good.example/mcp"},
+                "Bad Name": {"url": "https://bad.example/mcp"},
+            }
+        }
+    )
+    r = client.post("/apps", json={"config": pasted})
+    assert r.status_code == 422 and "Bad Name" in r.json()["detail"]
+    assert started == [] and "good" not in deps.apps.specs
+    noted = json.dumps({"mcpServers": {"good": {"url": "https://good.example/mcp", "x": 1}}})
+    r = client.post("/apps", json={"config": noted})
+    assert r.status_code == 200 and any("x" in p for p in r.json()["problems"])
+
+
+def test_a_key_in_a_pasted_configs_arguments_or_address_is_moved_too(world, tmp_path, monkeypatch):
+    """docs/apps.md: Ghost moves any key written into a pasted config into its private
+    settings. Arguments and the address's query stayed in apps.json as plain text."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    pasted = json.dumps(
+        {
+            "mcpServers": {
+                "brave": {"command": "npx", "args": ["-y", "brave-search", "--api-key", "BSAx1"]},
+                "maps": {"url": "https://maps.example/mcp?key=AIzaSy123&lang=en"},
+            }
+        }
+    )
+    r = client.post("/apps", json={"config": pasted})
+    assert r.status_code == 200, r.text
+    assert "BSAx1" not in r.text and "AIzaSy123" not in r.text
+    assert r.json()["problems"] == []  # moved, nothing left to fix
+    path = deps.policy_path.parent / "apps.json"
+    text = path.read_text()
+    assert "BSAx1" not in text and "AIzaSy123" not in text
+    assert path.stat().st_mode & 0o777 == 0o600
+    saved = load_apps(path).apps
+    assert saved["brave"].args[-1] == "${GHOST_APP_BRAVE_API_KEY}"
+    assert saved["maps"].url == "https://maps.example/mcp?key=${GHOST_APP_MAPS_KEY}&lang=en"
+    apps_env = (deps.env_path.parent / "apps.env").read_text()
+    assert "GHOST_APP_BRAVE_API_KEY=BSAx1" in apps_env
+    assert "GHOST_APP_MAPS_KEY=AIzaSy123" in apps_env
+    view = client.get("/apps/maps").json()
+    assert view["settings"] == ["GHOST_APP_MAPS_KEY"] and view["kind"] == "key"

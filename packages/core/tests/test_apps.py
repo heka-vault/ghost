@@ -15,6 +15,7 @@ from ghost_core.apps import (
     Apps,
     AppSpec,
     AppTarget,
+    ToolInfo,
     extract_secrets,
     fill_secrets,
     parse_apps_json,
@@ -67,6 +68,28 @@ def test_a_bad_entry_is_a_problem_and_the_rest_still_counts():
     assert len(f.problems) == 2
 
 
+def test_ghosts_own_names_are_not_app_names():
+    """An app called ``skills`` would replace Ghost's own operations in the gate, and the
+    operator's ``skills.*`` rules would apply to it."""
+    from ghost_core.apps import RESERVED_NAMES, app_name_problem
+    from ghost_core.conversations import SOURCE as CONVERSATIONS
+    from ghost_core.department_tools import SOURCE as DEPARTMENTS
+    from ghost_core.outputs import SOURCE as OUTPUTS
+    from ghost_core.skills import SOURCE as SKILLS
+    from ghost_core.waiting import SOURCE as WAITING
+
+    assert {CONVERSATIONS, DEPARTMENTS, OUTPUTS, SKILLS, WAITING} <= RESERVED_NAMES
+    f = parse_apps_json(
+        '{"apps": {"skills": {"command": "x"}, "conversations": {"url": "https://x"},'
+        ' "ok": {"command": "z"}}}',
+        "test",
+    )
+    assert set(f.apps) == {"ok"}
+    assert sum("Ghost's own" in p for p in f.problems) == 2
+    assert app_name_problem("waiting") and app_name_problem("Bad Name")
+    assert app_name_problem("skills-2") is None
+
+
 def test_a_key_written_into_the_file_is_flagged_and_moved_out_of_a_paste():
     f = parse_apps_json(
         '{"mcpServers": {"gh": {"url": "https://x/mcp",'
@@ -78,6 +101,82 @@ def test_a_key_written_into_the_file_is_flagged_and_moved_out_of_a_paste():
     assert spec.headers == {"Authorization": "${GHOST_APP_GH_AUTHORIZATION}"}
     token = "Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789"
     assert secrets == {"GHOST_APP_GH_AUTHORIZATION": token}
+
+
+def test_keys_in_arguments_and_the_address_are_moved_out_of_a_paste_too():
+    token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    pasted = {
+        "mcpServers": {
+            "tool": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@someone/a-rather-long-package-name-for-a-tool",
+                    "--api-key",
+                    "abc123",
+                    "--token=xyz789",
+                    token,
+                    "--ssh-key",
+                    "/home/me/.ssh/id_ed25519",
+                    "--from-env",
+                    "${ALREADY_A_REFERENCE}",
+                ],
+            },
+            "remote": {"url": "https://x.example/mcp?api_key=SEKRET&mode=fast&token=t%2Fz"},
+        }
+    }
+    import json
+
+    f = parse_apps_json(json.dumps(pasted), "paste")
+    assert sum("looks like a key" in p for p in f.problems) == 5
+    tool, secrets = extract_secrets(f.apps["tool"])
+    assert tool.args == (
+        "-y",
+        "@someone/a-rather-long-package-name-for-a-tool",
+        "--api-key",
+        "${GHOST_APP_TOOL_API_KEY}",
+        "--token=${GHOST_APP_TOOL_TOKEN}",
+        "${GHOST_APP_TOOL_ARG_5}",
+        "--ssh-key",
+        "/home/me/.ssh/id_ed25519",  # a path, not a key
+        "--from-env",
+        "${ALREADY_A_REFERENCE}",
+    )
+    assert secrets == {
+        "GHOST_APP_TOOL_API_KEY": "abc123",
+        "GHOST_APP_TOOL_TOKEN": "xyz789",
+        "GHOST_APP_TOOL_ARG_5": token,
+    }
+    env = {**secrets, "ALREADY_A_REFERENCE": "r"}
+    filled = [fill_secrets(a, env) for a in tool.args]
+    assert filled == [*pasted["mcpServers"]["tool"]["args"][:9], "r"]
+    remote, secrets = extract_secrets(f.apps["remote"])
+    assert remote.url == (
+        "https://x.example/mcp?api_key=${GHOST_APP_REMOTE_API_KEY}&mode=fast"
+        "&token=${GHOST_APP_REMOTE_TOKEN}"
+    )
+    assert fill_secrets(remote.url, secrets) == pasted["mcpServers"]["remote"]["url"]
+
+
+async def test_the_address_is_filled_from_the_environment_like_a_header():
+    apps = Apps(
+        {"proxy": AppSpec(name="proxy", url="http://127.0.0.1:9/mcp?key=${GHOST_APP_PROXY_KEY}")},
+        environ={},
+    )
+    await apps.connect()
+    assert apps.failed == {"proxy": "setting GHOST_APP_PROXY_KEY is not set"}
+    await apps.close()
+
+
+def test_apps_json_is_written_for_the_operator_only(tmp_path):
+    from ghost_core.apps import edit_apps, write_apps
+
+    path = tmp_path / "apps.json"
+    write_apps(path, {"a": AppSpec(name="a", command="x")})
+    assert path.stat().st_mode & 0o777 == 0o600
+    path.chmod(0o644)
+    edit_apps(path, [AppSpec(name="b", command="y")])
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_fill_secrets_from_environment_only():
@@ -306,6 +405,154 @@ async def test_arguments_are_checked_against_the_tools_own_schema_and_bounded():
         )
         assert isinstance(p.target, AppTarget) and p.target.fields["issue_number"] == 42
         assert "forty two" in p.target.mentions()
+
+
+class RecordingSession:
+    """A session that answers every call and remembers it."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        from types import SimpleNamespace
+
+        self.calls.append((name, arguments))
+        return SimpleNamespace(is_error=False, structured_content={"ok": True}, content=[])
+
+
+def by_hand(*tools: ToolInfo, name: str = "github") -> tuple[App, RecordingSession]:
+    app = App(AppSpec(name=name, title="GitHub", url="memory://"), environ={})
+    session = RecordingSession()
+    app._session = session  # noqa: SLF001 - connected, without a transport
+    app.tools = list(tools)
+    return app, session
+
+
+def schema(*names: str, ints: tuple[str, ...] = ()) -> dict[str, Any]:
+    props = {n: {"type": "integer" if n in ints else "string"} for n in names}
+    return {"type": "object", "properties": props, "required": list(names)}
+
+
+ISSUE_WRITE = ToolInfo(
+    "issue_write",
+    "Create or update an issue.",
+    schema("method", "owner", "repo", "issue_number", "state", ints=("issue_number",)),
+    read_only=False,
+)
+DELETE_FILE = ToolInfo(
+    "delete_file",
+    "Delete a file.",
+    schema("owner", "repo", "path", "branch", "message"),
+    read_only=False,
+)
+MERGE_BRANCH = ToolInfo(
+    "merge_branch", "Merge a branch.", schema("owner", "repo", "base", "head"), read_only=False
+)
+
+
+async def ask_first(app: App, tool: str, args: dict[str, Any]) -> WriteGate:
+    gate = gate_for(app, f'[permissions]\nask = ["github.{tool}"]\n')
+    sub = await change(gate, app, tool, args)
+    assert sub.autonomy is Autonomy.CONFIRM and sub.outcome is None
+    return gate
+
+
+@pytest.mark.parametrize(
+    ("words", "runs"),
+    [
+        # Where a change happens never names it: the repository, the owner, the branch.
+        ("close seventeen in ghost", False),
+        ("Ghost, close the one in heka-vault", False),
+        ("close 142 in ghost", True),
+        ("Ghost, close one forty two", True),
+    ],
+)
+async def test_naming_where_a_change_happens_is_not_asking_for_it(words, runs):
+    """ADR 0017: the request names what the change is about (#142), not only where it
+    happens. "close seventeen in ghost" used to close #142 in heka-vault/ghost."""
+    app, session = by_hand(ISSUE_WRITE)
+    args = {
+        "method": "update",
+        "owner": "heka-vault",
+        "repo": "ghost",
+        "issue_number": 142,
+        "state": "closed",
+    }
+    gate = await ask_first(app, "issue_write", args)
+    out = await gate.confirm_by_request("s", words)
+    assert (out is not None and out.status == "success") is runs
+    assert bool(session.calls) is runs
+
+
+@pytest.mark.parametrize(
+    ("words", "runs"),
+    [
+        ("Ghost, remove the stale label from main", False),  # "main" is only the branch
+        ("delete the file on main", False),
+        ("Ghost, delete README.md on main", True),  # the path names it
+    ],
+)
+async def test_a_branch_is_not_the_file(words, runs):
+    app, session = by_hand(DELETE_FILE)
+    args = {
+        "owner": "heka-vault",
+        "repo": "ghost",
+        "path": "README.md",
+        "branch": "main",
+        "message": "tidy",
+    }
+    gate = await ask_first(app, "delete_file", args)
+    out = await gate.confirm_by_request("s", words)
+    assert (out is not None) is runs
+    assert bool(session.calls) is runs
+
+
+async def test_a_change_named_only_by_where_it_happens_always_asks():
+    app, session = by_hand(MERGE_BRANCH)
+    args = {"owner": "heka-vault", "repo": "ghost", "base": "main", "head": "dev"}
+    gate = await ask_first(app, "merge_branch", args)
+    assert gate.pending("s").target.mentions() == set()
+    assert await gate.confirm_by_request("s", "merge dev into main in ghost") is None
+    assert session.calls == []
+
+
+def test_every_tool_name_is_one_the_model_accepts():
+    """The model API refuses the whole list over one bad name, so every turn failed."""
+    import re
+
+    long = "a_very_long_tool_name_" * 4
+    app, _ = by_hand(
+        ToolInfo("issue.read", "Get.", {}, read_only=True),
+        ToolInfo(long, "Long.", {}, read_only=False),
+        ToolInfo(long + "x", "Longer.", {}, read_only=False),
+        name="git-hub",
+    )
+    src = source_of(app)
+    names = [t.name for t in src.read_tools] + [o.tool_name for o in src.operations]
+    assert all(re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", n) for n in names), names
+    assert len(set(names)) == 3 and "git-hub_issue_read" in names
+    assert {o.name for o in src.operations} == {long, long + "x"}  # the app's own names
+
+
+async def test_two_apps_never_offer_the_same_tool_name():
+    """``github`` + ``issue_read`` and ``github_issue`` + ``read`` are both
+    ``github_issue_read``: the later one isn't offered, and its app says so."""
+    first, _ = by_hand(ToolInfo("issue_read", "Get an issue.", {}, read_only=True), name="github")
+    second, _ = by_hand(
+        ToolInfo("read", "Read.", {}, read_only=True),
+        ToolInfo("write", "Write.", {}, read_only=False),
+        name="github_issue",
+    )
+    apps = Apps({"github": first.spec, "github_issue": second.spec}, environ={})
+    apps.apps = {"github_issue": second, "github": first}  # connected in either order
+    by_name = {s.name: s for s in apps.sources()}
+    assert [t.name for t in by_name["github"].read_tools] == ["github_issue_read"]
+    assert by_name["github_issue"].read_tools == []
+    assert [o.tool_name for o in by_name["github_issue"].operations] == ["github_issue_write"]
+    assert apps.state("github_issue") == "connected"
+    problem = apps.problem("github_issue")
+    assert problem and "read" in problem and "github_issue_read" in problem
+    assert apps.problem("github") is None
 
 
 async def test_a_read_error_is_the_models_answer_and_a_watch_reads_only_reads():
