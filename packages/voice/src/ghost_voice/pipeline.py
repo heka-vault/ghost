@@ -578,6 +578,7 @@ def build_session(
                         on_handled=user_agg.reset,
                         last_assistant=last_assistant,
                         probe=latency,
+                        events=events,
                     ),
                 ),
                 (

@@ -1,6 +1,6 @@
 # 0031: The operator's policy decides how Ghost reaches them
 
-- **Status:** proposed
+- **Status:** accepted (built 2026-10-27: `ghost_core.routes`, the digest, do-not-disturb; the desk, desktop and phone routes plug in as they land)
 - **Date:** 2026-10-27
 
 Once something is on the waiting list (ADR 0029), Ghost has to decide how loud to be, and

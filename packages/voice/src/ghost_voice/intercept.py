@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable, Sequence
 
-from ghost_core import Handled, TurnInterceptor, UserTurn, WriteGate
+from ghost_core import Events, Handled, TurnInterceptor, UserTurn, WriteGate
 from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -45,9 +45,11 @@ class InterceptorProcessor(FrameProcessor):
         on_handled: Callable[[], Awaitable[None]] | None = None,
         last_assistant: Callable[[], str] | None = None,
         probe: LatencyProbe | None = None,
+        events: Events | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        self._events = events or Events()
         self._probe = probe or NULL_PROBE
         self._interceptors = list(interceptors)
         self._gate = gate
@@ -113,6 +115,8 @@ class InterceptorProcessor(FrameProcessor):
         elif h.action == "hold":
             # Whatever Ghost was saying stops; a pending question stays pending for later.
             await self.push_frame(InterruptionFrame())
+        elif h.action == "quiet":
+            await self._events.emit("quiet", until=h.until)  # the route engine listens
         if say:
             await self.push_frame(TTSSpeakFrame(say))
         if h.action == "hang_up":

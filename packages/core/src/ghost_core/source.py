@@ -85,8 +85,10 @@ class Handled:
 
     say: str | None = None
     # hang_up ends the session; hold keeps it while the operator talks to someone else
-    # (ADR 0021); cancel drops a pending change.
-    action: Literal["hang_up", "hold", "cancel"] | None = None
+    # (ADR 0021); cancel drops a pending change; quiet is do-not-disturb until ``until``
+    # (ADR 0031), the operator's own words, never the model's.
+    action: Literal["hang_up", "hold", "cancel", "quiet"] | None = None
+    until: Any = None  # a datetime, for quiet
 
 
 class TurnInterceptor(Protocol):
@@ -117,7 +119,7 @@ ProcessorFactory = Callable[[], Any]  # -> pipecat FrameProcessor; one per sessi
 
 @dataclass(frozen=True)
 class Event:
-    kind: Literal["wake", "session_start", "session_end", "outcome", "error"]
+    kind: Literal["wake", "session_start", "session_end", "outcome", "error", "quiet"]
     data: dict[str, Any] = field(default_factory=dict)
 
 

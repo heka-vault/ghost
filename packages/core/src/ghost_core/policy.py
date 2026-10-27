@@ -17,7 +17,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -80,6 +80,9 @@ class AutonomyPolicy:
     # ADR 0030: how long a change at ``confirm`` waits on the waiting list; None is the
     # default (``PENDING_TTL``).
     pending_ttl: int | None = None
+    # ADR 0031: how Ghost reaches the operator (``ghost_core.routes.RoutePolicy``); None is
+    # the default policy. Kept here so it lives in the operator's one file.
+    routes: Any = None
     targets: Mapping[str, Mapping[str, OpLevels]] = field(default_factory=dict)
     source: str = "<none>"
 
@@ -99,6 +102,7 @@ class AutonomyPolicy:
             raise ValueError(f"{source}: {e}") from None
         default: Autonomy | None = None
         pending_ttl: int | None = None
+        routes: Any = None
         skills: dict[str, dict[str, Autonomy]] = {}
         targets: dict[str, dict[str, dict[str, Autonomy]]] = {}
         for section, body in raw.items():
@@ -109,6 +113,11 @@ class AutonomyPolicy:
                     default = _level(body["autonomy"], f"{source}: defaults.autonomy")
                 if "pending_ttl" in body:
                     pending_ttl = _seconds(body["pending_ttl"], f"{source}: defaults.pending_ttl")
+                continue
+            if section == "routes":
+                from ghost_core.routes import RoutePolicy  # here: routes imports the store
+
+                routes = RoutePolicy.parse(body, f"{source}: [routes]")
                 continue
             if section in RETIRED_SECTIONS:
                 logger.warning(
@@ -129,6 +138,7 @@ class AutonomyPolicy:
             targets=targets,
             source=source,
             pending_ttl=pending_ttl,
+            routes=routes,
         )
 
     def resolve(
@@ -183,6 +193,8 @@ class AutonomyPolicy:
             if self.pending_ttl is not None:
                 lines.append(f"pending_ttl = {self.pending_ttl}")
             lines.append("")
+        if self.routes is not None:
+            lines += [*self.routes.to_toml(), ""]
         for skill in sorted(set(self.skills) | set(self.targets)):
             ops = self.skills.get(skill, {})
             lines.append(f"[{_toml_key(skill)}]")

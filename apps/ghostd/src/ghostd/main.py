@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import sys
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import timedelta
 from pathlib import Path
@@ -47,6 +48,7 @@ from ghost_core.departments import Departments, Fleet, all_sources
 from ghost_core.hooks import Hook, HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.mcp import Servers
+from ghost_core.routes import RouteEngine, RoutePolicy, spoken_digest
 from ghost_core.skills import Skills
 from ghost_core.waiting import Items, WaitingList, waiting_source
 from ghost_core.watches import Watch, WatchRunner
@@ -76,7 +78,8 @@ WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
 DEFAULT_WAKE_FUZZY = GhostdSettings.model_fields["wake_fuzzy"].default
 PHONE_STATE = "phone.json"
-WAITING_REFRESH_SECS = 30  # how often Ghost's own items (changes, servers) are re-read
+WAITING_REFRESH_SECS = 15  # how often Ghost's own items are re-read and the routes tick
+AT_DESK_SECS = 15 * 60  # a desk session this recent means the operator is at the desk
 VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its session;
 # long enough for a cellular blip or a tunnel re-handshake away from home (ADR 0020)
@@ -95,6 +98,18 @@ PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then
 def declared_watches(departments: Departments) -> list[Watch]:
     """Every department's watches (ADR 0028), Ghost's first."""
     return [w for d in departments.list() for w in d.watches.values()]
+
+
+def declared_urgency(departments: Departments) -> dict[str, str]:
+    """Each watch's and hook's declared urgency, by its items' source."""
+    out = {w.source: w.urgency for w in declared_watches(departments)}
+    out.update({h.source: h.urgency for h in declared_hooks(departments)})
+    return out
+
+
+def describe_routes(p: RoutePolicy) -> str:
+    quiet = f", quiet {p.quiet_hours[0]:%H:%M}-{p.quiet_hours[1]:%H:%M}" if p.quiet_hours else ""
+    return f"routes: {', '.join(p.enabled)}; escalate after {p.escalate_after} min{quiet}"
 
 
 def declared_hooks(departments: Departments) -> list[Hook]:
@@ -188,6 +203,8 @@ class Daemon:
         self.waiting: WaitingList | None = None  # ADR 0029; set in run()
         self.watch_runner: WatchRunner | None = None  # ADR 0028; set in run()
         self.hook_intake: HookIntake | None = None  # ADR 0027; set in run()
+        self.routes: RouteEngine | None = None  # ADR 0031; set in run()
+        self._last_desk_session: float | None = None
         self._first_via = "voice"  # how the wake-time utterance arrived
         self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
@@ -296,14 +313,26 @@ class Daemon:
             self.waiting.refresh()
 
     async def _refresh_waiting(self, waiting: WaitingList) -> None:
-        """Re-read Ghost's own items now and then: a change's time running out, a server
-        that went away. Watches (ADR 0028) sync their own items as they run."""
+        """Re-read Ghost's own items now and then (a change's time running out, a server
+        that went away; watches sync their own), and let the routes send what is due
+        (ADR 0031)."""
         while True:
             await asyncio.sleep(WAITING_REFRESH_SECS)
             try:
                 waiting.refresh()
+                if self.routes is not None:
+                    await self.routes.tick()
             except Exception:  # noqa: BLE001 - the list must not take the daemon down
                 logger.exception("waiting: refresh failed")
+
+    def _at_desk(self) -> bool:
+        """The operator is at the desk: a desk session ran lately, or the desktop app is
+        connected to the event stream."""
+        recent = (
+            self._last_desk_session is not None
+            and time.monotonic() - self._last_desk_session < AT_DESK_SECS
+        )
+        return recent or self.state.bus.subscribers > 0
 
     async def cancel_pending(self) -> bool:
         if self.gate is None or self.state.session_id is None:
@@ -325,6 +354,8 @@ class Daemon:
         policy = AutonomyPolicy.load(self.cfg.policy_path)
         if self.gate is not None:
             self.gate.set_autonomy(policy)
+        if self.routes is not None:
+            self.routes.set_policy(policy.routes or RoutePolicy())
         if self.departments is not None:
             self.departments.refresh()  # the gate's hook rebuilds the departments' levels
         logger.info(f"policy reloaded from {policy.source}")
@@ -643,6 +674,14 @@ class Daemon:
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.hook_intake = hook_intake
+        # ADR 0031: how Ghost reaches the operator, by the operator's [routes].
+        self.routes = RouteEngine(
+            waiting.items,
+            policy=autonomy.routes or RoutePolicy(),
+            urgency_of=lambda item: declared_urgency(departments).get(item.source, "notify"),
+            at_desk=self._at_desk,
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
 
         def register_department(slug: str) -> None:
             """A department's own servers came up: their declared writes join the gate."""
@@ -717,6 +756,14 @@ class Daemon:
             logger.info(line)
         hooks_listener = await self._start_hooks(hook_intake)
         logger.info(f"autonomy policy: {autonomy.source}")
+        logger.info(describe_routes(self.routes.policy))
+
+        async def on_event(event: Any) -> None:
+            if event.kind == "quiet" and event.data.get("until") is not None:
+                self.routes.quiet_until(event.data["until"])
+                logger.info(f"routes: quiet until {event.data['until']:%H:%M}")
+
+        events.add(on_event)
         logger.info(
             f"llm: {self.voice.llm_target().describe()}, thinking {self.voice.llm_thinking}"
         )
@@ -969,6 +1016,13 @@ class Daemon:
                 # From here the phone may close the call before the desk's last write lands.
                 _PHONE_TEARDOWN["on"] = True
 
+        # ADR 0031: a bare wake in Ghost opens with what is waiting, said before anything
+        # else (the digest); a request in the same breath is answered instead.
+        digest = (
+            self.routes.digest()
+            if self.routes is not None and start_in == GHOST and not first_utterance
+            else []
+        )
         start_profile = self.conversations.get(start_in) if self.conversations else None
         if start_profile is not None and not start_profile.is_ghost and self._enter is not None:
             # A call straight into an agent (phone, desktop): its department's servers
@@ -995,8 +1049,13 @@ class Daemon:
             wake_fuzzy=self.cfg.wake_fuzzy,
             origin=origin,
             latency_log=self.cfg.latency_path,
+            **({"greeting": spoken_digest(digest)} if digest else {}),
         )
         self.session = session
+        if digest and self.routes is not None:
+            self.routes.heard_in_digest(digest)
+        if origin == "desk":
+            self._last_desk_session = time.monotonic()
         self._origin = origin
         self.state.set_phase(Phase.LISTENING, session.session_id, origin=origin)
         self.state.set_conversation(
@@ -1058,6 +1117,8 @@ class Daemon:
                 self._refresh_waiting_now()
             self.session = None
             self._origin = None
+            if origin == "desk":
+                self._last_desk_session = time.monotonic()
             logger.info(f"session {session.session_id} end")
             await events.emit("session_end", session_id=session.session_id, origin=origin)
 

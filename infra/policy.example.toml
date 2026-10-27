@@ -30,3 +30,20 @@
 
 [departments]                 # a rule appended to a department's AGENTS.md, its memory
 # add_rule = "confirm"
+
+# How Ghost reaches you about what is waiting (ADR 0031). Ghost never edits this.
+# Routes, quietest first: digest (said at your next wake), desk (Ghost greets at the desk
+# and waits for your reply), desktop, phone, call, sms, whatsapp. Only the digest and the
+# phone are on unless you list more. "Ghost, nothing until two" pauses everything but the
+# digest until then.
+# [routes]
+# enabled = ["digest", "desk", "desktop", "phone"]
+# escalate_after = 15          # minutes a delivery waits for you to acknowledge it
+# quiet_hours = "22:00-07:00"  # nothing but the digest in these hours
+# batch_secs = 60              # a new item waits this long so others can go with it
+# calls_per_hour = 2
+# calls_per_day = 6
+# carry = "count"              # what an outside route may say: count, or title
+# greeting = "Got a minute?"   # what desk voice says before anything else
+# [routes.urgency]             # how loud a watch may get: digest, notify (the default), call
+# "eng/ci" = "call"

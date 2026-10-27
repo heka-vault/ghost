@@ -197,3 +197,19 @@ async def test_a_goodbye_in_pieces_is_caught_and_the_earlier_pieces_are_taken_ba
     proc, pushed, slept = make([QuickIntents()], FakeGate(), dropped)
     await proc.process_frame(said("what needs my sign off"), FrameDirection.DOWNSTREAM)
     assert not slept and not dropped and isinstance(pushed[-1], TranscriptionFrame)
+
+
+async def test_do_not_disturb_is_a_fixed_intent_with_its_time():
+    from ghost_voice.intents import QuickIntents
+
+    h = await QuickIntents().on_user_turn(
+        UserTurn(text="Ghost, nothing for an hour", pending=False, last_assistant="")
+    )
+    assert h is not None and h.action == "quiet" and h.until is not None
+    assert h.say.startswith("Okay, nothing until")
+    assert (
+        await QuickIntents().on_user_turn(
+            UserTurn(text="nothing until later", pending=False, last_assistant="")
+        )
+        is None
+    )

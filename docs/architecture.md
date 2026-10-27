@@ -99,6 +99,18 @@ the alerting, and a changed item alerts again. `GET /waiting`, `POST /waiting/ac
 sends a `waiting` event, and the model reads it with `waiting_list` ("what needs me?"),
 typed fields only.
 
+### Routes (ADR 0031)
+
+`ghost_core.routes.RouteEngine` ticks with the waiting list's refresh (every 15 s): for each
+item still to be heard, outside quiet hours and do-not-disturb, past the batch window, it
+picks the quietest enabled route the item's urgency allows (desk routes only when the
+operator is at the desk: a desk session in the last 15 minutes, or the desktop app
+connected), and after `escalate_after` minutes without an acknowledgment the next one up;
+a route that knows nobody heard (desk voice with no reply) hands the item on at once. A
+bare wake in Ghost opens with the digest instead of a greeting ("Hi. Two things are
+waiting: …"), which counts as heard. "Nothing until two" is a fixed intent (no model) that
+sets do-not-disturb. The policy is `[routes]` in `policy.toml`; the model sets none of it.
+
 ### Memory and compaction
 
 Each conversation loads only its own persona, memory and notes. The memory is a rolling summary kept in `memory.md`, produced by Pipecat's in-session summarizer with a tokens-only trigger (24k estimated tokens, last 20 messages kept raw, summary up to 3k; `GHOST_COMPACT_*`). Each applied summary is recorded as a version and written to the file through the gate; the file is the source of truth on resume, so an edit by hand is folded into the next version. Summarized turns stay in SQLite, flagged, and are pruned after `GHOST_TURN_RETENTION_DAYS` (90). Raw tool results are never stored, so old untrusted text does not re-enter a later session.

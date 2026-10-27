@@ -859,7 +859,7 @@ def create_app(deps: Deps) -> FastAPI:
                 raise HTTPException(422, str(e)) from None
             # The levels editor doesn't know the rest of [defaults]: keep it as it was.
             kept = AutonomyPolicy.parse(current.text) if current.text else AutonomyPolicy()
-            policy = dataclasses.replace(policy, pending_ttl=kept.pending_ttl)
+            policy = dataclasses.replace(policy, pending_ttl=kept.pending_ttl, routes=kept.routes)
             text = policy.to_toml()
         deps.policy_path.parent.mkdir(parents=True, exist_ok=True)
         deps.policy_path.write_text(text if text.endswith("\n") else text + "\n")
