@@ -19,8 +19,9 @@ the model never sees a body:
 3. **Checked at the source.** With ``check``, the reference is read again through one of
    a connected app's read-only tools (the department's permissions apply) and that read is
    what is believed: an item only when the check's ``when`` holds, a resolve only when it
-   no longer does. A read that fails or is blocked rejects the delivery but gives its id
-   back, so the sender's retry counts. Without ``check`` the item is marked unchecked.
+   no longer does. A read that disagrees, fails or is blocked rejects the delivery but
+   gives its id back, so the sender's retry counts (and is read again). Without
+   ``check`` the item is marked unchecked.
 
 What is kept is the parsed fields, the delivery id (and a github body's hash) and the
 outcome, never the body. A hook with no fixtures, or one whose fixtures fail, stays off.
@@ -227,8 +228,11 @@ def _parse_event(name: str, body: object, where: str) -> HookEvent:
 
 
 class Unconfirmed(Rejected):
-    """The source couldn't be read (a failed, refused or shapeless read). The delivery is
-    refused, but its id is given back, so the sender's retry (GitHub's Redeliver) counts."""
+    """The source didn't back the delivery: its read failed, was blocked, had no shape, or
+    didn't agree. The delivery is refused, but its id (and body hash) is given back, so the
+    sender's retry (GitHub's Redeliver, after an API that lagged its webhook) counts. That
+    is safe because belief always takes a fresh read: a retry passes only when the source
+    agrees. Refusals that never reach the source, and accepted deliveries, keep the claim."""
 
 
 @dataclass(frozen=True)
@@ -374,13 +378,13 @@ async def parse(hook: Hook, d: Delivery, read: Reader | None) -> Parsed:
             return Parsed("resolved", key)
         truth = await _read_back(hook, ev, fields, read)
         if all(c.holds(truth) for c in ev.check.when):
-            raise Rejected("the source does not say so")
+            raise Unconfirmed("the source does not say so")
         return Parsed("resolved", key, checked=True)
     checked = False
     if ev.check is not None:
         truth = await _read_back(hook, ev, fields, read)
         if not all(c.holds(truth) for c in ev.check.when):
-            raise Rejected("the source does not say so")
+            raise Unconfirmed("the source does not say so")
         fields = {**fields, **truth}
         checked = True
     title = render(ev.title, fields)

@@ -223,9 +223,9 @@ addresses, nothing else on them). Every step before an item is deterministic and
   department's `block` rules applied, and that read is believed, for a resolve as much as
   for an item: an item counts only when the check's `when` holds, and a resolve only when
   it no longer does (so an event with `resolve` and `check` must give `check` a `when`).
-  A read that doesn't hold refuses the delivery; one that fails or is blocked refuses it
-  but doesn't use up its delivery id, so the sender's retry (GitHub's Redeliver) is
-  heard. Without `check` the item says unchecked, and a resolve is taken as sent. A hook
+  A read that doesn't agree, fails or is blocked refuses the delivery but doesn't use up
+  its delivery id, so the sender's retry (GitHub's Redeliver, after an API that lagged its
+  webhook) is heard; a retry is read again and passes only if the source agrees then. Without `check` the item says unchecked, and a resolve is taken as sent. A hook
   closes only its own items, never a watch's under the same key.
 - **Fixtures**: recorded deliveries in `hooks/<name>/*.json` beside `department.json`, each
   with `headers`, `body`, an `expect` (`item` with its `key`/`title`/`fields`, `resolved`,

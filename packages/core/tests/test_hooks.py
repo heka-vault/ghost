@@ -246,6 +246,20 @@ async def test_a_resolve_is_believed_only_when_the_source_no_longer_says_failure
     assert i._items.open() == []
 
 
+async def test_a_resolve_the_source_disagreed_with_counts_when_redelivered_after_it_agrees():
+    source = Source()
+    i, h = intake(source)
+    headers, raw = github_request(payload())
+    await i.receive(h.path, headers, raw)
+    # GitHub's API lags its webhook: the run still reads as failed
+    headers, raw = github_request(payload(conclusion="success", run=102), delivery="d-2")
+    assert (await i.receive(h.path, headers, raw)).outcome == "the source does not say so"
+    source.conclusion = "success"  # Redeliver: the same id, the same body
+    assert (await i.receive(h.path, headers, raw)).outcome == "resolved"
+    assert i._items.open() == []
+    assert (await i.receive(h.path, headers, raw)).outcome == "replayed"  # accepted: kept
+
+
 async def test_a_hook_resolves_only_its_own_items():
     from ghost_core.waiting import ItemDraft
 
