@@ -1506,11 +1506,14 @@ def cli(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     cmd = argv[0] if argv else "run"
     logger.remove()
+    # diagnose=False: a traceback never prints its frames' variables (a webhook's raw body,
+    # the environment's secrets); the journal gets the stack and the message only.
     logger.add(
         sys.stderr,
         level="INFO",
         format="{time:HH:mm:ss.SSS} {level:<7} {message}",
         filter=quiet_phone_teardown,
+        diagnose=False,
     )
 
     if cmd == "run":
@@ -1523,6 +1526,7 @@ def cli(argv: list[str] | None = None) -> None:
                 level=voice.log_level.upper(),
                 format="{time:HH:mm:ss.SSS} {level:<7} {name}: {message}",
                 filter=quiet_phone_teardown,
+                diagnose=False,
             )
         debug.enable(voice.debug_audio)
         asyncio.run(Daemon(cfg, voice).run())
@@ -1665,18 +1669,24 @@ def push_cli(args: list[str]) -> int:
     body = (args[2] if len(args) > 2 else "{}").encode()
     ts, delivery = str(int(time.time())), uuid.uuid4().hex
     address = cfg.hooks_listen.split(",")[0].strip()
-    r = httpx.post(
-        f"http://{address}{hook.path}",
-        content=body,
-        headers={
-            "content-type": "application/json",
-            H_TIME: ts,
-            H_ID: delivery,
-            H_EVENT: args[1],
-            H_SIG: sign_hmac(secret, ts, delivery, body),
-        },
-        timeout=10,
-    )
+    try:
+        r = httpx.post(
+            f"http://{address}{hook.path}",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                H_TIME: ts,
+                H_ID: delivery,
+                H_EVENT: args[1],
+                H_SIG: sign_hmac(secret, ts, delivery, body),
+            },
+            timeout=10,
+        )
+    except httpx.HTTPError as e:
+        print(
+            f"could not reach the hooks listener on {address} ({type(e).__name__})", file=sys.stderr
+        )
+        return 1
     print("accepted" if r.status_code < 400 else f"refused ({r.status_code})")
     return 0 if r.status_code < 400 else 1
 

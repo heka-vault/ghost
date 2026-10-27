@@ -190,9 +190,11 @@ class Items:
         )
         return changed
 
-    def resolve(self, key: str, now: datetime | None = None) -> bool:
+    def resolve(self, source: str, key: str, now: datetime | None = None) -> bool:
+        """``source`` says ``key`` is over. An item another source holds open is left to
+        it, as in ``sync`` and ``observe``."""
         prior = self._store.get_item(key)
-        if prior is None or prior["resolved_at"] is not None:
+        if prior is None or prior["resolved_at"] is not None or prior["source"] != source:
             return False
         self._store.resolve_item(key, now or utcnow())
         return True
