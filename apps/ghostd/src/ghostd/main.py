@@ -49,17 +49,18 @@ from ghost_core.apps import APPS_FILE, Apps, load_apps
 from ghost_core.catalog import Catalog
 from ghost_core.conversations import GHOST, Conversations, Profile, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
-from ghost_core.department_tools import DepartmentTools, departments_source
-from ghost_core.departments import Departments
-from ghost_core.hooks import Hook, HookIntake, run_fixtures
+from ghost_core.folder import GhostFolder
+from ghost_core.hooks import HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.outputs import Outputs
 from ghost_core.routes import RouteEngine, RoutePolicy, SpokenDigest
+from ghost_core.rules import SOURCE as RULES
+from ghost_core.rules import Rules, rules_source
 from ghost_core.signin import SignIns
 from ghost_core.skills import Skills
 from ghost_core.waiting import Item, Items, WaitingList, waiting_source
-from ghost_core.watches import Watch, WatchRunner
+from ghost_core.watches import WatchRunner
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
@@ -114,15 +115,10 @@ PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then
 # While a phone session winds down after the phone has gone, Pipecat's output transport
 # reports its writes to the dead peer as errors. They are the expected tail of a hang-up,
 # not faults; the sinks drop them while this is set.
-def declared_watches(departments: Departments) -> list[Watch]:
-    """Every department's watches (ADR 0028), Ghost's first."""
-    return [w for d in departments.list() for w in d.watches.values()]
-
-
-def declared_urgency(departments: Departments) -> dict[str, str]:
+def declared_urgency(folder: GhostFolder) -> dict[str, str]:
     """Each watch's and hook's declared urgency, by its items' source."""
-    out = {w.source: w.urgency for w in declared_watches(departments)}
-    out.update({h.source: h.urgency for h in declared_hooks(departments)})
+    out = {w.source: w.urgency for w in folder.watches.values()}
+    out.update({h.source: h.urgency for h in folder.hooks.values()})
     return out
 
 
@@ -131,24 +127,38 @@ def describe_routes(p: RoutePolicy) -> str:
     return f"routes: {', '.join(p.enabled)}; escalate after {p.escalate_after} min{quiet}"
 
 
-def declared_hooks(departments: Departments) -> list[Hook]:
-    """Every department's webhooks (ADR 0027)."""
-    return [h for d in departments.list() for h in d.hooks.values()]
-
-
-def describe_watches(departments: Departments) -> list[str]:
+def describe_watches(folder: GhostFolder) -> list[str]:
     """One line per watch for the log and ``ghostd check``."""
     out = []
-    for d in departments.list():
-        for w in d.watches.values():
-            steps = "check" + (", jev" if w.jev else "") + (", model" if w.model else "")
-            out.append(
-                f"watch {d.slug}/{w.name}: {w.app}.{w.read} every {w.every}s, {steps}, {w.response}"
-            )
-        for p in d.problems:
-            if " watch " in p:
-                out.append(f"watch problem in {d.slug}: {p}")
+    for w in folder.watches.values():
+        steps = "check" + (", jev" if w.jev else "") + (", model" if w.model else "")
+        out.append(f"watch {w.name}: {w.app}.{w.read} every {w.every}s, {steps}, {w.response}")
     return out
+
+
+def check_folder(config_dir: Path) -> list[str]:
+    """``ghostd check`` for Ghost's folder (ADR 0035): the watches and hooks, each hook's
+    fixtures and secret, and what in the folder doesn't read or is no longer read (an
+    older layout's department.json, memory.md, docs/, departments/). Prints the lines;
+    returns the problems."""
+    folder = GhostFolder(config_dir)
+    problems: list[str] = []
+    print(f"folder: {folder.path}")
+    for problem in folder.problems:
+        print(f"  problem: {problem}")
+        problems.append(problem)
+    for line in describe_watches(folder):
+        print(line)
+    for h in folder.hooks.values():
+        failures = run_fixtures(h)
+        print(
+            f"hook {h.name}: {h.verify}, {len(h.events)} event(s), "
+            + ("fixtures pass" if not failures else f"{len(failures)} fixture(s) fail")
+        )
+        problems += [f"hook {h.name}: {f}" for f in failures]
+        if not os.environ.get(h.secret_name()):
+            problems.append(f"hook {h.name}: {h.secret_name()} is not set")
+    return problems
 
 
 def load_app_secrets(path: Path) -> None:
@@ -158,28 +168,22 @@ def load_app_secrets(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
-def ghost_problems(apps: Apps, departments: Departments) -> list[tuple[str, str, str | None]]:
+def ghost_problems(apps: Apps, folder: GhostFolder) -> list[tuple[str, str]]:
     """Ghost's own trouble, for the waiting list (ADR 0029): an app that isn't connected or
-    wants the operator to sign in again, a department folder that doesn't read."""
-    out: list[tuple[str, str, str | None]] = []
+    wants the operator to sign in again, a file in Ghost's folder that doesn't read or is
+    no longer read (ADR 0035)."""
+    out: list[tuple[str, str]] = []
     for name, spec in apps.specs.items():
         state = apps.state(name)
         if state == "connected":
             continue
         if state == "needs_sign_in":
-            out.append((f"app:{name}", f"{spec.shown} needs you to sign in again", None))
+            out.append((f"app:{name}", f"{spec.shown} needs you to sign in again"))
         else:
             why = apps.problem(name) or "not connected"
-            out.append((f"app:{name}", f"{spec.shown} isn't connected: {why}", None))
-    for d in departments.list():
-        if d.problems:
-            out.append(
-                (
-                    f"department:{d.slug}",
-                    f"{d.title}'s folder has a problem: {d.problems[0]}",
-                    None if d.is_ghost else d.slug,
-                )
-            )
+            out.append((f"app:{name}", f"{spec.shown} isn't connected: {why}"))
+    if folder.problems:
+        out.append(("folder", f"Ghost's folder has a problem: {folder.problems[0]}"))
     return out
 
 
@@ -238,7 +242,9 @@ class Daemon:
         self._chimed = False  # the detector's early chime played; the session won't repeat it
         self.conversations: Conversations | None = None
         self.skills: Skills | None = None
-        self.departments: Departments | None = None
+        self.folder: GhostFolder | None = None  # ADR 0035; set in run()
+        self.rules: Rules | None = None
+        self.outputs: Outputs | None = None
         self.apps: Apps | None = None
         self.signins: SignIns | None = None
         self.catalog: Catalog | None = None
@@ -423,15 +429,15 @@ class Daemon:
         return True
 
     def reload_policy(self) -> AutonomyPolicy:
-        """The file, and every department's levels over it (ADR 0024), re-read together:
-        a department.json edited by hand applies at the next write."""
+        """The file, and Ghost's folder with it (ADR 0035): watches.json and hooks.json
+        edited by hand apply too."""
         policy = AutonomyPolicy.load(self.cfg.policy_path)
         if self.gate is not None:
             self.gate.set_autonomy(policy)
         if self.routes is not None:
             self.routes.set_policy(policy.routes or RoutePolicy())
-        if self.departments is not None:
-            self.departments.refresh()  # the gate's hook rebuilds the departments' levels
+        if self.folder is not None:
+            self.folder.refresh()  # the watches and hooks follow
         logger.info(f"policy reloaded from {policy.source}")
         return policy
 
@@ -682,13 +688,13 @@ class Daemon:
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         store = Store(self.cfg.db_path)
         autonomy = AutonomyPolicy.load(self.cfg.policy_path)
-        # ADR 0024: the departments are folders. ADR 0034: the apps are Ghost's, connected
-        # now, and every department reaches them.
-        departments = Departments(self.cfg.config_dir)
-        departments.ensure_layout()
-        self.departments = departments
-        for problem in departments.problems():
-            logger.warning(f"departments: {problem}")
+        # ADR 0035: one folder, Ghost's. ADR 0034: the apps are Ghost's, connected now, and
+        # every agent reaches them.
+        folder = GhostFolder(self.cfg.config_dir)
+        folder.ensure_layout()
+        self.folder = folder
+        for problem in folder.problems:
+            logger.warning(f"folder: {problem}")
         apps_file = load_apps(self.cfg.config_dir / APPS_FILE)
         for problem in apps_file.problems:
             logger.warning(f"apps: {problem}")
@@ -701,7 +707,7 @@ class Daemon:
         self.apps = apps
         await apps.connect()
         self.catalog = Catalog(self.cfg.catalog_path)
-        skills = Skills(self.cfg.skills_dir, self.cfg.home_skills_dir)  # ADR 0024
+        skills = Skills(self.cfg.skills_dir, self.cfg.home_skills_dir)  # ADR 0035
         self.skills = skills
         # What Ghost's own sessions may call: every connected app's tools, and the skills
         # (the index, read_skill, add and remove).
@@ -724,7 +730,6 @@ class Daemon:
             classifier=classifier,
             on_decision=debug.audio,
         )
-        gate.attach_departments(departments)  # their rules follow the folders (ADR 0024)
         for a in tool_sources:  # every app's changes go through the gate
             gate.register(a.name, a.operations)
         self.gate = gate
@@ -745,41 +750,40 @@ class Daemon:
 
         apps.on_change.append(sync_apps)
 
-        async def read_for(department: str, app: str, tool: str, args: dict[str, Any]) -> Any:
-            """A read the daemon makes for a department (a watch's look, a webhook's check,
-            ADR 0027/0028): one of the app's read-only tools, unless the department's
-            permissions block it."""
-            if gate.blocks_read(app, tool, args, department):
-                raise ValueError(f"{app}.{tool} is blocked for {department}")
+        async def read_for(app: str, tool: str, args: dict[str, Any]) -> Any:
+            """A read the daemon makes (a watch's look, a webhook's check, ADR 0027/0028):
+            one of the app's read-only tools, unless the operator's permissions block it."""
+            if gate.blocks_read(app, tool, args):
+                raise ValueError(f"{app}.{tool} is blocked by the operator's permissions")
             return await apps.read_for(app, tool, args)
 
         conversations = Conversations(
             store,
-            departments,
+            self.cfg.config_dir,
             default_voice=self.voice.tts_voice,
             default_speed=self.voice.tts_speed,
             retention=timedelta(days=self.cfg.turn_retention_days),
         )
         gate.register(CONVERSATIONS, conversations_source(conversations).operations)
         self.conversations = conversations
-        department_tools = DepartmentTools(departments, store, conversations)
-        gate.register(departments_source(department_tools).name, department_tools.operations())
-        self.department_tools = department_tools
-        outputs = Outputs(departments, conversations)  # ADR 0033: what Ghost makes
+        rules = Rules(self.cfg.config_dir)  # ADR 0035: "add a rule", verbatim
+        gate.register(RULES, rules.operations())
+        self.rules = rules
+        outputs = Outputs(self.cfg.config_dir)  # ADR 0033: what Ghost makes
         gate.register(OUTPUTS, outputs.operations())
         self.outputs = outputs
         # ADR 0029: what needs the operator, with the changes waiting for a yes (ADR 0030).
         waiting = WaitingList(
             Items(store),
             changes=gate.waiting,
-            problems=lambda: ghost_problems(apps, departments),
+            problems=lambda: ghost_problems(apps, folder),
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.waiting = waiting
         # ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
         watch_runner = WatchRunner(
             waiting.items,
-            lambda w: read_for(w.department, w.app, w.read, dict(w.args)),
+            lambda w: read_for(w.app, w.read, dict(w.args)),
             jev=watch_decider(jev) if jev else None,
             model=None if self.voice.llm_problems() else model_decider(self.voice.llm_target()),
             on_change=lambda: self.state.set_waiting(waiting.count()),
@@ -797,7 +801,7 @@ class Daemon:
         self.routes = RouteEngine(
             waiting.items,
             policy=autonomy.routes or RoutePolicy(),
-            urgency_of=lambda item: declared_urgency(departments).get(item.source, "notify"),
+            urgency_of=lambda item: declared_urgency(folder).get(item.source, "notify"),
             at_desk=self._at_desk,
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
@@ -806,14 +810,13 @@ class Daemon:
         self.routes.add_route(self._phone_route)
 
         def reach(p: Profile) -> list[ToolSource]:
-            """What a session with this agent reaches (ADR 0024, ADR 0034): every connected
-            app (its department's permissions narrow them in the gate), the skills nearest
-            first, and the agents' own tools. Ghost also gets the skill writes."""
-            d = conversations.department_of(p)
+            """What a session with any agent reaches (ADR 0034, ADR 0035): every connected
+            app (the operator's permissions apply in the gate), the skills, the agents' own
+            tools, the rules, the outputs and the waiting list."""
             out: list[ToolSource] = list(apps.sources())
-            out.append(skills.source(d.skill_places(), writes=d.is_ghost))
+            out.append(skills.source())
             out.append(conversations_source(conversations))
-            out.append(departments_source(department_tools))
+            out.append(rules_source(rules))
             out.append(outputs.source())
             out.append(waiting_source(waiting))
             return out
@@ -831,22 +834,22 @@ class Daemon:
         refresher = asyncio.ensure_future(self._refresh_waiting(waiting))
 
         def follow_watches() -> None:
-            """The folders were re-read: the declared watches and hooks again."""
-            watched = declared_watches(departments)
+            """The folder was re-read: the declared watches and hooks again."""
+            watched = list(folder.watches.values())
             for w in watched:
                 if w.app not in apps.specs:
-                    logger.warning(
-                        f"watch {w.department}/{w.name}: reads {w.app}, which isn't connected"
-                    )
+                    logger.warning(f"watch {w.name}: reads {w.app}, which isn't connected")
             watch_runner.set_watches(watched)
-            for problem in hook_intake.set_hooks(declared_hooks(departments)):
+            for problem in hook_intake.set_hooks(list(folder.hooks.values())):
                 logger.warning(f"hooks: {problem}")
 
         follow_watches()
-        departments.on_refresh.append(follow_watches)
-        for line in describe_watches(departments):
+        folder.on_refresh.append(follow_watches)
+        for line in describe_watches(folder):
             logger.info(line)
         hooks_listener = await self._start_hooks(hook_intake)
+        if hooks_listener is not None and self._deps is not None:
+            self._deps.hooks_listening = list(hooks_listener.addresses)
         logger.info(f"autonomy policy: {autonomy.source}")
         logger.info(describe_routes(self.routes.policy))
 
@@ -1018,8 +1021,9 @@ class Daemon:
             catalog=self.catalog,
             signins=self.signins,
             skills=skills,
-            departments=self.departments,
-            department_tools=getattr(self, "department_tools", None),
+            folder=self.folder,
+            rules=self.rules,
+            outputs=self.outputs,
             waiting=self.waiting,
             watches=self.watch_runner,
             hooks=self.hook_intake,
@@ -1130,8 +1134,7 @@ class Daemon:
                 self._refresh_pending()
 
         async def on_conversation(slug: str) -> None:
-            p = self.conversations.get(slug) if self.conversations else None
-            self.state.set_conversation(slug, department=p.department if p else None)
+            self.state.set_conversation(slug)
             self._refresh_pending()
 
         async def on_hang_up() -> None:
@@ -1159,7 +1162,6 @@ class Daemon:
         )
         replied = asyncio.Event()
         first_reply: list[str] = []
-        start_profile = self.conversations.get(start_in) if self.conversations else None
         session = build_session(
             self.voice,
             models=models,
@@ -1196,9 +1198,7 @@ class Daemon:
             self._last_desk_session = time.monotonic()
         self._origin = origin
         self.state.set_phase(Phase.LISTENING, session.session_id, origin=origin)
-        self.state.set_conversation(
-            start_in, department=start_profile.department if start_profile else GHOST
-        )
+        self.state.set_conversation(start_in)
         if first_utterance:
             self.state.add_turn("user", first_utterance, via=self._first_via)
         self._first_via = "voice"
@@ -1412,7 +1412,7 @@ def describe_apps(apps: Apps, gate: WriteGate | None = None) -> list[str]:
     """Each app as connected: its reads and changes, and the changes Ghost's own
     permissions block or ask about (ADR 0034)."""
     lines = []
-    policy = gate.policy_for(GHOST) if gate is not None else AutonomyPolicy()
+    policy = gate.autonomy if gate is not None else AutonomyPolicy()
     for name, spec in apps.specs.items():
         live = apps.apps.get(name)
         if live is None or not live.connected:
@@ -1601,23 +1601,7 @@ def cli(argv: list[str] | None = None) -> None:
             print(f"autonomy policy: {autonomy.source}")
         except ValueError as e:
             problems.append(f"policy: {e}")
-        departments = Departments(cfg.config_dir)
-        print("departments: " + ", ".join(d.title for d in departments.list()))
-        for problem in departments.problems():
-            print(f"  problem: {problem}")
-            problems.append(problem)
-        for line in describe_watches(departments):
-            if not line.startswith("watch problem"):  # listed with the problems above
-                print(line)
-        for h in declared_hooks(departments):
-            failures = run_fixtures(h)
-            print(
-                f"hook {h.department}/{h.name}: {h.verify}, {len(h.events)} event(s), "
-                + ("fixtures pass" if not failures else f"{len(failures)} fixture(s) fail")
-            )
-            problems += [f"hook {h.department}/{h.name}: {f}" for f in failures]
-            if not os.environ.get(h.secret_name()):
-                problems.append(f"hook {h.department}/{h.name}: {h.secret_name()} is not set")
+        problems += check_folder(cfg.config_dir)
         apps_file = load_apps(cfg.config_dir / APPS_FILE)
         for problem in apps_file.problems:
             print(f"  problem: {problem}")
@@ -1655,7 +1639,7 @@ def cli(argv: list[str] | None = None) -> None:
     else:
         print(
             "usage: ghostd [run|wake|say <text>|sleep|status|latency|perf|restore-volumes|"
-            "devices|check|push <department>/<hook> <event> [json]]"
+            "devices|check|push <hook> <event> [json]]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)
@@ -1663,7 +1647,7 @@ def cli(argv: list[str] | None = None) -> None:
 
 def push_cli(args: list[str]) -> int:
     """Send a signed delivery to the local webhook listener (ADR 0027), for a local
-    sender: ``ghostd push ghost/jobs done '{"job": "backup", "ok": false}'`` at the end of a
+    sender: ``ghostd push jobs done '{"job": "backup", "ok": false}'`` at the end of a
     long job. The hook must use ``hmac``; its secret comes from the environment."""
     import time
     import uuid
@@ -1671,13 +1655,11 @@ def push_cli(args: list[str]) -> int:
     import httpx
     from ghost_core.hooks import H_EVENT, H_ID, H_SIG, H_TIME, sign_hmac
 
-    if len(args) < 2 or "/" not in args[0]:
-        print("usage: ghostd push <department>/<hook> <event> [json]", file=sys.stderr)
+    if len(args) < 2 or "/" in args[0]:
+        print("usage: ghostd push <hook> <event> [json]", file=sys.stderr)
         return 2
     cfg = GhostdSettings()
-    slug, name = args[0].split("/", 1)
-    d = Departments(cfg.config_dir).get(slug)
-    hook = d.hooks.get(name) if d is not None else None
+    hook = GhostFolder(cfg.config_dir).hooks.get(args[0])
     if hook is None or hook.verify != "hmac":
         print(f"no hmac hook {args[0]} is declared", file=sys.stderr)
         return 2

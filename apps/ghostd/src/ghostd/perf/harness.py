@@ -30,7 +30,6 @@ from ghost_core import (
 from ghost_core.apps import APPS_FILE, Apps, load_apps
 from ghost_core.conversations import GHOST, Conversations, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
-from ghost_core.departments import Departments
 from ghost_core.jev import JevClassifier, JevClient
 from ghost_voice import VoiceSettings, build_session
 from ghost_voice import llm as llm_module
@@ -473,11 +472,9 @@ class Bench:
         (tmp / "config").mkdir(parents=True, exist_ok=True)
         rules = self.gdsettings.infra_dir / "example" / "AGENTS.md"
         (tmp / "config" / "AGENTS.md").write_text(rules.read_text())
-        departments = Departments(tmp / "config")
-        departments.ensure_layout()
         conversations = Conversations(
             store,
-            departments,
+            tmp / "config",
             default_voice=settings.tts_voice,
             default_speed=settings.tts_speed,
         )

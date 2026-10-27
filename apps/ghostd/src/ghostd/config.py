@@ -41,10 +41,10 @@ class GhostdSettings(BaseSettings):
     def latency_path(self) -> Path:
         return self.latency_log or self.data_dir / "latency.jsonl"
 
-    # Departments (ADR 0024): everything the operator edits lives under config_dir: Ghost's
-    # AGENTS.md, apps.json and department.json at the root, each department under
-    # departments/<slug>/, and every agent's persona.md, memory.md and notes.md under its
-    # department's agents/. The transcript and the registry mirror are in the database.
+    # Ghost's folder (ADR 0035): everything the operator edits lives under config_dir:
+    # AGENTS.md, apps.json, watches.json, hooks.json, skills/, out/, and every agent's
+    # agent.json, persona.md, memory.md and notes.md under agents/<slug>/. The transcript
+    # and the registry mirror are in the database.
     # Summarized turns older than the retention window are pruned daily.
     config_dir: Path = Path.home() / ".config" / "ghost"
     # Apps (ADR 0034): a sign-in's browser comes back to 127.0.0.1 on this port, only while
@@ -52,8 +52,8 @@ class GhostdSettings(BaseSettings):
     signin_port: int = 47823
     # The catalog's copy of the app registry, refreshed at most hourly.
     catalog_path: Path = Path.home() / ".cache" / "ghost" / "catalog.json"
-    # Skills (ADR 0024): Ghost's own SKILL.md folders, and the operator's, read after a
-    # department's own (a project's skills come in through a department's root).
+    # Skills (ADR 0023, ADR 0035): the operator's SKILL.md folders, then Ghost's own; the
+    # first folder with a name wins.
     skills_dir: Path = Path.home() / ".config" / "ghost" / "skills"
     home_skills_dir: Path = Path.home() / ".agents" / "skills"
 
@@ -75,8 +75,8 @@ class GhostdSettings(BaseSettings):
     # TCP port and UDP from the LAN (aiortc picks random UDP ports).
     phone_listen: str = ""
 
-    # Webhook listener (ADR 0027): POST /hooks/<department>/<name> only, for the hooks the
-    # department folders declare; host:port, comma separated. Empty = off. Every delivery is
+    # Webhook listener (ADR 0027): POST /hooks/<name> only, for the hooks hooks.json
+    # declares (ADR 0035); host:port, comma separated. Empty = off. Every delivery is
     # signed, parsed by declaration and checked at the source before it is an item.
     hooks_listen: str = ""
 

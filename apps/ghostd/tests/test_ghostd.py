@@ -229,6 +229,44 @@ async def test_an_early_chime_without_a_session_restores_the_music(tmp_path, mon
     assert d._chimed is False  # noqa: SLF001
 
 
+def test_check_names_what_an_older_layout_left_and_reads_none_of_it(tmp_path, capsys):
+    """ADR 0035, no migration: ``ghostd check`` names each file and folder that is no
+    longer read, says where a department.json's watches and hooks go, and fails."""
+    import json
+
+    from ghostd.main import check_folder
+
+    watch = {
+        "app": "github",
+        "read": "list_workflow_runs",
+        "items": "runs",
+        "fields": {"id": {"at": "id", "type": "int"}},
+        "key": "{id}",
+        "title": "Run {id}",
+    }
+    (tmp_path / "department.json").write_text(json.dumps({"title": "Ghost", "watches": {}}))
+    (tmp_path / "memory.md").write_text("What every agent knew.\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "departments" / "marketing").mkdir(parents=True)
+    (tmp_path / "watches.json").write_text(json.dumps({"ci": watch}))
+    problems = check_folder(tmp_path)
+    out = capsys.readouterr().out
+    assert len(problems) == 4
+    old = next(p for p in problems if "department.json" in p)
+    assert "not read any more" in old and "watches.json" in old and "hooks.json" in old
+    assert any(p.startswith(str(tmp_path / "memory.md")) for p in problems)
+    assert any(p.startswith(str(tmp_path / "docs")) for p in problems)
+    assert any(p.startswith(str(tmp_path / "departments" / "marketing")) for p in problems)
+    assert "watch ci: github.list_workflow_runs every 60s, check, tell" in out
+    assert out.count("problem:") == 4
+    # a folder in today's shape is fine
+    for p in ("department.json", "memory.md"):
+        (tmp_path / p).unlink()
+    (tmp_path / "docs").rmdir()
+    (tmp_path / "departments" / "marketing").rmdir()
+    assert check_folder(tmp_path) == []
+
+
 def test_ghosts_own_problems_are_items_for_the_waiting_list():
     """ADR 0029, ADR 0034: an app that isn't connected, one that wants a new sign-in, a
     folder that doesn't read."""
@@ -247,14 +285,12 @@ def test_ghosts_own_problems_are_items_for_the_waiting_list():
     up._session = object()  # noqa: SLF001 - connected
     apps.apps["github"] = up
     apps.failed = {"figma": "setting FIGMA_TOKEN is not set", "linear": "needs sign-in"}
-    depts = [
-        SimpleNamespace(slug="ghost", title="Ghost", is_ghost=True, problems=[]),
-        SimpleNamespace(slug="sales", title="Sales", is_ghost=False, problems=["bad json"]),
-    ]
-    out = ghost_problems(apps, SimpleNamespace(list=lambda: depts))
-    assert [k for k, _, _ in out] == ["app:figma", "app:linear", "department:sales"]
+    out = ghost_problems(apps, SimpleNamespace(problems=["watches.json: bad json"]))
+    assert [k for k, _ in out] == ["app:figma", "app:linear", "folder"]
     assert out[1][1] == "Linear needs you to sign in again"
-    assert "FIGMA_TOKEN" in out[0][1] and out[2][2] == "sales"
+    assert "FIGMA_TOKEN" in out[0][1]
+    assert out[2][1] == "Ghost's folder has a problem: watches.json: bad json"
+    assert ghost_problems(apps, SimpleNamespace(problems=[]))[-1][0] == "app:linear"
 
 
 def test_the_route_engine_exists_before_routes_are_added_to_it():
