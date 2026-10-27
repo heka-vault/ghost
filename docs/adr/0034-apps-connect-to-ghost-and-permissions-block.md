@@ -104,7 +104,7 @@ An app not in the catalog is added by URL, or by pasting another client's config
   `ghost_core.signin` are new. `ghost_core.scope` goes, and with it the allowlists, ownership
   and `GHOST_DEPARTMENT_ROUTING`. A department limited to some repositories says so with a
   `block` rule (`github.*(repo!=site)`).
-- The control API: `/apps` (list, connect, disconnect, sign in), `/apps/catalog` and
+- The control API: `/apps` (list, connect, disconnect, sign in), `/catalog` and
   `/permissions`; `/mcp` goes. The desktop's Servers screen becomes Apps, and the Policy
   screen becomes Permissions.
 - Performance (ADR 0018): every tool of every app is now in the prompt. The GitHub server

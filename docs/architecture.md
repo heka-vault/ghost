@@ -75,7 +75,7 @@ A department is a folder (ADR 0024): `~/.config/ghost/departments/<slug>/` with 
 
 An accepted offer becomes a `SmallWebRTCConnection` with no ICE servers, which the listener hands to the daemon. The passive loop waits on it next to the wake detector: it cancels the wake task, which releases the desk mic, and runs a session whose transport is a `SmallWebRTCTransport` (16 kHz in, Kokoro's 24 kHz out, the thinking sound mixed into the phone's track). A phone session doesn't duck music or chime on the desk, and `Status.session_origin` is `phone`. An offer while any session runs, or while the models load, is refused (409 `busy`, 503 `not_ready`). The session ends when the peer closes or stops its keepalive, on `POST /end`, or on RTVI `disconnect-bot`, and its ending closes the peer. Phone sessions are ended with an EndFrame, not cancelled: Pipecat leaves a processor that saw a CancelFrame refusing frames, and Kokoro's processor is shared by every session.
 
-The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, which acts only on `client-ready` and `disconnect-bot` (no typed text, raw audio or function results), with an observer that sends `bot-ready` and the speaking events but no transcripts, LLM text, metrics or logs. The daemon forwards its own event bus (`status`, `turn`, `pending`, `outcome`, `conversation`; never `log`) to the phone as `server-message`s, the same JSON the control API's WebSocket sends.
+The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, which acts only on `client-ready` and `disconnect-bot` (no typed text, raw audio or function results), with an observer that sends `bot-ready` and the speaking events but no transcripts, LLM text, metrics or logs. The daemon forwards its own event bus (`status`, `turn`, `pending`, `outcome`, `conversation`, `waiting`, `apps`; never `log`) to the phone as `server-message`s, the same JSON the control API's WebSocket sends.
 
 ## Components
 
@@ -128,17 +128,24 @@ item still to be heard, outside quiet hours and do-not-disturb, past the batch w
 picks the quietest enabled route the item's urgency allows (desk routes only when the
 operator is at the desk: a desk session in the last 15 minutes, or the desktop app
 connected), and after `escalate_after` minutes without an acknowledgment the next one up;
-a route that knows nobody heard (desk voice with no reply) hands the item on at once. A
-bare wake in Ghost opens with the digest instead of a greeting ("Hi. Two things are
-waiting: …"), which counts as heard. "Nothing until two" is a fixed intent (no model) that
-sets do-not-disturb. The policy is `[routes]` in `policy.toml`; the model sets none of it.
+a route that knows nobody heard (desk voice with no reply), or that can't take the item
+now (the desk busy, no `notify-send`, the phone app closed), hands it on at once. When a
+snooze runs out the item starts again at the bottom of its ladder. A bare wake in Ghost
+opens with the digest instead of a greeting ("Hi. Five things are waiting: …; and two
+more"): the greeting going out delivers them, and the operator's first answer in that
+session acknowledges only the three titles it said (`ghost_core.routes.SpokenDigest`).
+"Nothing until two" is a fixed intent (no model) that sets do-not-disturb, kept in the
+store over a restart; a time that isn't one ("until 3:75") is said back, not set. The
+policy is `[routes]` in `policy.toml`; the model sets none of it.
 
 Desk voice (`desk`, opt-in, ADR 0032) is the daemon's own route (`ghostd.routes.DeskRoute`):
 only when the desk is idle, the passive loop takes it like a wake, releases the wake
 listener, and opens a session that greets with `[routes].greeting` and nothing about the
-items, which wait in the context. The phase is `asking`. A reply within 15 seconds is the
-acknowledgment; "not now" snoozes them for 30 minutes; silence ends the session with
-nothing kept, and the engine hands the items to the next route at once.
+items, which wait in the context (the first five titles). The phase is `asking`. A reply
+within 15 seconds acknowledges those five; "not now" snoozes them for 30 minutes; silence
+ends the session with nothing kept, and the engine hands the items to the next route at
+once. A desktop notification's button acknowledges what it showed, unless the item changed
+after.
 
 ### Memory and compaction
 
