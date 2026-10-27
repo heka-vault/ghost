@@ -1,6 +1,6 @@
 # 0032: Ghost may start a session: it greets, waits, and tells only on a reply
 
-- **Status:** proposed
+- **Status:** accepted (decided 2026-10-27; built: `ghostd.routes.DeskRoute`, the reply window, `Phase.ASKING`)
 - **Date:** 2026-10-27
 - **Amends:** ADR 0010 (a session may start without a wake phrase)
 

@@ -111,6 +111,13 @@ bare wake in Ghost opens with the digest instead of a greeting ("Hi. Two things 
 waiting: …"), which counts as heard. "Nothing until two" is a fixed intent (no model) that
 sets do-not-disturb. The policy is `[routes]` in `policy.toml`; the model sets none of it.
 
+Desk voice (`desk`, opt-in, ADR 0032) is the daemon's own route (`ghostd.routes.DeskRoute`):
+only when the desk is idle, the passive loop takes it like a wake, releases the wake
+listener, and opens a session that greets with `[routes].greeting` and nothing about the
+items, which wait in the context. The phase is `asking`. A reply within 15 seconds is the
+acknowledgment; "not now" snoozes them for 30 minutes; silence ends the session with
+nothing kept, and the engine hands the items to the next route at once.
+
 ### Memory and compaction
 
 Each conversation loads only its own persona, memory and notes. The memory is a rolling summary kept in `memory.md`, produced by Pipecat's in-session summarizer with a tokens-only trigger (24k estimated tokens, last 20 messages kept raw, summary up to 3k; `GHOST_COMPACT_*`). Each applied summary is recorded as a version and written to the file through the gate; the file is the source of truth on resume, so an edit by hand is folded into the next version. Summarized turns stay in SQLite, flagged, and are pruned after `GHOST_TURN_RETENTION_DAYS` (90). Raw tool results are never stored, so old untrusted text does not re-enter a later session.

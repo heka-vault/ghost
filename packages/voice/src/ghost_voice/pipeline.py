@@ -256,6 +256,7 @@ def build_session(
     reach: Callable[[Any], list[ToolSource]] | None = None,
     on_enter: Callable[[Any], Awaitable[None]] | None = None,
     on_leave: Callable[[Any], None] | None = None,
+    context_note: str | None = None,
 ) -> GhostSession:
     """Build one session. ``first_utterance`` is what the operator said right after
     the wake phrase; when given it is the first user turn and there is no greeting.
@@ -276,7 +277,10 @@ def build_session(
     hold that ran out). ``wake_phrases`` are what brings a session back from hold (ADR
     0021); the desk's wake phrases by default. ``reach``, ``on_enter`` and ``on_leave``
     are the departments (ADR 0024): what an agent's session reaches, and the hooks that
-    start a department's servers on a transfer and release them after."""
+    start a department's servers on a transfer and release them after.
+
+    ``context_note`` goes into the model's context before the greeting without running
+    it: why Ghost started this session itself (ADR 0032), for the operator's reply."""
     session_id = uuid.uuid4().hex
     target = settings.llm_target()  # GHOST_LLM_ENDPOINT: the proxy or OpenRouter
     latency = (
@@ -649,6 +653,14 @@ def build_session(
     async def opening() -> None:
         if runtime:
             await worker.queue_frames(runtime.start_frames())
+        if context_note:
+            await worker.queue_frames(
+                [
+                    LLMMessagesAppendFrame(
+                        messages=[{"role": "user", "content": context_note}], run_llm=False
+                    )
+                ]
+            )
         if first_utterance:
             if runtime:
                 runtime.record("user", first_utterance)

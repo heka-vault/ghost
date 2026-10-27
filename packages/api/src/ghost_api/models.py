@@ -22,6 +22,7 @@ class Phase(enum.StrEnum):
     THINKING = "thinking"  # model or tool working
     SPEAKING = "speaking"  # Ghost talking
     HOLD = "hold"  # in a session, waiting to be addressed by name again (ADR 0021)
+    ASKING = "asking"  # Ghost greeted the operator itself and waits for a reply (ADR 0032)
 
 
 class PendingProposal(BaseModel):

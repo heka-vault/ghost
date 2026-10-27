@@ -1597,7 +1597,8 @@
           "listening",
           "thinking",
           "speaking",
-          "hold"
+          "hold",
+          "asking"
         ],
         "title": "Phase",
         "type": "string"

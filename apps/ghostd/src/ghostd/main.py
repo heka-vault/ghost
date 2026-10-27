@@ -9,7 +9,7 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +50,7 @@ from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.mcp import Servers
 from ghost_core.routes import RouteEngine, RoutePolicy, spoken_digest
 from ghost_core.skills import Skills
-from ghost_core.waiting import Items, WaitingList, waiting_source
+from ghost_core.waiting import Item, Items, WaitingList, waiting_source
 from ghost_core.watches import Watch, WatchRunner
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
@@ -72,6 +72,14 @@ from ghostd.deciders import model_decider
 from ghostd.dictation import is_dictating
 from ghostd.hooks import HooksListener
 from ghostd.phone import PhoneListener, PhoneStore, Refusal
+from ghostd.routes import (
+    GREETING_SECS,
+    REPLY_WINDOW_SECS,
+    SNOOZE_MINUTES,
+    DeskRoute,
+    context_note,
+    is_not_now,
+)
 from ghostd.wake import FileWakeDetector, SpokenWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
@@ -227,6 +235,8 @@ class Daemon:
         self._phone_q: asyncio.Queue[Any] = asyncio.Queue()
         self._phone_end = asyncio.Event()
         self._waiting = False  # the passive loop is waiting for a wake or a phone
+        # ADR 0032: Ghost has something to raise at the desk: (items, policy, result future).
+        self._raise_q: asyncio.Queue[Any] = asyncio.Queue()
         self._origin: str | None = None  # "desk" | "phone" while a session runs
 
     # --- Controller (called by the API) -------------------------------------
@@ -324,6 +334,48 @@ class Daemon:
                     await self.routes.tick()
             except Exception:  # noqa: BLE001 - the list must not take the daemon down
                 logger.exception("waiting: refresh failed")
+
+    def _can_raise(self) -> bool:
+        """Desk voice may start (ADR 0032): the desk is idle, nothing else is about to
+        start, and dictation is off."""
+        return (
+            self.state.models_ready
+            and self._waiting
+            and self.session is None
+            and self.state.phase is Phase.PASSIVE
+            and self._phone_q.empty()
+            and self._raise_q.empty()
+            and not is_dictating(self.cfg.dictation_flag)
+        )
+
+    async def _reply_window(
+        self,
+        session: Any,
+        raised: tuple[list[Item], RoutePolicy, asyncio.Future[str]],
+        replied: asyncio.Event,
+        first_reply: list[str],
+    ) -> None:
+        """Wait for the operator's reply. Silence: not heard, the session ends quietly and
+        nothing heard was kept or sent. "Not now": snoozed. Anything else: heard."""
+        items, _policy, fut = raised
+        try:
+            await asyncio.wait_for(replied.wait(), REPLY_WINDOW_SECS + GREETING_SECS)
+        except TimeoutError:
+            logger.info("desk voice: no reply; handing on")
+            if not fut.done():
+                fut.set_result("not_heard")
+            await session.cancel()
+            return
+        if is_not_now(first_reply[0] if first_reply else ""):
+            until = datetime.now(UTC) + timedelta(minutes=SNOOZE_MINUTES)
+            if self.waiting is not None:
+                for i in items:
+                    self.waiting.items.snooze(i.key, until)
+            if not fut.done():
+                fut.set_result("delivered")
+            return
+        if not fut.done():
+            fut.set_result("heard")
 
     def _at_desk(self) -> bool:
         """The operator is at the desk: a desk session ran lately, or the desktop app is
@@ -656,6 +708,7 @@ class Daemon:
             problems=lambda: ghost_problems(fleet, departments),
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
+        self.routes.add_route(DeskRoute(self._can_raise, self._raise_q))
         self.waiting = waiting
         # ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
         watch_runner = WatchRunner(
@@ -828,16 +881,22 @@ class Daemon:
             stop_task = asyncio.ensure_future(self._stop.wait())
             rearm_task = asyncio.ensure_future(self._rearm.wait())
             phone_task = asyncio.ensure_future(self._phone_q.get())
+            raise_task = asyncio.ensure_future(self._raise_q.get())
             self._waiting = True
             try:
                 await asyncio.wait(
-                    {wake_task, stop_task, rearm_task, phone_task},
+                    {wake_task, stop_task, rearm_task, phone_task, raise_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
             finally:
                 self._waiting = False
             stop_task.cancel()
             rearm_task.cancel()
+            raised = raise_task.result() if raise_task.done() else None
+            raise_task.cancel()
+            if raised is not None and (phone_task.done() or wake_task.done()):
+                raised[2].set_result("unavailable")  # the operator came first
+                raised = None
             phone = phone_task.result() if phone_task.done() else None
             phone_task.cancel()
             if phone is None and not self._phone_q.empty():  # accepted in the same tick
@@ -845,6 +904,11 @@ class Daemon:
             phone_conn, phone_line = phone if phone is not None else (None, GHOST)
             # Decided before the cancel below, which makes a pending task done too.
             woke = wake_task.done()
+            if raised is not None and (
+                self._stop.is_set() or is_dictating(self.cfg.dictation_flag)
+            ):
+                raised[2].set_result("unavailable")
+                raised = None
             if self._stop.is_set() or phone is not None or not woke:
                 wake_task.cancel()
                 await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
@@ -855,6 +919,11 @@ class Daemon:
                 if phone_conn is not None:
                     await _close_peer(phone_conn)
                 break
+            if raised is not None:  # ADR 0032: Ghost greets at the desk and waits
+                await self._conversation(
+                    models, tool_sources, gate, events, ducker, None, raised=raised
+                )
+                continue
             if phone_conn is not None:  # the phone takes the session; the desk mic is free
                 await self._conversation(
                     models,
@@ -978,11 +1047,15 @@ class Daemon:
         *,
         phone: Any = None,
         start_in: str = GHOST,
+        raised: tuple[list[Item], RoutePolicy, asyncio.Future[str]] | None = None,
     ) -> None:
         """One session. With ``phone`` (a negotiated SmallWebRTCConnection) the audio is
         the phone's: no ducking, no desk chime, the thinking sound in its track, and the
         session's events go to it over RTVI (ADR 0016). ``start_in`` is the thread the
-        session opens in: Ghost, or the one the phone called directly."""
+        session opens in: Ghost, or the one the phone called directly. With ``raised``
+        Ghost started it (ADR 0032): it greets with the operator's phrase, the items wait
+        in the context, and a reply within the window is the acknowledgment; silence ends
+        it with nothing kept."""
         origin = "phone" if phone is not None else "desk"
         if phone is None and not self._chimed:
             ducker.duck()
@@ -999,6 +1072,9 @@ class Daemon:
             self.state.add_turn(role, text)
             if role == "user":
                 self._refresh_pending()
+                if raised is not None and not replied.is_set():
+                    first_reply.append(text)
+                    replied.set()
 
         async def on_phase(phase: str) -> None:
             self.state.set_phase(Phase(phase), self.state.session_id)
@@ -1020,9 +1096,14 @@ class Daemon:
         # else (the digest); a request in the same breath is answered instead.
         digest = (
             self.routes.digest()
-            if self.routes is not None and start_in == GHOST and not first_utterance
+            if self.routes is not None
+            and start_in == GHOST
+            and not first_utterance
+            and raised is None
             else []
         )
+        replied = asyncio.Event()
+        first_reply: list[str] = []
         start_profile = self.conversations.get(start_in) if self.conversations else None
         if start_profile is not None and not start_profile.is_ghost and self._enter is not None:
             # A call straight into an agent (phone, desktop): its department's servers
@@ -1050,6 +1131,11 @@ class Daemon:
             origin=origin,
             latency_log=self.cfg.latency_path,
             **({"greeting": spoken_digest(digest)} if digest else {}),
+            **(
+                {"greeting": raised[1].greeting, "context_note": context_note(raised[0])}
+                if raised is not None
+                else {}
+            ),
         )
         self.session = session
         if digest and self.routes is not None:
@@ -1076,6 +1162,11 @@ class Daemon:
                 asyncio.ensure_future(peer_gone.wait()),
                 asyncio.ensure_future(self._phone_end.wait()),
             }
+        if raised is not None:
+            self.state.set_phase(Phase.ASKING, session.session_id, origin=origin)
+            helpers.append(
+                asyncio.ensure_future(self._reply_window(session, raised, replied, first_reply))
+            )
         try:
             await session.start(open=phone is None)  # type: ignore[attr-defined]
             run_task = asyncio.ensure_future(session.run())
@@ -1101,6 +1192,8 @@ class Daemon:
             for t in [*waits, *helpers]:
                 t.cancel()
             await asyncio.gather(*helpers, return_exceptions=True)
+            if raised is not None and not raised[2].done():
+                raised[2].set_result("not_heard")
             if events_q is not None:
                 self.state.bus.unsubscribe(events_q)
             if phone is not None:

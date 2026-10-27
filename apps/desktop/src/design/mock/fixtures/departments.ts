@@ -102,5 +102,7 @@ export default function departments(s: Scenario): Omit<DepartmentView, "agents">
     skills: d.skills ?? [],
     docs: d.docs ?? [],
     problems: d.problems ?? [],
+    watches: [],
+    hooks: [],
   }));
 }

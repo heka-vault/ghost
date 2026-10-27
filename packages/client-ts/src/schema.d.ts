@@ -1446,7 +1446,7 @@ export interface components {
          * Phase
          * @enum {string}
          */
-        Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold";
+        Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking";
         /** PhoneDevice */
         PhoneDevice: {
             /** Id */
