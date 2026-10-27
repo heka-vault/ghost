@@ -5,10 +5,11 @@ after it is ceremony. When the gate holds a confirm-level proposal, it reads the
 words that led to it (the pipeline's transcript, never the model's text) and executes at
 once when they plainly ask for exactly that:
 
-- a word for the operation, which the ability declares (``Operation.asked_by``: "close",
-  "shut" for close). An operation that declares none always asks;
+- a word for the operation (``Operation.asked_by``: "close", "shut" for close; an app's
+  come from the tool's name and short arguments, ADR 0034). One with none always asks;
 - the target, named in the request ("17", "seventeen", ``Target.mentions``), or "it",
-  "this", "that one" right after Ghost's last reply named it;
+  "this", "that one" right after Ghost's last reply named it. What names it is what the
+  change is about: the repository or the branch it happens in never does;
 - nothing hedged or negated: no "no", "don't", "not", "wait", "should", "maybe", "if";
 - not a question, except a polite request ("can you reopen seventeen?").
 
@@ -99,7 +100,8 @@ def asked_for(
     """Whether ``request`` plainly asks for this operation on this target."""
     said = words(request)
     verbs = [v.lower() for v in verbs]
-    mentions = [m.lower() for m in mentions]
+    # Compared word by word, as the transcript is: "README.md" is "readme md".
+    mentions = [said_as for m in mentions if (said_as := " ".join(words(m)))]
     if not said or not verbs or not mentions:
         return False
     if any(w in _HEDGES for w in said):

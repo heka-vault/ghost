@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from ghost_core.models import Change, ChangeSet, Snapshot, Target
-from ghost_core.request import number_mentions
+from ghost_core.request import number_mentions, words
 
 if TYPE_CHECKING:  # source imports policy; keep the runtime edge lazy
     from ghost_core.source import Operation, Prepared, ReadTool, ToolSource
@@ -502,14 +502,18 @@ class AppTarget(Target, frozen=True):
         return f"{self.title or self.app} {named}".strip()
 
     def mentions(self) -> set[str]:
+        """The words that name what the change is about (ADR 0017): the issue's number,
+        the file's path, the label. Where it happens (the owner, the repository, the
+        branch) never counts on its own, so "close seventeen in ghost" does not name #142
+        in ghost; a change named only by where it happens always asks."""
         out: set[str] = set()
-        for v in self.fields.values():
-            if isinstance(v, bool):
+        for k, v in self.fields.items():
+            if isinstance(v, bool) or _says_where(k):
                 continue
             if isinstance(v, int) or (isinstance(v, str) and v.isdigit()):
                 out |= number_mentions(int(v))
-            elif isinstance(v, str):
-                out.add(v.lower())
+            elif isinstance(v, str) and (said := " ".join(words(v))):
+                out.add(said)  # as the transcript has it: "README.md" is "readme md"
         return out
 
     def rule_args(self) -> dict[str, Any]:
@@ -911,6 +915,24 @@ def _names_it(key: str, v: Any) -> bool:
     if isinstance(v, int):
         return True
     return isinstance(v, str) and 0 < len(v) <= MAX_FIELD_CHARS and not any(c.isspace() for c in v)
+
+
+# Arguments that say where a change happens rather than what it is about (ADR 0017): the
+# account, the repository, the branch. "ghost" is the repository and the wake word, and
+# "main" is every repository's branch, so naming them asks for nothing.
+_WHERE = frozenset(
+    """owner org organization organisation repo repository branch ref base head workspace
+    team account space site tenant region""".split()
+)
+_ID_WORDS = frozenset({"name", "id", "slug", "login", "full"})
+
+
+def _says_where(key: str) -> bool:
+    """``owner``, ``repo_name``, ``base_branch``, ``teamId``: every word of the argument's
+    name, past ``name`` and ``id``, is a place."""
+    parts = re.findall(r"[a-z]+", re.sub(r"([a-z])([A-Z])", r"\1_\2", key).lower())
+    parts = [p for p in parts if p not in _ID_WORDS]
+    return bool(parts) and all(p in _WHERE for p in parts)
 
 
 def source_of(app: App) -> ToolSource:
