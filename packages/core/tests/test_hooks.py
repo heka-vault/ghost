@@ -152,17 +152,141 @@ async def test_the_source_has_the_last_word():
     assert res.outcome == "the source does not say so" and i._items.open() == []
 
 
-async def test_outside_the_allowlist_is_refused():
+async def test_a_check_read_the_department_blocks_refuses_the_delivery():
+    # There is no allowlist of references: what stops a check read is the department's
+    # block rules, enforced by the reader, and a refused read refuses the delivery.
     i, h = intake(Source(refuse=True))
     headers, raw = github_request(payload(repo="acme/other"))
     res = await i.receive(h.path, headers, raw)
     assert res.status == 400 and res.outcome.startswith("not confirmed")
+    assert i._items.open() == []
+
+
+@pytest.mark.parametrize("scheme", ["github", "hmac"])
+async def test_a_signature_header_that_isnt_ascii_is_a_bad_signature(scheme):
+    store = Store()
+    i = HookIntake(Items(store), store, environ={"GITHUB_HOOK_SECRET": SECRET})
+    h = parse_hook("ci", {**CI, "verify": scheme}, "eng", "test")
+    i.hooks[h.path] = h
+    raw = json.dumps(payload()).encode()
+    ts = str(int(utcnow().timestamp()))
+    headers = {H_GH_SIG: "sha256=\xff", H_GH_ID: "d-1", H_GH_EVENT: "workflow_run"}
+    headers |= {H_SIG: "sha256=\xff", H_ID: "d-1", H_EVENT: "workflow_run", H_TIME: ts}
+    res = await i.receive(h.path, headers, raw)
+    assert (res.status, res.outcome) == (401, "bad signature")
+
+
+async def test_an_empty_secret_never_verifies():
+    store = Store()
+    i = HookIntake(Items(store), store, read=Source(), environ={"GITHUB_HOOK_SECRET": ""})
+    h = parse_hook("ci", CI, "eng", "test")
+    i.hooks[h.path] = h
+    headers, raw = github_request(payload(), secret="")
+    res = await i.receive(h.path, headers, raw)
+    assert res.status == 401 and i._items.open() == []
+
+
+async def test_a_github_body_replayed_under_a_new_delivery_id_is_refused():
+    i, h = intake()
+    headers, raw = github_request(payload())
+    assert (await i.receive(h.path, headers, raw)).outcome == "item"
+    for n in range(3):
+        res = await i.receive(h.path, {**headers, H_GH_ID: f"forged-{n}"}, raw)
+        assert (res.status, res.outcome) == (400, "replayed")
+    assert i.state[h.path].accepted["item"] == 1
+    # the body itself is never kept, only its hash beside the delivery
+    dump = "\n".join(i._store._conn.iterdump())
+    assert "workflow_run" not in dump and "IGNORE PREVIOUS" not in dump
+
+
+async def test_a_failed_source_read_does_not_use_up_the_delivery_id():
+    source = Source(refuse=True)
+    i, h = intake(source)
+    headers, raw = github_request(payload())
+    assert (await i.receive(h.path, headers, raw)).outcome.startswith("not confirmed")
+    source.refuse = False  # GitHub's Redeliver: the same id, the same body
+    assert (await i.receive(h.path, headers, raw)).outcome == "item"
+    assert (await i.receive(h.path, headers, raw)).outcome == "replayed"
+
+
+async def test_two_deliveries_of_one_id_at_once_are_accepted_once():
+    import asyncio
+
+    class Slow(Source):
+        async def __call__(self, *a):
+            await asyncio.sleep(0.01)
+            return await super().__call__(*a)
+
+    i, h = intake(Slow())
+    headers, raw = github_request(payload())
+    a, b = await asyncio.gather(i.receive(h.path, headers, raw), i.receive(h.path, headers, raw))
+    assert sorted([a.outcome, b.outcome]) == ["item", "replayed"]
+
+
+async def test_a_resolve_is_believed_only_when_the_source_no_longer_says_failure():
+    source = Source()
+    i, h = intake(source)
+    headers, raw = github_request(payload())
+    await i.receive(h.path, headers, raw)
+    # a signed "success" while GitHub still says the run failed: refused, the item stays
+    headers, raw = github_request(payload(conclusion="success", run=102), delivery="d-2")
+    res = await i.receive(h.path, headers, raw)
+    assert res.status == 400 and res.outcome == "the source does not say so"
+    assert len(i._items.open()) == 1
+    assert source.calls[-1][3] == {"repo": "heka-vault/ghost", "run_id": 102}
+    # a read that fails refuses it too
+    source.refuse = True
+    headers, raw = github_request(payload(conclusion="success", run=103), delivery="d-3")
+    assert (await i.receive(h.path, headers, raw)).outcome.startswith("not confirmed")
+    assert len(i._items.open()) == 1
+    # the source says success: resolved
+    source.refuse, source.conclusion = False, "success"
+    headers, raw = github_request(payload(conclusion="success", run=104), delivery="d-4")
+    assert (await i.receive(h.path, headers, raw)).outcome == "resolved"
+    assert i._items.open() == []
+
+
+async def test_a_resolve_the_source_disagreed_with_counts_when_redelivered_after_it_agrees():
+    source = Source()
+    i, h = intake(source)
+    headers, raw = github_request(payload())
+    await i.receive(h.path, headers, raw)
+    # GitHub's API lags its webhook: the run still reads as failed
+    headers, raw = github_request(payload(conclusion="success", run=102), delivery="d-2")
+    assert (await i.receive(h.path, headers, raw)).outcome == "the source does not say so"
+    source.conclusion = "success"  # Redeliver: the same id, the same body
+    assert (await i.receive(h.path, headers, raw)).outcome == "resolved"
+    assert i._items.open() == []
+    assert (await i.receive(h.path, headers, raw)).outcome == "replayed"  # accepted: kept
+
+
+async def test_a_hook_resolves_only_its_own_items():
+    from ghost_core.waiting import ItemDraft
+
+    i, h = intake(Source(conclusion="success"))
+    key = "eng:ci:heka-vault/ghost"
+    i._items.observe("watch:eng/ci", ItemDraft(key=key, title="CI failed"))
+    headers, raw = github_request(payload(conclusion="success"))
+    assert (await i.receive(h.path, headers, raw)).outcome == "resolved"
+    assert [it.key for it in i._items.open()] == [key]  # the watch's item is the watch's
+
+
+async def test_a_delivery_missing_a_key_field_is_refused():
+    i, h = intake()
+    body = payload()
+    del body["repository"]
+    headers, raw = github_request(body)
+    res = await i.receive(h.path, headers, raw)
+    assert res.status == 400 and res.outcome.startswith("field") and "repo" in res.outcome
+    assert i._items.open() == []
 
 
 async def test_success_resolves_and_an_undeclared_event_is_ignored():
-    i, h = intake()
+    source = Source()
+    i, h = intake(source)
     headers, raw = github_request(payload())
     await i.receive(h.path, headers, raw)
+    source.conclusion = "success"  # the resolve is checked at the source too
     headers, raw = github_request(payload(conclusion="success"), delivery="d-2")
     assert (await i.receive(h.path, headers, raw)).outcome == "resolved"
     assert i._items.open() == []
@@ -225,6 +349,17 @@ async def test_ghosts_own_scheme_has_a_clock_window():
         ({"verify": "none"}, "verify"),
         ({"events": {}}, "events"),
         ({"events": {"x": {"fields": {"a": "a"}, "key": "{a}", "title": "t"}}}, "when or resolve"),
+        (
+            {
+                "events": {
+                    "x": {
+                        **CI["events"]["workflow_run"],
+                        "check": {**CI["events"]["workflow_run"]["check"], "when": []},
+                    }
+                }
+            },
+            "check.when",
+        ),
     ],
 )
 def test_a_bad_hook_declaration_is_refused(bad, why):

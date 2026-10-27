@@ -30,6 +30,8 @@ PREFIX = "/hooks/"
 
 
 class Intake(Protocol):
+    def knows(self, path: str) -> bool: ...
+
     async def receive(self, path: str, headers: dict[str, str], body: bytes) -> Any: ...
 
 
@@ -63,6 +65,9 @@ def hooks_app(intake: Intake):
             return
         if scope["method"] != "POST":
             await _reply(send, 405, {"error": "method_not_allowed"})
+            return
+        if not intake.knows(path):  # ADR 0027: an unknown source is a 404, no body read
+            await _reply(send, 404, {"error": "not_found"})
             return
         body = b""
         more = True

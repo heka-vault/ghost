@@ -133,12 +133,17 @@ on an interval itself; nothing about noticing needs a model.
   reads.)
 - **`fields`**: what to keep from each result (`items` is the path to the list), each a
   dotted path with a `type` (`str`, `int`, `float`, `bool`) and optionally a `pattern`, a
-  `max` length or an `enum`. A result whose field breaks its constraint is dropped whole;
-  everything else the app sent is never kept.
+  `max` length or an `enum`. A result whose field breaks its constraint, or that lacks a
+  field the `key` or `title` names, is dropped whole; everything else the app sent is
+  never kept. A result with no list at `items` is a failed read, not an empty one.
 - **`when`**: checks over the fields (`==`, `!=`, `in`, `not_in`, `>`, `>=`, `<`, `<=`,
-  `exists`), all of which must hold; `for_minutes` waits until a result has held that long.
+  `exists`), all of which must hold; `for_minutes` waits until a result has held that long
+  before it becomes an item. An item already open stays open while it matches, so a
+  restart (which starts the wait again) doesn't resolve it and tell you again later.
 - **`key`, `title`, `link`**: `{field}` templates, nothing else. The key makes one failure
-  one item however often it is seen; a key that is gone next time is resolved.
+  one item however often it is seen; a key that is gone next time is resolved. A look
+  that dropped results (one broke a constraint, or there were more than 100) resolves
+  nothing, since a dropped result may be the open one; a failed read resolves nothing.
 - **`response`**: `tell` puts the item on the waiting list, `record` keeps it without
   alerting. `urgency` (`digest`, `notify`, `call`) is for the route policy (ADR 0031).
 - **`jev` and `model`** (optional): where the check can't decide, a typed question:
@@ -155,10 +160,12 @@ on an interval itself; nothing about noticing needs a model.
   `fields` is what may leave the machine for it; `choices` are two or more of `tell`,
   `record` and `drop`; the `default` applies when Jev is off, late, unsure, or answers
   anything else. `model` takes the same shape and is asked only when Jev isn't declared or
-  couldn't say. An answer is remembered while the item's fields stay the same.
+  couldn't say. An answer is remembered while the item's fields stay the same. When a
+  question that could be asked isn't answered (Jev fails, or the poll's ten questions are
+  spent), an item already open keeps the response it has rather than taking the default.
 
 An app whose connection died is started again before the next look, backing off while it
-fails.
+fails; so does a look that breaks for any other reason, with the error on the watch.
 `ghostd check` lists the watches, `GET /departments` shows each one's last look, error and
 open items, and a watch that doesn't read is a problem on the department and stays off.
 
@@ -198,17 +205,28 @@ addresses, nothing else on them). Every step before an item is deterministic and
 ```
 
 - **`verify`**: `github` checks `X-Hub-Signature-256` over the raw body and refuses a
-  repeated `X-GitHub-Delivery`; `hmac` is Ghost's own scheme for local senders:
+  repeated `X-GitHub-Delivery`. GitHub signs only the body, not the delivery id, so a body
+  seen before is refused too, whatever id it carries (its hash is kept beside the
+  delivery, never the body). `hmac` is Ghost's own scheme for local senders:
   `X-Ghost-Signature: sha256=` HMAC of `<X-Ghost-Timestamp>.<X-Ghost-Delivery>.<body>`, a
   five-minute window, and `X-Ghost-Event` names the event. The secret is `${NAME}` from
-  the environment; a hook whose secret isn't set stays off.
-- **`events`**: only declared events count; anything else is ignored. Fields are typed,
-  constrained paths, as a watch's are; one that breaks its constraint refuses the whole
-  delivery, and everything not declared is dropped. `resolve` checks close the item,
-  `when` checks open it.
+  the environment; a hook whose secret isn't set stays off, and an empty one verifies
+  nothing.
+- **`events`**: only declared events count; anything else is ignored. Each event needs
+  `when` or `resolve` (or both): they say which deliveries count, and an event with
+  neither turns the whole hook off. `when` checks open the item, `resolve` checks close
+  it, and a delivery that matches neither is ignored. Fields are typed, constrained
+  paths, as a watch's are; one that breaks its constraint refuses the whole delivery, as
+  does a missing field the `key` or `title` names, and everything not declared is
+  dropped.
 - **`check`**: the reference is read again through one of the app's read-only tools, the
-  department's `block` rules applied, and that read is believed: a read that fails, is
-  blocked or doesn't hold refuses the delivery. Without `check` the item says unchecked.
+  department's `block` rules applied, and that read is believed, for a resolve as much as
+  for an item: an item counts only when the check's `when` holds, and a resolve only when
+  it no longer does (so an event with `resolve` and `check` must give `check` a `when`).
+  A read that doesn't agree, fails or is blocked refuses the delivery but doesn't use up
+  its delivery id, so the sender's retry (GitHub's Redeliver, after an API that lagged its
+  webhook) is heard; a retry is read again and passes only if the source agrees then. Without `check` the item says unchecked, and a resolve is taken as sent. A hook
+  closes only its own items, never a watch's under the same key.
 - **Fixtures**: recorded deliveries in `hooks/<name>/*.json` beside `department.json`, each
   with `headers`, `body`, an `expect` (`item` with its `key`/`title`/`fields`, `resolved`,
   `ignored`, or `rejected` with a `reason`), and optionally `sign` (`bad`, `none`),
@@ -217,7 +235,8 @@ addresses, nothing else on them). Every step before an item is deterministic and
   hook with no fixtures, or with one that fails, stays off; `ghostd check` runs them.
 
 What is kept is the parsed fields, the delivery id and the outcome, never a body. The
-listener answers accepted or refused, nothing more; `GET /departments` shows each hook's
+listener answers 404 for a hook that isn't declared (or is off) before it reads the body,
+and accepted or refused otherwise, nothing more; `GET /departments` shows each hook's
 counts. A local sender signs with `ghostd push <department>/<hook> <event> '<json>'`.
 
 ## Outputs

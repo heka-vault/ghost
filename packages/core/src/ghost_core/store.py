@@ -488,6 +488,10 @@ class Store:
         )
         return cur.rowcount == 1
 
+    def forget_delivery(self, source: str, delivery: str) -> None:
+        """Give an id back: nothing was decided (the source couldn't be read)."""
+        self._conn.execute("DELETE FROM deliveries WHERE source = ? AND id = ?", (source, delivery))
+
     def note_delivery(
         self, source: str, delivery: str, outcome: str, item: str, checked: bool
     ) -> None:

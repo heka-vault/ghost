@@ -50,7 +50,7 @@ from typing import Any, Literal
 from loguru import logger
 
 from ghost_core.models import utcnow
-from ghost_core.waiting import ItemDraft, Items, Scalar
+from ghost_core.waiting import Item, ItemDraft, Items, Scalar
 
 Choice = Literal["tell", "record", "drop"]
 CHOICES: tuple[Choice, ...] = ("tell", "record", "drop")
@@ -202,21 +202,38 @@ class Watch:
         """Its items' source, as the waiting list knows it."""
         return f"watch:{self.department}/{self.name}"
 
-    def observe(self, result: Any) -> list[dict[str, Scalar]]:
-        """The kept fields of each result. A result that breaks a constraint is dropped
-        whole; the rest of what the app sent is never kept."""
+    def look(self, result: Any) -> tuple[list[dict[str, Scalar]], bool]:
+        """The kept fields of each result, and whether that is every result the app sent.
+        A result that breaks a constraint, or lacks a field the key or title names, is
+        dropped whole, as is anything past ``MAX_ITEMS``; the rest of what the app sent is
+        never kept. A result with no list at ``items`` is a read that failed (an error
+        that doesn't say so): ``WatchError``."""
         rows = result if not self.items else _at(result, self.items)
         if isinstance(rows, Mapping):
             rows = [rows]
         if not isinstance(rows, list):
-            return []
+            raise WatchError(f"the result has no {self.items or 'items'}")
+        named = set(_PLACEHOLDER.findall(self.key)) | set(_PLACEHOLDER.findall(self.title))
         out: list[dict[str, Scalar]] = []
+        whole = len(rows) <= MAX_ITEMS
         for row in rows[:MAX_ITEMS]:
             try:
-                out.append({n: f.take(row) for n, f in self.fields.items()})
+                fields = {n: f.take(row) for n, f in self.fields.items()}
             except WatchError:
+                whole = False
                 continue
-        return out
+            if any(fields[n] is None for n in named):
+                whole = False
+                continue
+            out.append(fields)
+        return out, whole
+
+    def observe(self, result: Any) -> list[dict[str, Scalar]]:
+        """The kept fields of each result (``look`` without the rest)."""
+        try:
+            return self.look(result)[0]
+        except WatchError:
+            return []
 
     def checked(self, fields: Mapping[str, Scalar]) -> bool:
         return all(c.holds(fields) for c in self.when)
@@ -473,11 +490,15 @@ async def decide(
     budget: list[int],
 ) -> tuple[Choice, str]:
     """The response for one observation that passed the check, and which step chose it.
-    ``budget`` is how many questions this poll may still ask (shared, decremented)."""
+    ``budget`` is how many questions this poll may still ask (shared, decremented).
+    ``unjudged`` is the default taken because a step that could be asked wasn't (the
+    budget ran out) or didn't answer; ``default`` is the default with no step to ask."""
+    unjudged = False
     for step, ask, decider in (("jev", watch.jev, jev), ("model", watch.model, model)):
-        if ask is None:
+        if ask is None or decider is None:
             continue
-        if decider is None or budget[0] <= 0:
+        if budget[0] <= 0:
+            unjudged = True
             continue
         budget[0] -= 1
         sent = {f: fields.get(f) for f in ask.fields}
@@ -488,9 +509,10 @@ async def decide(
             answer = None
         if answer in ask.choices:
             return answer, step  # type: ignore[return-value]
+        unjudged = True
     for ask in (watch.jev, watch.model):
         if ask is not None:
-            return ask.default, "default"
+            return ask.default, "unjudged" if unjudged else "default"
     return watch.response, "check"
 
 
@@ -566,9 +588,22 @@ class WatchRunner:
     async def _loop(self, w: Watch) -> None:
         backoff = w.every
         while True:
-            ok = await self.poll(w)
+            try:
+                ok = await self.poll(w)
+            except Exception as e:  # noqa: BLE001 - a watch that breaks says so and goes on
+                st = self.state.setdefault(w.source, WatchState())
+                st.error = f"{type(e).__name__}: {str(e)[:160]}"
+                logger.warning(f"watch {w.source}: poll failed: {st.error}")
+                ok = False
             backoff = w.every if ok else min(backoff * 2, max(w.every, 900))
             await asyncio.sleep(backoff)
+
+    def _held(self, w: Watch, key: str) -> Item | None:
+        """This watch's open item under ``key``, if it has one."""
+        item = self._items.get(f"{w.department}:{key}"[:300])
+        if item is None or item.source != w.source or item.resolved_at is not None:
+            return None
+        return item
 
     async def poll(self, w: Watch, now: datetime | None = None) -> bool:
         """One look. True when the read worked (the backoff resets)."""
@@ -586,18 +621,30 @@ class WatchRunner:
             st.error = str(result["error"])[:200]
             st.seconds = time.perf_counter() - began
             return False
+        try:
+            rows, whole = w.look(result)
+        except WatchError as e:  # no list where the watch looks: not "nothing is wrong"
+            st.error = str(e)[:200]
+            st.seconds = time.perf_counter() - began
+            logger.info(f"watch {w.source}: read failed: {st.error}")
+            return False
         at = now or utcnow()
         drafts: list[ItemDraft] = []
         budget = [MAX_ASKED]
         matched: set[str] = set()
-        rows = w.observe(result)
         for fields in rows:
             if not w.checked(fields):
                 continue
             key = render(w.key, fields)
             matched.add(key)
+            # An item already open that still matches stays: neither the wait (which a
+            # restart begins again) nor a question that wasn't asked or answered this
+            # poll is a reason to resolve it and tell the operator again later.
+            held = self._held(w, key)
             first = st.first_match.setdefault(key, at)
             if w.for_minutes and at - first < timedelta(minutes=w.for_minutes):
+                if held is not None and (d := w.draft(fields, held.response)) is not None:
+                    drafts.append(d)
                 continue
             memo = self._decisions.get(w, key, fields)
             if memo is None:
@@ -606,6 +653,8 @@ class WatchRunner:
                 )
                 if by in ("jev", "model"):
                     self._decisions.put(w, key, fields, _Memo(choice, by))
+                elif by == "unjudged" and held is not None:
+                    choice = held.response
             else:
                 choice = memo.choice
             if choice == "drop":
@@ -614,7 +663,9 @@ class WatchRunner:
             if d is not None:
                 drafts.append(d)
         st.first_match = {k: v for k, v in st.first_match.items() if k in matched}
-        found = self._items.sync(w.source, drafts, at)
+        # Rows dropped (past the cap, or breaking a constraint) may be the open ones: a
+        # partial look adds and updates but resolves nothing.
+        found = self._items.sync(w.source, drafts, at, resolve=whole)
         st.error = None
         st.last_ok = at
         st.seen = len(rows)

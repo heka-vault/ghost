@@ -7,20 +7,24 @@ the model never sees a body:
 1. **Signature first.** ``github`` checks ``X-Hub-Signature-256`` over the raw bytes;
    ``hmac`` (Ghost's own, for local senders) checks ``X-Ghost-Signature`` over
    ``<timestamp>.<delivery id>.<body>`` inside a five-minute window. The secret is
-   ``${NAME}`` from the environment. A delivery id seen before is a replay.
+   ``${NAME}`` from the environment; an empty one verifies nothing. A delivery id seen
+   before is a replay, and for ``github``, whose delivery id isn't signed, so is a body
+   seen before (by its hash) under any id.
 2. **Parsed by declaration.** The event (``X-GitHub-Event`` or ``X-Ghost-Event``) must be
    declared; its fields are typed and constrained paths into the JSON body, as a watch's
    are (``ghost_core.watches``). A field that breaks its constraint rejects the delivery
-   whole; everything not declared is dropped at the door. ``resolve`` checks close an
-   item; ``when`` checks open one; anything else is ignored.
+   whole, and so does a missing field the key or title names; everything not declared is
+   dropped at the door. ``resolve`` checks close an item; ``when`` checks open one;
+   anything else is ignored.
 3. **Checked at the source.** With ``check``, the reference is read again through one of
    a connected app's read-only tools (the department's permissions apply) and that read is
-   what is believed;
-   a read that fails or doesn't hold rejects the delivery. Without ``check`` the item is
-   marked unchecked.
+   what is believed: an item only when the check's ``when`` holds, a resolve only when it
+   no longer does. A read that disagrees, fails or is blocked rejects the delivery but
+   gives its id back, so the sender's retry counts (and is read again). Without
+   ``check`` the item is marked unchecked.
 
-What is kept is the parsed fields, the delivery id and the outcome, never the body. A hook
-with no fixtures, or one whose fixtures fail, stays off.
+What is kept is the parsed fields, the delivery id (and a github body's hash) and the
+outcome, never the body. A hook with no fixtures, or one whose fixtures fail, stays off.
 """
 
 from __future__ import annotations
@@ -211,6 +215,11 @@ def _parse_event(name: str, body: object, where: str) -> HookEvent:
         rb_when = tuple(
             _parse_check(c, rb_fields, f"{where}: check.when") for c in raw.get("when") or []
         )
+        if resolve and not rb_when:
+            raise WatchError(
+                f"{where}: check.when says what still open looks like, so a resolve can be"
+                " checked at the source"
+            )
         check = ReadBack(str(app), str(raw["read"]), dict(args), rb_fields, rb_when)
     return HookEvent(name, fields, key, title, link, when, resolve, check)
 
@@ -218,11 +227,20 @@ def _parse_event(name: str, body: object, where: str) -> HookEvent:
 # --- verifying ----------------------------------------------------------------------------
 
 
+class Unconfirmed(Rejected):
+    """The source didn't back the delivery: its read failed, was blocked, had no shape, or
+    didn't agree. The delivery is refused, but its id (and body hash) is given back, so the
+    sender's retry (GitHub's Redeliver, after an API that lagged its webhook) counts. That
+    is safe because belief always takes a fresh read: a retry passes only when the source
+    agrees. Refusals that never reach the source, and accepted deliveries, keep the claim."""
+
+
 @dataclass(frozen=True)
 class Delivery:
     id: str
     event: str
     payload: Mapping[str, Any]
+    body_sha: str = ""  # the raw body's hash, for github's dedupe; never the body
 
 
 def sign_hmac(secret: str, ts: str, delivery: str, body: bytes) -> str:
@@ -240,6 +258,8 @@ def verify(
     """The signature over the raw bytes, then the JSON. Raises ``Rejected``."""
     if len(body) > MAX_BODY:
         raise Rejected("too large")
+    if not secret:  # an empty key would sign for anyone
+        raise Rejected("no secret")
     h = {k.lower(): v for k, v in headers.items()}
     if hook.verify == "github":
         given, delivery, event = h.get(H_GH_SIG, ""), h.get(H_GH_ID, ""), h.get(H_GH_EVENT, "")
@@ -254,7 +274,11 @@ def verify(
         if abs((now or utcnow()) - at) > WINDOW:
             raise Rejected("outside the clock window")
         expected = sign_hmac(secret, ts, delivery, body)
-    if not given or not hmac.compare_digest(given, expected):
+    # Bytes, not str: a header may carry any byte (the listener decodes latin-1), and
+    # compare_digest refuses a str that isn't ASCII.
+    if not given or not hmac.compare_digest(
+        given.encode("utf-8", "surrogateescape"), expected.encode()
+    ):
         raise Rejected("bad signature")
     if not delivery or len(delivery) > 100:
         raise Rejected("no delivery id")
@@ -264,7 +288,7 @@ def verify(
         raise Rejected("not JSON") from None
     if not isinstance(payload, Mapping):
         raise Rejected("not a JSON object")
-    return Delivery(delivery, event or "event", payload)
+    return Delivery(delivery, event or "event", payload, hashlib.sha256(body).hexdigest())
 
 
 # --- parsing and checking -----------------------------------------------------------------
@@ -301,6 +325,39 @@ def _take(specs: Mapping[str, FieldSpec], obj: Any) -> dict[str, Scalar]:
         raise Rejected(f"field {e}") from None
 
 
+async def _read_back(
+    hook: Hook, ev: HookEvent, fields: Mapping[str, Scalar], read: Reader | None
+) -> dict[str, Scalar]:
+    """The check's read, and its typed fields. A read that fails, is blocked by the
+    department's permissions, or doesn't carry the fields its checks name said nothing:
+    ``Unconfirmed``."""
+    assert ev.check is not None
+    if read is None:
+        raise Unconfirmed("not confirmed at the source")
+    try:
+        result = await read(
+            hook.department, ev.check.app, ev.check.read, _fill(ev.check.args, fields)
+        )
+    except Exception as e:  # noqa: BLE001 - a blocked or failed read
+        raise Unconfirmed(f"not confirmed at the source ({type(e).__name__})") from None
+    if isinstance(result, Mapping) and set(result) == {"error"}:
+        raise Unconfirmed("not confirmed at the source")
+    truth = _take(ev.check.fields, result)
+    if any(truth.get(c.field) is None for c in ev.check.when if c.op != "exists"):
+        raise Unconfirmed("not confirmed at the source")
+    return truth
+
+
+def _missing(ev: HookEvent, fields: Mapping[str, Scalar]) -> str | None:
+    """A field the key or the title names that the delivery didn't carry: without it the
+    key collapses (``eng:ci:``), so the delivery is refused."""
+    for t in (ev.key, ev.title):
+        for ref in _PLACEHOLDER.findall(t):
+            if fields.get(ref) is None:
+                return ref
+    return None
+
+
 async def parse(hook: Hook, d: Delivery, read: Reader | None) -> Parsed:
     """The delivery's typed fields and what they mean. Raises ``Rejected``."""
     ev = hook.events.get(d.event)
@@ -308,25 +365,26 @@ async def parse(hook: Hook, d: Delivery, read: Reader | None) -> Parsed:
         return Parsed("ignored")
     fields = _take(ev.fields, d.payload)
     key = f"{hook.department}:{render(ev.key, fields)}"[:300]
-    if ev.resolve and all(c.holds(fields) for c in ev.resolve):
-        return Parsed("resolved", key)
-    if not ev.when or not all(c.holds(fields) for c in ev.when):
+    resolves = bool(ev.resolve) and all(c.holds(fields) for c in ev.resolve)
+    if not resolves and (not ev.when or not all(c.holds(fields) for c in ev.when)):
         return Parsed("ignored", key)
+    gone = _missing(ev, fields)
+    if gone is not None:
+        raise Rejected(f"field {gone}: missing")
+    if resolves:
+        # A resolve is a claim too (ADR 0027): believed only when the source's read shows
+        # the item no longer holds, the check's ``when`` false.
+        if ev.check is None:
+            return Parsed("resolved", key)
+        truth = await _read_back(hook, ev, fields, read)
+        if all(c.holds(truth) for c in ev.check.when):
+            raise Unconfirmed("the source does not say so")
+        return Parsed("resolved", key, checked=True)
     checked = False
     if ev.check is not None:
-        if read is None:
-            raise Rejected("not confirmed at the source")
-        try:
-            result = await read(
-                hook.department, ev.check.app, ev.check.read, _fill(ev.check.args, fields)
-            )
-        except Exception as e:  # noqa: BLE001 - outside the allowlist, a failed read
-            raise Rejected(f"not confirmed at the source ({type(e).__name__})") from None
-        if isinstance(result, Mapping) and set(result) == {"error"}:
-            raise Rejected("not confirmed at the source")
-        truth = _take(ev.check.fields, result)
+        truth = await _read_back(hook, ev, fields, read)
         if not all(c.holds(truth) for c in ev.check.when):
-            raise Rejected("the source does not say so")
+            raise Unconfirmed("the source does not say so")
         fields = {**fields, **truth}
         checked = True
     title = render(ev.title, fields)
@@ -412,25 +470,50 @@ class HookIntake:
         now = now or utcnow()
         try:
             d = verify(hook, headers, body, self._environ.get(hook.secret_name(), ""), now)
-            if not self._store.first_delivery(hook.source, d.id, now, keep=DEDUPE_FOR):
-                raise Rejected("replayed")
-            parsed = await parse(hook, d, self._read)
+            taken = self._claim(hook, d, now)
+            try:
+                parsed = await parse(hook, d, self._read)
+            except Unconfirmed:
+                for source, key in taken:
+                    self._store.forget_delivery(source, key)
+                raise
         except Rejected as e:
             st.rejected[str(e)] += 1
             logger.info(f"hook {hook.department}/{hook.name}: refused ({e})")
-            return Result(
-                401 if str(e) in ("bad signature", "outside the clock window") else 400, str(e)
-            )
+            unsigned = ("bad signature", "outside the clock window", "no secret")
+            return Result(401 if str(e) in unsigned else 400, str(e))
         st.accepted[parsed.outcome] += 1
         st.last = now
-        self._store.note_delivery(hook.source, d.id, parsed.outcome, parsed.key, parsed.checked)
+        for source, key in taken:
+            self._store.note_delivery(source, key, parsed.outcome, parsed.key, parsed.checked)
         if parsed.outcome == "item" and parsed.draft is not None:
             self._items.observe(hook.source, parsed.draft, now)
             self._on_change()
         elif parsed.outcome == "resolved" and parsed.key:
-            if self._items.resolve(parsed.key, now):
+            if self._items.resolve(hook.source, parsed.key, now):
                 self._on_change()
         return Result(202, parsed.outcome)
+
+    def knows(self, path: str) -> bool:
+        """A declared hook that is on: the listener asks before it reads a body."""
+        return path in self.hooks
+
+    def _claim(self, hook: Hook, d: Delivery, now: datetime) -> list[tuple[str, str]]:
+        """Take the delivery id, and for ``github`` the body's hash too: GitHub signs only
+        the body, so its delivery id can be changed at will, and one signed body must count
+        once whatever id it carries. Taken before the parse, so two copies arriving
+        together can't both pass; given back only when the source couldn't be read."""
+        wanted = [(hook.source, d.id)]
+        if hook.verify == "github":
+            wanted.append((f"{hook.source}#body", f"sha256:{d.body_sha}"))
+        taken: list[tuple[str, str]] = []
+        for source, key in wanted:
+            if not self._store.first_delivery(source, key, now, keep=DEDUPE_FOR):
+                for s, k in taken:
+                    self._store.forget_delivery(s, k)
+                raise Rejected("replayed")
+            taken.append((source, key))
+        return taken
 
 
 # --- fixtures -------------------------------------------------------------------------------

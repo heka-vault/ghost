@@ -63,6 +63,63 @@ async def test_only_post_to_a_declared_hook_reaches_the_intake():
         assert big.status_code == 413
 
 
+async def test_a_signature_header_with_a_high_byte_is_refused_not_a_crash():
+    intake, hook = wired()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(hooks_app(intake)), base_url="http://x"
+    ) as c:
+        body = json.dumps({"job": "backup", "ok": False}).encode()
+        headers = {**signed(body), H_SIG: b"sha256=\xff"}
+        r = await c.post(hook.path, content=body, headers=headers)
+        assert r.status_code == 401 and r.json() == {"error": "refused"}
+
+
+async def test_an_unknown_hook_is_not_found_before_its_body_is_read():
+    intake, _ = wired()
+    app = hooks_app(intake)
+    sent: list[dict] = []
+
+    async def receive():
+        raise AssertionError("the body was read")
+
+    async def send(msg):
+        sent.append(msg)
+
+    scope = {"type": "http", "method": "POST", "path": "/hooks/ghost/nope", "headers": []}
+    await app(scope, receive, send)
+    assert sent[0]["status"] == 404
+
+
+def test_push_with_the_listener_down_says_so_in_one_line(tmp_path, monkeypatch, capsys):
+    import socket
+
+    from ghostd.main import push_cli
+
+    with socket.socket() as s:  # a port nothing listens on
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    (tmp_path / "department.json").write_text(json.dumps({"hooks": {"jobs": JOBS}}))
+    monkeypatch.setenv("GHOST_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("GHOST_HOOKS_LISTEN", f"127.0.0.1:{port}")
+    monkeypatch.setenv("JOB_SECRET", "k")
+    assert push_cli(["ghost/jobs", "done", '{"job": "backup", "ok": false}']) == 1
+    err = capsys.readouterr().err.strip()
+    assert "\n" not in err and "could not reach" in err
+
+
+def test_the_journal_never_prints_variable_values_in_a_traceback(monkeypatch):
+    # loguru's diagnose shows each frame's variables: once, a raw body and os.environ.
+    import pytest
+    from ghostd import main
+
+    added: list[dict] = []
+    monkeypatch.setattr(main.logger, "remove", lambda *a: None)
+    monkeypatch.setattr(main.logger, "add", lambda *a, **kw: added.append(kw))
+    with pytest.raises(SystemExit):
+        main.cli(["no-such-command"])
+    assert added and all(kw.get("diagnose") is False for kw in added)
+
+
 async def test_the_listener_binds_its_own_address():
     intake, hook = wired()
     listener = HooksListener("127.0.0.1:0", intake)
