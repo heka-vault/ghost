@@ -39,20 +39,19 @@ its body is not parsed, stored or logged, only counted.
 
 **Parsed by declaration, deterministically, never by a model.** Each source declares, in
 the department folder that owns it, which events it accepts and which fields it takes
-from each: the JSON path, the type, and a constraint (a pattern, a length, an enum, or
-membership in the department's allowlist). Parsing is code in `ghost_core`, one parser
-for every source, reading those declarations: no per-service handler. A body that does not
-match a declared event, or a field that fails its constraint, is rejected whole. What
-survives is a typed observation with a stable key; the rest of the body is discarded at
-the door.
+from each: the JSON path, the type, and a constraint (a pattern, a length or an enum).
+Parsing is code in `ghost_core`, one parser for every source, reading those declarations:
+no per-service handler. A body that does not match a declared event, or a field that fails
+its constraint, is rejected whole. What survives is a typed observation with a stable key;
+the rest of the body is discarded at the door.
 
 **Checked at the source before it is believed.** A parsed reference (a repository and run
 id, an issue URL) is re-read through the department's declared MCP read before the
 observation counts: the webhook says run 123 failed, Ghost reads run 123 from GitHub. The
-read's answer is the truth; the webhook is a hint about where to look. A reference outside
-the department's allowlist is rejected without a read. A source with no read to check
-against is allowed, and its observations are marked unchecked, which the operator's rules
-can treat differently (record only, say).
+read's answer is the truth; the webhook is a hint about where to look. A reference the
+department's permissions block is refused, because its read is (ADR 0034). A source with
+no read to check against is allowed, and its observations are marked unchecked, which the
+operator's rules can treat differently (record only, say).
 
 **No raw text reaches the model.** The model sees an observation's typed fields, never the
 body. A free-text field (a commit message, a PR title) is taken only if the declaration
@@ -72,7 +71,7 @@ delivery id, never the raw body.
 deterministic, every step is tested without one. Each declared source ships fixtures
 beside its declaration: real deliveries (secrets and personal data scrubbed) that must
 parse to an exact observation, and bad ones (wrong signature, stale timestamp, replayed
-id, a field that breaks its constraint, an item outside the allowlist, an oversized body,
+id, a field that breaks its constraint, a read the permissions block, an oversized body,
 instructions in a free-text field) that must be rejected or carried as inert data.
 `ghostd check` runs a department's fixtures, and a declaration that fails its own
 fixtures is a problem the folder reports, so the source stays off.

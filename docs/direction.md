@@ -184,7 +184,7 @@ daemon, on strict terms:
    and delivery id check out.
 2. **Parsed by declaration, not by a model.** The department declares which events a
    source sends and which fields to keep, each with a type and a constraint (a pattern,
-   an allowlist). Anything else in the body is dropped at the door; a body that doesn't
+   an enum). Anything else in the body is dropped at the door; a body that doesn't
    fit is rejected whole.
 3. **Checked at the source.** A webhook that says run 123 failed is a hint: Ghost reads
    run 123 from GitHub through one of its read-only tools, and the read is what it believes.
