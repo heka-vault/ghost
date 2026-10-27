@@ -333,10 +333,6 @@
       },
       "AuditEntry": {
         "properties": {
-          "ability": {
-            "title": "Ability",
-            "type": "string"
-          },
           "autonomy": {
             "title": "Autonomy",
             "type": "string"
@@ -387,6 +383,10 @@
             "title": "Session Id",
             "type": "string"
           },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -403,7 +403,7 @@
         "required": [
           "id",
           "session_id",
-          "ability",
+          "source",
           "operation",
           "target",
           "summary",
@@ -1927,10 +1927,6 @@
       },
       "PendingProposal": {
         "properties": {
-          "ability": {
-            "title": "Ability",
-            "type": "string"
-          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -1952,6 +1948,10 @@
             "title": "Rationale",
             "type": "string"
           },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
           "summary": {
             "title": "Summary",
             "type": "string"
@@ -1963,7 +1963,7 @@
         },
         "required": [
           "id",
-          "ability",
+          "source",
           "operation",
           "target",
           "summary",
@@ -3656,6 +3656,7 @@
     },
     "/audit": {
       "get": {
+        "description": "Proposals, newest first; source narrows to one app or one of Ghost's own.",
         "operationId": "audit_audit_get",
         "parameters": [
           {
@@ -3683,7 +3684,7 @@
           },
           {
             "in": "query",
-            "name": "ability",
+            "name": "source",
             "required": false,
             "schema": {
               "anyOf": [
@@ -3694,7 +3695,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Ability"
+              "title": "Source"
             }
           },
           {

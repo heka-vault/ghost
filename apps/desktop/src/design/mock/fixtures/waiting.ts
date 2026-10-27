@@ -36,7 +36,7 @@ export default function waiting(s: Scenario): WaitingItemView[] {
       delivered_via: "phone",
       change: {
         id: "5f0c9a",
-        ability: "github",
+        source: "github",
         operation: "close",
         target: "heka-vault/ghost#17",
         summary: "On heka-vault/ghost#17: close the issue.",

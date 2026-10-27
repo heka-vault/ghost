@@ -92,7 +92,11 @@ async def test_cancel_pending(world):
     assert client.post("/proposals/pending/cancel").json()["ok"] is False
     assert writer.tags == []
     assert client.get("/audit", params={"status": "cancelled"}).json()["total"] == 1
-    assert client.get("/audit", params={"ability": "nope"}).json()["total"] == 0
+    assert client.get("/audit", params={"source": "nope"}).json()["total"] == 0
+    # A proposal's origin is its source (ghost_core.source); the database says ability.
+    (entry,) = client.get("/audit", params={"source": "fake"}).json()["items"]
+    assert entry["source"] == "fake" and "ability" not in str(entry)
+    assert entry["events"][0]["detail"]["source"] == "fake"
 
 
 def test_sources_listing(world):

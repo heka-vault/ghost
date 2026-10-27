@@ -260,7 +260,7 @@ export function Session({ phone, mode }: { phone: PhoneState; mode: "session" | 
                 touch
                 summary={splitSummary(question).text}
                 rationale={question.rationale}
-                operation={`${question.ability}.${question.operation}`}
+                operation={`${question.source}.${question.operation}`}
                 expiresAt={question.expires_at}
                 busy={pending ? busy : true}
                 disabled={!canWrite}

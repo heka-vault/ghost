@@ -78,7 +78,7 @@ def test_create_get_update_and_delete(world):
     assert r.json()["notes"][-1] == "call Pat"
 
     # every edit is an audited write under the ui session
-    audit = client.get("/audit", params={"ability": "conversations"}).json()
+    audit = client.get("/audit", params={"source": "conversations"}).json()
     assert audit["total"] >= 6
     assert {e["session_id"] for e in audit["items"]} == {"ui"}
 
@@ -205,7 +205,7 @@ def test_move_an_agent_between_departments(world):
         client.post("/conversations/marketing/move", json={"department": "sales"}).status_code
         == 409
     )
-    audit = client.get("/audit", params={"ability": "conversations"}).json()
+    audit = client.get("/audit", params={"source": "conversations"}).json()
     assert any(e["operation"] == "move" for e in audit["items"])
 
 
@@ -257,7 +257,7 @@ def test_retire_rehire_and_seed_from(world):
     client.post("/conversations/heka-new/switch")
     assert client.post("/conversations/heka-new/retire").status_code == 409
 
-    audit = client.get("/audit", params={"ability": "conversations"}).json()
+    audit = client.get("/audit", params={"source": "conversations"}).json()
     assert {e["operation"] for e in audit["items"]} >= {"retire", "rehire", "create"}
 
 

@@ -122,7 +122,7 @@ function ActivityRow({ e, open, onToggle }: { e: AuditEntry; open: boolean; onTo
           <div><dt>Your rule</dt><dd>{autonomyLabel(e.autonomy)}</dd></div>
           {how && <div><dt>Decided by</dt><dd>{how}</dd></div>}
           <div><dt>When</dt><dd className="t-num">{formatTime(e.created_at)}</dd></div>
-          <div><dt>Operation</dt><dd className="t-mono">{e.ability}.{e.operation}</dd></div>
+          <div><dt>Operation</dt><dd className="t-mono">{e.source}.{e.operation}</dd></div>
         </dl>
       )}
     </li>

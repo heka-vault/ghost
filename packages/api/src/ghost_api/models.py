@@ -27,7 +27,7 @@ class Phase(enum.StrEnum):
 
 class PendingProposal(BaseModel):
     id: str
-    ability: str
+    source: str  # what it changes: an app, or Ghost's own (ghost_core.source.ToolSource)
     operation: str
     target: str
     summary: str
@@ -218,7 +218,7 @@ class AuditEventView(BaseModel):
 class AuditEntry(BaseModel):
     id: str
     session_id: str
-    ability: str
+    source: str  # an app, or Ghost's own (conversations, skills, ...)
     operation: str
     target: str
     summary: str

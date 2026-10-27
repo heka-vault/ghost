@@ -84,7 +84,7 @@ function cachedEntry(target: string, operation: string, summary: string, status:
   return {
     id: `cached-${target}-${operation}`,
     session_id: SAMPLE_SESSION,
-    ability: "github",
+    source: "github",
     operation,
     target,
     summary,

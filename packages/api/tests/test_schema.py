@@ -17,5 +17,8 @@ def test_the_contract_says_app_not_the_retired_words():
     ``source``, not an ability (ADR 0022)."""
     text = json.dumps(openapi())
     assert "mcp.json" not in text
+    assert "ability" not in text.lower()
+    for model in ("PendingProposal", "AuditEntry"):
+        assert "source" in openapi()["components"]["schemas"][model]["properties"]
     client = Path(__file__).parents[2] / "client-ts" / "src" / "index.ts"
     assert "mcp.json" not in client.read_text()

@@ -192,7 +192,7 @@ def pending_view(p: Proposal, at: datetime | None = None) -> PendingProposal:
     at = at or now()
     return PendingProposal(
         id=p.id,
-        ability=p.ability,
+        source=p.ability,  # the store's column keeps its older name
         operation=p.operation,
         target=p.target.spoken(),
         summary=p.preview,
@@ -279,19 +279,19 @@ def audit_page(
     *,
     limit: int,
     offset: int,
-    ability: str | None = None,
+    source: str | None = None,
     status: str | None = None,
     session_id: str | None = None,
 ) -> AuditPage:
     """A page of the audit log, newest first. Shared by the control API and the phone."""
     rows, total = store.list_proposals(
-        limit=limit, offset=offset, ability=ability, status=status, session_id=session_id
+        limit=limit, offset=offset, ability=source, status=status, session_id=session_id
     )
     items = [
         AuditEntry(
             id=p.id,
             session_id=p.session_id,
-            ability=p.ability,
+            source=p.ability,
             operation=p.operation,
             target=p.target.spoken(),
             summary=p.preview,
@@ -301,13 +301,21 @@ def audit_page(
             conversation=p.conversation,
             department=p.department,
             events=[
-                AuditEventView(at=at, event=ev, detail=detail)
+                AuditEventView(at=at, event=ev, detail=_event_detail(detail))
                 for at, ev, detail in store.events(p.id)
             ],
         )
         for p in rows
     ]
     return AuditPage(items=items, total=total, limit=limit, offset=offset)
+
+
+def _event_detail(detail: dict[str, Any] | None) -> dict[str, Any] | None:
+    """An audit event's detail as the API says it: the source, where the store's rows
+    keep the older word (ability)."""
+    if not detail or "ability" not in detail:
+        return detail
+    return {("source" if k == "ability" else k): v for k, v in detail.items()}
 
 
 def create_app(deps: Deps) -> FastAPI:
@@ -412,15 +420,16 @@ def create_app(deps: Deps) -> FastAPI:
     async def audit(
         limit: int = Query(50, ge=1, le=500),
         offset: int = Query(0, ge=0),
-        ability: str | None = None,
+        source: str | None = None,
         status_: str | None = Query(None, alias="status"),
         session_id: str | None = None,
     ) -> AuditPage:
+        """Proposals, newest first; source narrows to one app or one of Ghost's own."""
         return audit_page(
             deps.store,
             limit=limit,
             offset=offset,
-            ability=ability,
+            source=source,
             status=status_,
             session_id=session_id,
         )

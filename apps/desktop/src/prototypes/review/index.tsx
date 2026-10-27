@@ -376,7 +376,7 @@ export default function ReviewPrototype(_: RouteProps) {
       <PendingChange
         summary={pending.summary}
         rationale={pending.rationale}
-        operation={`${pending.ability}.${pending.operation}`}
+        operation={`${pending.source}.${pending.operation}`}
         expiresAt={pending.expires_at}
         busy={busy === "confirm" ? "confirm" : busy === "cancel" ? "cancel" : busy !== false}
         disabled={!live.online}

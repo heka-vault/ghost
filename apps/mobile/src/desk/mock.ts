@@ -18,7 +18,7 @@ const ASK_SECS = 45;
 
 /** What Ghost asks in the mock, and what the gate writes when it is settled. */
 const QUESTION = {
-  ability: "github_heka",
+  source: "github_heka",
   operation: "close",
   target: "ghost-mock/infra#77",
   summary: "On ghost-mock/infra#77: close the issue, with a comment: “Fixed by the runner image bump.”",
@@ -31,7 +31,7 @@ function entry(target: string, operation: string, summary: string, status: strin
   return {
     id: id(),
     session_id: "earlier",
-    ability: "github_heka",
+    source: "github_heka",
     operation,
     target,
     summary,
@@ -227,7 +227,7 @@ export class MockDesk implements Desk {
     await sleep(900);
     const p: PendingProposal = {
       id: id(),
-      ability: QUESTION.ability,
+      source: QUESTION.source,
       operation: QUESTION.operation,
       target: QUESTION.target,
       summary: QUESTION.summary,
@@ -264,7 +264,7 @@ export class MockDesk implements Desk {
     const row: AuditEntry = {
       id: p.id,
       session_id: this.state.status?.session_id ?? "",
-      ability: p.ability,
+      source: p.source,
       operation: p.operation,
       target: p.target,
       summary: status === "executed" ? QUESTION.done : p.summary,
