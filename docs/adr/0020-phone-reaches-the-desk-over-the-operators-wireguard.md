@@ -1,6 +1,6 @@
 # 0020: The phone reaches the desk from anywhere over the operator's own WireGuard
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR 0027 (a public listener for signed, parsed webhooks is allowed; the phone path stays on the LAN and the tunnel)
 - **Date:** 2026-10-20
 - **Amends:** ADR 0005 (records the exception: a VPN client on the phone), ADR 0016 (the listener binds more than one address; "LAN only" ends)
 
