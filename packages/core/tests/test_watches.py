@@ -219,6 +219,118 @@ async def test_set_watches_resolves_the_items_of_a_removed_watch():
     await runner.close()
 
 
+# --- an open item is not resolved by what the watch didn't look at -------------------
+
+
+async def test_for_minutes_keeps_an_open_item_across_a_restart():
+    items = Items(Store())
+    w = watch(for_minutes=5)
+    t0 = utcnow()
+    first = WatchRunner(items, reader([run(7)]))
+    await first.poll(w, now=t0)
+    await first.poll(w, now=t0 + timedelta(minutes=6))
+    (told,) = items.open()
+    again = WatchRunner(items, reader([run(7)]))  # the daemon restarted: no first_match
+    await again.poll(w, now=t0 + timedelta(minutes=7))
+    assert [i.key for i in items.open()] == ["eng:ci:7"]
+    await again.poll(w, now=t0 + timedelta(minutes=13))
+    (still,) = items.open()
+    assert still.first_seen == told.first_seen  # never resolved, so never news again
+
+
+async def test_an_open_item_stays_when_the_question_budget_runs_out():
+    async def jev(*_a):
+        return "tell"
+
+    items = Items(Store())
+    results = [run(i, name=f"t{i}") for i in range(1, 13)]  # more than MAX_ASKED
+    w = watch(jev={**ASK, "choices": {"tell": "new", "drop": "known"}, "default": "drop"})
+    runner = WatchRunner(items, reader(results), jev=jev)
+    await runner.poll(w)
+    await runner.poll(w)
+    assert len(items.open()) == 12
+    restarted = WatchRunner(items, reader(results), jev=jev)  # nothing remembered
+    await restarted.poll(w)
+    assert len(items.open()) == 12
+
+
+async def test_an_open_item_stays_when_jev_fails_once():
+    answers = ["tell"]
+
+    async def jev(*_a):
+        if not answers:
+            raise TimeoutError
+        return answers.pop()
+
+    items = Items(Store())
+    w = watch(jev={**ASK, "choices": {"tell": "new", "drop": "known"}, "default": "drop"})
+    await WatchRunner(items, reader([run(7)]), jev=jev).poll(w)
+    assert len(items.open()) == 1
+    await WatchRunner(items, reader([run(7)]), jev=jev).poll(w)
+    assert len(items.open()) == 1
+
+
+async def test_a_result_without_its_items_is_a_failed_read():
+    items = Items(Store())
+    runner = WatchRunner(items, reader([run(7)]))
+    w = watch()
+    await runner.poll(w)
+
+    async def text(_w):
+        return {"text": "upstream connect error"}  # an error that doesn't say error
+
+    runner._read = text
+    assert await runner.poll(w) is False
+    assert runner.state[w.source].error and [i.key for i in items.open()] == ["eng:ci:7"]
+
+
+async def test_rows_dropped_by_a_constraint_or_the_cap_resolve_nothing():
+    items = Items(Store())
+    results = [run(7)]
+    runner = WatchRunner(items, reader(results))
+    w = watch()
+    await runner.poll(w)
+    results[:] = [run(7, url="javascript:x")]  # breaks its constraint: dropped, not gone
+    await runner.poll(w)
+    assert [i.key for i in items.open()] == ["eng:ci:7"]
+    results[:] = [run(i) for i in range(100, 200)] + [run(7)]  # 7 is past the cap
+    await runner.poll(w)
+    assert "eng:ci:7" in {i.key for i in items.open()}
+
+
+def test_a_result_missing_a_key_or_title_field_is_dropped():
+    w = watch()
+    nameless = run(8)
+    del nameless["id"]
+    assert [r["id"] for r in w.observe({"workflow_runs": [run(7), nameless]})] == [7]
+
+
+async def test_a_poll_that_raises_is_recorded_and_the_watch_keeps_polling(monkeypatch):
+    import asyncio
+    import sqlite3
+
+    from ghost_core import watches as watches_mod
+
+    class Locked(Items):
+        def sync(self, *a, **kw):
+            raise sqlite3.OperationalError("database is locked")
+
+    runner = WatchRunner(Locked(Store()), reader([run(7)]))
+    w = watch()
+    slept: list[float] = []
+
+    async def sleep(s):
+        slept.append(s)
+        if len(slept) == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(watches_mod.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await runner._loop(w)
+    assert slept == [120, 240]  # polled again, backing off as a failed read does
+    assert "database is locked" in runner.state[w.source].error
+
+
 # --- in the department folder and against a server ------------------------------------
 
 

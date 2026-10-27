@@ -127,9 +127,17 @@ class Items:
     def __init__(self, store: Store) -> None:
         self._store = store
 
-    def sync(self, source: str, seen: Iterable[ItemDraft], now: datetime | None = None) -> Sync:
+    def sync(
+        self,
+        source: str,
+        seen: Iterable[ItemDraft],
+        now: datetime | None = None,
+        *,
+        resolve: bool = True,
+    ) -> Sync:
         """``seen`` is everything ``source`` sees now. Keys are global: a key another source
-        holds open is left to it."""
+        holds open is left to it. With ``resolve=False`` the source saw only part of what is
+        there (a watch dropped rows), so a key it didn't see is not taken as gone."""
         now = now or utcnow()
         before = {r["key"]: r for r in self._store.open_items(source)}
         new: list[str] = []
@@ -162,7 +170,7 @@ class Items:
                 now=now,
                 changed=is_change,
             )
-        resolved = [k for k in before if k not in kept]
+        resolved = [k for k in before if k not in kept] if resolve else []
         for k in resolved:
             self._store.resolve_item(k, now)
         return Sync(tuple(new), tuple(changed), tuple(resolved))
