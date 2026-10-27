@@ -343,8 +343,9 @@ export interface paths {
         put?: never;
         /**
          * Create Department
-         * @description A new department folder: the operator's action, with a short AGENTS.md, an
-         *     empty mcp.json and its department.json. The model never calls this.
+         * @description A new department folder: the operator's action, with a short AGENTS.md and
+         *     its department.json; it reaches every connected app (ADR 0034). The model never
+         *     calls this.
          */
         post: operations["create_department_departments_post"];
         delete?: never;

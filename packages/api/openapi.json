@@ -4547,7 +4547,7 @@
         ]
       },
       "post": {
-        "description": "A new department folder: the operator's action, with a short AGENTS.md, an\nempty mcp.json and its department.json. The model never calls this.",
+        "description": "A new department folder: the operator's action, with a short AGENTS.md and\nits department.json; it reaches every connected app (ADR 0034). The model never\ncalls this.",
         "operationId": "create_department_departments_post",
         "requestBody": {
           "content": {

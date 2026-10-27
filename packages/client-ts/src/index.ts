@@ -313,7 +313,7 @@ export class GhostClient {
   department(slug: string) {
     return unwrap(this.api.GET("/departments/{slug}", { params: { path: { slug } } }));
   }
-  /** A new department folder with its AGENTS.md, mcp.json and department.json. 409 when the name is taken. */
+  /** A new department folder with its AGENTS.md and department.json; it reaches every connected app. 409 when the name is taken. */
   createDepartment(body: DepartmentCreate) {
     return unwrap(this.api.POST("/departments", { body }));
   }
