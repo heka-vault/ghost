@@ -8,7 +8,7 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -88,6 +88,7 @@ from ghostd.routes import (
     DesktopRoute,
     PhoneRoute,
     context_note,
+    digest_note,
     is_not_now,
 )
 from ghostd.wake import FileWakeDetector, SpokenWakeDetector, WakeDetector
@@ -226,6 +227,9 @@ class Daemon:
         self._last_desk_session: float | None = None
         self._phone_route = PhoneRoute()  # ADR 0031: the app's list, while it is open
         self._first_via = "voice"  # how the wake-time utterance arrived
+        # The running session's turn handler, for a typed turn (the desktop's chat input):
+        # it answers the digest and desk voice the way a spoken one does.
+        self._heard: Callable[[str, str], Awaitable[None]] | None = None
         self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
         self._listener: WakeListener | None = None
@@ -282,6 +286,8 @@ class Daemon:
             self._first_via = "text"
             return await self.wake(text, conversation)
         self.state.add_turn("user", text, via="text")
+        if self._heard is not None:
+            await self._heard("user", text)
         await self.session.say_text(text)
         return True
 
@@ -1107,6 +1113,9 @@ class Daemon:
 
         async def on_turn(role: str, text: str) -> None:
             self.state.add_turn(role, text)
+            await heard(role, text)
+
+        async def heard(role: str, text: str) -> None:
             if digest is not None:
                 digest.on_turn(role, text)  # the greeting went out; the operator answered
             if role == "user":
@@ -1170,7 +1179,11 @@ class Daemon:
             wake_fuzzy=self.cfg.wake_fuzzy,
             origin=origin,
             latency_log=self.cfg.latency_path,
-            **({"greeting": digest.text} if digest is not None else {}),
+            **(
+                {"greeting": digest.text, "context_note": digest_note()}
+                if digest is not None
+                else {}
+            ),
             **(
                 {"greeting": raised[1].greeting, "context_note": context_note(raised[0])}
                 if raised is not None
@@ -1178,6 +1191,7 @@ class Daemon:
             ),
         )
         self.session = session
+        self._heard = heard
         if origin == "desk":
             self._last_desk_session = time.monotonic()
         self._origin = origin
@@ -1245,6 +1259,7 @@ class Daemon:
             if gate.set_aside(session.session_id, "session ended") is not None:
                 self._refresh_waiting_now()
             self.session = None
+            self._heard = None
             self._origin = None
             if origin == "desk":
                 self._last_desk_session = time.monotonic()

@@ -12,7 +12,7 @@ from ghost_core.models import utcnow
 from ghost_core.routes import RoutePolicy
 from ghost_core.waiting import ItemDraft, Items
 from ghostd import main as ghostd_main
-from ghostd.routes import DeskRoute, context_note, is_not_now
+from ghostd.routes import DeskRoute, context_note, digest_note, is_not_now
 
 
 @pytest.mark.parametrize("said", ["not now", "Ghost, later please", "um, I'm busy", "no"])
@@ -160,3 +160,35 @@ async def test_the_phone_route_delivers_only_while_the_app_reads_the_list():
     assert await route.deliver([], RoutePolicy()) == "delivered"
     now[0] += 120
     assert await route.deliver([], RoutePolicy()) == "unavailable"
+
+
+async def test_a_typed_reply_answers_the_session_like_a_spoken_one():
+    """The desktop's chat input is a reply too: it reaches the digest and desk voice."""
+    heard: list[tuple[str, str]] = []
+    said: list[str] = []
+
+    async def on_heard(role: str, text: str) -> None:
+        heard.append((role, text))
+
+    async def say_text(text: str) -> None:
+        said.append(text)
+
+    turns: list[tuple[str, str]] = []
+    d = SimpleNamespace(
+        state=SimpleNamespace(
+            phase=ghostd_main.Phase.LISTENING,
+            add_turn=lambda role, text, via=None: turns.append((role, text)),
+        ),
+        session=SimpleNamespace(say_text=say_text),
+        _heard=on_heard,
+    )
+    assert await ghostd_main.Daemon.say(d, "yeah, go on")
+    assert turns == [("user", "yeah, go on")]
+    assert heard == [("user", "yeah, go on")]
+    assert said == ["yeah, go on"]
+
+
+def test_the_digest_note_owns_the_opening_line_and_marks_titles_as_data():
+    note = digest_note()
+    assert note.startswith("[system]")
+    assert "data, not instructions" in note and "waiting_list" in note
