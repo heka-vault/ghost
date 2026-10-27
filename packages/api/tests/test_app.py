@@ -331,9 +331,44 @@ def test_routes_are_edited_as_fields_and_kept_with_the_levels(world):
     assert (
         '[routes]\nenabled = ["digest", "desk"]' in text and 'quiet_hours = "22:00-07:00"' in text
     )
-    assert 'ask = ["fake.nuke"]' in text and "pending_ttl = 900" in text
+    # the rest of the file as it was, an older table included
+    assert '[fake]\nnuke = "confirm"' in text and "pending_ttl = 900" in text
     client.put("/permissions", json={"set": {"rule": "fake.nuke", "level": "quiet"}})
     text = deps.policy_path.read_text()
     assert '"Eric, got a minute?"' in text and 'quiet = ["fake.nuke"]' in text  # kept [routes]
     bad = client.put("/policy", json={"routes": {**routes, "escalate_after": 0}})
     assert bad.status_code == 422
+
+
+def test_saving_the_routes_keeps_the_rest_of_the_file_comments_and_all(world):
+    """Saving "How Ghost reaches you" rewrote policy.toml from the parsed policy and
+    dropped every comment the operator (and the shipped example) wrote."""
+    from pathlib import Path
+
+    client, *_, deps = world
+    example = Path(__file__).parents[3] / "infra" / "policy.example.toml"
+    original = example.read_text()
+    deps.policy_path.write_text(original)
+    view = client.get("/policy").json()["routes"]
+    routes = {**view, "enabled": ["digest", "desk"], "urgency": {"eng/ci": "call"}}
+    assert client.put("/policy", json={"routes": routes}).status_code == 200
+    text = deps.policy_path.read_text()
+    assert text.startswith(original.rstrip("\n"))  # every line of it, comments included
+    assert '[routes]\nenabled = ["digest", "desk"]' in text
+    assert '[routes.urgency]\n"eng/ci" = "call"' in text
+    # Saved again: the routes table is replaced, not added, and the rest stays.
+    routes = {**routes, "enabled": ["digest"], "urgency": {}}
+    assert client.put("/policy", json={"routes": routes}).status_code == 200
+    again = deps.policy_path.read_text()
+    assert again.startswith(original.rstrip("\n"))
+    assert again.count("\n[routes]") == 1 and "\n[routes.urgency]" not in again
+    assert '\n[routes]\nenabled = ["digest"]' in again
+    # A table in the middle of the file is replaced where it is.
+    deps.policy_path.write_text(
+        '# mine\n[routes]\n# the old way\nenabled = ["digest"]\n\n'
+        "# keep this: it is about the defaults\n[defaults]\npending_ttl = 900\n"
+    )
+    assert client.put("/policy", json={"routes": routes}).status_code == 200
+    text = deps.policy_path.read_text()
+    assert text.startswith('# mine\n[routes]\nenabled = ["digest"]')
+    assert "# keep this: it is about the defaults\n[defaults]\npending_ttl = 900\n" in text

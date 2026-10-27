@@ -8,7 +8,6 @@ rule), secret values (write-only), or a way for the model to reach any of it.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import os
 import subprocess
 from collections.abc import Sequence
@@ -28,7 +27,7 @@ from ghost_core import (
     WriteGate,
 )
 from ghost_core.outputs import list_outputs
-from ghost_core.policy import PolicyError
+from ghost_core.policy import PolicyError, write_routes
 from loguru import logger
 
 from ghost_api.files import read_env, update_env
@@ -808,28 +807,26 @@ def create_app(deps: Deps) -> FastAPI:
     async def put_policy(update: PolicyUpdate) -> PolicyResult:
         if update.text is not None:
             try:
-                policy = AutonomyPolicy.parse(update.text, source="request")
+                AutonomyPolicy.parse(update.text, source="request")  # never a file that won't read
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None
             text = update.text
         else:
             current = policy_view()
-            # The routes editor doesn't know the rest of the file: keep it as it was.
-            kept = AutonomyPolicy.parse(current.text) if current.text else AutonomyPolicy()
-            policy = kept
-            routes = kept.routes
-            if update.routes is not None:
-                from ghost_core.routes import RouteError, RoutePolicy
+            if update.routes is None:
+                return PolicyResult(policy=current, applied=False)
+            from ghost_core.routes import RouteError, RoutePolicy
 
-                raw = update.routes.model_dump(exclude={"available"})
-                if raw.get("quiet_hours") is None:
-                    raw.pop("quiet_hours")
-                try:
-                    routes = RoutePolicy.parse(raw)
-                except RouteError as e:
-                    raise HTTPException(422, str(e)) from None
-            policy = dataclasses.replace(policy, routes=routes)
-            text = policy.to_toml()
+            raw = update.routes.model_dump(exclude={"available"})
+            if raw.get("quiet_hours") is None:
+                raw.pop("quiet_hours")
+            try:
+                routes = RoutePolicy.parse(raw)
+                # The routes editor doesn't know the rest of the file: only [routes]
+                # changes, and everything else stays as written, comments included.
+                text = write_routes(current.text, routes)
+            except (RouteError, ValueError) as e:
+                raise HTTPException(422, str(e)) from None
         deps.policy_path.parent.mkdir(parents=True, exist_ok=True)
         deps.policy_path.write_text(text if text.endswith("\n") else text + "\n")
         deps.control.reload_policy()

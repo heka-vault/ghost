@@ -229,6 +229,54 @@ def write_permissions(text: str, permissions: Permissions) -> str:
     return result
 
 
+def write_routes(text: str, routes: Any) -> str:
+    """``text`` with its ``[routes]`` table (and ``[routes.urgency]``) replaced by
+    ``routes`` (``ghost_core.routes.RoutePolicy``; None takes it out), where it was, or at
+    the end. Everything else stays as the operator wrote it, comments included: the
+    comments just above the next table are that table's, so they stay too."""
+    rendered: list[str] = routes.to_toml() if routes is not None else []
+    out: list[str] = []
+    inside = False
+    placed = False
+    dropped: list[str] = []
+
+    def leave() -> None:
+        tail: list[str] = []
+        while dropped and (not dropped[-1].strip() or dropped[-1].lstrip().startswith("#")):
+            tail.insert(0, dropped.pop())
+        dropped.clear()
+        if out and out[-1].strip() and tail[:1] != [""]:
+            tail.insert(0, "")
+        out.extend(tail)
+
+    for line in text.splitlines():
+        m = _HEADER.match(line)
+        if m:
+            top = m.group(1).strip().strip('"').split(".", 1)[0].strip('"')
+            if top == "routes":
+                if not placed:
+                    out.extend(rendered)
+                    placed = True
+                inside = True
+                continue
+            if inside:
+                leave()
+                inside = False
+        if inside:
+            dropped.append(line)
+        else:
+            out.append(line)
+    if inside:
+        leave()
+    if not placed and rendered:
+        while out and not out[-1].strip():
+            out.pop()
+        out += ["", *rendered] if out else rendered
+    result = "\n".join(out).rstrip() + "\n"
+    AutonomyPolicy.parse(result, source="rendered")  # never write a file that won't read
+    return result
+
+
 def _legacy_rules(
     section: str, body: Mapping[str, Any], out: dict[str, list[Rule]], source: str
 ) -> None:
