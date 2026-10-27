@@ -3,7 +3,7 @@
 The default wake path (ADR 0010). While passive, the microphone goes through VAD and
 Parakeet on this machine only. Transcripts that do not contain a wake phrase are dropped
 on the spot: not logged, not stored, not sent anywhere. A match returns the words that
-followed the phrase, so "hey ghost, what needs my sign-off" becomes the first turn.
+followed the phrase, so "hey ghost, what needs me?" becomes the first turn.
 
 With a ``Detector`` the same listener wakes on the trained "hey ghost" model instead
 (ADR 0025, ``ghost_voice.wakeword``), and Parakeet only checks its hits.

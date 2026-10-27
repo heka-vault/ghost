@@ -231,7 +231,7 @@ export default function AuditScreen(_: RouteProps) {
         : more
           ? `Older changes aren’t loaded yet, and may match.${online ? "" : " They load once Ghost is back."}`
           : q
-            ? "Try fewer words, an issue number, or an operation like close."
+            ? "Try fewer words, a name, or an operation like close."
             : "Try another status or source.";
   const empty = !log.loading && !log.error && log.total === 0 && log.items.length === 0;
 

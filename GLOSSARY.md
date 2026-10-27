@@ -23,6 +23,14 @@ of the first increment (*line*, *patch me through*) is gone (ADR 0024).
 | **Skill** | A `SKILL.md` folder: instructions the model reads on demand through `read_skill`, never a source of permission. Read nearest first: the department's, the operator's `~/.agents/skills`, Ghost's own. Scripts in it run only through the gated scripts server (ADR 0023). | |
 | **Server** | An MCP server a department declares in its `mcp.json`, with its reads, scope, writes and levels in `department.json`: its reads are offered to the model, its writes by declaration through the gate (ADR 0022, ADR 0024). A department may `use` one of Ghost's. Also *source*: a server, the agents or the departments, as the gate and the audit know them (the audit's `ability` field holds the source's name). | An *ability*: the installable packages Ghost had until 2026-10-20 (ADR 0012, superseded). |
 | **Journal** | A department's writes in the audit, by any of its agents, newest first. | |
+| **Watch** | What a department declares to observe an outside system: a read polled on an interval, or a signed request pushed to the daemon. It keeps typed fields and decides deterministically first, then with Jev, then a model, only where it declares them (ADR 0028). Never written by the model. | A routine, which runs the model. |
+| **Observation** | What one look by a watch found: its typed fields, nothing else. Untrusted data. | |
+| **Item** | Something a watch or Ghost itself is tracking, with a stable key, so one failure is one item however often it is seen. Resolved when its source says so. | |
+| **Response** | What a watch does with its items: *record*, *tell* (put it on the waiting list) or *act* (run a routine) (ADR 0029). The operator's, never the model's. | A *rule*, which is a line of `AGENTS.md`. |
+| **Waiting list** | The items that need the operator: what watches *tell*, changes waiting for a yes, servers and departments with a problem. "What needs me?" reads it (ADR 0029). | The audit, which is history. |
+| **Route** | How Ghost reaches the operator about an item: the digest, desk voice, a desktop notification, the phone app, a call, a carrier. Which ones, and how loud, is the operator's policy (ADR 0031). | |
+| **Delivered / acknowledged** | Delivered: a route passed the item on. Acknowledged: the operator heard it (replied, opened it, pressed acknowledge). Only acknowledged stops the alerting; a snooze stops it until a time. | |
+| **Output** | A file Ghost made, in a department's `out/` folder, written through the gate (ADR 0033). Ghost never runs it. | |
 | **Wisp** | Ghost's mascot and the only ghost drawing in the apps; an agent is shown as Wisp in the agent's colour. | |
 
 Retired words, so old notes still read: a **line** was an agent; a **toolkit** was a

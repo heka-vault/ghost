@@ -1,6 +1,6 @@
 # 0017: A plain request is the yes for a confirm-level change
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR 0030 (the yes may come later, from the waiting list)
 - **Date:** 2026-10-19
 - **Amends:** ADR 0007 (what counts as confirmation evidence), ADR 0011 (what `confirm` means)
 

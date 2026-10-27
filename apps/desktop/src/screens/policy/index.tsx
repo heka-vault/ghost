@@ -492,7 +492,7 @@ export default function PolicyScreen(_: RouteProps) {
         label="Policy file"
         errorLine={saveError?.line ?? null}
         describedBy={saveError ? `${errorId} ${helpId}` : helpId}
-        placeholder={'[mcp.github.levels]\nclose = "confirm"'}
+        placeholder={'[conversations]\ndelete = "confirm"'}
       />
       <p id={helpId} className="t-small t-3 policy-file__help">
         Ghost checks the file before writing it; if it doesn’t read cleanly, nothing changes. Comments stay as you write them, from here and from

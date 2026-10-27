@@ -92,7 +92,7 @@ restart: stop start ## stop ghostd, wait for it, start it again
 wake: ## simulate the wake word (through the API socket when ghostd is running)
 	@$(UV) run ghostd wake
 
-say: ## type a turn to the running Ghost: make say TEXT="what needs my sign-off"
+say: ## type a turn to the running Ghost: make say TEXT="what needs me?"
 	@$(UV) run ghostd say "$(TEXT)"
 
 status: ## the running daemon's status as JSON

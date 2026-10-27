@@ -69,8 +69,8 @@ INTENTS: dict[str, str] = {
         "sorry, huh, come again, one more time, didn't catch that, read that again."
     ),
     "ask": (
-        "a new request, question, or instruction for the assistant about issues or "
-        "anything else, including 'label it bug' or 'what time is it'."
+        "a new request, question, or instruction for the assistant about anything, "
+        "including 'label it bug' or 'what time is it'."
     ),
     "noise": (
         "not addressed to the assistant: song lyrics, talking to another person, a stray "
@@ -147,7 +147,7 @@ class JevClient:
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "ghost-voice-triage",
+                "User-Agent": "ghost",
             },
         )
 

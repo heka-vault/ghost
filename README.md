@@ -40,7 +40,7 @@ make wake            # optional, from another shell: trigger a wake by hand
 
 Say "Hey Ghost", or "Ghost, you there?" (`GHOST_WAKE_PHRASES` to change them; phonetic
 near-misses such as "hey guys" count too, `GHOST_WAKE_FUZZY=0` for exact only). Words
-in the same breath are the first request: "hey ghost, what needs my sign-off".
+in the same breath are the first request: "hey ghost, what needs me?".
 
 When Ghost does not react the way you expect, run `GHOST_DEBUG_AUDIO=1 make run`: it
 logs what Parakeet heard (also while passive), VAD starts and stops, wake matches and
@@ -70,7 +70,7 @@ sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp
 sudo ufw allow from 192.168.1.0/24 proto udp
 ```
 
-Say "what needs my sign-off", talk it through, and "go to sleep" when done. How much
+Say "what needs me?", talk it through, and "that's all" when done. How much
 Ghost may do without asking is in `~/.config/ghost/policy.toml` (seeded by `make env`
 from `infra/policy.example.toml`): per operation, `deny`, `confirm`, `announce`, or
 `quiet`. Every write is logged; to reverse one, ask Ghost and it proposes the opposite change.
