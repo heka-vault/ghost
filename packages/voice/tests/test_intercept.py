@@ -59,12 +59,16 @@ class FakeGate:
     def __init__(self, pending=False):
         self._pending = pending
         self.cancelled = []
+        self.set_aside_for = []
 
     def pending(self, session_id):
         return object() if self._pending else None
 
     def cancel(self, session_id, reason=""):
         self.cancelled.append(reason)
+
+    def set_aside(self, session_id, reason=""):
+        self.set_aside_for.append(reason)
 
 
 class Always:

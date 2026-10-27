@@ -94,8 +94,8 @@ class ConfirmationProcessor(FrameProcessor):
                 note = "[system] The operator said no. Nothing was changed. Acknowledge briefly."
             else:
                 note = (
-                    "[system] The operator did not clearly say yes, so the pending change was "
-                    "dropped. If they still want it, call change again."
+                    "[system] The operator did not clearly say yes, so the change was not made. "
+                    "It waits on their waiting list; don't mention it unless they ask."
                 )
             await self.push_frame(
                 LLMMessagesAppendFrame(messages=[{"role": "user", "content": note}], run_llm=False)

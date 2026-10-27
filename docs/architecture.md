@@ -87,6 +87,18 @@ model's list, keeps its transcript, memory and audit, and can be rehired. An age
 moved to another department with its folder, memory and transcript; a running session in
 it follows.
 
+### The waiting list (ADR 0029)
+
+What needs the operator is one list (`ghost_core.waiting`): items with stable keys in the
+`items` table, from watches and from Ghost itself (a change waiting for a yes, a server of
+Ghost's that is down, a department folder with a problem). A source syncs the whole set it
+sees; a new key is news, a key that is gone is resolved. An item is delivered when a route
+passed it on and acknowledged when the operator heard it; only acknowledged or snoozed stops
+the alerting, and a changed item alerts again. `GET /waiting`, `POST /waiting/ack` and
+`POST /waiting/snooze` serve it, `Status.waiting` counts what is still to be heard, the bus
+sends a `waiting` event, and the model reads it with `waiting_list` ("what needs me?"),
+typed fields only.
+
 ### Memory and compaction
 
 Each conversation loads only its own persona, memory and notes. The memory is a rolling summary kept in `memory.md`, produced by Pipecat's in-session summarizer with a tokens-only trigger (24k estimated tokens, last 20 messages kept raw, summary up to 3k; `GHOST_COMPACT_*`). Each applied summary is recorded as a version and written to the file through the gate; the file is the source of truth on resume, so an edit by hand is folded into the next version. Summarized turns stay in SQLite, flagged, and are pruned after `GHOST_TURN_RETENTION_DAYS` (90). Raw tool results are never stored, so old untrusted text does not re-enter a later session.
@@ -106,10 +118,14 @@ without asking is the operator's call (ADR 0011):
    risk class).
 3. `core` fetches the target through the source's writer (for a server, the declared read) and stores an immutable
    proposal with that snapshot.
-4. At `announce` or `quiet` the proposal is executed at once. At `confirm` it waits
-   up to 60 s for the next user turn; the classifier (Jev when configured, else the
-   regex allowlist, negation guard in both) must call it a clear yes, and the issue
-   must not have changed since the snapshot. Any other turn cancels it.
+4. At `announce` or `quiet` the proposal is executed at once. At `confirm` it is
+   attached to the session: the next user turn answers it, and the classifier (Jev when
+   configured, else the regex allowlist, negation guard in both) must call it a clear
+   yes; a no cancels it. A turn about something else, a hang-up or a transfer sets it
+   aside instead (ADR 0030): it waits on the waiting list for `[defaults] pending_ttl`
+   (an hour unless set), and a Confirm by id in the operator's app, or Ghost taking it
+   up again (`bring_up_change`) and a yes, applies it. Either way the target must not
+   have changed since the snapshot.
 5. Execution claims the proposal atomically, applies each step through the writer, reads
    the target back, and records success, partial, or failed. Anything created carries a
    hidden idempotency marker so a retry never duplicates it.

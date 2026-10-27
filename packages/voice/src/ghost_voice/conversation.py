@@ -297,7 +297,8 @@ class ConversationRuntime:
         if target.slug == origin.slug and not rehome:
             return []
         if self._gate.pending(self._session_id) is not None:
-            self._gate.cancel(self._session_id, "switched conversation")
+            # Set aside, not cancelled: it waits on the waiting list (ADR 0030).
+            self._gate.set_aside(self._session_id, "switched conversation")
         self.settled.clear()
         if self._on_enter is not None:
             await self._on_enter(target)  # the department's servers, before anything is said

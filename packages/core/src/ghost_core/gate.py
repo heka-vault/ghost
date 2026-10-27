@@ -7,6 +7,10 @@ allowlist, snapshot, bounded steps, idempotency, stale check, readback, audit ro
 ``confirm`` a spoken yes sits between proposal and execution. At ``announce`` and
 ``quiet`` the write happens at once. Reversing a write is a new change through
 ``submit`` like any other.
+
+A change at ``confirm`` waits on the waiting list (ADR 0030), not in the session: while
+attached, the session's next turn answers it; set aside (a turn about something else, a
+hang-up, a transfer), it waits for a yes by id until its time is up.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from ghost_core.confirmation import (
@@ -24,6 +28,7 @@ from ghost_core.confirmation import (
     Verdict,
 )
 from ghost_core.models import (
+    PENDING_TTL,
     ChangeSet,
     Outcome,
     Proposal,
@@ -67,12 +72,14 @@ class Classification:
 
 
 class WriteGate:
-    """Holds at most one pending proposal per session.
+    """At most one pending proposal is attached to a session; any number wait set aside.
 
     * ``submit`` is callable from an LLM tool. Depending on policy it either writes
       now or stores a pending proposal.
     * ``on_user_turn`` is called by the pipeline with the operator's transcribed
-      turn. It is the only path from a pending proposal to ``execute``.
+      turn; ``confirm_by_request`` with the request that led to the proposal;
+      ``confirm_pending`` and ``confirm_id`` with a click in the operator's own app.
+      Those are the only paths from a pending proposal to ``execute``.
     """
 
     def __init__(
@@ -163,6 +170,12 @@ class WriteGate:
         """The merged policy per department (``Department.policy(base)``), replaced whole
         whenever the file or a department folder is re-read."""
         self._department_policies = dict(policies)
+
+    @property
+    def pending_ttl(self) -> timedelta:
+        """How long a change at ``confirm`` waits (ADR 0030), from the policy file."""
+        secs = self._autonomy.pending_ttl
+        return timedelta(seconds=secs) if secs else PENDING_TTL
 
     def policy_for(self, department: str | None) -> AutonomyPolicy:
         if department is not None and department in self._department_policies:
@@ -297,8 +310,8 @@ class WriteGate:
         department: str | None = None,
     ) -> Proposal:
         writer = self.operation(ability, operation, department).writer
-        # One pending proposal at a time: a new one replaces the old.
-        self._store.cancel_pending(session_id)
+        # One attached at a time: a new one sets the old aside, on the waiting list.
+        self._detach(session_id, "a newer change")
         snapshot = await writer.fetch(target)
         proposal = Proposal(
             session_id=session_id,
@@ -312,6 +325,7 @@ class WriteGate:
             autonomy=autonomy.value,
             conversation=conversation,
             department=department,
+            expires_at=utcnow() + self.pending_ttl,
         )
         self._store.insert_proposal(proposal)
         self._store.event(
@@ -337,7 +351,62 @@ class WriteGate:
         return p
 
     def cancel(self, session_id: str, reason: str = "cancelled") -> Proposal | None:
+        """The operator dropped the change the session is waiting on ("never mind")."""
         p = self.pending(session_id)
+        if p is None:
+            return None
+        self._store.set_status(p.id, ProposalStatus.CANCELLED)
+        self._store.event(p.id, "cancelled", {"reason": reason})
+        return p
+
+    def set_aside(self, session_id: str, reason: str) -> Proposal | None:
+        """The session moved on (a hang-up, a transfer, a turn about something else): the
+        change it was waiting on stays pending, on the waiting list (ADR 0030)."""
+        p = self.pending(session_id)
+        if p is None:
+            return None
+        self._detach(session_id, reason)
+        return p
+
+    def _detach(self, session_id: str, reason: str) -> None:
+        p = self._store.pending_for_session(session_id)
+        if p is not None and self._store.detach(session_id):
+            self._store.event(p.id, "set_aside", {"reason": reason})
+
+    def waiting(self, now: datetime | None = None) -> list[Proposal]:
+        """Every change waiting for a yes, oldest first; expired ones are marked so."""
+        out = []
+        for p in self._store.pending_proposals():
+            if p.is_expired(now):
+                self._store.set_status(p.id, ProposalStatus.EXPIRED)
+                self._store.event(p.id, "expired")
+                continue
+            out.append(p)
+        return out
+
+    def waiting_one(self, proposal_id: str, now: datetime | None = None) -> Proposal | None:
+        p = self._store.get_proposal(proposal_id)
+        if p is None or p.status is not ProposalStatus.PENDING:
+            return None
+        if p.is_expired(now):
+            self._store.set_status(p.id, ProposalStatus.EXPIRED)
+            self._store.event(p.id, "expired")
+            return None
+        return p
+
+    def bring_back(self, proposal_id: str, session_id: str) -> Proposal | None:
+        """Attach a waiting change to this session, so its next turn answers it: Ghost
+        reads it out and the operator says yes or no (ADR 0030). Writes nothing."""
+        p = self.waiting_one(proposal_id)
+        if p is None:
+            return None
+        if self._store.attach(p.id, session_id):
+            self._store.event(p.id, "brought_back", {"session": session_id})
+            return self._store.pending_for_session(session_id)
+        return None
+
+    def cancel_id(self, proposal_id: str, reason: str = "cancelled") -> Proposal | None:
+        p = self.waiting_one(proposal_id)
         if p is None:
             return None
         self._store.set_status(p.id, ProposalStatus.CANCELLED)
@@ -381,9 +450,13 @@ class WriteGate:
                 "classifier": getattr(self._classifier, "name", "custom"),
             },
         )
-        if verdict is not Verdict.AFFIRMATIVE:
+        if verdict is Verdict.NEGATIVE:
             self._store.set_status(p.id, ProposalStatus.CANCELLED)
             self._store.event(p.id, "cancelled", {"reason": verdict.value})
+            return verdict, None
+        if verdict is not Verdict.AFFIRMATIVE:
+            # Not an answer: the operator moved on. The change waits on the list (ADR 0030).
+            self._detach(session_id, verdict.value)
             return verdict, None
         return verdict, await self._execute(p, now)
 
@@ -431,6 +504,20 @@ class WriteGate:
             p.id, "user_turn", {"verdict": Verdict.AFFIRMATIVE.value, "classifier": source}
         )
         self._log(f"gate: {source} confirmed {p.id}")
+        return await self._execute(p, now)
+
+    async def confirm_id(
+        self, proposal_id: str, *, source: str = "ui", now: datetime | None = None
+    ) -> Outcome | None:
+        """A click in the operator's own app on a change on the waiting list (ADR 0013,
+        ADR 0030). The stale check in ``_execute`` still runs. None when it isn't waiting."""
+        p = self.waiting_one(proposal_id, now)
+        if p is None:
+            return None
+        self._store.event(
+            p.id, "user_turn", {"verdict": Verdict.AFFIRMATIVE.value, "classifier": source}
+        )
+        self._log(f"gate: {source} confirmed {p.id} from the waiting list")
         return await self._execute(p, now)
 
     # --- execution -----------------------------------------------------

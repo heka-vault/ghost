@@ -1,6 +1,6 @@
 # 0030: A change at `confirm` waits on the waiting list, not in the session
 
-- **Status:** accepted (not built yet)
+- **Status:** accepted (built 2026-10-27: `WriteGate.set_aside`, `confirm_id`, `bring_back`; `bring_up_change`; `/proposals/{id}/confirm`)
 - **Date:** 2026-10-27
 - **Amends:** ADR 0011 (how long `confirm` waits), ADR 0017 (when the yes may come)
 

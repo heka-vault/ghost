@@ -53,6 +53,8 @@ class Status(BaseModel):
     # Ghost has decided to hang up: its goodbye may still be playing, and the session ends
     # as soon as it has. False outside a session.
     ending: bool = False
+    # How many items on the waiting list still need the operator to hear them (ADR 0029).
+    waiting: int = 0
 
 
 class Turn(BaseModel):
@@ -113,10 +115,60 @@ class ConversationEvent(BaseModel):
     changed: str | None = None  # slug that was created/edited/deleted, if any
 
 
+class WaitingEvent(BaseModel):
+    """The waiting list changed: read ``GET /waiting`` for it."""
+
+    type: Literal["waiting"] = "waiting"
+    count: int
+
+
 Event = Annotated[
-    StatusEvent | TurnEvent | PendingEvent | OutcomeEvent | LogEvent | ConversationEvent,
+    StatusEvent
+    | TurnEvent
+    | PendingEvent
+    | OutcomeEvent
+    | LogEvent
+    | ConversationEvent
+    | WaitingEvent,
     Field(discriminator="type"),
 ]
+
+
+# --- the waiting list (ADR 0029, ADR 0030) ---------------------------------------
+
+
+class WaitingItemView(BaseModel):
+    """One item that needs the operator. ``title`` comes from an outside system: show
+    it as text, never as markup. ``change`` is set for a change waiting for a yes."""
+
+    key: str
+    source: str
+    department: str | None = None
+    title: str
+    link: str | None = None
+    state: Literal["new", "delivered", "acknowledged", "snoozed"]
+    first_seen: datetime
+    changed_at: datetime
+    age_secs: int
+    delivered_at: datetime | None = None
+    delivered_via: str | None = None
+    acknowledged_at: datetime | None = None
+    snoozed_until: datetime | None = None
+    change: PendingProposal | None = None
+
+
+class WaitingView(BaseModel):
+    items: list[WaitingItemView]
+    count: int  # how many still need the operator to hear them
+
+
+class ItemKey(BaseModel):
+    key: str
+
+
+class SnoozeRequest(BaseModel):
+    key: str
+    minutes: int = Field(ge=1, le=7 * 24 * 60)
 
 
 # --- requests -------------------------------------------------------------------

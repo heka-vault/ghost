@@ -61,6 +61,7 @@ class AutonomyPolicy:
 
         [defaults]
         autonomy = "confirm"          # optional; omit to fall back to each op's risk class
+        pending_ttl = 3600            # seconds a change at confirm waits (ADR 0030)
 
         [conversations]               # the agents' own operations (ADR 0014)
         set_persona = "confirm"
@@ -76,6 +77,9 @@ class AutonomyPolicy:
 
     default: Autonomy | None = None
     skills: Mapping[str, OpLevels] = field(default_factory=dict)
+    # ADR 0030: how long a change at ``confirm`` waits on the waiting list; None is the
+    # default (``PENDING_TTL``).
+    pending_ttl: int | None = None
     targets: Mapping[str, Mapping[str, OpLevels]] = field(default_factory=dict)
     source: str = "<none>"
 
@@ -94,6 +98,7 @@ class AutonomyPolicy:
         except tomllib.TOMLDecodeError as e:
             raise ValueError(f"{source}: {e}") from None
         default: Autonomy | None = None
+        pending_ttl: int | None = None
         skills: dict[str, dict[str, Autonomy]] = {}
         targets: dict[str, dict[str, dict[str, Autonomy]]] = {}
         for section, body in raw.items():
@@ -102,6 +107,8 @@ class AutonomyPolicy:
             if section == "defaults":
                 if "autonomy" in body:
                     default = _level(body["autonomy"], f"{source}: defaults.autonomy")
+                if "pending_ttl" in body:
+                    pending_ttl = _seconds(body["pending_ttl"], f"{source}: defaults.pending_ttl")
                 continue
             if section in RETIRED_SECTIONS:
                 logger.warning(
@@ -116,7 +123,13 @@ class AutonomyPolicy:
                     continue
                 ops[key] = _level(value, f"{source}: {section}.{key}")
             skills.setdefault(section, {}).update(ops)
-        return cls(default=default, skills=skills, targets=targets, source=source)
+        return cls(
+            default=default,
+            skills=skills,
+            targets=targets,
+            source=source,
+            pending_ttl=pending_ttl,
+        )
 
     def resolve(
         self, skill: str, operation: str, target: str = "", risk: Risk = "medium"
@@ -163,8 +176,13 @@ class AutonomyPolicy:
             "# Ghost autonomy policy (ADR 0011). Edited through the desktop app or by hand.",
             "",
         ]
-        if self.default is not None:
-            lines += ["[defaults]", f'autonomy = "{self.default.value}"', ""]
+        if self.default is not None or self.pending_ttl is not None:
+            lines.append("[defaults]")
+            if self.default is not None:
+                lines.append(f'autonomy = "{self.default.value}"')
+            if self.pending_ttl is not None:
+                lines.append(f"pending_ttl = {self.pending_ttl}")
+            lines.append("")
         for skill in sorted(set(self.skills) | set(self.targets)):
             ops = self.skills.get(skill, {})
             lines.append(f"[{_toml_key(skill)}]")
@@ -181,6 +199,12 @@ class AutonomyPolicy:
     def describe(self, skill: str, operations: Mapping[str, Risk]) -> dict[str, Autonomy]:
         """The skill-level resolution for each op; targets may still tighten it."""
         return {op: self.resolve(skill, op, risk=risk) for op, risk in operations.items()}
+
+
+def _seconds(value: object, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 60 <= value <= 7 * 86400:
+        raise ValueError(f"{where} must be a whole number of seconds from 60 to 604800")
+    return value
 
 
 def _toml_key(k: str) -> str:

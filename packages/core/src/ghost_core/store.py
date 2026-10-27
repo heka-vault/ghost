@@ -95,6 +95,28 @@ CREATE TABLE IF NOT EXISTS compactions (
     source          TEXT NOT NULL DEFAULT 'auto'
 );
 CREATE INDEX IF NOT EXISTS compactions_conversation ON compactions(conversation, at);
+
+-- What Ghost is tracking for the operator (ADR 0029): one row per stable key, from a
+-- watch or from Ghost itself (a change waiting for a yes, a server down). ``fields`` are
+-- the item's typed fields as JSON; untrusted data, never instructions.
+CREATE TABLE IF NOT EXISTS items (
+    key             TEXT PRIMARY KEY,
+    source          TEXT NOT NULL,
+    department      TEXT,
+    title           TEXT NOT NULL,
+    link            TEXT,
+    fields          TEXT NOT NULL DEFAULT '{}',
+    response        TEXT NOT NULL DEFAULT 'tell',
+    first_seen      TEXT NOT NULL,
+    last_seen       TEXT NOT NULL,
+    changed_at      TEXT NOT NULL,
+    resolved_at     TEXT,
+    delivered_at    TEXT,
+    delivered_via   TEXT,
+    acknowledged_at TEXT,
+    snoozed_until   TEXT
+);
+CREATE INDEX IF NOT EXISTS items_open ON items(resolved_at, source);
 """
 
 # The three tables the lines (ADR 0014 to 0023) lived in. ADR 0024 starts over: they are
@@ -141,6 +163,13 @@ class Store:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(operations)")}
         if "readback_version" not in cols:
             self._conn.execute("ALTER TABLE operations ADD COLUMN readback_version TEXT")
+        # ADR 0030: a pending proposal answers the session's next turn only while attached;
+        # set aside, it waits on the waiting list for a yes by id.
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(proposals)")}
+        if "attached" not in cols:
+            self._conn.execute(
+                "ALTER TABLE proposals ADD COLUMN attached INTEGER NOT NULL DEFAULT 1"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -171,12 +200,47 @@ class Store:
         return p.model_copy(update={"status": _status(row[1])})
 
     def pending_for_session(self, session_id: str) -> Proposal | None:
+        """The change this session's next turn answers: pending and still attached."""
         row = self._conn.execute(
-            "SELECT body FROM proposals WHERE session_id = ? AND status = ?"
+            "SELECT body FROM proposals WHERE session_id = ? AND status = ? AND attached = 1"
             " ORDER BY created_at DESC LIMIT 1",
             (session_id, ProposalStatus.PENDING.value),
         ).fetchone()
         return load_proposal(row[0]) if row else None
+
+    def pending_proposals(self) -> list[Proposal]:
+        """Every change waiting for a yes, attached or set aside, oldest first."""
+        rows = self._conn.execute(
+            "SELECT body FROM proposals WHERE status = ? ORDER BY created_at",
+            (ProposalStatus.PENDING.value,),
+        ).fetchall()
+        out = []
+        for (body,) in rows:
+            try:
+                out.append(load_proposal(body))
+            except Exception:  # noqa: BLE001 - a row from an older schema
+                continue
+        return out
+
+    def detach(self, session_id: str) -> int:
+        """Set the session's pending changes aside: they stay pending, on the waiting
+        list, and the session's next turn no longer answers them."""
+        cur = self._conn.execute(
+            "UPDATE proposals SET attached = 0 WHERE session_id = ? AND status = ?"
+            " AND attached = 1",
+            (session_id, ProposalStatus.PENDING.value),
+        )
+        return cur.rowcount
+
+    def attach(self, proposal_id: str, session_id: str) -> bool:
+        """Bring a pending change back to a session, the one its next turn answers. The
+        session's own pending change, if any, is set aside first."""
+        self.detach(session_id)
+        cur = self._conn.execute(
+            "UPDATE proposals SET attached = 1, session_id = ? WHERE id = ? AND status = ?",
+            (session_id, proposal_id, ProposalStatus.PENDING.value),
+        )
+        return cur.rowcount == 1
 
     def list_proposals(
         self,
@@ -300,6 +364,90 @@ class Store:
             (proposal_id,),
         ).fetchall()
         return [(at, ev, json.loads(d) if d else None) for at, ev, d in rows]
+
+    # items (ADR 0029)
+
+    def get_item(self, key: str) -> dict[str, object] | None:
+        row = self._conn.execute(f"SELECT {_ITEM_COLS} FROM items WHERE key = ?", (key,)).fetchone()
+        return _item(row) if row else None
+
+    def open_items(self, source: str | None = None) -> list[dict[str, object]]:
+        """Unresolved items, oldest first; one source's when ``source`` is given."""
+        where, args = "resolved_at IS NULL", []
+        if source is not None:
+            where += " AND source = ?"
+            args.append(source)
+        rows = self._conn.execute(
+            f"SELECT {_ITEM_COLS} FROM items WHERE {where} ORDER BY first_seen", args
+        ).fetchall()
+        return [_item(r) for r in rows]
+
+    def upsert_item(
+        self,
+        *,
+        key: str,
+        source: str,
+        department: str | None,
+        title: str,
+        link: str | None,
+        fields: dict[str, object],
+        response: str,
+        now: datetime,
+        changed: bool,
+    ) -> None:
+        """Seen now. A new key, or one resolved before, starts over; ``changed`` moves
+        ``changed_at`` so an item the operator acknowledged alerts again."""
+        at = now.isoformat()
+        self._conn.execute(
+            "INSERT INTO items (key, source, department, title, link, fields, response,"
+            " first_seen, last_seen, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET source = excluded.source,"
+            " department = excluded.department, title = excluded.title,"
+            " link = excluded.link, fields = excluded.fields, response = excluded.response,"
+            " last_seen = excluded.last_seen,"
+            " first_seen = CASE WHEN items.resolved_at IS NULL THEN items.first_seen"
+            "   ELSE excluded.first_seen END,"
+            " changed_at = CASE WHEN ? OR items.resolved_at IS NOT NULL"
+            "   THEN excluded.changed_at ELSE items.changed_at END,"
+            " delivered_at = CASE WHEN items.resolved_at IS NULL THEN items.delivered_at END,"
+            " delivered_via = CASE WHEN items.resolved_at IS NULL THEN items.delivered_via END,"
+            " acknowledged_at = CASE WHEN items.resolved_at IS NULL"
+            "   THEN items.acknowledged_at END,"
+            " snoozed_until = CASE WHEN items.resolved_at IS NULL THEN items.snoozed_until END,"
+            " resolved_at = NULL",
+            (
+                key,
+                source,
+                department,
+                title,
+                link,
+                json.dumps(fields, sort_keys=True),
+                response,
+                at,
+                at,
+                at,
+                1 if changed else 0,
+            ),
+        )
+
+    def resolve_item(self, key: str, now: datetime) -> None:
+        self._conn.execute(
+            "UPDATE items SET resolved_at = ? WHERE key = ? AND resolved_at IS NULL",
+            (now.isoformat(), key),
+        )
+
+    def mark_item(self, key: str, **values: str | None) -> bool:
+        """Set ``delivered_at``/``delivered_via``/``acknowledged_at``/``snoozed_until`` on
+        an open item. False when there is no such open item."""
+        allowed = {"delivered_at", "delivered_via", "acknowledged_at", "snoozed_until"}
+        if not values or not set(values) <= allowed:
+            raise ValueError(f"mark_item takes {sorted(allowed)}")
+        sets = ", ".join(f"{k} = ?" for k in values)
+        cur = self._conn.execute(
+            f"UPDATE items SET {sets} WHERE key = ? AND resolved_at IS NULL",
+            [*values.values(), key],
+        )
+        return cur.rowcount == 1
 
     # per-ability key/value
 
@@ -481,6 +629,19 @@ class Store:
             )
             for r in rows
         ]
+
+
+_ITEM_COLS = (
+    "key, source, department, title, link, fields, response, first_seen, last_seen,"
+    " changed_at, resolved_at, delivered_at, delivered_via, acknowledged_at, snoozed_until"
+)
+
+
+def _item(row) -> dict[str, object]:
+    names = [c.strip() for c in _ITEM_COLS.split(",")]
+    out = dict(zip(names, row, strict=True))
+    out["fields"] = json.loads(row[5] or "{}")
+    return out
 
 
 _PROFILE_COLS = (

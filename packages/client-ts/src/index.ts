@@ -128,6 +128,26 @@ export class GhostClient {
   cancel() {
     return unwrap(this.api.POST("/proposals/pending/cancel"));
   }
+  /** Confirm a change on the waiting list by id, with or without a session (ADR 0030). */
+  confirmProposal(id: string) {
+    return unwrap(this.api.POST("/proposals/{proposal_id}/confirm", { params: { path: { proposal_id: id } } }));
+  }
+  cancelProposal(id: string) {
+    return unwrap(this.api.POST("/proposals/{proposal_id}/cancel", { params: { path: { proposal_id: id } } }));
+  }
+
+  // --- the waiting list (ADR 0029) ------------------------------------------------
+  /** What needs the operator: items from watches and Ghost's own, with their state. */
+  waiting() {
+    return unwrap(this.api.GET("/waiting"));
+  }
+  /** The operator heard it: it stops alerting until it changes. */
+  acknowledge(key: string) {
+    return unwrap(this.api.POST("/waiting/ack", { body: { key } }));
+  }
+  snooze(key: string, minutes: number) {
+    return unwrap(this.api.POST("/waiting/snooze", { body: { key, minutes } }));
+  }
   audit(query: paths["/audit"]["get"]["parameters"]["query"] = {}) {
     return unwrap(this.api.GET("/audit", { params: { query } }));
   }

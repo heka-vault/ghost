@@ -158,6 +158,7 @@ export class MockDaemon {
       department: first ? first.department : null,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
+      waiting: 0,
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;

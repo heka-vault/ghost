@@ -23,6 +23,7 @@ from ghost_api.models import (
     StatusEvent,
     Turn,
     TurnEvent,
+    WaitingEvent,
 )
 
 _event_adapter: TypeAdapter[Event] = TypeAdapter(Event)
@@ -76,6 +77,7 @@ class DaemonState:
         self.department: str | None = None  # the department the session's agent works in
         self.session_origin: str | None = None  # "desk" | "phone" while a session runs
         self.ending = False  # going to sleep; the goodbye may still be playing
+        self.waiting = 0  # items on the waiting list still to be heard (ADR 0029)
         self.turns: deque[Turn] = deque(maxlen=200)
         self.bus = EventBus()
         self._started = time.monotonic()
@@ -136,6 +138,12 @@ class DaemonState:
     def set_pending(self, pending: PendingProposal | None) -> None:
         self.pending = pending
         self.bus.publish(PendingEvent(pending=pending))
+        self._publish_status()
+
+    def set_waiting(self, count: int) -> None:
+        """The waiting list changed; the apps re-read it."""
+        self.waiting = count
+        self.bus.publish(WaitingEvent(count=count))
         self._publish_status()
 
     def outcome(self, view: OutcomeView, via: str) -> None:

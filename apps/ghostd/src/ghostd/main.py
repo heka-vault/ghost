@@ -46,6 +46,7 @@ from ghost_core.departments import Departments, Fleet, all_sources
 from ghost_core.jev import JevClassifier, JevClient
 from ghost_core.mcp import Servers
 from ghost_core.skills import Skills
+from ghost_core.waiting import Items, WaitingList, waiting_source
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
@@ -70,6 +71,7 @@ WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
 DEFAULT_WAKE_FUZZY = GhostdSettings.model_fields["wake_fuzzy"].default
 PHONE_STATE = "phone.json"
+WAITING_REFRESH_SECS = 30  # how often Ghost's own items (changes, servers) are re-read
 VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its session;
 # long enough for a cellular blip or a tunnel re-handshake away from home (ADR 0020)
@@ -81,9 +83,33 @@ PHONE_READY_SECS = 4.0
 PHONE_GREETING_LEAD_SECS = 0.3  # let the phone's playback settle before the first word
 PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then is dropped
 
+
 # While a phone session winds down after the phone has gone, Pipecat's output transport
 # reports its writes to the dead peer as errors. They are the expected tail of a hang-up,
 # not faults; the sinks drop them while this is set.
+def ghost_problems(fleet: Fleet, departments: Departments) -> list[tuple[str, str, str | None]]:
+    """Ghost's own trouble, for the waiting list (ADR 0029): a server of Ghost's that
+    didn't start or stopped, a department folder that doesn't read."""
+    out: list[tuple[str, str, str | None]] = []
+    seen: set[str] = set()
+    for name, why in fleet.ghost.failed.items():
+        seen.add(name)
+        out.append((f"server:{name}", f"The {name} server isn't running: {why}", None))
+    for name, server in fleet.ghost.servers.items():
+        if name not in seen and server.failed:
+            out.append((f"server:{name}", f"The {name} server stopped: {server.failed}", None))
+    for d in departments.list():
+        if d.problems:
+            out.append(
+                (
+                    f"department:{d.slug}",
+                    f"{d.title}'s folder has a problem: {d.problems[0]}",
+                    None if d.is_ghost else d.slug,
+                )
+            )
+    return out
+
+
 _PHONE_TEARDOWN = {"on": False}
 _TEARDOWN_NOISE = ("writing audio to the transport", "can no longer do its job")
 
@@ -121,6 +147,7 @@ class Daemon:
         self.state = DaemonState(version=VERSION, wake_mode=cfg.wake_mode)
         self.session: GhostSession | None = None
         self.gate: WriteGate | None = None
+        self.waiting: WaitingList | None = None  # ADR 0029; set in run()
         self._first_via = "voice"  # how the wake-time utterance arrived
         self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
@@ -192,6 +219,51 @@ class Daemon:
             f"{outcome.summary()} Say what happened in a few words."
         )
         return outcome
+
+    async def confirm_proposal(self, proposal_id: str):
+        """A Confirm on a change on the waiting list (ADR 0030). When it is the one the live
+        session is waiting on, the session hears the result too."""
+        if self.gate is None:
+            return None
+        live = self.gate.pending(self.state.session_id) if self.state.session_id else None
+        outcome = await self.gate.confirm_id(proposal_id, source="ui")
+        if outcome is None:
+            return None
+        self.state.outcome(outcome_view(outcome), "ui")
+        if live is not None and live.id == proposal_id:
+            self.state.set_pending(None)
+            if self.session:
+                await self.session.system_note(
+                    "[system] The operator confirmed from the desktop app. Verified result: "
+                    f"{outcome.summary()} Say what happened in a few words."
+                )
+        self._refresh_waiting_now()
+        return outcome
+
+    async def cancel_proposal(self, proposal_id: str) -> bool:
+        if self.gate is None:
+            return False
+        live = self.gate.pending(self.state.session_id) if self.state.session_id else None
+        if self.gate.cancel_id(proposal_id, "cancelled from the waiting list") is None:
+            return False
+        if live is not None and live.id == proposal_id:
+            self.state.set_pending(None)
+        self._refresh_waiting_now()
+        return True
+
+    def _refresh_waiting_now(self) -> None:
+        if self.waiting is not None:
+            self.waiting.refresh()
+
+    async def _refresh_waiting(self, waiting: WaitingList) -> None:
+        """Re-read Ghost's own items now and then: a change's time running out, a server
+        that went away. Watches (ADR 0028) sync their own items as they run."""
+        while True:
+            await asyncio.sleep(WAITING_REFRESH_SECS)
+            try:
+                waiting.refresh()
+            except Exception:  # noqa: BLE001 - the list must not take the daemon down
+                logger.exception("waiting: refresh failed")
 
     async def cancel_pending(self) -> bool:
         if self.gate is None or self.state.session_id is None:
@@ -506,6 +578,14 @@ class Daemon:
         department_tools = DepartmentTools(departments, store, conversations)
         gate.register(departments_source(department_tools).name, department_tools.operations())
         self.department_tools = department_tools
+        # ADR 0029: what needs the operator, with the changes waiting for a yes (ADR 0030).
+        waiting = WaitingList(
+            Items(store),
+            changes=gate.waiting,
+            problems=lambda: ghost_problems(fleet, departments),
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
+        self.waiting = waiting
 
         def register_department(slug: str) -> None:
             """A department's own servers came up: their declared writes join the gate."""
@@ -546,6 +626,7 @@ class Daemon:
             out.append(skills.source(d.skill_places(), writes=d.is_ghost))
             out.append(conversations_source(conversations))
             out.append(departments_source(department_tools))
+            out.append(waiting_source(waiting))
             return out
 
         self._reach = reach
@@ -556,6 +637,9 @@ class Daemon:
         events = Events()
         api = await self._start_api(gate, store, all_sources(fleet), mcp, skills)
         await self._start_phone()
+        waiting.refresh()
+        self.state.set_waiting(waiting.count())
+        refresher = asyncio.ensure_future(self._refresh_waiting(waiting))
         logger.info(f"autonomy policy: {autonomy.source}")
         logger.info(
             f"llm: {self.voice.llm_target().describe()}, thinking {self.voice.llm_thinking}"
@@ -586,6 +670,7 @@ class Daemon:
         try:
             await self._passive(wake, models, tool_sources, gate, events, ducker)
         finally:
+            refresher.cancel()
             wake.close()
             ducker.restore()
             if self.phone_listener:
@@ -697,6 +782,7 @@ class Daemon:
             departments=self.departments,
             fleet=self.fleet,
             department_tools=getattr(self, "department_tools", None),
+            waiting=self.waiting,
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,
@@ -874,6 +960,9 @@ class Daemon:
             ducker.restore()
             if session.conversation is not None and self.fleet is not None:
                 self.fleet.leave(session.conversation.active.department)
+            # A change the session was still waiting on stays on the waiting list (ADR 0030).
+            if gate.set_aside(session.session_id, "session ended") is not None:
+                self._refresh_waiting_now()
             self.session = None
             self._origin = None
             logger.info(f"session {session.session_id} end")

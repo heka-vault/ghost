@@ -105,7 +105,8 @@ class InterceptorProcessor(FrameProcessor):
         if h.action == "cancel":
             self._gate.cancel(self._session_id, "operator cancelled")
         elif h.action == "hang_up":
-            self._gate.cancel(self._session_id, "hung up")
+            # The change it was waiting on stays on the waiting list (ADR 0030).
+            self._gate.set_aside(self._session_id, "hung up")
             # A reply to an earlier fragment ("okay, um") may still be on its way: cut it,
             # so the goodbye is the last thing said and the session ends now.
             await self.push_frame(InterruptionFrame())

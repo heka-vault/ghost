@@ -423,6 +423,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/proposals/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel One */
+        post: operations["cancel_one_proposals__proposal_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm One
+         * @description A Confirm on a change on the waiting list (ADR 0030): the stale check runs.
+         */
+        post: operations["confirm_one_proposals__proposal_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/proposals/pending": {
         parameters: {
             query?: never;
@@ -675,6 +712,61 @@ export interface paths {
         put?: never;
         /** Sample Voice */
         post: operations["sample_voice_voices__voice__sample_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Waiting */
+        get: operations["waiting_waiting_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/waiting/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge
+         * @description The operator heard it: it stops alerting until it changes. Not a gate write;
+         *     it changes Ghost's own bookkeeping only.
+         */
+        post: operations["acknowledge_waiting_ack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/waiting/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Snooze */
+        post: operations["snooze_waiting_snooze_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1077,6 +1169,11 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ItemKey */
+        ItemKey: {
+            /** Key */
+            key: string;
         };
         /**
          * JournalEntry
@@ -1536,6 +1633,13 @@ export interface components {
             /** Source */
             source: string;
         };
+        /** SnoozeRequest */
+        SnoozeRequest: {
+            /** Key */
+            key: string;
+            /** Minutes */
+            minutes: number;
+        };
         /**
          * SourceInfo
          * @description A source of tools the gate knows: the lines (built in) or an MCP server. The
@@ -1598,6 +1702,11 @@ export interface components {
             uptime_secs: number;
             /** Version */
             version: string;
+            /**
+             * Waiting
+             * @default 0
+             */
+            waiting: number;
             /** Wake Mode */
             wake_mode: string;
         };
@@ -1683,6 +1792,69 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * WaitingEvent
+         * @description The waiting list changed: read ``GET /waiting`` for it.
+         */
+        WaitingEvent: {
+            /** Count */
+            count: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "waiting";
+        };
+        /**
+         * WaitingItemView
+         * @description One item that needs the operator. ``title`` comes from an outside system: show
+         *     it as text, never as markup. ``change`` is set for a change waiting for a yes.
+         */
+        WaitingItemView: {
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
+            /** Age Secs */
+            age_secs: number;
+            change?: components["schemas"]["PendingProposal"] | null;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Delivered At */
+            delivered_at?: string | null;
+            /** Delivered Via */
+            delivered_via?: string | null;
+            /** Department */
+            department?: string | null;
+            /**
+             * First Seen
+             * Format: date-time
+             */
+            first_seen: string;
+            /** Key */
+            key: string;
+            /** Link */
+            link?: string | null;
+            /** Snoozed Until */
+            snoozed_until?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "new" | "delivered" | "acknowledged" | "snoozed";
+            /** Title */
+            title: string;
+        };
+        /** WaitingView */
+        WaitingView: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["WaitingItemView"][];
+        };
         /** WakeRequest */
         WakeRequest: {
             /**
@@ -1719,6 +1891,7 @@ export type SchemaDepartmentView = components['schemas']['DepartmentView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
+export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaJournalEntry = components['schemas']['JournalEntry'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
 export type SchemaMcpScopeInfo = components['schemas']['McpScopeInfo'];
@@ -1749,6 +1922,7 @@ export type SchemaSettingsView = components['schemas']['SettingsView'];
 export type SchemaSkillAdd = components['schemas']['SkillAdd'];
 export type SchemaSkillBody = components['schemas']['SkillBody'];
 export type SchemaSkillInfo = components['schemas']['SkillInfo'];
+export type SchemaSnoozeRequest = components['schemas']['SnoozeRequest'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
@@ -1757,6 +1931,9 @@ export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
 export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
+export type SchemaWaitingEvent = components['schemas']['WaitingEvent'];
+export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
+export type SchemaWaitingView = components['schemas']['WaitingView'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
 export type $defs = Record<string, never>;
 export interface operations {
@@ -2435,7 +2612,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"];
                 };
             };
         };
@@ -2560,6 +2737,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_one_proposals__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_one_proposals__proposal_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeView"];
                 };
             };
             /** @description Validation Error */
@@ -2997,6 +3236,92 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["SampleRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    waiting_waiting_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitingView"];
+                };
+            };
+        };
+    };
+    acknowledge_waiting_ack_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemKey"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snooze_waiting_snooze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SnoozeRequest"];
             };
         };
         responses: {

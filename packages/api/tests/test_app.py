@@ -286,3 +286,38 @@ def test_phone_routes(world):
     assert client.delete("/phone").json()["ok"] is True
     assert client.delete("/phone").json()["ok"] is False
     assert client.get("/phone").json()["device"] is None
+
+
+async def test_a_change_from_a_hung_up_session_is_confirmed_from_the_waiting_list(world):
+    """ADR 0030: the session ends, the change waits, a Confirm by id applies it."""
+    client, state, control, gate, writer, *_ = world
+    state.set_phase(Phase.PASSIVE)
+    client.post("/wake")
+    sub = await pend(gate)
+    gate.set_aside("sess1", "hung up")
+    client.post("/sleep")
+    waiting = client.get("/waiting").json()
+    (item,) = waiting["items"]
+    assert item["source"] == "gate" and item["change"]["id"] == sub.proposal.id
+    assert waiting["count"] == 1 and item["state"] == "new"
+    out = client.post(f"/proposals/{sub.proposal.id}/confirm").json()
+    assert out["status"] == "success" and writer.tags == ["flagged"]
+    assert client.get("/waiting").json()["items"] == []
+    entry = client.get("/audit").json()["items"][0]
+    assert entry["status"] == "executed"
+    assert client.post(f"/proposals/{sub.proposal.id}/confirm").status_code == 409
+
+
+async def test_acknowledge_and_snooze_an_item(world):
+    client, state, control, gate, *_ = world
+    sub = await pend(gate)
+    gate.set_aside("sess1", "hung up")
+    key = client.get("/waiting").json()["items"][0]["key"]
+    assert client.post("/waiting/ack", json={"key": key}).json()["ok"] is True
+    view = client.get("/waiting").json()
+    assert view["items"][0]["state"] == "acknowledged" and view["count"] == 0
+    assert client.post("/waiting/snooze", json={"key": key, "minutes": 30}).json()["ok"]
+    assert client.get("/waiting").json()["items"][0]["state"] == "snoozed"
+    assert client.post("/waiting/ack", json={"key": "nope"}).json()["ok"] is False
+    assert client.post(f"/proposals/{sub.proposal.id}/cancel").json()["ok"] is True
+    assert client.get("/waiting").json()["items"] == []

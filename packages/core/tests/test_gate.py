@@ -94,11 +94,13 @@ async def test_first_step_failure_is_failed(gate, writer, target):
     assert outcome.status == "failed" and outcome.applied == ()
 
 
-async def test_new_prepare_replaces_pending(gate, target):
+async def test_new_prepare_sets_the_old_aside(gate, target):
+    # ADR 0030: the older change is not cancelled; it waits on the waiting list.
     p1 = await prepare(gate, target)
     p2 = await prepare(gate, target, changeset(SetState(state="closed")))
     assert gate.pending("s1").id == p2.id
-    assert gate._store.get_proposal(p1.id).status is ProposalStatus.CANCELLED
+    assert gate._store.get_proposal(p1.id).status is ProposalStatus.PENDING
+    assert [p.id for p in gate.waiting()] == [p1.id, p2.id]
 
 
 async def test_sessions_are_isolated(gate, target):

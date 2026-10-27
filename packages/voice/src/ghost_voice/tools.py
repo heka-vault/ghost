@@ -47,6 +47,7 @@ OnCall = Callable[[str, dict[str, Any]], None]
 
 CHANGE_TOOL = "change"
 SWITCH_TOOL = "switch_conversation"
+BRING_UP_TOOL = "bring_up_change"
 
 
 def register_tools(
@@ -384,7 +385,8 @@ def register_tools(
             {
                 "status": "needs_confirmation",
                 "summary": sub.proposal.preview,
-                "expires_in_secs": 60,
+                # ADR 0030: unanswered, it waits on the operator's waiting list.
+                "waits_minutes": int(gate.pending_ttl.total_seconds() // 60),
             }
         )
 
@@ -446,6 +448,40 @@ def register_tools(
             )
 
         llm.register_function(SWITCH_TOOL, switch)
+
+    session_schemas.append(
+        FunctionSchema(
+            name=BRING_UP_TOOL,
+            description=(
+                "Take up a change waiting on the operator's waiting list (its 'change' id "
+                "from waiting_list) when they ask about it: returns 'done' if their words "
+                "already asked for exactly it, else 'needs_confirmation' with a summary to "
+                "read out in one short sentence before you stop."
+            ),
+            properties={"change": {"type": "string"}},
+            required=["change"],
+        )
+    )
+
+    async def bring_up(params: FunctionCallParams) -> None:
+        change_id = str(params.arguments.get("change") or "")
+        record(BRING_UP_TOOL, dict(params.arguments))
+        p = gate.bring_back(change_id, session_id)
+        if p is None:
+            await params.result_callback({"error": "That change isn't waiting any more."})
+            return
+        # "Yes, close seventeen": the operator's own words may already be the yes (ADR 0017).
+        request, before = last_request()
+        outcome = await gate.confirm_by_request(session_id, request, question=before)
+        if outcome is not None:
+            await params.result_callback(
+                {"status": "done", "result": outcome.summary(), "state_now": _state(outcome)}
+            )
+            await events.emit("outcome", operation="confirmed", status=outcome.status)
+            return
+        await params.result_callback({"status": "needs_confirmation", "summary": p.preview})
+
+    llm.register_function(BRING_UP_TOOL, bring_up)
 
     session_schemas.append(
         FunctionSchema(

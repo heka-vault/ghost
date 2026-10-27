@@ -227,3 +227,20 @@ async def test_an_early_chime_without_a_session_restores_the_music(tmp_path, mon
     await asyncio.wait_for(d._passive(Wake(), None, [], None, Events(), ducker), 5)  # noqa: SLF001
     assert ducker.calls == ["duck", "restore"]
     assert d._chimed is False  # noqa: SLF001
+
+
+def test_ghosts_own_problems_are_items_for_the_waiting_list():
+    """ADR 0029: a server that didn't start, one that stopped, a folder that doesn't read."""
+    from types import SimpleNamespace
+
+    from ghostd.main import ghost_problems
+
+    servers = {"github": SimpleNamespace(failed=None), "mobbin": SimpleNamespace(failed="gone")}
+    fleet = SimpleNamespace(ghost=SimpleNamespace(failed={"figma": "no token"}, servers=servers))
+    depts = [
+        SimpleNamespace(slug="ghost", title="Ghost", is_ghost=True, problems=[]),
+        SimpleNamespace(slug="sales", title="Sales", is_ghost=False, problems=["bad json"]),
+    ]
+    out = ghost_problems(fleet, SimpleNamespace(list=lambda: depts))
+    assert [k for k, _, _ in out] == ["server:figma", "server:mobbin", "department:sales"]
+    assert out[2][2] == "sales"

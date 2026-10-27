@@ -19,6 +19,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 PROPOSAL_TTL = timedelta(seconds=60)
+# ADR 0030: a change at ``confirm`` waits this long on the waiting list unless the policy
+# file says otherwise ([defaults] pending_ttl).
+PENDING_TTL = timedelta(hours=1)
 MAX_STEPS = 4
 
 

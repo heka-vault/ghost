@@ -18,6 +18,7 @@
 
 [defaults]
 # autonomy = "confirm"        # uncomment to make everything ask unless listed below
+# pending_ttl = 3600          # seconds a change at confirm waits on your waiting list (ADR 0030)
 
 [conversations]               # the agents (hire, retire, rename, persona, notes, ...)
 # set_persona = "confirm"

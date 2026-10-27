@@ -140,7 +140,7 @@ def test_prompt_includes_fragments_and_persona():
 
 def test_only_reads_change_and_sleep_are_exposed(wired):
     _, _, schemas, _, _ = wired
-    assert sorted(s.name for s in schemas) == ["change", "echo", "hang_up"]
+    assert sorted(s.name for s in schemas) == ["bring_up_change", "change", "echo", "hang_up"]
 
 
 def test_denied_ops_are_not_offered(wired):

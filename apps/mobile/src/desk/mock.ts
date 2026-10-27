@@ -110,6 +110,7 @@ export class MockDesk implements Desk {
       session_id: null,
       session_origin: null,
       ending: false,
+      waiting: 0,
       uptime_secs: 0,
       version: "0.1.0",
       wake_mode: "transcript",

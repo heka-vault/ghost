@@ -8,9 +8,10 @@ rule), secret values (write-only), or a way for the model to reach any of it.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import subprocess
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -40,6 +41,7 @@ from ghost_api.models import (
     DeviceInfo,
     DevicesView,
     Event,
+    ItemKey,
     JournalEntry,
     McpScopeInfo,
     McpServerInfo,
@@ -64,8 +66,11 @@ from ghost_api.models import (
     SkillAdd,
     SkillBody,
     SkillInfo,
+    SnoozeRequest,
     SourceInfo,
     Status,
+    WaitingItemView,
+    WaitingView,
     WakeRequest,
 )
 from ghost_api.state import DaemonState, now
@@ -79,6 +84,9 @@ class Controller(Protocol):
     async def say(self, text: str, conversation: str | None = None) -> bool: ...
     async def confirm_pending(self) -> Outcome | None: ...
     async def cancel_pending(self) -> bool: ...
+    # a change on the waiting list, by id (ADR 0030); with or without a session
+    async def confirm_proposal(self, proposal_id: str) -> Outcome | None: ...
+    async def cancel_proposal(self, proposal_id: str) -> bool: ...
     def reload_policy(self) -> AutonomyPolicy: ...
     def apply_settings(self, values: dict[str, str | None]) -> list[str]: ...  # keys live now
     # conversations (ADR 0014)
@@ -116,7 +124,9 @@ class Deps:
         departments: Any = None,  # ghost_core.departments.Departments
         fleet: Any = None,  # ghost_core.departments.Fleet
         department_tools: Any = None,  # ghost_core.department_tools.DepartmentTools
+        waiting: Any = None,  # ghost_core.waiting.WaitingList
     ) -> None:
+        self.waiting = waiting
         self.conversations = conversations
         self.mcp = mcp
         self.skills = skills
@@ -194,7 +204,40 @@ def status_snapshot(deps: Deps) -> Status:
         department=st.department,
         session_origin=st.session_origin,  # type: ignore[arg-type]
         ending=st.ending,
+        waiting=st.waiting,
     )
+
+
+def waiting_view(deps: Deps) -> WaitingView:
+    """The waiting list (ADR 0029), re-read now: the control API and the phone listener
+    both serve this."""
+    if deps.waiting is None:
+        return WaitingView(items=[], count=0)
+    at = now()
+    items = deps.waiting.refresh(at)
+    changes = {p.id: p for p in deps.gate.waiting(at)}
+    out = []
+    for i in items:
+        change = changes.get(str(i.fields.get("proposal"))) if i.source == "gate" else None
+        out.append(
+            WaitingItemView(
+                key=i.key,
+                source=i.source,
+                department=i.department,
+                title=i.title,
+                link=i.link,
+                state=i.state(at),
+                first_seen=i.first_seen,
+                changed_at=i.changed_at,
+                age_secs=i.age_seconds(at),
+                delivered_at=i.delivered_at,
+                delivered_via=i.delivered_via,
+                acknowledged_at=i.acknowledged_at,
+                snoozed_until=i.snoozed_until,
+                change=pending_view(change, at) if change else None,
+            )
+        )
+    return WaitingView(items=out, count=sum(1 for i in items if i.needs_alerting(at)))
 
 
 def audit_page(
@@ -294,6 +337,37 @@ def create_app(deps: Deps) -> FastAPI:
     @app.post("/proposals/pending/cancel", response_model=Ack, tags=["writes"])
     async def cancel() -> Ack:
         return Ack(ok=await deps.control.cancel_pending())
+
+    @app.post("/proposals/{proposal_id}/confirm", response_model=OutcomeView, tags=["writes"])
+    async def confirm_one(proposal_id: str) -> OutcomeView:
+        """A Confirm on a change on the waiting list (ADR 0030): the stale check runs."""
+        outcome = await deps.control.confirm_proposal(proposal_id)
+        if outcome is None:
+            raise HTTPException(409, "that change isn't waiting")
+        return outcome_view(outcome)
+
+    @app.post("/proposals/{proposal_id}/cancel", response_model=Ack, tags=["writes"])
+    async def cancel_one(proposal_id: str) -> Ack:
+        return Ack(ok=await deps.control.cancel_proposal(proposal_id))
+
+    # --- the waiting list (ADR 0029) ----------------------------------------------
+
+    @app.get("/waiting", response_model=WaitingView, tags=["waiting"])
+    async def waiting() -> WaitingView:
+        return waiting_view(deps)
+
+    @app.post("/waiting/ack", response_model=Ack, tags=["waiting"])
+    async def acknowledge(body: ItemKey) -> Ack:
+        """The operator heard it: it stops alerting until it changes. Not a gate write;
+        it changes Ghost's own bookkeeping only."""
+        ok = deps.waiting is not None and deps.waiting.acknowledge(body.key)
+        return Ack(ok=bool(ok))
+
+    @app.post("/waiting/snooze", response_model=Ack, tags=["waiting"])
+    async def snooze(body: SnoozeRequest) -> Ack:
+        until = now() + timedelta(minutes=body.minutes)
+        ok = deps.waiting is not None and deps.waiting.snooze(body.key, until)
+        return Ack(ok=bool(ok))
 
     # --- audit ---------------------------------------------------------------------
 
@@ -743,6 +817,9 @@ def create_app(deps: Deps) -> FastAPI:
                 )
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None
+            # The levels editor doesn't know the rest of [defaults]: keep it as it was.
+            kept = AutonomyPolicy.parse(current.text) if current.text else AutonomyPolicy()
+            policy = dataclasses.replace(policy, pending_ttl=kept.pending_ttl)
             text = policy.to_toml()
         deps.policy_path.parent.mkdir(parents=True, exist_ok=True)
         deps.policy_path.write_text(text if text.endswith("\n") else text + "\n")

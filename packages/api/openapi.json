@@ -971,6 +971,19 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ItemKey": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "ItemKey",
+        "type": "object"
+      },
       "JournalEntry": {
         "description": "One thing an agent did in a department: an executed write from the audit.",
         "properties": {
@@ -2080,6 +2093,26 @@
         "title": "SkillInfo",
         "type": "object"
       },
+      "SnoozeRequest": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "minutes": {
+            "maximum": 10080.0,
+            "minimum": 1.0,
+            "title": "Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "minutes"
+        ],
+        "title": "SnoozeRequest",
+        "type": "object"
+      },
       "SourceInfo": {
         "description": "A source of tools the gate knows: the lines (built in) or an MCP server. The\npolicy screen edits levels per operation from this list.",
         "properties": {
@@ -2241,6 +2274,11 @@
           "version": {
             "title": "Version",
             "type": "string"
+          },
+          "waiting": {
+            "default": 0,
+            "title": "Waiting",
+            "type": "integer"
           },
           "wake_mode": {
             "title": "Wake Mode",
@@ -2441,6 +2479,178 @@
           "label"
         ],
         "title": "VoiceInfo",
+        "type": "object"
+      },
+      "WaitingEvent": {
+        "description": "The waiting list changed: read ``GET /waiting`` for it.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "type": {
+            "const": "waiting",
+            "default": "waiting",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "WaitingEvent",
+        "type": "object"
+      },
+      "WaitingItemView": {
+        "description": "One item that needs the operator. ``title`` comes from an outside system: show\nit as text, never as markup. ``change`` is set for a change waiting for a yes.",
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "age_secs": {
+            "title": "Age Secs",
+            "type": "integer"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changed_at": {
+            "format": "date-time",
+            "title": "Changed At",
+            "type": "string"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "delivered_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered Via"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "title": "First Seen",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "snoozed_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snoozed Until"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "new",
+              "delivered",
+              "acknowledged",
+              "snoozed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "source",
+          "title",
+          "state",
+          "first_seen",
+          "changed_at",
+          "age_secs"
+        ],
+        "title": "WaitingItemView",
+        "type": "object"
+      },
+      "WaitingView": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WaitingItemView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "WaitingView",
         "type": "object"
       },
       "WakeRequest": {
@@ -3504,7 +3714,8 @@
                       "outcome": "#/components/schemas/OutcomeEvent",
                       "pending": "#/components/schemas/PendingEvent",
                       "status": "#/components/schemas/StatusEvent",
-                      "turn": "#/components/schemas/TurnEvent"
+                      "turn": "#/components/schemas/TurnEvent",
+                      "waiting": "#/components/schemas/WaitingEvent"
                     },
                     "propertyName": "type"
                   },
@@ -3526,6 +3737,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ConversationEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WaitingEvent"
                     }
                   ],
                   "title": "Response Events Schema Events Schema Get"
@@ -3756,6 +3970,91 @@
           }
         },
         "summary": "Confirm",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/proposals/{proposal_id}/cancel": {
+      "post": {
+        "operationId": "cancel_one_proposals__proposal_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel One",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/proposals/{proposal_id}/confirm": {
+      "post": {
+        "description": "A Confirm on a change on the waiting list (ADR 0030): the stale check runs.",
+        "operationId": "confirm_one_proposals__proposal_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm One",
         "tags": [
           "writes"
         ]
@@ -4243,6 +4542,110 @@
         "summary": "Sample Voice",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/waiting": {
+      "get": {
+        "operationId": "waiting_waiting_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Waiting",
+        "tags": [
+          "waiting"
+        ]
+      }
+    },
+    "/waiting/ack": {
+      "post": {
+        "description": "The operator heard it: it stops alerting until it changes. Not a gate write;\nit changes Ghost's own bookkeeping only.",
+        "operationId": "acknowledge_waiting_ack_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge",
+        "tags": [
+          "waiting"
+        ]
+      }
+    },
+    "/waiting/snooze": {
+      "post": {
+        "operationId": "snooze_waiting_snooze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnoozeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Snooze",
+        "tags": [
+          "waiting"
         ]
       }
     },
