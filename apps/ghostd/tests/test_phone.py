@@ -51,6 +51,20 @@ class FakeHost:
     def agents(self):
         return []
 
+    def waiting_view(self):
+        from ghost_api import WaitingView
+
+        self.fetched = getattr(self, "fetched", 0) + 1
+        return WaitingView(items=[], count=0)
+
+    def acknowledge_item(self, key):
+        self.acked = [*getattr(self, "acked", []), key]
+        return key == "eng:ci:1"
+
+    def snooze_item(self, key, minutes):
+        self.snoozed = (key, minutes)
+        return True
+
     def admit_phone(self):
         return self.refusal
 
@@ -560,3 +574,19 @@ async def test_daemon_phone_controller_when_listener_is_off(daemon):
     assert daemon.phone_pairing() is None
     assert daemon.phone_view().address is None
     assert await daemon.forget_phone() is False
+
+
+async def test_the_waiting_list_is_signed_like_everything_else(phone):
+    """ADR 0029: the phone reads the same list and acknowledges or snoozes from it."""
+    listener, host, client, _ = phone
+    creds = await pair(listener, client)
+    r, nonce = await signed(client, creds, "GET", "/waiting")
+    assert r.status_code == 200 and r.json() == {"items": [], "count": 0}
+    assert response_ok(r, creds, nonce) and host.fetched == 1
+    r, _ = await signed(client, creds, "POST", "/waiting/ack", {"key": "eng:ci:1"})
+    assert r.json() == {"ok": True} and host.acked == ["eng:ci:1"]
+    r, _ = await signed(
+        client, creds, "POST", "/waiting/snooze", {"key": "eng:ci:1", "minutes": 30}
+    )
+    assert r.json() == {"ok": True} and host.snoozed == ("eng:ci:1", 30)
+    assert (await client.get("/waiting")).status_code == 401  # unsigned

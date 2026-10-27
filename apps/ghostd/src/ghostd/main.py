@@ -23,6 +23,7 @@ from ghost_api import (
     PhonePairing,
     PhoneView,
     Status,
+    WaitingView,
     audit_page,
     create_app,
     default_socket_path,
@@ -30,6 +31,7 @@ from ghost_api import (
     pending_view,
     status_snapshot,
 )
+from ghost_api import waiting_view as build_waiting_view
 from ghost_api.conversations import conversation_view
 from ghost_api.models import ConversationView, StatusEvent
 from ghost_core import (
@@ -78,6 +80,7 @@ from ghostd.routes import (
     SNOOZE_MINUTES,
     DeskRoute,
     DesktopRoute,
+    PhoneRoute,
     context_note,
     is_not_now,
 )
@@ -214,6 +217,7 @@ class Daemon:
         self.hook_intake: HookIntake | None = None  # ADR 0027; set in run()
         self.routes: RouteEngine | None = None  # ADR 0031; set in run()
         self._last_desk_session: float | None = None
+        self._phone_route = PhoneRoute()  # ADR 0031: the app's list, while it is open
         self._first_via = "voice"  # how the wake-time utterance arrived
         self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
@@ -531,6 +535,21 @@ class Daemon:
         assert self._deps is not None
         return audit_page(self._deps.store, limit=limit, offset=offset)
 
+    def waiting_view(self) -> WaitingView:
+        """The phone's read of the waiting list; the fetch is the phone route's delivery."""
+        assert self._deps is not None
+        view = build_waiting_view(self._deps)
+        self._phone_route.fetched()
+        return view
+
+    def acknowledge_item(self, key: str) -> bool:
+        return self.waiting is not None and self.waiting.acknowledge(key)
+
+    def snooze_item(self, key: str, minutes: int) -> bool:
+        if self.waiting is None:
+            return False
+        return self.waiting.snooze(key, datetime.now(UTC) + timedelta(minutes=minutes))
+
     def admit_phone(self) -> Refusal | None:
         if self.state.phase is Phase.STARTING or not self.state.models_ready:
             return "not_ready"
@@ -711,6 +730,7 @@ class Daemon:
         )
         self.routes.add_route(DeskRoute(self._can_raise, self._raise_q))
         self.routes.add_route(DesktopRoute(waiting.acknowledge))
+        self.routes.add_route(self._phone_route)
         self.waiting = waiting
         # ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
         watch_runner = WatchRunner(

@@ -124,3 +124,15 @@ async def test_no_notify_send_is_unavailable():
     _, items = daemon_with_items()
     route = DesktopRoute(items.acknowledge, binary="/nonexistent/notify-send")
     assert await route.deliver(items.open(), RoutePolicy()) == "unavailable"
+
+
+async def test_the_phone_route_delivers_only_while_the_app_reads_the_list():
+    from ghostd.routes import PhoneRoute
+
+    now = [100.0]
+    route = PhoneRoute(clock=lambda: now[0])
+    assert await route.deliver([], RoutePolicy()) == "unavailable"  # no push: closed app
+    route.fetched()
+    assert await route.deliver([], RoutePolicy()) == "delivered"
+    now[0] += 120
+    assert await route.deliver([], RoutePolicy()) == "unavailable"

@@ -24,6 +24,8 @@ export class LiveDesk implements Desk {
   async end() {}
   async retry() {}
   async loadAudit() {}
+  async acknowledge(_key: string) {}
+  async snooze(_key: string, _minutes: number) {}
   setMuted() {}
   setRoute() {}
   dispose() {}

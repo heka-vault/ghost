@@ -1,8 +1,9 @@
 """The phone listener (ADR 0016, ADR 0020): a small signed HTTP app on the configured addresses.
 
-It is not the control API and does not proxy it. Five routes: ``POST /pair``
-(unsigned, spends a pairing code), ``GET /hello``, ``GET /audit``, ``POST``/``PATCH
-/offer`` (WebRTC signalling) and ``POST /end``. Everything but ``/pair`` is signed both
+It is not the control API and does not proxy it. Its routes: ``POST /pair``
+(unsigned, spends a pairing code), ``GET /hello``, ``GET /audit``, ``GET /waiting`` with
+``POST /waiting/ack`` and ``/waiting/snooze`` (ADR 0029), ``POST``/``PATCH /offer``
+(WebRTC signalling) and ``POST /end``. Everything but ``/pair`` is signed both
 ways by ``SigningMiddleware``; the wire format is docs/phone-protocol.md.
 
 ``GHOST_PHONE_LISTEN`` may list several ``host:port`` addresses, comma separated: the LAN
@@ -28,7 +29,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from ghost_api import AuditPage, PhoneDevice, PhonePairing, PhoneView, Status
-from ghost_api.models import ConversationView
+from ghost_api.models import ConversationView, WaitingView
 from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -54,11 +55,22 @@ _STATUS_CODES = {
 }
 
 
+class _Key(BaseModel):
+    key: str = Field(min_length=1, max_length=300)
+
+
+class _Snooze(_Key):
+    minutes: int = Field(ge=1, le=7 * 24 * 60)
+
+
 class PhoneHost(Protocol):
     """What the daemon gives the listener."""
 
     def status(self) -> Status: ...
     def audit(self, limit: int, offset: int) -> AuditPage: ...
+    def waiting_view(self) -> WaitingView: ...  # what needs the operator (ADR 0029)
+    def acknowledge_item(self, key: str) -> bool: ...
+    def snooze_item(self, key: str, minutes: int) -> bool: ...
     def agents(self) -> list[ConversationView]: ...  # the agents a call can start with
     def admit_phone(self) -> Refusal | None: ...  # a cheap check before negotiating
     async def start_phone(
@@ -380,6 +392,20 @@ class PhoneListener:
             limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)
         ) -> JSONResponse:
             return _json(200, self.host.audit(limit, offset).model_dump(mode="json"))
+
+        @app.get("/waiting")
+        async def waiting() -> JSONResponse:
+            # ADR 0029: the same list the desktop shows; reading it is the phone route's
+            # delivery (no push, 2026-10-27).
+            return _json(200, self.host.waiting_view().model_dump(mode="json"))
+
+        @app.post("/waiting/ack")
+        async def acknowledge(body: _Key) -> JSONResponse:
+            return _json(200, {"ok": self.host.acknowledge_item(body.key)})
+
+        @app.post("/waiting/snooze")
+        async def snooze(body: _Snooze) -> JSONResponse:
+            return _json(200, {"ok": self.host.snooze_item(body.key, body.minutes)})
 
         @app.post("/offer")
         async def offer(req: OfferRequest) -> JSONResponse:

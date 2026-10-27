@@ -79,6 +79,9 @@ or query that doesn't fit), `bad_offer` and `bad_candidate` (400), `not_found` (
 |---|---|---|
 | `GET /hello` | | `{workstation, addresses, status: Status}`. `Status` is the control API's, including `session_origin: "desk" \| "phone" \| null`. `addresses` is the current list; the phone replaces its saved one when it differs. |
 | `GET /audit?limit=N&offset=M` | | the control API's `AuditPage` |
+| `GET /waiting` | | the control API's `WaitingView`: what needs the operator (ADR 0029). There is no push: the app reads it while it is open (with `/hello` when `status.waiting` moves, and every ~30 s), and a read in the last minute is what the desk counts as the phone route having delivered. |
+| `POST /waiting/ack` | `{key}` | `{ok}`. The operator heard it; it stops reminding until it changes. Not a gate write. |
+| `POST /waiting/snooze` | `{key, minutes}` | `{ok}`. Back after `minutes` (1 to 10080). |
 | `GET /conversations` | | the control API's `ConversationView` list: every thread a call can start in, Ghost first, settled ones left out (ADR 0014, ADR 0019). |
 | `POST /offer` | `{sdp, type: "offer", pc_id?, restart_pc?, conversation?}` | `{sdp, type: "answer", pc_id}`. `conversation` is a slug from `/conversations`: the session opens in that thread, which greets as itself; absent, in Ghost. 404 `{error: "no_such_line"}` for a slug that is not a live thread. 409 `{error: "busy"}` while any session runs, desk or phone. 503 `{error: "not_ready"}` until the models load. |
 | `PATCH /offer` | `{pc_id, candidates: [{candidate, sdp_mid, sdp_mline_index}]}` | `{ok: true}` (trickle ICE). `candidate` may keep its `candidate:` prefix; an empty one means end of candidates. |

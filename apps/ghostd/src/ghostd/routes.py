@@ -171,3 +171,29 @@ def _open_desktop() -> None:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+
+
+PHONE_FRESH_SECS = 60.0  # the app read the list this recently: it is open, polling
+
+
+class PhoneRoute:
+    """The phone app (ADR 0031): no push for now (2026-10-27), so it can only deliver while
+    the app is open and reading ``GET /waiting``; then the items are on its screen, and
+    acknowledging is the operator's tap. Closed, it is unavailable and the items wait for
+    the digest or a louder route."""
+
+    name = "phone"
+
+    def __init__(self, clock: Callable[[], float] | None = None) -> None:
+        import time
+
+        self._clock = clock or time.monotonic
+        self._last: float | None = None
+
+    def fetched(self) -> None:
+        self._last = self._clock()
+
+    async def deliver(self, items: Sequence[Item], policy: RoutePolicy) -> Delivery:
+        if self._last is None or self._clock() - self._last > PHONE_FRESH_SECS:
+            return "unavailable"
+        return "delivered"
