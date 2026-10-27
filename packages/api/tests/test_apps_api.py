@@ -270,3 +270,55 @@ def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
     assert again.status_code == 409 and "my-app" in again.json()["detail"]
     assert "k1" in (deps.env_path.parent / "apps.env").read_text()
     assert "my_app" not in deps.apps.specs
+
+
+def test_connecting_never_rewrites_entries_ghost_could_not_read(world, tmp_path, monkeypatch):
+    """apps.json is edited one entry at a time: an entry Ghost can't read (a bad name, a
+    key it doesn't know) stays as the operator wrote it, and so does a key at the top."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    path = deps.policy_path.parent / "apps.json"
+    theirs = {
+        "Bad Name": {"url": "https://bad.example/mcp"},
+        "later": {"command": "later-app", "disabled": True},
+        "both": {"url": "https://x", "command": "y"},
+    }
+    path.write_text(json.dumps({"apps": theirs, "note": "mine"}))
+    url = "https://mcp.notion.com/mcp"
+    assert client.post("/apps", json={"url": url, "name": "notion"}).status_code == 200
+    raw = json.loads(path.read_text())
+    assert raw["note"] == "mine"
+    assert {k: v for k, v in raw["apps"].items() if k != "notion"} == theirs
+    assert raw["apps"]["notion"]["url"] == url
+    assert client.delete("/apps/notion").status_code == 200
+    assert json.loads(path.read_text()) == {"apps": theirs, "note": "mine"}
+
+
+def test_a_file_that_is_not_json_is_never_overwritten(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    path = deps.policy_path.parent / "apps.json"
+    broken = '{"apps": {"github": {"command": "github-mcp-server",}}'  # a stray comma
+    path.write_text(broken)
+    r = client.post("/apps", json={"url": "https://mcp.notion.com/mcp", "name": "notion"})
+    assert r.status_code == 409 and "apps.json" in r.json()["detail"]
+    assert path.read_text() == broken and started == [] and "notion" not in deps.apps.specs
+    r = client.delete("/apps/github")
+    assert r.status_code == 409 and path.read_text() == broken
+    assert "github" in deps.apps.specs  # still connected: nothing changed
+
+
+def test_a_pasted_config_names_the_entries_it_leaves_out(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    pasted = json.dumps(
+        {
+            "mcpServers": {
+                "good": {"url": "https://good.example/mcp"},
+                "Bad Name": {"url": "https://bad.example/mcp"},
+            }
+        }
+    )
+    r = client.post("/apps", json={"config": pasted})
+    assert r.status_code == 422 and "Bad Name" in r.json()["detail"]
+    assert started == [] and "good" not in deps.apps.specs
+    noted = json.dumps({"mcpServers": {"good": {"url": "https://good.example/mcp", "x": 1}}})
+    r = client.post("/apps", json={"config": noted})
+    assert r.status_code == 200 and any("x" in p for p in r.json()["problems"])

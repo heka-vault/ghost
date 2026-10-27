@@ -168,6 +168,14 @@
             "title": "Apps",
             "type": "array"
           },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
           "sign_in_url": {
             "anyOf": [
               {

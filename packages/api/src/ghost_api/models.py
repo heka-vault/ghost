@@ -345,6 +345,8 @@ class AppConnect(BaseModel):
 class AppConnectResult(BaseModel):
     apps: list[AppView]
     sign_in_url: str | None = None
+    # What the operator should know about a pasted config: keys Ghost does not read.
+    problems: list[str] = []
 
 
 class PermissionsView(BaseModel):

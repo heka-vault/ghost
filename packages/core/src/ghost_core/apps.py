@@ -162,6 +162,7 @@ class AppsFile:
     problems: tuple[str, ...] = ()
     # The keys the file used: ``mcpServers`` from another client is read, not written.
     imported: bool = False
+    left_out: tuple[str, ...] = ()  # entries that did not read, named in ``problems``
 
 
 def app_name_problem(name: str) -> str | None:
@@ -229,19 +230,24 @@ def parse_apps_json(text: str, where: str) -> AppsFile:
         raise ValueError(f"{where}: apps must be an object of apps by name")
     problems: list[str] = []
     apps: dict[str, AppSpec] = {}
+    left_out: list[str] = []
     for name, body in entries.items():
         at = f"{where}: {name}"
         if why := app_name_problem(str(name)):
             problems.append(f"{at}: {why}")
+            left_out.append(str(name))
             continue
         try:
             apps[str(name)] = parse_app(str(name), body, at, problems)
         except ValueError as e:
             problems.append(str(e))
+            left_out.append(str(name))
     extra = sorted(set(raw) - {"apps", "mcpServers"})
     if extra:
         problems.append(f"{where}: unknown key(s) {', '.join(extra)} are ignored")
-    return AppsFile(apps=apps, problems=tuple(problems), imported=imported)
+    return AppsFile(
+        apps=apps, problems=tuple(problems), imported=imported, left_out=tuple(left_out)
+    )
 
 
 def parse_app(name: str, body: object, where: str, problems: list[str]) -> AppSpec:
@@ -317,10 +323,42 @@ def load_apps(path: Path) -> AppsFile:
 
 
 def write_apps(path: Path, apps: Mapping[str, AppSpec]) -> None:
-    """The operator's action (connect, disconnect in the desktop); never the model's."""
+    """The whole file from ``apps`` (a new file, a test). Connecting and disconnecting
+    use ``edit_apps``, which keeps what Ghost can't read."""
+    _write_private(path, render_apps_json(apps))
+
+
+def edit_apps(path: Path, put: Sequence[AppSpec] = (), *, remove: str | None = None) -> None:
+    """The operator's action (connect, disconnect in the desktop); never the model's. Only
+    the entries named change: every other entry, one Ghost can't read included, and any
+    other key in the file stay as they are. A file that is not a JSON object of apps is
+    never overwritten: ``ValueError`` says why, and the operator fixes it by hand."""
+    text = path.read_text() if path.is_file() else ""
+    try:
+        raw = json.loads(text) if text.strip() else {}
+    except ValueError as e:
+        raise ValueError(f"{path} is not JSON ({e}); fix it by hand first") from None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} is not an object of apps; fix it by hand first")
+    key = "apps" if "apps" in raw or "mcpServers" not in raw else "mcpServers"
+    entries = raw.setdefault(key, {})
+    if not isinstance(entries, dict):
+        raise ValueError(f"{path}: {key} is not an object of apps; fix it by hand first")
+    if remove is not None:
+        entries.pop(remove, None)
+    for spec in put:
+        entries[spec.name] = render_app(spec)
+    _write_private(path, json.dumps(raw, indent=2) + "\n")
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Atomic, and 0600: an entry may hold a key the operator pasted before Ghost moved it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(render_apps_json(apps))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        os.fchmod(f.fileno(), 0o600)
+        f.write(text)
     tmp.replace(path)
 
 
@@ -1147,6 +1185,7 @@ __all__ = [
     "AppWriter",
     "Apps",
     "AppsFile",
+    "edit_apps",
     "NeedsSignIn",
     "RESERVED_NAMES",
     "ToolError",

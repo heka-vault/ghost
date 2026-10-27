@@ -961,6 +961,11 @@ export interface components {
         AppConnectResult: {
             /** Apps */
             apps: components["schemas"]["AppView"][];
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
             /** Sign In Url */
             sign_in_url?: string | null;
         };
