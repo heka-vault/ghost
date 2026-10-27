@@ -68,20 +68,20 @@ reached only after a wake phrase fires (ADR 0010). Observing should work the sam
 |---|---|---|
 | Always on | VAD and Parakeet on the mic | Deterministic checks and incoming notifications |
 | Cost while idle | Local CPU | Local CPU, a few reads a minute |
-| Model involved | None until the wake | None until a rule says to act |
-| What fires | A wake phrase | An observation matches one of the operator's rules |
+| Model involved | None until the wake | None while a deterministic check can decide |
+| What fires | A wake phrase | An observation the operator's responses say to record, tell or act on |
 | What happens then | A session opens | Ghost records it, tells the operator, or acts |
 
 Most "did something happen?" questions have deterministic answers: is the build red,
 is the disk over 90%, did a message arrive from this sender, did a job finish, is
-something waiting on me. Nothing about noticing needs a model, so nothing about it should
-cost tokens, leak context or hallucinate.
+something waiting on me. Those should not cost tokens, leak context or hallucinate, so
+a model is never the first thing that looks.
 
 The general rule: **deterministic first, the model last.** Everything between an outside
 system and the model is deterministic code that can be tested without a model: verify,
-parse, constrain, check at the source, match the operator's rules. Only what survives is
-handed to the model, and only as typed fields. A parser or a rule is never replaced by a
-model because the model would be quicker to write.
+parse, constrain, check at the source, match the operator's declarations. Only what
+survives is handed to the model, and only as typed fields. A parser or a check is never
+replaced by a model because the model would be quicker to write.
 
 Contrast OpenClaw's heartbeat, which wakes the model every thirty minutes with a
 checklist and drops its answer when the model says nothing needs attention. It works,
@@ -108,13 +108,33 @@ Ghost diffs what it sees: a new key is news, a key that disappears is resolved, 
 that stays is a candidate to escalate.
 
 Whatever an observation carries is untrusted data, like issue text and MCP results. It
-names an item and carries a title; it never changes a level, a scope, a prompt or a
-rule.
+names an item and carries a title; it never changes a level, a scope, a prompt, a
+rule or a response.
+
+### Deciding: deterministic first, then Jev, then a model
+
+Some questions about an observation are not a field comparison ("is this failure the
+flaky test again, or new?"). A watch decides in the cheapest step that can, and each step
+is declared by the operator, in this order:
+
+1. **A deterministic check** over the parsed fields. Most watches stop here.
+2. **Jev**, when the watch declares a typed question: Jev answers typed questions over
+   JSON state in about 100 ms, and its answer is one of the watch's declared values
+   (`new` or `known`, `notify` or `record`). On a failure, a timeout or low confidence the
+   watch falls back to its declared default.
+3. **A model**, only when the watch declares one, and only to choose among the same
+   declared values or to write the item's summary.
+
+Each step sees only the typed fields that passed the step before, never the raw result
+or body. None of them can pick a response the watch didn't declare, raise urgency past
+the watch's ceiling, or grant anything. Sending fields to Jev or a model sends them off
+the machine, so the watch names which fields go.
 
 ### What Ghost does with an observation
 
-The operator's rules, in the same folder, say what each watch's items get. The model
-picks none of this:
+Each watch's **response**, in the same folder, says what its items get. (*Rule* stays
+the word for a line of a department's `AGENTS.md`.) The model never picks the
+response:
 
 - **Record.** Kept for the digest and for "what happened overnight?" Nothing else.
 - **Tell.** The item goes on the **waiting list**, the list of things that need the
@@ -125,12 +145,13 @@ picks none of this:
   department's levels; at `confirm` they wait for the operator, which puts them on the
   waiting list. Tell and act can go together.
 
-So the model is reached only at **act**, or when the operator talks to Ghost.
+So the model is reached at **act**, when a watch declares a model step, or when the
+operator talks to Ghost.
 
 ### The waiting list
 
 The waiting list is the part of all this that is about the operator. It holds what came
-from **tell** rules, and Ghost's own items: a change at `confirm` with no yes, a server
+from **tell** responses, and Ghost's own items: a change at `confirm` with no yes, a server
 that needs a secret, an agent that failed (issue #11's "waiting on me"). An item leaves
 it when it is resolved at its source.
 
@@ -140,7 +161,7 @@ check.
 
 ### Examples of what could be observed
 
-| System | Polled or pushed | A rule might |
+| System | Polled or pushed | A response might |
 |---|---|---|
 | CI (GitHub Actions) | Polled through the GitHub server already declared | Tell on a red main; act to summarise the log |
 | Pull requests and issues | Polled through the GitHub server | Tell when a review is requested |
@@ -168,7 +189,7 @@ daemon, on strict terms:
 3. **Checked at the source.** A webhook that says run 123 failed is a hint: Ghost reads
    run 123 from GitHub through the declared read, and the read is what it believes.
 4. **No raw text to the model,** and a webhook can never write, confirm or change a
-   permission. It produces an observation; the operator's rules decide what happens.
+   permission. It produces an observation; the watch's response decides what happens.
 
 Polling stays the fallback for anything that can't meet those terms.
 
@@ -192,7 +213,7 @@ ignores it) is the last on its ladder.
 
 ### Routes, quietest first
 
-Every route except the digest and the app's notification is **off until the operator
+Every route except the digest and the app's waiting list is **off until the operator
 enables it**, in the policy file or the desktop's settings. The model never turns one
 on.
 
@@ -209,8 +230,11 @@ on.
    answers. Desk voice does not interrupt a running session or a hold; the item waits for
    the session to end, or goes to the next route.
 3. **Desktop notification** (opt-in). Clicking it is the acknowledgment.
-4. **Phone notification.** Through Ghost's own phone app; opening it acknowledges.
-5. **App call** (opt-in). The phone rings with a full-screen incoming call. Answering
+4. **Phone app.** The waiting list on the phone's Home, with acknowledge and snooze,
+   and a notification while the app is running. There is no push for now (decided
+   2026-10-27), so a closed app hears nothing until it is opened; the ladder goes on
+   past it to the next enabled route.
+5. **App call** (opt-in, waits for push). The phone rings with a full-screen incoming call. Answering
    opens an ordinary phone session (ADR 0016) in the agent that has the item, over the
    operator's tunnel (ADR 0020), and Ghost opens with the question. The operator answers
    by voice, and Ghost carries the answer back through the gate.
@@ -279,9 +303,9 @@ writes (ADR 0011). A sketch of what that policy holds:
 Today only LLM calls and server calls leave the machine. Telling the operator things
 adds a new kind of traffic, and the rule should be stated before the code exists:
 
-- The default route is Ghost's own app over the operator's tunnel. A push service that
-  wakes the phone (FCM, or a self-hosted UnifiedPush/ntfy on the desk) carries no
-  content, only "check in"; the phone fetches the details over WireGuard.
+- The phone app reads the waiting list over the operator's tunnel. There is no push
+  for now. If one is added (FCM, or a self-hosted UnifiedPush/ntfy on the desk), it
+  carries no content, only "check in"; the phone fetches the details over WireGuard.
 - A third-party messenger receives only what its channel's policy allows: by default the
   source and a count ("CI: 1 failure"), not titles or text.
 - A call never goes through a telephone carrier unless the operator enables a carrier
@@ -317,8 +341,8 @@ or a clock, and reaches you where you are. Where Ghost differs, and should keep
 differing:
 
 - **Observing without a model.** Their always-on means a model on a timer, or a model
-  run per event. Ghost's means deterministic checks and the operator's rules, the way its
-  passive listening is local; the model is reached only when a rule says act.
+  run per event. Ghost's means deterministic checks first, the way its passive listening
+  is local; Jev or a model only where a watch declares one, and on typed fields.
 - **Makes things, but is not an IDE.** It does real work, short of running sustained
   engineering inside a codebase.
 - **Voice first, and a call you can answer.** None of them treat a phone call as the
@@ -336,28 +360,30 @@ phone app and the tunnel are all what this needs. What moves:
   not the product.
 - **#11 (status)** becomes the waiting list plus Ghost's own state. It moves up from
   backlog into the next increment.
-- **#10 (routines)** becomes the **act** half of a rule, triggered by an observation as
+- **#10 (routines)** becomes the **act** response, triggered by an observation as
   well as by a schedule.
 - **New ADRs, in order:** the public listener for webhooks (ADR 0027, accepted); watches
-  and observations (polled, pushed, the local endpoint); rules (record, tell, act) and the waiting list; reaching the operator
+  and observations (polled, pushed, the local endpoint; deterministic, then Jev, then a
+  model); responses (record, tell, act) and the waiting list; reaching the operator
   (routes, the interruption budget, the privacy rule for outbound messages);
   Ghost-initiated sessions at the desk and on the phone; what Ghost makes and where it
   writes it.
 - **New words for GLOSSARY.md:** *watch* (what the operator declares to observe, polled
-  or pushed), *item*, *rule*, *waiting list*, *route* (how Ghost reaches the operator).
+  or pushed), *item*, *response* (record, tell or act; not *rule*, which stays a line
+  of `AGENTS.md`), *waiting list*, *route* (how Ghost reaches the operator).
 
 ## Open questions for review
 
 1. **Is observation the core of Ghost?** If yes, "what needs me?" is answered from the
    waiting list alone, and voice triage of GitHub is one department among many.
 2. **The predicate language for polled watches.** Smallest useful: a field, an operator
-   (`in`, `exists`, `>`), a "for at least N minutes". Anything larger should be a
-   script, which raises whether watch scripts run through `ghost-scripts`.
+   (`in`, `exists`, `>`), a "for at least N minutes". Decided 2026-10-27: past that, a
+   watch declares a Jev question, then a model, not a script (see "Deciding").
 3. ~~Ghost speaking first at the desk.~~ Decided 2026-10-27: opt-in; greet, wait for
    a reply, deliver only then; no reply passes the item to the next route (see Routes).
-4. **Phone wake-up.** FCM with no content, or self-hosted UnifiedPush/ntfy on the desk
-   over WireGuard? The second keeps Google out entirely but needs a long-lived
-   connection on the phone.
+4. ~~Phone wake-up.~~ Decided 2026-10-27: no push for now. The phone shows the
+   waiting list when the app is open. FCM or self-hosted UnifiedPush/ntfy is revisited
+   when the app call is built, since a call needs the phone woken.
 5. **Carrier routes.** Decided 2026-10-27: opt-in, Bird as the first candidate. Still
    open: the Bird workspace to use, whether the stdio server takes an API key, and
    whether an unattended Bird call is worth a small server around the Voice API, given
@@ -384,15 +410,15 @@ has:
    already declared, every minute.
 2. The pushed endpoint, signed, local and tunnel only, with one sender: a shell one-liner
    the operator can put at the end of any long job.
-3. Rules with record and tell only (act waits for routines).
+3. Responses: record and tell only (act waits for routines).
 4. The waiting list in the store, with Ghost's own pending confirms in it, and "what needs
    me?" answered from it.
-5. One route: a phone notification through the app, with batching, quiet hours and
-   acknowledge.
+5. Routes: the digest at the next wake and the desktop notification, with batching,
+   quiet hours and acknowledge; the waiting list in the phone app when it is opened.
 6. Measure: how often it fired, and how often the operator wished it had or hadn't. That
    is the data for whether desk voice and calls are a good idea.
 
-Then desk voice and the app call, then act rules through routines, then more watches
+Then desk voice and the app call, then act responses through routines, then more watches
 (Bird messages, T3 threads, monitoring) as the operator wants them.
 
 ## Sources
