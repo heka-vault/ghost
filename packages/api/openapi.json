@@ -353,17 +353,6 @@
             "title": "Created At",
             "type": "string"
           },
-          "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
-          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/AuditEventView"
@@ -750,17 +739,6 @@
             "title": "Aliases",
             "type": "array"
           },
-          "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
-          },
           "job": {
             "default": "",
             "maxLength": 200,
@@ -843,10 +821,6 @@
             "title": "Created At",
             "type": "string"
           },
-          "department": {
-            "title": "Department",
-            "type": "string"
-          },
           "dir": {
             "title": "Dir",
             "type": "string"
@@ -854,11 +828,6 @@
           "id": {
             "title": "Id",
             "type": "string"
-          },
-          "is_default": {
-            "default": false,
-            "title": "Is Default",
-            "type": "boolean"
           },
           "is_ghost": {
             "title": "Is Ghost",
@@ -939,7 +908,6 @@
           "slug",
           "name",
           "aliases",
-          "department",
           "voice",
           "speed",
           "created_at",
@@ -992,21 +960,6 @@
           "active"
         ],
         "title": "ConversationEvent",
-        "type": "object"
-      },
-      "ConversationMove": {
-        "properties": {
-          "department": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Department",
-            "type": "string"
-          }
-        },
-        "required": [
-          "department"
-        ],
-        "title": "ConversationMove",
         "type": "object"
       },
       "ConversationUpdate": {
@@ -1129,7 +1082,7 @@
         "type": "object"
       },
       "ConversationView": {
-        "description": "An agent (ADR 0024): a conversation with a persona and a job, in a department.",
+        "description": "An agent (ADR 0014, ADR 0035): a conversation with a persona and a job.",
         "properties": {
           "active": {
             "title": "Active",
@@ -1147,18 +1100,9 @@
             "title": "Created At",
             "type": "string"
           },
-          "department": {
-            "title": "Department",
-            "type": "string"
-          },
           "id": {
             "title": "Id",
             "type": "string"
-          },
-          "is_default": {
-            "default": false,
-            "title": "Is Default",
-            "type": "boolean"
           },
           "is_ghost": {
             "title": "Is Ghost",
@@ -1220,7 +1164,6 @@
           "slug",
           "name",
           "aliases",
-          "department",
           "voice",
           "speed",
           "created_at",
@@ -1229,209 +1172,6 @@
           "is_ghost"
         ],
         "title": "ConversationView",
-        "type": "object"
-      },
-      "DepartmentCreate": {
-        "properties": {
-          "aliases": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Aliases",
-            "type": "array"
-          },
-          "name": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "voice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Voice"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "DepartmentCreate",
-        "type": "object"
-      },
-      "DepartmentPermissions": {
-        "description": "What a department adds over Ghost's (``permissions`` in its department.json).",
-        "properties": {
-          "ask": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Ask",
-            "type": "array"
-          },
-          "block": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Block",
-            "type": "array"
-          },
-          "quiet": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Quiet",
-            "type": "array"
-          }
-        },
-        "title": "DepartmentPermissions",
-        "type": "object"
-      },
-      "DepartmentView": {
-        "description": "A department (ADR 0024): a folder under ~/.config/ghost with its rules, skills,\nagents and the permissions that narrow what they may do (ADR 0034). Ghost is one too.",
-        "properties": {
-          "agents": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Agents",
-            "type": "array"
-          },
-          "aliases": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Aliases",
-            "type": "array"
-          },
-          "docs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Docs",
-            "type": "array"
-          },
-          "hooks": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/HookInfo"
-            },
-            "title": "Hooks",
-            "type": "array"
-          },
-          "is_ghost": {
-            "title": "Is Ghost",
-            "type": "boolean"
-          },
-          "memory": {
-            "default": "",
-            "title": "Memory",
-            "type": "string"
-          },
-          "outputs": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/OutputInfo"
-            },
-            "title": "Outputs",
-            "type": "array"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "permissions": {
-            "$ref": "#/components/schemas/DepartmentPermissions",
-            "default": {
-              "ask": [],
-              "block": [],
-              "quiet": []
-            }
-          },
-          "problems": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Problems",
-            "type": "array"
-          },
-          "root": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Root"
-          },
-          "rules": {
-            "default": "",
-            "title": "Rules",
-            "type": "string"
-          },
-          "rules_lead": {
-            "default": "",
-            "title": "Rules Lead",
-            "type": "string"
-          },
-          "skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Skills",
-            "type": "array"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "voice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Voice"
-          },
-          "watches": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/WatchInfo"
-            },
-            "title": "Watches",
-            "type": "array"
-          }
-        },
-        "required": [
-          "slug",
-          "title",
-          "path",
-          "is_ghost"
-        ],
-        "title": "DepartmentView",
         "type": "object"
       },
       "DeviceInfo": {
@@ -1541,7 +1281,7 @@
         "type": "object"
       },
       "HookInfo": {
-        "description": "A webhook the department takes (ADR 0027): on or off, and what came of deliveries\nsince the daemon started. Counts only; never a body.",
+        "description": "A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of\ndeliveries since the daemon started. Counts only; never a body.",
         "properties": {
           "accepted": {
             "additionalProperties": {
@@ -1631,41 +1371,6 @@
           "key"
         ],
         "title": "ItemKey",
-        "type": "object"
-      },
-      "JournalEntry": {
-        "description": "One thing an agent did in a department: an executed write from the audit.",
-        "properties": {
-          "agent": {
-            "title": "Agent",
-            "type": "string"
-          },
-          "at": {
-            "format": "date-time",
-            "title": "At",
-            "type": "string"
-          },
-          "operation": {
-            "title": "Operation",
-            "type": "string"
-          },
-          "target": {
-            "title": "Target",
-            "type": "string"
-          },
-          "what": {
-            "title": "What",
-            "type": "string"
-          }
-        },
-        "required": [
-          "at",
-          "agent",
-          "operation",
-          "target",
-          "what"
-        ],
-        "title": "JournalEntry",
         "type": "object"
       },
       "LogEvent": {
@@ -1871,7 +1576,7 @@
         "type": "object"
       },
       "OutputInfo": {
-        "description": "A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it.",
+        "description": "A file Ghost made in its out/ folder (ADR 0033). Ghost never runs it.",
         "properties": {
           "bytes": {
             "title": "Bytes",
@@ -2441,7 +2146,7 @@
         "type": "object"
       },
       "RuleAdd": {
-        "description": "A rule appended to a department's AGENTS.md, verbatim (ADR 0024).",
+        "description": "A rule appended to Ghost's AGENTS.md, verbatim (ADR 0035).",
         "properties": {
           "text": {
             "maxLength": 1000,
@@ -2487,6 +2192,25 @@
           "rule"
         ],
         "title": "RuleSet",
+        "type": "object"
+      },
+      "RulesView": {
+        "description": "Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "text"
+        ],
+        "title": "RulesView",
         "type": "object"
       },
       "SampleRequest": {
@@ -2729,7 +2453,7 @@
         "type": "object"
       },
       "SkillInfo": {
-        "description": "A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or a project's.",
+        "description": "A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.",
         "properties": {
           "description": {
             "title": "Description",
@@ -2877,17 +2601,6 @@
               }
             ],
             "title": "Conversation"
-          },
-          "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
           },
           "ending": {
             "default": false,
@@ -3227,17 +2940,6 @@
             ],
             "title": "Delivered Via"
           },
-          "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
-          },
           "first_seen": {
             "format": "date-time",
             "title": "First Seen",
@@ -3353,7 +3055,7 @@
         "type": "object"
       },
       "WatchInfo": {
-        "description": "A watch the department declares (ADR 0028) and how its last look went.",
+        "description": "A watch in watches.json (ADR 0028, ADR 0035) and how its last look went.",
         "properties": {
           "app": {
             "title": "App",
@@ -3451,6 +3153,45 @@
           "urgency"
         ],
         "title": "WatchInfo",
+        "type": "object"
+      },
+      "WatchingView": {
+        "description": "What Ghost watches (ADR 0035): the watches in watches.json, the webhooks in\nhooks.json, where the webhook listener is, and what is wrong in those files or left\nin Ghost's folder from an older layout.",
+        "properties": {
+          "hooks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HookInfo"
+            },
+            "title": "Hooks",
+            "type": "array"
+          },
+          "listening": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Listening",
+            "type": "array"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "watches": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WatchInfo"
+            },
+            "title": "Watches",
+            "type": "array"
+          }
+        },
+        "title": "WatchingView",
         "type": "object"
       }
     }
@@ -3871,7 +3612,7 @@
     },
     "/conversations": {
       "get": {
-        "description": "Every agent, Ghost first, retired ones included (``retired_at`` set) so the app\ncan show its Retired group. ``retired=true`` or ``false`` filters; ``department``\nnarrows to one roster.",
+        "description": "Every agent, Ghost first, retired ones included (``retired_at`` set) so the app\ncan show its Retired group. ``retired=true`` or ``false`` filters.",
         "operationId": "list_conversations_conversations_get",
         "parameters": [
           {
@@ -3888,22 +3629,6 @@
                 }
               ],
               "title": "Retired"
-            }
-          },
-          {
-            "in": "query",
-            "name": "department",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Department"
             }
           }
         ],
@@ -3939,7 +3664,7 @@
         ]
       },
       "post": {
-        "description": "Hire an agent into a department.",
+        "description": "Hire an agent.",
         "operationId": "create_conversation_conversations_post",
         "requestBody": {
           "content": {
@@ -4199,59 +3924,6 @@
         ]
       }
     },
-    "/conversations/{slug}/move": {
-      "post": {
-        "description": "Move the agent's folder into another department (ADR 0024). The desktop's\ndrag; a move of the agent the session is with is the session's to make.",
-        "operationId": "move_conversation_conversations__slug__move_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConversationMove"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConversationDetail"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Move Conversation",
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
     "/conversations/{slug}/notes": {
       "post": {
         "operationId": "add_note_conversations__slug__notes_post",
@@ -4392,7 +4064,7 @@
     },
     "/conversations/{slug}/retire": {
       "post": {
-        "description": "Retire the agent (ADR 0024): off the roster and voice routing, everything kept.",
+        "description": "Retire the agent: off the roster and voice routing, everything kept.",
         "operationId": "retire_conversation_conversations__slug__retire_post",
         "parameters": [
           {
@@ -4531,225 +4203,6 @@
         ]
       }
     },
-    "/departments": {
-      "get": {
-        "operationId": "departments_departments_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/DepartmentView"
-                  },
-                  "title": "Response Departments Departments Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Departments",
-        "tags": [
-          "departments"
-        ]
-      },
-      "post": {
-        "description": "A new department folder: the operator's action, with a short AGENTS.md and\nits department.json; it reaches every connected app (ADR 0034). The model never\ncalls this.",
-        "operationId": "create_department_departments_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DepartmentCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DepartmentView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Department",
-        "tags": [
-          "departments"
-        ]
-      }
-    },
-    "/departments/{slug}": {
-      "get": {
-        "operationId": "department_departments__slug__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DepartmentView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Department",
-        "tags": [
-          "departments"
-        ]
-      }
-    },
-    "/departments/{slug}/journal": {
-      "get": {
-        "description": "What the department's agents did, newest first, from the audit.",
-        "operationId": "department_journal_departments__slug__journal_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 30,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/JournalEntry"
-                  },
-                  "title": "Response Department Journal Departments  Slug  Journal Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Department Journal",
-        "tags": [
-          "departments"
-        ]
-      }
-    },
-    "/departments/{slug}/rules": {
-      "post": {
-        "description": "Append a rule to the department's AGENTS.md, verbatim, through the gate: the\noperator's own click, audited like the spoken form (ADR 0024).",
-        "operationId": "add_rule_departments__slug__rules_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RuleAdd"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DepartmentView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Add Rule",
-        "tags": [
-          "departments"
-        ]
-      }
-    },
     "/devices": {
       "get": {
         "operationId": "devices_devices_get",
@@ -4829,6 +4282,32 @@
         "summary": "Events Schema",
         "tags": [
           "events"
+        ]
+      }
+    },
+    "/outputs": {
+      "get": {
+        "description": "The files Ghost made in its out/ folder (ADR 0033), by name.",
+        "operationId": "outputs_outputs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OutputInfo"
+                  },
+                  "title": "Response Outputs Outputs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Outputs",
+        "tags": [
+          "outputs"
         ]
       }
     },
@@ -5169,6 +4648,68 @@
         "summary": "Confirm One",
         "tags": [
           "writes"
+        ]
+      }
+    },
+    "/rules": {
+      "get": {
+        "description": "Ghost's AGENTS.md: the rules in every agent's prompt (ADR 0035).",
+        "operationId": "get_rules_rules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Rules",
+        "tags": [
+          "rules"
+        ]
+      },
+      "post": {
+        "description": "Append a rule to Ghost's AGENTS.md, verbatim, through the gate: the operator's\nown click, audited like the spoken ``rules.add`` (ADR 0035). Never written here.",
+        "operationId": "add_rule_rules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Rule",
+        "tags": [
+          "rules"
         ]
       }
     },
@@ -5806,6 +5347,28 @@
         "summary": "Wake",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/watches": {
+      "get": {
+        "description": "The watches in watches.json and the webhooks in hooks.json, each with its last\nlook and its counts, re-read now; where the webhook listener is; and what is wrong\nin those files or left over in Ghost's folder (ADR 0035).",
+        "operationId": "watching_watches_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Watching",
+        "tags": [
+          "watching"
         ]
       }
     }

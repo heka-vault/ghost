@@ -139,14 +139,13 @@ export interface paths {
         /**
          * List Conversations
          * @description Every agent, Ghost first, retired ones included (``retired_at`` set) so the app
-         *     can show its Retired group. ``retired=true`` or ``false`` filters; ``department``
-         *     narrows to one roster.
+         *     can show its Retired group. ``retired=true`` or ``false`` filters.
          */
         get: operations["list_conversations_conversations_get"];
         put?: never;
         /**
          * Create Conversation
-         * @description Hire an agent into a department.
+         * @description Hire an agent.
          */
         post: operations["create_conversation_conversations_post"];
         delete?: never;
@@ -202,27 +201,6 @@ export interface paths {
         get: operations["conversation_compactions_conversations__slug__compactions_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/conversations/{slug}/move": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Move Conversation
-         * @description Move the agent's folder into another department (ADR 0024). The desktop's
-         *     drag; a move of the agent the session is with is the session's to make.
-         */
-        post: operations["move_conversation_conversations__slug__move_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -291,7 +269,7 @@ export interface paths {
         put?: never;
         /**
          * Retire Conversation
-         * @description Retire the agent (ADR 0024): off the roster and voice routing, everything kept.
+         * @description Retire the agent: off the roster and voice routing, everything kept.
          */
         post: operations["retire_conversation_conversations__slug__retire_post"];
         delete?: never;
@@ -334,87 +312,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/departments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Departments */
-        get: operations["departments_departments_get"];
-        put?: never;
-        /**
-         * Create Department
-         * @description A new department folder: the operator's action, with a short AGENTS.md and
-         *     its department.json; it reaches every connected app (ADR 0034). The model never
-         *     calls this.
-         */
-        post: operations["create_department_departments_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/departments/{slug}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Department */
-        get: operations["department_departments__slug__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/departments/{slug}/journal": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Department Journal
-         * @description What the department's agents did, newest first, from the audit.
-         */
-        get: operations["department_journal_departments__slug__journal_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/departments/{slug}/rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Add Rule
-         * @description Append a rule to the department's AGENTS.md, verbatim, through the gate: the
-         *     operator's own click, audited like the spoken form (ADR 0024).
-         */
-        post: operations["add_rule_departments__slug__rules_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/devices": {
         parameters: {
             query?: never;
@@ -444,6 +341,26 @@ export interface paths {
          * @description Documents the payloads sent on the /events WebSocket. Not meant to be called.
          */
         get: operations["events_schema_events_schema_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Outputs
+         * @description The files Ghost made in its out/ folder (ADR 0033), by name.
+         */
+        get: operations["outputs_outputs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -616,6 +533,31 @@ export interface paths {
         put?: never;
         /** Confirm */
         post: operations["confirm_proposals_pending_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Rules
+         * @description Ghost's AGENTS.md: the rules in every agent's prompt (ADR 0035).
+         */
+        get: operations["get_rules_rules_get"];
+        put?: never;
+        /**
+         * Add Rule
+         * @description Append a rule to Ghost's AGENTS.md, verbatim, through the gate: the operator's
+         *     own click, audited like the spoken ``rules.add`` (ADR 0035). Never written here.
+         */
+        post: operations["add_rule_rules_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -901,6 +843,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/watches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Watching
+         * @description The watches in watches.json and the webhooks in hooks.json, each with its last
+         *     look and its counts, re-read now; where the webhook listener is; and what is wrong
+         *     in those files or left over in Ghost's folder (ADR 0035).
+         */
+        get: operations["watching_watches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1038,8 +1002,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Department */
-            department?: string | null;
             /** Events */
             events: components["schemas"]["AuditEventView"][];
             /** Id */
@@ -1206,8 +1168,6 @@ export interface components {
              * @default []
              */
             aliases: string[];
-            /** Department */
-            department?: string | null;
             /**
              * Job
              * @default
@@ -1240,17 +1200,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Department */
-            department: string;
             /** Dir */
             dir: string;
             /** Id */
             id: string;
-            /**
-             * Is Default
-             * @default false
-             */
-            is_default: boolean;
             /** Is Ghost */
             is_ghost: boolean;
             /**
@@ -1299,11 +1252,6 @@ export interface components {
              */
             type: "conversation";
         };
-        /** ConversationMove */
-        ConversationMove: {
-            /** Department */
-            department: string;
-        };
         /**
          * ConversationUpdate
          * @description Each field present is applied as its own audited write.
@@ -1330,7 +1278,7 @@ export interface components {
         };
         /**
          * ConversationView
-         * @description An agent (ADR 0024): a conversation with a persona and a job, in a department.
+         * @description An agent (ADR 0014, ADR 0035): a conversation with a persona and a job.
          */
         ConversationView: {
             /** Active */
@@ -1342,15 +1290,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Department */
-            department: string;
             /** Id */
             id: string;
-            /**
-             * Is Default
-             * @default false
-             */
-            is_default: boolean;
             /** Is Ghost */
             is_ghost: boolean;
             /**
@@ -1375,121 +1316,6 @@ export interface components {
             speed: number;
             /** Voice */
             voice: string;
-        };
-        /** DepartmentCreate */
-        DepartmentCreate: {
-            /**
-             * Aliases
-             * @default []
-             */
-            aliases: string[];
-            /** Name */
-            name: string;
-            /** Voice */
-            voice?: string | null;
-        };
-        /**
-         * DepartmentPermissions
-         * @description What a department adds over Ghost's (``permissions`` in its department.json).
-         */
-        DepartmentPermissions: {
-            /**
-             * Ask
-             * @default []
-             */
-            ask: string[];
-            /**
-             * Block
-             * @default []
-             */
-            block: string[];
-            /**
-             * Quiet
-             * @default []
-             */
-            quiet: string[];
-        };
-        /**
-         * DepartmentView
-         * @description A department (ADR 0024): a folder under ~/.config/ghost with its rules, skills,
-         *     agents and the permissions that narrow what they may do (ADR 0034). Ghost is one too.
-         */
-        DepartmentView: {
-            /**
-             * Agents
-             * @default []
-             */
-            agents: string[];
-            /**
-             * Aliases
-             * @default []
-             */
-            aliases: string[];
-            /**
-             * Docs
-             * @default []
-             */
-            docs: string[];
-            /**
-             * Hooks
-             * @default []
-             */
-            hooks: components["schemas"]["HookInfo"][];
-            /** Is Ghost */
-            is_ghost: boolean;
-            /**
-             * Memory
-             * @default
-             */
-            memory: string;
-            /**
-             * Outputs
-             * @default []
-             */
-            outputs: components["schemas"]["OutputInfo"][];
-            /** Path */
-            path: string;
-            /**
-             * @default {
-             *       "ask": [],
-             *       "block": [],
-             *       "quiet": []
-             *     }
-             */
-            permissions: components["schemas"]["DepartmentPermissions"];
-            /**
-             * Problems
-             * @default []
-             */
-            problems: string[];
-            /** Root */
-            root?: string | null;
-            /**
-             * Rules
-             * @default
-             */
-            rules: string;
-            /**
-             * Rules Lead
-             * @default
-             */
-            rules_lead: string;
-            /**
-             * Skills
-             * @default []
-             */
-            skills: string[];
-            /** Slug */
-            slug: string;
-            /** Title */
-            title: string;
-            /** Voice */
-            voice?: string | null;
-            /**
-             * Watches
-             * @default []
-             */
-            watches: components["schemas"]["WatchInfo"][];
         };
         /** DeviceInfo */
         DeviceInfo: {
@@ -1523,8 +1349,8 @@ export interface components {
         };
         /**
          * HookInfo
-         * @description A webhook the department takes (ADR 0027): on or off, and what came of deliveries
-         *     since the daemon started. Counts only; never a body.
+         * @description A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of
+         *     deliveries since the daemon started. Counts only; never a body.
          */
         HookInfo: {
             /**
@@ -1568,25 +1394,6 @@ export interface components {
         ItemKey: {
             /** Key */
             key: string;
-        };
-        /**
-         * JournalEntry
-         * @description One thing an agent did in a department: an executed write from the audit.
-         */
-        JournalEntry: {
-            /** Agent */
-            agent: string;
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /** Operation */
-            operation: string;
-            /** Target */
-            target: string;
-            /** What */
-            what: string;
         };
         /** LogEvent */
         LogEvent: {
@@ -1671,7 +1478,7 @@ export interface components {
         };
         /**
          * OutputInfo
-         * @description A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it.
+         * @description A file Ghost made in its out/ folder (ADR 0033). Ghost never runs it.
          */
         OutputInfo: {
             /** Bytes */
@@ -1884,7 +1691,7 @@ export interface components {
         };
         /**
          * RuleAdd
-         * @description A rule appended to a department's AGENTS.md, verbatim (ADR 0024).
+         * @description A rule appended to Ghost's AGENTS.md, verbatim (ADR 0035).
          */
         RuleAdd: {
             /** Text */
@@ -1899,6 +1706,16 @@ export interface components {
             level?: ("allow" | "ask" | "block" | "quiet") | null;
             /** Rule */
             rule: string;
+        };
+        /**
+         * RulesView
+         * @description Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt.
+         */
+        RulesView: {
+            /** Path */
+            path: string;
+            /** Text */
+            text: string;
         };
         /** SampleRequest */
         SampleRequest: {
@@ -1996,7 +1813,7 @@ export interface components {
         };
         /**
          * SkillInfo
-         * @description A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or a project's.
+         * @description A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.
          */
         SkillInfo: {
             /** Description */
@@ -2068,8 +1885,6 @@ export interface components {
             apps: string[];
             /** Conversation */
             conversation?: string | null;
-            /** Department */
-            department?: string | null;
             /**
              * Ending
              * @default false
@@ -2210,8 +2025,6 @@ export interface components {
             delivered_at?: string | null;
             /** Delivered Via */
             delivered_via?: string | null;
-            /** Department */
-            department?: string | null;
             /**
              * First Seen
              * Format: date-time
@@ -2255,7 +2068,7 @@ export interface components {
         };
         /**
          * WatchInfo
-         * @description A watch the department declares (ADR 0028) and how its last look went.
+         * @description A watch in watches.json (ADR 0028, ADR 0035) and how its last look went.
          */
         WatchInfo: {
             /** App */
@@ -2295,6 +2108,34 @@ export interface components {
              */
             urgency: "digest" | "notify" | "call";
         };
+        /**
+         * WatchingView
+         * @description What Ghost watches (ADR 0035): the watches in watches.json, the webhooks in
+         *     hooks.json, where the webhook listener is, and what is wrong in those files or left
+         *     in Ghost's folder from an older layout.
+         */
+        WatchingView: {
+            /**
+             * Hooks
+             * @default []
+             */
+            hooks: components["schemas"]["HookInfo"][];
+            /**
+             * Listening
+             * @default []
+             */
+            listening: string[];
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+            /**
+             * Watches
+             * @default []
+             */
+            watches: components["schemas"]["WatchInfo"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -2319,18 +2160,13 @@ export type SchemaCompactionView = components['schemas']['CompactionView'];
 export type SchemaConversationCreate = components['schemas']['ConversationCreate'];
 export type SchemaConversationDetail = components['schemas']['ConversationDetail'];
 export type SchemaConversationEvent = components['schemas']['ConversationEvent'];
-export type SchemaConversationMove = components['schemas']['ConversationMove'];
 export type SchemaConversationUpdate = components['schemas']['ConversationUpdate'];
 export type SchemaConversationView = components['schemas']['ConversationView'];
-export type SchemaDepartmentCreate = components['schemas']['DepartmentCreate'];
-export type SchemaDepartmentPermissions = components['schemas']['DepartmentPermissions'];
-export type SchemaDepartmentView = components['schemas']['DepartmentView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
-export type SchemaJournalEntry = components['schemas']['JournalEntry'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
@@ -2352,6 +2188,7 @@ export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
 export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaRuleSet = components['schemas']['RuleSet'];
+export type SchemaRulesView = components['schemas']['RulesView'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];
 export type SchemaSecretState = components['schemas']['SecretState'];
@@ -2375,6 +2212,7 @@ export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
 export type SchemaWaitingView = components['schemas']['WaitingView'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
 export type SchemaWatchInfo = components['schemas']['WatchInfo'];
+export type SchemaWatchingView = components['schemas']['WatchingView'];
 export type $defs = Record<string, never>;
 export interface operations {
     list_apps_apps_get: {
@@ -2625,7 +2463,6 @@ export interface operations {
     list_conversations_conversations_get: {
         parameters: {
             query?: {
-                department?: string | null;
                 retired?: boolean | null;
             };
             header?: never;
@@ -2846,41 +2683,6 @@ export interface operations {
             };
         };
     };
-    move_conversation_conversations__slug__move_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConversationMove"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConversationDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     add_note_conversations__slug__notes_post: {
         parameters: {
             query?: never;
@@ -3075,158 +2877,6 @@ export interface operations {
             };
         };
     };
-    departments_departments_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepartmentView"][];
-                };
-            };
-        };
-    };
-    create_department_departments_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DepartmentCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepartmentView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    department_departments__slug__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepartmentView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    department_journal_departments__slug__journal_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JournalEntry"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    add_rule_departments__slug__rules_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RuleAdd"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepartmentView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     devices_devices_get: {
         parameters: {
             query?: never;
@@ -3263,6 +2913,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"];
+                };
+            };
+        };
+    };
+    outputs_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutputInfo"][];
                 };
             };
         };
@@ -3551,6 +3221,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutcomeView"];
+                };
+            };
+        };
+    };
+    get_rules_rules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RulesView"];
+                };
+            };
+        };
+    };
+    add_rule_rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleAdd"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4057,6 +3780,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    watching_watches_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchingView"];
                 };
             };
         };

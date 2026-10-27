@@ -18,8 +18,10 @@ from ghost_core import (
 )
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.conversations import Conversations
-from ghost_core.department_tools import DepartmentTools
-from ghost_core.departments import Departments
+from ghost_core.folder import GhostFolder
+from ghost_core.outputs import Outputs
+from ghost_core.rules import SOURCE as RULES
+from ghost_core.rules import Rules
 from ghost_core.waiting import Items, WaitingList
 
 
@@ -183,17 +185,20 @@ def world(tmp_path: Path):
     policy_path.write_text('[permissions]\nask = ["fake.nuke"]\n')
     gate = WriteGate(store, autonomy=AutonomyPolicy.load(policy_path))
     gate.register("fake", loaded.operations)
-    departments = Departments(tmp_path / "config")
-    departments.ensure_layout()
+    config = tmp_path / "config"
+    folder = GhostFolder(config)
+    folder.ensure_layout()
     conversations = Conversations(
         store,
-        departments,
+        config,
         default_voice="af_heart",
         voices=("af_heart", "am_adam", "bf_emma"),
     )
     gate.register(CONVERSATIONS, conversations.operations())
-    department_tools = DepartmentTools(departments, store, conversations)
-    gate.register("departments", department_tools.operations())
+    rules = Rules(config)
+    gate.register(RULES, rules.operations())
+    outputs = Outputs(config)
+    gate.register("outputs", outputs.operations())
     state = DaemonState(version="test", wake_mode="file")
     control = FakeControl(state, gate, policy_path)
     infra = tmp_path / "infra" / "pipewire"
@@ -216,8 +221,9 @@ def world(tmp_path: Path):
         output_device=None,
         stt_model="parakeet",
         conversations=conversations,
-        departments=departments,
-        department_tools=department_tools,
+        folder=folder,
+        rules=rules,
+        outputs=outputs,
         waiting=WaitingList(Items(store), changes=gate.waiting),
     )
     app = create_app(deps)

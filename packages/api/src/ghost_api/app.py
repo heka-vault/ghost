@@ -18,7 +18,6 @@ from typing import Any, Protocol
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from ghost_core import (
     AutonomyPolicy,
-    ChangeSet,
     GateError,
     Outcome,
     Proposal,
@@ -37,15 +36,11 @@ from ghost_api.models import (
     AuditEntry,
     AuditEventView,
     AuditPage,
-    DepartmentCreate,
-    DepartmentPermissions,
-    DepartmentView,
     DeviceInfo,
     DevicesView,
     Event,
     HookInfo,
     ItemKey,
-    JournalEntry,
     ModelsView,
     OperationInfo,
     OutcomeView,
@@ -61,6 +56,7 @@ from ghost_api.models import (
     RouteName,
     RoutesView,
     RuleAdd,
+    RulesView,
     SayRequest,
     SecretState,
     SettingsResult,
@@ -76,6 +72,7 @@ from ghost_api.models import (
     WaitingView,
     WakeRequest,
     WatchInfo,
+    WatchingView,
 )
 from ghost_api.state import DaemonState, now
 
@@ -127,22 +124,26 @@ class Deps:
         catalog: Any = None,  # ghost_core.catalog.Catalog
         signins: Any = None,  # ghost_core.signin.SignIns
         skills: Any = None,  # ghost_core.skills.Skills
-        departments: Any = None,  # ghost_core.departments.Departments
-        department_tools: Any = None,  # ghost_core.department_tools.DepartmentTools
+        folder: Any = None,  # ghost_core.folder.GhostFolder (ADR 0035)
+        rules: Any = None,  # ghost_core.rules.Rules
+        outputs: Any = None,  # ghost_core.outputs.Outputs
         waiting: Any = None,  # ghost_core.waiting.WaitingList
         watches: Any = None,  # ghost_core.watches.WatchRunner
         hooks: Any = None,  # ghost_core.hooks.HookIntake
+        hooks_listening: Sequence[str] = (),  # the webhook listener's addresses, when on
     ) -> None:
         self.waiting = waiting
         self.watches = watches
         self.hooks = hooks
+        self.hooks_listening = list(hooks_listening)
         self.conversations = conversations
         self.apps = apps
         self.catalog = catalog
         self.signins = signins
         self.skills = skills
-        self.departments = departments
-        self.department_tools = department_tools
+        self.folder = folder
+        self.rules = rules
+        self.outputs = outputs
         self.state = state
         self.control = control
         self.gate = gate
@@ -235,7 +236,6 @@ def status_snapshot(deps: Deps) -> Status:
         else [],
         pending=pending,
         conversation=st.conversation,
-        department=st.department,
         session_origin=st.session_origin,  # type: ignore[arg-type]
         ending=st.ending,
         waiting=st.waiting,
@@ -257,7 +257,6 @@ def waiting_view(deps: Deps) -> WaitingView:
             WaitingItemView(
                 key=i.key,
                 source=i.source,
-                department=i.department,
                 title=i.title,
                 link=i.link,
                 state=i.state(at),
@@ -299,7 +298,6 @@ def audit_page(
             status=p.status.value,
             created_at=p.created_at,
             conversation=p.conversation,
-            department=p.department,
             events=[
                 AuditEventView(at=at, event=ev, detail=_event_detail(detail))
                 for at, ev, detail in store.events(p.id)
@@ -455,51 +453,8 @@ def create_app(deps: Deps) -> FastAPI:
         ok = await deps.control.forget_phone()
         return Ack(ok=ok, detail=None if ok else "no phone paired")
 
-    # --- departments (ADR 0024) --------------------------------------------------------
-
-    def department_view(d) -> DepartmentView:
-        convs = deps.conversations
-        agents = (
-            [p.slug for p in convs.agents_of(d.slug, include_retired=True)]
-            if convs is not None
-            else []
-        )
-        agents.sort(key=lambda s: (s != d.slug, s))
-        skills = (
-            [s.name for s in deps.skills.list(d.skill_places())] if deps.skills is not None else []
-        )
-        return DepartmentView(
-            slug=d.slug,
-            title=d.title,
-            aliases=list(d.aliases),
-            path=str(d.path),
-            root=str(d.root) if d.root else None,
-            voice=d.voice,
-            is_ghost=d.is_ghost,
-            rules_lead=d.rules_lead(),
-            rules=d.rules(),
-            memory=d.memory(),
-            permissions=DepartmentPermissions(
-                block=[str(r) for r in d.permissions.block],
-                ask=[str(r) for r in d.permissions.ask],
-                quiet=[str(r) for r in d.permissions.quiet],
-            ),
-            skills=skills,
-            docs=d.docs(),
-            agents=agents,
-            problems=list(d.problems),
-            watches=[watch_info(w) for w in getattr(d, "watches", {}).values()],
-            hooks=[hook_info(h) for h in getattr(d, "hooks", {}).values()],
-            outputs=[
-                OutputInfo(
-                    name=f["name"],
-                    path=f["path"],
-                    bytes=f["bytes"],
-                    modified=datetime.fromtimestamp(f["modified"]).astimezone(),
-                )
-                for f in list_outputs(d)
-            ],
-        )
+    # --- what Ghost watches, its rules and what it made (ADR 0035) -----------------------
+    UI_SESSION = "ui"  # the desktop's own session id for audited edits (as conversations.py)
 
     def hook_info(h) -> HookInfo:
         intake = deps.hooks
@@ -533,80 +488,68 @@ def create_app(deps: Deps) -> FastAPI:
             open=st.open if st else 0,
         )
 
-    @app.get("/departments", response_model=list[DepartmentView], tags=["departments"])
-    async def departments() -> list[DepartmentView]:
-        if deps.departments is None:
-            return []
-        deps.departments.refresh()
-        return [department_view(d) for d in deps.departments.list()]
+    @app.get("/watches", response_model=WatchingView, tags=["watching"])
+    async def watching() -> WatchingView:
+        """The watches in watches.json and the webhooks in hooks.json, each with its last
+        look and its counts, re-read now; where the webhook listener is; and what is wrong
+        in those files or left over in Ghost's folder (ADR 0035)."""
+        if deps.folder is None:
+            return WatchingView(listening=list(deps.hooks_listening))
+        deps.folder.refresh()  # the daemon follows: changed watches restart
+        return WatchingView(
+            watches=[watch_info(w) for w in deps.folder.watches.values()],
+            hooks=[hook_info(h) for h in deps.folder.hooks.values()],
+            listening=list(deps.hooks_listening),
+            problems=list(deps.folder.problems),
+        )
 
-    @app.get("/departments/{slug}", response_model=DepartmentView, tags=["departments"])
-    async def department(slug: str) -> DepartmentView:
-        d = deps.departments.get(slug) if deps.departments is not None else None
-        if d is None:
-            raise HTTPException(404, f"no department {slug!r}")
-        return department_view(d)
+    @app.get("/rules", response_model=RulesView, tags=["rules"])
+    async def get_rules() -> RulesView:
+        """Ghost's AGENTS.md: the rules in every agent's prompt (ADR 0035)."""
+        if deps.rules is None:
+            raise HTTPException(503, "rules are not available")
+        return RulesView(path=str(deps.rules.path), text=deps.rules.text())
 
-    @app.post("/departments/{slug}/rules", response_model=DepartmentView, tags=["departments"])
-    async def add_rule(slug: str, req: RuleAdd) -> DepartmentView:
-        """Append a rule to the department's AGENTS.md, verbatim, through the gate: the
-        operator's own click, audited like the spoken form (ADR 0024)."""
-        from ghost_core.department_tools import SOURCE as DEPARTMENTS
-        from ghost_core.department_tools import AddRule, DepartmentTarget
+    @app.post("/rules", response_model=OutcomeView, tags=["rules"])
+    async def add_rule(req: RuleAdd) -> OutcomeView:
+        """Append a rule to Ghost's AGENTS.md, verbatim, through the gate: the operator's
+        own click, audited like the spoken ``rules.add`` (ADR 0035). Never written here."""
+        from ghost_core.rules import SOURCE as RULES
 
-        d = deps.departments.get(slug) if deps.departments is not None else None
-        if d is None:
-            raise HTTPException(404, f"no department {slug!r}")
-        if deps.department_tools is None:
-            raise HTTPException(503, "departments are not available")
+        if deps.rules is None:
+            raise HTTPException(503, "rules are not available")
         try:
+            prepared = deps.rules.prepare_add(req.text)
             out = await deps.gate.apply_internal(
                 session_id=UI_SESSION,
-                ability=DEPARTMENTS,
-                operation="add_rule",
-                target=DepartmentTarget(slug=d.slug, title=d.title),
-                changes=ChangeSet(steps=(AddRule(text=req.text.strip()),)),
+                ability=RULES,
+                operation="add",
+                target=prepared.target,
+                changes=prepared.changes,
                 rationale="a rule added in the desktop app",
             )
         except (GateError, PolicyError, ValueError) as e:
             raise HTTPException(409, str(e)) from None
         if out.status != "success":
             raise HTTPException(409, out.error or "not applied")
-        deps.departments.refresh()
-        return department_view(deps.departments.get(slug))
+        return outcome_view(out)
 
-    @app.get("/departments/{slug}/journal", response_model=list[JournalEntry], tags=["departments"])
-    async def department_journal(
-        slug: str, limit: int = Query(30, ge=1, le=200)
-    ) -> list[JournalEntry]:
-        """What the department's agents did, newest first, from the audit."""
-        d = deps.departments.get(slug) if deps.departments is not None else None
-        if d is None:
-            raise HTTPException(404, f"no department {slug!r}")
-        if deps.department_tools is None:
+    @app.get("/outputs", response_model=list[OutputInfo], tags=["outputs"])
+    async def outputs() -> list[OutputInfo]:
+        """The files Ghost made in its out/ folder (ADR 0033), by name."""
+        if deps.outputs is None:
             return []
-        return [JournalEntry(**e) for e in deps.department_tools.journal(slug, limit=limit)]
-
-    @app.post("/departments", response_model=DepartmentView, tags=["departments"])
-    async def create_department(req: DepartmentCreate) -> DepartmentView:
-        """A new department folder: the operator's action, with a short AGENTS.md and
-        its department.json; it reaches every connected app (ADR 0034). The model never
-        calls this."""
-        if deps.departments is None:
-            raise HTTPException(503, "departments are not available")
-        from ghost_core.departments import DepartmentError
-
-        try:
-            d = deps.departments.create(req.name, aliases=req.aliases, voice=req.voice)
-        except DepartmentError as e:
-            raise HTTPException(409, str(e)) from None
-        if deps.conversations is not None:
-            deps.conversations.sync()  # its own agent
-        deps.control.reload_policy()  # its levels join the gate
-        return department_view(d)
+        return [
+            OutputInfo(
+                name=f["name"],
+                path=f["path"],
+                bytes=f["bytes"],
+                modified=datetime.fromtimestamp(f["modified"]).astimezone(),
+            )
+            for f in list_outputs(deps.outputs.config_dir)
+        ]
 
     # --- skills (ADR 0023) ------------------------------------------------------------
-    UI_SESSION = "ui"  # the desktop's own session id for audited edits (as conversations.py)
 
     def skill_info(skill) -> SkillInfo:
         servers = (
@@ -716,7 +659,7 @@ def create_app(deps: Deps) -> FastAPI:
                     + [
                         OperationInfo(
                             name="switch",
-                            description="Transfer the operator to a department or an agent.",
+                            description="Transfer the operator to one of their agents.",
                             risk="low",
                             autonomy=autonomy.resolve(CONVERSATIONS, "switch").value,
                             properties={"name": {"type": "string"}},
@@ -729,19 +672,15 @@ def create_app(deps: Deps) -> FastAPI:
                     ],
                 )
             )
-        if deps.department_tools is not None:
-            from ghost_core.department_tools import SOURCE as DEPARTMENTS
+        if deps.rules is not None:
+            from ghost_core.rules import SOURCE as RULES
 
             out.append(
                 SourceInfo(
-                    name=DEPARTMENTS,
+                    name=RULES,
                     kind="built-in",
-                    description="Your departments: a rule added, a shared fact (ADR 0024)",
-                    operations=ops(DEPARTMENTS, deps.department_tools.operations()),
-                    read_tools=[
-                        ReadToolInfo(name=t.name, description=t.description)
-                        for t in deps.department_tools.read_tools()
-                    ],
+                    description="Your rules for every agent: a rule added (ADR 0035)",
+                    operations=ops(RULES, deps.rules.operations()),
                 )
             )
         apps = deps.apps.sources() if deps.apps is not None else deps.sources

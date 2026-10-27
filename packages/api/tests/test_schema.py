@@ -13,12 +13,14 @@ def test_committed_openapi_is_current():
 
 
 def test_the_contract_says_app_not_the_retired_words():
-    """Departments no longer have an mcp.json (ADR 0034), and a proposal's origin is its
-    ``source``, not an ability (ADR 0022)."""
+    """There is no mcp.json (ADR 0034), a proposal's origin is its ``source``, not an
+    ability (ADR 0022), and there are no departments (ADR 0035)."""
     text = json.dumps(openapi())
     assert "mcp.json" not in text
     assert "ability" not in text.lower()
+    assert "department" not in text.lower() and '"is_default"' not in text
     for model in ("PendingProposal", "AuditEntry"):
         assert "source" in openapi()["components"]["schemas"][model]["properties"]
     client = Path(__file__).parents[2] / "client-ts" / "src" / "index.ts"
     assert "mcp.json" not in client.read_text()
+    assert "department" not in client.read_text().lower()

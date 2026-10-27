@@ -47,7 +47,6 @@ class Status(BaseModel):
     apps: list[str] = []  # the apps connected now (ADR 0034)
     pending: PendingProposal | None = None
     conversation: str | None = None  # slug of the agent the session is with (ADR 0014)
-    department: str | None = None  # the department it works in (ADR 0024)
     # Where the live session's audio is: the workstation's mic and speaker, or the paired
     # phone over WebRTC (ADR 0016). None when there is no session.
     session_origin: Literal["desk", "phone"] | None = None
@@ -155,7 +154,6 @@ class WaitingItemView(BaseModel):
 
     key: str
     source: str
-    department: str | None = None
     title: str
     link: str | None = None
     state: Literal["new", "delivered", "acknowledged", "snoozed"]
@@ -227,7 +225,6 @@ class AuditEntry(BaseModel):
     created_at: datetime
     events: list[AuditEventView]
     conversation: str | None = None  # the agent it was proposed with (ADR 0014); colours the entry
-    department: str | None = None  # the department (ADR 0024)
 
 
 class AuditPage(BaseModel):
@@ -378,20 +375,12 @@ class PermissionsUpdate(BaseModel):
     set: RuleSet | None = None
 
 
-class DepartmentPermissions(BaseModel):
-    """What a department adds over Ghost's (``permissions`` in its department.json)."""
-
-    block: list[str] = []
-    ask: list[str] = []
-    quiet: list[str] = []
-
-
 class SkillInfo(BaseModel):
-    """A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or a project's."""
+    """A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's."""
 
     name: str
     description: str
-    source: str  # "ghost" for Ghost's own folder, "home" for the operator's, else a department
+    source: str  # "ghost" for Ghost's own folder, "home" for the operator's ~/.agents/skills
     path: str
     requires: list[str] = []  # the apps it says it needs
     missing: list[str] = []  # the ones that are not connected
@@ -412,7 +401,7 @@ class SkillAdd(BaseModel):
 
 
 class WatchInfo(BaseModel):
-    """A watch the department declares (ADR 0028) and how its last look went."""
+    """A watch in watches.json (ADR 0028, ADR 0035) and how its last look went."""
 
     name: str
     app: str
@@ -429,8 +418,8 @@ class WatchInfo(BaseModel):
 
 
 class HookInfo(BaseModel):
-    """A webhook the department takes (ADR 0027): on or off, and what came of deliveries
-    since the daemon started. Counts only; never a body."""
+    """A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of
+    deliveries since the daemon started. Counts only; never a body."""
 
     name: str
     path: str  # POST here on the webhook listener
@@ -444,7 +433,7 @@ class HookInfo(BaseModel):
 
 
 class OutputInfo(BaseModel):
-    """A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it."""
+    """A file Ghost made in its out/ folder (ADR 0033). Ghost never runs it."""
 
     name: str
     path: str
@@ -452,50 +441,28 @@ class OutputInfo(BaseModel):
     modified: datetime
 
 
-class DepartmentView(BaseModel):
-    """A department (ADR 0024): a folder under ~/.config/ghost with its rules, skills,
-    agents and the permissions that narrow what they may do (ADR 0034). Ghost is one too."""
+class WatchingView(BaseModel):
+    """What Ghost watches (ADR 0035): the watches in watches.json, the webhooks in
+    hooks.json, where the webhook listener is, and what is wrong in those files or left
+    in Ghost's folder from an older layout."""
 
-    slug: str
-    title: str
-    aliases: list[str] = []
-    path: str  # the folder the operator opens
-    root: str | None = None  # resources read in place from another folder, when set
-    voice: str | None = None
-    is_ghost: bool
-    rules_lead: str = ""  # the first line of AGENTS.md
-    rules: str = ""  # AGENTS.md, as the prompt carries it
-    memory: str = ""  # the shared memory every agent in it reads
-    permissions: DepartmentPermissions = DepartmentPermissions()
-    skills: list[str] = []  # the skills its sessions read first
-    docs: list[str] = []
-    agents: list[str] = []  # slugs, the department's own first
-    problems: list[str] = []  # what is wrong in its files, for the operator
-    watches: list[WatchInfo] = []  # ADR 0028
-    hooks: list[HookInfo] = []  # ADR 0027
-    outputs: list[OutputInfo] = []  # ADR 0033
+    watches: list[WatchInfo] = []
+    hooks: list[HookInfo] = []
+    listening: list[str] = []  # the webhook listener's addresses; empty when it is off
+    problems: list[str] = []
 
 
-class DepartmentCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    aliases: list[str] = []
-    voice: str | None = None
+class RulesView(BaseModel):
+    """Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt."""
+
+    path: str  # the file the operator opens
+    text: str
 
 
 class RuleAdd(BaseModel):
-    """A rule appended to a department's AGENTS.md, verbatim (ADR 0024)."""
+    """A rule appended to Ghost's AGENTS.md, verbatim (ADR 0035)."""
 
     text: str = Field(min_length=1, max_length=1000)
-
-
-class JournalEntry(BaseModel):
-    """One thing an agent did in a department: an executed write from the audit."""
-
-    at: datetime
-    agent: str  # the agent's name, or its slug when it is gone
-    operation: str  # "github.issue_write"
-    target: str
-    what: str  # the proposal's preview
 
 
 class SourceInfo(BaseModel):
@@ -616,15 +583,14 @@ class ModelsView(BaseModel):
 
 
 class ConversationView(BaseModel):
-    """An agent (ADR 0024): a conversation with a persona and a job, in a department."""
+    """An agent (ADR 0014, ADR 0035): a conversation with a persona and a job."""
 
     id: str
     slug: str
     name: str
     aliases: list[str]
-    department: str  # the department it works in (its slug); Ghost's agents say "ghost"
     job: str = ""
-    voice: str  # the voice heard: its own, else the department's
+    voice: str  # the voice heard: its own, else Ghost's
     speed: float
     own_voice: bool = False  # True when the voice is the agent's own
     created_at: datetime
@@ -632,7 +598,6 @@ class ConversationView(BaseModel):
     retired_at: datetime | None = None  # set: off the roster and voice routing, still readable
     active: bool  # the running session is with it
     is_ghost: bool
-    is_default: bool = False  # the department's own agent, named for it
 
 
 class ConversationDetail(ConversationView):
@@ -649,18 +614,13 @@ class ConversationCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=80)
     aliases: list[str] = []
-    department: str | None = None  # None: Ghost
     job: str = Field(default="", max_length=200)
-    voice: str | None = None  # None: the department's voice
+    voice: str | None = None  # None: Ghost's voice
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     persona: str = Field(default="", max_length=4000)
     # Slug of a retired agent whose memory.md becomes this one's first memory, as a
     # handoff. Never Ghost.
     seed_from: str | None = None
-
-
-class ConversationMove(BaseModel):
-    department: str = Field(min_length=1, max_length=80)
 
 
 class ConversationUpdate(BaseModel):
@@ -669,7 +629,7 @@ class ConversationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     aliases: list[str] | None = None
     job: str | None = Field(default=None, max_length=200)
-    voice: str | None = None  # "" means back to the department's voice
+    voice: str | None = None  # "" means back to Ghost's voice
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     persona: str | None = Field(default=None, max_length=4000)
     memory: str | None = Field(default=None, max_length=20000)

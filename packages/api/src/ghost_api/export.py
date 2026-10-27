@@ -68,10 +68,9 @@ def openapi() -> dict[str, Any]:
 
     from ghost_core import Store, WriteGate
     from ghost_core.conversations import Conversations
-    from ghost_core.departments import Departments
 
     store = Store()
-    departments = Departments(Path(tempfile.mkdtemp()) / "ghost")
+    config_dir = Path(tempfile.mkdtemp()) / "ghost"
     deps = Deps(
         state=DaemonState(version="schema", wake_mode="file"),
         control=_NoControl(),
@@ -79,8 +78,7 @@ def openapi() -> dict[str, Any]:
         store=store,
         sources=[],
         skills=None,
-        conversations=Conversations(store, departments),
-        departments=departments,
+        conversations=Conversations(store, config_dir),
         policy_path=Path("/dev/null"),
         settings_path=Path("/dev/null"),
         env_path=Path("/dev/null"),
