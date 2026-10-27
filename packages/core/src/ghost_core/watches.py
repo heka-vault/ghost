@@ -1,10 +1,10 @@
-"""Watches (ADR 0028): a department observes an outside system, deterministically first.
+"""Watches (ADR 0028): Ghost observes an outside system, deterministically first.
 
-A watch is declared by the operator in ``department.json`` under ``watches`` and never
-written by the model. A polled watch calls one of a connected app's read-only tools, on an
-interval, from the daemon (ADR 0034); no model is involved in that. What comes back is untrusted
-data: the watch keeps only the fields it names (a path, a type, a constraint) and drops
-the rest, then decides in declared steps, cheapest first:
+A watch is declared by the operator in ``watches.json`` in Ghost's folder, keyed by name
+(ADR 0035), and never written by the model. A polled watch calls one of a connected app's
+read-only tools, on an interval, from the daemon (ADR 0034); no model is involved in that.
+What comes back is untrusted data: the watch keeps only the fields it names (a path, a
+type, a constraint) and drops the rest, then decides in declared steps, cheapest first:
 
 1. ``when``: a deterministic check over the kept fields. Most watches stop here.
 2. ``jev``: a typed question to Jev over the fields the watch lets leave the machine;
@@ -15,9 +15,9 @@ A choice is a response: ``tell`` (the waiting list), ``record`` (kept, not alert
 ``drop`` (not an item). No step can pick anything else or grant anything. Every item has
 a stable key from a template over the fields, so one failure is one item.
 
-Example::
+Example, ``watches.json``::
 
-    "watches": {
+    {
       "ci": {
         "app": "github", "read": "list_workflow_runs",
         "args": {"owner": "heka-vault", "repo": "ghost", "status": "failure"},
@@ -83,7 +83,7 @@ _WATCH_KEYS = {
 
 
 class WatchError(ValueError):
-    """A watch declaration that does not read. Reported on the department."""
+    """A watch declaration that does not read. Reported with Ghost's folder."""
 
 
 # --- the declaration ----------------------------------------------------------------
@@ -180,7 +180,6 @@ class Ask:
 @dataclass(frozen=True)
 class Watch:
     name: str
-    department: str
     app: str
     read: str
     args: Mapping[str, Any]
@@ -200,7 +199,7 @@ class Watch:
     @property
     def source(self) -> str:
         """Its items' source, as the waiting list knows it."""
-        return f"watch:{self.department}/{self.name}"
+        return f"watch:{self.name}"
 
     def look(self, result: Any) -> tuple[list[dict[str, Scalar]], bool]:
         """The kept fields of each result, and whether that is every result the app sent.
@@ -245,9 +244,8 @@ class Watch:
             return None
         link = render(self.link, fields) if self.link else None
         return ItemDraft(
-            key=f"{self.department}:{key}"[:300],
+            key=f"{self.name}:{key}"[:300],
             title=title,
-            department=self.department,
             link=link if link and link.startswith(("https://", "http://")) else None,
             fields=dict(fields),
             response="tell" if response == "tell" else "record",
@@ -278,9 +276,9 @@ def _at(obj: Any, path: str) -> Any:
     return obj
 
 
-def parse_watches(body: object, department: str, where: str) -> tuple[dict[str, Watch], list[str]]:
-    """``watches`` from ``department.json``: the ones that read, and a problem for each
-    that doesn't (that one is off)."""
+def parse_watches(body: object, where: str) -> tuple[dict[str, Watch], list[str]]:
+    """``watches.json``, keyed by name: the ones that read, and a problem for each that
+    doesn't (that one is off)."""
     if body is None:
         return {}, []
     if not isinstance(body, Mapping):
@@ -289,13 +287,13 @@ def parse_watches(body: object, department: str, where: str) -> tuple[dict[str, 
     problems: list[str] = []
     for name, spec in body.items():
         try:
-            out[str(name)] = parse_watch(str(name), spec, department, f"{where}: watch {name}")
+            out[str(name)] = parse_watch(str(name), spec, f"{where}: watch {name}")
         except WatchError as e:
             problems.append(f"{e}; the watch is off")
     return out, problems
 
 
-def parse_watch(name: str, body: object, department: str, where: str) -> Watch:
+def parse_watch(name: str, body: object, where: str) -> Watch:
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", name):
         raise WatchError(f"{where}: a watch name is lowercase letters, digits, - and _")
     if not isinstance(body, Mapping):
@@ -340,7 +338,6 @@ def parse_watch(name: str, body: object, department: str, where: str) -> Watch:
         raise WatchError(f"{where}: urgency is digest, notify or call")
     return Watch(
         name=name,
-        department=department,
         app=app,
         read=read,
         args=dict(args),
@@ -523,7 +520,7 @@ Reader = Callable[[Watch], Awaitable[Any]]  # the declared read, untrimmed, scop
 
 @dataclass
 class WatchState:
-    """What the operator sees per watch: ``ghostd check``, ``GET /departments``."""
+    """What the operator sees per watch: ``ghostd check``, ``GET /watches``."""
 
     last_run: datetime | None = None
     last_ok: datetime | None = None
@@ -559,7 +556,7 @@ class WatchRunner:
         self.state: dict[str, WatchState] = {}
 
     def set_watches(self, watches: Sequence[Watch]) -> None:
-        """The declared watches, again (a folder was re-read): new ones start, gone ones
+        """The declared watches, again (the folder was re-read): new ones start, gone ones
         stop and their open items resolve, changed ones restart."""
         wanted = {w.source: w for w in watches}
         for source in set(self._tasks) | set(self.watches):
@@ -600,7 +597,7 @@ class WatchRunner:
 
     def _held(self, w: Watch, key: str) -> Item | None:
         """This watch's open item under ``key``, if it has one."""
-        item = self._items.get(f"{w.department}:{key}"[:300])
+        item = self._items.get(f"{w.name}:{key}"[:300])
         if item is None or item.source != w.source or item.resolved_at is not None:
             return None
         return item

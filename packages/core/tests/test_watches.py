@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 from ghost_core import Store
-from ghost_core.departments import load_department
+from ghost_core.folder import GhostFolder
 from ghost_core.models import utcnow
 from ghost_core.waiting import Items
 from ghost_core.watches import WatchError, WatchRunner, parse_watch, render
@@ -42,7 +42,7 @@ def run(i, branch="main", name="test", url=None):
 
 
 def watch(**over):
-    return parse_watch("ci", {**CI, **over}, "eng", "test")
+    return parse_watch("ci", {**CI, **over}, "test")
 
 
 # --- the declaration -------------------------------------------------------------
@@ -107,8 +107,8 @@ async def test_a_failure_is_one_item_until_it_is_gone():
     assert await runner.poll(w)
     assert await runner.poll(w)
     (item,) = items.open()
-    assert item.key == "eng:ci:7" and item.title == "CI failed on main: test"
-    assert item.link.startswith("https://github.com/") and item.source == "watch:eng/ci"
+    assert item.key == "ci:ci:7" and item.title == "CI failed on main: test"
+    assert item.link.startswith("https://github.com/") and item.source == "watch:ci"
     results.clear()
     await runner.poll(w)
     assert items.open() == []
@@ -126,7 +126,7 @@ async def test_a_read_that_fails_is_an_error_not_a_resolution():
     runner._read = broken
     assert await runner.poll(w) is False
     assert runner.state[w.source].error == "server down"
-    assert [i.key for i in items.open()] == ["eng:ci:7"]  # not resolved by a failed look
+    assert [i.key for i in items.open()] == ["ci:ci:7"]  # not resolved by a failed look
 
 
 async def test_for_minutes_waits_before_it_tells():
@@ -232,7 +232,7 @@ async def test_for_minutes_keeps_an_open_item_across_a_restart():
     (told,) = items.open()
     again = WatchRunner(items, reader([run(7)]))  # the daemon restarted: no first_match
     await again.poll(w, now=t0 + timedelta(minutes=7))
-    assert [i.key for i in items.open()] == ["eng:ci:7"]
+    assert [i.key for i in items.open()] == ["ci:ci:7"]
     await again.poll(w, now=t0 + timedelta(minutes=13))
     (still,) = items.open()
     assert still.first_seen == told.first_seen  # never resolved, so never news again
@@ -281,7 +281,7 @@ async def test_a_result_without_its_items_is_a_failed_read():
 
     runner._read = text
     assert await runner.poll(w) is False
-    assert runner.state[w.source].error and [i.key for i in items.open()] == ["eng:ci:7"]
+    assert runner.state[w.source].error and [i.key for i in items.open()] == ["ci:ci:7"]
 
 
 async def test_rows_dropped_by_a_constraint_or_the_cap_resolve_nothing():
@@ -292,10 +292,10 @@ async def test_rows_dropped_by_a_constraint_or_the_cap_resolve_nothing():
     await runner.poll(w)
     results[:] = [run(7, url="javascript:x")]  # breaks its constraint: dropped, not gone
     await runner.poll(w)
-    assert [i.key for i in items.open()] == ["eng:ci:7"]
+    assert [i.key for i in items.open()] == ["ci:ci:7"]
     results[:] = [run(i) for i in range(100, 200)] + [run(7)]  # 7 is past the cap
     await runner.poll(w)
-    assert "eng:ci:7" in {i.key for i in items.open()}
+    assert "ci:ci:7" in {i.key for i in items.open()}
 
 
 def test_a_result_missing_a_key_or_title_field_is_dropped():
@@ -331,20 +331,19 @@ async def test_a_poll_that_raises_is_recorded_and_the_watch_keeps_polling(monkey
     assert "database is locked" in runner.state[w.source].error
 
 
-# --- in the department folder and against a server ------------------------------------
+# --- in Ghost's folder and against a server ------------------------------------------
 
 
-def test_a_department_reads_its_watches_and_the_older_word_still_reads(tmp_path):
-    folder = tmp_path / "eng"
-    folder.mkdir()
+def test_watches_json_is_read_and_the_older_word_still_reads(tmp_path):
     older = {k: v for k, v in CI.items() if k != "app"} | {"server": "figma"}
-    body = {"watches": {"ci": CI, "pages": older, "Bad Name": CI}}
-    (folder / "department.json").write_text(json.dumps(body))
-    d = load_department("eng", folder)
-    assert list(d.watches) == ["ci", "pages"]
-    assert d.watches["ci"].app == "github" and d.watches["pages"].app == "figma"
-    assert any("Bad Name" in p for p in d.problems)
-    assert not any("unknown key" in p for p in d.problems)
+    body = {"ci": CI, "pages": older, "Bad Name": CI}
+    (tmp_path / "watches.json").write_text(json.dumps(body))
+    folder = GhostFolder(tmp_path)
+    assert list(folder.watches) == ["ci", "pages"]
+    assert folder.watches["ci"].app == "github" and folder.watches["pages"].app == "figma"
+    assert folder.watches["ci"].source == "watch:ci"  # ADR 0035: by name alone
+    assert any("Bad Name" in p for p in folder.problems)
+    assert not any("unknown key" in p for p in folder.problems)
 
 
 async def test_jev_as_a_watch_step_answers_only_with_a_confident_declared_choice():

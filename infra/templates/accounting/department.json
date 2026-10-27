@@ -1,7 +1,0 @@
-{
-  "title": "Accounting",
-  "aliases": ["the books", "finance"],
-  "permissions": {
-    "ask": ["books.*"]
-  }
-}

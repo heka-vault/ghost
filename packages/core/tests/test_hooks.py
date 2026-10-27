@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 from ghost_core import Store
-from ghost_core.departments import load_department
+from ghost_core.folder import GhostFolder
 from ghost_core.hooks import (
     H_EVENT,
     H_GH_EVENT,
@@ -76,13 +76,13 @@ def github_request(body: dict, *, delivery="d-1", secret=SECRET, event="workflow
 
 
 class Source:
-    """The department's declared read: what GitHub says now."""
+    """The declared check read: what GitHub says now."""
 
     def __init__(self, conclusion="failure", refuse=False):
         self.conclusion, self.refuse, self.calls = conclusion, refuse, []
 
-    async def __call__(self, department, server, read, args):
-        self.calls.append((department, server, read, args))
+    async def __call__(self, server, read, args):
+        self.calls.append((server, read, args))
         if self.refuse:
             raise ValueError("acme/other is not an allowed repository")
         return {"conclusion": self.conclusion, "logs": "…"}
@@ -93,7 +93,7 @@ def intake(read=None, store=None):
     i = HookIntake(
         Items(store), store, read=read or Source(), environ={"GITHUB_HOOK_SECRET": SECRET}
     )
-    h = parse_hook("ci", CI, "eng", "test")
+    h = parse_hook("ci", CI, "test")
     i.hooks[h.path] = h
     return i, h
 
@@ -106,8 +106,7 @@ async def test_a_signed_failure_checked_at_the_source_is_an_item():
     assert (res.status, res.outcome) == (202, "item")
     (item,) = i._items.open()
     assert (
-        item.key == "eng:ci:heka-vault/ghost"
-        and item.title == "CI failed on heka-vault/ghost: test"
+        item.key == "ci:ci:heka-vault/ghost" and item.title == "CI failed on heka-vault/ghost: test"
     )
     assert (
         item.fields["checked"] is True
@@ -115,7 +114,7 @@ async def test_a_signed_failure_checked_at_the_source_is_an_item():
         and "bio" not in str(item.fields)
     )
     assert source.calls == [
-        ("eng", "github", "get_workflow_run", {"repo": "heka-vault/ghost", "run_id": 101})
+        ("github", "get_workflow_run", {"repo": "heka-vault/ghost", "run_id": 101})
     ]
 
 
@@ -152,8 +151,8 @@ async def test_the_source_has_the_last_word():
     assert res.outcome == "the source does not say so" and i._items.open() == []
 
 
-async def test_a_check_read_the_department_blocks_refuses_the_delivery():
-    # There is no allowlist of references: what stops a check read is the department's
+async def test_a_check_read_the_permissions_block_refuses_the_delivery():
+    # There is no allowlist of references: what stops a check read is the operator's
     # block rules, enforced by the reader, and a refused read refuses the delivery.
     i, h = intake(Source(refuse=True))
     headers, raw = github_request(payload(repo="acme/other"))
@@ -166,7 +165,7 @@ async def test_a_check_read_the_department_blocks_refuses_the_delivery():
 async def test_a_signature_header_that_isnt_ascii_is_a_bad_signature(scheme):
     store = Store()
     i = HookIntake(Items(store), store, environ={"GITHUB_HOOK_SECRET": SECRET})
-    h = parse_hook("ci", {**CI, "verify": scheme}, "eng", "test")
+    h = parse_hook("ci", {**CI, "verify": scheme}, "test")
     i.hooks[h.path] = h
     raw = json.dumps(payload()).encode()
     ts = str(int(utcnow().timestamp()))
@@ -179,7 +178,7 @@ async def test_a_signature_header_that_isnt_ascii_is_a_bad_signature(scheme):
 async def test_an_empty_secret_never_verifies():
     store = Store()
     i = HookIntake(Items(store), store, read=Source(), environ={"GITHUB_HOOK_SECRET": ""})
-    h = parse_hook("ci", CI, "eng", "test")
+    h = parse_hook("ci", CI, "test")
     i.hooks[h.path] = h
     headers, raw = github_request(payload(), secret="")
     res = await i.receive(h.path, headers, raw)
@@ -233,7 +232,7 @@ async def test_a_resolve_is_believed_only_when_the_source_no_longer_says_failure
     res = await i.receive(h.path, headers, raw)
     assert res.status == 400 and res.outcome == "the source does not say so"
     assert len(i._items.open()) == 1
-    assert source.calls[-1][3] == {"repo": "heka-vault/ghost", "run_id": 102}
+    assert source.calls[-1][2] == {"repo": "heka-vault/ghost", "run_id": 102}
     # a read that fails refuses it too
     source.refuse = True
     headers, raw = github_request(payload(conclusion="success", run=103), delivery="d-3")
@@ -264,8 +263,8 @@ async def test_a_hook_resolves_only_its_own_items():
     from ghost_core.waiting import ItemDraft
 
     i, h = intake(Source(conclusion="success"))
-    key = "eng:ci:heka-vault/ghost"
-    i._items.observe("watch:eng/ci", ItemDraft(key=key, title="CI failed"))
+    key = "ci:ci:heka-vault/ghost"
+    i._items.observe("watch:ci", ItemDraft(key=key, title="CI failed"))
     headers, raw = github_request(payload(conclusion="success"))
     assert (await i.receive(h.path, headers, raw)).outcome == "resolved"
     assert [it.key for it in i._items.open()] == [key]  # the watch's item is the watch's
@@ -296,7 +295,7 @@ async def test_success_resolves_and_an_undeclared_event_is_ignored():
 
 async def test_an_unknown_path_is_not_found():
     i, _ = intake()
-    assert (await i.receive("/hooks/eng/nope", {}, b"{}")).status == 404
+    assert (await i.receive("/hooks/nope", {}, b"{}")).status == 404
 
 
 async def test_ghosts_own_scheme_has_a_clock_window():
@@ -364,7 +363,7 @@ async def test_ghosts_own_scheme_has_a_clock_window():
 )
 def test_a_bad_hook_declaration_is_refused(bad, why):
     with pytest.raises(WatchError, match=why):
-        parse_hook("ci", {**CI, **bad}, "eng", "test")
+        parse_hook("ci", {**CI, **bad}, "test")
 
 
 # --- fixtures and the folder ------------------------------------------------------------
@@ -377,7 +376,7 @@ def write_fixtures(folder, fixtures):
 
 
 def test_fixtures_must_exist_and_pass(tmp_path):
-    h = parse_hook("ci", CI, "eng", "test", tmp_path / "hooks" / "ci")
+    h = parse_hook("ci", CI, "test", tmp_path / "hooks" / "ci")
     assert "no fixtures" in run_fixtures(h)[0]
     write_fixtures(
         tmp_path / "hooks" / "ci",
@@ -386,7 +385,7 @@ def test_fixtures_must_exist_and_pass(tmp_path):
                 "headers": {H_GH_EVENT: "workflow_run"},
                 "body": payload(),
                 "readback": {"conclusion": "failure"},
-                "expect": {"outcome": "item", "key": "eng:ci:heka-vault/ghost"},
+                "expect": {"outcome": "item", "key": "ci:ci:heka-vault/ghost"},
             },
             "bad-signature": {
                 "headers": {H_GH_EVENT: "workflow_run"},
@@ -435,7 +434,7 @@ def test_fixtures_must_exist_and_pass(tmp_path):
 def test_a_hook_without_its_secret_or_fixtures_stays_off(tmp_path):
     store = Store()
     i = HookIntake(Items(store), store, environ={})
-    h = parse_hook("ci", CI, "eng", "test", tmp_path / "hooks" / "ci")
+    h = parse_hook("ci", CI, "test", tmp_path / "hooks" / "ci")
     (problem,) = i.set_hooks([h])
     assert "GITHUB_HOOK_SECRET" in problem and i.hooks == {}
     i = HookIntake(Items(store), store, environ={"GITHUB_HOOK_SECRET": "x"})
@@ -443,15 +442,16 @@ def test_a_hook_without_its_secret_or_fixtures_stays_off(tmp_path):
     assert "no fixtures" in problem
 
 
-def test_a_department_reads_its_hooks(tmp_path):
-    folder = tmp_path / "eng"
-    folder.mkdir()
+def test_hooks_json_is_read_with_fixtures_beside_it(tmp_path):
     check = {k: v for k, v in CI["events"]["workflow_run"]["check"].items() if k != "app"}
     other = {
         **CI,
         "events": {"x": {**CI["events"]["workflow_run"], "check": {**check, "server": "jira"}}},
     }
-    (folder / "department.json").write_text(json.dumps({"hooks": {"ci": CI, "tickets": other}}))
-    d = load_department("eng", folder)
-    assert list(d.hooks) == ["ci", "tickets"] and d.hooks["ci"].folder == folder / "hooks" / "ci"
-    assert d.hooks["tickets"].events["x"].check.app == "jira"  # the older word still reads
+    (tmp_path / "hooks.json").write_text(json.dumps({"ci": CI, "tickets": other}))
+    folder = GhostFolder(tmp_path)
+    assert list(folder.hooks) == ["ci", "tickets"]
+    ci = folder.hooks["ci"]
+    assert ci.folder == tmp_path / "hooks" / "ci"  # ADR 0035: hooks/<name>/ in Ghost's folder
+    assert (ci.source, ci.path) == ("hook:ci", "/hooks/ci")
+    assert folder.hooks["tickets"].events["x"].check.app == "jira"  # the older word still reads

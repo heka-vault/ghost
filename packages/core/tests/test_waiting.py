@@ -128,7 +128,7 @@ async def test_a_change_that_went_stale_is_refused_when_confirmed_later(gate, wr
 async def test_bring_back_attaches_it_to_another_session(gate, writer, target):
     p = await prepare(gate, target, session="old")
     gate.set_aside("old", "hung up")
-    assert gate.bring_back(p.id, "new", None).id == p.id
+    assert gate.bring_back(p.id, "new").id == p.id
     verdict, outcome = await gate.on_user_turn("new", "yes")
     assert verdict is Verdict.AFFIRMATIVE and outcome.status == "success"
 
@@ -159,7 +159,7 @@ def _asking_gate(writer):
     return gate
 
 
-async def _submit(gate, target, department=None, session="s1"):
+async def _submit(gate, target, session="s1", conversation=None):
     from test_gate import APPROVE
 
     sub = await gate.submit(
@@ -169,7 +169,7 @@ async def _submit(gate, target, department=None, session="s1"):
         target=target,
         changes=APPROVE,
         rationale="operator asked",
-        department=department,
+        conversation=conversation,
     )
     assert sub.outcome is None  # it waits for a yes
     return sub.proposal
@@ -202,39 +202,18 @@ async def test_a_change_blocked_while_it_waited_is_refused_when_spoken(writer, t
     _assert_refused_as_blocked(gate, writer, p, outcome)
 
 
-async def test_a_change_its_department_blocked_while_it_waited_is_refused(writer, target):
-    from ghost_core.permissions import Permissions
-
+async def test_any_session_brings_up_any_waiting_change(writer, target):
+    """ADR 0035: one set of permissions, so whichever agent proposed a change, any session
+    may take it up and answer it."""
     gate = _asking_gate(writer)
-    p = await _submit(gate, target, department="ops")
-    block = Permissions.parse({"block": ["github_issues"]}, "ops", narrow_only=True)
-    gate.set_department_policies({"ops": gate.autonomy.with_rules(block, "ops")})
-    _assert_refused_as_blocked(gate, writer, p, await gate.confirm_pending("s1"))
-
-
-async def test_a_session_brings_up_only_its_own_departments_changes(writer, target):
-    gate = _asking_gate(writer)
-    p = await _submit(gate, target, department="sales", session="old")
+    p = await _submit(gate, target, session="old", conversation="brand")
     gate.set_aside("old", "hung up")
-    assert gate.bring_back(p.id, "support-session", department="support") is None
-    assert gate.pending("support-session") is None
-    assert await gate.confirm_pending("support-session") is None
-    assert gate._store.get_proposal(p.id).status is ProposalStatus.PENDING
-    assert gate.bring_back(p.id, "sales-session", department="sales").id == p.id
-
-
-async def test_ghost_brings_up_any_departments_change(writer, target):
-    gate = _asking_gate(writer)
-    p = await _submit(gate, target, department="sales", session="old")
-    gate.set_aside("old", "hung up")
-    assert gate.bring_back(p.id, "ghost-session", department="ghost").id == p.id
+    assert gate.bring_back(p.id, "ghost-session").id == p.id
     verdict, outcome = await gate.on_user_turn("ghost-session", "yes")
     assert verdict is Verdict.AFFIRMATIVE and outcome.status == "success"
-    # a change made outside any department is Ghost's alone to bring up
     q = await _submit(gate, target, session="older")
     gate.set_aside("older", "hung up")
-    assert gate.bring_back(q.id, "sales-session", department="sales") is None
-    assert gate.bring_back(q.id, "ghost-session", department="ghost").id == q.id
+    assert gate.bring_back(q.id, "maya-session").id == q.id
 
 
 def test_pending_ttl_round_trips_and_is_bounded():
@@ -253,7 +232,7 @@ def test_pending_ttl_round_trips_and_is_bounded():
 
 async def test_the_list_has_the_waiting_changes_and_ghosts_problems(gate, target):
     p = await prepare(gate, target, changeset(SetState(state="closed")))
-    problems = [("server:github", "The github server is down", None)]
+    problems = [("server:github", "The github server is down")]
     calls = []
     waiting = WaitingList(
         Items(gate._store),
@@ -275,5 +254,5 @@ async def test_the_model_reads_typed_fields_only(gate, target):
     tool = waiting_source(waiting).read_tools[0]
     out = await tool.handler({})
     (item,) = out["items"]
-    assert set(item) == {"key", "source", "department", "title", "age_minutes", "state", "change"}
+    assert set(item) == {"key", "source", "title", "age_minutes", "state", "change"}
     assert item["source"] == GATE and item["change"] == p.id

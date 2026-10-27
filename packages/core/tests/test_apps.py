@@ -23,7 +23,6 @@ from ghost_core.apps import (
     source_of,
     verbs_of,
 )
-from ghost_core.permissions import Permissions
 from ghost_core.policy import PolicyError
 from mcp.client.session import ClientSession
 from mcp.server.mcpserver import MCPServer
@@ -73,12 +72,12 @@ def test_ghosts_own_names_are_not_app_names():
     operator's ``skills.*`` rules would apply to it."""
     from ghost_core.apps import RESERVED_NAMES, app_name_problem
     from ghost_core.conversations import SOURCE as CONVERSATIONS
-    from ghost_core.department_tools import SOURCE as DEPARTMENTS
     from ghost_core.outputs import SOURCE as OUTPUTS
+    from ghost_core.rules import SOURCE as RULES
     from ghost_core.skills import SOURCE as SKILLS
     from ghost_core.waiting import SOURCE as WAITING
 
-    assert {CONVERSATIONS, DEPARTMENTS, OUTPUTS, SKILLS, WAITING} <= RESERVED_NAMES
+    assert {CONVERSATIONS, OUTPUTS, RULES, SKILLS, WAITING} == RESERVED_NAMES
     f = parse_apps_json(
         '{"apps": {"skills": {"command": "x"}, "conversations": {"url": "https://x"},'
         ' "ok": {"command": "z"}}}',
@@ -361,8 +360,8 @@ async def test_a_block_refuses_the_call_and_a_whole_app_block_takes_the_tools_aw
                 {"owner": "acme", "repo": "site", "issue_number": 7, "body": "x"},
             )
         assert world.comments == []
-        assert gate.blocks_read("github", "list_issues", {"owner": "acme", "repo": "site"}, None)
-        assert not gate.blocks_read("github", "list_issues", {"owner": "acme", "repo": "app"}, None)
+        assert gate.blocks_read("github", "list_issues", {"owner": "acme", "repo": "site"})
+        assert not gate.blocks_read("github", "list_issues", {"owner": "acme", "repo": "app"})
         whole = gate_for(app, '[permissions]\nblock = ["github"]\n')
         assert not whole.offers("github", "issue_write")
         assert not whole.offers("github", "issue_read", read=True)
@@ -373,18 +372,6 @@ async def test_read_only_mode_blocks_changes_but_keeps_reads():
         gate = gate_for(app, '[permissions]\nmode = "read-only"\n')
         assert not gate.offers("github", "add_issue_comment")
         assert gate.offers("github", "issue_read", read=True)
-
-
-async def test_a_department_only_narrows():
-    async with connected() as (app, _):
-        gate = gate_for(app, '[permissions]\nallow = ["github.*"]\n')
-        dept = Permissions.parse({"ask": ["github.add_issue_comment"]}, "d", narrow_only=True)
-        gate.set_department_policies({"site": gate.autonomy.with_rules(dept)})
-        args = {"owner": "acme", "repo": "app", "issue_number": 42, "body": "x"}
-        here = await change(gate, app, "add_issue_comment", args, department="site")
-        assert here.autonomy is Autonomy.CONFIRM
-        ghost = await change(gate, app, "add_issue_comment", args)
-        assert ghost.autonomy is Autonomy.ANNOUNCE
 
 
 async def test_arguments_are_checked_against_the_tools_own_schema_and_bounded():

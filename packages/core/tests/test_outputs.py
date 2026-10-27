@@ -1,16 +1,14 @@
-"""What Ghost makes (ADR 0033): a file in out/, through the gate, never run."""
+"""What Ghost makes (ADR 0033): a file in its one out/ folder (ADR 0035), through the
+gate, never run."""
 
 from __future__ import annotations
 
-import json
 import os
 import stat
 from pathlib import Path
 
 import pytest
 from ghost_core import Autonomy, AutonomyPolicy, Store, WriteGate
-from ghost_core.conversations import Conversations
-from ghost_core.departments import Departments
 from ghost_core.outputs import MAX_BYTES, SOURCE, OutputError, Outputs, OutputTarget, list_outputs
 
 PAGE = "<!doctype html><title>Week</title><h1>Week in review</h1>"
@@ -19,17 +17,12 @@ PAGE = "<!doctype html><title>Week</title><h1>Week in review</h1>"
 @pytest.fixture
 def world(tmp_path: Path):
     cfg = tmp_path / "ghost"
-    (cfg / "departments" / "marketing").mkdir(parents=True)
-    (cfg / "departments" / "marketing" / "department.json").write_text(
-        json.dumps({"title": "Marketing"})
-    )
-    departments = Departments(cfg)
+    cfg.mkdir()
     store = Store()
-    convs = Conversations(store, departments)
-    outputs = Outputs(departments, convs)
+    outputs = Outputs(cfg)
     gate = WriteGate(store)
     gate.register(SOURCE, outputs.operations())
-    return cfg, departments, outputs, gate
+    return cfg, outputs, gate
 
 
 async def make(gate, outputs, op="write", **args):
@@ -46,8 +39,8 @@ async def make(gate, outputs, op="write", **args):
 
 
 async def test_a_new_file_is_written_at_announce_and_never_executable(world):
-    cfg, departments, outputs, gate = world
-    sub = await make(gate, outputs, name="week.html", content=PAGE, _active="ghost")
+    cfg, outputs, gate = world
+    sub = await make(gate, outputs, name="week.html", content=PAGE)
     assert sub.autonomy is Autonomy.ANNOUNCE and sub.outcome.status == "success"
     path = cfg / "out" / "week.html"
     assert path.read_text() == PAGE
@@ -56,29 +49,19 @@ async def test_a_new_file_is_written_at_announce_and_never_executable(world):
         sub.outcome.readback.exists
         and "week.html in Ghost's outputs" in sub.proposal.target.spoken()
     )
-    assert [f["name"] for f in list_outputs(departments.ghost)] == ["week.html"]
-
-
-async def test_a_department_writes_into_its_own_out_folder(world):
-    cfg, _, outputs, gate = world
-    sub = await make(gate, outputs, name="plan.md", content="# Plan\n", _active="marketing")
-    assert (cfg / "departments" / "marketing" / "out" / "plan.md").is_file()
-    assert sub.proposal.target.scope() == "marketing"
+    assert [f["name"] for f in list_outputs(cfg)] == ["week.html"]
+    assert sub.proposal.target.scope() == "week.html"  # what a permission rule matches
 
 
 async def test_replacing_is_its_own_operation_and_an_ask_rule_makes_it_wait(world):
-    _, _, outputs, gate = world
-    await make(gate, outputs, name="week.html", content=PAGE, _active="ghost")
+    _, outputs, gate = world
+    await make(gate, outputs, name="week.html", content=PAGE)
     with pytest.raises(OutputError, match="replace"):
-        await make(gate, outputs, name="week.html", content=PAGE, _active="ghost")
-    sub = await make(
-        gate, outputs, "replace", name="week.html", content=PAGE + "<p>v2", _active="ghost"
-    )
+        await make(gate, outputs, name="week.html", content=PAGE)
+    sub = await make(gate, outputs, "replace", name="week.html", content=PAGE + "<p>v2")
     assert sub.autonomy is Autonomy.ANNOUNCE and sub.outcome.status == "success"  # ADR 0034
     gate.set_autonomy(AutonomyPolicy.parse('[permissions]\nask = ["outputs.replace"]\n'))
-    sub = await make(
-        gate, outputs, "replace", name="week.html", content=PAGE + "<p>v3", _active="ghost"
-    )
+    sub = await make(gate, outputs, "replace", name="week.html", content=PAGE + "<p>v3")
     assert sub.autonomy is Autonomy.CONFIRM and sub.outcome is None  # waits for a yes
 
 
@@ -95,36 +78,36 @@ async def test_replacing_is_its_own_operation_and_an_ask_rule_makes_it_wait(worl
     ],
 )
 async def test_a_bad_name_is_refused_before_any_write(world, name):
-    cfg, _, outputs, gate = world
+    cfg, outputs, gate = world
     with pytest.raises(OutputError):
-        await make(gate, outputs, name=name, content="x", _active="ghost")
+        await make(gate, outputs, name=name, content="x")
     assert not (cfg / "out").exists() or list((cfg / "out").iterdir()) == []
 
 
 async def test_too_big_or_empty_is_refused(world):
-    _, _, outputs, gate = world
+    _, outputs, gate = world
     with pytest.raises(OutputError, match="KB"):
-        await make(gate, outputs, name="big.txt", content="x" * (MAX_BYTES + 1), _active="ghost")
+        await make(gate, outputs, name="big.txt", content="x" * (MAX_BYTES + 1))
     with pytest.raises(OutputError, match="nothing"):
-        await make(gate, outputs, name="empty.txt", content="  ", _active="ghost")
+        await make(gate, outputs, name="empty.txt", content="  ")
 
 
 async def test_never_through_a_link(world, tmp_path):
-    cfg, _, outputs, gate = world
+    cfg, outputs, gate = world
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     (cfg / "out").symlink_to(elsewhere)
-    target = OutputTarget(department="ghost", name="week.html")
+    target = OutputTarget(name="week.html")
     assert not outputs.writer.allowed(target)
     with pytest.raises(Exception, match="not allowed|link"):
-        await make(gate, outputs, name="week.html", content=PAGE, _active="ghost")
+        await make(gate, outputs, name="week.html", content=PAGE)
     assert list(elsewhere.iterdir()) == []
 
 
 async def test_the_model_lists_what_is_there(world):
-    _, _, outputs, gate = world
-    await make(gate, outputs, name="week.html", content=PAGE, _active="ghost")
-    out = await outputs.read_tools()[0].handler({"_active": "ghost"})
+    _, outputs, gate = world
+    await make(gate, outputs, name="week.html", content=PAGE)
+    out = await outputs.read_tools()[0].handler({})
     assert out == {
         "folder": "Ghost's outputs",
         "files": [{"name": "week.html", "bytes": len(PAGE)}],

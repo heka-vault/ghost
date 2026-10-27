@@ -1,5 +1,4 @@
-"""What Ghost makes (ADR 0033): a file in the active department's ``out/`` folder, written
-through the gate.
+"""What Ghost makes (ADR 0033): a file in Ghost's ``out/`` folder, written through the gate.
 
 Ghost does real work itself, code included: asked for a presentation, it writes the page.
 ``outputs.write`` creates a file and ``outputs.replace`` replaces one, each a gate operation
@@ -8,8 +7,7 @@ allowed extension, in ``out/`` and nowhere else, never through a link; the conte
 capped. Ghost never runs what it makes: a page is opened by the operator, and a script runs
 only from a skill, through ``ghost-scripts`` (ADR 0023).
 
-Ghost's own folder is ``~/.config/ghost/out/``; a department's is its folder's ``out/``,
-never its ``root`` (Ghost does not write into a project folder).
+There is one folder, ``~/.config/ghost/out/``, whichever agent made the file (ADR 0035).
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from ghost_core.departments import Department, Departments
 from ghost_core.models import Change, ChangeSet, Snapshot, Target
 from ghost_core.source import Operation, Prepared, ReadTool, ToolSource
 
@@ -50,25 +47,22 @@ def check_name(name: str) -> str:
     return n
 
 
-def out_dir(d: Department) -> Path:
-    """The department's outputs: its own folder's out/, never a root."""
-    return d.path / OUT_DIR
+def out_dir(config_dir: Path) -> Path:
+    """Ghost's outputs: ``out/`` in its folder."""
+    return Path(config_dir) / OUT_DIR
 
 
 class OutputTarget(Target, frozen=True):
-    department: str
-    title: str = ""
     name: str
 
     def key(self) -> str:
-        return f"output:{self.department}/{self.name}"
+        return f"output:{self.name}"
 
     def scope(self) -> str:
-        return self.department
+        return self.name
 
     def spoken(self) -> str:
-        where = "Ghost's" if self.department == "ghost" else f"{self.title or self.department}'s"
-        return f"{self.name} in {where} outputs"
+        return f"{self.name} in Ghost's outputs"
 
     def mentions(self) -> set[str]:
         stem = self.name.rsplit(".", 1)[0].lower()
@@ -94,15 +88,12 @@ class WriteFile(Change, frozen=True):
 
 
 class OutputWriter:
-    def __init__(self, departments: Departments) -> None:
-        self._departments = departments
+    def __init__(self, folder: Path) -> None:
+        self._folder = folder
 
     def _path(self, target: Target) -> Path:
         assert isinstance(target, OutputTarget)
-        d = self._departments.get(target.department)
-        if d is None:
-            raise OutputError(f"there is no department {target.department}")
-        folder = out_dir(d)
+        folder = self._folder
         if folder.is_symlink():
             raise OutputError(f"{folder} is a link; Ghost writes only into a real out/ folder")
         path = folder / check_name(target.name)
@@ -158,8 +149,8 @@ def _write_atomic(p: Path, data: bytes) -> None:
         raise
 
 
-def list_outputs(d: Department) -> list[dict[str, Any]]:
-    folder = out_dir(d)
+def list_outputs(config_dir: Path) -> list[dict[str, Any]]:
+    folder = out_dir(config_dir)
     if not folder.is_dir() or folder.is_symlink():
         return []
     out = []
@@ -174,34 +165,25 @@ def list_outputs(d: Department) -> list[dict[str, Any]]:
 class Outputs:
     """The ``outputs`` source: one read (what is in out/) and the two writes."""
 
-    def __init__(self, departments: Departments, conversations: Any = None) -> None:
-        self.departments = departments
-        self._conversations = conversations
-        self.writer = OutputWriter(departments)
-
-    def _here(self, active: object) -> Department:
-        slug = str(active or "ghost")
-        if self._conversations is not None:
-            p = self._conversations.get(slug)
-            if p is not None:
-                return self._conversations.department_of(p)
-        return self.departments.get(slug) or self.departments.ghost
+    def __init__(self, config_dir: Path) -> None:
+        self.config_dir = Path(config_dir)
+        self.folder = out_dir(self.config_dir)
+        self.writer = OutputWriter(self.folder)
 
     def _prepare(self, args: dict[str, Any], *, replace: bool) -> Prepared:
-        d = self._here(args.get("_active"))
         name = check_name(str(args.get("name") or ""))
         content = str(args.get("content") or "")
         if not content.strip():
             raise OutputError("there is nothing to write")
         if len(content.encode()) > MAX_BYTES:
             raise OutputError(f"an output is at most {MAX_BYTES // 1024} KB; make it smaller")
-        exists = (out_dir(d) / name).is_file()
+        exists = (self.folder / name).is_file()
         if exists and not replace:
             raise OutputError(f"{name} is already there: use outputs.replace, or another name")
         if replace and not exists:
             raise OutputError(f"there is no {name} to replace: use outputs.write")
         return Prepared(
-            target=OutputTarget(department=d.slug, title=d.title, name=name),
+            target=OutputTarget(name=name),
             changes=ChangeSet(steps=(WriteFile(content=content, replace=replace),)),
             rationale=str(args.get("rationale") or f"{name}, made for the operator"),
         )
@@ -227,7 +209,7 @@ class Outputs:
                 "write",
                 (
                     "Make a file for the operator (a page, a summary, a table, a small script) "
-                    "in this department's outputs folder. Ghost never runs it. Say where it is "
+                    "in Ghost's outputs folder. Ghost never runs it. Say where it is "
                     "in a few words afterwards."
                 ),
                 props,
@@ -240,7 +222,7 @@ class Outputs:
             ),
             Operation(
                 "replace",
-                "Replace a file already in this department's outputs with a new version.",
+                "Replace a file already in Ghost's outputs with a new version.",
                 props,
                 ["name", "content"],
                 prepare=replace,
@@ -252,17 +234,18 @@ class Outputs:
         ]
 
     def read_tools(self) -> list[ReadTool]:
-        async def listing(args: dict[str, Any]) -> dict[str, Any]:
-            d = self._here(args.get("_active"))
+        async def listing(_args: dict[str, Any]) -> dict[str, Any]:
             return {
-                "folder": f"{d.title}'s outputs",
-                "files": [{"name": f["name"], "bytes": f["bytes"]} for f in list_outputs(d)],
+                "folder": "Ghost's outputs",
+                "files": [
+                    {"name": f["name"], "bytes": f["bytes"]} for f in list_outputs(self.config_dir)
+                ],
             }
 
         return [
             ReadTool(
                 "list_outputs",
-                "The files Ghost has made in this department's outputs folder.",
+                "The files Ghost has made in its outputs folder.",
                 {},
                 [],
                 listing,
@@ -274,7 +257,7 @@ class Outputs:
             name=SOURCE,
             prompt=(
                 "You can make self-contained things yourself (a page, a summary, a table, a "
-                "small script) with outputs.write; they land in the department's outputs "
+                "small script) with outputs.write; they land in Ghost's outputs "
                 "folder and you never run them. Sustained work inside a codebase belongs to "
                 "the operator's coding tools, not you."
             ),

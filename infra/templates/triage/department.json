@@ -1,8 +1,0 @@
-{
-  "title": "Triage",
-  "aliases": ["issues", "the triage desk"],
-  "permissions": {
-    "block": ["github.*(owner!=ghost-mock)"],
-    "ask": ["github.issue_write(state=closed)"]
-  }
-}

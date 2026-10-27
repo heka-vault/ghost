@@ -63,27 +63,19 @@ def test_example_layout_parses():
     from pathlib import Path
 
     from ghost_core.apps import APPS_FILE, load_apps
-    from ghost_core.departments import load_department
+    from ghost_core.folder import GhostFolder
     from ghost_core.permissions import Mode
 
     infra = Path(__file__).parents[3] / "infra"
     p = AutonomyPolicy.parse((infra / "policy.example.toml").read_text())
     assert p.permissions.mode is Mode.OPEN and not any(p.permissions.rules().values())
-    ghost = load_department("ghost", infra / "example", is_ghost=True)
-    assert ghost.problems == []
+    assert p.resolve("github", "issue_write") is Autonomy.ANNOUNCE
+    ghost = GhostFolder(infra / "example")
+    assert ghost.problems == []  # nothing an older layout left, nothing broken
+    assert ghost.rules().startswith("# Ghost")
     apps = load_apps(infra / "example" / APPS_FILE)
     assert apps.problems == () and set(apps.apps) == {"github"}
-    for folder in sorted((infra / "templates").iterdir()):
-        if folder.is_dir():
-            assert load_department(folder.name, folder).problems == [], folder.name
-    assert ghost.policy(p).resolve("github", "issue_write") is Autonomy.ANNOUNCE
-    assert ghost.rules_lead() == "Ghost"
-    triage = load_department("triage", infra / "templates" / "triage")
-    t = triage.policy(p)
-    assert t.resolve("github", "issue_write", {"owner": "acme"}) is Autonomy.DENY
-    assert t.resolve("github", "issue_write", {"owner": "ghost-mock"}) is Autonomy.ANNOUNCE
-    closing = {"owner": "ghost-mock", "state": "closed"}
-    assert t.resolve("github", "issue_write", closing) is Autonomy.CONFIRM
+    assert not (infra / "templates").exists()  # ADR 0035: no department folders to copy
 
 
 def test_abilities_section_is_ignored():
