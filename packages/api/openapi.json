@@ -765,6 +765,14 @@
             "title": "Docs",
             "type": "array"
           },
+          "hooks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HookInfo"
+            },
+            "title": "Hooks",
+            "type": "array"
+          },
           "is_ghost": {
             "title": "Is Ghost",
             "type": "boolean"
@@ -977,6 +985,86 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HookInfo": {
+        "description": "A webhook the department takes (ADR 0027): on or off, and what came of deliveries\nsince the daemon started. Counts only; never a body.",
+        "properties": {
+          "accepted": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Accepted",
+            "type": "object"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "off_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Off Reason"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "rejected": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Rejected",
+            "type": "object"
+          },
+          "verify": {
+            "enum": [
+              "github",
+              "hmac"
+            ],
+            "title": "Verify",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "verify",
+          "events",
+          "on"
+        ],
+        "title": "HookInfo",
         "type": "object"
       },
       "ItemKey": {

@@ -72,6 +72,11 @@ class GhostdSettings(BaseSettings):
     # TCP port and UDP from the LAN (aiortc picks random UDP ports).
     phone_listen: str = ""
 
+    # Webhook listener (ADR 0027): POST /hooks/<department>/<name> only, for the hooks the
+    # department folders declare; host:port, comma separated. Empty = off. Every delivery is
+    # signed, parsed by declaration and checked at the source before it is an item.
+    hooks_listen: str = ""
+
     # Wake. transcript: local VAD + Parakeet while passive, looking for a phrase
     # (ADR 0010); onnx: the trained "hey ghost" detector, that phrase only, with no
     # transcript fallback (ADR 0025, ghost_voice.wakeword); file: `ghostd wake` /

@@ -117,6 +117,18 @@ CREATE TABLE IF NOT EXISTS items (
     snoozed_until   TEXT
 );
 CREATE INDEX IF NOT EXISTS items_open ON items(resolved_at, source);
+
+-- Webhook deliveries (ADR 0027): the id, so a replay is refused, and what came of it.
+-- Never the body.
+CREATE TABLE IF NOT EXISTS deliveries (
+    source      TEXT NOT NULL,
+    id          TEXT NOT NULL,
+    at          TEXT NOT NULL,
+    outcome     TEXT,
+    item        TEXT,
+    checked     INTEGER,
+    PRIMARY KEY (source, id)
+);
 """
 
 # The three tables the lines (ADR 0014 to 0023) lived in. ADR 0024 starts over: they are
@@ -448,6 +460,26 @@ class Store:
             [*values.values(), key],
         )
         return cur.rowcount == 1
+
+    # webhook deliveries (ADR 0027)
+
+    def first_delivery(self, source: str, delivery: str, now: datetime, *, keep) -> bool:
+        """Record a delivery id; False when it was seen before (a replay). Ids older than
+        ``keep`` are forgotten."""
+        self._conn.execute("DELETE FROM deliveries WHERE at < ?", ((now - keep).isoformat(),))
+        cur = self._conn.execute(
+            "INSERT OR IGNORE INTO deliveries (source, id, at) VALUES (?, ?, ?)",
+            (source, delivery, now.isoformat()),
+        )
+        return cur.rowcount == 1
+
+    def note_delivery(
+        self, source: str, delivery: str, outcome: str, item: str, checked: bool
+    ) -> None:
+        self._conn.execute(
+            "UPDATE deliveries SET outcome = ?, item = ?, checked = ? WHERE source = ? AND id = ?",
+            (outcome, item or None, 1 if checked else 0, source, delivery),
+        )
 
     # per-ability key/value
 

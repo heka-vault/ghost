@@ -46,6 +46,7 @@ from typing import Any
 
 from loguru import logger
 
+from ghost_core.hooks import Hook, parse_hooks
 from ghost_core.mcp import (
     SERVER_NAME_RE,
     ScopeSpec,
@@ -91,6 +92,7 @@ _DEPARTMENT_KEYS = {
     "root_servers",
     "servers",
     "watches",  # ADR 0028
+    "hooks",  # ADR 0027
 }
 # A literal that is probably a token: a known prefix, or a bearer value with no reference.
 _SECRET_SHAPES = re.compile(r"^(ghp_|github_pat_|gho_|sk-|xox[abp]-|AKIA|glpat-|Bearer\s+\S{16,})")
@@ -289,6 +291,7 @@ class Department:
     uses: tuple[str, ...] = ()  # Ghost's servers it reaches through its own declaration
     declarations: dict[str, Declaration] = field(default_factory=dict)
     watches: dict[str, Watch] = field(default_factory=dict)  # ADR 0028
+    hooks: dict[str, Hook] = field(default_factory=dict)  # ADR 0027
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -547,6 +550,20 @@ def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Departm
                 "starts nor uses; the watch is off"
             )
             del watches[wname]
+    hooks, hook_problems = parse_hooks(data.get("hooks"), slug, str(file), path)
+    problems.extend(hook_problems)
+    for hname, h in list(hooks.items()):
+        lacking = sorted(
+            {e.check.server for e in h.events.values() if e.check is not None}
+            - set(servers)
+            - set(uses)
+        )
+        if lacking:
+            problems.append(
+                f"{file}: hook {hname} checks with {', '.join(lacking)}, which this department "
+                "neither starts nor uses; the hook is off"
+            )
+            del hooks[hname]
     return Department(
         slug=slug,
         path=path,
@@ -560,6 +577,7 @@ def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Departm
         uses=uses,
         declarations=declarations,
         watches=watches,
+        hooks=hooks,
         problems=problems,
     )
 
@@ -876,24 +894,33 @@ class Fleet:
         return own.servers.get(name) if own is not None else None
 
     async def watch_read(self, watch: Watch) -> Any:
-        """A watch's read (ADR 0028): the daemon calls it, no model. It must be a read the
-        department reaches, its allowlist applies, and the result is not trimmed. A server
-        whose transport died is brought back first."""
-        d = self.departments.get(watch.department)
+        """A watch's read (ADR 0028): the daemon calls it, no model."""
+        return await self.read_for(watch.department, watch.server, watch.read, dict(watch.args))
+
+    async def read_for(
+        self, department: str, server_name: str, read: str, args: dict[str, Any]
+    ) -> Any:
+        """A read the daemon makes for a department (a watch's look, a webhook's check at
+        the source, ADR 0027/0028): one of the reads its declaration offers, its allowlist
+        applied, the result not trimmed. A server whose transport died is brought back
+        first; a department's own servers are started if they are not up."""
+        d = self.departments.get(department)
         if d is None:
-            raise ValueError(f"no department {watch.department}")
-        servers = self.ghost if d.is_ghost or watch.server in d.uses else self.own.get(d.slug)
+            raise ValueError(f"no department {department}")
+        own = not d.is_ghost and server_name not in d.uses
+        servers = self.own.get(d.slug) if own else self.ghost
         if servers is None:
-            await self.pin(d.slug)
+            await self.enter(d.slug)
             servers = self.own.get(d.slug)
             if servers is None:
                 raise ValueError(f"{d.title}'s servers are not up")
-        if not servers.is_up(watch.server):
-            await servers.revive(watch.server)
-        server = self.watch_server(d, watch.server)
+            self.leave(d.slug)  # idles out unless a watch pinned it
+        if not servers.is_up(server_name):
+            await servers.revive(server_name)
+        server = self.watch_server(d, server_name)
         if server is None:
-            raise ValueError(f"{watch.server} is not connected")
-        return await server.watch_read(watch.read, dict(watch.args))
+            raise ValueError(f"{server_name} is not connected")
+        return await server.watch_read(read, args)
 
     async def stop(self, slug: str) -> None:
         self._cancel_timer(slug)

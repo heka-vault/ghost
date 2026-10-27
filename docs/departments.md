@@ -185,6 +185,64 @@ whose transport died is started again before the next look, backing off while it
 `ghostd check` lists the watches, `GET /departments` shows each one's last look, error and
 open items, and a watch that doesn't read is a problem on the department and stays off.
 
+## Webhooks
+
+A department can take webhooks (ADR 0027): `hooks` in `department.json`. The daemon serves
+`POST /hooks/<department>/<name>` on `GHOST_HOOKS_LISTEN` (off when empty; its own
+addresses, nothing else on them). Every step before an item is deterministic and tested:
+
+```json
+"hooks": {
+  "ci": {
+    "verify": "github",
+    "secret": "${GITHUB_HOOK_SECRET}",
+    "events": {
+      "workflow_run": {
+        "fields": {
+          "action": {"at": "action"},
+          "conclusion": {"at": "workflow_run.conclusion"},
+          "id": {"at": "workflow_run.id", "type": "int"},
+          "repo": {"at": "repository.full_name", "pattern": "^[\\w.-]+/[\\w.-]+$"}
+        },
+        "when": [{"field": "conclusion", "op": "==", "value": "failure"}],
+        "resolve": [{"field": "conclusion", "op": "==", "value": "success"}],
+        "key": "ci:{repo}",
+        "title": "CI failed on {repo}",
+        "check": {
+          "server": "github", "read": "get_workflow_run",
+          "args": {"owner": "heka-vault", "repo": "ghost", "run_id": "{id}"},
+          "fields": {"conclusion": {"at": "conclusion"}},
+          "when": [{"field": "conclusion", "op": "==", "value": "failure"}]
+        }
+      }
+    }
+  }
+}
+```
+
+- **`verify`**: `github` checks `X-Hub-Signature-256` over the raw body and refuses a
+  repeated `X-GitHub-Delivery`; `hmac` is Ghost's own scheme for local senders:
+  `X-Ghost-Signature: sha256=` HMAC of `<X-Ghost-Timestamp>.<X-Ghost-Delivery>.<body>`, a
+  five-minute window, and `X-Ghost-Event` names the event. The secret is `${NAME}` from
+  the environment; a hook whose secret isn't set stays off.
+- **`events`**: only declared events count; anything else is ignored. Fields are typed,
+  constrained paths, as a watch's are; one that breaks its constraint refuses the whole
+  delivery, and everything not declared is dropped. `resolve` checks close the item,
+  `when` checks open it.
+- **`check`**: the reference is read again through the department's declared read, its
+  allowlist applied, and that read is believed: a read that fails, falls outside the
+  allowlist or doesn't hold refuses the delivery. Without `check` the item says unchecked.
+- **Fixtures**: recorded deliveries in `hooks/<name>/*.json` beside `department.json`, each
+  with `headers`, `body`, an `expect` (`item` with its `key`/`title`/`fields`, `resolved`,
+  `ignored`, or `rejected` with a `reason`), and optionally `sign` (`bad`, `none`),
+  `age_secs`, `replay`, and `readback` (what the source's read returns; `{"refuse": true}`
+  for outside the allowlist). They are signed with a fixture secret, never a real one. A
+  hook with no fixtures, or with one that fails, stays off; `ghostd check` runs them.
+
+What is kept is the parsed fields, the delivery id and the outcome, never a body. The
+listener answers accepted or refused, nothing more; `GET /departments` shows each hook's
+counts. A local sender signs with `ghostd push <department>/<hook> <event> '<json>'`.
+
 ## The journal
 
 Every write in a department, by any of its agents, is in the audit with the agent and the

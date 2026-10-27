@@ -1085,6 +1085,11 @@ export interface components {
              * @default []
              */
             docs: string[];
+            /**
+             * Hooks
+             * @default []
+             */
+            hooks: components["schemas"]["HookInfo"][];
             /** Is Ghost */
             is_ghost: boolean;
             /**
@@ -1169,6 +1174,44 @@ export interface components {
             input_device: string | null;
             /** Output Device */
             output_device: string | null;
+        };
+        /**
+         * HookInfo
+         * @description A webhook the department takes (ADR 0027): on or off, and what came of deliveries
+         *     since the daemon started. Counts only; never a body.
+         */
+        HookInfo: {
+            /**
+             * Accepted
+             * @default {}
+             */
+            accepted: {
+                [key: string]: number;
+            };
+            /** Events */
+            events: string[];
+            /** Last */
+            last?: string | null;
+            /** Name */
+            name: string;
+            /** Off Reason */
+            off_reason?: string | null;
+            /** On */
+            on: boolean;
+            /** Path */
+            path: string;
+            /**
+             * Rejected
+             * @default {}
+             */
+            rejected: {
+                [key: string]: number;
+            };
+            /**
+             * Verify
+             * @enum {string}
+             */
+            verify: "github" | "hmac";
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1937,6 +1980,7 @@ export type SchemaDepartmentCreate = components['schemas']['DepartmentCreate'];
 export type SchemaDepartmentView = components['schemas']['DepartmentView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
+export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaJournalEntry = components['schemas']['JournalEntry'];

@@ -1,6 +1,6 @@
 # 0027: A public listener may take webhooks: signed, parsed by declaration, checked at the source
 
-- **Status:** accepted (not built yet)
+- **Status:** accepted (built 2026-10-27: `ghost_core.hooks`, `ghostd.hooks`, `ghostd push`)
 - **Date:** 2026-10-27
 - **Amends:** ADR 0020 (a public listener is no longer ruled out; the phone path is unchanged)
 

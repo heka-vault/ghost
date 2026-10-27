@@ -324,6 +324,21 @@ class WatchInfo(BaseModel):
     open: int = 0  # items it holds open now
 
 
+class HookInfo(BaseModel):
+    """A webhook the department takes (ADR 0027): on or off, and what came of deliveries
+    since the daemon started. Counts only; never a body."""
+
+    name: str
+    path: str  # POST here on the webhook listener
+    verify: Literal["github", "hmac"]
+    events: list[str]
+    on: bool
+    off_reason: str | None = None
+    accepted: dict[str, int] = {}  # item, resolved, ignored
+    rejected: dict[str, int] = {}  # by reason
+    last: datetime | None = None
+
+
 class DepartmentView(BaseModel):
     """A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
     skills and agents. Ghost is one too."""
@@ -346,6 +361,7 @@ class DepartmentView(BaseModel):
     agents: list[str] = []  # slugs, the department's own first
     problems: list[str] = []  # what is wrong in its files, for the operator
     watches: list[WatchInfo] = []  # ADR 0028
+    hooks: list[HookInfo] = []  # ADR 0027
 
 
 class DepartmentCreate(BaseModel):

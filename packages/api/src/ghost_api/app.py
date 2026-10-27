@@ -41,6 +41,7 @@ from ghost_api.models import (
     DeviceInfo,
     DevicesView,
     Event,
+    HookInfo,
     ItemKey,
     JournalEntry,
     McpScopeInfo,
@@ -127,9 +128,11 @@ class Deps:
         department_tools: Any = None,  # ghost_core.department_tools.DepartmentTools
         waiting: Any = None,  # ghost_core.waiting.WaitingList
         watches: Any = None,  # ghost_core.watches.WatchRunner
+        hooks: Any = None,  # ghost_core.hooks.HookIntake
     ) -> None:
         self.waiting = waiting
         self.watches = watches
+        self.hooks = hooks
         self.conversations = conversations
         self.mcp = mcp
         self.skills = skills
@@ -509,6 +512,22 @@ def create_app(deps: Deps) -> FastAPI:
                 *(deps.fleet.failures(d.slug) if deps.fleet is not None else []),
             ],
             watches=[watch_info(w) for w in getattr(d, "watches", {}).values()],
+            hooks=[hook_info(h) for h in getattr(d, "hooks", {}).values()],
+        )
+
+    def hook_info(h) -> HookInfo:
+        intake = deps.hooks
+        st = intake.state.get(h.path) if intake is not None else None
+        return HookInfo(
+            name=h.name,
+            path=h.path,
+            verify=h.verify,
+            events=list(h.events),
+            on=intake is not None and h.path in intake.hooks,
+            off_reason=intake.off.get(h.path) if intake is not None else "the listener is off",
+            accepted=dict(st.accepted) if st else {},
+            rejected=dict(st.rejected) if st else {},
+            last=st.last if st else None,
         )
 
     def watch_info(w) -> WatchInfo:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import sys
 from collections.abc import Awaitable, Callable, Sequence
@@ -43,6 +44,7 @@ from ghost_core.conversations import GHOST, Conversations, Profile, conversation
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.department_tools import DepartmentTools, departments_source
 from ghost_core.departments import Departments, Fleet, all_sources
+from ghost_core.hooks import Hook, HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.mcp import Servers
 from ghost_core.skills import Skills
@@ -66,6 +68,7 @@ from ghostd.audio import Ducker, chime, restore_from_state
 from ghostd.config import GhostdSettings, runtime_dir
 from ghostd.deciders import model_decider
 from ghostd.dictation import is_dictating
+from ghostd.hooks import HooksListener
 from ghostd.phone import PhoneListener, PhoneStore, Refusal
 from ghostd.wake import FileWakeDetector, SpokenWakeDetector, WakeDetector
 
@@ -92,6 +95,11 @@ PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then
 def declared_watches(departments: Departments) -> list[Watch]:
     """Every department's watches (ADR 0028), Ghost's first."""
     return [w for d in departments.list() for w in d.watches.values()]
+
+
+def declared_hooks(departments: Departments) -> list[Hook]:
+    """Every department's webhooks (ADR 0027)."""
+    return [h for d in departments.list() for h in d.hooks.values()]
 
 
 def is_own_server(departments: Departments, w: Watch) -> bool:
@@ -179,6 +187,7 @@ class Daemon:
         self.gate: WriteGate | None = None
         self.waiting: WaitingList | None = None  # ADR 0029; set in run()
         self.watch_runner: WatchRunner | None = None  # ADR 0028; set in run()
+        self.hook_intake: HookIntake | None = None  # ADR 0027; set in run()
         self._first_via = "voice"  # how the wake-time utterance arrived
         self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
@@ -626,6 +635,14 @@ class Daemon:
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.watch_runner = watch_runner
+        # ADR 0027: webhooks, signed and parsed by declaration, checked through read_for.
+        hook_intake = HookIntake(
+            waiting.items,
+            store,
+            read=fleet.read_for,
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
+        self.hook_intake = hook_intake
 
         def register_department(slug: str) -> None:
             """A department's own servers came up: their declared writes join the gate."""
@@ -689,11 +706,16 @@ class Daemon:
             needed = {w.department for w in watched if is_own_server(departments, w)}
             for slug in list(fleet.pinned - needed):
                 fleet.unpin(slug)
+            for slug in needed - fleet.pinned:
+                asyncio.ensure_future(fleet.pin(slug))
+            for problem in hook_intake.set_hooks(declared_hooks(departments)):
+                logger.warning(f"hooks: {problem}")
 
         follow_watches()
         departments.on_refresh.append(follow_watches)
         for line in describe_watches(departments):
             logger.info(line)
+        hooks_listener = await self._start_hooks(hook_intake)
         logger.info(f"autonomy policy: {autonomy.source}")
         logger.info(
             f"llm: {self.voice.llm_target().describe()}, thinking {self.voice.llm_thinking}"
@@ -726,6 +748,8 @@ class Daemon:
         finally:
             refresher.cancel()
             await watch_runner.close()
+            if hooks_listener is not None:
+                await hooks_listener.stop()
             wake.close()
             ducker.restore()
             if self.phone_listener:
@@ -839,6 +863,7 @@ class Daemon:
             department_tools=getattr(self, "department_tools", None),
             waiting=self.waiting,
             watches=self.watch_runner,
+            hooks=self.hook_intake,
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,
@@ -882,6 +907,18 @@ class Daemon:
             logger.error(f"phone: listener not started on {self.cfg.phone_listen!r}: {e}")
             return
         self.phone_listener = listener
+
+    async def _start_hooks(self, intake: HookIntake) -> HooksListener | None:
+        """The webhook listener, when GHOST_HOOKS_LISTEN is set (ADR 0027)."""
+        if not self.cfg.hooks_listen.strip():
+            return None
+        try:
+            listener = HooksListener(self.cfg.hooks_listen, intake)
+            await listener.start()
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error(f"hooks: listener not started on {self.cfg.hooks_listen!r}: {e}")
+            return None
+        return listener
 
     async def _conversation(
         self,
@@ -1391,6 +1428,15 @@ def cli(argv: list[str] | None = None) -> None:
         for line in describe_watches(departments):
             if not line.startswith("watch problem"):  # listed with the problems above
                 print(line)
+        for h in declared_hooks(departments):
+            failures = run_fixtures(h)
+            print(
+                f"hook {h.department}/{h.name}: {h.verify}, {len(h.events)} event(s), "
+                + ("fixtures pass" if not failures else f"{len(failures)} fixture(s) fail")
+            )
+            problems += [f"hook {h.department}/{h.name}: {f}" for f in failures]
+            if not os.environ.get(h.secret_name()):
+                problems.append(f"hook {h.department}/{h.name}: {h.secret_name()} is not set")
         if departments.ghost.servers:
 
             async def probe() -> list[str]:
@@ -1421,13 +1467,61 @@ def cli(argv: list[str] | None = None) -> None:
             problems.append(str(e))
         print("\n".join(problems) if problems else "config ok")
         sys.exit(1 if problems else 0)
+    elif cmd == "push":
+        sys.exit(push_cli(argv[1:]))
     else:
         print(
             "usage: ghostd [run|wake|say <text>|sleep|status|latency|perf|restore-volumes|"
-            "devices|check]"
+            "devices|check|push <department>/<hook> <event> [json]]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)
+
+
+def push_cli(args: list[str]) -> int:
+    """Send a signed delivery to the local webhook listener (ADR 0027), for a local
+    sender: ``ghostd push ghost/jobs done '{"job": "backup", "ok": false}'`` at the end of a
+    long job. The hook must use ``hmac``; its secret comes from the environment."""
+    import time
+    import uuid
+
+    import httpx
+    from ghost_core.hooks import H_EVENT, H_ID, H_SIG, H_TIME, sign_hmac
+
+    if len(args) < 2 or "/" not in args[0]:
+        print("usage: ghostd push <department>/<hook> <event> [json]", file=sys.stderr)
+        return 2
+    cfg = GhostdSettings()
+    slug, name = args[0].split("/", 1)
+    d = Departments(cfg.config_dir).get(slug)
+    hook = d.hooks.get(name) if d is not None else None
+    if hook is None or hook.verify != "hmac":
+        print(f"no hmac hook {args[0]} is declared", file=sys.stderr)
+        return 2
+    secret = os.environ.get(hook.secret_name(), "")
+    if not secret:
+        print(f"{hook.secret_name()} is not set", file=sys.stderr)
+        return 2
+    if not cfg.hooks_listen.strip():
+        print("GHOST_HOOKS_LISTEN is not set", file=sys.stderr)
+        return 2
+    body = (args[2] if len(args) > 2 else "{}").encode()
+    ts, delivery = str(int(time.time())), uuid.uuid4().hex
+    address = cfg.hooks_listen.split(",")[0].strip()
+    r = httpx.post(
+        f"http://{address}{hook.path}",
+        content=body,
+        headers={
+            "content-type": "application/json",
+            H_TIME: ts,
+            H_ID: delivery,
+            H_EVENT: args[1],
+            H_SIG: sign_hmac(secret, ts, delivery, body),
+        },
+        timeout=10,
+    )
+    print("accepted" if r.status_code < 400 else f"refused ({r.status_code})")
+    return 0 if r.status_code < 400 else 1
 
 
 if __name__ == "__main__":

@@ -167,6 +167,36 @@ class Items:
             self._store.resolve_item(k, now)
         return Sync(tuple(new), tuple(changed), tuple(resolved))
 
+    def observe(self, source: str, d: ItemDraft, now: datetime | None = None) -> bool:
+        """One item seen now, others of ``source`` left as they are (a webhook brings one
+        at a time). True when it is new or changed."""
+        now = now or utcnow()
+        prior = self._store.get_item(d.key)
+        if prior is not None and prior["resolved_at"] is None and prior["source"] != source:
+            return False  # open under another source
+        title = _clip(d.title)
+        open_now = prior is not None and prior["resolved_at"] is None
+        changed = not open_now or prior["title"] != title or prior["fields"] != d.fields
+        self._store.upsert_item(
+            key=d.key,
+            source=source,
+            department=d.department,
+            title=title,
+            link=d.link,
+            fields=dict(d.fields),
+            response=d.response,
+            now=now,
+            changed=changed,
+        )
+        return changed
+
+    def resolve(self, key: str, now: datetime | None = None) -> bool:
+        prior = self._store.get_item(key)
+        if prior is None or prior["resolved_at"] is not None:
+            return False
+        self._store.resolve_item(key, now or utcnow())
+        return True
+
     def get(self, key: str) -> Item | None:
         row = self._store.get_item(key)
         return _from_row(row) if row else None
