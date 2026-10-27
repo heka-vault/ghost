@@ -28,7 +28,6 @@ from ghost_core.conversations import (
     Conversations,
     conversations_source,
 )
-from ghost_core.departments import Departments
 from ghost_voice.conversation import ConversationMarkerFrame, ConversationRuntime, transfer_tone
 from ghost_voice.tools import SWITCH_TOOL, register_tools
 from pipecat.frames.frames import (
@@ -88,19 +87,13 @@ class FakeParams:
             await properties.on_context_updated()
 
 
-def layout(tmp_path: Path, *departments: str, **declaration) -> Departments:
-    import json
-
+def layout(tmp_path: Path, rules: str = "") -> Path:
+    """Ghost's folder (ADR 0035), with an AGENTS.md when ``rules`` is given."""
     cfg = tmp_path / "ghost"
     cfg.mkdir(parents=True, exist_ok=True)
-    for name in departments:
-        folder = cfg / "departments" / name
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / "department.json").write_text(
-            json.dumps({"title": name.title(), **declaration.get(name, {})})
-        )
-        (folder / "AGENTS.md").write_text(f"# {name.title()}: the {name} desk\n")
-    return Departments(cfg)
+    if rules:
+        (cfg / "AGENTS.md").write_text(rules)
+    return cfg
 
 
 @pytest.fixture
@@ -199,7 +192,8 @@ async def test_switch_tool_transfers_with_announce_tone_voice_and_context(world)
     assert llm.pushed[2].delta == TTSSettings(voice="am_adam", speed=1.1)
     assert llm.pushed[3].slug == "accounting"
     prompt = llm.pushed[4].delta.system_instruction
-    assert "You are Accounting, an agent" in prompt and "hates surprises" in prompt
+    assert "You are Accounting, one of the operator's agents" in prompt
+    assert "hates surprises" in prompt
     assert "FRAG" in prompt
     update = llm.pushed[5]
     assert update.run_llm is True
@@ -297,7 +291,7 @@ async def test_read_tool_and_change_records_calls(world):
     _, convs, _, rt, llm, _ = world
     p = FakeParams(llm, "list_agents", {})
     await llm.functions["list_agents"](p)
-    assert p.result["departments"][0]["agents"][0]["name"] == "Ghost"
+    assert p.result["agents"][0]["name"] == "Ghost"
     assert [t.text for t in convs.turns(GHOST)] == ["list_agents()"]
 
 
@@ -331,7 +325,7 @@ def test_transfer_tone_is_short_mono_pcm():
     assert 0.15 * 24000 * 2 < len(data) < 0.4 * 24000 * 2
 
 
-# --- departments: prompt, reads, permissions (ADR 0024, ADR 0034) ----------------------
+# --- every agent's reach: one set of permissions (ADR 0034, ADR 0035) ----------------
 
 
 class Issue(Target, frozen=True):
@@ -375,8 +369,8 @@ class RepoWriter:
 
 
 def repo_source(writer, name: str) -> ToolSource:
-    """Like a connected GitHub app (ADR 0034): every department reaches it; a
-    department's own permissions narrow what its calls may touch."""
+    """Like a connected GitHub app (ADR 0034): every agent reaches it, under the
+    operator's one set of permissions (ADR 0035)."""
 
     async def list_issues(args):
         return {"repos": [args["repo"]] if args.get("repo") else ["acme/app", "acme/infra"]}
@@ -414,24 +408,25 @@ def repo_source(writer, name: str) -> ToolSource:
     )
 
 
-def only(repo: str) -> dict:
-    return {"permissions": {"block": [f"github.*(repo!={repo})"]}}
+RULES = "# Ghost\n\nUK dates.\n"
+BLOCK_SECRET = '[permissions]\nblock = ["github.*(repo=acme/secret)"]\n'
 
 
 @pytest.fixture
-def departments(tmp_path: Path):
-    """Ghost and two departments reach one github app; app and infra each block every call
-    that is not about their own repository."""
+def agents(tmp_path: Path):
+    """Ghost and a hired agent reach one github app; the operator's permissions block every
+    call about acme/secret, whichever agent makes it."""
 
     def build():
         store = Store()
         writer = RepoWriter()
-        deps = layout(tmp_path, "app", "infra", app=only("acme/app"), infra=only("acme/infra"))
         convs = Conversations(
-            store, deps, default_voice="af_heart", voices=("af_heart", "am_adam", "bf_emma")
+            store,
+            layout(tmp_path, RULES),
+            default_voice="af_heart",
+            voices=("af_heart", "am_adam", "bf_emma"),
         )
-        gate = WriteGate(store)
-        gate.attach_departments(deps)
+        gate = WriteGate(store, autonomy=AutonomyPolicy.parse(BLOCK_SECRET))
         agents = conversations_source(convs)
         gate.register(SOURCE, agents.operations)
         github = repo_source(writer, "github")
@@ -470,53 +465,61 @@ def departments(tmp_path: Path):
     return build
 
 
-async def test_the_department_shapes_the_prompt_and_the_calls(departments):
-    _, convs, gate, rt, llm, writer = departments()
-    # Ghost: the app, every repo, the roster of departments
+async def hire(gate, name: str, **args):
+    create = gate.operation(SOURCE, "create")
+    prepared = await create.prepare({"name": name, **args})
+    await gate.submit(
+        session_id="setup",
+        ability=SOURCE,
+        operation="create",
+        target=prepared.target,
+        changes=prepared.changes,
+        rationale="",
+    )
+
+
+async def test_every_agent_reaches_the_same_apps_and_reads_ghosts_rules(agents):
+    _, convs, gate, rt, llm, writer = agents()
+    await hire(gate, "Brand", job="the look")
+    # Ghost: the app, the rules, the roster of agents by name and job
     prompt = rt.system_prompt()
     assert "GITHUB is connected." in prompt and "FRAG" not in prompt
-    assert "- App: App: the app desk" in prompt and "- Infra" in prompt
+    assert "standing instructions, for every agent:\n# Ghost\n\nUK dates." in prompt
+    assert "other agents, for transfers:\n- Brand: the look" in prompt
+    assert "department" not in prompt.lower()
     p = FakeParams(llm, "github_list_issues", {})
     await llm.functions["github_list_issues"](p)
     assert p.result == {"repos": ["acme/app", "acme/infra"]}
 
-    await rt.switch(convs.get("app"))
+    await rt.switch(convs.get("brand"))
     prompt = rt.system_prompt()
-    assert "GITHUB is connected." in prompt  # every department reaches the app
-    assert "You are App, the operator's App department" in prompt
-    assert "App department's standing instructions" in prompt and "the app desk" in prompt
-    assert "The departments, each" not in prompt  # only Ghost lists them
-    assert rt.department_slug() == "app"
-    p = FakeParams(llm, "github_list_issues", {"repo": "acme/app"})
-    await llm.functions["github_list_issues"](p)
-    assert p.result == {"repos": ["acme/app"]}
-
-    # a change inside what the department allows goes through, as its own tool
+    assert "GITHUB is connected." in prompt  # every agent reaches the app
+    assert "You are Brand, one of the operator's agents, hired for the look" in prompt
+    assert "UK dates." in prompt  # Ghost's AGENTS.md is in every agent's prompt
+    assert "for transfers" not in prompt  # only Ghost lists them
+    assert "department" not in prompt.lower()
     p = FakeParams(llm, "github_set_labels", {"repo": "acme/app", "number": 17})
     await llm.functions[None](p)
     assert p.result["status"] == "done" and writer.applied == [("acme/app", 17, "bug")]
 
 
-async def test_what_a_department_blocks_is_refused_and_nothing_is_written(departments):
-    _, convs, gate, rt, llm, writer = departments()
-    await rt.switch(convs.get("app"))
-    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})
-    await llm.functions["github_list_issues"](p)
-    assert "blocked" in p.result["error"]
-    p = FakeParams(llm, "github_set_labels", {"repo": "acme/infra", "number": 17})
-    await llm.functions[None](p)
-    assert "blocked" in p.result["error"] and writer.applied == [] and gate.pending("s1") is None
-    # from Ghost, which blocks nothing, the same calls run
-    await rt.switch(convs.get(GHOST))
-    p = FakeParams(llm, "github_set_labels", {"repo": "acme/infra", "number": 17})
-    await llm.functions[None](p)
-    assert p.result["status"] == "done" and writer.applied == [("acme/infra", 17, "bug")]
+async def test_what_the_permissions_block_is_refused_for_every_agent(agents):
+    _, convs, gate, rt, llm, writer = agents()
+    await hire(gate, "Brand")
+    for slug in (GHOST, "brand"):
+        await rt.switch(convs.get(slug))
+        p = FakeParams(llm, "github_list_issues", {"repo": "acme/secret"})
+        await llm.functions["github_list_issues"](p)
+        assert "blocked" in p.result["error"]
+        p = FakeParams(llm, "github_set_labels", {"repo": "acme/secret", "number": 17})
+        await llm.functions[None](p)
+        assert "blocked" in p.result["error"] and writer.applied == []
+        assert gate.pending("s1") is None
 
 
-async def test_a_voice_hired_agent_joins_the_department_and_the_tools_follow(departments):
-    _, convs, gate, rt, llm, writer = departments()
-    await rt.switch(convs.get("app"))
-    rt.record("user", "hire someone for the app's release notes")
+async def test_a_voice_hired_agent_and_the_tools_follow(agents):
+    _, convs, gate, rt, llm, writer = agents()
+    rt.record("user", "hire someone for the release notes")
     p = FakeParams(
         llm,
         "change",
@@ -529,46 +532,40 @@ async def test_a_voice_hired_agent_joins_the_department_and_the_tools_follow(dep
     await llm.functions["change"](p)
     assert p.result["status"] == "done" and rt.active.slug == "release-notes"
     agent = convs.get("release-notes")
-    assert agent.department == "app" and agent.job == "release notes" and agent.voice == "am_adam"
+    assert agent.job == "release notes" and agent.voice == "am_adam"
     assert (
-        "You are Release Notes, an agent in the operator's App department, hired for release notes"
+        "You are Release Notes, one of the operator's agents, hired for release notes"
         in rt.system_prompt()
     )
     assert [s.name for s in rt.sources_for()] == ["github", SOURCE]
-    # a transfer by department name lands on its own agent
-    assert rt.resolve("the infra department").slug == "infra"
 
 
-async def test_retiring_the_active_agent_returns_to_its_department(departments):
-    _, convs, gate, rt, llm, _ = departments()
-    create = gate.operation(SOURCE, "create")
-    prepared = await create.prepare({"name": "Brand", "department": "app"})
-    await gate.submit(
-        session_id="setup",
-        ability=SOURCE,
-        operation="create",
-        target=prepared.target,
-        changes=prepared.changes,
-        rationale="",
-    )
+async def test_a_transfer_names_an_agent(agents):
+    _, convs, gate, rt, llm, _ = agents()
+    await hire(gate, "Maya", aliases=["the brand agent"])
+    assert rt.resolve("Maya").slug == "maya"
+    assert rt.resolve("the brand agent").slug == "maya"
+    assert rt.resolve("marketing") is None
+    p = FakeParams(llm, SWITCH_TOOL, {"name": "marketing"})
+    await llm.functions[SWITCH_TOOL](p)
+    assert p.result["status"] == "no_match" and p.result["known"] == ["Ghost", "Maya"]
+    p = FakeParams(llm, SWITCH_TOOL, {"name": "maya"})
+    await llm.functions[SWITCH_TOOL](p)
+    assert p.result == {"status": "transferred", "to": "Maya"} and rt.active.slug == "maya"
+
+
+async def test_retiring_the_active_agent_returns_to_ghost(agents):
+    _, convs, gate, rt, llm, _ = agents()
+    await hire(gate, "Brand")
     await rt.switch(convs.get("brand"))
     llm.pushed.clear()
     p = FakeParams(llm, "change", {"ability": SOURCE, "operation": "retire", "args": {}})
     await llm.functions["change"](p)
     assert p.result["status"] == "done" and convs.get("brand").retired
-    assert rt.active.slug == "app" and llm.pushed[0].text == "Transferring you to App."
+    assert rt.active.slug == GHOST and llm.pushed[0].text == "Back to Ghost."
     assert convs.resolve("brand") is None
     # retiring another agent from Ghost stays put
-    await rt.switch(convs.get(GHOST))
-    prepared = await create.prepare({"name": "Social", "department": "infra"})
-    await gate.submit(
-        session_id="setup",
-        ability=SOURCE,
-        operation="create",
-        target=prepared.target,
-        changes=prepared.changes,
-        rationale="",
-    )
+    await hire(gate, "Social")
     p = FakeParams(
         llm,
         "change",
@@ -578,94 +575,52 @@ async def test_retiring_the_active_agent_returns_to_its_department(departments):
     assert p.result["status"] == "done" and rt.active.slug == GHOST
 
 
-async def test_entering_a_department_starts_its_servers_first(departments):
-    """on_enter runs before the transfer frames are built, on_leave after (ADR 0024)."""
-    _, convs, gate, rt, llm, _ = departments()
-    log: list[str] = []
-
-    async def enter(p):
-        log.append(f"enter {p.department}")
-
-    rt._on_enter = enter  # noqa: SLF001
-    rt._on_leave = lambda p: log.append(f"leave {p.department}")  # noqa: SLF001
-    await rt.switch(convs.get("app"))
-    await rt.switch(convs.get("infra"))
-    frames = await rt.switch(convs.get("infra"), rehome=True)
-    assert log == ["enter app", "leave ghost", "enter infra", "leave app", "enter infra"]
-    assert frames[0].text == "Moved to Infra."
-    assert (
-        "moved to the Infra department"
-        in [f for f in frames if isinstance(f, LLMMessagesUpdateFrame)][0].messages[-1]["content"]
-    )
+async def read(_args):
+    return {"ok": True}
 
 
-async def test_moving_the_active_agent_rehomes_the_session(departments):
-    """ "Move this to infra" (ADR 0024): the agent the operator is with changes department
-    and the session goes on in place with the destination's tools, rules and voice."""
-    _, convs, gate, rt, llm, writer = departments()
-    create = gate.operation(SOURCE, "create")
-    prepared = await create.prepare({"name": "Brand", "department": "app", "job": "the look"})
-    await gate.submit(
-        session_id="setup",
-        ability=SOURCE,
-        operation="create",
-        target=prepared.target,
-        changes=prepared.changes,
-        rationale="",
+async def test_tools_connected_after_the_session_was_built_are_dispatched(tmp_path: Path):
+    """Every read goes through one catch-all dispatched to the active agent's reach, so an
+    app connected since is there at once (ADR 0034)."""
+    store = Store()
+    convs = Conversations(store, layout(tmp_path), default_voice="af_heart")
+    gate = WriteGate(store, autonomy=AutonomyPolicy())
+    agents = conversations_source(convs)
+    gate.register(SOURCE, agents.operations)
+    figma = ToolSource(
+        name="figma",
+        read_tools=[ReadTool("figma_get_file", "x", {}, [], read, operation="get_file")],
+        operations=[
+            Operation("export", "x", {}, [], prepare=None, writer=None, tool_name="figma_export")
+        ],
     )
-    await rt.switch(convs.get("brand"))
-    assert "App department's standing instructions" in rt.system_prompt()
-    assert gate.blocks_read("github", "list_issues", {"repo": "acme/infra"}, "app")
-    llm.pushed.clear()
-    heard = "move this to infra"
-    rt.record("user", heard)
-    p = FakeParams(
-        llm, "change", {"ability": SOURCE, "operation": "move", "args": {"department": "infra"}}
+    connected: list[ToolSource] = []  # figma connects after the session is built
+    rt = ConversationRuntime(
+        convs,
+        gate=gate,
+        session_id="s",
+        fragments=[],
+        tts_settings=TTSSettings,
+        llm_settings=LLMSettings,
+        sample_rate=24000,
+        reach=lambda p: [*connected, agents],
     )
-    await llm.functions["change"](p)
-    assert p.result["status"] in ("done", "needs_confirmation")
-    if p.result["status"] == "needs_confirmation":  # medium risk asks; the desk says yes
-        out = await gate.confirm_pending("s1")
-        assert out is not None and out.status == "success"
-        # the re-home happens on the model's path; here the state is checked directly
-        moved = convs.get("brand")
-        frames = await rt.switch(moved, rehome=True)
-        assert frames[0].text == "Moved to Infra."
-    else:
-        assert llm.pushed[0].text == "Moved to Infra."
-    moved = convs.get("brand")
-    assert moved.department == "infra" and moved.id == prepared.target and True or True
-    assert rt.active.slug == "brand" and rt.active.department == "infra"
-    assert "Infra department's standing instructions" in rt.system_prompt()
-    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})  # infra's rules now
-    await llm.functions["github_list_issues"](p)
-    assert p.result == {"repos": ["acme/infra"]}
-    assert convs.files.dir("brand").parent.parent.name == "infra"
-    # a department's own agent does not move: the model is told to hire there instead
-    await rt.switch(convs.get("app"))
-    p = FakeParams(
-        llm, "change", {"ability": SOURCE, "operation": "move", "args": {"department": "infra"}}
+    llm = FakeLLM()
+
+    async def hang(): ...
+
+    register_tools(
+        llm, sources=[agents], gate=gate, session_id="s", on_hang_up=hang, conversations=rt
     )
-    await llm.functions["change"](p)
-    assert "hire an agent in the destination" in p.result["error"]
-    # the split move: hire there with a summary; the turns follow and the operator is transferred
-    rt.record("user", "let's plan the infra launch")
-    p = FakeParams(
-        llm,
-        "change",
-        {
-            "ability": SOURCE,
-            "operation": "create",
-            "args": {
-                "name": "Launch",
-                "department": "infra",
-                "job": "the launch",
-                "memory": "Planning the infra launch; nothing decided yet.",
-            },
-        },
-    )
-    await llm.functions["change"](p)
-    assert p.result["status"] == "done" and rt.active.slug == "launch"
-    assert convs.get("launch").department == "infra"
-    assert convs.files.memory("launch").strip() == "Planning the infra launch; nothing decided yet."
-    assert "let's plan the infra launch" in [t.text for t in convs.turns("launch")]
+    connected[:] = [figma]
+    gate.register("figma", figma.operations)
+    advertised = {s.name for s in rt.tool_schemas(rt.sources_for())}
+    assert {"figma_get_file", "figma_export"} <= advertised
+    p = FakeParams(llm, "figma_get_file", {})
+    await llm.functions["figma_get_file"](p)
+    assert p.result == {"ok": True}
+    gate.set_autonomy(AutonomyPolicy.parse('[permissions]\nblock = ["figma"]\n'))
+    assert "figma_get_file" not in {s.name for s in rt.tool_schemas(rt.sources_for())}
+    p = FakeParams(llm, "figma_get_file", {})
+    await llm.functions["figma_get_file"](p)
+    assert "not available here" in p.result["error"]

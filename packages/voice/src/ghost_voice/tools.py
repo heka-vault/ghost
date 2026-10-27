@@ -2,7 +2,7 @@
 
 Three kinds of tool reach the model: a source's typed read tools; each connected app's
 changes, under the app's name like its reads (ADR 0034); and one shared ``change`` for
-Ghost's own operations (the agents, the departments, the outputs), plus the session's
+Ghost's own operations (the agents, the rules, the outputs), plus the session's
 tools (switch, hang up, hold). A change of either kind goes to the gate. What happens
 then is the operator's permissions (ADR 0011, ADR 0034): it happens now and the result
 comes back, or it waits for a spoken yes. There is no undo tool: to take a change back
@@ -27,9 +27,8 @@ from ghost_core import (
 from ghost_core.apps import RESERVED_NAMES
 from ghost_core.conversations import GHOST
 from ghost_core.conversations import SOURCE as CONVERSATIONS
-from ghost_core.department_tools import SOURCE as DEPARTMENTS
-from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.policy import PolicyError
+from ghost_core.rules import SOURCE as RULES
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import FunctionCallResultProperties
@@ -75,22 +74,17 @@ def register_tools(
     last_request = last_request or (lambda: ("", ""))
 
     def active_sources() -> list[ToolSource]:
-        """What the active agent reaches (ADR 0024): its department's sources, or every
-        source when the session was built without departments."""
+        """What the active agent reaches (ADR 0035): every connected app and Ghost's own
+        sources, or every source given when the session was built without a reach."""
         if conversations is not None and conversations.has_reach:
             return conversations.sources_for(conversations.active)
         return list(sources)
 
-    def department() -> str | None:
-        return conversations.department_slug() if conversations is not None else None
-
     def offered_ops(srcs: Sequence[ToolSource]) -> dict[str, dict[str, Operation]]:
-        """Operations the department's permissions do not block outright."""
+        """Operations the operator's permissions do not block outright."""
         out: dict[str, dict[str, Operation]] = {}
         for a in srcs:
-            offered = {
-                op.name: op for op in a.operations if gate.offers(a.name, op.name, department())
-            }
+            offered = {op.name: op for op in a.operations if gate.offers(a.name, op.name)}
             if offered:
                 out[a.name] = offered
         return out
@@ -102,7 +96,7 @@ def register_tools(
                     yield tool, a
 
     def gate_offers_read(source: str, operation: str) -> bool:
-        return gate.offers(source, operation, department(), read=True)
+        return gate.offers(source, operation, read=True)
 
     warned: set[str] = set()
 
@@ -161,7 +155,7 @@ def register_tools(
                     "type": "string",
                     "enum": list(own),
                     "description": "What it changes: 'conversations' (the agents), "
-                    "'departments', 'outputs' or 'skills'.",
+                    "'rules', 'outputs' or 'skills'.",
                 },
                 "operation": {"type": "string"},
                 "args": {"type": "object", "description": "Arguments for the operation."},
@@ -207,14 +201,12 @@ def register_tools(
             await params.result_callback({"error": f"{name} is not available here"})
             return
         tool, a = hit
-        if gate.blocks_read(a.name, tool.operation or tool.name, params.arguments, department()):
+        if gate.blocks_read(a.name, tool.operation or tool.name, params.arguments):
             record(name, dict(params.arguments))
             await params.result_callback(
                 {"error": f"{name} is blocked by the operator's permissions for that"}
             )
             return
-        if a.name in (DEPARTMENTS, OUTPUTS) and conversations is not None:
-            params.arguments = {**params.arguments, "_active": conversations.active.slug}
         await _wrap_read(tool.handler, record, probe)(params)
 
     llm.register_function(None, dispatch)
@@ -258,9 +250,9 @@ def register_tools(
         call_id = getattr(params, "tool_call_id", "")
         probe.tool_operation(call_id, f"{aname}.{op.name}")
         record(f"{aname}.{op_name}", args)
-        if aname in (CONVERSATIONS, DEPARTMENTS, OUTPUTS) and conversations is not None:
+        if aname == CONVERSATIONS and conversations is not None:
             args["_active"] = conversations.active.slug
-        if aname == DEPARTMENTS:
+        if aname == RULES:
             args["_request"] = last_request()[0]  # a rule must be the operator's words
         try:
             began = time.perf_counter()
@@ -275,7 +267,6 @@ def register_tools(
                 changes=prepared.changes,
                 rationale=rationale or prepared.rationale,
                 conversation=conversations.active.slug if conversations else None,
-                department=department(),
                 asked_by=prepared.asked_by,
             )
             probe.tool_step(call_id, "submit", time.perf_counter() - began)
@@ -332,27 +323,8 @@ def register_tools(
                         "outcome", ability=aname, operation=op.name, status=sub.outcome.status
                     )
                     return
-            # "Move this to accounting" (ADR 0024): the agent the operator is with moved
-            # departments, so the session is re-homed in place: that department's rules,
-            # memory and voice, and "Moved to Accounting."
-            if (
-                aname == CONVERSATIONS
-                and op.name == "move"
-                and conversations is not None
-                and sub.outcome.status == "success"
-                and sub.proposal.target.scope() == conversations.active.slug
-            ):
-                moved = conversations.conversations.get(conversations.active.slug)
-                if moved is not None:
-                    await _transfer(
-                        params, conversations, moved, handoff="", result=result, rehome=True
-                    )
-                    await events.emit(
-                        "outcome", ability=aname, operation=op.name, status=sub.outcome.status
-                    )
-                    return
-            # A retired agent leaves voice routing (ADR 0024): retiring the one the
-            # operator is with hands them to its department's own agent, else to Ghost.
+            # A retired agent leaves voice routing: retiring the one the operator is with
+            # hands them back to Ghost.
             if (
                 aname == CONVERSATIONS
                 and op.name == "retire"
@@ -360,9 +332,7 @@ def register_tools(
                 and sub.outcome.status == "success"
                 and sub.proposal.target.scope() == conversations.active.slug
             ):
-                home = conversations.conversations.default_agent(
-                    conversations.active.department
-                ) or conversations.conversations.get(GHOST)
+                home = conversations.conversations.get(GHOST)
                 if home is not None:
                     await _transfer(
                         params,
@@ -420,15 +390,15 @@ def register_tools(
             FunctionSchema(
                 name=SWITCH_TOOL,
                 description=(
-                    "Transfer the operator to a department or to one of its agents by name "
-                    '("marketing", "the brand agent", "ghost" to come back). The transfer is '
+                    "Transfer the operator to one of their agents by name "
+                    '("Maya", "the brand agent", "ghost" to come back). The transfer is '
                     "announced and the agent greets them; say nothing else yourself. "
                     "If nothing matches, the result says so: then ask in one short "
                     "sentence whether to hire an agent for it, and on yes call change with "
                     "conversations.create."
                 ),
                 properties={
-                    "name": {"type": "string", "description": "The department or agent to go to."},
+                    "name": {"type": "string", "description": "The agent to go to."},
                     "handoff": {
                         "type": "string",
                         "description": "One line for the other side about what the operator "
@@ -488,7 +458,7 @@ def register_tools(
     async def bring_up(params: FunctionCallParams) -> None:
         change_id = str(params.arguments.get("change") or "")
         record(BRING_UP_TOOL, dict(params.arguments))
-        p = gate.bring_back(change_id, session_id, department())
+        p = gate.bring_back(change_id, session_id)
         if p is None:
             await params.result_callback({"error": "That change isn't waiting any more."})
             return
@@ -564,7 +534,6 @@ async def _transfer(
     handoff: str,
     result: dict[str, Any],
     outcome: str = "",
-    rehome: bool = False,
 ) -> None:
     """Return the tool result without a model run, then, once the aggregator has
     appended it to the context, feed the transfer frames in at the pipeline source.
@@ -572,7 +541,7 @@ async def _transfer(
     itself (the system prompt would not change), and anything pushed downstream
     queues behind the audio being played."""
     worker = getattr(params, "pipeline_worker", None)
-    frames = await conversations.switch(target, handoff=handoff, outcome=outcome, rehome=rehome)
+    frames = await conversations.switch(target, handoff=handoff, outcome=outcome)
 
     async def on_context_updated() -> None:
         try:
