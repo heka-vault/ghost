@@ -52,6 +52,7 @@ async def test_by_default_a_rule_is_added_and_announced(world, tmp_path):
     assert sub.autonomy is Autonomy.ANNOUNCE and sub.outcome.status == "success"
     assert (cfg / "AGENTS.md").read_text() == "# Ghost\n\nBe warm.\n\nBe brief.\n"
     assert rules.text().endswith("Be brief.\n")
+    assert not sub.outcome.summary().endswith("..")  # the rule's own stop is enough
 
 
 async def test_a_rule_is_appended_verbatim_at_confirm_after_a_spoken_yes(world):

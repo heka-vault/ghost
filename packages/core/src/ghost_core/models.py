@@ -165,7 +165,7 @@ class Outcome(BaseModel, frozen=True):
     def summary(self) -> str:
         """Terse form for the model to paraphrase after an autonomous write."""
         if self.status == "success":
-            return f"Applied on {self.target}: {'; '.join(self.applied)}."
+            return f"Applied on {self.target}: {'; '.join(self.applied).rstrip('.')}."
         if self.status == "partial":
             return (
                 f"Partly applied on {self.target}: {'; '.join(self.applied)}. "
