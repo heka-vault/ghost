@@ -194,6 +194,24 @@ def test_what_the_registry_fixes_is_never_a_reference_to_ghosts_secrets():
     assert not any("sk-" in fill_secrets(a, environ) for a in local.args)
 
 
+def test_an_entry_titled_like_ghosts_own_tools_gets_another_name():
+    skills = parse_entry(
+        record(
+            {
+                "name": "io.github.someone/skills",
+                "title": "Skills",
+                "version": "1",
+                "remotes": [{"type": "streamable-http", "url": "https://skills.example/mcp"}],
+            }
+        )
+    )
+    assert skills.app_name not in ("skills", "app") and skills.app_name.startswith("skills")
+    with pytest.raises(CatalogError, match="Ghost's own"):
+        connect(skills, "remote-0", "skills", {})
+    spec, _ = connect(skills, "remote-0", skills.app_name, {})
+    assert spec.name == skills.app_name
+
+
 def test_signing_in_needs_nothing_typed():
     spec, secrets = connect(parse_entry(LINEAR), "remote-0", "linear", {})
     assert spec.sign_in and spec.url == "https://mcp.linear.app/mcp" and secrets == {}

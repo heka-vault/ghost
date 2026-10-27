@@ -65,6 +65,9 @@ MAX_FIELD_CHARS = 60  # an argument short enough to name what a change is about
 # $NAME, ${NAME} or ${env:NAME} (the shape other clients' config files use)
 _SECRET = re.compile(r"\$\{(?:env:)?([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)")
 APP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+# The names of Ghost's own tool sources (``ghost_core.source.ToolSource``): the gate, the
+# permissions (``skills.*``) and the audit key on them, so an app may not take one.
+RESERVED_NAMES = frozenset({"conversations", "departments", "outputs", "skills", "waiting"})
 _ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "no.")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s")
 _TRANSPORTS = {"stdio", "http", "streamable-http", "streamable_http", "streamableHttp"}
@@ -161,6 +164,15 @@ class AppsFile:
     imported: bool = False
 
 
+def app_name_problem(name: str) -> str | None:
+    """Why ``name`` can't name an app, or None."""
+    if not APP_NAME_RE.match(name):
+        return "an app's name is lower-case letters, digits, _ or - (up to 40)"
+    if name in RESERVED_NAMES:
+        return f"{name} is the name of Ghost's own tools; give the app another name"
+    return None
+
+
 def secret_names(value: str) -> list[str]:
     """The environment names a value refers to."""
     return [m.group(1) or m.group(2) for m in _SECRET.finditer(value)]
@@ -219,8 +231,8 @@ def parse_apps_json(text: str, where: str) -> AppsFile:
     apps: dict[str, AppSpec] = {}
     for name, body in entries.items():
         at = f"{where}: {name}"
-        if not APP_NAME_RE.match(str(name)):
-            problems.append(f"{at}: an app's name is lower-case letters, digits, _ or -")
+        if why := app_name_problem(str(name)):
+            problems.append(f"{at}: {why}")
             continue
         try:
             apps[str(name)] = parse_app(str(name), body, at, problems)
@@ -1136,8 +1148,10 @@ __all__ = [
     "Apps",
     "AppsFile",
     "NeedsSignIn",
+    "RESERVED_NAMES",
     "ToolError",
     "ToolInfo",
+    "app_name_problem",
     "fill_secrets",
     "load_apps",
     "looks_like_secret",

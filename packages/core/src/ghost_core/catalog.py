@@ -35,7 +35,13 @@ from urllib.parse import quote, urlparse
 
 from loguru import logger
 
-from ghost_core.apps import APP_NAME_RE, AppSpec, secret_name
+from ghost_core.apps import (
+    APP_NAME_RE,
+    RESERVED_NAMES,
+    AppSpec,
+    app_name_problem,
+    secret_name,
+)
 
 REGISTRY = "https://registry.modelcontextprotocol.io"
 MAX_AGE_SECS = 3600.0  # the registry's advice: copy about once an hour
@@ -350,6 +356,8 @@ def _title_of(name: str) -> str:
 
 def suggest_name(entry: CatalogEntry) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", entry.title.lower()).strip("-")[:30] or "app"
+    if base in RESERVED_NAMES:
+        return f"{base}-app"  # an entry called "Skills" is not Ghost's own skills
     return base if APP_NAME_RE.match(base) else "app"
 
 
@@ -368,8 +376,8 @@ def connect(
 ) -> tuple[AppSpec, dict[str, str]]:
     """The app to write into ``apps.json``, and the secrets to put in Ghost's environment.
     A secret's value goes only into the second; the file holds ``${NAME}``."""
-    if not APP_NAME_RE.match(app_name):
-        raise CatalogError("the name is lower-case letters, digits, - or _ (up to 40)")
+    if why := app_name_problem(app_name):
+        raise CatalogError(why)
     option = next((o for o in entry.options if o.id == option_id), None)
     if option is None:
         raise CatalogError(f"{entry.title} has no way to connect called {option_id}")

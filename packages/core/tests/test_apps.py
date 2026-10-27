@@ -68,6 +68,28 @@ def test_a_bad_entry_is_a_problem_and_the_rest_still_counts():
     assert len(f.problems) == 2
 
 
+def test_ghosts_own_names_are_not_app_names():
+    """An app called ``skills`` would replace Ghost's own operations in the gate, and the
+    operator's ``skills.*`` rules would apply to it."""
+    from ghost_core.apps import RESERVED_NAMES, app_name_problem
+    from ghost_core.conversations import SOURCE as CONVERSATIONS
+    from ghost_core.department_tools import SOURCE as DEPARTMENTS
+    from ghost_core.outputs import SOURCE as OUTPUTS
+    from ghost_core.skills import SOURCE as SKILLS
+    from ghost_core.waiting import SOURCE as WAITING
+
+    assert {CONVERSATIONS, DEPARTMENTS, OUTPUTS, SKILLS, WAITING} <= RESERVED_NAMES
+    f = parse_apps_json(
+        '{"apps": {"skills": {"command": "x"}, "conversations": {"url": "https://x"},'
+        ' "ok": {"command": "z"}}}',
+        "test",
+    )
+    assert set(f.apps) == {"ok"}
+    assert sum("Ghost's own" in p for p in f.problems) == 2
+    assert app_name_problem("waiting") and app_name_problem("Bad Name")
+    assert app_name_problem("skills-2") is None
+
+
 def test_a_key_written_into_the_file_is_flagged_and_moved_out_of_a_paste():
     f = parse_apps_json(
         '{"mcpServers": {"gh": {"url": "https://x/mcp",'

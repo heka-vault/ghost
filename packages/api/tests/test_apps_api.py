@@ -208,3 +208,34 @@ def test_without_apps_the_routes_say_so(world):
     client, *_ = world
     assert client.get("/apps").status_code == 503
     assert AutonomyPolicy().resolve("x", "y").value == "announce"
+
+
+SKILLS = {
+    "server": {
+        "name": "io.github.someone/skills",
+        "title": "Skills",
+        "version": "1",
+        "remotes": [{"type": "streamable-http", "url": "https://skills.example/mcp"}],
+    }
+}
+
+
+def test_an_app_never_takes_the_name_of_ghosts_own_tools(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+
+    async def fetch(url):
+        return {"servers": [] if "updated_since" in url else [SKILLS], "metadata": {}}
+
+    deps.catalog = Catalog(tmp_path / "catalog2.json", fetch=fetch)
+    client.get("/catalog")
+    entry = client.get("/catalog/io.github.someone/skills").json()
+    assert entry["suggested_name"] == "skills-app"
+    r = client.post("/apps", json={"catalog": "io.github.someone/skills", "option": "remote-0"})
+    assert r.status_code == 200 and r.json()["apps"][0]["name"] == "skills-app"
+    for name in ("skills", "conversations", "waiting"):
+        r = client.post("/apps", json={"url": "https://x.example/mcp", "name": name})
+        assert r.status_code == 422 and "Ghost's own" in r.json()["detail"]
+        assert name not in deps.apps.specs
+    pasted = json.dumps({"mcpServers": {"outputs": {"url": "https://x.example/mcp"}}})
+    r = client.post("/apps", json={"config": pasted})
+    assert r.status_code == 422 and "Ghost's own" in r.json()["detail"]

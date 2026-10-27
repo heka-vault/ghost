@@ -21,9 +21,10 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query
 from ghost_core.apps import (
-    APP_NAME_RE,
     APPS_FILE,
+    RESERVED_NAMES,
     AppSpec,
+    app_name_problem,
     extract_secrets,
     load_apps,
     parse_apps_json,
@@ -181,7 +182,9 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         )
 
     def free_name(base: str) -> str:
+        """``base``, or ``base-2`` and on when an app has it or Ghost's own tools do."""
         taken = set(deps.apps.specs) if deps.apps is not None else set()
+        taken |= RESERVED_NAMES
         if base not in taken:
             return base
         n = 2
@@ -325,8 +328,8 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         need_apps()
         specs, secrets = specs_from(req)
         for spec in specs:
-            if not APP_NAME_RE.match(spec.name):
-                raise HTTPException(422, f"{spec.name!r}: a name is lower-case letters and -")
+            if why := app_name_problem(spec.name):
+                raise HTTPException(422, f"{spec.name!r}: {why}")
             if spec.name in deps.apps.specs and not req.replace:
                 raise HTTPException(409, f"an app is already connected as {spec.name}")
         keep_secrets(secrets)
