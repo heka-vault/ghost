@@ -21,8 +21,8 @@ const ROUTES: { name: Name; title: string; help: string; later?: string }[] = [
   { name: "desktop", title: "Desktop notification", help: "On this computer. “Got it” in the notification counts as heard." },
   { name: "phone", title: "The phone app", help: "The list on your phone’s Home, and a notification while the app is open." },
   { name: "call", title: "Ghost calls your phone", help: "The phone rings; answering opens the agent with the question.", later: "Waits for phone push" },
-  { name: "sms", title: "Text message", help: "Through a carrier you declare, such as Bird. Carries a count, not titles, unless you say so.", later: "Needs a carrier app" },
-  { name: "whatsapp", title: "WhatsApp", help: "Through a carrier you declare, such as Bird.", later: "Needs a carrier app" },
+  { name: "sms", title: "Text message", help: "Through a carrier app you connect, such as Bird. Carries a count, not titles, unless you say so.", later: "Needs a carrier app" },
+  { name: "whatsapp", title: "WhatsApp", help: "Through a carrier app you connect, such as Bird.", later: "Needs a carrier app" },
 ];
 
 const ESCALATE = [5, 10, 15, 30, 60, 120].map((m) => ({ value: String(m), label: m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? "s" : ""}` }));

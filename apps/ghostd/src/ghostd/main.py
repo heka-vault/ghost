@@ -55,7 +55,7 @@ from ghost_core.hooks import Hook, HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.outputs import Outputs
-from ghost_core.routes import RouteEngine, RoutePolicy, spoken_digest
+from ghost_core.routes import RouteEngine, RoutePolicy, SpokenDigest
 from ghost_core.signin import SignIns
 from ghost_core.skills import Skills
 from ghost_core.waiting import Item, Items, WaitingList, waiting_source
@@ -1107,6 +1107,8 @@ class Daemon:
 
         async def on_turn(role: str, text: str) -> None:
             self.state.add_turn(role, text)
+            if digest is not None:
+                digest.on_turn(role, text)  # the greeting went out; the operator answered
             if role == "user":
                 self._refresh_pending()
                 if raised is not None and not replied.is_set():
@@ -1130,14 +1132,21 @@ class Daemon:
                 _PHONE_TEARDOWN["on"] = True
 
         # ADR 0031: a bare wake in Ghost opens with what is waiting, said before anything
-        # else (the digest); a request in the same breath is answered instead.
-        digest = (
+        # else (the digest); a request in the same breath is answered instead. The greeting
+        # going out delivers them; the operator's answer acknowledges only the titles said
+        # (ADR 0029), so a voice that failed or "and two more" leaves them alerting.
+        waiting_now = (
             self.routes.digest()
             if self.routes is not None
             and start_in == GHOST
             and not first_utterance
             and raised is None
             else []
+        )
+        digest = (
+            SpokenDigest(self.routes, waiting_now)
+            if waiting_now and self.routes is not None
+            else None
         )
         replied = asyncio.Event()
         first_reply: list[str] = []
@@ -1161,7 +1170,7 @@ class Daemon:
             wake_fuzzy=self.cfg.wake_fuzzy,
             origin=origin,
             latency_log=self.cfg.latency_path,
-            **({"greeting": spoken_digest(digest)} if digest else {}),
+            **({"greeting": digest.text} if digest is not None else {}),
             **(
                 {"greeting": raised[1].greeting, "context_note": context_note(raised[0])}
                 if raised is not None
@@ -1169,8 +1178,6 @@ class Daemon:
             ),
         )
         self.session = session
-        if digest and self.routes is not None:
-            self.routes.heard_in_digest(digest)
         if origin == "desk":
             self._last_desk_session = time.monotonic()
         self._origin = origin

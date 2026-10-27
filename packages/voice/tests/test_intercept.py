@@ -213,3 +213,12 @@ async def test_do_not_disturb_is_a_fixed_intent_with_its_time():
         )
         is None
     )
+
+
+@pytest.mark.parametrize("said", ["quiet until 3:75", "nothing until 14 pm"])
+async def test_a_quiet_time_that_isnt_one_is_said_back_not_set(said):
+    from ghost_voice.intents import QuickIntents
+
+    h = await QuickIntents().on_user_turn(UserTurn(text=said, pending=False, last_assistant=""))
+    assert h is not None and h.action is None and h.until is None
+    assert "didn't catch the time" in h.say

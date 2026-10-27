@@ -11,6 +11,7 @@ import { type FormEvent, useEffect, useId, useState } from "react";
 
 import { useDesign } from "../../design/context";
 import { Button, Dialog, Disclosure, Field, Input, Notice, SegmentedControl, Textarea, errorText, useLive, useToast } from "../../ui";
+import { connectOutcome, failedText } from "./ConnectDialog";
 import { sentence } from "./model";
 import { expectSignIn, openSignIn } from "./signin";
 
@@ -38,7 +39,9 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<{ title: string; text: string; taken: boolean } | null>(null);
+  const [error, setError] = useState<{ title: string; text: string; taken: boolean; failed?: boolean } | null>(null);
+  /** Saved by an earlier try that then didn't connect: the next try replaces it. */
+  const [saved, setSaved] = useState(false);
   const [blank, setBlank] = useState(false);
   const [signIn, setSignIn] = useState<{ url: string; opened: boolean } | null>(null);
 
@@ -51,6 +54,7 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
     setName("");
     setConfig("");
     setError(null);
+    setSaved(false);
     setBlank(false);
     setSignIn(null);
   }, [open]);
@@ -65,18 +69,26 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
     setBusy(true);
     setError(null);
     try {
+      const again = replace || saved || undefined;
       const body =
         way === "url"
-          ? { url: text, name: name.trim() || undefined, values: key.trim() ? { key: key.trim() } : undefined, replace: replace || undefined }
-          : { config: text, replace: replace || undefined };
+          ? { url: text, name: name.trim() || undefined, values: key.trim() ? { key: key.trim() } : undefined, replace: again }
+          : { config: text, replace: again };
       if (way === "url" && name.trim()) expectSignIn(name.trim());
       const r = await client.connectApp(body);
       for (const a of r.apps) expectSignIn(a.name);
       onConnected();
       const names = r.apps.map((a) => a.title || a.name);
-      if (r.sign_in_url) {
+      const { failed, connecting } = connectOutcome(r.apps);
+      if (failed) {
+        setSaved(true);
+        setError({ title: `Ghost couldn’t connect to ${failed.title || failed.name}`, text: failedText(failed), taken: false, failed: true });
+      } else if (r.sign_in_url) {
         const opened = await openSignIn(r.sign_in_url, { again: true, mock });
         setSignIn({ url: r.sign_in_url, opened });
+      } else if (connecting) {
+        toast({ title: names.length === 1 ? `Connecting to ${names[0]}…` : `Connecting to ${names.length} apps…`, description: "Ghost is still reaching it. It shows as connected under Apps once it answers." });
+        onClose();
       } else {
         toast({ title: names.length === 1 ? `Connected ${names[0]}` : `Connected ${names.length} apps`, description: "Ghost can use it from its next turn. Its tools are on its page under Apps." });
         onClose();
@@ -202,9 +214,9 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
             title={error.title}
             className="apps-form__notice"
             action={
-              error.taken ? (
+              error.taken || error.failed ? (
                 <Button size="sm" variant="secondary" loading={busy} onClick={() => void connect(true)}>
-                  Replace it
+                  {error.failed ? "Try again" : "Replace it"}
                 </Button>
               ) : undefined
             }

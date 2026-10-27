@@ -17,8 +17,10 @@ rest. Each app offers one or more ways to connect:
   gets back. There is nothing to copy or paste. When the app later wants you to sign in
   again, it waits on your list ("Linear needs you to sign in again") until you press
   Sign in.
-- **Use an API key.** Paste the key once. It goes into Ghost's private settings (`env`,
-  0600) and never comes back out of the control API. `apps.json` only names it.
+- **Use an API key.** Paste the key once. It goes into Ghost's private settings for apps
+  (`~/.config/ghost/apps.env`, 0600, which the vault renderer never rewrites) and never
+  comes back out of the control API. `apps.json` only names it. Disconnecting the app
+  clears it.
 - **Run on this computer.** Ghost starts the app's package itself: `npx` for npm, `uvx`
   for Python, `docker` for a container. Its settings go into its environment, and the
   secret ones into Ghost's private settings like a key.

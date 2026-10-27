@@ -39,6 +39,20 @@ function SourceIcon({ item }: { item: WaitingItemView }) {
   return <ShieldAlert aria-hidden />;
 }
 
+/**
+ * What an action answered, when it didn't do what was asked. The daemon answers 200 with
+ * `ok: false` (an item already gone, a change no longer waiting) or, for a confirmed change,
+ * an outcome whose status is `failed` or `partial`: those are failures to show, not "Done".
+ */
+export function actionFailure(r: unknown): { title: string; text: string; tone: "danger" | "warn" } | null {
+  if (!r || typeof r !== "object") return null;
+  const v = r as { ok?: boolean; detail?: string | null; status?: string; error?: string | null; summary?: string };
+  if (v.ok === false) return { title: "That didn’t work", text: v.detail || "It may have changed meanwhile; the list is up to date now.", tone: "danger" };
+  if (v.status === "failed") return { title: "The change didn’t go through", text: v.error || v.summary || "", tone: "danger" };
+  if (v.status === "partial") return { title: "Only part of the change went through", text: v.error || v.summary || "", tone: "warn" };
+  return null;
+}
+
 /** Minutes until 9:00 tomorrow, for "Tomorrow morning". */
 function untilTomorrowMorning(): number {
   const t = new Date();
@@ -71,8 +85,9 @@ export default function WaitingScreen(_: RouteProps) {
   const act = async (key: string, run: () => Promise<unknown>, done?: string) => {
     setBusy(key);
     try {
-      await run();
-      if (done) toast({ title: done });
+      const failed = actionFailure(await run());
+      if (failed) toast({ title: failed.title, description: failed.text || undefined, tone: failed.tone });
+      else if (done) toast({ title: done });
       await load();
     } catch (e) {
       toast({ title: "That didn’t work", description: errorText(e), tone: "danger" });

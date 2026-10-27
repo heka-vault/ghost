@@ -6,7 +6,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from ghost_core import AutonomyPolicy, Store
-from ghost_core.routes import RouteEngine, RouteError, RoutePolicy, parse_quiet, spoken_digest
+from ghost_core.routes import (
+    UNCLEAR,
+    RouteEngine,
+    RouteError,
+    RoutePolicy,
+    SpokenDigest,
+    parse_quiet,
+    spoken_digest,
+)
 from ghost_core.waiting import ItemDraft, Items
 
 T0 = datetime(2026, 10, 27, 15, 0, tzinfo=UTC)
@@ -139,12 +147,74 @@ async def test_a_route_that_fails_is_skipped_not_fatal():
     assert items.get("eng:ci:1").state(T0) == "new"
 
 
-def test_the_digest_marks_what_it_said_as_heard():
+async def test_an_unavailable_route_hands_the_item_on():
+    # notify-send missing and the desk busy: the phone still hears of it (QA, 2026-10-27)
+    e, routes, items = engine(at_desk=True)
+    routes["desk"].answer = routes["desktop"].answer = "unavailable"
+    for m in range(0, 105, 15):
+        await e.tick(T0 + timedelta(minutes=m))
+    assert routes["phone"].got == [["eng:ci:1"]]
+    assert items.get("eng:ci:1").delivered_via == "phone"
+
+
+async def test_a_snooze_ends_and_the_item_alerts_again_from_the_start():
+    e, routes, items = engine()  # away from the desk: the phone is the whole ladder
+    await e.tick(T0)
+    items.snooze("eng:ci:1", T0 + timedelta(minutes=30))
+    await e.tick(T0 + timedelta(minutes=20))
+    assert routes["phone"].got == [["eng:ci:1"]]  # snoozed: nothing
+    await e.tick(T0 + timedelta(minutes=31))
+    assert routes["phone"].got == [["eng:ci:1"], ["eng:ci:1"]]
+
+
+async def test_after_a_snooze_at_the_desk_it_starts_at_the_desk_again():
+    e, routes, items = engine(at_desk=True)
+    routes["desk"].answer = "not_heard"
+    await e.tick(T0)  # the desk, then the desktop at once
+    items.snooze("eng:ci:1", T0 + timedelta(minutes=30))
+    routes["desk"].answer = "delivered"
+    await e.tick(T0 + timedelta(minutes=31))
+    assert routes["desk"].got == [["eng:ci:1"], ["eng:ci:1"]]
+
+
+def many(e, items, n=5):
+    items.sync("watch:eng/ci", [ItemDraft(key=f"w{i}", title=f"Item {i}") for i in range(n)], T0)
+    return e.digest(T0)
+
+
+def test_the_digest_acknowledges_only_the_titles_it_said_once_the_operator_replies():
     e, _, items = engine()
-    said = e.digest(T0)
-    assert spoken_digest(said) == "Hi. One thing is waiting: CI failed on main."
-    e.heard_in_digest(said, T0)
-    assert e.digest(T0) == [] and items.get("eng:ci:1").delivered_via == "digest"
+    d = SpokenDigest(e, many(e, items))
+    assert d.text == "Hi. Five things are waiting: Item 0; Item 1; Item 2, and two more."
+    d.on_turn("user", "hello?", T0)  # before the greeting: not a reply to it
+    assert all(i.state(T0) == "new" for i in items.open())
+    d.on_turn("assistant", d.text, T0)  # the greeting reached the voice: delivered
+    assert all(i.state(T0) == "delivered" and i.delivered_via == "digest" for i in items.open())
+    d.on_turn("user", "okay, thanks", T0)  # the operator answered: the three said are heard
+    left = [i.key for i in e.digest(T0)]
+    assert left == ["w3", "w4"]  # "and two more" was not hearing them
+    d.on_turn("user", "and the rest?", T0)
+    assert [i.key for i in e.digest(T0)] == left  # only the first reply counts
+
+
+def test_a_digest_that_was_never_spoken_marks_nothing():
+    e, _, items = engine()
+    d = SpokenDigest(e, many(e, items))
+    d.on_turn("user", "hello?", T0)  # the voice failed: the operator never heard it
+    d.on_turn("assistant", "Sure, what do you need?", T0)
+    d.on_turn("user", "nothing", T0)
+    assert all(i.state(T0) == "new" for i in items.open())
+
+
+async def test_desk_voice_acknowledges_only_the_titles_it_could_give():
+    e, routes, items = engine(at_desk=True)
+    routes["desk"].answer = "heard"
+    routes["desk"].names = 5  # what the session's note carries
+    many(e, items, 7)
+    await e.tick(T0)
+    left = {i.key for i in items.open() if i.needs_alerting(T0)}
+    assert left == {"w5", "w6"}
+    assert all(items.get(k).delivered_via == "desk" for k in left)
 
 
 def test_spoken_digest_counts_and_clips():
@@ -217,3 +287,20 @@ def test_parse_quiet(said, hours, minutes):
 )
 def test_other_words_are_not_quiet(said):
     assert parse_quiet(said, T0) is None
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["quiet until 3:75", "nothing until 14 pm", "nothing until 25", "quiet for 9999999 hours"],
+)
+def test_a_time_that_isnt_one_is_not_understood(said):
+    assert parse_quiet(said, T0) == UNCLEAR
+
+
+def test_do_not_disturb_outlives_a_restart(tmp_path):
+    store = Store(tmp_path / "ghost.db")
+    RouteEngine(Items(store)).quiet_until(T0 + timedelta(hours=1))
+    again = RouteEngine(Items(store))
+    assert again.dnd_until == T0 + timedelta(hours=1) and again.quiet(T0)
+    again.quiet_until(None)
+    assert RouteEngine(Items(store)).dnd_until is None

@@ -869,7 +869,7 @@ export default function SettingsScreen(_: RouteProps) {
                       }
                     >
                       <p className="set-help set-optional-keys__lead">
-                        Set when you connected each app under <a href={hrefFor("/apps")}>Apps</a>. Disconnecting an app leaves its key here until you clear it.
+                        Set when you connected each app under <a href={hrefFor("/apps")}>Apps</a>. Disconnecting an app clears the key Ghost saved for it; a key you named yourself stays here until you clear it.
                       </p>
                       <div className="set-optional-keys__list">{appSecrets.map(secretRow)}</div>
                     </Disclosure>

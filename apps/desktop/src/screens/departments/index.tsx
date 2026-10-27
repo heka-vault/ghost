@@ -404,7 +404,7 @@ function DepartmentDetail({ slug }: { slug: string }) {
             <Section
               id="dept-watches"
               title="Watches and webhooks"
-              description={<>What {title} keeps an eye on (ADR 0028) and the webhooks it takes (ADR 0027), declared in its department.json. Nothing here uses the model unless a watch asks for it.</>}
+              description={<>What {title} keeps an eye on (ADR 0028) and the webhooks it takes (ADR 0027), as its department.json sets them out. Nothing here uses the model unless a watch asks for it.</>}
             >
               <Card list>
                 {d.watches.map((w) => (

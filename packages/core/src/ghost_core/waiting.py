@@ -35,6 +35,7 @@ State = Literal["new", "delivered", "acknowledged", "snoozed"]
 GATE = "gate"  # Ghost's own source: changes waiting for a yes
 GHOST = "ghost"  # Ghost's own source: servers and departments with a problem
 SOURCE = "waiting"  # the read tool's source name
+SETTINGS = "routes"  # the store's key/value rows the routes keep (ADR 0031)
 TITLE_MAX = 200
 
 
@@ -215,7 +216,16 @@ class Items:
         items = [_from_row(r) for r in self._store.open_items()]
         return [i for i in items if response is None or i.response == response]
 
-    def acknowledge(self, key: str, now: datetime | None = None) -> bool:
+    def acknowledge(
+        self, key: str, now: datetime | None = None, *, seen: datetime | None = None
+    ) -> bool:
+        """The operator heard it. ``seen`` is the item's ``changed_at`` as the operator
+        was shown it (an old notification clicked later): when it has changed since, what
+        they saw is not what is there now, and nothing is acknowledged."""
+        if seen is not None:
+            item = self.get(key)
+            if item is None or item.changed_at > seen:
+                return False
         return self._store.mark_item(key, acknowledged_at=(now or utcnow()).isoformat())
 
     def snooze(self, key: str, until: datetime) -> bool:
@@ -225,6 +235,13 @@ class Items:
         return self._store.mark_item(
             key, delivered_at=(now or utcnow()).isoformat(), delivered_via=via
         )
+
+    def setting(self, key: str) -> str | None:
+        """A small piece of the routes' own state (do-not-disturb), kept in the store."""
+        return self._store.get_checkpoint(SETTINGS, key)
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._store.set_checkpoint(SETTINGS, key, value)
 
 
 def change_key(proposal_id: str) -> str:
@@ -282,8 +299,10 @@ class WaitingList:
             self._on_change()
         return self.items.open(response="tell")
 
-    def acknowledge(self, key: str, now: datetime | None = None) -> bool:
-        ok = self.items.acknowledge(key, now)
+    def acknowledge(
+        self, key: str, now: datetime | None = None, *, seen: datetime | None = None
+    ) -> bool:
+        ok = self.items.acknowledge(key, now, seen=seen)
         if ok:
             self._on_change()
         return ok
