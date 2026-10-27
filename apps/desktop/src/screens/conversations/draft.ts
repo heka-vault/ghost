@@ -13,7 +13,7 @@ export interface Draft {
   aliases: string;
   /** What the agent was hired for, in a line. */
   job: string;
-  /** The agent's own voice; "" means the department's (ADR 0024). */
+  /** The agent's own voice; "" means Ghost's (ADR 0035). */
   voice: string;
   speed: number;
   persona: string;
@@ -49,12 +49,12 @@ function same(k: DraftKey, a: Draft, b: Draft): boolean {
 
 const KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "persona", "memory", "notes"];
 
-/** Ghost keeps its name; a department's own agent keeps the department's. Those keys can't be dirty on them. */
-export function dirtyKeys(draft: Draft, base: Draft, isDefault: boolean): DraftKey[] {
-  return KEYS.filter((k) => !(isDefault && (k === "name" || k === "aliases")) && !same(k, draft, base));
+/** Ghost keeps its name, so its name and aliases can't be dirty. */
+export function dirtyKeys(draft: Draft, base: Draft, isGhost: boolean): DraftKey[] {
+  return KEYS.filter((k) => !(isGhost && (k === "name" || k === "aliases")) && !same(k, draft, base));
 }
 
-/** The PATCH body for the dirty fields. A voice of "" asks for the department's. */
+/** The PATCH body for the dirty fields. A voice of "" asks for Ghost's. */
 export function updateBody(draft: Draft, keys: DraftKey[]): AgentUpdate {
   const body: AgentUpdate = {};
   for (const k of keys) {

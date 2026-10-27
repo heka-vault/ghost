@@ -5,7 +5,7 @@ import { type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useStat
 
 import { useDesign } from "../design/context";
 import { GhostMark, type GhostPhase, LineGlyph, StatusDot, agentName, cx, liveLabel, phaseText, relativeTime, useLive } from "../ui";
-import { groupByDepartment, isRetired } from "../screens/conversations/threads";
+import { isRetired } from "../screens/conversations/threads";
 import { newAgentSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
@@ -127,13 +127,11 @@ export function Sidebar() {
   // Where the eye starts: Ghost, then the agent Ghost is with right now (which is also the one
   // holding any pending okay), then the rest by recency. The live agent is never buried.
   const rank = (l: ConversationView) => (l.is_ghost ? 0 : inSession && l.slug === active ? 1 : 2);
-  // A retired agent (ADR 0024) has left the roster; the Agents screen keeps it in its Retired group.
+  // A retired agent has left the roster; the Agents screen keeps it in its Retired group.
   const working = agents.filter((l) => !isRetired(l));
   const sortedAgents = [...working].sort((a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? ""));
   // Every working agent, right here: the sidebar is the list, not a preview of one (the operator's call, 2026-10-20).
   const shownAgents = state !== "offline" ? sortedAgents : [];
-  // Agents sit under their department's own agent (ADR 0024), one glyph column in; a group takes the place of its first member, so the live agent still pulls its department up.
-  const groups = groupByDepartment(shownAgents).flatMap((g) => [...(g.head ? [{ agent: g.head, member: false }] : []), ...g.agents.map((l) => ({ agent: l, member: !!g.head }))]);
   const retiredCount = agents.filter(isRetired).length;
   const agentIsCurrent = shownAgents.some((l) => path === `/agents/${l.slug}`);
 
@@ -173,7 +171,7 @@ export function Sidebar() {
               Agents
             </a>
             <ul className="sidebar__group" role="list" aria-labelledby="sidebar-agents">
-              {groups.map(({ agent: l, member }) => {
+              {shownAgents.map((l) => {
                 const to = `/agents/${l.slug}`;
                 const live = inSession && l.slug === active;
                 const waiting = live && !!pending;
@@ -187,7 +185,7 @@ export function Sidebar() {
                 return (
                   <li key={l.slug}>
                     <a
-                      className={cx("sidebar__item sidebar__item--line", member && "sidebar__item--topic", path === to && "is-current")}
+                      className={cx("sidebar__item sidebar__item--line", path === to && "is-current")}
                       href={hrefFor(to)}
                       aria-current={path === to ? "page" : undefined}
                       title={l.job || undefined}

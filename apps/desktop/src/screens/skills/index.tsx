@@ -1,8 +1,8 @@
 /**
  * Owner: skills. The SKILL.md folders Ghost reads (ADR 0023): its own, under
  * ~/.config/ghost/skills, which the operator adds by dropping a folder on the list or naming
- * its path, and removes with a click; and a project's, read in place from each root in
- * GHOST_SKILL_ROOTS, never copied or removed here. A skill tells the model how to do a kind
+ * its path, and removes with a click; and the operator's own in ~/.agents/skills, read in
+ * place, never copied or removed here (ADR 0035). A skill tells the model how to do a kind
  * of task; it never changes what Ghost may do, so there are no levels on this page. Adding
  * and removing go through the gate as skills.add and skills.remove, audited like any write.
  *
@@ -21,7 +21,7 @@ import { inTauri } from "../../transport";
 import { Button, Card, EmptyState, ListRow, LiveStatus, Notice, Page, Skeleton, SkeletonText, cx, errorText, scrollIntoPanel, useConfirm, useLive, useToast } from "../../ui";
 import { AddDialog } from "./AddDialog";
 import { Detail } from "./Detail";
-import { GHOST_SKILLS_DIR, humanize, needsWords, saysInstalled, settingsHref, sourceWord, tildePath } from "./model";
+import { GHOST_SKILLS_DIR, humanize, needsWords, saysInstalled, sourceWord, tildePath } from "./model";
 import "./skills.css";
 
 const params = () => new URLSearchParams(window.location.search);
@@ -309,8 +309,8 @@ export default function SkillsScreen(_: RouteProps) {
               description={
                 <>
                   Put a folder with a <span className="t-mono">SKILL.md</span> at <span className="t-mono">{GHOST_SKILLS_DIR}/&lt;name&gt;/</span>,{" "}
-                  {inTauri ? "drop one here, or use Add from folder… to copy one in." : "or use Add from folder… to copy one in."} A project’s own{" "}
-                  <span className="t-mono">.agents/skills</span> are read in place once its root is in <a href={settingsHref()}>Project skill roots</a> under Settings.
+                  {inTauri ? "drop one here, or use Add from folder… to copy one in." : "or use Add from folder… to copy one in."} Yours in{" "}
+                  <span className="t-mono">~/.agents/skills</span> are read in place.
                 </>
               }
             />

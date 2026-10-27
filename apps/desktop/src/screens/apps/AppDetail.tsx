@@ -189,7 +189,7 @@ export function AppDetail({ name }: { name: string }) {
               controlWidth="auto"
               label={`Block ${title}`}
               detail={name}
-              help={wholeBlocked ? `Ghost can’t see or use anything in ${title}, in any department, until you turn this off.` : `Turn on to keep Ghost out of ${title} entirely, without disconnecting it.`}
+              help={wholeBlocked ? `Ghost and its agents can’t see or use anything in ${title} until you turn this off.` : `Turn on to keep Ghost out of ${title} entirely, without disconnecting it.`}
             >
               <Switch
                 checked={wholeBlocked}

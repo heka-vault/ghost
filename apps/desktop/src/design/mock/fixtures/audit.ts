@@ -166,17 +166,16 @@ function ev(at: number, event: string, detail?: Record<string, unknown>): AuditE
 }
 
 /**
- * Where a GitHub write was made (ADR 0023): billing issues from the Accounting department
- * (now and then from its Q3 audit agent), the rest of the app repo
- * from the App department through code, infra from Infra through ops. The remainder was done
- * from Ghost.
+ * The agent a GitHub write was made with: billing issues from Accounting (now and then from
+ * the Q3 audit agent), the rest of the app repo from App, infra from Infra. The remainder was
+ * done from Ghost.
  */
 const BILLING = new Set(["ghost-mock/app#212", "ghost-mock/app#208"]);
-function whereMade(target: string, rand: () => number): Pick<AuditEntry, "department" | "conversation"> {
-  if (BILLING.has(target)) return { department: "accounting", conversation: rand() < 0.35 ? "q3-audit" : "accounting" };
-  if (rand() < 0.4) return { department: null, conversation: null };
-  if (target.startsWith("ghost-mock/infra")) return { department: "infra", conversation: "infra" };
-  return { department: "app", conversation: "app" };
+function whereMade(target: string, rand: () => number): Pick<AuditEntry, "conversation"> {
+  if (BILLING.has(target)) return { conversation: rand() < 0.35 ? "q3-audit" : "accounting" };
+  if (rand() < 0.4) return { conversation: null };
+  if (target.startsWith("ghost-mock/infra")) return { conversation: "infra" };
+  return { conversation: "app" };
 }
 
 export default function audit(s: Scenario): AuditEntry[] {
@@ -248,7 +247,7 @@ export default function audit(s: Scenario): AuditEntry[] {
     // The real gate stores a failed or partial write as "executed"; its finished event says how
     // it went. Keep both shapes in the fixture so the screen proves it reads either.
     const stored = (status === "failed" || status === "partial") && rand() < 0.6 ? "executed" : status;
-    const where = conv ? { conversation: tgt.replace(/^conversation:/, ""), department: null } : whereMade(tgt, rand);
+    const where = conv ? { conversation: tgt.replace(/^conversation:/, "") } : whereMade(tgt, rand);
     entries.push({ id, session_id, source, operation, target: tgt, summary, autonomy, status: stored, created_at: ago(t), events, ...where });
   }
   // One of each way a waiting write gets canceled, early in the log so the first page shows
@@ -288,13 +287,13 @@ export default function audit(s: Scenario): AuditEntry[] {
     {
       id: hex(32, rand), session_id: recentSession, source: "github", operation: "approve", target: "ghost-mock/app#208",
       summary: "On ghost-mock/app#208: approved, with a comment: “Dana’s fix looks right to me.”", autonomy: "announce", status: "executed", created_at: ago(4.0),
-      conversation: "accounting", department: "accounting",
+      conversation: "accounting",
       events: [ev(4.0, "prepared", { source: "github", operation: "approve", target: "github:ghost-mock/app#208", autonomy: "announce" }), ev(3.99, "claimed"), ev(3.98, "step_applied", { index: 0, step: "labels: add approved; remove needs-signoff" }), ev(3.97, "step_applied", { index: 1, step: "comment: Dana’s fix looks right to me." }), ev(3.96, "finished", { status: "success" })],
     },
     {
       id: hex(32, rand), session_id: recentSession, source: "github", operation: "set_labels", target: "ghost-mock/app#212",
       summary: "On ghost-mock/app#212: labels: add bug, priority-high.", autonomy: "quiet", status: "executed", created_at: ago(4.8),
-      conversation: "accounting", department: "accounting",
+      conversation: "accounting",
       events: [ev(4.8, "prepared", { source: "github", operation: "set_labels", target: "github:ghost-mock/app#212", autonomy: "quiet" }), ev(4.79, "claimed"), ev(4.78, "step_applied", { index: 0, step: "labels: add bug, priority-high" }), ev(4.77, "finished", { status: "success" })],
     },
   ];

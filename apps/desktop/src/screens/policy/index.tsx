@@ -3,13 +3,13 @@
  * screen holds the exceptions, in `[permissions]` of ~/.config/ghost/policy.toml. The mode says
  * what a change no rule names does (Open, Ask before changes, Read only: the lockdown); the
  * lists say what is blocked, asks first, runs quietly or is allowed anyway. The most careful
- * rule that matches wins. Ghost's own operations (agents, departments, skills, outputs) are
+ * rule that matches wins. Ghost's own operations (agents, rules, skills, outputs) are
  * named by the same rules. The model never sees this screen or the file.
  *
  * Rules apply the moment they are set (`PUT /permissions`); the TOML view edits the whole file
  * (`PUT /policy` with text) and saves through the dock, keeping the operator's comments.
  *   #/permissions                 the rules
- *   ?policy=toml#/permissions     the file (works anywhere; Departments link to it)
+ *   ?policy=toml#/permissions     the file (works anywhere)
  *   mock only: ?policy=dirty|invalid|load-error
  */
 import { ApiError, type AppView, type PermissionsView, type PolicyView, type SourceInfo } from "@ghost/client-ts";
@@ -144,7 +144,7 @@ export default function PermissionsScreen(_: RouteProps) {
     };
   }, [load, designState]);
 
-  // Another window, the voice, or a department changed the rules: read them again, unless the file is being edited here.
+  // Another window or the voice changed the rules: read them again, unless the file is being edited here.
   const firstApps = useRef(true);
   useEffect(() => {
     if (firstApps.current) {
@@ -380,8 +380,7 @@ export default function PermissionsScreen(_: RouteProps) {
       <OwnOperations sources={sources} />
 
       <p className="policy-foot t-small t-3">
-        A department can add its own blocked, ask-first and quiet rules for its sessions, in its folder; it can only narrow what Ghost does (<Link to="/departments">Departments</Link>). Each app’s tools, with these rules
-        applied, are on its page under <Link to="/apps">Apps</Link>.
+        These apply to Ghost and every agent alike. Each app’s tools, with these rules applied, are on its page under <Link to="/apps">Apps</Link>.
       </p>
     </>
   );
@@ -534,9 +533,9 @@ function OwnOperations({ sources }: { sources: SourceInfo[] | null }) {
   if (own.length === 0) return null;
   const total = own.reduce((n, s) => n + s.operations.length, 0);
   return (
-    <Disclosure summary={`What Ghost does itself: ${total} operations on your agents and departments`} className="policy-own">
+    <Disclosure summary={`What Ghost does itself: ${total} operations on your agents, rules and files`} className="policy-own">
       <p className="t-small t-2 policy-own__lead">
-        Hiring, retiring and moving agents, rules and memory: named by the same rules, such as <span className="t-mono">conversations.delete</span>.
+        Hiring and retiring agents, rules, memory and what Ghost makes: named by the same rules, such as <span className="t-mono">conversations.delete</span>.
       </p>
       <Table density="compact">
         <thead>

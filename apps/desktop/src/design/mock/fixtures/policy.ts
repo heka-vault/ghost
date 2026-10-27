@@ -51,7 +51,7 @@ export function permissions(s: Scenario): PermissionsView {
       block: ["github.delete_file", "github-acme.*(repo=public-app)", "calendar.delete_event"],
       ask: ["conversations.delete", "conversations.reset"],
       quiet: ["conversations.remember"],
-      allow: ["github.add_issue_comment", "github.issue_write(state=open)", "calendar.create_event", "departments.remember"],
+      allow: ["github.add_issue_comment", "github.issue_write(state=open)", "calendar.create_event", "outputs.write"],
     };
   }
   return {

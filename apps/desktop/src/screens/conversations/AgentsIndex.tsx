@@ -1,16 +1,18 @@
 /**
- * Owner: conversations. Every agent at a glance (#/agents), grouped by department: Ghost and
- * its agents, then each department with its own agent first and the agents hired into it.
- * Each row is a name, the job, the agent's persona and when it was last used; a row opens
- * the agent, and while a session is live, Switch shows on the row under the pointer or focus
- * and transfers the session from here. Retired agents wait in their own group below.
+ * Owner: conversations. Every agent at a glance (#/agents), Ghost first, then the agent Ghost
+ * is with, then the rest by last use (ADR 0035: no grouping). Each row is a name, the job,
+ * the agent's persona and when it was last used; a row opens the agent, and while a session
+ * is live, Switch shows on the row under the pointer or focus and transfers the session from
+ * here. Retired agents wait in their own group below. Under the list, what every agent
+ * shares: Ghost's rules (AGENTS.md, Add rule through the gate, Open folder) and what Ghost
+ * made in out/ (Reveal, Open).
  */
-import type { ConversationView, DepartmentView } from "@ghost/client-ts";
+import type { ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { Archive, CloudOff, MessagesSquare, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { Link, hrefFor, navigate } from "../../app/router";
+import { hrefFor, navigate } from "../../app/router";
 import { useDesign } from "../../design/context";
 import {
   Button,
@@ -36,9 +38,10 @@ import { drafts } from "./draft";
 import { LineStateText, lineState } from "./lineState";
 import { NewAgentDialog } from "./NewAgentDialog";
 import { personaCache } from "./personaCache";
-import { departmentTitle, groupByDepartment, isRetired, retiredAt } from "./threads";
+import { isRetired, retiredAt } from "./threads";
 import { designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
 import { parseVoice, voiceKind } from "./voices";
+import { GhostFolder } from "./GhostFolder";
 
 /** The first line of a persona, as the row's one-line description. */
 export function personaLead(persona: string): string {
@@ -51,7 +54,6 @@ export function AgentsIndex() {
   const toast = useToast();
   const design = useDesign();
   const [agents, setAgents] = useState<ConversationView[] | null>(null);
-  const [departments, setDepartments] = useState<DepartmentView[]>([]);
   /**
    * Each agent's persona, by slug. The list route carries no persona (ConversationView), so
    * it is read from each agent's detail after the list lands; `null` when that read failed,
@@ -65,22 +67,17 @@ export function AgentsIndex() {
   const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [retrying, setRetrying] = useState(false);
-  // New agent opens from the URL, from a retired agent's “Start an agent from this memory”, or
-  // from a department's page (which names the department).
+  // New agent opens from the URL, from the sidebar, or from a retired agent's “Start an agent
+  // from this memory”.
   const [seed] = useState<string | null>(() => {
     const s = newAgentSeed.slug ?? readParam("seed");
     newAgentSeed.slug = null;
     return s;
   });
-  const [presetDepartment] = useState<string | null>(() => {
-    const d = newAgentSeed.department ?? readParam("department");
-    newAgentSeed.department = null;
-    return d;
-  });
   const [creating, setCreating] = useState(() => {
     const asked = newAgentSeed.open;
     newAgentSeed.open = false;
-    return readParam("open") === "new" || !!seed || asked || !!presetDepartment;
+    return readParam("open") === "new" || !!seed || asked;
   });
   const [retiredAsked] = useState(() => {
     const asked = newAgentSeed.retired;
@@ -97,10 +94,6 @@ export function AgentsIndex() {
     const get = designFail(design, "agents")
       ? Promise.reject(new Error("Ghost couldn’t read the agents (database is locked)."))
       : client.conversations();
-    client
-      .departments()
-      .then((d) => on && setDepartments(d))
-      .catch(() => {});
     get
       .then((l) => {
         if (!on) return;
@@ -130,13 +123,12 @@ export function AgentsIndex() {
   const sorted = [...(agents ?? [])].sort(
     (a, b) => rank(a) - rank(b) || (b.last_active_at ?? "").localeCompare(a.last_active_at ?? "") || a.name.localeCompare(b.name),
   );
-  // Retired agents (ADR 0024) are off the roster; they wait in their own group below.
+  // Retired agents are off the roster; they wait in their own group below.
   const working = sorted.filter((l) => !isRetired(l));
   const retiredAgents = sorted.filter(isRetired).sort((a, b) => (retiredAt(b) ?? "").localeCompare(retiredAt(a) ?? ""));
-  const groups = groupByDepartment(working);
-  const hired = working.filter((l) => !l.is_default);
-  // With only the departments' own agents, the empty state below the list carries the one call to action.
-  const onlyDefaults = agents != null && hired.length === 0;
+  const hired = working.filter((l) => !l.is_ghost);
+  // With only Ghost, the empty state below the list carries the one call to action.
+  const onlyGhost = agents != null && hired.length === 0;
 
   const switchTo = async (l: ConversationView) => {
     const name = agentName(l.slug, l.name);
@@ -175,15 +167,15 @@ export function AgentsIndex() {
             <span className="conv-row-desc" data-user-content>
               {lead}
             </span>
-          ) : l.is_default ? (
-            <span className="conv-row-desc t-3">{l.is_ghost ? "Every wake starts here" : "The department’s own agent; it speaks as its rules"}</span>
+          ) : l.is_ghost ? (
+            <span className="conv-row-desc t-3">Every wake starts here</span>
           ) : persona === null ? (
             <span className="conv-row-desc">{v.name}, {voiceKind(v)}</span>
           ) : (
             <span className="conv-row-desc t-3">No persona yet</span>
           )
         }
-        meta={unsaved ? <span className="conv-row-meta">Unsaved changes</span> : l.job ? <span className="conv-row-dept">{l.job}</span> : undefined}
+        meta={unsaved ? <span className="conv-row-meta">Unsaved changes</span> : l.job ? <span className="conv-row-job">{l.job}</span> : undefined}
         trailing={
           live ? (
             <span className="conv-row-end">
@@ -226,11 +218,11 @@ export function AgentsIndex() {
       status={<LiveStatus />}
       description={
         <>
-          The agents you can be transferred to, by department. Say {quoted("transfer me to marketing")}, {quoted("get me the brand agent")}, or {quoted("back to Ghost")}. Each keeps its own persona, job and memory.
+          The agents you can be transferred to. Say {quoted("transfer me to brand")}, {quoted("get me the Q3 audit")}, or {quoted("back to Ghost")}. Each keeps its own persona, job and memory, and every one follows Ghost’s rules below.
         </>
       }
       actions={
-        onlyDefaults ? undefined : (
+        onlyGhost ? undefined : (
           <Button variant="primary" leadingIcon={<Plus />} disabled={!online} onClick={() => setCreating(true)}>
             New agent
           </Button>
@@ -287,34 +279,12 @@ export function AgentsIndex() {
         </Card>
       ) : (
         <>
-          {groups.map((g) => {
-            const title = departmentTitle(g.slug, departments);
-            const dept = departments.find((d) => d.slug === g.slug);
-            return (
-              <Section
-                key={g.slug}
-                id={`conv-dept-${g.slug}`}
-                title={g.slug === "ghost" ? "Ghost" : title}
-                description={
-                  g.slug === "ghost" ? (
-                    <>Where every wake lands. Agents hired here work with Ghost’s own rules and skills.</>
-                  ) : (
-                    <>
-                      {dept?.rules_lead ? <span data-user-content>{dept.rules_lead} </span> : null}
-                      <Link to={`/departments/${g.slug}`}>The {title} department</Link>: its rules, skills and permissions.
-                    </>
-                  )
-                }
-              >
-                <Card list>{[...(g.head ? [g.head] : []), ...g.agents].map(row)}</Card>
-              </Section>
-            );
-          })}
-          {onlyDefaults && (
+          <Card list>{working.map(row)}</Card>
+          {onlyGhost && (
             <EmptyState
               icon={<MessagesSquare />}
               title="Hire an agent for each part of your work"
-              description={<>Brand design, the Q3 audit, a morning standup: each agent keeps its own persona, job and memory, and works in a department. Hire one here, then say {quoted("transfer me to brand")} in any session.</>}
+              description={<>Brand design, the Q3 audit, a morning standup: each agent keeps its own persona, job and memory, and works with Ghost’s rules, skills and apps. Hire one here, then say {quoted("transfer me to brand")} in any session.</>}
               actions={
                 <Button variant="primary" leadingIcon={<Plus />} disabled={!online} onClick={() => setCreating(true)}>
                   New agent
@@ -362,7 +332,7 @@ export function AgentsIndex() {
                           <span className="conv-row-desc t-3">No persona</span>
                         )
                       }
-                      meta={<span className="conv-row-dept">in {departmentTitle(l.department, departments)}</span>}
+                      meta={l.job ? <span className="conv-row-job">{l.job}</span> : undefined}
                       trailing={
                         <span className="conv-row-end">
                           <span className="conv-row-end__when conv-row-settled">
@@ -380,6 +350,8 @@ export function AgentsIndex() {
         </>
       )}
 
+      <GhostFolder />
+
       <NewAgentDialog
         open={creating}
         onClose={() => {
@@ -388,8 +360,6 @@ export function AgentsIndex() {
         }}
         taken={(agents ?? []).flatMap((l) => [l.name.toLowerCase(), l.slug])}
         retired={retiredAgents}
-        departments={departments}
-        department={presetDepartment}
         seed={seed}
         onCreated={(d) => {
           setCreating(false);

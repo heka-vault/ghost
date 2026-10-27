@@ -1,17 +1,17 @@
 /**
- * Owner: conversations. Hire an agent (ADR 0024): a name (what you say after "transfer me
- * to"), the department it works in, its job in a line, other names it answers to, an optional
- * persona in the operator's own words, and optionally a retired agent whose memory becomes
- * its starting memory. It inherits the department's voice until given one of its own.
+ * Owner: conversations. Hire an agent (ADR 0035): a name (what you say after "transfer me
+ * to"), its job in a line, other names it answers to, an optional persona in the operator's
+ * own words, and optionally a retired agent whose memory becomes its starting memory. It
+ * speaks in Ghost's voice until given one of its own.
  */
-import type { ConversationDetail, ConversationView, DepartmentView } from "@ghost/client-ts";
+import type { ConversationDetail, ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, Dialog, Field, Input, Select, Textarea, agentName, errorText, quoted, relativeTime, useLive } from "../../ui";
 import { splitAliases } from "./draft";
 import { aliasExample, PERSONA_EXAMPLE } from "./examples";
-import { type AgentCreate, departmentTitle, retiredAt } from "./threads";
+import { type AgentCreate, retiredAt } from "./threads";
 
 const NAME_EXAMPLES = ["Brand", "Social", "Vendors", "Hiring", "Release train", "Security"];
 
@@ -20,18 +20,14 @@ export interface NewAgentDialogProps {
   onClose: () => void;
   /** Names already taken, lowercased. */
   taken: string[];
-  /** Retired agents a new one can start from (ADR 0024). */
+  /** Retired agents a new one can start from. */
   retired?: ConversationView[];
-  /** The departments an agent can be hired into: Ghost first. */
-  departments?: DepartmentView[];
-  /** The department preselected when the dialog opens (a department page's New agent). */
-  department?: string | null;
   /** A retired agent preselected as the starting memory, once, when the dialog opens. */
   seed?: string | null;
   onCreated: (d: ConversationDetail) => void;
 }
 
-export function NewAgentDialog({ open, onClose, taken, retired = [], departments = [], department: preset = null, seed = null, onCreated }: NewAgentDialogProps) {
+export function NewAgentDialog({ open, onClose, taken, retired = [], seed = null, onCreated }: NewAgentDialogProps) {
   const { client } = useGhost();
   const { online } = useLive();
   const [name, setName] = useState("");
@@ -39,7 +35,6 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
   const [job, setJob] = useState("");
   const [persona, setPersona] = useState("");
   const [seedFrom, setSeedFrom] = useState("");
-  const [department, setDepartment] = useState("ghost");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,17 +46,16 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
       setJob("");
       setPersona("");
       setSeedFrom("");
-      setDepartment(preset ?? "ghost");
       setError(null);
       seeded.current = false;
       // showModal() focuses the close button; the name is where the operator starts.
       const id = requestAnimationFrame(() => nameRef.current?.focus());
       return () => cancelAnimationFrame(id);
     }
-  }, [open, preset]);
+  }, [open]);
 
   // Starting from a retired agent: once, when it is known (the list may land after the dialog
-  // opens from the URL); it is hired into the same department unless the operator picks another.
+  // opens from the URL).
   const seeded = useRef(false);
   useEffect(() => {
     if (!open || !seed || seeded.current) return;
@@ -69,13 +63,11 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
     if (!from) return;
     seeded.current = true;
     setSeedFrom(from.slug);
-    if (!preset) setDepartment(from.department || "ghost");
-  }, [open, seed, retired, preset]);
+  }, [open, seed, retired]);
 
   const trimmed = name.trim();
   const clash = trimmed && taken.includes(trimmed.toLowerCase()) ? `There’s already an agent called ${trimmed}. Pick another name.` : null;
   const shown = clash ?? error;
-  const deptTitle = departmentTitle(department, departments);
 
   const submit = async () => {
     if (!trimmed || clash || busy) return;
@@ -85,7 +77,6 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
       const body: AgentCreate = {
         name: trimmed,
         aliases: splitAliases(aliases),
-        department: department === "ghost" ? null : department,
         job: job.trim(),
         voice: null,
         speed: null,
@@ -104,12 +95,8 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
   const example = NAME_EXAMPLES.find((n) => !taken.includes(n.toLowerCase())) ?? "Brand";
   const spoken = (trimmed || example).toLowerCase();
 
-  // Retired agents from the same department first: those are the ones this one most likely continues.
-  const seeds = [...retired].sort((a, b) => {
-    const sa = a.department === department ? 0 : 1;
-    const sb = b.department === department ? 0 : 1;
-    return sa - sb || (retiredAt(b) ?? "").localeCompare(retiredAt(a) ?? "");
-  });
+  // The most recently retired first: those are the ones this one most likely continues.
+  const seeds = [...retired].sort((a, b) => (retiredAt(b) ?? "").localeCompare(retiredAt(a) ?? ""));
   const seedAgent = retired.find((l) => l.slug === seedFrom);
 
   return (
@@ -119,7 +106,7 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
       dismissible={!busy}
       size="md"
       title="New agent"
-      description="An agent has its own persona, job and memory, and works in a department: its rules, skills and permissions. Transfer to it in any session."
+      description="An agent has its own persona, job and memory, and works with Ghost’s rules, skills, apps and permissions. Transfer to it in any session."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
@@ -141,12 +128,6 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
       >
         <Field label="Name" error={shown} help={<>You’ll say {quoted(`transfer me to ${spoken}`)}.</>}>
           <Input ref={nameRef} value={name} placeholder={example} maxLength={60} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field
-          label="Department"
-          help={department === "ghost" ? <>Works with Ghost’s own rules and skills, like Ghost.</> : <>Works with {deptTitle}’s rules, skills and permissions, and reads what {deptTitle} knows. {quoted(`transfer me to ${deptTitle.toLowerCase()}`)} still lands on the department’s own agent.</>}
-        >
-          <Select value={department} onChange={(e) => setDepartment(e.target.value)} options={[{ value: "ghost", label: "Ghost" }, ...departments.filter((d) => !d.is_ghost).map((d) => ({ value: d.slug, label: d.title }))]} />
         </Field>
         <Field label="Job" optional help="What it is for, in a line: brand design, the Q3 audit, social media.">
           <Input value={job} placeholder="brand design" maxLength={200} onChange={(e) => setJob(e.target.value)} />
@@ -174,7 +155,7 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
                 { value: "", label: "Start with an empty memory" },
                 ...seeds.map((l) => {
                   const when = retiredAt(l);
-                  return { value: l.slug, label: `${agentName(l.slug, l.name)}${when ? ` · retired ${relativeTime(when)}` : ""}${l.department === department ? ` · ${deptTitle}` : ""}` };
+                  return { value: l.slug, label: `${agentName(l.slug, l.name)}${when ? ` · retired ${relativeTime(when)}` : ""}` };
                 }),
               ]}
             />
