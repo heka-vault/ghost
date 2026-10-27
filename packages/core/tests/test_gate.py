@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -206,6 +207,70 @@ def test_changeset_is_bounded():
 
 def test_fresh_writer_fixture_is_independent():
     assert FakeWriter().issues == {}
+
+
+# --- two yeses at once -------------------------------------------------------------
+
+
+class SlowWriter(FakeWriter):
+    """Every read takes a moment, as a real app's does. ``versioned`` False is an app's
+    tool, whose snapshot has no version (ADR 0034)."""
+
+    def __init__(self, versioned: bool = True) -> None:
+        super().__init__()
+        self.versioned = versioned
+
+    async def fetch(self, target):
+        await asyncio.sleep(0.01)
+        snap = await super().fetch(target)
+        return snap if self.versioned else snap.model_copy(update={"version": ""})
+
+
+async def _later(coro):
+    await asyncio.sleep(0.005)
+    return await coro
+
+
+@pytest.mark.parametrize("versioned", [True, False])
+async def test_two_confirms_at_once_run_the_change_once(target, versioned):
+    # A Confirm click and a spoken yes at the same moment: one runs it, the other finds
+    # it no longer waiting, and nothing raises or writes over the executed row.
+    writer = SlowWriter(versioned)
+    writer.seed(target)
+    gate = WriteGate(Store())
+    register_fake(gate, writer)
+    p = await prepare(gate, target)
+    gate.set_aside("s1", "hung up")
+    first, second = await asyncio.gather(gate.confirm_id(p.id), _later(gate.confirm_id(p.id)))
+    assert first is not None and first.status == "success"
+    assert second is None
+    assert gate._store.get_proposal(p.id).status is ProposalStatus.EXECUTED
+    assert [c[0] for c in writer.calls].count("set_labels") == 1
+    assert "stale" not in [e for _, e, _ in gate._store.events(p.id)]
+
+
+async def test_a_spoken_yes_and_a_click_at_once_run_the_change_once(target):
+    writer = SlowWriter()
+    writer.seed(target)
+    gate = WriteGate(Store())
+    register_fake(gate, writer)
+    p = await prepare(gate, target)
+    (_, spoken), clicked = await asyncio.gather(
+        gate.on_user_turn("s1", "yes"), _later(gate.confirm_id(p.id))
+    )
+    assert [o is not None for o in (spoken, clicked)].count(True) == 1
+    assert gate._store.get_proposal(p.id).status is ProposalStatus.EXECUTED
+    assert [c[0] for c in writer.calls].count("set_labels") == 1
+
+
+async def test_a_finished_proposal_keeps_its_status(gate, target):
+    p = await prepare(gate, target)
+    await gate.on_user_turn("s1", "yes")
+    store = gate._store
+    for status in (ProposalStatus.STALE, ProposalStatus.CANCELLED, ProposalStatus.EXPIRED):
+        assert store.set_status(p.id, status) is False
+    assert store.get_proposal(p.id).status is ProposalStatus.EXECUTED
+    assert gate.cancel_id(p.id) is None
 
 
 # --- scope (ADR 0019) ---------------------------------------------------------------
