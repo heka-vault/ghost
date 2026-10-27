@@ -20,9 +20,9 @@ def make_skill(
     return folder
 
 
-def test_discovery_reads_the_operators_then_ghosts(tmp_path: Path):
-    """The operator's ~/.agents/skills, then Ghost's own; the first folder with a name wins.
-    Every agent reads the same two (ADR 0035)."""
+def test_discovery_reads_ghosts_then_the_operators(tmp_path: Path):
+    """Ghost's own, then the operator's ~/.agents/skills; the first folder with a name wins,
+    as a session in Ghost read them before ADR 0035. Every agent reads the same two."""
     ghost = tmp_path / "ghost-skills"
     home = tmp_path / "home-skills"
     make_skill(
@@ -34,13 +34,13 @@ def test_discovery_reads_the_operators_then_ghosts(tmp_path: Path):
     skills = Skills(ghost, home)
     found = skills.lookup()
     assert set(found) == {"invoicing", "triage"}
-    assert found["invoicing"].source == "ghost" and found["triage"].source == "home"
-    assert found["triage"].description == "Triage issues."
+    assert found["invoicing"].source == "ghost" and found["triage"].source == "ghost"
+    assert found["triage"].description == "Ghost's triage."
     assert found["invoicing"].description == "Send and chase invoices."
     assert found["invoicing"].requires == ("mcp:quickbooks",)
     assert found["invoicing"].missing(["github"]) == ["quickbooks"]
     assert found["invoicing"].missing(["quickbooks"]) == []
-    assert [p for p, _ in skills.places()] == [home, ghost]
+    assert [p for p, _ in skills.places()] == [ghost, home]
     assert Skills(ghost, None).places() == [(ghost, "ghost")]
     # a skill folder that is a symlink is followed; links inside one are not listed
     elsewhere = tmp_path / "project" / "skills"

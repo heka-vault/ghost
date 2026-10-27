@@ -45,8 +45,8 @@ before. Ghost is agent zero. There is no move and no default agent per departmen
 
 - **Rules.** `AGENTS.md` is in every agent's prompt. "Add a rule" appends the operator's
   words verbatim through the gate as `rules.add`, never a paraphrase (ADR 0014).
-- **Skills** are the operator's `~/.agents/skills/`, then Ghost's `skills/`, as before
-  less the department's own: there is no nearer folder to read first.
+- **Skills** are Ghost's `skills/`, then the operator's `~/.agents/skills/`: the order a
+  session in Ghost already read them in, Ghost's folder having been its department's.
 - **Watches and webhooks** are `watches.json` and `hooks.json`, keyed by name, in the shapes
   ADR 0027 and ADR 0028 gave them. A watch's items are keyed `<watch>:<key>`, its source is
   `watch:<name>`, a hook's is `hook:<name>`, the listener serves `POST /hooks/<name>`, and

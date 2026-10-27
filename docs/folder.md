@@ -83,7 +83,7 @@ on an interval itself; nothing about noticing needs a model.
       "url": {"at": "html_url", "pattern": "^https://github\\.com/.*"}
     },
     "when": [{"field": "branch", "op": "==", "value": "main"}],
-    "key": "ci:{id}",
+    "key": "{id}",
     "title": "CI failed on {branch}: {name}",
     "link": "{url}",
     "response": "tell"
@@ -104,8 +104,9 @@ on an interval itself; nothing about noticing needs a model.
   `exists`), all of which must hold; `for_minutes` waits until a result has held that long
   before it becomes an item. An item already open stays open while it matches, so a
   restart (which starts the wait again) doesn't resolve it and tell you again later.
-- **`key`, `title`, `link`**: `{field}` templates, nothing else. The key makes one failure
-  one item however often it is seen; a key that is gone next time is resolved. A look
+- **`key`, `title`, `link`**: `{field}` templates, nothing else. Ghost puts the watch's
+  name in front of the key (`{id}` is `ci:123`). The key makes one failure one item
+  however often it is seen; a key that is gone next time is resolved. A look
   that dropped results (one broke a constraint, or there were more than 100) resolves
   nothing, since a dropped result may be the open one; a failed read resolves nothing.
 - **`response`**: `tell` puts the item on the waiting list, `record` keeps it without
@@ -156,7 +157,7 @@ addresses, nothing else on them). Every step before an item is deterministic and
         },
         "when": [{"field": "conclusion", "op": "==", "value": "failure"}],
         "resolve": [{"field": "conclusion", "op": "==", "value": "success"}],
-        "key": "ci:{repo}",
+        "key": "{repo}",
         "title": "CI failed on {repo}",
         "check": {
           "app": "github", "read": "get_workflow_run",

@@ -24,13 +24,13 @@ requires: [app:quickbooks]          # optional: apps it needs; the desktop shows
 
 In this order, and the first folder with a name wins:
 
-1. **The operator's:** `~/.agents/skills/<name>/` (`home_skills_dir`), the folder other
-   agents on the machine share. Read in place.
-2. **Ghost's own:** `~/.config/ghost/skills/<name>/` (`skills_dir`). The desktop adds here
+1. **Ghost's own:** `~/.config/ghost/skills/<name>/` (`skills_dir`). The desktop adds here
    by drag-and-drop or by path, and removes; Ghost does the same by voice ("add the
    invoicing skill from my downloads") as the `skills.add` and `skills.remove` operations
-   through the gate, `confirm` unless the policy file says otherwise. A skill installed
-   under a new name has its `name` rewritten to match the folder.
+   through the gate, which run and Ghost says so unless the permissions ask first. A skill
+   installed under a new name has its `name` rewritten to match the folder.
+2. **The operator's:** `~/.agents/skills/<name>/` (`home_skills_dir`), the folder other
+   agents on the machine share. Read in place.
 
 ## Problems
 

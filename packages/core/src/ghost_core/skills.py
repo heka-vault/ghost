@@ -2,8 +2,8 @@
 
 A skill is instructions for a task, the agent-skills standard: a folder with a
 ``SKILL.md`` whose YAML front matter gives ``name`` and ``description``, and any files
-beside it. Every agent reads the same two places: the operator's ``~/.agents/skills/``,
-then Ghost's ``~/.config/ghost/skills/``; the first folder with a name wins. What a session
+beside it. Every agent reads the same two places: Ghost's ``~/.config/ghost/skills/``, then
+the operator's ``~/.agents/skills/``; the first folder with a name wins. What a session
 gets:
 
 * an index in the prompt (name and one line each), so the model knows what it can read;
@@ -338,9 +338,10 @@ class Skills:
         self._cache = None
 
     def places(self) -> list[tuple[Path, str]]:
-        """In order: the operator's, then Ghost's."""
+        """In order: Ghost's, then the operator's (a session in Ghost read its own folder
+        first before ADR 0035, and still does)."""
         home = [(self.home_dir, HOME_SOURCE)] if self.home_dir is not None else []
-        return [*home, (self.ghost_dir, GHOST_SOURCE)]
+        return [(self.ghost_dir, GHOST_SOURCE), *home]
 
     def _found(self) -> dict[str, Skill]:
         if self._cache is None:
