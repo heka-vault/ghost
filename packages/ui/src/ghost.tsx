@@ -18,6 +18,8 @@ export interface GhostState {
   lastEvent: GhostEvent | null;
   /** Bumps whenever a conversation is created, edited, deleted or switched (ADR 0014). */
   conversationsVersion: number;
+  /** Bumps whenever the waiting list changes (ADR 0029); re-read GET /waiting. */
+  waitingVersion: number;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -31,6 +33,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [logs, setLogs] = useState<GhostState["logs"]>([]);
   const [lastEvent, setLastEvent] = useState<GhostEvent | null>(null);
   const [conversationsVersion, setConversationsVersion] = useState(0);
+  const [waitingVersion, setWaitingVersion] = useState(0);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -68,6 +71,9 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
             case "conversation":
               setConversationsVersion((v) => v + 1);
               break;
+            case "waiting":
+              setWaitingVersion((v) => v + 1);
+              break;
           }
         },
         () => {
@@ -101,8 +107,8 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   }, [client]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion }),
-    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion],
+    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion }),
+    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

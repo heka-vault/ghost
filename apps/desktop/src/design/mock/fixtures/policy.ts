@@ -50,11 +50,25 @@ function withComments(text: string): string {
     .replace(/^(\[mcp\.github_heka\.targets\."ghost-mock\/infra"\])$/m, "# infra is shared with the platform team. Never close there.\n$1");
 }
 
+/** [routes] as the daemon reports it (ADR 0031): the digest, desk voice and the phone. */
+export const ROUTES: NonNullable<PolicyView["routes"]> = {
+  enabled: ["digest", "desk", "phone"],
+  escalate_after: 15,
+  quiet_hours: "22:00-07:00",
+  batch_secs: 60,
+  calls_per_hour: 2,
+  calls_per_day: 6,
+  carry: "count",
+  greeting: "Got a minute?",
+  urgency: {},
+  available: ["digest", "desk", "desktop"],
+};
+
 export default function policy(s: Scenario, servers: ServerFixture[]): PolicyView {
   const path = "~/.config/ghost/policy.toml";
   if (s.data === "empty") {
     // No file yet: the daemon reports empty text.
-    return { default: null, skills: {}, targets: {}, path, exists: false, text: "" };
+    return { default: null, skills: {}, targets: {}, path, exists: false, text: "", routes: { ...ROUTES, enabled: ["digest", "phone"], quiet_hours: null } };
   }
   const skills: PolicyView["skills"] = {
     github_heka: { set_labels: "quiet", comment: "announce", close: "confirm", reopen: "confirm" },
@@ -67,5 +81,5 @@ export default function policy(s: Scenario, servers: ServerFixture[]): PolicyVie
   // Busy: the calendar sets one level for everything it does with a `*` line.
   if (s.data === "busy") skills.calendar = { "*": "confirm" };
   const p = { default: null, skills, targets };
-  return { ...p, path, exists: true, text: withComments(renderToml(p, servers)) };
+  return { ...p, path, exists: true, text: withComments(renderToml(p, servers)), routes: ROUTES };
 }

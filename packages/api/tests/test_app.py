@@ -321,3 +321,27 @@ async def test_acknowledge_and_snooze_an_item(world):
     assert client.post("/waiting/ack", json={"key": "nope"}).json()["ok"] is False
     assert client.post(f"/proposals/{sub.proposal.id}/cancel").json()["ok"] is True
     assert client.get("/waiting").json()["items"] == []
+
+
+def test_routes_are_edited_as_fields_and_kept_with_the_levels(world):
+    client, *_, deps = world
+    deps.policy_path.write_text('[defaults]\npending_ttl = 900\n[fake]\nnuke = "confirm"\n')
+    view = client.get("/policy").json()["routes"]
+    assert view["enabled"] == ["digest", "phone"] and view["available"] == ["digest"]
+    routes = {
+        **view,
+        "enabled": ["desk", "digest"],
+        "quiet_hours": "22:00-07:00",
+        "greeting": "Eric, got a minute?",
+    }
+    r = client.put("/policy", json={"routes": routes})
+    assert r.status_code == 200, r.text
+    text = deps.policy_path.read_text()
+    assert (
+        '[routes]\nenabled = ["digest", "desk"]' in text and 'quiet_hours = "22:00-07:00"' in text
+    )
+    assert 'nuke = "confirm"' in text and "pending_ttl = 900" in text
+    client.put("/policy", json={"skills": {"fake": {"nuke": "announce"}}})
+    assert '"Eric, got a minute?"' in deps.policy_path.read_text()  # a levels edit keeps [routes]
+    bad = client.put("/policy", json={"routes": {**routes, "escalate_after": 0}})
+    assert bad.status_code == 422

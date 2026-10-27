@@ -58,6 +58,8 @@ from ghost_api.models import (
     PolicyUpdate,
     PolicyView,
     ReadToolInfo,
+    RouteName,
+    RoutesView,
     RuleAdd,
     SayRequest,
     SecretState,
@@ -830,6 +832,28 @@ def create_app(deps: Deps) -> FastAPI:
                 s: {t: {op: lv.value for op, lv in ops.items()} for t, ops in ts.items()}
                 for s, ts in p.targets.items()
             },
+            routes=routes_view(p.routes),
+        )
+
+    def routes_view(r: Any) -> RoutesView:
+        from ghost_core.routes import RoutePolicy
+
+        r = r or RoutePolicy()
+        engine = getattr(deps.control, "routes", None)
+        available = ["digest", *(getattr(engine, "routes", {}) or {})]
+        return RoutesView(
+            enabled=list(r.enabled),
+            escalate_after=r.escalate_after,
+            quiet_hours=(
+                f"{r.quiet_hours[0]:%H:%M}-{r.quiet_hours[1]:%H:%M}" if r.quiet_hours else None
+            ),
+            batch_secs=r.batch_secs,
+            calls_per_hour=r.calls_per_hour,
+            calls_per_day=r.calls_per_day,
+            carry=r.carry,
+            greeting=r.greeting,
+            urgency=dict(r.urgency),
+            available=[a for a in available if a in RouteName.__args__],  # type: ignore[attr-defined]
         )
 
     @app.get("/policy", response_model=PolicyView, tags=["policy"])
@@ -859,7 +883,18 @@ def create_app(deps: Deps) -> FastAPI:
                 raise HTTPException(422, str(e)) from None
             # The levels editor doesn't know the rest of [defaults]: keep it as it was.
             kept = AutonomyPolicy.parse(current.text) if current.text else AutonomyPolicy()
-            policy = dataclasses.replace(policy, pending_ttl=kept.pending_ttl, routes=kept.routes)
+            routes = kept.routes
+            if update.routes is not None:
+                from ghost_core.routes import RouteError, RoutePolicy
+
+                raw = update.routes.model_dump(exclude={"available"})
+                if raw.get("quiet_hours") is None:
+                    raw.pop("quiet_hours")
+                try:
+                    routes = RoutePolicy.parse(raw)
+                except RouteError as e:
+                    raise HTTPException(422, str(e)) from None
+            policy = dataclasses.replace(policy, pending_ttl=kept.pending_ttl, routes=routes)
             text = policy.to_toml()
         deps.policy_path.parent.mkdir(parents=True, exist_ok=True)
         deps.policy_path.write_text(text if text.endswith("\n") else text + "\n")

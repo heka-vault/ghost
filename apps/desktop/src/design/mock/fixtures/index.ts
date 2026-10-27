@@ -16,6 +16,7 @@ import settings from "./settings";
 import skills from "./skills";
 import sources from "./sources";
 import tray from "./tray";
+import waiting from "./waiting";
 
 export function composeFixtures(s: Scenario) {
   const servers = mcp(s);
@@ -34,6 +35,8 @@ export function composeFixtures(s: Scenario) {
     settings: settings(s),
     /** The SKILL.md folders Ghost reads (GET /skills), ADR 0023; `missing` follows the connected servers. */
     skills: skillList,
+    /** What needs the operator (GET /waiting), ADR 0029. */
+    waiting: waiting(s),
     /** Data with no API behind it yet, exposed to prototypes through useFixture(owner). */
     prototypes: {
       onboarding: onboarding(s),

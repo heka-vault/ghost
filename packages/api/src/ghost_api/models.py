@@ -401,6 +401,25 @@ class SourceInfo(BaseModel):
     department: str | None = None  # the department whose server this is; None for Ghost's
 
 
+RouteName = Literal["digest", "desk", "desktop", "phone", "call", "sms", "whatsapp"]
+
+
+class RoutesView(BaseModel):
+    """``[routes]`` in the policy file (ADR 0031): how Ghost reaches the operator."""
+
+    enabled: list[RouteName]
+    escalate_after: int  # minutes
+    quiet_hours: str | None = None  # "22:00-07:00"
+    batch_secs: int
+    calls_per_hour: int
+    calls_per_day: int
+    carry: Literal["count", "title"]
+    greeting: str
+    urgency: dict[str, Literal["digest", "notify", "call"]] = {}
+    # The routes this daemon has something behind; the others can be listed but do nothing yet.
+    available: list[RouteName] = []
+
+
 class PolicyView(BaseModel):
     path: str
     exists: bool
@@ -408,6 +427,7 @@ class PolicyView(BaseModel):
     default: str | None
     skills: dict[str, dict[str, str]]
     targets: dict[str, dict[str, dict[str, str]]]
+    routes: RoutesView | None = None
 
 
 class PolicyUpdate(BaseModel):
@@ -417,6 +437,7 @@ class PolicyUpdate(BaseModel):
     default: str | None = None
     skills: dict[str, dict[str, str]] | None = None
     targets: dict[str, dict[str, dict[str, str]]] | None = None
+    routes: RoutesView | None = None
 
 
 class PolicyResult(BaseModel):

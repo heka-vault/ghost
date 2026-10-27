@@ -29,6 +29,7 @@ import {
   Notice,
   Page,
   Section,
+  relativeTime,
   Skeleton,
   Textarea,
   agentName,
@@ -424,6 +425,37 @@ function DepartmentDetail({ slug }: { slug: string }) {
             </p>
           </Section>
 
+          {(d.watches.length > 0 || d.hooks.length > 0) && (
+            <Section
+              id="dept-watches"
+              title="Watches and webhooks"
+              description={<>What {title} keeps an eye on (ADR 0028) and the webhooks it takes (ADR 0027), declared in its department.json. Nothing here uses the model unless a watch asks for it.</>}
+            >
+              <Card list>
+                {d.watches.map((w) => (
+                  <div key={`w-${w.name}`} className="dept-cell">
+                    <span className="dept-cell__text">
+                      <span className="t-mono">{w.name}</span> <span className="t-3">reads {w.server}.{w.read} every {w.every_secs < 120 ? `${w.every_secs} s` : `${Math.round(w.every_secs / 60)} min`}</span>
+                    </span>
+                    <span className="dept-cell__meta">
+                      {w.error ? `can’t read: ${w.error}` : w.last_ok ? `${w.open} open · looked ${relativeTime(w.last_ok)}` : "not run yet"}
+                    </span>
+                  </div>
+                ))}
+                {d.hooks.map((h) => (
+                  <div key={`h-${h.name}`} className="dept-cell">
+                    <span className="dept-cell__text">
+                      <span className="t-mono">{h.name}</span> <span className="t-3">webhook at {h.path}</span>
+                    </span>
+                    <span className="dept-cell__meta">
+                      {h.on ? `${sumOf(h.accepted)} taken · ${sumOf(h.rejected)} refused` : `off: ${h.off_reason ?? "the listener is off"}`}
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            </Section>
+          )}
+
           <Section id="dept-skills" title="Skills" description={`Read first by every agent in ${title}, then your ~/.agents/skills, then Ghost’s own.`}>
             <Card list>
               {d.skills.length === 0 ? <p className="dept-text dept-text--empty">No skills of its own. Add a SKILL.md folder under skills/ in the department’s folder.</p> : d.skills.map((s) => (
@@ -515,4 +547,9 @@ function DepartmentDetail({ slug }: { slug: string }) {
       </Dialog>
     </Page>
   );
+}
+
+/** Deliveries counted by outcome or reason, added up. */
+function sumOf(counts: Record<string, number>): number {
+  return Object.values(counts).reduce((a, b) => a + b, 0);
 }

@@ -58,6 +58,11 @@ export type DepartmentView = Schemas["DepartmentView"];
 export type DepartmentCreate = Schemas["DepartmentCreate"];
 export type JournalEntry = Schemas["JournalEntry"];
 export type RuleAdd = Schemas["RuleAdd"];
+export type WaitingItemView = Schemas["WaitingItemView"];
+export type WaitingView = Schemas["WaitingView"];
+export type WatchInfo = Schemas["WatchInfo"];
+export type HookInfo = Schemas["HookInfo"];
+export type RoutesView = Schemas["RoutesView"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -66,7 +71,8 @@ export type GhostEvent =
   | Schemas["PendingEvent"]
   | Schemas["OutcomeEvent"]
   | Schemas["LogEvent"]
-  | Schemas["ConversationEvent"];
+  | Schemas["ConversationEvent"]
+  | Schemas["WaitingEvent"];
 
 export type Unsubscribe = () => void;
 

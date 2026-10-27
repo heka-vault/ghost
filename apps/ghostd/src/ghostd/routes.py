@@ -1,4 +1,5 @@
-"""The routes the daemon itself runs (ADR 0031): desk voice (ADR 0032).
+"""The routes the daemon itself runs (ADR 0031): desk voice (ADR 0032) and the desktop
+notification.
 
 Desk voice is the one route that speaks first. It is off unless the operator lists
 ``desk`` in ``[routes].enabled``, and it only ever runs when the desk is idle: no session,
@@ -83,3 +84,90 @@ class DeskRoute:
             return await asyncio.wait_for(fut, DELIVER_TIMEOUT_SECS)
         except TimeoutError:
             return "unavailable"
+
+
+DESKTOP_APP = "heka-ghost-desktop"  # opened by the notification's Open
+NOTIFY_SEND = "notify-send"
+
+
+class DesktopRoute:
+    """A notification on the workstation's desktop (``notify-send``, libnotify): it shows
+    the titles, and its buttons are the acknowledgment. ``deliver`` returns once it is
+    shown; a click acknowledges later through ``acknowledge``, and closing it without a
+    click leaves the items to escalate. Off unless ``desktop`` is in ``[routes].enabled``."""
+
+    name = "desktop"
+
+    def __init__(
+        self,
+        acknowledge: Callable[[str], Any],
+        *,
+        binary: str = NOTIFY_SEND,
+        open_app: Callable[[], Any] | None = None,
+    ) -> None:
+        self._acknowledge = acknowledge
+        self._binary = binary
+        self._open_app = open_app or _open_desktop
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    async def deliver(self, items: Sequence[Item], policy: RoutePolicy) -> Delivery:
+        import shutil
+
+        if not items or shutil.which(self._binary) is None:
+            return "unavailable"
+        title = (
+            "Ghost: one thing is waiting"
+            if len(items) == 1
+            else (f"Ghost: {len(items)} things are waiting")
+        )
+        body = "\n".join(f"• {i.title}" for i in items[:5])
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._binary,
+                "--app-name=Ghost",
+                "--wait",
+                "--action=default=Open",
+                "--action=ack=Got it",
+                "--action=open=Open Ghost",
+                title,
+                body,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError:
+            return "unavailable"
+        task = asyncio.ensure_future(self._await_click(proc, [i.key for i in items]))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return "delivered"
+
+    async def _await_click(self, proc: Any, keys: list[str]) -> None:
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), 24 * 3600)
+        except TimeoutError:
+            proc.kill()
+            return
+        action = (out or b"").decode(errors="replace").strip()
+        if action in ("ack", "open", "default"):
+            for k in keys:
+                self._acknowledge(k)
+        if action in ("open", "default"):
+            self._open_app()
+
+    async def close(self) -> None:
+        for t in list(self._tasks):
+            t.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+
+
+def _open_desktop() -> None:
+    import shutil
+    import subprocess
+
+    if shutil.which(DESKTOP_APP):
+        subprocess.Popen(  # noqa: S603 - a fixed binary, no shell, no input
+            [DESKTOP_APP],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )

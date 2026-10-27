@@ -884,36 +884,28 @@ export default function SettingsScreen(_: RouteProps) {
                 )}
               </Section>
 
-              {/* ---------------------------------------------------------- GitHub */}
+              {/* --------------------------------------------- Servers (was GitHub) */}
               <Section
                 id={sectionDomId("github")}
                 title={SECTION_TITLE.github}
-                description="GitHub is an MCP server declared in your policy file, not a setting here (ADR 0022)."
+                description="Every outside system Ghost reads, watches or writes to is an MCP server a department declares, not a setting here (ADR 0022, ADR 0024)."
                 className="set-section"
               >
                 <Card padding="md">
                   <p className="set-github t-body">
-                    Its declaration under <span className="set-detail">[mcp.github]</span> in <span className="set-detail">~/.config/ghost/policy.toml</span> names the
-                    command Ghost runs, the repositories it may touch and the writes Ghost may make. The GitHub token above is what it signs in with; one token per
-                    server, so a second organization is a second server.
+                    A department’s <span className="set-detail">mcp.json</span> names the command Ghost runs or the URL it connects to, and its{" "}
+                    <span className="set-detail">department.json</span> says what it may touch, the writes Ghost may make and what Ghost watches. A token is a
+                    secret above, named in <span className="set-detail">mcp.json</span> as <span className="set-detail">{"${NAME}"}</span>.
                   </p>
                   <div className="set-github__links">
                     <Button size="sm" variant="secondary" href={hrefFor("/servers")} trailingIcon={<ArrowRight />}>
                       Open Servers
                     </Button>
-                    <Button size="sm" variant="ghost" href={`${window.location.pathname}?policy=toml#/policy`}>
-                      Edit the policy file
+                    <Button size="sm" variant="ghost" href={hrefFor("/departments")}>
+                      Open Departments
                     </Button>
                   </div>
                 </Card>
-                {!isSet(s, "GITHUB_TOKEN") && (
-                  <p className="set-note">
-                    Ghost has no GitHub token, so a GitHub server can’t sign in.{" "}
-                    <button type="button" className="set-link" onClick={() => go("secrets")}>
-                      Add a token
-                    </button>
-                  </p>
-                )}
               </Section>
 
               {/* ----------------------------------------------------------- Departments */}

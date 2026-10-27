@@ -1499,6 +1499,7 @@ export interface components {
         PolicyUpdate: {
             /** Default */
             default?: string | null;
+            routes?: components["schemas"]["RoutesView"] | null;
             /** Skills */
             skills?: {
                 [key: string]: {
@@ -1524,6 +1525,7 @@ export interface components {
             exists: boolean;
             /** Path */
             path: string;
+            routes?: components["schemas"]["RoutesView"] | null;
             /** Skills */
             skills: {
                 [key: string]: {
@@ -1547,6 +1549,43 @@ export interface components {
             description: string;
             /** Name */
             name: string;
+        };
+        /**
+         * RoutesView
+         * @description ``[routes]`` in the policy file (ADR 0031): how Ghost reaches the operator.
+         */
+        RoutesView: {
+            /**
+             * Available
+             * @default []
+             */
+            available: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
+            /** Batch Secs */
+            batch_secs: number;
+            /** Calls Per Day */
+            calls_per_day: number;
+            /** Calls Per Hour */
+            calls_per_hour: number;
+            /**
+             * Carry
+             * @enum {string}
+             */
+            carry: "count" | "title";
+            /** Enabled */
+            enabled: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
+            /** Escalate After */
+            escalate_after: number;
+            /** Greeting */
+            greeting: string;
+            /** Quiet Hours */
+            quiet_hours?: string | null;
+            /**
+             * Urgency
+             * @default {}
+             */
+            urgency: {
+                [key: string]: "digest" | "notify" | "call";
+            };
         };
         /**
          * RuleAdd
@@ -2003,6 +2042,7 @@ export type SchemaPolicyResult = components['schemas']['PolicyResult'];
 export type SchemaPolicyUpdate = components['schemas']['PolicyUpdate'];
 export type SchemaPolicyView = components['schemas']['PolicyView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
+export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];

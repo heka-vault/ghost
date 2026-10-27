@@ -1,0 +1,6 @@
+/* Owner: routes. Prefix: rt-. Compose primitives; never style a g- class here. */
+.rt-notice { margin-bottom: var(--space-4); }
+.rt-stack { display: grid; gap: var(--space-4); }
+.rt-row { padding: var(--space-3) var(--space-4); }
+.rt-fields { display: grid; gap: var(--space-5); }
+.rt-foot { margin: 0; }

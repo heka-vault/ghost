@@ -7,6 +7,7 @@
  */
 import {
   AudioLines,
+  BellRing,
   BookOpen,
   Building2,
   Ghost,
@@ -69,6 +70,18 @@ export const ROUTES: RouteDef[] = [
     component: lazy(() => import("../screens/session")),
   },
   {
+    id: "waiting",
+    patterns: ["/waiting"],
+    path: "/waiting",
+    owner: "waiting",
+    title: "What needs you",
+    kind: "screen",
+    chrome: "app",
+    needsDaemon: true,
+    nav: { label: "What needs you", icon: Inbox, group: "main" },
+    component: lazy(() => import("../screens/waiting")),
+  },
+  {
     id: "conversations",
     patterns: ["/agents/:slug?"],
     path: "/agents",
@@ -91,6 +104,18 @@ export const ROUTES: RouteDef[] = [
     needsDaemon: true,
     nav: { label: "Departments", icon: Building2, group: "main" },
     component: lazy(() => import("../screens/departments")),
+  },
+  {
+    id: "routes",
+    patterns: ["/routes"],
+    path: "/routes",
+    owner: "routes",
+    title: "How Ghost reaches you",
+    kind: "screen",
+    chrome: "app",
+    needsDaemon: true,
+    nav: { label: "How Ghost reaches you", icon: BellRing, group: "settings" },
+    component: lazy(() => import("../screens/routes")),
   },
   {
     id: "policy",

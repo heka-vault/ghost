@@ -26,6 +26,7 @@ import type {
   Status,
   Turn,
   VoiceInfo,
+  WaitingItemView,
 } from "@ghost/client-ts";
 
 import type { AgentRecord } from "./fixtures/conversations";
@@ -123,6 +124,8 @@ export class MockDaemon {
   /** The SKILL.md folders Ghost reads (ADR 0023): Ghost's own and the operator's. */
   private skills: SkillFixture[];
   private script: SessionFixture;
+  /** What needs the operator (ADR 0029). */
+  private waitingItems: WaitingItemView[];
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(scenario: Scenario, f: Fixtures, phoneOpts: PhoneOptions = {}) {
@@ -143,6 +146,7 @@ export class MockDaemon {
     this.devices = f.settings.devices;
     this.models = f.settings.models;
     this.skills = f.skills;
+    this.waitingItems = f.waiting;
     const first = f.conversations.agents.find((l) => l.detail.slug === scenario.session)?.detail ?? null;
     this.status = {
       phase: scenario.phase,
@@ -158,7 +162,7 @@ export class MockDaemon {
       department: first ? first.department : null,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
-      waiting: 0,
+      waiting: f.waiting.filter((i) => i.state === "new" || i.state === "delivered").length,
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;
@@ -475,6 +479,28 @@ export class MockDaemon {
     this.audited("skills", "remove", `skill:${name}`, `Removed the ${name} skill.`, "quiet");
   }
 
+  // ------------------------------------------------------------------ waiting (ADR 0029)
+  private waitingView() {
+    const count = this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length;
+    return { items: this.waitingItems, count };
+  }
+  private markWaiting(key: string, patch: Partial<WaitingItemView>): boolean {
+    const i = this.waitingItems.findIndex((x) => x.key === key);
+    if (i < 0) return false;
+    this.waitingItems[i] = { ...this.waitingItems[i], ...patch };
+    this.waitingChanged();
+    return true;
+  }
+  private dropWaiting(key: string) {
+    this.waitingItems = this.waitingItems.filter((x) => x.key !== key);
+    this.waitingChanged();
+  }
+  private waitingChanged() {
+    const { count } = this.waitingView();
+    this.emit({ type: "waiting", count });
+    this.pushStatus({ waiting: count });
+  }
+
   // ------------------------------------------------------------------ router
   async handle(method: string, path: string, query: URLSearchParams, body: unknown): Promise<unknown> {
     const b = (body ?? {}) as Record<string, unknown>;
@@ -502,6 +528,19 @@ export class MockDaemon {
       this.reply("Okay, I won't.");
       return { ok: true };
     }
+    if (method === "GET" && path === "/waiting") return this.waitingView();
+    if (method === "POST" && path === "/waiting/ack") return { ok: this.markWaiting(String(b.key ?? ""), { state: "acknowledged", acknowledged_at: now() }) };
+    if (method === "POST" && path === "/waiting/snooze") {
+      const until = new Date(Date.now() + Number(b.minutes ?? 30) * 60000).toISOString();
+      return { ok: this.markWaiting(String(b.key ?? ""), { state: "snoozed", snoozed_until: until }) };
+    }
+    if ((r = m(/^\/proposals\/([^/]+)\/(confirm|cancel)$/))) {
+      const item = this.waitingItems.find((i) => i.change?.id === r![1]);
+      if (!item) throw new HttpError(409, "that change isn't waiting");
+      this.dropWaiting(item.key);
+      if (r[2] === "cancel") return { ok: true };
+      return { proposal_id: r[1], target: item.change!.target, status: "success", applied: [item.change!.summary], summary: `Applied on ${item.change!.target}.` } satisfies OutcomeView;
+    }
     if (method === "GET" && path === "/audit") {
       let items = this.audit;
       const ability = query.get("ability"), status = query.get("status"), sid = query.get("session_id");
@@ -526,6 +565,10 @@ export class MockDaemon {
         if (u.skills) this.policy.skills = u.skills;
         if (u.default !== undefined) this.policy.default = u.default ?? null;
         if (u.targets) this.policy.targets = u.targets;
+        if (u.routes) {
+          if (u.routes.escalate_after < 1) throw new HttpError(422, "[routes].escalate_after is a whole number from 1 to 1440");
+          this.policy.routes = { ...u.routes, enabled: (["digest", "desk", "desktop", "phone", "call", "sms", "whatsapp"] as const).filter((r) => u.routes!.enabled.includes(r)) };
+        }
         this.policy = { ...this.policy, exists: true, text: renderToml(this.policy, this.servers) };
       }
       // Levels apply live (ADR 0022): every source's operations and every server's declared

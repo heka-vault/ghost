@@ -1741,6 +1741,16 @@
             ],
             "title": "Default"
           },
+          "routes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoutesView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "skills": {
             "anyOf": [
               {
@@ -1814,6 +1824,16 @@
             "title": "Path",
             "type": "string"
           },
+          "routes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoutesView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "skills": {
             "additionalProperties": {
               "additionalProperties": {
@@ -1869,6 +1889,107 @@
           "description"
         ],
         "title": "ReadToolInfo",
+        "type": "object"
+      },
+      "RoutesView": {
+        "description": "``[routes]`` in the policy file (ADR 0031): how Ghost reaches the operator.",
+        "properties": {
+          "available": {
+            "default": [],
+            "items": {
+              "enum": [
+                "digest",
+                "desk",
+                "desktop",
+                "phone",
+                "call",
+                "sms",
+                "whatsapp"
+              ],
+              "type": "string"
+            },
+            "title": "Available",
+            "type": "array"
+          },
+          "batch_secs": {
+            "title": "Batch Secs",
+            "type": "integer"
+          },
+          "calls_per_day": {
+            "title": "Calls Per Day",
+            "type": "integer"
+          },
+          "calls_per_hour": {
+            "title": "Calls Per Hour",
+            "type": "integer"
+          },
+          "carry": {
+            "enum": [
+              "count",
+              "title"
+            ],
+            "title": "Carry",
+            "type": "string"
+          },
+          "enabled": {
+            "items": {
+              "enum": [
+                "digest",
+                "desk",
+                "desktop",
+                "phone",
+                "call",
+                "sms",
+                "whatsapp"
+              ],
+              "type": "string"
+            },
+            "title": "Enabled",
+            "type": "array"
+          },
+          "escalate_after": {
+            "title": "Escalate After",
+            "type": "integer"
+          },
+          "greeting": {
+            "title": "Greeting",
+            "type": "string"
+          },
+          "quiet_hours": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiet Hours"
+          },
+          "urgency": {
+            "additionalProperties": {
+              "enum": [
+                "digest",
+                "notify",
+                "call"
+              ],
+              "type": "string"
+            },
+            "default": {},
+            "title": "Urgency",
+            "type": "object"
+          }
+        },
+        "required": [
+          "enabled",
+          "escalate_after",
+          "batch_secs",
+          "calls_per_hour",
+          "calls_per_day",
+          "carry",
+          "greeting"
+        ],
+        "title": "RoutesView",
         "type": "object"
       },
       "RuleAdd": {

@@ -77,6 +77,7 @@ from ghostd.routes import (
     REPLY_WINDOW_SECS,
     SNOOZE_MINUTES,
     DeskRoute,
+    DesktopRoute,
     context_note,
     is_not_now,
 )
@@ -709,6 +710,7 @@ class Daemon:
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.routes.add_route(DeskRoute(self._can_raise, self._raise_q))
+        self.routes.add_route(DesktopRoute(waiting.acknowledge))
         self.waiting = waiting
         # ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
         watch_runner = WatchRunner(
@@ -848,6 +850,9 @@ class Daemon:
         finally:
             refresher.cancel()
             await watch_runner.close()
+            for route in self.routes.routes.values():
+                if hasattr(route, "close"):
+                    await route.close()
             if hooks_listener is not None:
                 await hooks_listener.stop()
             wake.close()

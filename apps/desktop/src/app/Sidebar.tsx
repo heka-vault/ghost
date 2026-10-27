@@ -154,7 +154,13 @@ export function Sidebar() {
         {main.length > 0 && (
           <ul className="sidebar__group" role="list">
             {main.map((r) => (
-              <NavItem key={r.id} route={r} current={current === r.id && !(agentIsCurrent && r.id === "conversations")} section={agentIsCurrent && r.id === "conversations"} />
+              <NavItem
+                key={r.id}
+                route={r}
+                current={current === r.id && !(agentIsCurrent && r.id === "conversations")}
+                section={agentIsCurrent && r.id === "conversations"}
+                badge={r.id === "waiting" && connected && status?.waiting ? status.waiting : undefined}
+              />
             ))}
           </ul>
         )}

@@ -98,3 +98,29 @@ async def test_not_now_snoozes(monkeypatch):
 async def test_a_reply_is_heard(monkeypatch):
     result, *_ = await run_window("yeah, what is it", monkeypatch)
     assert result == "heard"
+
+
+async def test_a_desktop_notification_is_delivered_and_its_button_acknowledges(tmp_path):
+    from ghostd.routes import DesktopRoute
+
+    fake = tmp_path / "notify-send"
+    fake.write_text("#!/bin/sh\necho ack\n")
+    fake.chmod(0o755)
+    _, items = daemon_with_items()
+    opened = []
+    route = DesktopRoute(items.acknowledge, binary=str(fake), open_app=lambda: opened.append(1))
+    assert await route.deliver(items.open(), RoutePolicy()) == "delivered"
+    for _ in range(50):
+        if items.get("eng:ci:1").state() == "acknowledged":
+            break
+        await asyncio.sleep(0.02)
+    assert items.get("eng:ci:1").state() == "acknowledged" and opened == []
+    await route.close()
+
+
+async def test_no_notify_send_is_unavailable():
+    from ghostd.routes import DesktopRoute
+
+    _, items = daemon_with_items()
+    route = DesktopRoute(items.acknowledge, binary="/nonexistent/notify-send")
+    assert await route.deliver(items.open(), RoutePolicy()) == "unavailable"

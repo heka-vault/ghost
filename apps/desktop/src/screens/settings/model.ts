@@ -12,7 +12,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
   secrets: "Secrets",
   model: "Model",
-  github: "GitHub",
+  github: "Servers",
   departments: "Departments",
   skills: "Skills",
   voice: "Voice and wake",
@@ -72,7 +72,7 @@ export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
   ANTHROPIC_AUTH_TOKEN: { help: "Lets Ghost think and talk. Not needed if your own endpoint takes no key.", placeholder: "sk-ant-…" },
-  GITHUB_TOKEN: { help: "What the GitHub server in your policy file signs in with.", placeholder: "github_pat_…" },
+  GITHUB_TOKEN: { help: "What a GitHub server signs in with, named ${GITHUB_TOKEN} in a department’s mcp.json.", placeholder: "github_pat_…" },
   TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev keys are set.", optional: true, placeholder: "ts_…" },
   OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when the endpoint setting is openrouter.", optional: true, placeholder: "sk-or-…" },
   HF_TOKEN: { help: "Speeds up the first download of the voice models.", optional: true, placeholder: "hf_…" },

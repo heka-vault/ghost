@@ -1,0 +1,10 @@
+/* Owner: waiting. Prefix: wait-. Compose primitives; never style a g- class here. */
+.wait-notice { margin-bottom: var(--space-4); }
+.wait-summary { margin: 0 0 var(--space-3); }
+.wait-list { list-style: none; margin: 0; padding: 0; }
+.wait-icon { display: inline-flex; color: var(--text-3); }
+.wait-icon svg { width: var(--icon-lg); height: var(--icon-lg); }
+.wait-title { overflow-wrap: anywhere; }
+.wait-meta { display: inline-flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); color: var(--text-3); }
+.wait-actions { display: inline-flex; align-items: center; gap: var(--space-2); }
+.wait-skel { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
