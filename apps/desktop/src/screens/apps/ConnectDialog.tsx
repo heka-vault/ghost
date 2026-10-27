@@ -4,7 +4,7 @@
  * field, sent once and never shown again), and, under Advanced, the name rules use. An app
  * that signs in opens the browser; the dialog then waits for the operator to finish there.
  */
-import { ApiError, type CatalogEntryView } from "@ghost/client-ts";
+import { ApiError, type AppView, type CatalogEntryView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { ExternalLink } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
@@ -14,6 +14,19 @@ import { Button, Dialog, Disclosure, Field, Input, Notice, RadioGroup, Select, e
 import { AppIcon } from "./AppIcon";
 import { optionHelp, sentence } from "./model";
 import { expectSignIn, openSignIn } from "./signin";
+
+/**
+ * What a connect came back with. POST /apps answers once the app is saved, even when it then
+ * didn't answer: the first app that failed (with its problem), else whether one is still
+ * connecting.
+ */
+export function connectOutcome(apps: AppView[]): { failed: AppView | null; connecting: boolean } {
+  const failed = apps.find((a) => a.state === "failed" || a.state === "stopped") ?? null;
+  return { failed, connecting: !failed && apps.some((a) => a.state === "connecting") };
+}
+
+/** The dialog's notice text for an app that was saved and then didn't connect. */
+export const failedText = (a: AppView) => `${a.problem ? sentence(a.problem) : "It didn’t answer."} Check the settings and try again.`;
 
 export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: CatalogEntryView; onClose: () => void; onConnected: () => void }) {
   const { client } = useGhost();
@@ -27,7 +40,9 @@ export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: Catal
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(e.options.flatMap((o) => o.settings.map((s) => [`${o.id}:${s.key}`, s.default ?? ""]))));
   const [name, setName] = useState(e.suggested_name);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<{ title: string; text: string; taken: boolean } | null>(null);
+  const [error, setError] = useState<{ title: string; text: string; taken: boolean; failed?: boolean } | null>(null);
+  /** Saved by an earlier try that then didn't connect: the next try replaces it. */
+  const [saved, setSaved] = useState(false);
   const [missing, setMissing] = useState<Set<string>>(new Set());
   /** After a connect that signs in: the page Ghost opened, and whether it could open it. */
   const [signIn, setSignIn] = useState<{ url: string; opened: boolean; name: string } | null>(null);
@@ -51,11 +66,18 @@ export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: Catal
     expectSignIn(appName);
     try {
       const vals = Object.fromEntries(option.settings.map((s) => [s.key, value(s.key).trim()]).filter(([, v]) => v));
-      const r = await client.connectApp({ catalog: e.name, option: option.id, name: appName, values: vals, replace: replace || undefined });
+      const r = await client.connectApp({ catalog: e.name, option: option.id, name: appName, values: vals, replace: replace || saved || undefined });
       onConnected();
-      if (r.sign_in_url) {
+      const { failed, connecting } = connectOutcome(r.apps);
+      if (failed) {
+        setSaved(true);
+        setError({ title: `Ghost couldn’t connect to ${e.title}`, text: failedText(failed), taken: false, failed: true });
+      } else if (r.sign_in_url) {
         const opened = await openSignIn(r.sign_in_url, { again: true, mock });
         setSignIn({ url: r.sign_in_url, opened, name: r.apps[0]?.title ?? e.title });
+      } else if (connecting) {
+        toast({ title: `Connecting to ${e.title}…`, description: "Ghost is still reaching it. It shows as connected under Apps once it answers." });
+        onClose();
       } else {
         toast({ title: `Connected ${e.title}`, description: "Ghost can use it from its next turn. Its tools are on its page under Apps." });
         onClose();
@@ -194,9 +216,9 @@ export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: Catal
             title={error.title}
             className="apps-form__notice"
             action={
-              error.taken ? (
+              error.taken || error.failed ? (
                 <Button size="sm" variant="secondary" loading={busy} onClick={() => void connect(true)}>
-                  Replace it
+                  {error.failed ? "Try again" : "Replace it"}
                 </Button>
               ) : undefined
             }
