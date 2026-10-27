@@ -118,6 +118,30 @@ async def test_a_desktop_notification_is_delivered_and_its_button_acknowledges(t
     await route.close()
 
 
+async def test_an_old_notification_clicked_after_a_change_acknowledges_nothing(tmp_path):
+    from ghostd.routes import DesktopRoute
+
+    fake = tmp_path / "notify-send"
+    fake.write_text("#!/bin/sh\nsleep 0.3\necho ack\n")  # the operator clicks it later
+    fake.chmod(0o755)
+    _, items = daemon_with_items()
+    route = DesktopRoute(items.acknowledge, binary=str(fake), open_app=lambda: None)
+    assert await route.deliver(items.open(), RoutePolicy()) == "delivered"
+    await asyncio.sleep(0.05)
+    items.sync("watch:eng/ci", [ItemDraft(key="eng:ci:1", title="CI failed again")])
+    await asyncio.sleep(0.6)
+    assert items.get("eng:ci:1").state() != "acknowledged"  # what it showed is not this
+    await route.close()
+
+
+def test_the_note_names_as_many_titles_as_desk_voice_acknowledges():
+    items = Items(Store())
+    items.sync("s", [ItemDraft(key=f"k{i}", title=f"Title {i}") for i in range(8)])
+    note = context_note(items.open())
+    named = [n for n in range(8) if f"Title {n}\n" in note]
+    assert named == list(range(DeskRoute.names)) and "and 3 more" in note
+
+
 async def test_no_notify_send_is_unavailable():
     from ghostd.routes import DesktopRoute
 

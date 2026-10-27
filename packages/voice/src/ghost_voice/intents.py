@@ -14,7 +14,7 @@ from datetime import datetime
 
 from ghost_core import Handled, UserTurn
 from ghost_core.confirmation import has_negation, normalize
-from ghost_core.routes import parse_quiet
+from ghost_core.routes import UNCLEAR, parse_quiet
 
 _FILLERS = {"ghost", "okay", "ok", "hey", "oh", "um", "so", "please"}
 
@@ -186,6 +186,8 @@ class QuickIntents:
         if turn.pending and phrases & CANCEL:
             return Handled(say="Dropped it.", action="cancel")
         until = parse_quiet(turn.text, datetime.now().astimezone())
+        if until == UNCLEAR:  # quiet, asked for with a time that isn't one: nothing is set
+            return Handled(say="Sorry, I didn't catch the time. Say it like: nothing until two.")
         if until is not None:  # ADR 0031: the operator's words set it; no model
             return Handled(
                 say=f"Okay, nothing until {_spoken_time(until)}.", action="quiet", until=until

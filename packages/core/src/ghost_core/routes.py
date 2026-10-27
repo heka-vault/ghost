@@ -167,7 +167,10 @@ class Route(Protocol):
     """One way to reach the operator. ``deliver`` passes the items on and says what it
     knows: ``delivered`` (sent; nobody has said they heard), ``heard`` (the operator
     answered, which is the acknowledgment), ``not_heard`` (nobody answered: go on at once)
-    or ``unavailable`` (it can't now: skip it this time)."""
+    or ``unavailable`` (it can't now: the items go on to the next route this time).
+
+    A route that gives the operator only the first few items (desk voice's note) says how
+    many in ``names``; ``heard`` acknowledges those, and the rest are only delivered."""
 
     name: RouteName
 
@@ -207,7 +210,7 @@ class RouteEngine:
         self._at_desk = at_desk
         self._local = local
         self._on_change = on_change or (lambda: None)
-        self.dnd_until: datetime | None = None
+        self.dnd_until: datetime | None = _when(items.setting(DND_KEY))  # kept over restarts
         self.calls: list[datetime] = []  # when calls went out, for the cap
         self.log: list[tuple[datetime, str, str, str]] = []  # (at, key, route, what)
         self._not_heard: set[str] = set()  # delivered, and the route knows nobody heard
@@ -219,8 +222,10 @@ class RouteEngine:
         self.policy = policy
 
     def quiet_until(self, until: datetime | None) -> None:
-        """Do-not-disturb, from the operator's own words (a fixed intent)."""
+        """Do-not-disturb, from the operator's own words (a fixed intent). Kept in the
+        store, so "nothing until two" still holds after a restart."""
         self.dnd_until = until
+        self.items.set_setting(DND_KEY, until.isoformat() if until else "")
 
     # --- what is due --------------------------------------------------------------------
 
@@ -249,9 +254,12 @@ class RouteEngine:
             return True
         return self.policy.is_quiet(self._local(now))
 
-    def due(self, now: datetime | None = None) -> list[Plan]:
+    def due(
+        self, now: datetime | None = None, skip: Mapping[str, set[str]] | None = None
+    ) -> list[Plan]:
         """Which items go out by which route now. Held for the digest when it is quiet,
-        when no louder route is on, or while a new item waits out the batch window."""
+        when no louder route is on, or while a new item waits out the batch window.
+        ``skip`` names, per item, the routes that were unavailable for it this tick."""
         now = now or utcnow()
         if self.quiet(now):
             return []
@@ -264,29 +272,42 @@ class RouteEngine:
             ladder = self.ladder(item, now)
             if not ladder:
                 continue
-            nxt = self._next(item, ladder, now)
+            nxt = self._next(item, ladder, now, (skip or {}).get(item.key, set()))
             if nxt is not None:
                 plans.setdefault(nxt, []).append(item)
         return [Plan(r, plans[r]) for r in LADDER if r in plans]
 
-    def _next(self, item: Item, ladder: list[RouteName], now: datetime) -> RouteName | None:
+    def _next(
+        self, item: Item, ladder: list[RouteName], now: datetime, skip: set[str]
+    ) -> RouteName | None:
         last = item.delivered_via if item.state(now) == "delivered" else None
+        if (
+            item.snoozed_until is not None
+            and item.delivered_at is not None
+            and item.delivered_at < item.snoozed_until
+        ):
+            last = None  # a snooze ran out: it alerts again from the start of its ladder
         if last is None or last == "digest":
-            return ladder[0]
-        waited = item.delivered_at is not None and now - item.delivered_at >= timedelta(
-            minutes=self.policy.escalate_after
-        )
-        if not waited and item.key not in self._not_heard:
-            return None  # still waiting for the operator to acknowledge it
-        louder = [r for r in ladder if LADDER.index(r) > LADDER.index(last)]  # type: ignore[arg-type]
-        return louder[0] if louder else None  # the top of the ladder: no more
+            options = ladder
+        else:
+            waited = item.delivered_at is not None and now - item.delivered_at >= timedelta(
+                minutes=self.policy.escalate_after
+            )
+            if not waited and item.key not in self._not_heard:
+                return None  # still waiting for the operator to acknowledge it
+            options = [r for r in ladder if LADDER.index(r) > LADDER.index(last)]  # type: ignore[arg-type]
+        # A route that couldn't take it this tick hands it to the next one up.
+        options = [r for r in options if r not in skip]
+        return options[0] if options else None  # the top of the ladder: no more
 
     async def tick(self, now: datetime | None = None) -> list[tuple[RouteName, Delivery]]:
-        """Send what is due. A route that says nobody heard hands its items on at once."""
+        """Send what is due. A route that says nobody heard, or that can't take the items
+        now, hands them on at once."""
         now = now or utcnow()
         done: list[tuple[RouteName, Delivery]] = []
+        skip: dict[str, set[str]] = {}  # per item, the routes unavailable this tick
         for _ in range(len(LADDER)):  # at most one pass per route: "not heard" moves up
-            plans = self.due(now)
+            plans = self.due(now, skip)
             if not plans:
                 break
             moved = False
@@ -302,13 +323,16 @@ class RouteEngine:
                 done.append((plan.route, what))
                 if plan.route == "call" and what != "unavailable":
                     self.calls.append(now)
-                for item in plan.items:
+                names = getattr(route, "names", None)
+                for n, item in enumerate(plan.items):
                     self.log.append((now, item.key, plan.route, what))
                     if what == "unavailable":
+                        skip.setdefault(item.key, set()).add(plan.route)
+                        moved = True
                         continue
                     self.items.delivered(item.key, plan.route, now)
                     self._not_heard.discard(item.key)
-                    if what == "heard":
+                    if what == "heard" and (names is None or n < names):
                         self.items.acknowledge(item.key, now)
                     elif what == "not_heard":
                         self._not_heard.add(item.key)  # nobody heard: move on now
@@ -326,15 +350,53 @@ class RouteEngine:
         now = now or utcnow()
         return [i for i in self.items.open(response="tell") if i.needs_alerting(now)]
 
+    def said_in_digest(self, items: Sequence[Item], now: datetime | None = None) -> None:
+        """The wake's greeting went out with them: delivered by the digest, not heard."""
+        self._mark(items, "delivered", now)
+
     def heard_in_digest(self, items: Sequence[Item], now: datetime | None = None) -> None:
-        """Ghost said them at the wake: delivered by the digest and heard."""
+        """The operator answered the greeting that said these titles: heard (ADR 0029)."""
+        self._mark(items, "heard", now)
+
+    def _mark(self, items: Sequence[Item], what: Delivery, now: datetime | None) -> None:
         now = now or utcnow()
         for i in items:
-            self.items.delivered(i.key, "digest", now)
-            self.items.acknowledge(i.key, now)
-            self.log.append((now, i.key, "digest", "heard"))
+            if what == "heard":
+                self.items.acknowledge(i.key, now)
+            else:
+                self.items.delivered(i.key, "digest", now)
+            self.log.append((now, i.key, "digest", what))
         if items:
             self._on_change()
+
+
+DIGEST_TITLES = 3  # titles the digest says; the rest are a count
+
+
+class SpokenDigest:
+    """One bare wake's digest, from the greeting to the operator's answer (ADR 0031). The
+    greeting reaching the voice delivers every item it counts; the operator's first turn
+    after it acknowledges only the items whose titles it said, since "and two more" is
+    not hearing them. ``on_turn`` takes the session's turns as they happen; a greeting
+    that never went out (the voice failed) marks nothing."""
+
+    def __init__(self, engine: RouteEngine, items: Sequence[Item], most: int = DIGEST_TITLES):
+        self._engine = engine
+        self.items = list(items)
+        self.named = self.items[:most]
+        self.text = spoken_digest(self.items, most=most)
+        self._said = False
+        self._heard = False
+
+    def on_turn(self, role: str, text: str, now: datetime | None = None) -> None:
+        if not self.items or self._heard:
+            return
+        if role == "assistant" and not self._said and text.strip() == self.text:
+            self._said = True
+            self._engine.said_in_digest(self.items, now)
+        elif role == "user" and self._said:
+            self._heard = True
+            self._engine.heard_in_digest(self.named, now)
 
 
 def _short(source: str) -> str:
@@ -342,7 +404,17 @@ def _short(source: str) -> str:
     return source.split(":", 1)[1] if ":" in source else source
 
 
-def spoken_digest(items: Sequence[Item], *, most: int = 3) -> str:
+def _when(v: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(v) if v else None
+    except ValueError:
+        return None
+
+
+DND_KEY = "dnd_until"
+
+
+def spoken_digest(items: Sequence[Item], *, most: int = DIGEST_TITLES) -> str:
     """The digest as Ghost says it at a bare wake: a count, then up to three titles. The
     titles come from outside systems; they are read as they are, never acted on."""
     if not items:
@@ -375,9 +447,14 @@ _QUIET = re.compile(
 )
 
 
-def parse_quiet(text: str, now: datetime) -> datetime | None:
+UNCLEAR: Literal["unclear"] = "unclear"  # the words ask for quiet; the time isn't one
+_MOST_QUIET = timedelta(days=1)
+
+
+def parse_quiet(text: str, now: datetime) -> datetime | Literal["unclear"] | None:
     """ "Nothing until two", "do not disturb for an hour", "quiet till 3:30 pm": when the
-    quiet ends, in ``now``'s timezone, or None when the words aren't that."""
+    quiet ends, in ``now``'s timezone; ``UNCLEAR`` when they ask for quiet with a time that
+    isn't one ("until 3:75", "for a million hours"); None when the words aren't that."""
     t = re.sub(r"[^a-z0-9: ']", " ", text.lower()).strip()
     t = re.sub(r"\s+", " ", t).removeprefix("okay ").removeprefix("ok ")
     m = _QUIET.match(t)
@@ -395,11 +472,12 @@ def parse_quiet(text: str, now: datetime) -> datetime | None:
         n = int(d[1]) if d[1].isdigit() else _NUM.get(d[1])
         if not n:
             return None
-        return now + (timedelta(hours=n) if d[2].startswith("hour") else timedelta(minutes=n))
+        span = timedelta(hours=n) if d[2].startswith("hour") else timedelta(minutes=n)
+        return now + span if span <= _MOST_QUIET else UNCLEAR
     return _next_clock(rest, now)
 
 
-def _next_clock(rest: str, now: datetime) -> datetime | None:
+def _next_clock(rest: str, now: datetime) -> datetime | Literal["unclear"] | None:
     rest = rest.replace("o'clock", "").replace("oclock", "").strip()
     if rest in ("noon", "midday"):
         h, mins, half = 12, 0, "pm"
@@ -412,9 +490,9 @@ def _next_clock(rest: str, now: datetime) -> datetime | None:
         if not m:
             return None
         hour_s, min_s, half_s = m.groups()
-        h = int(hour_s) if hour_s.isdigit() else _NUM.get(hour_s, -1)
-        if not 0 <= h <= 23:
-            return None
+        if not hour_s.isdigit() and hour_s not in _NUM:
+            return None  # "until later": not a time at all
+        h = int(hour_s) if hour_s.isdigit() else _NUM[hour_s]
         if min_s is None:
             mins = 0
         elif min_s.isdigit():
@@ -422,6 +500,8 @@ def _next_clock(rest: str, now: datetime) -> datetime | None:
         else:
             mins = {"thirty": 30, "fifteen": 15, "forty five": 45, "forty-five": 45}[min_s]
         half = (half_s or "").replace(" ", "")
+        if not 0 <= h <= 23 or mins > 59 or (half and not 1 <= h <= 12):
+            return UNCLEAR  # "3:75", "14 pm", "25": a time, but not one there is
     candidates = []
     if half == "pm":
         candidates = [h if h == 12 else h + 12]
