@@ -302,10 +302,15 @@ class Store:
                 continue
         return out, int(total)
 
-    def set_status(self, proposal_id: str, status: ProposalStatus) -> None:
-        self._conn.execute(
-            "UPDATE proposals SET status = ? WHERE id = ?", (status.value, proposal_id)
+    def set_status(self, proposal_id: str, status: ProposalStatus) -> bool:
+        """A waiting proposal leaves the list (cancelled, expired). False when it was not
+        waiting: one claimed by a yes belongs to the gate until it finishes, and one that
+        finished keeps its status, so a late cancel never writes over an executed row."""
+        cur = self._conn.execute(
+            "UPDATE proposals SET status = ? WHERE id = ? AND status = ?",
+            (status.value, proposal_id, ProposalStatus.PENDING.value),
         )
+        return cur.rowcount == 1
 
     def cancel_pending(
         self, session_id: str, status: ProposalStatus = ProposalStatus.CANCELLED
@@ -347,14 +352,24 @@ class Store:
         return True
 
     def finish_operation(
-        self, proposal_id: str, status: str, readback_version: str | None = None
+        self,
+        proposal_id: str,
+        status: str,
+        readback_version: str | None = None,
+        *,
+        final: ProposalStatus = ProposalStatus.EXECUTED,
     ) -> None:
+        """Close the claimed proposal's operation row. ``final`` is where the proposal ends:
+        executed, or stale or cancelled when the gate refused it after the claim."""
         self._conn.execute(
             "UPDATE operations SET finished_at = ?, status = ?, readback_version = ?"
             " WHERE proposal_id = ?",
             (utcnow().isoformat(), status, readback_version, proposal_id),
         )
-        self.set_status(proposal_id, ProposalStatus.EXECUTED)
+        self._conn.execute(
+            "UPDATE proposals SET status = ? WHERE id = ? AND status = ?",
+            (final.value, proposal_id, ProposalStatus.CLAIMED.value),
+        )
 
     def readback_version(self, proposal_id: str) -> str | None:
         row = self._conn.execute(

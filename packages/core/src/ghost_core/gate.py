@@ -27,6 +27,7 @@ from ghost_core.confirmation import (
     RegexClassifier,
     Verdict,
 )
+from ghost_core.departments import GHOST
 from ghost_core.models import (
     PENDING_TTL,
     ChangeSet,
@@ -241,7 +242,14 @@ class WriteGate:
         self._log(f"gate: {ability}.{operation} on {target} -> {level.value}")
         if level is Autonomy.CONFIRM:
             return Submission(level, proposal, None)
-        return Submission(level, proposal, await self._execute(proposal))
+        return Submission(level, proposal, await self._run_now(proposal))
+
+    async def _run_now(self, proposal: Proposal) -> Outcome:
+        """A change that needs no yes runs at once; nothing else can have claimed it."""
+        outcome = await self._execute(proposal)
+        if outcome is None:
+            raise GateError("That proposal is no longer pending.")
+        return outcome
 
     async def apply_internal(
         self,
@@ -273,7 +281,7 @@ class WriteGate:
             autonomy=Autonomy.QUIET,
         )
         self._log(f"gate: internal {ability}.{operation} on {target}")
-        return await self._execute(proposal)
+        return await self._run_now(proposal)
 
     async def prepare(
         self,
@@ -358,9 +366,8 @@ class WriteGate:
     def cancel(self, session_id: str, reason: str = "cancelled") -> Proposal | None:
         """The operator dropped the change the session is waiting on ("never mind")."""
         p = self.pending(session_id)
-        if p is None:
+        if p is None or not self._store.set_status(p.id, ProposalStatus.CANCELLED):
             return None
-        self._store.set_status(p.id, ProposalStatus.CANCELLED)
         self._store.event(p.id, "cancelled", {"reason": reason})
         return p
 
@@ -399,11 +406,18 @@ class WriteGate:
             return None
         return p
 
-    def bring_back(self, proposal_id: str, session_id: str) -> Proposal | None:
+    def bring_back(
+        self, proposal_id: str, session_id: str, department: str | None
+    ) -> Proposal | None:
         """Attach a waiting change to this session, so its next turn answers it: Ghost
-        reads it out and the operator says yes or no (ADR 0030). Writes nothing."""
+        reads it out and the operator says yes or no (ADR 0030). Writes nothing.
+        ``department`` is where the session works: a department's session takes up only
+        its own department's changes, and Ghost's (``ghost``, or None for a session built
+        without departments) any, since Ghost alone sees across them (ADR 0024)."""
         p = self.waiting_one(proposal_id)
         if p is None:
+            return None
+        if department not in (None, GHOST) and p.department != department:
             return None
         if self._store.attach(p.id, session_id):
             self._store.event(p.id, "brought_back", {"session": session_id})
@@ -412,9 +426,8 @@ class WriteGate:
 
     def cancel_id(self, proposal_id: str, reason: str = "cancelled") -> Proposal | None:
         p = self.waiting_one(proposal_id)
-        if p is None:
+        if p is None or not self._store.set_status(p.id, ProposalStatus.CANCELLED):
             return None
-        self._store.set_status(p.id, ProposalStatus.CANCELLED)
         self._store.event(p.id, "cancelled", {"reason": reason})
         return p
 
@@ -456,8 +469,8 @@ class WriteGate:
             },
         )
         if verdict is Verdict.NEGATIVE:
-            self._store.set_status(p.id, ProposalStatus.CANCELLED)
-            self._store.event(p.id, "cancelled", {"reason": verdict.value})
+            if self._store.set_status(p.id, ProposalStatus.CANCELLED):
+                self._store.event(p.id, "cancelled", {"reason": verdict.value})
             return verdict, None
         if verdict is not Verdict.AFFIRMATIVE:
             # Not an answer: the operator moved on. The change waits on the list (ADR 0030).
@@ -526,13 +539,35 @@ class WriteGate:
 
     # --- execution -----------------------------------------------------
 
-    async def _execute(self, p: Proposal, now: datetime | None = None) -> Outcome:
+    async def _execute(self, p: Proposal, now: datetime | None = None) -> Outcome | None:
+        """None when the proposal was not waiting any more: another yes (a click and a
+        spoken yes at the same moment) claimed it first, or it was dropped or expired."""
         now = now or utcnow()
         writer = self.operation(p.ability, p.operation).writer
+        # The claim is the one gate between a yes and the call, and it comes first: of two
+        # yeses at once exactly one wins, and the other changes nothing, not even the status.
+        if not self._store.claim(p.id, now):
+            return None
+        self._store.event(p.id, "claimed")
+        # The permissions are read again: the operator may have blocked the change in the
+        # time it waited for its yes (ADR 0030). Blocked now, it is refused; nothing ran.
+        args = {**p.target.rule_args(), **p.changes.rule_args()}
+        if self.level(p.ability, p.operation, department=p.department, args=args) is (
+            Autonomy.DENY
+        ):
+            self._store.finish_operation(p.id, "blocked", final=ProposalStatus.CANCELLED)
+            self._store.event(p.id, "blocked", {"reason": "blocked after it was proposed"})
+            return Outcome(
+                proposal_id=p.id,
+                target=p.target,
+                status="failed",
+                applied=(),
+                error="Your permissions block that now, so I didn't do it.",
+            )
         # Stale check: the target must not have changed since the snapshot.
         current = await writer.fetch(p.target)
         if current.version != p.snapshot.version:
-            self._store.set_status(p.id, ProposalStatus.STALE)
+            self._store.finish_operation(p.id, "stale", final=ProposalStatus.STALE)
             self._store.event(p.id, "stale", {"was": p.snapshot.version, "now": current.version})
             return Outcome(
                 proposal_id=p.id,
@@ -542,9 +577,6 @@ class WriteGate:
                 error="It changed since I read it. Ask me to look again.",
                 readback=current,
             )
-        if not self._store.claim(p.id, now):
-            raise GateError("That proposal is no longer pending.")
-        self._store.event(p.id, "claimed")
 
         applied: list[str] = []
         failed_step: str | None = None

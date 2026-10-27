@@ -11,7 +11,9 @@ A rule names an app, one of its tools, or a tool with argument patterns::
 Each rule sits in one list, and the most careful list that matches wins: ``block``, then
 ``ask``, then ``quiet``, then ``allow``, then ``mode``, the default for a change no rule
 names (``open`` announces it, ``ask`` asks first, ``read-only`` blocks it). A read is only
-ever offered or blocked: ``ask`` and ``quiet`` say nothing about it.
+ever offered or blocked: ``ask`` and ``quiet`` say nothing about it. A department's
+``block``, ``ask`` and ``quiet`` are weighed after the operator's answer, mode included,
+and the more careful of the two wins: a department only narrows.
 
 A pattern is a shell glob, case-insensitive. ``arg=pattern`` holds when the argument is
 there and matches (any item, for a list); ``arg!=pattern`` holds when it is missing or
@@ -27,8 +29,8 @@ from __future__ import annotations
 import enum
 import fnmatch
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ghost_core.levels import Autonomy
@@ -137,15 +139,25 @@ def parse_rules(values: object, where: str) -> tuple[Rule, ...]:
     return tuple(out)
 
 
+# Most careful first, the order of the lists (ADR 0034): block, ask, quiet, allow.
+_CARE = (Autonomy.DENY, Autonomy.CONFIRM, Autonomy.QUIET, Autonomy.ANNOUNCE)
+
+
+def _most_careful(levels: Iterable[Autonomy]) -> Autonomy:
+    return min(levels, key=_CARE.index)
+
+
 @dataclass(frozen=True)
 class Permissions:
-    """The operator's lists, and the mode for what they leave out."""
+    """The operator's lists, and the mode for what they leave out. ``narrowed_by`` are a
+    department's lists laid over them (``merged``): they can only add care."""
 
     mode: Mode = Mode.OPEN
     block: tuple[Rule, ...] = ()
     ask: tuple[Rule, ...] = ()
     quiet: tuple[Rule, ...] = ()
     allow: tuple[Rule, ...] = ()
+    narrowed_by: tuple[Permissions, ...] = ()
 
     @classmethod
     def parse(
@@ -171,16 +183,11 @@ class Permissions:
         return cls(mode=mode, **lists)
 
     def merged(self, other: Permissions) -> Permissions:
-        """These lists with ``other``'s added (a department over Ghost's); the mode is
-        this one's, the more careful of the two."""
-        mode = max(self.mode, other.mode, key=lambda m: list(Mode).index(m))
-        return Permissions(
-            mode=mode,
-            block=self.block + other.block,
-            ask=self.ask + other.ask,
-            quiet=self.quiet + other.quiet,
-            allow=self.allow + other.allow,
-        )
+        """``other`` (a department's lists) laid over these. They are not mixed in: a
+        department's ``quiet`` found before the operator's ``mode`` would lift a read-only
+        or silence an ask. A call resolves to the most careful of the two answers, so a
+        department only ever narrows (ADR 0034)."""
+        return replace(self, narrowed_by=(*self.narrowed_by, other))
 
     def with_rule(self, rule: Rule, level: str | None) -> Permissions:
         """The same lists with ``rule`` (by its text) moved to ``level``, or removed when
@@ -191,29 +198,36 @@ class Permissions:
             if level not in LISTS:
                 raise ValueError(f"{level!r} is not one of {', '.join(LISTS)}")
             lists[level] = (*lists[level], rule)
-        return Permissions(mode=self.mode, **lists)
+        return Permissions(mode=self.mode, narrowed_by=self.narrowed_by, **lists)
 
     def resolve(
         self, source: str, operation: str, args: Mapping[str, Any] | None = None
     ) -> Autonomy:
-        """The level for a change: the most careful list that matches, else the mode."""
-        for rules, level in (
-            (self.block, Autonomy.DENY),
-            (self.ask, Autonomy.CONFIRM),
-            (self.quiet, Autonomy.QUIET),
-            (self.allow, Autonomy.ANNOUNCE),
-        ):
+        """The level for a change: the most careful list that matches, else the mode;
+        then the most careful of that and each department's list that matches."""
+        own = self._match(source, operation, args) or self.mode.level
+        extra = (p._match(source, operation, args) for p in self.narrowed_by)
+        return _most_careful([own, *(level for level in extra if level is not None)])
+
+    def _match(
+        self, source: str, operation: str, args: Mapping[str, Any] | None
+    ) -> Autonomy | None:
+        lists = (self.block, self.ask, self.quiet, self.allow)
+        for rules, level in zip(lists, _CARE, strict=True):
             if any(r.matches(source, operation, args) for r in rules):
                 return level
-        return self.mode.level
+        return None
 
     def blocks(self, source: str, operation: str, args: Mapping[str, Any] | None = None) -> bool:
         """Whether a read (or any call) is refused: only ``block`` can say so."""
-        return any(r.matches(source, operation, args) for r in self.block)
+        return any(r.matches(source, operation, args) for r in self.block) or any(
+            p.blocks(source, operation, args) for p in self.narrowed_by
+        )
 
     def offers_change(self, source: str, operation: str) -> bool:
         """Whether the model is offered the change at all: not when an unconditional
-        ``block`` names it, nor in ``read-only`` when no rule could let a call through."""
+        ``block`` names it, nor in ``read-only`` when no rule of the operator's could let
+        a call through (a department's rules never let one through)."""
         if self.blocks(source, operation):
             return False
         if self.mode is not Mode.READ_ONLY:

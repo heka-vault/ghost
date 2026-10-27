@@ -471,7 +471,7 @@ def register_tools(
     async def bring_up(params: FunctionCallParams) -> None:
         change_id = str(params.arguments.get("change") or "")
         record(BRING_UP_TOOL, dict(params.arguments))
-        p = gate.bring_back(change_id, session_id)
+        p = gate.bring_back(change_id, session_id, department())
         if p is None:
             await params.result_callback({"error": "That change isn't waiting any more."})
             return
