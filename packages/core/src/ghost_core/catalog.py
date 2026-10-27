@@ -356,6 +356,13 @@ def suggest_name(entry: CatalogEntry) -> str:
 # --- connecting -----------------------------------------------------------------------
 
 
+def _literal(text: str) -> str:
+    """Text Ghost did not write (the registry's, or a setting the operator typed) as it
+    must reach ``apps.json``: with no ``$``, so it can never become a ``${NAME}`` filled
+    from Ghost's environment (``ghost_core.apps.fill_secrets``)."""
+    return text.replace("$", "")
+
+
 def connect(
     entry: CatalogEntry, option_id: str, app_name: str, values: Mapping[str, str]
 ) -> tuple[AppSpec, dict[str, str]]:
@@ -383,10 +390,14 @@ def connect(
             secrets[name] = value
             filled[s.key] = "${" + name + "}"
         else:
-            filled[s.key] = value.replace("$", "")  # a setting is never a reference
+            filled[s.key] = _literal(value)  # a setting is never a reference
 
     def fill(template: str) -> str:
-        return _VAR.sub(lambda m: filled.get(m[1], ""), template)
+        """The entry's template with the settings in it. The template is the registry's
+        text, so it is literal too: ``$ANTHROPIC_API_KEY`` in a fixed header would
+        otherwise be filled from Ghost's environment at connect and sent to the entry's
+        own server. The only references in the result are the ones written above."""
+        return _VAR.sub(lambda m: filled.get(m[1], ""), _literal(template))
 
     common = {"title": entry.title, "catalog": entry.name}
     if option.url:
@@ -406,13 +417,14 @@ def connect(
     env = {s.key: filled[s.key] for s in option.settings if s.where == "env" and s.key in filled}
     args_before = [fill(a) for a in option.runtime_args]
     args_after = [fill(a) for a in option.package_args]
+    package = _literal(str(option.package))
     if option.runner == "docker":
         passes = [x for k in env for x in ("-e", k)]
-        args = ["run", "-i", "--rm", *passes, *args_before, str(option.package), *args_after]
+        args = ["run", "-i", "--rm", *passes, *args_before, package, *args_after]
     elif option.runner == "npx":
-        args = ["-y", *args_before, str(option.package), *args_after]
+        args = ["-y", *args_before, package, *args_after]
     else:
-        args = [*args_before, str(option.package), *args_after]
+        args = [*args_before, package, *args_after]
     spec = AppSpec(name=app_name, command=option.runner, args=tuple(args), env=env, **common)
     return spec, secrets
 
