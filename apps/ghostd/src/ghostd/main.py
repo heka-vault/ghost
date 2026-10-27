@@ -50,6 +50,8 @@ from ghost_core.departments import Departments, Fleet, all_sources
 from ghost_core.hooks import Hook, HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.mcp import Servers
+from ghost_core.outputs import SOURCE as OUTPUTS
+from ghost_core.outputs import Outputs
 from ghost_core.routes import RouteEngine, RoutePolicy, spoken_digest
 from ghost_core.skills import Skills
 from ghost_core.waiting import Item, Items, WaitingList, waiting_source
@@ -721,6 +723,9 @@ class Daemon:
         department_tools = DepartmentTools(departments, store, conversations)
         gate.register(departments_source(department_tools).name, department_tools.operations())
         self.department_tools = department_tools
+        outputs = Outputs(departments, conversations)  # ADR 0033: what Ghost makes
+        gate.register(OUTPUTS, outputs.operations())
+        self.outputs = outputs
         # ADR 0029: what needs the operator, with the changes waiting for a yes (ADR 0030).
         waiting = WaitingList(
             Items(store),
@@ -797,6 +802,7 @@ class Daemon:
             out.append(skills.source(d.skill_places(), writes=d.is_ghost))
             out.append(conversations_source(conversations))
             out.append(departments_source(department_tools))
+            out.append(outputs.source())
             out.append(waiting_source(waiting))
             return out
 

@@ -340,6 +340,15 @@ class HookInfo(BaseModel):
     last: datetime | None = None
 
 
+class OutputInfo(BaseModel):
+    """A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it."""
+
+    name: str
+    path: str
+    bytes: int
+    modified: datetime
+
+
 class DepartmentView(BaseModel):
     """A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
     skills and agents. Ghost is one too."""
@@ -363,6 +372,7 @@ class DepartmentView(BaseModel):
     problems: list[str] = []  # what is wrong in its files, for the operator
     watches: list[WatchInfo] = []  # ADR 0028
     hooks: list[HookInfo] = []  # ADR 0027
+    outputs: list[OutputInfo] = []  # ADR 0033
 
 
 class DepartmentCreate(BaseModel):

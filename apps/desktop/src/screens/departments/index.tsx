@@ -40,7 +40,7 @@ import {
   useToast,
 } from "../../ui";
 import { newAgentSeed } from "../conversations/url";
-import { count, listWords, reachWords, revealFolder, tildePath } from "./model";
+import { count, listWords, openFile, reachWords, revealFolder, tildePath } from "./model";
 import "./departments.css";
 
 export default function DepartmentsScreen({ params }: RouteProps) {
@@ -274,6 +274,12 @@ function DepartmentDetail({ slug }: { slug: string }) {
     if (!r.ok) toast({ title: `${d.title}’s folder`, description: `${r.path} (open it in your file manager; this build can’t open folders itself).` });
   };
 
+  /** Reveal or open a file Ghost made; a browser build shows the path instead. */
+  const showFile = async (path: string, how: (p: string) => Promise<{ ok: true } | { ok: false; path: string }>) => {
+    const r = await how(path);
+    if (!r.ok) toast({ title: "Open it yourself", description: `${r.path} (this build can’t open files itself).` });
+  };
+
   const addRule = async () => {
     const text = rule.trim();
     if (!text || busy) return;
@@ -456,6 +462,28 @@ function DepartmentDetail({ slug }: { slug: string }) {
             </Section>
           )}
 
+          {d.outputs.length > 0 && (
+            <Section id="dept-outputs" title="Outputs" description={<>What Ghost made{d.is_ghost ? "" : ` for ${title}`}, in {d.is_ghost ? "Ghost’s" : "its"} out/ folder. Ghost never runs these; open them yourself.</>}>
+              <Card list>
+                {d.outputs.map((o) => (
+                  <div key={o.name} className="dept-cell">
+                    <span className="dept-cell__text">
+                      <span className="t-mono">{o.name}</span> <span className="t-3">{formatBytes(o.bytes)} · {relativeTime(o.modified)}</span>
+                    </span>
+                    <span className="dept-outputs__actions">
+                      <Button size="sm" variant="ghost" onClick={() => void showFile(o.path, revealFolder)}>
+                        Reveal
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => void showFile(o.path, openFile)}>
+                        Open
+                      </Button>
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            </Section>
+          )}
+
           <Section id="dept-skills" title="Skills" description={`Read first by every agent in ${title}, then your ~/.agents/skills, then Ghost’s own.`}>
             <Card list>
               {d.skills.length === 0 ? <p className="dept-text dept-text--empty">No skills of its own. Add a SKILL.md folder under skills/ in the department’s folder.</p> : d.skills.map((s) => (
@@ -553,3 +581,8 @@ function DepartmentDetail({ slug }: { slug: string }) {
 function sumOf(counts: Record<string, number>): number {
   return Object.values(counts).reduce((a, b) => a + b, 0);
 }
+
+function formatBytes(n: number): string {
+  return n < 1024 ? `${n} bytes` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+

@@ -63,6 +63,7 @@ export type WaitingView = Schemas["WaitingView"];
 export type WatchInfo = Schemas["WatchInfo"];
 export type HookInfo = Schemas["HookInfo"];
 export type RoutesView = Schemas["RoutesView"];
+export type OutputInfo = Schemas["OutputInfo"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =

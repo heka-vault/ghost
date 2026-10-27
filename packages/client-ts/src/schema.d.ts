@@ -1097,6 +1097,11 @@ export interface components {
              * @default
              */
             memory: string;
+            /**
+             * Outputs
+             * @default []
+             */
+            outputs: components["schemas"]["OutputInfo"][];
             /** Path */
             path: string;
             /**
@@ -1410,6 +1415,23 @@ export interface components {
             summary: string;
             /** Target */
             target: string;
+        };
+        /**
+         * OutputInfo
+         * @description A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it.
+         */
+        OutputInfo: {
+            /** Bytes */
+            bytes: number;
+            /**
+             * Modified
+             * Format: date-time
+             */
+            modified: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
         };
         /** PendingEvent */
         PendingEvent: {
@@ -2032,6 +2054,7 @@ export type SchemaModelsView = components['schemas']['ModelsView'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
+export type SchemaOutputInfo = components['schemas']['OutputInfo'];
 export type SchemaPendingEvent = components['schemas']['PendingEvent'];
 export type SchemaPendingProposal = components['schemas']['PendingProposal'];
 export type SchemaPhase = components['schemas']['Phase'];

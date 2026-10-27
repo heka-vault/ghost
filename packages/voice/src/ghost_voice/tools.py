@@ -29,6 +29,7 @@ from ghost_core import (
 from ghost_core.conversations import GHOST
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.department_tools import SOURCE as DEPARTMENTS
+from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.policy import PolicyError
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -193,7 +194,7 @@ def register_tools(
             await params.result_callback({"error": f"{name} is not available in this department"})
             return
         tool, a = hit
-        if a.name == DEPARTMENTS and conversations is not None:
+        if a.name in (DEPARTMENTS, OUTPUTS) and conversations is not None:
             params.arguments = {**params.arguments, "_active": conversations.active.slug}
         await _wrap_read(tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope)(
             params
@@ -229,7 +230,7 @@ def register_tools(
         probe.tool_operation(call_id, f"{aname}.{op.name}")
         args = dict(a.get("args") or {})
         record(f"{aname}.{op_name}", args)
-        if aname in (CONVERSATIONS, DEPARTMENTS) and conversations is not None:
+        if aname in (CONVERSATIONS, DEPARTMENTS, OUTPUTS) and conversations is not None:
             args["_active"] = conversations.active.slug
         if aname == DEPARTMENTS:
             args["_request"] = last_request()[0]  # a rule must be the operator's words

@@ -400,7 +400,7 @@ export class MockDaemon {
     if (!title) throw new HttpError(422, "A department needs a name.");
     const slug = slugOf(title);
     if (slug === "ghost" || this.departments.some((d) => d.slug === slug)) throw new HttpError(409, `there is already a department called ${JSON.stringify(title)}`);
-    const d: Omit<DepartmentView, "agents"> = { slug, title, aliases, path: `${CONFIG_DIR}/departments/${slug}`, root: null, voice, is_ghost: false, rules_lead: title, rules: `# ${title}\n`, memory: "", servers: [], uses: [], servers_up: false, skills: [], docs: [], problems: [], watches: [], hooks: [] };
+    const d: Omit<DepartmentView, "agents"> = { slug, title, aliases, path: `${CONFIG_DIR}/departments/${slug}`, root: null, voice, is_ghost: false, rules_lead: title, rules: `# ${title}\n`, memory: "", servers: [], uses: [], servers_up: false, skills: [], docs: [], problems: [], watches: [], hooks: [], outputs: [] };
     this.departments.push(d);
     // Its own agent, named for it.
     const detail: ConversationDetail = {

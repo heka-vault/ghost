@@ -782,6 +782,14 @@
             "title": "Memory",
             "type": "string"
           },
+          "outputs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OutputInfo"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -1514,6 +1522,36 @@
           "summary"
         ],
         "title": "OutcomeView",
+        "type": "object"
+      },
+      "OutputInfo": {
+        "description": "A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it.",
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "bytes",
+          "modified"
+        ],
+        "title": "OutputInfo",
         "type": "object"
       },
       "PendingEvent": {

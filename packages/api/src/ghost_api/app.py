@@ -26,6 +26,7 @@ from ghost_core import (
     ToolSource,
     WriteGate,
 )
+from ghost_core.outputs import list_outputs
 from ghost_core.policy import PolicyError
 from loguru import logger
 
@@ -51,6 +52,7 @@ from ghost_api.models import (
     ModelsView,
     OperationInfo,
     OutcomeView,
+    OutputInfo,
     PendingProposal,
     PhonePairing,
     PhoneView,
@@ -515,6 +517,15 @@ def create_app(deps: Deps) -> FastAPI:
             ],
             watches=[watch_info(w) for w in getattr(d, "watches", {}).values()],
             hooks=[hook_info(h) for h in getattr(d, "hooks", {}).values()],
+            outputs=[
+                OutputInfo(
+                    name=f["name"],
+                    path=f["path"],
+                    bytes=f["bytes"],
+                    modified=datetime.fromtimestamp(f["modified"]).astimezone(),
+                )
+                for f in list_outputs(d)
+            ],
         )
 
     def hook_info(h) -> HookInfo:

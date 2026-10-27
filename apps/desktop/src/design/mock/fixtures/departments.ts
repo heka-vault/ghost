@@ -104,5 +104,6 @@ export default function departments(s: Scenario): Omit<DepartmentView, "agents">
     problems: d.problems ?? [],
     watches: [],
     hooks: [],
+    outputs: d.slug === "ghost" && s.data !== "empty" ? [{ name: "week-in-review.html", path: `${CONFIG_DIR}/out/week-in-review.html`, bytes: 18432, modified: new Date(Date.now() - 3600000).toISOString() }] : [],
   }));
 }

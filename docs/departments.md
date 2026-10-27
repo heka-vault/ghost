@@ -243,6 +243,17 @@ What is kept is the parsed fields, the delivery id and the outcome, never a body
 listener answers accepted or refused, nothing more; `GET /departments` shows each hook's
 counts. A local sender signs with `ghostd push <department>/<hook> <event> '<json>'`.
 
+## Outputs
+
+What Ghost makes (ADR 0033), a page, a summary, a table, a small script, lands in the
+department's `out/` folder (Ghost's is `~/.config/ghost/out/`), never in a `root`.
+`outputs.write` creates a file (low risk: announce) and `outputs.replace` replaces one
+(medium: confirm), each through the gate with an audit row. A name is a plain file name
+ending in `.html`, `.md`, `.txt`, `.csv`, `.json`, `.svg`, `.py` or `.sh`; nothing goes
+through a link; a file is at most 256 KB and is never made executable. Ghost never runs
+what it makes. The model sees the list with `list_outputs`; the desktop's department page
+lists them with Reveal and Open.
+
 ## The journal
 
 Every write in a department, by any of its agents, is in the audit with the agent and the

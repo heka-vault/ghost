@@ -1,6 +1,6 @@
 # 0033: Ghost makes things, into an outputs folder, through the gate; it is not an IDE
 
-- **Status:** proposed
+- **Status:** accepted (decided 2026-10-27; built: `ghost_core.outputs`, `outputs.write` and `outputs.replace`, the desktop's Outputs)
 - **Date:** 2026-10-27
 
 Asked for a presentation, Ghost should write the HTML and JavaScript page itself, not hand

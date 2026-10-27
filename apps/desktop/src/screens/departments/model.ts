@@ -41,3 +41,17 @@ export async function revealFolder(path: string): Promise<{ ok: true } | { ok: f
     return { ok: false, path: shown };
   }
 }
+
+/** Open a file Ghost made with the operator's default app (ADR 0033); a browser can't. */
+export async function openFile(path: string): Promise<{ ok: true } | { ok: false; path: string }> {
+  const shown = tildePath(path);
+  if (!("__TAURI_INTERNALS__" in window)) return { ok: false, path: shown };
+  try {
+    const { openPath } = await import("@tauri-apps/plugin-opener");
+    await openPath(path);
+    return { ok: true };
+  } catch {
+    return { ok: false, path: shown };
+  }
+}
+
