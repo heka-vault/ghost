@@ -13,9 +13,8 @@ export default function waiting(s: Scenario): WaitingItemView[] {
   if (s.data === "empty") return [];
   const items: WaitingItemView[] = [
     {
-      key: "engineering:ci:18822931",
-      source: "watch:engineering/ci",
-      department: "engineering",
+      key: "ci:18822931",
+      source: "watch:ci",
       title: "CI failed on main: test (ubuntu-latest)",
       link: "https://github.com/heka-vault/ghost/actions/runs/18822931",
       state: "new",
@@ -26,7 +25,6 @@ export default function waiting(s: Scenario): WaitingItemView[] {
     {
       key: "change:5f0c9a",
       source: "gate",
-      department: null,
       title: "Waiting for your yes: On heka-vault/ghost#17: close the issue.",
       state: "delivered",
       first_seen: ago(40),
@@ -46,9 +44,8 @@ export default function waiting(s: Scenario): WaitingItemView[] {
       },
     },
     {
-      key: "ghost:job:backup",
-      source: "hook:ghost/jobs",
-      department: null,
+      key: "jobs:backup",
+      source: "hook:jobs",
       title: "backup failed",
       state: "acknowledged",
       first_seen: ago(180),
@@ -61,7 +58,6 @@ export default function waiting(s: Scenario): WaitingItemView[] {
     items.push({
       key: "app:linear",
       source: "ghost",
-      department: null,
       title: "Linear needs you to sign in again",
       state: "new",
       first_seen: ago(3),

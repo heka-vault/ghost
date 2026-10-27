@@ -98,8 +98,6 @@ html[data-capture="full"] .sidebar { position: sticky; top: 0; }
 .sidebar__line-sub.is-waiting { color: var(--warn); }
 .sidebar__item.is-current .sidebar__line-sub:not(.is-waiting) { color: var(--text-2); }
 .sidebar__item--more { color: var(--text-3); font-weight: var(--weight-regular); padding-left: calc(var(--space-2) + var(--icon-md) + var(--space-2_5)); }
-/* A topic line sits under its department (ADR 0023): one glyph column in, so the department reads as the head of its group. */
-.sidebar__item--topic { padding-left: calc(var(--space-1_5) + var(--space-5)); }
 .sidebar__waiting-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
 .sidebar__live { display: grid; place-items: center; width: var(--icon-md); flex: none; }
 .sidebar__count { display: inline-grid; place-items: center; min-width: var(--count-size); height: var(--count-size); padding: 0 var(--space-1_5); border-radius: var(--radius-full); background: var(--warn-soft); color: var(--warn); font-size: var(--text-xs); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }

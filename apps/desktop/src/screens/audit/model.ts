@@ -70,15 +70,14 @@ export const STATUS_ORDER = ["executed", "pending", "claimed", "failed", "partia
 
 /* ---------------------------------------------------------------------------- words */
 
-/** "github.issue_write": the source (an app's name, the agents or the departments) and the operation. */
+/** "github.issue_write": the source (an app's name, or Ghost's own: the agents, the rules, the outputs) and the operation. */
 export function opName(e: AuditEntry): string {
   return `${e.source}.${e.operation}`;
 }
 
-/** Source names read as words in the filter: the built-in ones are "Agents" and "Departments", an app goes by its name in words ("GitHub", "Github acme"). */
+/** Source names read as words in the filter: the agents are "Agents", Ghost's rules "Rules", an app goes by its name in words ("GitHub", "Github acme"). */
 export function sourceLabel(name: string): string {
   if (name === "conversations") return "Agents";
-  if (name === "departments") return "Departments";
   const s = name.replace(/[_-]+/g, " ");
   return (s[0].toUpperCase() + s.slice(1)).replace(/\bgithub\b/i, "GitHub");
 }
@@ -144,14 +143,12 @@ export function stepView(raw: string): StepView {
   if (s === "request_changes") return { done: "Requested changes", todo: "request changes", known: true };
   if (s === "comment") return { done: "Comment added", todo: "add the comment", known: true };
   if (s === "set_labels") return { done: "Labels changed", todo: "change the labels", known: true };
-  // agents (ADR 0024)
-  if ((m = /^hire\s+(.+?)\s+in\s+(\S+)(.*)$/.exec(s))) return { done: `Hired ${unquote(m[1])} in ${m[2]}`, todo: `hire ${unquote(m[1])}`, known: true };
+  // agents (ADR 0014, ADR 0035)
+  if ((m = /^hire\s+(['"].+?['"]|\S+)/.exec(s))) return { done: `Hired ${unquote(m[1])}`, todo: `hire ${unquote(m[1])}`, known: true };
   if ((m = /^start conversation\s+(.+)$/.exec(s))) return { done: `Started ${unquote(m[1])}`, todo: `start ${unquote(m[1])}`, known: true };
   if (s === "retire the agent") return { done: "Retired", todo: "retire the agent", known: true };
   if (s === "bring the agent back") return { done: "Rehired", todo: "rehire the agent", known: true };
-  if ((m = /^move to\s+(.+)$/.exec(s))) return { done: `Moved to ${m[1]}`, todo: `move it to ${m[1]}`, known: true };
   if ((m = /^add the rule:\s*([\s\S]*)$/.exec(s))) return { done: "Rule added", todo: "add the rule", quote: m[1] || undefined, known: true };
-  if ((m = /^the department remembers:\s*([\s\S]*)$/.exec(s))) return { done: "The department remembers", todo: "add the shared fact", quote: m[1] || undefined, known: true };
   if ((m = /^rename to\s+(.+)$/.exec(s))) return { done: `Renamed to ${unquote(m[1])}`, todo: `rename it to ${unquote(m[1])}`, known: true };
   if ((m = /^voice\s+(\S+)\s+at\s+(\S+?)x$/.exec(s))) return { done: `Voice set to ${m[1]} at ${m[2]}×`, todo: `set the voice to ${m[1]}`, known: true };
   if ((m = /^persona:\s*([\s\S]*)$/.exec(s))) return { done: "Persona set", todo: "set the persona", quote: unquote(m[1]) || undefined, known: true };
@@ -162,7 +159,7 @@ export function stepView(raw: string): StepView {
   if (s === "edit memory") return { done: "Edited the memory", todo: "edit the memory", known: true };
   if (s === "reset: forget everything") return { done: "Reset · forgot everything", todo: "reset the agent", known: true };
   if (s === "delete the agent" || s === "delete the conversation") return { done: "Deleted the agent", todo: "delete the agent", known: true };
-  if (s === "voice: the department's") return { done: "Voice set to the department's", todo: "set the voice to the department's", known: true };
+  if (s === "voice: Ghost's") return { done: "Voice set to Ghost’s", todo: "set the voice to Ghost’s", known: true };
   return { done: upperFirst(s), todo: s, known: false };
 }
 
@@ -354,7 +351,7 @@ export function haystack(e: AuditEntry, ctx: OutcomeContext = {}): string {
     outcomeLabel(o),
     ...levelParts(e, o),
     sourceLabel(e.source),
-    e.department ?? "",
+    e.conversation ?? "",
     e.id,
     ...e.events.flatMap((ev) => {
       const v = describeEvent(ev, e);

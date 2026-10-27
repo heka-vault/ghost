@@ -6,7 +6,7 @@ import type { Scenario } from "../scenarios";
 import apps, { CATALOG } from "./apps";
 import audit from "./audit";
 import conversations from "./conversations";
-import departments from "./departments";
+import { outputs, rules, watching } from "./folder";
 import mobile from "./mobile";
 import onboarding from "./onboarding";
 import policy from "./policy";
@@ -23,10 +23,12 @@ export function composeFixtures(s: Scenario) {
   const skillList = skills(s, appList);
   return {
     session: session(s),
-    /** The agents (GET /conversations), ADR 0024, by department. */
+    /** The agents (GET /conversations), ADR 0014. */
     conversations: conversations(s),
-    /** The department folders (GET /departments), ADR 0024, without their agents, which the mock fills in. */
-    departments: departments(s),
+    /** Ghost's folder (ADR 0035): AGENTS.md (GET /rules), out/ (GET /outputs), watches and webhooks (GET /watches). */
+    rules: rules(s),
+    outputs: outputs(s),
+    watching: watching(s),
     /** The apps in apps.json (GET /apps) and the catalog to connect more from (GET /catalog), ADR 0034. */
     apps: appList,
     catalog: structuredClone(CATALOG),

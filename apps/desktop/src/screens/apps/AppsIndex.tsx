@@ -84,7 +84,7 @@ export function AppsIndex() {
         </Notice>
       )}
 
-      <Section id="apps-connected" title="Connected" description={apps && apps.length > 0 ? "Every agent and department reaches these. A department can narrow what its sessions may do in its own folder." : undefined}>
+      <Section id="apps-connected" title="Connected" description={apps && apps.length > 0 ? "Every agent reaches these. What Ghost may not do, or asks first, is on Permissions." : undefined}>
         {actions.problem && (
           <Notice tone="danger" title={actions.problem.title} onDismiss={actions.clearProblem} className="apps-notice">
             {actions.problem.text}

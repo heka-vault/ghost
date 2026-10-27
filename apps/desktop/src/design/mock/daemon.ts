@@ -12,12 +12,11 @@ import type {
   CatalogPage,
   ConversationDetail,
   ConversationView,
-  DepartmentView,
   DevicesView,
   GhostEvent,
-  JournalEntry,
   ModelsView,
   OutcomeView,
+  OutputInfo,
   PendingProposal,
   PermissionsUpdate,
   PermissionsView,
@@ -25,6 +24,7 @@ import type {
   PhoneView,
   PolicyUpdate,
   PolicyView,
+  RulesView,
   SettingsUpdate,
   SettingsView,
   SkillInfo,
@@ -33,12 +33,13 @@ import type {
   Turn,
   VoiceInfo,
   WaitingItemView,
+  WatchingView,
 } from "@ghost/client-ts";
 
 import { HttpError } from "./errors";
 import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
-import { CONFIG_DIR } from "./fixtures/departments";
+import { CONFIG_DIR } from "./fixtures/folder";
 import type { Fixtures } from "./fixtures";
 import { renderPolicy } from "./fixtures/policy";
 import type { SessionFixture } from "./fixtures/session";
@@ -117,8 +118,10 @@ export class MockDaemon {
   private turns: Turn[];
   private pending: PendingProposal | null;
   private agents = new Map<string, AgentRecord>();
-  /** The department folders (ADR 0024), without their agents, which are read off the agents. */
-  private departments: Omit<DepartmentView, "agents">[];
+  /** Ghost's folder (ADR 0035): AGENTS.md, what Ghost made in out/, what it watches. */
+  private rules: RulesView;
+  private outputs: OutputInfo[];
+  private watching: WatchingView;
   /** The apps in apps.json (GET /apps, ADR 0034) and the registry copy to connect more from (GET /catalog). */
   private apps: AppFixture[];
   private catalog: CatalogSeed[];
@@ -148,7 +151,9 @@ export class MockDaemon {
     this.turns = f.session.turns;
     this.pending = f.session.pending;
     for (const l of f.conversations.agents) this.agents.set(l.detail.slug, l);
-    this.departments = f.departments;
+    this.rules = f.rules;
+    this.outputs = f.outputs;
+    this.watching = f.watching;
     this.voices = f.conversations.voices;
     this.apps = f.apps;
     this.catalog = f.catalog;
@@ -160,7 +165,6 @@ export class MockDaemon {
     this.models = f.settings.models;
     this.skills = f.skills;
     this.waitingItems = f.waiting;
-    const first = f.conversations.agents.find((l) => l.detail.slug === scenario.session)?.detail ?? null;
     this.status = {
       phase: scenario.phase,
       session_id: f.session.sessionId,
@@ -172,7 +176,6 @@ export class MockDaemon {
       apps: f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name),
       pending: this.pending,
       conversation: scenario.session,
-      department: first ? first.department : null,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
       waiting: f.waiting.filter((i) => i.state === "new" || i.state === "delivered").length,
@@ -195,7 +198,6 @@ export class MockDaemon {
         created_at: new Date(Date.now() - 8_000).toISOString(),
         events: [{ at: new Date(Date.now() - 8_000).toISOString(), event: "prepared", detail: { source: this.pending.source, operation: this.pending.operation, target: `github:${this.pending.target}`, autonomy: "confirm" } }],
         conversation: this.status.conversation ?? null,
-        department: this.status.department ?? null,
       });
     }
   }
@@ -256,7 +258,7 @@ export class MockDaemon {
     if (!target || target.retired_at) throw new HttpError(409, `There's no working agent called ${slug}.`);
     this.turns = [];
     this.setActive(slug);
-    this.pushStatus({ session_id: newId(), phase: "listening", conversation: slug, department: target.department, session_origin: "desk" });
+    this.pushStatus({ session_id: newId(), phase: "listening", conversation: slug, session_origin: "desk" });
     this.addTurn("assistant", target.is_ghost ? "Ghost here." : `${target.name} here.`, "system");
   }
   private setActive(slug: string | null) {
@@ -267,14 +269,11 @@ export class MockDaemon {
     this.addTurn("user", text, "text");
     this.pushStatus({ phase: "thinking" });
     this.later(900, () => {
-      const patch = /(?:patch me (?:through )?to|transfer me to|switch to|get me|back to)\s+(?:the\s+)?([\w -]+?)(?:\s+(?:line|agent|department))?[.!?]*$/i.exec(text);
+      const patch = /(?:patch me (?:through )?to|transfer me to|switch to|get me|back to)\s+(?:the\s+)?([\w -]+?)(?:\s+(?:line|agent))?[.!?]*$/i.exec(text);
       if (patch) {
         const want = patch[1].trim().toLowerCase();
-        // A retired agent has left voice routing (ADR 0024): its name no longer transfers.
-        const agent =
-          [...this.agents.values()].find((l) => !l.detail.retired_at && (l.detail.slug === want || l.detail.name.toLowerCase() === want || l.detail.aliases.includes(want))) ??
-          // A department's name lands on its own agent.
-          [...this.agents.values()].find((l) => l.detail.is_default && this.departments.some((d) => d.slug === l.detail.department && (d.slug === want || d.title.toLowerCase() === want || d.aliases.includes(want))));
+        // A retired agent has left voice routing: its name no longer transfers.
+        const agent = [...this.agents.values()].find((l) => !l.detail.retired_at && (l.detail.slug === want || l.detail.name.toLowerCase() === want || l.detail.aliases.includes(want)));
         if (agent) {
           this.switchTo(agent.detail.slug);
           return this.reply(`${agent.detail.is_ghost ? "Ghost" : agent.detail.name} here.`);
@@ -296,7 +295,7 @@ export class MockDaemon {
     this.later(1600, () => this.status.session_id && this.pushStatus({ phase: "listening" }));
   }
   private propose(p: Omit<PendingProposal, "id" | "expires_at" | "expires_in_secs">) {
-    const where = { conversation: this.status.conversation ?? null, department: this.status.department ?? null };
+    const where = { conversation: this.status.conversation ?? null };
     this.pending = { ...p, id: newId(), expires_at: new Date(Date.now() + 60_000).toISOString(), expires_in_secs: 60 };
     this.audit.unshift({
       id: this.pending.id, session_id: this.status.session_id ?? "", source: p.source, operation: p.operation, target: p.target,
@@ -327,7 +326,7 @@ export class MockDaemon {
   private sleepNow() {
     if (this.pending) this.settlePending("cancelled", { reason: "session ended" });
     this.setActive(null);
-    this.pushStatus({ session_id: null, phase: "passive", conversation: null, department: null, session_origin: null });
+    this.pushStatus({ session_id: null, phase: "passive", conversation: null, session_origin: null });
     this.conversationEvent(null);
   }
   private settlePending(status: "executed" | "cancelled", detail?: Record<string, unknown>): AuditEntry | null {
@@ -364,24 +363,19 @@ export class MockDaemon {
     return outcome;
   }
 
-  // ------------------------------------------------------------------ agents (ADR 0024)
+  // ------------------------------------------------------------------ agents (ADR 0014, ADR 0035)
   private view(d: ConversationDetail): ConversationView {
-    const { id, slug, name, aliases, department, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost, is_default } = d;
-    return { id, slug, name, aliases, department, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost, is_default };
+    const { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost } = d;
+    return { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost };
   }
   private agent(slug: string): AgentRecord {
     const l = this.agents.get(slug);
     if (!l) throw new HttpError(404, `No agent called ${slug}.`);
     return l;
   }
-  private departmentNamed(raw: string | null | undefined): Omit<DepartmentView, "agents"> {
-    const want = (raw ?? "ghost").trim().toLowerCase() || "ghost";
-    const d = this.departments.find((x) => x.slug === want || x.title.toLowerCase() === want || x.aliases.map((a) => a.toLowerCase()).includes(want));
-    if (!d) throw new HttpError(422, `there is no department called ${raw}`);
-    return d;
-  }
-  private departmentVoice(slug: string): string {
-    return this.departments.find((d) => d.slug === slug)?.voice ?? "af_heart";
+  /** The voice an agent without its own speaks in: Ghost's. */
+  private ghostVoice(): string {
+    return this.agents.get("ghost")?.detail.voice ?? "af_heart";
   }
   /** The old agent speaks the transfer, as ghost_voice/conversation.py does, then the new one is active. */
   private switchTo(slug: string) {
@@ -390,60 +384,43 @@ export class MockDaemon {
     if (target.detail.retired_at) throw new HttpError(409, `${target.detail.name} is retired. Rehire it to transfer.`);
     if (this.status.conversation !== slug) this.addTurn("assistant", target.detail.is_ghost ? "Back to Ghost." : `Transferring you to ${target.detail.name}.`, "system");
     this.setActive(slug);
-    this.pushStatus({ conversation: slug, department: target.detail.department });
+    this.pushStatus({ conversation: slug });
     this.conversationEvent(slug);
   }
-  private audited(source: string, operation: string, target: string, summary: string, autonomy = "announce", department?: string | null) {
+  private audited(source: string, operation: string, target: string, summary: string, autonomy = "announce") {
     this.audit.unshift({
       id: newId(), session_id: this.status.session_id ?? "ui", source, operation, target, summary, autonomy, status: "executed", created_at: now(),
       events: [{ at: now(), event: "prepared", detail: { source, operation, target, autonomy } }, { at: now(), event: "claimed" }, { at: now(), event: "finished", detail: { status: "success" } }],
       conversation: this.status.conversation ?? null,
-      department: department === undefined ? (this.status.department ?? null) : department,
     });
   }
 
-  // ------------------------------------------------------------------ departments (ADR 0024)
-  /** GET /departments: each folder with its agents, the department's own first. */
-  private departmentView(d: Omit<DepartmentView, "agents">): DepartmentView {
-    const agents = [...this.agents.values()].filter((a) => a.detail.department === d.slug).map((a) => a.detail.slug).sort((a, b) => (a === d.slug ? -1 : b === d.slug ? 1 : a.localeCompare(b)));
-    return { ...structuredClone(d), agents };
-  }
-  private createDepartment(name: string, aliases: string[], voice: string | null): DepartmentView {
-    const title = name.trim();
-    if (!title) throw new HttpError(422, "A department needs a name.");
-    const slug = slugOf(title);
-    if (slug === "ghost" || this.departments.some((d) => d.slug === slug)) throw new HttpError(409, `there is already a department called ${JSON.stringify(title)}`);
-    const d: Omit<DepartmentView, "agents"> = { slug, title, aliases, path: `${CONFIG_DIR}/departments/${slug}`, root: null, voice, is_ghost: false, rules_lead: title, rules: `# ${title}\n`, memory: "", permissions: { block: [], ask: [], quiet: [] }, skills: [], docs: [], problems: [], watches: [], hooks: [], outputs: [] };
-    this.departments.push(d);
-    // Its own agent, named for it.
-    const detail: ConversationDetail = {
-      id: newId(), slug, name: title, aliases: [...aliases], department: slug, job: "", voice: voice ?? "af_heart", speed: 1, own_voice: false,
-      persona: "", memory: "", notes: [], created_at: now(), last_active_at: null, retired_at: null, active: false, is_ghost: false, is_default: true,
-      turn_count: 0, compactions: 0, dir: `${CONFIG_DIR}/departments/${slug}/agents/${slug}`,
-    };
-    this.agents.set(slug, { detail, turns: [], compactions: [] });
-    this.conversationEvent(slug);
-    return this.departmentView(d);
-  }
-  /** POST /departments/{slug}/rules: appended verbatim, as the gate does, audited. */
-  private addRule(slug: string, text: string): DepartmentView {
-    const d = this.departments.find((x) => x.slug === slug);
-    if (!d) throw new HttpError(404, `no department ${JSON.stringify(slug)}`);
-    if (d.root) throw new HttpError(409, `${d.title}'s rules live in ${d.root}/AGENTS.md; Ghost does not write into a project folder, so add the rule there`);
+  // ------------------------------------------------------------------ Ghost's folder (ADR 0035)
+  /**
+   * POST /rules: the operator's own click, through the gate as rules.add at quiet (the
+   * daemon's apply_internal): the permissions' block still refuses it (409, the gate's own
+   * sentence), anything else runs at once. Appended verbatim, as ghost_core.rules does: a
+   * heading when the file is new, the rule as its own paragraph.
+   */
+  private addRule(text: string): OutcomeView {
     const rule = text.trim();
     if (!rule) throw new HttpError(409, "the rule is required, in the operator's words");
-    const current = d.rules.trim() ? d.rules.replace(/\n*$/, "\n") : `# ${d.title}\n`;
-    d.rules = `${current}\n${rule}\n`;
-    d.rules_lead = d.rules.split("\n").map((l) => l.replace(/^#+\s*/, "").trim()).find(Boolean) ?? "";
-    this.audited("departments", "add_rule", `department:${slug}`, `On ${d.title}: add the rule: ${rule}.`, "confirm", slug);
-    return this.departmentView(d);
-  }
-  /** GET /departments/{slug}/journal: executed writes made in the department, newest first, from the audit. */
-  private journal(slug: string, limit: number): JournalEntry[] {
-    return this.audit
-      .filter((e) => e.status === "executed" && e.department === slug)
-      .slice(0, limit)
-      .map((e) => ({ at: e.created_at, agent: e.conversation ? this.agents.get(e.conversation)?.detail.name ?? e.conversation : "", operation: `${e.source}.${e.operation}`, target: e.target, what: e.summary }));
+    if (rule.length > 1000) throw new HttpError(409, "that rule is too long; keep it to a few sentences");
+    if (levelOf(this.policy.permissions, "rules", "add", false) === "block") throw new HttpError(409, "rules.add is blocked by the operator's permissions");
+    const current = this.rules.text.trim() ? this.rules.text.replace(/\n*$/, "\n") : "# Ghost\n";
+    this.rules = { ...this.rules, text: `${current}\n${rule}\n` };
+    const id = newId();
+    this.audit.unshift({
+      id, session_id: "ui", source: "rules", operation: "add", target: "rules:ghost", summary: `On Ghost's rules: add the rule: ${rule}`, autonomy: "quiet", status: "executed", created_at: now(),
+      events: [
+        { at: now(), event: "prepared", detail: { source: "rules", operation: "add", target: "rules:ghost", autonomy: "quiet" } },
+        { at: now(), event: "claimed" },
+        { at: now(), event: "step_applied", detail: { index: 0, step: `add the rule: ${rule}` } },
+        { at: now(), event: "finished", detail: { status: "success" } },
+      ],
+      conversation: null,
+    });
+    return { proposal_id: id, status: "success", summary: `add the rule: ${rule}`, target: "rules:ghost", applied: ["add_rule"], state_now: null, error: null, failed_step: null };
   }
 
   // ------------------------------------------------------------------ skills (ADR 0023)
@@ -827,17 +804,10 @@ export class MockDaemon {
       if (method === "DELETE") return this.removeSkill(name), { ok: true, detail: null };
     }
 
-    if (method === "GET" && path === "/departments") return this.departments.map((d) => this.departmentView(d));
-    if (method === "POST" && path === "/departments") return this.createDepartment(String(b.name ?? ""), Array.isArray(b.aliases) ? b.aliases.map(String) : [], typeof b.voice === "string" && b.voice ? b.voice : null);
-    if ((r = m(/^\/departments\/([^/]+)(\/[a-z]+)?$/))) {
-      const slug = decodeURIComponent(r[1]);
-      const sub = r[2] ?? "";
-      const d = this.departments.find((x) => x.slug === slug);
-      if (!d) throw new HttpError(404, `no department ${JSON.stringify(slug)}`);
-      if (method === "GET" && sub === "") return this.departmentView(d);
-      if (method === "GET" && sub === "/journal") return this.journal(slug, Number(query.get("limit") ?? 30));
-      if (method === "POST" && sub === "/rules") return this.addRule(slug, String(b.text ?? ""));
-    }
+    if (method === "GET" && path === "/rules") return structuredClone(this.rules);
+    if (method === "POST" && path === "/rules") return this.addRule(String(b.text ?? ""));
+    if (method === "GET" && path === "/outputs") return structuredClone(this.outputs);
+    if (method === "GET" && path === "/watches") return structuredClone(this.watching);
 
     if (method === "GET" && path === "/phone") return this.phone;
     if (method === "POST" && path === "/phone/pairing") return this.newPairing();
@@ -851,8 +821,7 @@ export class MockDaemon {
 
     if (method === "GET" && path === "/conversations") {
       let out = [...this.agents.values()].map((l) => this.view(l.detail));
-      const dept = query.get("department"), retired = query.get("retired");
-      if (dept) out = out.filter((a) => a.department === dept);
+      const retired = query.get("retired");
       if (retired != null) out = out.filter((a) => (a.retired_at != null) === (retired === "true"));
       return out;
     }
@@ -861,22 +830,20 @@ export class MockDaemon {
       if (!name) throw new HttpError(422, "An agent needs a name.");
       const slug = slugOf(name);
       if (this.agents.has(slug)) throw new HttpError(409, `There is already an agent called ${name}.`);
-      if (this.departments.some((d) => d.slug === slug)) throw new HttpError(422, `${name} is a department's name; pick another`);
-      const dept = this.departmentNamed(typeof b.department === "string" ? b.department : null);
-      // seed_from (ADR 0024): a retired agent's memory is the new one's starting memory, a handoff to edit.
+      // seed_from: a retired agent's memory is the new one's starting memory, a handoff to edit.
       let memory = typeof b.memory === "string" ? b.memory : "";
       const seed = typeof b.seed_from === "string" && b.seed_from ? this.agents.get(b.seed_from) : null;
       if (b.seed_from && !seed) throw new HttpError(422, `No agent called ${String(b.seed_from)} to start from.`);
       if (seed) memory = seed.detail.memory;
       const own = typeof b.voice === "string" && !!b.voice;
       const detail: ConversationDetail = {
-        id: newId(), slug, name, aliases: (b.aliases as string[]) ?? [], department: dept.slug, job: String(b.job ?? ""),
-        voice: own ? (b.voice as string) : this.departmentVoice(dept.slug), speed: (b.speed as number) ?? 1, own_voice: own,
-        persona: String(b.persona ?? ""), memory, notes: [], created_at: now(), last_active_at: null, retired_at: null, active: false, is_ghost: false, is_default: false,
-        turn_count: 0, compactions: memory ? 1 : 0, dir: dept.slug === "ghost" ? `${CONFIG_DIR}/agents/${slug}` : `${CONFIG_DIR}/departments/${dept.slug}/agents/${slug}`,
+        id: newId(), slug, name, aliases: (b.aliases as string[]) ?? [], job: String(b.job ?? ""),
+        voice: own ? (b.voice as string) : this.ghostVoice(), speed: (b.speed as number) ?? 1, own_voice: own,
+        persona: String(b.persona ?? ""), memory, notes: [], created_at: now(), last_active_at: null, retired_at: null, active: false, is_ghost: false,
+        turn_count: 0, compactions: memory ? 1 : 0, dir: `${CONFIG_DIR}/agents/${slug}`,
       };
       this.agents.set(slug, { detail, turns: [], compactions: memory ? [{ id: newId(), at: now(), source: "manual", summary: memory, through_turn_id: null }] : [] });
-      this.audited("conversations", "create", `agent:${slug}`, seed ? `On ${slug.replace(/-/g, " ")}: hire ${JSON.stringify(name)} in ${dept.slug} with a handoff memory.` : `On ${slug.replace(/-/g, " ")}: hire ${JSON.stringify(name)} in ${dept.slug}${detail.job ? ` for ${detail.job}` : ""}.`, "announce", dept.slug);
+      this.audited("conversations", "create", `agent:${slug}`, `On ${slug.replace(/-/g, " ")}: hire ${JSON.stringify(name)}${detail.job ? ` for ${detail.job}` : ""}${seed ? " with a handoff memory" : ""}.`);
       this.conversationEvent(slug);
       return detail;
     }
@@ -891,29 +858,29 @@ export class MockDaemon {
       if (method === "GET" && sub === "/compactions") return l.compactions;
       if (method === "PATCH" && sub === "") {
         if (d.retired_at) throw new HttpError(409, `${d.name} is retired. Rehire it to change it.`);
-        if (d.is_default && typeof b.name === "string" && slugOf(b.name) !== slug) throw new HttpError(409, `${d.name} is named for its department`);
+        if (d.is_ghost && typeof b.name === "string" && slugOf(b.name) !== slug) throw new HttpError(409, "Ghost keeps its name");
         for (const k of ["name", "aliases", "job", "speed", "persona", "memory", "notes"] as const) {
           if (b[k] != null) (d as unknown as Record<string, unknown>)[k] = b[k];
         }
         if (typeof b.voice === "string") {
           d.own_voice = b.voice !== "";
-          d.voice = b.voice || this.departmentVoice(d.department);
+          d.voice = b.voice || this.ghostVoice();
         }
         if (typeof b.memory === "string") {
           d.compactions += 1;
           l.compactions.unshift({ id: newId(), at: now(), source: "edit", summary: b.memory, through_turn_id: null });
         }
-        this.audited("conversations", "update", `agent:${slug}`, `On ${spoken}: updated ${Object.keys(b).join(", ")}.`, "announce", d.department);
+        this.audited("conversations", "update", `agent:${slug}`, `On ${spoken}: updated ${Object.keys(b).join(", ")}.`);
         this.conversationEvent(slug);
         return d;
       }
-      // Retire and rehire (ADR 0024): announce-level, nothing is destroyed.
+      // Retire and rehire: announce-level, nothing is destroyed.
       if (method === "POST" && sub === "/retire") {
-        if (d.is_default) throw new HttpError(409, `${d.name} is its department's own agent; it stays`);
+        if (d.is_ghost) throw new HttpError(409, "Ghost stays; it is where every wake lands");
         if (d.active) throw new HttpError(409, "Switch away from this agent before retiring it.");
         if (!d.retired_at) {
           d.retired_at = now();
-          this.audited("conversations", "retire", `agent:${slug}`, `On ${spoken}: retire the agent.`, "announce", d.department);
+          this.audited("conversations", "retire", `agent:${slug}`, `On ${spoken}: retire the agent.`);
           this.conversationEvent(slug);
         }
         return { ok: true, detail: `Retired ${d.name}.` };
@@ -921,36 +888,22 @@ export class MockDaemon {
       if (method === "POST" && sub === "/rehire") {
         if (d.retired_at) {
           d.retired_at = null;
-          this.audited("conversations", "rehire", `agent:${slug}`, `On ${spoken}: bring the agent back.`, "announce", d.department);
+          this.audited("conversations", "rehire", `agent:${slug}`, `On ${spoken}: bring the agent back.`);
           this.conversationEvent(slug);
         }
         return { ok: true, detail: `${d.name} is back.` };
       }
-      // Move (ADR 0024): the folder goes into another department; the voice follows unless its own.
-      if (method === "POST" && sub === "/move") {
-        if (d.is_default) throw new HttpError(409, `${d.name} is its department's own agent; it cannot move`);
-        if (d.active) throw new HttpError(409, "the session is with this agent; ask Ghost to move it");
-        const dept = this.departmentNamed(typeof b.department === "string" ? b.department : null);
-        if (dept.slug === d.department) throw new HttpError(409, `${d.name} is already in ${dept.slug}`);
-        const from = d.department;
-        d.department = dept.slug;
-        if (!d.own_voice) d.voice = this.departmentVoice(dept.slug);
-        d.dir = dept.slug === "ghost" ? `${CONFIG_DIR}/agents/${slug}` : `${CONFIG_DIR}/departments/${dept.slug}/agents/${slug}`;
-        this.audited("conversations", "move", `agent:${slug}`, `On ${spoken}: move to ${dept.slug}.`, "confirm", from);
-        this.conversationEvent(slug);
-        return d;
-      }
       if (method === "POST" && sub === "/notes") {
         d.notes = [...d.notes, String(b.text ?? "")];
-        this.audited("conversations", "remember", `agent:${slug}`, `On ${spoken}: remember: ${b.text}.`, "announce", d.department);
+        this.audited("conversations", "remember", `agent:${slug}`, `On ${spoken}: remember: ${b.text}.`);
         this.conversationEvent(slug);
         return d;
       }
       if (method === "DELETE" && sub === "") {
-        if (d.is_default) throw new HttpError(409, `${d.name} is its department's own agent; it stays`);
+        if (d.is_ghost) throw new HttpError(409, "Ghost stays; it is where every wake lands");
         if (d.active) throw new HttpError(409, "Switch away from this agent before deleting it.");
         this.agents.delete(slug);
-        this.audited("conversations", "delete", `agent:${slug}`, `On ${spoken}: delete the agent.`, "confirm", d.department);
+        this.audited("conversations", "delete", `agent:${slug}`, `On ${spoken}: delete the agent.`, "confirm");
         this.conversationEvent(slug);
         return { ok: true };
       }
@@ -959,7 +912,7 @@ export class MockDaemon {
         Object.assign(d, { memory: "", notes: [], turn_count: 0, compactions: 0 });
         l.turns = [];
         l.compactions = [];
-        this.audited("conversations", "reset", `agent:${slug}`, `On ${spoken}: reset: forget everything.`, "confirm", d.department);
+        this.audited("conversations", "reset", `agent:${slug}`, `On ${spoken}: reset: forget everything.`, "confirm");
         this.conversationEvent(slug);
         return { ok: true };
       }
