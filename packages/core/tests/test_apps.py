@@ -516,6 +516,45 @@ async def test_a_change_named_only_by_where_it_happens_always_asks():
     assert session.calls == []
 
 
+def test_every_tool_name_is_one_the_model_accepts():
+    """The model API refuses the whole list over one bad name, so every turn failed."""
+    import re
+
+    long = "a_very_long_tool_name_" * 4
+    app, _ = by_hand(
+        ToolInfo("issue.read", "Get.", {}, read_only=True),
+        ToolInfo(long, "Long.", {}, read_only=False),
+        ToolInfo(long + "x", "Longer.", {}, read_only=False),
+        name="git-hub",
+    )
+    src = source_of(app)
+    names = [t.name for t in src.read_tools] + [o.tool_name for o in src.operations]
+    assert all(re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", n) for n in names), names
+    assert len(set(names)) == 3 and "git-hub_issue_read" in names
+    assert {o.name for o in src.operations} == {long, long + "x"}  # the app's own names
+
+
+async def test_two_apps_never_offer_the_same_tool_name():
+    """``github`` + ``issue_read`` and ``github_issue`` + ``read`` are both
+    ``github_issue_read``: the later one isn't offered, and its app says so."""
+    first, _ = by_hand(ToolInfo("issue_read", "Get an issue.", {}, read_only=True), name="github")
+    second, _ = by_hand(
+        ToolInfo("read", "Read.", {}, read_only=True),
+        ToolInfo("write", "Write.", {}, read_only=False),
+        name="github_issue",
+    )
+    apps = Apps({"github": first.spec, "github_issue": second.spec}, environ={})
+    apps.apps = {"github_issue": second, "github": first}  # connected in either order
+    by_name = {s.name: s for s in apps.sources()}
+    assert [t.name for t in by_name["github"].read_tools] == ["github_issue_read"]
+    assert by_name["github_issue"].read_tools == []
+    assert [o.tool_name for o in by_name["github_issue"].operations] == ["github_issue_write"]
+    assert apps.state("github_issue") == "connected"
+    problem = apps.problem("github_issue")
+    assert problem and "read" in problem and "github_issue_read" in problem
+    assert apps.problem("github") is None
+
+
 async def test_a_read_error_is_the_models_answer_and_a_watch_reads_only_reads():
     async with connected() as (app, _):
         read = next(t for t in app.read_tools() if t.name == "github_issue_read")

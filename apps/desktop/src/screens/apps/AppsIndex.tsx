@@ -126,6 +126,10 @@ function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof 
   const line =
     a.sign_in_url ? (
       <span className="apps-row__state is-warn">Finish signing in in your browser</span>
+    ) : a.state === "connected" && a.problem ? (
+      <span className="apps-row__state is-warn" data-user-content>
+        {summaryWords(a)} · {a.problem}
+      </span>
     ) : a.state === "connected" ? (
       <span className="apps-row__state">{summaryWords(a)}</span>
     ) : a.state === "connecting" ? (

@@ -277,7 +277,7 @@ class AppView(BaseModel):
     title: str
     kind: Literal["sign_in", "key", "local", "custom"]
     state: Literal["connected", "connecting", "needs_sign_in", "failed", "stopped"]
-    problem: str | None = None  # why it is not connected; never a secret
+    problem: str | None = None  # not connected, or tools not offered, and why; never a secret
     catalog: str | None = None  # the catalog entry it came from
     icon: str | None = None
     actions: list[AppAction] = []

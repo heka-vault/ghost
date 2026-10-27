@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -666,6 +667,8 @@ class App:
         self._session: Any = None
         self.tools: list[ToolInfo] = []
         self.failed: str | None = None
+        self.taken_elsewhere: set[str] = set()  # model tool names another app offers first
+        self.withheld: dict[str, str] = {}  # tools not offered, with the name they'd have
         self._task: asyncio.Task[None] | None = None
         self._ready: asyncio.Future[None] | None = None
         self._closing = asyncio.Event()
@@ -835,13 +838,32 @@ class App:
 
     def public_name(self, tool: str) -> str:
         """Tool names are per app; two apps may both have ``search``."""
-        return f"{self.spec.name}_{tool}"
+        return model_tool_name(f"{self.spec.name}_{tool}")
+
+    def offered(self) -> dict[str, str]:
+        """Each tool offered to the model, by the app's name for it, with the model's. A
+        tool whose name for the model an earlier tool of this app, or another app
+        (``taken_elsewhere``, from ``Apps``), already has is not offered: it is in
+        ``withheld``, and the operator sees why. The model API refuses a whole list with
+        one name twice, which would fail every turn."""
+        out: dict[str, str] = {}
+        self.withheld = {}
+        for t in self.tools:
+            name = self.public_name(t.name)
+            if name in self.taken_elsewhere or name in out.values():
+                self.withheld[t.name] = name
+            else:
+                out[t.name] = name
+        return out
 
     def read_tools(self) -> list[ReadTool]:
         from ghost_core.source import ReadTool
 
         tools: list[ReadTool] = []
+        offered = self.offered()
         for t in self.reads():
+            if t.name not in offered:
+                continue
 
             async def handler(args: dict[str, Any], _t: ToolInfo = t) -> dict[str, Any]:
                 try:
@@ -851,7 +873,7 @@ class App:
 
             tools.append(
                 ReadTool(
-                    self.public_name(t.name),
+                    offered[t.name],
                     t.brief,
                     t.properties,
                     t.required,
@@ -866,6 +888,7 @@ class App:
         from ghost_core.source import Operation
 
         writer = AppWriter(self)
+        offered = self.offered()
         return [
             Operation(
                 name=t.name,
@@ -874,9 +897,10 @@ class App:
                 required=t.required,
                 prepare=lambda args, _t=t: self._prepare(_t, args),
                 writer=writer,
-                tool_name=self.public_name(t.name),
+                tool_name=offered[t.name],
             )
             for t in self.changes()
+            if t.name in offered
         ]
 
     async def _prepare(self, tool: ToolInfo, raw: dict[str, Any]) -> Prepared:
@@ -924,8 +948,9 @@ class App:
 
     def prompt(self) -> str:
         """The paragraph for the system prompt."""
-        reads = [self.public_name(t.name) for t in self.reads()]
-        changes = [self.public_name(t.name) for t in self.changes()]
+        offered = self.offered()
+        reads = [offered[t.name] for t in self.reads() if t.name in offered]
+        changes = [offered[t.name] for t in self.changes() if t.name in offered]
         text = f"{self.spec.shown} is connected."
         if reads:
             text += f" Look things up with {', '.join(reads)}."
@@ -958,6 +983,20 @@ class App:
         except Exception:  # noqa: BLE001 - whatever the transport raised on the way out
             logger.debug(f"app {self.spec.name}: close raised")
         self._session = None
+
+
+_TOOL_NAME_BAD = re.compile(r"[^a-zA-Z0-9_-]+")
+MAX_TOOL_NAME = 64  # the model API's limit; its pattern is ^[a-zA-Z0-9_-]{1,64}$
+
+
+def model_tool_name(name: str) -> str:
+    """``name`` as the model API accepts it: other characters become ``_``, and a name
+    too long keeps its start and a short hash of the whole, so two long names stay two."""
+    clean = _TOOL_NAME_BAD.sub("_", name) or "tool"
+    if len(clean) <= MAX_TOOL_NAME:
+        return clean
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{clean[: MAX_TOOL_NAME - 9]}_{digest}"
 
 
 def _clean(args: Mapping[str, Any]) -> dict[str, Any]:
@@ -1084,7 +1123,14 @@ class Apps:
     def problem(self, name: str) -> str | None:
         app = self.apps.get(name)
         if app is not None and app.connected:
-            return None
+            self._claim_names()
+            if not app.withheld:
+                return None
+            names = ", ".join(f"{t} (as {n})" for t, n in app.withheld.items())
+            return (
+                f"not offered: {names}; another tool already has that name. Give the app "
+                "another name to offer them"
+            )
         if name in self.failed:
             return self.failed[name]
         return app.failed if app is not None else None
@@ -1120,11 +1166,23 @@ class Apps:
         for hook in list(self.on_change):
             hook()
 
+    def _in_order(self) -> list[App]:
+        """Connected apps in the file's order: the first to name a tool keeps the name."""
+        order = [*self.specs, *(n for n in self.apps if n not in self.specs)]
+        return [a for n in order if (a := self.apps.get(n)) is not None and a.connected]
+
+    def _claim_names(self) -> None:
+        """Which app offers a tool name the model sees two apps give (``github`` with
+        ``issue_read``, ``github_issue`` with ``read``): the first in apps.json."""
+        taken: set[str] = set()
+        for app in self._in_order():
+            app.taken_elsewhere = set(taken)
+            taken |= set(app.offered().values())
+
     def sources(self) -> list[ToolSource]:
         out: list[ToolSource] = []
-        for app in self.apps.values():
-            if not app.connected:
-                continue
+        self._claim_names()
+        for app in self._in_order():
             source = source_of(app)
             if source.read_tools or source.operations:
                 out.append(source)
@@ -1268,6 +1326,7 @@ __all__ = [
     "ToolInfo",
     "app_name_problem",
     "fill_secrets",
+    "model_tool_name",
     "load_apps",
     "looks_like_secret",
     "parse_app",
