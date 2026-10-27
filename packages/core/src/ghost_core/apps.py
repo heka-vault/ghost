@@ -151,7 +151,12 @@ class AppSpec:
     def secrets(self) -> list[str]:
         """The environment names this app needs."""
         names: list[str] = []
-        for value in (*self.headers.values(), *self.env.values(), *(self.args or ())):
+        for value in (
+            self.url or "",
+            *self.headers.values(),
+            *self.env.values(),
+            *(self.args or ()),
+        ):
             names.extend(secret_names(value))
         return list(dict.fromkeys(names))
 
@@ -266,20 +271,29 @@ def parse_app(name: str, body: object, where: str, problems: list[str]) -> AppSp
         raise ValueError(f"{where} needs exactly one of url or command")
     headers = _str_table(t.get("headers", {}), f"{where}.headers")
     env = _str_table(t.get("env", {}), f"{where}.env")
-    for label, table in (("headers", headers), ("env", env)):
-        for key, value in table.items():
-            if looks_like_secret(value):
-                problems.append(
-                    f"{where}: {label} {key} looks like a key written into the file; use "
-                    "${NAME} and set it in Ghost's environment"
-                )
+    args = _str_list(t.get("args", []), f"{where}.args")
+    found = [
+        *(
+            f"{label} {key}"
+            for label, table in (("headers", headers), ("env", env))
+            for key, value in table.items()
+            if looks_like_secret(value)
+        ),
+        *(f"argument {label}" for _, label, _, _ in _keys_in_args(args)),
+        *(f"the address's {param}" for param, _ in _keys_in_url(str(url or ""))),
+    ]
+    for what in found:
+        problems.append(
+            f"{where}: {what} looks like a key written into the file; use "
+            "${NAME} and set it in Ghost's environment"
+        )
     return AppSpec(
         name=name,
         title=str(t.get("title") or ""),
         url=str(url) if url else None,
         headers=headers,
         command=str(command) if command else None,
-        args=_str_list(t.get("args", []), f"{where}.args"),
+        args=args,
         env=env,
         catalog=str(t["catalog"]) if t.get("catalog") else None,
         sign_in=bool(t.get("sign_in", False)) and bool(url),
@@ -696,8 +710,10 @@ class App:
                     auth = self._auth_for(spec, interactive) if self._auth_for else None
                     http = create_mcp_http_client(headers=headers, auth=auth)
                     await stack.enter_async_context(http)
+                    # A key moved out of the address's query is filled back in here.
+                    url = fill_secrets(spec.url, self.environ)
                     read, write, *_ = await stack.enter_async_context(
-                        streamable_http_client(spec.url, http_client=http)
+                        streamable_http_client(url, http_client=http)
                     )
                 else:
                     from mcp.client.stdio import (
@@ -1157,22 +1173,82 @@ def secret_name(app: str, key: str) -> str:
 
 
 def extract_secrets(spec: AppSpec) -> tuple[AppSpec, dict[str, str]]:
-    """A pasted config with keys written into it: each literal that looks like a secret
-    moves into Ghost's environment under its own name, and the entry keeps a reference."""
+    """A pasted config with keys written into it: each literal that looks like a secret,
+    in a header, the environment, an argument (``--api-key X``, ``--token=X``) or the
+    address's query (``?api_key=X``), moves into Ghost's environment under its own name,
+    and the entry keeps a reference."""
     secrets: dict[str, str] = {}
 
-    def move(table: Mapping[str, str]) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for key, value in table.items():
-            if looks_like_secret(value):
-                name = secret_name(spec.name, key)
-                secrets[name] = value
-                out[key] = "${" + name + "}"
-            else:
-                out[key] = value
-        return out
+    def keep(key: str, value: str) -> str:
+        name = secret_name(spec.name, key)
+        n = 2
+        while name in secrets:
+            name = f"{secret_name(spec.name, key)}_{n}"
+            n += 1
+        secrets[name] = value
+        return "${" + name + "}"
 
-    return replace(spec, headers=move(spec.headers), env=move(spec.env)), secrets
+    def move(table: Mapping[str, str]) -> dict[str, str]:
+        return {k: keep(k, v) if looks_like_secret(v) else v for k, v in table.items()}
+
+    headers, env = move(spec.headers), move(spec.env)
+    args = list(spec.args)
+    for i, label, lead, value in _keys_in_args(spec.args):
+        args[i] = lead + keep(label, value)
+    url = spec.url
+    if url and _keys_in_url(url):
+        head, _, rest = url.partition("?")
+        query, hash_, fragment = rest.partition("#")
+        parts = []
+        for part in query.split("&"):
+            param, eq, value = part.partition("=")
+            if (param, value) in _keys_in_url(f"?{part}"):
+                # As written, still percent-encoded: filled back in, it is the address.
+                part = f"{param}={keep(param, value)}"
+            parts.append(part)
+        url = f"{head}?{'&'.join(parts)}{hash_}{fragment}"
+    return replace(spec, headers=headers, env=env, args=tuple(args), url=url), secrets
+
+
+# An argument or a query parameter named for a key: ``--api-key``, ``--token``, ``key=``.
+_KEY_WORD = r"(?:[a-z0-9]+[-_])*(?:api[-_]?key|apikey|key|token|secret|password|pat|auth)"
+_KEY_FLAG = re.compile(rf"^--?{_KEY_WORD}$", re.I)
+_KEY_PARAM = re.compile(rf"^{_KEY_WORD}$", re.I)
+
+
+def _is_path(value: str) -> bool:
+    return value.startswith(("/", "~", "./", "../"))
+
+
+def _keys_in_args(args: Sequence[str]) -> list[tuple[int, str, str, str]]:
+    """Keys written into an app's arguments: the value after ``--api-key``, the value in
+    ``--token=X``, and a value that is a key by its shape. Each as (index, a name for it,
+    what stays before it, the key). A reference or a path is not a key."""
+    out: list[tuple[int, str, str, str]] = []
+    for i, a in enumerate(args):
+        if secret_names(a):
+            continue
+        flag, eq, value = a.partition("=")
+        if eq and value and _KEY_FLAG.match(flag) and not _is_path(value):
+            out.append((i, flag.lstrip("-"), flag + "=", value))
+        elif i and _KEY_FLAG.match(args[i - 1]) and not a.startswith("-") and not _is_path(a):
+            out.append((i, args[i - 1].lstrip("-"), "", a))
+        elif bool(_SECRET_SHAPES.match(a)) or (
+            looks_like_secret(a) and not any(c in a for c in "/@:=.") and not a.startswith("-")
+        ):
+            out.append((i, f"arg_{i}", "", a))  # a package's name has / or @; a key doesn't
+    return out
+
+
+def _keys_in_url(url: str) -> list[tuple[str, str]]:
+    """Query parameters named for a key (``api_key=``, ``token=``), as written."""
+    query = url.partition("?")[2].partition("#")[0]
+    out: list[tuple[str, str]] = []
+    for part in query.split("&"):
+        param, eq, value = part.partition("=")
+        if eq and value and _KEY_PARAM.match(param) and not secret_names(value):
+            out.append((param, value))
+    return out
 
 
 __all__ = [

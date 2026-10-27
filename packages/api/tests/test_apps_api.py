@@ -322,3 +322,33 @@ def test_a_pasted_config_names_the_entries_it_leaves_out(world, tmp_path, monkey
     noted = json.dumps({"mcpServers": {"good": {"url": "https://good.example/mcp", "x": 1}}})
     r = client.post("/apps", json={"config": noted})
     assert r.status_code == 200 and any("x" in p for p in r.json()["problems"])
+
+
+def test_a_key_in_a_pasted_configs_arguments_or_address_is_moved_too(world, tmp_path, monkeypatch):
+    """docs/apps.md: Ghost moves any key written into a pasted config into its private
+    settings. Arguments and the address's query stayed in apps.json as plain text."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    pasted = json.dumps(
+        {
+            "mcpServers": {
+                "brave": {"command": "npx", "args": ["-y", "brave-search", "--api-key", "BSAx1"]},
+                "maps": {"url": "https://maps.example/mcp?key=AIzaSy123&lang=en"},
+            }
+        }
+    )
+    r = client.post("/apps", json={"config": pasted})
+    assert r.status_code == 200, r.text
+    assert "BSAx1" not in r.text and "AIzaSy123" not in r.text
+    assert r.json()["problems"] == []  # moved, nothing left to fix
+    path = deps.policy_path.parent / "apps.json"
+    text = path.read_text()
+    assert "BSAx1" not in text and "AIzaSy123" not in text
+    assert path.stat().st_mode & 0o777 == 0o600
+    saved = load_apps(path).apps
+    assert saved["brave"].args[-1] == "${GHOST_APP_BRAVE_API_KEY}"
+    assert saved["maps"].url == "https://maps.example/mcp?key=${GHOST_APP_MAPS_KEY}&lang=en"
+    apps_env = (deps.env_path.parent / "apps.env").read_text()
+    assert "GHOST_APP_BRAVE_API_KEY=BSAx1" in apps_env
+    assert "GHOST_APP_MAPS_KEY=AIzaSy123" in apps_env
+    view = client.get("/apps/maps").json()
+    assert view["settings"] == ["GHOST_APP_MAPS_KEY"] and view["kind"] == "key"

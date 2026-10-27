@@ -103,6 +103,82 @@ def test_a_key_written_into_the_file_is_flagged_and_moved_out_of_a_paste():
     assert secrets == {"GHOST_APP_GH_AUTHORIZATION": token}
 
 
+def test_keys_in_arguments_and_the_address_are_moved_out_of_a_paste_too():
+    token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    pasted = {
+        "mcpServers": {
+            "tool": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@someone/a-rather-long-package-name-for-a-tool",
+                    "--api-key",
+                    "abc123",
+                    "--token=xyz789",
+                    token,
+                    "--ssh-key",
+                    "/home/me/.ssh/id_ed25519",
+                    "--from-env",
+                    "${ALREADY_A_REFERENCE}",
+                ],
+            },
+            "remote": {"url": "https://x.example/mcp?api_key=SEKRET&mode=fast&token=t%2Fz"},
+        }
+    }
+    import json
+
+    f = parse_apps_json(json.dumps(pasted), "paste")
+    assert sum("looks like a key" in p for p in f.problems) == 5
+    tool, secrets = extract_secrets(f.apps["tool"])
+    assert tool.args == (
+        "-y",
+        "@someone/a-rather-long-package-name-for-a-tool",
+        "--api-key",
+        "${GHOST_APP_TOOL_API_KEY}",
+        "--token=${GHOST_APP_TOOL_TOKEN}",
+        "${GHOST_APP_TOOL_ARG_5}",
+        "--ssh-key",
+        "/home/me/.ssh/id_ed25519",  # a path, not a key
+        "--from-env",
+        "${ALREADY_A_REFERENCE}",
+    )
+    assert secrets == {
+        "GHOST_APP_TOOL_API_KEY": "abc123",
+        "GHOST_APP_TOOL_TOKEN": "xyz789",
+        "GHOST_APP_TOOL_ARG_5": token,
+    }
+    env = {**secrets, "ALREADY_A_REFERENCE": "r"}
+    filled = [fill_secrets(a, env) for a in tool.args]
+    assert filled == [*pasted["mcpServers"]["tool"]["args"][:9], "r"]
+    remote, secrets = extract_secrets(f.apps["remote"])
+    assert remote.url == (
+        "https://x.example/mcp?api_key=${GHOST_APP_REMOTE_API_KEY}&mode=fast"
+        "&token=${GHOST_APP_REMOTE_TOKEN}"
+    )
+    assert fill_secrets(remote.url, secrets) == pasted["mcpServers"]["remote"]["url"]
+
+
+async def test_the_address_is_filled_from_the_environment_like_a_header():
+    apps = Apps(
+        {"proxy": AppSpec(name="proxy", url="http://127.0.0.1:9/mcp?key=${GHOST_APP_PROXY_KEY}")},
+        environ={},
+    )
+    await apps.connect()
+    assert apps.failed == {"proxy": "setting GHOST_APP_PROXY_KEY is not set"}
+    await apps.close()
+
+
+def test_apps_json_is_written_for_the_operator_only(tmp_path):
+    from ghost_core.apps import edit_apps, write_apps
+
+    path = tmp_path / "apps.json"
+    write_apps(path, {"a": AppSpec(name="a", command="x")})
+    assert path.stat().st_mode & 0o777 == 0o600
+    path.chmod(0o644)
+    edit_apps(path, [AppSpec(name="b", command="y")])
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
 def test_fill_secrets_from_environment_only():
     env = {"MCP_PROXY_KEY": "k-123"}
     assert fill_secrets("Bearer $MCP_PROXY_KEY", env) == "Bearer k-123"
