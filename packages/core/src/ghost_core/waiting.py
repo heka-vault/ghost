@@ -256,7 +256,7 @@ def change_draft(p: Proposal) -> ItemDraft:
         department=p.department,
         fields={
             "proposal": p.id,
-            "ability": p.ability,
+            "source": p.ability,
             "operation": p.operation,
             "target": p.target.spoken(),
             "expires_at": p.expires_at.isoformat(),

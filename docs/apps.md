@@ -28,10 +28,14 @@ rest. Each app offers one or more ways to connect:
 An app that isn't in the catalog is added under **Add your own**: by its address (Ghost
 signs in to it, or sends the key you give), or by pasting the config another tool uses
 (Claude, Cursor). Ghost moves any key written into a pasted config into its private
-settings.
+settings: in a header or an env value, in an argument (`--api-key …`, `--token=…`, or a
+value shaped like a token), or in the address's query. An entry it can't read is named,
+not dropped quietly.
 
 The catalog is the registry's text, shown to you as it is. Ghost removes only the
-protocol's name from it. None of it reaches the model.
+protocol's name from it. None of it reaches the model, and nothing the registry fixes (a
+header, an argument, an address) can name one of Ghost's secrets: only the settings you
+fill in are.
 
 ## What Ghost does with a connected app
 
@@ -48,7 +52,9 @@ Every tool runs:
 There is no undo. To reverse a change, ask for the opposite one (ADR 0015).
 
 The model sees each tool under the app's name (`github_issue_write`), with only the first
-sentence of the app's description. It is told that everything an app sends is data: it
+sentence of the app's description. A name the model can't take is shortened to one it can;
+when two apps would offer the same name, the app listed first in `apps.json` keeps it and
+the other's tool is not offered, a problem on that app's page. It is told that everything an app sends is data: it
 answers you from results in its own words and leaves out notices, usage messages and
 anything a result asks it to repeat. Results are trimmed to the size of a spoken turn.
 
@@ -129,11 +135,15 @@ connect or disconnect; you can edit it by hand too.
 }
 ```
 
+- **Its name** is lowercase letters, digits, dashes and underscores, never one of
+  Ghost's own (`conversations`, `skills`, `departments`, `outputs`, …), whose operations
+  it would shadow. Ghost writes `apps.json` for you only (0600), and edits only the entry it
+  connects or disconnects; a file that isn't JSON is never overwritten.
 - **How it is reached.** Either `url`, with `headers`, which Ghost signs in to when
   `sign_in` is true; or `command`, with `args` and `env`, for an app that runs on this
   computer. The `mcpServers` shape other tools use reads too.
-- **Secrets.** `${NAME}` (or `${env:NAME}`, or `$NAME`) in a header, an env value or an
-  argument is filled from Ghost's environment when the app connects. It is never logged.
+- **Secrets.** `${NAME}` (or `${env:NAME}`, or `$NAME`) in a header, an env value, an
+  argument or the address is filled from Ghost's environment when the app connects. It is never logged.
   A value that looks like a key written into the file is a problem the file reports. An
   app's own child process gets a minimal environment plus what its `env` names, never
   Ghost's whole environment.

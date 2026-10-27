@@ -80,6 +80,9 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
       onConnected();
       const names = r.apps.map((a) => a.title || a.name);
       const { failed, connecting } = connectOutcome(r.apps);
+      // What Ghost noticed about a paste that still connected (a key it moved, an entry it
+      // left out): said with the result, never dropped.
+      const notes = r.problems.length ? ` ${r.problems.map(sentence).join(" ")}` : "";
       if (failed) {
         setSaved(true);
         setError({ title: `Ghost couldn’t connect to ${failed.title || failed.name}`, text: failedText(failed), taken: false, failed: true });
@@ -87,10 +90,10 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
         const opened = await openSignIn(r.sign_in_url, { again: true, mock });
         setSignIn({ url: r.sign_in_url, opened });
       } else if (connecting) {
-        toast({ title: names.length === 1 ? `Connecting to ${names[0]}…` : `Connecting to ${names.length} apps…`, description: "Ghost is still reaching it. It shows as connected under Apps once it answers." });
+        toast({ title: names.length === 1 ? `Connecting to ${names[0]}…` : `Connecting to ${names.length} apps…`, description: `Ghost is still reaching it. It shows as connected under Apps once it answers.${notes}` });
         onClose();
       } else {
-        toast({ title: names.length === 1 ? `Connected ${names[0]}` : `Connected ${names.length} apps`, description: "Ghost can use it from its next turn. Its tools are on its page under Apps." });
+        toast({ title: names.length === 1 ? `Connected ${names[0]}` : `Connected ${names.length} apps`, description: `Ghost can use it from its next turn. Its tools are on its page under Apps.${notes}` });
         onClose();
       }
     } catch (err) {
