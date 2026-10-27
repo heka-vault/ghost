@@ -244,3 +244,18 @@ def test_ghosts_own_problems_are_items_for_the_waiting_list():
     out = ghost_problems(fleet, SimpleNamespace(list=lambda: depts))
     assert [k for k, _, _ in out] == ["server:figma", "server:mobbin", "department:sales"]
     assert out[2][2] == "sales"
+
+
+def test_the_route_engine_exists_before_routes_are_added_to_it():
+    """Daemon.run is not exercised end to end in tests (it loads the voice models); this
+    guards the order that broke startup on 2026-10-27."""
+    import inspect
+
+    from ghostd.main import Daemon
+
+    src = inspect.getsource(Daemon.run)
+    made = src.index("self.routes = RouteEngine(")
+    assert all(
+        made < i
+        for i in [m.start() for m in __import__("re").finditer(r"self\.routes\.add_route", src)]
+    )
