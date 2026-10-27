@@ -10,22 +10,16 @@ export type Summarized = Pick<AuditEntry, "summary" | "target"> & { operation?: 
 
 /**
  * “On ghost-mock/app#208: approved, with …” → { target: "ghost-mock/app#208", text: "Approved, with …" }.
- * A change to an agent (persona, voice) or a department (a rule) has `conversation: true` and
- * the name as the target: “the Standup agent”, never a slug in mono.
+ * A change to an agent (persona, voice) or to Ghost's rules has `conversation: true` and the
+ * name as the target: “Standup agent”, “Ghost’s rules”, never a slug in mono.
  */
 export function splitSummary(e: Summarized): { target: string; text: string; conversation: boolean } {
   const m = /^On ([^:]+):\s*(.*)$/s.exec(e.summary);
   const text = cap(m ? m[2] : e.summary);
   const agent = e.target.startsWith("agent:") || e.target.startsWith("conversation:");
-  const department = e.target.startsWith("department:");
-  const target = agent
-    ? `${agentName(e.target.slice(e.target.indexOf(":") + 1))} agent`
-    : department
-      ? `${agentName(e.target.slice("department:".length))} department`
-      : m
-        ? m[1]
-        : e.target;
-  return { target, text, conversation: agent || department };
+  const rules = e.target.startsWith("rules:");
+  const target = agent ? `${agentName(e.target.slice(e.target.indexOf(":") + 1))} agent` : rules ? "Ghost’s rules" : m ? m[1] : e.target;
+  return { target, text, conversation: agent || rules };
 }
 
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);

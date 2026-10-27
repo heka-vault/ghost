@@ -25,7 +25,7 @@ export function phaseText(phase: GhostPhase): string {
   return phaseLabel(phase);
 }
 
-/** Display name for an agent (or a department) slug when only the slug is known. */
+/** Display name for an agent slug when only the slug is known. */
 export function agentName(slug: string | null | undefined, name?: string): string {
   if (!slug || slug === "ghost") return "Ghost";
   if (name) return name;
