@@ -231,16 +231,30 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         update_env(apps_env_path(deps), dict(secrets), mode=0o600)
         os.environ.update(secrets)
 
-    def forget_secrets(name: str) -> None:
-        """The keys Ghost made for this app when it was connected (``GHOST_APP_<NAME>_*``);
-        a name the operator chose themselves stays."""
+    def forget_secrets(spec: AppSpec) -> None:
+        """The keys Ghost kept for this app: the ``GHOST_APP_`` names its own entry refers
+        to and no other app's does. A name the operator chose themselves stays, and so
+        does every other app's key (``github-2``'s are not ``github``'s)."""
+        others = {n for s in deps.apps.specs.values() if s.name != spec.name for n in s.secrets()}
         path = apps_env_path(deps)
-        prefix = secret_name(name, "") + "_"
-        gone = [k for k in read_env(path) if k.startswith(prefix)]
+        kept = read_env(path)
+        gone = [k for k in spec.secrets() if k.startswith("GHOST_APP_") and k not in others]
+        gone = [k for k in gone if k in kept]
         if gone:
             update_env(path, dict.fromkeys(gone), mode=0o600)
             for k in gone:
                 os.environ.pop(k, None)
+
+    def clash(spec: AppSpec, secrets: dict[str, str]) -> str | None:
+        """Another app whose keys this one's would overwrite: ``my-app`` and ``my_app``
+        keep theirs under the same names."""
+        prefix = secret_name(spec.name, "")
+        for other in deps.apps.specs.values():
+            if other.name == spec.name:
+                continue
+            if secret_name(other.name, "") == prefix or set(secrets) & set(other.secrets()):
+                return other.name
+        return None
 
     def save(specs: list[AppSpec], *, remove: str | None = None) -> None:
         current = dict(load_apps(apps_path()).apps)
@@ -332,6 +346,10 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
                 raise HTTPException(422, f"{spec.name!r}: {why}")
             if spec.name in deps.apps.specs and not req.replace:
                 raise HTTPException(409, f"an app is already connected as {spec.name}")
+            if other := clash(spec, secrets):
+                raise HTTPException(
+                    409, f"{spec.name} would share its keys with {other}; give it another name"
+                )
         keep_secrets(secrets)
         save(specs)
         url = await start(specs)
@@ -354,13 +372,14 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         """Disconnect: it leaves the tools at once and apps.json; its sign-in and the keys
         Ghost kept for it are forgotten."""
         need_apps()
-        if name not in deps.apps.specs:
+        spec = deps.apps.specs.get(name)
+        if spec is None:
             raise HTTPException(404, f"no app called {name!r}")
         await deps.apps.remove(name)
         if deps.signins is not None:
             deps.signins.forget(name)
         save([], remove=name)
-        forget_secrets(name)
+        forget_secrets(spec)
         deps.state.publish_apps(changed=name)
         return Ack(ok=True, detail=None)
 

@@ -239,3 +239,34 @@ def test_an_app_never_takes_the_name_of_ghosts_own_tools(world, tmp_path, monkey
     pasted = json.dumps({"mcpServers": {"outputs": {"url": "https://x.example/mcp"}}})
     r = client.post("/apps", json={"config": pasted})
     assert r.status_code == 422 and "Ghost's own" in r.json()["detail"]
+
+
+def test_disconnecting_forgets_only_that_apps_own_keys(world, tmp_path, monkeypatch):
+    """``github-2`` is what the catalog suggests beside ``github``; disconnecting ``github``
+    used to delete every GHOST_APP_GITHUB_* key, ``github-2``'s too."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    for name, key in (("work", "k1"), ("work-2", "k2")):
+        r = client.post(
+            "/apps",
+            json={"url": "https://mcp.example.com/mcp", "name": name, "values": {"key": key}},
+        )
+        assert r.status_code == 200, r.text
+    apps_env = deps.env_path.parent / "apps.env"
+    apps_env.write_text(apps_env.read_text() + "GHOST_APP_WORK_MINE=kept\n")
+    assert client.delete("/apps/work").status_code == 200
+    left = apps_env.read_text()
+    assert "GHOST_APP_WORK_KEY=" not in left
+    assert "GHOST_APP_WORK_2_KEY=" in left  # another app's
+    assert "GHOST_APP_WORK_MINE=kept" in left  # the entry never named it
+
+
+def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
+    """``my-app`` and ``my_app`` keep their keys under the same names."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    url = "https://mcp.example.com/mcp"
+    first = client.post("/apps", json={"url": url, "name": "my-app", "values": {"key": "k1"}})
+    assert first.status_code == 200
+    again = client.post("/apps", json={"url": url, "name": "my_app", "values": {"key": "k2"}})
+    assert again.status_code == 409 and "my-app" in again.json()["detail"]
+    assert "k1" in (deps.env_path.parent / "apps.env").read_text()
+    assert "my_app" not in deps.apps.specs
