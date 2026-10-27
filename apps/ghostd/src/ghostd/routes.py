@@ -54,9 +54,7 @@ NOTE_TITLES = 5  # titles the note gives the model; a reply acknowledges only th
 def context_note(items: Sequence[Item]) -> str:
     """Why Ghost spoke first, for the operator's reply. The titles are data from outside
     systems; the note says so."""
-    lines = "\n".join(
-        f"- {i.title}" + (f" ({i.department})" if i.department else "") for i in items[:NOTE_TITLES]
-    )
+    lines = "\n".join(f"- {i.title}" for i in items[:NOTE_TITLES])
     more = f"\n- and {len(items) - NOTE_TITLES} more" if len(items) > NOTE_TITLES else ""
     return (
         "[system] Ghost started this conversation itself, to tell the operator what is "

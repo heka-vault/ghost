@@ -74,17 +74,6 @@ def test_lockdown_modes():
     assert ro.offers_read("github", "list_issues")
 
 
-def test_a_department_only_narrows():
-    ghost = perms(allow=["github.*"])
-    dept = Permissions.parse({"block": ["github.delete_*"]}, "dept", narrow_only=True)
-    merged = ghost.merged(dept)
-    assert merged.resolve("github", "delete_branch") is Autonomy.DENY
-    with pytest.raises(ValueError, match="only block, ask or quiet"):
-        Permissions.parse({"allow": ["github"]}, "dept", narrow_only=True)
-    with pytest.raises(ValueError, match="only block, ask or quiet"):
-        Permissions.parse({"mode": "open"}, "dept", narrow_only=True)
-
-
 @pytest.mark.parametrize("bad", ["github.(x)", "github.issue_write(state)", "", "a b"])
 def test_a_rule_that_does_not_parse_is_an_error(bad):
     with pytest.raises(ValueError):
@@ -178,61 +167,3 @@ enabled = ["digest", "phone"]  # mine
     again = write_permissions(out, after.permissions.with_rule(Rule.parse("gmail"), None))
     assert again.count("[permissions]") == 1
     assert AutonomyPolicy.parse(again).resolve("gmail", "send") is Autonomy.CONFIRM
-
-
-# --- a department only narrows (ADR 0034) --------------------------------------------
-
-
-def dept(**lists) -> Permissions:
-    return Permissions.parse(lists, "dept", narrow_only=True)
-
-
-def test_a_department_quiet_never_lifts_the_operators_read_only():
-    merged = perms(mode="read-only").merged(dept(quiet=["github"]))
-    assert merged.resolve("github", "delete_repository") is Autonomy.DENY
-    assert not merged.offers_change("github", "delete_repository")
-    merged = perms(mode="read-only").merged(dept(ask=["github.issue_write"]))
-    assert merged.resolve("github", "issue_write", {"state": "closed"}) is Autonomy.DENY
-    assert not merged.offers_change("github", "issue_write")
-    # what the operator lets through stays through, as carefully as the department says
-    merged = perms(mode="read-only", allow=["github.issue_write"]).merged(dept(quiet=["github"]))
-    assert merged.offers_change("github", "issue_write")
-    assert merged.resolve("github", "issue_write") is Autonomy.QUIET
-
-
-def test_a_department_quiet_never_silences_the_operators_ask():
-    merged = perms(mode="ask").merged(dept(quiet=["github"]))
-    assert merged.resolve("github", "issue_write") is Autonomy.CONFIRM
-    merged = perms(ask=["github.delete_*"]).merged(dept(quiet=["github"]))
-    assert merged.resolve("github", "delete_branch") is Autonomy.CONFIRM
-    assert merged.resolve("github", "issue_write") is Autonomy.QUIET
-    merged = perms(mode="ask").merged(dept(block=["github.delete_*"]))
-    assert merged.resolve("github", "delete_branch") is Autonomy.DENY
-    assert merged.resolve("github", "issue_write") is Autonomy.CONFIRM
-
-
-def test_a_department_narrows_the_operators_open_mode():
-    open_ = perms()
-    assert open_.merged(dept(quiet=["github"])).resolve("github", "x") is Autonomy.QUIET
-    assert open_.merged(dept(ask=["github"])).resolve("github", "x") is Autonomy.CONFIRM
-    assert open_.merged(dept(block=["github"])).resolve("github", "x") is Autonomy.DENY
-    assert not open_.merged(dept(block=["github"])).offers_change("github", "x")
-    assert not open_.merged(dept(block=["github"])).offers_read("github", "list")
-    assert open_.merged(dept(quiet=["github"])).resolve("gmail", "send") is Autonomy.ANNOUNCE
-    # the operator's block still wins over a department's quieter word
-    merged = perms(block=["github.delete_*"]).merged(dept(quiet=["github"]))
-    assert merged.resolve("github", "delete_branch") is Autonomy.DENY
-
-
-def test_a_departments_policy_narrows_through_the_policy_and_the_gate():
-    from fakes import FakeWriter, register_fake
-    from ghost_core import Store, WriteGate
-
-    base = AutonomyPolicy(permissions=perms(mode="read-only"))
-    narrowed = base.with_rules(dept(quiet=["github_issues"]), "ops")
-    assert narrowed.resolve("github_issues", "close") is Autonomy.DENY
-    gate = WriteGate(Store(), autonomy=base)
-    register_fake(gate, FakeWriter())
-    gate.set_department_policies({"ops": narrowed})
-    assert gate.level("github_issues", "close", department="ops") is Autonomy.DENY
-    assert not gate.offers("github_issues", "close", "ops")

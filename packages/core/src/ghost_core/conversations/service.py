@@ -1,5 +1,5 @@
-"""The agents facade (ADR 0014, ADR 0024): the registry read from the department folders,
-name resolution, what a session loads on resume, turn and summary records, retention, and
+"""The agents facade (ADR 0014, ADR 0035): the registry read from Ghost's ``agents/``
+folder, name resolution, what a session loads on resume, turn and summary records, retention, and
 the operations the gate registers under the ``conversations`` source name.
 
 Switching is not here: it is a session action in ``ghost_voice``. Everything that
@@ -28,7 +28,6 @@ from ghost_core.conversations.models import (
     ConversationTarget,
     Create,
     Delete,
-    Move,
     Profile,
     Rehire,
     Rename,
@@ -42,7 +41,7 @@ from ghost_core.conversations.models import (
     slugify,
 )
 from ghost_core.conversations.writer import ConversationWriter
-from ghost_core.departments import Department, Departments
+from ghost_core.folder import AGENTS_DIR
 from ghost_core.models import ChangeSet, utcnow
 from ghost_core.source import Operation, Prepared, ReadTool, ToolSource
 from ghost_core.store import Store
@@ -73,8 +72,6 @@ _STOP = {
     "me",
     "with",
     "team",
-    "department",
-    "dept",
     "office",
     "desk",
     "agent",
@@ -148,7 +145,7 @@ class Conversations:
     def __init__(
         self,
         store: Store,
-        departments: Departments,
+        config_dir: Path,
         *,
         default_voice: str = DEFAULT_VOICE,
         default_speed: float = 1.0,
@@ -156,12 +153,14 @@ class Conversations:
         recent_limit: int = 40,
         retention: timedelta = timedelta(days=90),
     ) -> None:
-        """The folders are the registry; the store mirrors them and holds what only Ghost
-        writes. ``sync`` reads the folders; every write below keeps both in step."""
+        """The folders under ``config_dir/agents/`` are the registry; the store mirrors
+        them and holds what only Ghost writes. ``sync`` reads the folders; every write
+        below keeps both in step."""
         self._store = store
-        self.departments = departments
+        self.config_dir = Path(config_dir).expanduser()
+        self.agents_dir = self.config_dir / AGENTS_DIR
         self.files = ConversationFiles(self.dir_for)
-        self.writer = ConversationWriter(store, self.files, agents_dir=self._agents_dir)
+        self.writer = ConversationWriter(store, self.files, agents_dir=self.agents_dir)
         self.default_voice = default_voice
         self.default_speed = default_speed
         self._voices = tuple(voices)
@@ -171,22 +170,14 @@ class Conversations:
 
     # --- registry ------------------------------------------------------------
 
-    def _agents_dir(self, department: str) -> Path | None:
-        d = self.departments.get(department)
-        return d.agents_dir if d is not None else None
-
     def dir_for(self, slug: str) -> Path:
-        """An agent's folder: under its department's ``agents/``. A slug with no row yet
-        (a hire in progress) is placed by the department the writer just recorded."""
-        p = self._store.get_conversation(slug, include_deleted=True)
-        department = p.department if p is not None else GHOST
-        base = self._agents_dir(department) or self.departments.ghost.agents_dir
-        return base / slug
+        """An agent's folder: ``agents/<slug>/`` in Ghost's folder (ADR 0035)."""
+        return self.agents_dir / slug
 
     def sync(self) -> list[str]:
-        """Read every department's ``agents/`` folder into the store: a folder is an agent
-        (its ``agent.json`` is its identity), each department gets its default agent, and
-        a row whose folder is gone is marked deleted. Returns the problems found."""
+        """Read ``agents/`` into the store: a folder is an agent (its ``agent.json`` is its
+        identity), Ghost is made when it is missing, and a row whose folder is gone is
+        marked deleted. Returns the problems found."""
         problems: list[str] = []
         seen: set[str] = set()
         # Deleted rows are kept (slug is unique): a folder made again under an old slug
@@ -196,60 +187,51 @@ class Conversations:
             for p in self._store.list_conversations(include_retired=True, include_deleted=True)
         }
         ids = {p.id for p in rows.values()}
-        for d in self.departments.list():
-            ids.add(self._ensure_default(d, rows).id)
-            seen.add(d.slug)
-            if not d.agents_dir.is_dir():
+        ids.add(self._ensure_ghost(rows).id)  # agents/ exists from here on
+        for folder in sorted(p for p in self.agents_dir.iterdir() if p.is_dir()):
+            slug = folder.name.lower()
+            if folder.name != slug:
+                problems.append(f"{folder}: an agent folder's name is not lower-case; not read")
                 continue
-            for folder in sorted(p for p in d.agents_dir.iterdir() if p.is_dir()):
-                slug = folder.name.lower()
-                if folder.name != slug:
-                    problems.append(f"{folder}: an agent folder's name is not lower-case; not read")
+            data = read_agent_json(folder)
+            existing = rows.get(slug)
+            if data is None:
+                if existing is None:
+                    problems.append(f"{folder}: no agent.json; not an agent")
                     continue
-                if slug in seen:
-                    if slug != d.slug:
-                        problems.append(f"{folder}: another agent is already called {slug}")
-                    continue
-                data = read_agent_json(folder)
-                existing = rows.get(slug)
-                if data is None:
-                    if existing is None:
-                        problems.append(f"{folder}: no agent.json; not an agent")
-                        continue
-                    data = existing.agent_json()
-                # The row's id wins over agent.json (an edited or restored file); an id
-                # another agent already has (a copied folder) is a new agent.
-                file_id = str(data.get("id") or "")
-                if existing is not None:
-                    agent_id = existing.id
-                elif file_id and file_id not in ids:
-                    agent_id = file_id
-                else:
-                    agent_id = Profile(slug=slug, name=slug).id
-                ids.add(agent_id)
-                p = Profile(
-                    id=agent_id,
-                    slug=slug,
-                    name=str(
-                        data.get("name")
-                        or (existing.name if existing else slug.replace("-", " ").title())
-                    ),
-                    aliases=tuple(str(a) for a in data.get("aliases", []) if str(a).strip()),
-                    department=d.slug,
-                    job=str(data.get("job") or "")[:MAX_JOB],
-                    voice=str(data["voice"]) if data.get("voice") else None,
-                    speed=float(data["speed"]) if data.get("speed") is not None else None,
-                    created_at=existing.created_at if existing else utcnow(),
-                    updated_at=existing.updated_at if existing else utcnow(),
-                    last_active_at=existing.last_active_at if existing else None,
-                    retired_at=existing.retired_at if existing else None,
-                    deleted_at=None,
-                )
-                if existing is None or existing.model_dump() != p.model_dump():
-                    self._store.upsert_conversation(p)
-                if data != p.agent_json():  # a hand-made folder gets its id written back
-                    self.files.write_agent(slug, p.agent_json())
-                seen.add(slug)
+                data = existing.agent_json()
+            # The row's id wins over agent.json (an edited or restored file); an id
+            # another agent already has (a copied folder) is a new agent.
+            file_id = str(data.get("id") or "")
+            if existing is not None:
+                agent_id = existing.id
+            elif file_id and file_id not in ids:
+                agent_id = file_id
+            else:
+                agent_id = Profile(slug=slug, name=slug).id
+            ids.add(agent_id)
+            p = Profile(
+                id=agent_id,
+                slug=slug,
+                name=str(
+                    data.get("name")
+                    or (existing.name if existing else slug.replace("-", " ").title())
+                ),
+                aliases=tuple(str(a) for a in data.get("aliases", []) if str(a).strip()),
+                job=str(data.get("job") or "")[:MAX_JOB],
+                voice=str(data["voice"]) if data.get("voice") else None,
+                speed=float(data["speed"]) if data.get("speed") is not None else None,
+                created_at=existing.created_at if existing else utcnow(),
+                updated_at=existing.updated_at if existing else utcnow(),
+                last_active_at=existing.last_active_at if existing else None,
+                retired_at=existing.retired_at if existing else None,
+                deleted_at=None,
+            )
+            if existing is None or existing.model_dump() != p.model_dump():
+                self._store.upsert_conversation(p)
+            if data != p.agent_json():  # a hand-made folder gets its id written back
+                self.files.write_agent(slug, p.agent_json())
+            seen.add(slug)
         for slug, p in rows.items():
             if slug not in seen and p.deleted_at is None:
                 logger.warning(f"agents: {slug}'s folder is gone; marked deleted")
@@ -258,31 +240,27 @@ class Conversations:
             logger.warning(f"agents: {problem}")
         return problems
 
-    def _ensure_default(self, d: Department, rows: dict[str, Profile]) -> Profile:
-        """Each department's own agent, named for it, where a transfer lands."""
-        existing = rows.get(d.slug)
-        folder = d.agents_dir / d.slug
-        data = read_agent_json(folder) or {}
+    def _ensure_ghost(self, rows: dict[str, Profile]) -> Profile:
+        """Agent zero, where every wake lands: its row and its folder, made when either is
+        missing. Its folder is then read like any agent's."""
+        existing = rows.get(GHOST)
+        folder = self.agents_dir / GHOST
         if existing is not None and existing.deleted_at is None and folder.is_dir():
             return existing
-        if existing is not None and existing.deleted_at is not None and not folder.is_dir():
-            # A department made again under an old slug: its agent comes back with its id.
-            data = {}
-        name = "Ghost" if d.is_ghost else d.title
+        data = read_agent_json(folder) or {}
         p = Profile(
             id=str(data.get("id") or (existing.id if existing else ""))
-            or Profile(slug=d.slug, name=name).id,
-            slug=d.slug,
-            name=str(data.get("name") or name),
+            or Profile(slug=GHOST, name="Ghost").id,
+            slug=GHOST,
+            name=str(data.get("name") or "Ghost"),
             aliases=tuple(str(a) for a in data.get("aliases", []))
-            or (("ghost", "primary", "main line") if d.is_ghost else d.aliases),
-            department=d.slug,
+            or ("ghost", "primary", "main line"),
             created_at=existing.created_at if existing else utcnow(),
         )
         self._store.upsert_conversation(p)
         if not (folder / "agent.json").is_file():
-            self.files.write_agent(d.slug, p.agent_json())
-        rows[d.slug] = p
+            self.files.write_agent(GHOST, p.agent_json())
+        rows[GHOST] = p
         return p
 
     def ensure_ghost(self) -> Profile:
@@ -299,25 +277,10 @@ class Conversations:
     def by_id(self, id: str) -> Profile | None:
         return self._store.get_conversation_by_id(id)
 
-    def list(
-        self, *, include_retired: bool = False, department: str | None = None
-    ) -> list[Profile]:
+    def list(self, *, include_retired: bool = False) -> list[Profile]:
         """Live agents, Ghost first. Retired ones are left out unless asked for: they
-        are readable, not routable. ``department`` narrows to one roster."""
-        out = self._store.list_conversations(include_retired=include_retired)
-        if department is not None:
-            out = [p for p in out if p.department == department]
-        return out
-
-    def agents_of(self, department: str, *, include_retired: bool = False) -> list[Profile]:
-        return self.list(include_retired=include_retired, department=department)
-
-    def default_agent(self, department: str) -> Profile | None:
-        return self.get(department)
-
-    def department_of(self, p: Profile) -> Department:
-        """The department an agent works in; Ghost's when its folder is gone."""
-        return self.departments.get(p.department) or self.departments.ghost
+        are readable, not routable."""
+        return self._store.list_conversations(include_retired=include_retired)
 
     def resolve(self, spoken: str, *, include_retired: bool = False) -> Profile | None:
         """The agent the operator most likely means by ``spoken``: exact slug, then any
@@ -355,21 +318,21 @@ class Conversations:
         return self._voices
 
     def voice_for(self, p: Profile) -> tuple[str, float]:
-        """The voice heard: the agent's own, else its department's, else the default."""
-        d = self.department_of(p)
-        voice = p.voice or d.voice or self.default_voice
-        speed = (
-            p.speed
-            if p.speed is not None
-            else (d.speed if d.speed is not None else self.default_speed)
-        )
+        """The voice heard: the agent's own, else Ghost's, else the default (ADR 0035)."""
+        ghost = p if p.is_ghost else self.get(GHOST)
+        voice = p.voice or (ghost.voice if ghost is not None else None) or self.default_voice
+        if p.speed is not None:
+            speed = p.speed
+        elif ghost is not None and ghost.speed is not None:
+            speed = ghost.speed
+        else:
+            speed = self.default_speed
         return voice, speed
 
     def unused_voice(self) -> str:
-        """A voice no live agent or department uses yet, so a new agent sounds like
-        itself. The default when every installed voice is taken (or none is known)."""
+        """A voice no live agent uses yet, so a new agent sounds like itself. The default
+        when every installed voice is taken (or none is known)."""
         taken = {p.voice for p in self.list(include_retired=True) if p.voice}
-        taken |= {d.voice for d in self.departments.list() if d.voice}
         taken.add(self.default_voice)
         for v in self._voices:
             if v not in taken:
@@ -426,25 +389,15 @@ class Conversations:
     def read_tools(self) -> list[ReadTool]:
         async def list_agents(_args: dict[str, Any]) -> dict[str, Any]:
             return {
-                "departments": [
+                "agents": [
                     {
-                        "name": d.title,
-                        "slug": d.slug,
-                        "about": d.rules_lead(),
-                        "agents": [
-                            {
-                                "name": p.name,
-                                "slug": p.slug,
-                                "aliases": list(p.aliases),
-                                "job": p.job or None,
-                                "last_active": p.last_active_at.isoformat()
-                                if p.last_active_at
-                                else None,
-                            }
-                            for p in self.agents_of(d.slug)
-                        ],
+                        "name": p.name,
+                        "slug": p.slug,
+                        "aliases": list(p.aliases),
+                        "job": p.job or None,
+                        "last_active": p.last_active_at.isoformat() if p.last_active_at else None,
                     }
-                    for d in self.departments.list()
+                    for p in self.list()
                 ]
             }
 
@@ -452,8 +405,8 @@ class Conversations:
             ReadTool(
                 name="list_agents",
                 description=(
-                    "The departments and the agents in each, with names, aliases and jobs: "
-                    "who the operator can be transferred to. Retired agents are not listed."
+                    "The agents, with names, aliases and jobs: who the operator can be "
+                    "transferred to. Retired agents are not listed."
                 ),
                 properties={},
                 required=[],
@@ -476,9 +429,6 @@ class Conversations:
             slug = slugify(name)
             if self._store.get_conversation(slug, include_deleted=True) is not None:
                 raise ValueError(f"there is already an agent called {name!r}")
-            if self.departments.get(slug) is not None:
-                raise ValueError(f"{name!r} is a department's name; pick another")
-            department = self._department_arg(args.get("department"), args.get("_active"))
             voice = _voice(args.get("voice"), voices)
             persona = str(args.get("persona") or "").strip()
             if len(persona) > MAX_PERSONA:
@@ -497,7 +447,6 @@ class Conversations:
                         Create(
                             name=name,
                             aliases=_aliases(args.get("aliases")),
-                            department=department.slug,
                             job=job,
                             voice=voice,
                             speed=_speed(args.get("speed"), None),
@@ -506,13 +455,13 @@ class Conversations:
                         ),
                     )
                 ),
-                rationale=f"hire {name} in {department.title}",
+                rationale=f"hire {name}",
             )
 
         async def retire(args: dict[str, Any]) -> Prepared:
             p = self._target(args)
-            if p.is_default:
-                raise ValueError(f"{p.name} is its department's own agent and stays")
+            if p.is_ghost:
+                raise ValueError("Ghost stays")
             if p.retired:
                 raise ValueError(f"{p.name} is already retired")
             return Prepared(
@@ -612,37 +561,10 @@ class Conversations:
 
         async def delete(args: dict[str, Any]) -> Prepared:
             p = self._target(args, include_retired=True)
-            if p.is_default:
-                raise ValueError(f"{p.name} is its department's own agent; it cannot be deleted")
+            if p.is_ghost:
+                raise ValueError("Ghost cannot be deleted")
             return Prepared(
                 target=ConversationTarget(slug=p.slug), changes=ChangeSet(steps=(Delete(),))
-            )
-
-        async def move(args: dict[str, Any]) -> Prepared:
-            p = self._target(args)
-            if p.is_default:
-                raise ValueError(
-                    f"{p.name} is long-lived and about many things, so it does not move. To "
-                    "move this conversation, hire an agent in the destination (change, "
-                    "conversations.create with department, a job, a persona and a memory "
-                    "that summarizes this session); the session's turns go with it and the "
-                    "operator is transferred there. Say the agent's name."
-                )
-            text = str(args.get("department") or "").strip()
-            if not text:
-                raise ValueError("which department?")
-            d = self.departments.get(text) or self.departments.resolve(text)
-            if d is None:
-                raise ValueError(
-                    f"there is no department called {text!r}; the departments are "
-                    + ", ".join(x.title for x in self.departments.list())
-                )
-            if d.slug == p.department:
-                raise ValueError(f"{p.name} is already in {d.title}")
-            return Prepared(
-                target=ConversationTarget(slug=p.slug),
-                changes=ChangeSet(steps=(Move(department=d.slug),)),
-                rationale=f"move {p.name} to {d.title}",
             )
 
         conv = {
@@ -653,19 +575,14 @@ class Conversations:
             Operation(
                 "create",
                 (
-                    "Hire a new agent: a conversation with its own persona and job, in a "
-                    "department. Use it at once, without asking, when the operator says 'save "
-                    "this as X', 'start an agent for X' or 'hire someone for X'; it switches "
-                    "them to it. Always write a persona and a one-line job. Leave voice out to "
-                    "inherit the department's."
+                    "Hire a new agent: a conversation with its own persona and job. Use it "
+                    "at once, without asking, when the operator says 'save this as X', 'start "
+                    "an agent for X' or 'hire someone for X'; it switches them to it. Always "
+                    "write a persona and a one-line job. Leave voice out to speak in Ghost's."
                 ),
                 {
                     "name": {"type": "string"},
                     "aliases": {"type": "array", "items": {"type": "string"}},
-                    "department": {
-                        "type": "string",
-                        "description": "the department it works in; omit for the current one",
-                    },
                     "job": {
                         "type": "string",
                         "description": "what it is for, in one line (brand design, the Q3 audit)",
@@ -693,9 +610,8 @@ class Conversations:
                         "type": "string",
                         "description": (
                             "The new agent's first memory: a summary you write of this "
-                            "session so far, when the operator moves a conversation out of "
-                            "Ghost or a department's own agent (a split move, ADR 0024). "
-                            "Facts, decisions, open items."
+                            "session so far, when the operator hands this conversation to a "
+                            "new agent ('save this as X'). Facts, decisions, open items."
                         ),
                     },
                 },
@@ -748,7 +664,7 @@ class Conversations:
             ),
             Operation(
                 "set_voice",
-                "Change an agent's voice or speaking speed; no voice means the department's.",
+                "Change an agent's voice or speaking speed; no voice means Ghost's.",
                 {
                     "conversation": conv,
                     "voice": voice_prop(),
@@ -829,25 +745,6 @@ class Conversations:
                 risk="high",
                 allowed=w.allowed,
             ),
-            Operation(
-                "move",
-                (
-                    "Move an agent to another department (ADR 0024): it keeps its name, "
-                    "persona, memory and transcript and works with that department's tools, "
-                    "rules and memory from then on. The one you are with, by default. A "
-                    "department's own agent cannot move."
-                ),
-                {
-                    "conversation": conv,
-                    "department": {"type": "string", "description": "the destination"},
-                },
-                ["department"],
-                prepare=move,
-                writer=w,
-                risk="medium",
-                allowed=w.allowed,
-                asked_by=("move",),
-            ),
         ]
 
     def handoff_memory(self, seed: str) -> str:
@@ -862,20 +759,6 @@ class Conversations:
                 "Ghost's memory is private; a handoff from Ghost is a summary you write"
             )
         return self.files.memory(p.slug)
-
-    def _department_arg(self, spoken: object, active: object) -> Department:
-        """The department an operation names, else the active agent's."""
-        text = str(spoken or "").strip()
-        if text:
-            d = self.departments.get(text) or self.departments.resolve(text)
-            if d is None:
-                raise ValueError(
-                    f"there is no department called {text!r}; the departments are "
-                    + ", ".join(x.title for x in self.departments.list())
-                )
-            return d
-        p = self.get(str(active or GHOST))
-        return self.department_of(p) if p is not None else self.departments.ghost
 
     def _target(self, args: dict[str, Any], *, include_retired: bool = False) -> Profile:
         """The agent an operation is about: ``conversation`` by name, else the active

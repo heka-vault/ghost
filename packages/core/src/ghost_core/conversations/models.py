@@ -1,10 +1,10 @@
-"""The write model for agents (ADR 0014, ADR 0024).
+"""The write model for agents (ADR 0014, ADR 0035).
 
-An agent is a conversation with a persona and a job: a folder in its department
+An agent is a conversation with a persona and a job: a folder under Ghost's ``agents/``
 (``agent.json``, ``persona.md``, ``memory.md``, ``notes.md``), a mirror row in SQLite, and a
 transcript keyed by its stable id. The operator's word is *agent*; the code and the control
 API keep *conversation*. The gate edits it through the same ``Target`` / ``Snapshot`` /
-``Change`` shapes a server's writes use, so hire, retire, move and the rest are
+``Change`` shapes an app's writes use, so hire, retire and the rest are
 snapshotted, bounded and audited. The snapshot carries the full file texts: they are
 small, and the audit row then keeps what was there before a reset or a compaction.
 """
@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from ghost_core.models import Change, Snapshot, Target, utcnow
 
-GHOST = "ghost"  # agent zero and the department every wake lands in
+GHOST = "ghost"  # agent zero, where every wake lands
 
 MAX_NAME = 80
 MAX_JOB = 200
@@ -50,9 +50,8 @@ class Profile(BaseModel, frozen=True):
     slug: str
     name: str
     aliases: tuple[str, ...] = ()
-    department: str = GHOST  # the department whose folder it lives in
     job: str = ""  # what it was hired for, in a line
-    voice: str | None = None  # None: the department's voice, so a move can be heard
+    voice: str | None = None  # None: Ghost's voice (ADR 0035)
     speed: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -63,12 +62,6 @@ class Profile(BaseModel, frozen=True):
     @property
     def is_ghost(self) -> bool:
         return self.slug == GHOST
-
-    @property
-    def is_default(self) -> bool:
-        """The department's own agent, named for it, where a transfer lands. It speaks
-        as the department's AGENTS.md and cannot be moved, retired or deleted."""
-        return self.slug == self.department
 
     @property
     def retired(self) -> bool:
@@ -134,7 +127,6 @@ class ConversationSnapshot(Snapshot, frozen=True):
     exists: bool
     name: str = ""
     aliases: tuple[str, ...] = ()
-    department: str = GHOST
     job: str = ""
     voice: str | None = None
     speed: float | None = None
@@ -154,7 +146,6 @@ class ConversationSnapshot(Snapshot, frozen=True):
         *,
         name: str,
         aliases: tuple[str, ...],
-        department: str,
         job: str,
         voice: str | None,
         speed: float | None,
@@ -169,7 +160,6 @@ class ConversationSnapshot(Snapshot, frozen=True):
         for part in (
             name,
             ",".join(aliases),
-            department,
             job,
             voice or "",
             f"{speed:g}" if speed is not None else "",
@@ -187,7 +177,6 @@ class ConversationSnapshot(Snapshot, frozen=True):
             exists=not deleted,
             name=name,
             aliases=aliases,
-            department=department,
             job=job,
             voice=voice,
             speed=speed,
@@ -201,9 +190,9 @@ class ConversationSnapshot(Snapshot, frozen=True):
     def spoken(self) -> str:
         if not self.exists:
             return "does not exist"
-        bits = [f"in {self.department}", f"{self.turns} turns on record"]
+        bits = [f"{self.turns} turns on record"]
         if self.job:
-            bits.insert(1, self.job)
+            bits.insert(0, self.job)
         if self.voice:
             bits.append(f"voice {self.voice}")
         if self.retired:
@@ -214,23 +203,22 @@ class ConversationSnapshot(Snapshot, frozen=True):
 
 
 class Create(Change, frozen=True):
-    """Hire: a new agent in a department, with a persona and a job."""
+    """Hire: a new agent, with a persona and a job."""
 
     kind: Literal["create"] = "create"
     name: str = Field(min_length=1, max_length=MAX_NAME)
     aliases: tuple[str, ...] = ()
-    department: str = GHOST
     job: str = Field(default="", max_length=MAX_JOB)
     voice: str | None = None
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
     persona: str = Field(default="", max_length=MAX_PERSONA)
-    # The first memory: a handoff from a retired agent, or the summary a split move writes.
+    # The first memory: a handoff from a retired agent, or a summary of this session.
     memory: str = Field(default="", max_length=MAX_MEMORY)
 
     def describe(self) -> str:
         job = f" for {self.job}" if self.job.strip() else ""
         seed = " with a handoff memory" if self.memory.strip() else ""
-        return f"hire {self.name!r} in {self.department}{job}{seed}"
+        return f"hire {self.name!r}{job}{seed}"
 
 
 class Retire(Change, frozen=True):
@@ -249,17 +237,6 @@ class Rehire(Change, frozen=True):
         return "bring the agent back"
 
 
-class Move(Change, frozen=True):
-    """Whole move: the agent's folder goes into another department (ADR 0024). A split
-    move is a Create there plus the carried turns, composed by the runtime."""
-
-    kind: Literal["move"] = "move"
-    department: str
-
-    def describe(self) -> str:
-        return f"move to {self.department}"
-
-
 class Rename(Change, frozen=True):
     kind: Literal["rename"] = "rename"
     name: str = Field(min_length=1, max_length=MAX_NAME)
@@ -274,12 +251,12 @@ class Rename(Change, frozen=True):
 
 class SetVoice(Change, frozen=True):
     kind: Literal["set_voice"] = "set_voice"
-    voice: str | None = None  # None: back to the department's voice
+    voice: str | None = None  # None: back to Ghost's voice
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
 
     def describe(self) -> str:
         if self.voice is None:
-            return "voice: the department's"
+            return "voice: Ghost's"
         speed = f" at {self.speed:g}x" if self.speed is not None else ""
         return f"voice {self.voice}{speed}"
 

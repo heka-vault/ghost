@@ -38,7 +38,7 @@ class ScriptRunner:
         skill = skill.strip().lower()
         if not skill or "/" in skill or skill.startswith("."):
             raise ValueError(f"{skill!r} is not a skill name")
-        folders = ("skills", ".agents/skills", ".claude/skills")  # as ghost_core.departments
+        folders = ("skills", ".agents/skills", ".claude/skills")  # a project's, under --root
         places = [self.skills_dir / skill] + [r / f / skill for r in self.roots for f in folders]
         for p in places:
             if (p / "SKILL.md").is_file():

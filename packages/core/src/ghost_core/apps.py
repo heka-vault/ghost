@@ -1,5 +1,5 @@
 """Apps connected to Ghost (ADR 0034). The operator connects an app once, in
-``~/.config/ghost/apps.json``, and every department reaches it.
+``~/.config/ghost/apps.json``, and every agent reaches it.
 
 An app speaks the Model Context Protocol, but nothing the operator sees says so: an app is
 something Ghost signs in to, sends a key to, or runs on this computer::
@@ -68,7 +68,7 @@ _SECRET = re.compile(r"\$\{(?:env:)?([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)")
 APP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 # The names of Ghost's own tool sources (``ghost_core.source.ToolSource``): the gate, the
 # permissions (``skills.*``) and the audit key on them, so an app may not take one.
-RESERVED_NAMES = frozenset({"conversations", "departments", "outputs", "skills", "waiting"})
+RESERVED_NAMES = frozenset({"conversations", "outputs", "rules", "skills", "waiting"})
 _ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "no.")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s")
 _TRANSPORTS = {"stdio", "http", "streamable-http", "streamable_http", "streamableHttp"}

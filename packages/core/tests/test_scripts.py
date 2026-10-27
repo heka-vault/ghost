@@ -1,4 +1,4 @@
-"""The gated scripts server (ADR 0023, ADR 0024): a skill's scripts run only through it."""
+"""The gated scripts server (ADR 0023, ADR 0034): a skill's scripts run only through it."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def test_scripts_run_in_their_folder_with_a_minimal_environment(tmp_path: Path):
     (skills / "counter" / "link.py").symlink_to(tmp_path / "elsewhere.py")
     runner = ScriptRunner(skills, [])
     assert runner.scripts("counter") == ["count.py"]
-    # a root's skills may sit in any of the three folders a department reads
+    # a project root's skills (--root) may sit in any of the three usual folders
     root = tmp_path / "repo"
     make_skill_with_script(root / ".claude" / "skills" / "deploy")
     assert ScriptRunner(skills, [root]).scripts("deploy") == ["count.py"]

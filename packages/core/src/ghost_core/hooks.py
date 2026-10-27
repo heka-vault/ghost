@@ -1,6 +1,7 @@
 """Pushed watches: signed webhooks, parsed by declaration, checked at the source (ADR 0027).
 
-A department declares each webhook it takes in ``department.json`` under ``hooks``. Every
+The operator declares each webhook Ghost takes in ``hooks.json``, keyed by name, with its
+recorded deliveries in ``hooks/<name>/`` beside it (ADR 0035). Every
 step between the request and an item is deterministic and tested with recorded deliveries;
 the model never sees a body:
 
@@ -17,7 +18,7 @@ the model never sees a body:
    dropped at the door. ``resolve`` checks close an item; ``when`` checks open one;
    anything else is ignored.
 3. **Checked at the source.** With ``check``, the reference is read again through one of
-   a connected app's read-only tools (the department's permissions apply) and that read is
+   a connected app's read-only tools (the operator's block rules apply) and that read is
    what is believed: an item only when the check's ``when`` holds, a resolve only when it
    no longer does. A read that disagrees, fails or is blocked rejects the delivery but
    gives its id back, so the sender's retry counts (and is read again). Without
@@ -59,7 +60,7 @@ Scheme = Literal["github", "hmac"]
 MAX_BODY = 256 * 1024
 WINDOW = timedelta(minutes=5)
 DEDUPE_FOR = timedelta(days=7)
-HOOKS_DIR = "hooks"  # <department>/hooks/<name>/*.json: the fixtures
+HOOKS_DIR = "hooks"  # ~/.config/ghost/hooks/<name>/*.json: the fixtures
 H_GH_SIG, H_GH_ID, H_GH_EVENT = "x-hub-signature-256", "x-github-delivery", "x-github-event"
 H_SIG, H_ID, H_TIME, H_EVENT = (
     "x-ghost-signature",
@@ -99,7 +100,6 @@ class HookEvent:
 @dataclass(frozen=True)
 class Hook:
     name: str
-    department: str
     verify: Scheme
     secret: str  # "${NAME}"
     events: Mapping[str, HookEvent]
@@ -109,11 +109,11 @@ class Hook:
 
     @property
     def source(self) -> str:
-        return f"hook:{self.department}/{self.name}"
+        return f"hook:{self.name}"
 
     @property
     def path(self) -> str:
-        return f"/hooks/{self.department}/{self.name}"
+        return f"/hooks/{self.name}"
 
     def secret_name(self) -> str:
         return self.secret[2:-1]
@@ -123,8 +123,10 @@ class Hook:
 
 
 def parse_hooks(
-    body: object, department: str, where: str, folder: Path | None = None
+    body: object, where: str, folder: Path | None = None
 ) -> tuple[dict[str, Hook], list[str]]:
+    """``hooks.json``, keyed by name: the ones that read, and a problem for each that
+    doesn't (that one is off). ``folder`` holds ``hooks/<name>/``, the fixtures."""
     if body is None:
         return {}, []
     if not isinstance(body, Mapping):
@@ -136,7 +138,6 @@ def parse_hooks(
             out[str(name)] = parse_hook(
                 str(name),
                 spec,
-                department,
                 f"{where}: hook {name}",
                 folder / HOOKS_DIR / str(name) if folder else None,
             )
@@ -145,9 +146,7 @@ def parse_hooks(
     return out, problems
 
 
-def parse_hook(
-    name: str, body: object, department: str, where: str, folder: Path | None = None
-) -> Hook:
+def parse_hook(name: str, body: object, where: str, folder: Path | None = None) -> Hook:
     import re
 
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", name):
@@ -175,7 +174,7 @@ def parse_hook(
     urgency = body.get("urgency", "notify")
     if urgency not in ("digest", "notify", "call"):
         raise WatchError(f"{where}: urgency is digest, notify or call")
-    return Hook(name, department, verify, secret, events, response, urgency, folder)
+    return Hook(name, verify, secret, events, response, urgency, folder)
 
 
 def _parse_event(name: str, body: object, where: str) -> HookEvent:
@@ -294,9 +293,9 @@ def verify(
 # --- parsing and checking -----------------------------------------------------------------
 
 Outcome = Literal["item", "resolved", "ignored"]
-# (department, app, read, args) -> the read's result; raises when it can't, or when the
-# department's permissions block it.
-Reader = Callable[[str, str, str, dict[str, Any]], Awaitable[Any]]
+# (app, read, args) -> the read's result; raises when it can't, or when the operator's
+# permissions block it.
+Reader = Callable[[str, str, dict[str, Any]], Awaitable[Any]]
 
 
 @dataclass
@@ -329,15 +328,13 @@ async def _read_back(
     hook: Hook, ev: HookEvent, fields: Mapping[str, Scalar], read: Reader | None
 ) -> dict[str, Scalar]:
     """The check's read, and its typed fields. A read that fails, is blocked by the
-    department's permissions, or doesn't carry the fields its checks name said nothing:
+    operator's permissions, or doesn't carry the fields its checks name said nothing:
     ``Unconfirmed``."""
     assert ev.check is not None
     if read is None:
         raise Unconfirmed("not confirmed at the source")
     try:
-        result = await read(
-            hook.department, ev.check.app, ev.check.read, _fill(ev.check.args, fields)
-        )
+        result = await read(ev.check.app, ev.check.read, _fill(ev.check.args, fields))
     except Exception as e:  # noqa: BLE001 - a blocked or failed read
         raise Unconfirmed(f"not confirmed at the source ({type(e).__name__})") from None
     if isinstance(result, Mapping) and set(result) == {"error"}:
@@ -350,7 +347,7 @@ async def _read_back(
 
 def _missing(ev: HookEvent, fields: Mapping[str, Scalar]) -> str | None:
     """A field the key or the title names that the delivery didn't carry: without it the
-    key collapses (``eng:ci:``), so the delivery is refused."""
+    key collapses (``ci:``), so the delivery is refused."""
     for t in (ev.key, ev.title):
         for ref in _PLACEHOLDER.findall(t):
             if fields.get(ref) is None:
@@ -364,7 +361,7 @@ async def parse(hook: Hook, d: Delivery, read: Reader | None) -> Parsed:
     if ev is None:
         return Parsed("ignored")
     fields = _take(ev.fields, d.payload)
-    key = f"{hook.department}:{render(ev.key, fields)}"[:300]
+    key = f"{hook.name}:{render(ev.key, fields)}"[:300]
     resolves = bool(ev.resolve) and all(c.holds(fields) for c in ev.resolve)
     if not resolves and (not ev.when or not all(c.holds(fields) for c in ev.when)):
         return Parsed("ignored", key)
@@ -392,7 +389,6 @@ async def parse(hook: Hook, d: Delivery, read: Reader | None) -> Parsed:
     draft = ItemDraft(
         key=key,
         title=title or ev.name,
-        department=hook.department,
         link=link if link and link.startswith(("https://", "http://")) else None,
         fields={**fields, "checked": checked},
         response=hook.response,
@@ -417,7 +413,7 @@ class HookState:
 
 
 class HookIntake:
-    """Takes a request for ``/hooks/<department>/<name>`` and turns it into an item, or
+    """Takes a request for ``/hooks/<name>`` and turns it into an item, or
     refuses it. The listener in ``ghostd`` hands it the path, the headers and the raw body
     and nothing else reaches the daemon."""
 
@@ -454,7 +450,7 @@ class HookIntake:
                     why = failures[0]
             if why:
                 self.off[h.path] = why
-                problems.append(f"hook {h.department}/{h.name} is off: {why}")
+                problems.append(f"hook {h.name} is off: {why}")
                 continue
             self.hooks[h.path] = h
             self.state.setdefault(h.path, HookState())
@@ -479,7 +475,7 @@ class HookIntake:
                 raise
         except Rejected as e:
             st.rejected[str(e)] += 1
-            logger.info(f"hook {hook.department}/{hook.name}: refused ({e})")
+            logger.info(f"hook {hook.name}: refused ({e})")
             unsigned = ("bad signature", "outside the clock window", "no secret")
             return Result(401 if str(e) in unsigned else 400, str(e))
         st.accepted[parsed.outcome] += 1
@@ -589,7 +585,7 @@ async def _fixture(hook: Hook, spec: Mapping[str, Any], now: datetime | None) ->
             headers[H_SIG] = sign_hmac(secret, ts, headers[H_ID], body)
     readback = spec.get("readback")
 
-    async def read(_d: str, _s: str, _r: str, args: dict[str, Any]) -> Any:
+    async def read(_s: str, _r: str, args: dict[str, Any]) -> Any:
         if readback is None:
             raise LookupError("no readback in the fixture")
         if isinstance(readback, Mapping) and readback.get("refuse"):

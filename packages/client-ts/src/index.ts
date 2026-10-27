@@ -40,7 +40,6 @@ export type CatalogSetting = Schemas["CatalogSetting"];
 export type PermissionsView = Schemas["PermissionsView"];
 export type PermissionsUpdate = Schemas["PermissionsUpdate"];
 export type PermissionLevel = Schemas["RuleSet"]["level"];
-export type DepartmentPermissions = Schemas["DepartmentPermissions"];
 export type PolicyView = Schemas["PolicyView"];
 export type PolicyUpdate = Schemas["PolicyUpdate"];
 export type PolicyResult = Schemas["PolicyResult"];
@@ -49,12 +48,11 @@ export type SettingsUpdate = Schemas["SettingsUpdate"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
 export type Ack = Schemas["Ack"];
-/** An agent (ADR 0024): a conversation with a persona and a job, in a department. The wire keeps the word conversation. */
+/** An agent (ADR 0014, ADR 0035): a conversation with a persona and a job. The wire keeps the word conversation. */
 export type ConversationView = Schemas["ConversationView"];
 export type ConversationDetail = Schemas["ConversationDetail"];
 export type ConversationCreate = Schemas["ConversationCreate"];
 export type ConversationUpdate = Schemas["ConversationUpdate"];
-export type ConversationMove = Schemas["ConversationMove"];
 export type TurnView = Schemas["TurnView"];
 export type CompactionView = Schemas["CompactionView"];
 export type VoiceInfo = Schemas["VoiceInfo"];
@@ -64,10 +62,11 @@ export type PhonePairing = Schemas["PhonePairing"];
 export type SkillInfo = Schemas["SkillInfo"];
 export type SkillBody = Schemas["SkillBody"];
 export type SkillAdd = Schemas["SkillAdd"];
-export type DepartmentView = Schemas["DepartmentView"];
-export type DepartmentCreate = Schemas["DepartmentCreate"];
-export type JournalEntry = Schemas["JournalEntry"];
+/** Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt. */
+export type RulesView = Schemas["RulesView"];
 export type RuleAdd = Schemas["RuleAdd"];
+/** What Ghost watches (ADR 0035): watches.json, hooks.json, the listener and what is wrong. */
+export type WatchingView = Schemas["WatchingView"];
 export type WaitingItemView = Schemas["WaitingItemView"];
 export type WaitingView = Schemas["WaitingView"];
 export type WatchInfo = Schemas["WatchInfo"];
@@ -171,7 +170,7 @@ export class GhostClient {
   }
 
   // --- configuration ---------------------------------------------------------------
-  /** Every source of tools the gate knows: Ghost's own (the agents, the departments) and each
+  /** Every source of tools the gate knows: Ghost's own (the agents, the rules) and each
    *  connected app, with its operations at the level the permissions give them by name. */
   sources() {
     return unwrap(this.api.GET("/sources"));
@@ -232,19 +231,18 @@ export class GhostClient {
     return unwrap(this.api.GET("/setup/models"));
   }
 
-  // --- agents (ADR 0014, ADR 0024) ---------------------------------------------------------
+  // --- agents (ADR 0014, ADR 0035) ---------------------------------------------------------
   /** Every agent, Ghost first; retired ones have `retired_at` set. Pass `retired` to get only
-   *  the retired or only the working ones, and `department` for one roster. */
-  conversations(retired?: boolean, department?: string) {
-    const query: { retired?: boolean; department?: string } = {};
+   *  the retired or only the working ones. */
+  conversations(retired?: boolean) {
+    const query: { retired?: boolean } = {};
     if (retired !== undefined) query.retired = retired;
-    if (department) query.department = department;
     return unwrap(this.api.GET("/conversations", { params: { query } }));
   }
   conversation(slug: string) {
     return unwrap(this.api.GET("/conversations/{slug}", { params: { path: { slug } } }));
   }
-  /** Hire an agent into a department. */
+  /** Hire an agent. Without a voice of its own it speaks in Ghost's. */
   createConversation(body: ConversationCreate) {
     return unwrap(this.api.POST("/conversations", { body }));
   }
@@ -265,20 +263,13 @@ export class GhostClient {
   switchConversation(slug: string) {
     return unwrap(this.api.POST("/conversations/{slug}/switch", { params: { path: { slug } } }));
   }
-  /** Retire an agent (ADR 0024): off the roster and voice routing, everything kept.
-   *  409 for a department's own agent or for the agent the session is with. */
+  /** Retire an agent: off the roster and voice routing, everything kept.
+   *  409 for Ghost or for the agent the session is with. */
   retireConversation(slug: string) {
     return unwrap(this.api.POST("/conversations/{slug}/retire", { params: { path: { slug } } }));
   }
   rehireConversation(slug: string) {
     return unwrap(this.api.POST("/conversations/{slug}/rehire", { params: { path: { slug } } }));
-  }
-  /** Move an agent's folder into another department (ADR 0024). 409 for a department's own
-   *  agent, the agent the session is with, or the department it is already in. */
-  moveConversation(slug: string, department: string) {
-    return unwrap(
-      this.api.POST("/conversations/{slug}/move", { params: { path: { slug } }, body: { department } }),
-    );
   }
   compactConversation(slug: string) {
     return unwrap(this.api.POST("/conversations/{slug}/compact", { params: { path: { slug } } }));
@@ -305,25 +296,24 @@ export class GhostClient {
     );
   }
 
-  // --- departments (ADR 0024) --------------------------------------------------------------
-  /** Every department, Ghost first: its folder, rules, permissions, skills, agents and problems. */
-  departments() {
-    return unwrap(this.api.GET("/departments"));
+  // --- Ghost's folder (ADR 0035) ------------------------------------------------------------
+  /** Ghost's AGENTS.md: the rules in every agent's prompt, and the file to open. */
+  rules() {
+    return unwrap(this.api.GET("/rules"));
   }
-  department(slug: string) {
-    return unwrap(this.api.GET("/departments/{slug}", { params: { path: { slug } } }));
+  /** Append a rule to AGENTS.md, verbatim, through the gate; the gate's outcome. 409 when the
+   *  permissions block it. */
+  addRule(text: string) {
+    return unwrap(this.api.POST("/rules", { body: { text } }));
   }
-  /** A new department folder with its AGENTS.md and department.json; it reaches every connected app. 409 when the name is taken. */
-  createDepartment(body: DepartmentCreate) {
-    return unwrap(this.api.POST("/departments", { body }));
+  /** The files Ghost made in its out/ folder (ADR 0033). */
+  outputs() {
+    return unwrap(this.api.GET("/outputs"));
   }
-  /** Append a rule to the department's AGENTS.md, verbatim, through the gate. 409 when its rules live in a project folder. */
-  addRule(slug: string, text: string) {
-    return unwrap(this.api.POST("/departments/{slug}/rules", { params: { path: { slug } }, body: { text } }));
-  }
-  /** What the department's agents did, newest first, from the audit. */
-  departmentJournal(slug: string, limit = 30) {
-    return unwrap(this.api.GET("/departments/{slug}/journal", { params: { path: { slug }, query: { limit } } }));
+  /** The watches and webhooks, each with its last look and counts, the webhook listener's
+   *  addresses, and what is wrong in watches.json, hooks.json or left from an older layout. */
+  watches() {
+    return unwrap(this.api.GET("/watches"));
   }
 
   // --- phone (ADR 0016) ----------------------------------------------------------------
@@ -340,7 +330,7 @@ export class GhostClient {
     return unwrap(this.api.DELETE("/phone"));
   }
 
-  // --- skills (ADR 0023, ADR 0024) -----------------------------------------------------------
+  // --- skills (ADR 0023, ADR 0035) -----------------------------------------------------------
   /** Every SKILL.md folder Ghost reads for itself: its own and the operator's, with the apps
    *  each needs, which of those aren't connected, and any problem that keeps it from being offered. */
   skills() {

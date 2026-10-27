@@ -254,8 +254,6 @@ def build_session(
     latency_log: Path | None = None,
     on_latency: Callable[[dict[str, Any]], None] | None = None,
     reach: Callable[[Any], list[ToolSource]] | None = None,
-    on_enter: Callable[[Any], Awaitable[None]] | None = None,
-    on_leave: Callable[[Any], None] | None = None,
     context_note: str | None = None,
 ) -> GhostSession:
     """Build one session. ``first_utterance`` is what the operator said right after
@@ -275,9 +273,8 @@ def build_session(
 
     ``on_hang_up`` is called when the session is ending (a goodbye, the idle timeout, a
     hold that ran out). ``wake_phrases`` are what brings a session back from hold (ADR
-    0021); the desk's wake phrases by default. ``reach``, ``on_enter`` and ``on_leave``
-    are the departments (ADR 0024): what an agent's session reaches, and hooks run on
-    either side of a transfer.
+    0021); the desk's wake phrases by default. ``reach`` is what an agent's session
+    reaches: every connected app and Ghost's own sources (ADR 0035).
 
     ``context_note`` goes into the model's context before the greeting without running
     it: why Ghost started this session itself (ADR 0032), for the operator's reply."""
@@ -317,9 +314,7 @@ def build_session(
             keep_messages=settings.compact_keep_messages,
             start=start_in,
             on_switch=switched,
-            reach=reach,  # ADR 0024: what the agent's department reaches
-            on_enter=on_enter,
-            on_leave=on_leave,
+            reach=reach,  # ADR 0035: what every agent reaches
         )
 
     mixer = None

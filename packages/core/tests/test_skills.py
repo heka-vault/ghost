@@ -20,36 +20,32 @@ def make_skill(
     return folder
 
 
-def test_discovery_is_nearest_first(tmp_path: Path):
-    """A department's own skills, then the operator's ~/.agents/skills, then Ghost's; for
-    Ghost itself its own come first (ADR 0024)."""
+def test_discovery_reads_the_operators_then_ghosts(tmp_path: Path):
+    """The operator's ~/.agents/skills, then Ghost's own; the first folder with a name wins.
+    Every agent reads the same two (ADR 0035)."""
     ghost = tmp_path / "ghost-skills"
     home = tmp_path / "home-skills"
     make_skill(
         ghost / "invoicing", "invoicing", "Send and chase invoices.", requires="[mcp:quickbooks]"
     )
+    make_skill(ghost / "triage", "triage", "Ghost's triage.")
     make_skill(home / "triage", "triage", "Triage issues.")
-    make_skill(home / "invoicing", "invoicing", "The operator's copy.")
-    dept = tmp_path / "marketing" / "skills"
-    make_skill(dept / "launch", "launch", "Launch a thing.")
-    make_skill(dept / "triage", "triage", "Marketing's own triage.")
     (ghost / "not-a-skill").mkdir()
     skills = Skills(ghost, home)
     found = skills.lookup()
     assert set(found) == {"invoicing", "triage"}
     assert found["invoicing"].source == "ghost" and found["triage"].source == "home"
+    assert found["triage"].description == "Triage issues."
     assert found["invoicing"].description == "Send and chase invoices."
     assert found["invoicing"].requires == ("mcp:quickbooks",)
     assert found["invoicing"].missing(["github"]) == ["quickbooks"]
     assert found["invoicing"].missing(["quickbooks"]) == []
-    near = skills.lookup([(dept, "marketing")])
-    assert set(near) == {"invoicing", "triage", "launch"}
-    assert near["triage"].source == "marketing" and near["invoicing"].source == "home"
-    assert [p for p, _ in skills.places_for([(dept, "marketing")])] == [dept, home, ghost]
-    assert [p for p, _ in skills.places_for()] == [ghost, home]
-    assert Skills(ghost, None).places_for() == [(ghost, "ghost")]
+    assert [p for p, _ in skills.places()] == [home, ghost]
+    assert Skills(ghost, None).places() == [(ghost, "ghost")]
     # a skill folder that is a symlink is followed; links inside one are not listed
-    (ghost / "launch").symlink_to(dept / "launch")
+    elsewhere = tmp_path / "project" / "skills"
+    make_skill(elsewhere / "launch", "launch", "Launch a thing.")
+    (ghost / "launch").symlink_to(elsewhere / "launch")
     skills.refresh()
     assert skills.get("launch").path == ghost / "launch" and skills.get("launch").source == "ghost"
     (ghost / "launch" / "elsewhere.md").symlink_to(tmp_path / "secret")
@@ -124,14 +120,7 @@ async def test_index_and_read_tool(tmp_path: Path):
         in (await read.handler({"name": "month-close", "file": "../../etc/passwd"}))["error"]
     )
     assert (await read.handler({"name": "nope"}))["skills"] == ["month-close"]
-    # a department's view reads its own places first and never writes
-    dept = tmp_path / "dept"
-    view = skills.source([(dept, "dept")], writes=False)
-    assert view.operations == [] and [t.name for t in view.read_tools] == ["read_skill"]
-    make_skill(dept / "month-close", "month-close", "The department's own.")
-    skills.refresh()
-    assert "The department's own" in skills.index_prompt([(dept, "dept")])
-    assert "Close the books" in skills.index_prompt()
+    assert {o.name for o in src.operations} == {"add", "remove"}  # every agent's
 
 
 async def test_add_and_remove_go_through_the_gate(tmp_path: Path):

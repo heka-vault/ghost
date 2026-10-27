@@ -1,11 +1,11 @@
-"""The files an agent owns, in its folder under its department (ADR 0024).
+"""The files an agent owns, in its folder under Ghost's ``agents/`` (ADR 0035).
 
 ``agent.json`` is who it is (id, name, aliases, job, its own voice when it has one);
 ``persona.md`` is how it speaks; ``memory.md`` is the current rolling summary;
 ``notes.md`` is what the operator asked to be remembered, one line each, verbatim.
 The operator may open and edit any of them; Ghost writes them only through the
 gate (``ConversationWriter``). Where a slug's folder is comes from the registry
-(``locate``), since an agent's folder is in whichever department it works in."""
+(``locate``)."""
 
 from __future__ import annotations
 

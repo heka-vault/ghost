@@ -1,7 +1,7 @@
 """The webhook listener (ADR 0027): a third app in ``ghostd``, for webhooks only.
 
-It serves ``POST /hooks/<department>/<name>`` for the hooks the department folders declare
-and nothing else: no phone route, nothing of the control API, no static files. It binds
+It serves ``POST /hooks/<name>`` for the hooks ``hooks.json`` declares (ADR 0035) and
+nothing else: no phone route, nothing of the control API, no static files. It binds
 its own addresses (``GHOST_HOOKS_LISTEN``, comma separated; off when empty), apart from the
 phone listener and the control API's socket. How the internet reaches those addresses is
 the operator's network.
@@ -52,15 +52,15 @@ async def _reply(send: Send, status: int, body: dict[str, Any]) -> None:
 
 
 def hooks_app(intake: Intake):
-    """The ASGI app. Anything but ``POST /hooks/<department>/<name>`` is a 404 or 405 with
-    no body read."""
+    """The ASGI app. Anything but ``POST /hooks/<name>`` is a 404 or 405 with no body
+    read."""
 
     async def app(scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             return
         path = scope["path"]
         parts = path[len(PREFIX) :].split("/") if path.startswith(PREFIX) else []
-        if len(parts) != 2 or not all(parts):
+        if len(parts) != 1 or not all(parts):
             await _reply(send, 404, {"error": "not_found"})
             return
         if scope["method"] != "POST":

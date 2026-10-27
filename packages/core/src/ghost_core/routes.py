@@ -62,7 +62,7 @@ class RoutePolicy:
     calls_per_day: int = 6
     carry: Literal["count", "title"] = "count"  # what an outside route may say
     greeting: str = "Got a minute?"  # what desk voice says before anything else
-    urgency: Mapping[str, str] = field(default_factory=dict)  # "eng/ci" -> digest|notify|call
+    urgency: Mapping[str, str] = field(default_factory=dict)  # "ci" -> digest|notify|call
 
     @classmethod
     def parse(cls, raw: object, where: str = "[routes]") -> RoutePolicy:
@@ -150,7 +150,7 @@ def _hours(v: object, where: str) -> tuple[time, time] | None:
 
 def _urgency(v: object, where: str) -> dict[str, str]:
     if not isinstance(v, Mapping) or any(u not in CEILING for u in v.values()):
-        raise RouteError(f"{where} maps a department/watch to digest, notify or call")
+        raise RouteError(f"{where} maps a watch or hook, by name, to digest, notify or call")
     return {str(k): str(u) for k, u in v.items()}
 
 
@@ -400,7 +400,7 @@ class SpokenDigest:
 
 
 def _short(source: str) -> str:
-    """``watch:eng/ci`` and ``hook:eng/ci`` are ``eng/ci`` in ``[routes.urgency]``."""
+    """``watch:ci`` and ``hook:ci`` are ``ci`` in ``[routes.urgency]`` (ADR 0035)."""
     return source.split(":", 1)[1] if ":" in source else source
 
 

@@ -108,42 +108,35 @@ describe("GhostClient", () => {
     expect(removed).toBe("month-close");
   });
 
-  it("retires, rehires and moves an agent, and reads the departments (ADR 0024)", async () => {
+  it("retires and rehires an agent, and reads Ghost's folder (ADR 0035)", async () => {
     const posts: Record<string, string> = {};
-    const agent = { id: "a1", slug: "brand", name: "Brand", aliases: [], department: "marketing", job: "the look", voice: "bm_george", speed: 1, own_voice: false, persona: "", memory: "", notes: [], created_at: "x", last_active_at: null, retired_at: null, active: false, is_ghost: false, is_default: false, turn_count: 0, compactions: 0, dir: "~" };
-    const dept = { slug: "marketing", title: "Marketing", aliases: [], path: "~/.config/ghost/departments/marketing", root: null, voice: null, is_ghost: false, rules_lead: "Marketing", rules: "# Marketing\n", memory: "", permissions: { block: ["github.delete_*"], ask: [], quiet: [] }, skills: [], docs: [], agents: ["marketing", "brand"], problems: [] };
+    const watch = { name: "ci", app: "github", read: "list_workflow_runs", every_secs: 60, steps: ["check"], response: "tell", urgency: "notify", last_run: null, last_ok: null, error: null, seen: 0, open: 0 };
+    const hook = { name: "ci", path: "/hooks/ci", verify: "github", events: ["workflow_run"], on: true, off_reason: null, accepted: {}, rejected: {}, last: null };
     const client = new GhostClient(
       fakeTransport({
         "POST /conversations/brand/retire": () => ({ ok: true, detail: null }),
         "POST /conversations/brand/rehire": () => ({ ok: true, detail: "not retired" }),
-        "POST /conversations/brand/move": (body) => {
-          posts.move = body;
-          return { ...agent, department: "sales" };
-        },
-        "GET /departments": () => [dept],
-        "GET /departments/marketing": () => dept,
-        "POST /departments": (body) => {
-          posts.department = body;
-          return dept;
-        },
-        "POST /departments/marketing/rules": (body) => {
+        "GET /conversations": () => [],
+        "GET /rules": () => ({ path: "~/.config/ghost/AGENTS.md", text: "# Ghost\n" }),
+        "POST /rules": (body) => {
           posts.rule = body;
-          return { ...dept, rules: "# Marketing\n\nUK dates.\n" };
+          return { proposal_id: "p1", target: "Ghost's rules", status: "success", applied: ["add the rule: UK dates."], failed_step: null, error: null, state_now: "3 line(s) of rules", summary: "Applied." };
         },
-        "GET /departments/marketing/journal": () => [{ at: "x", agent: "Brand", operation: "github.comment", target: "acme/web#7", what: "On acme/web#7: comment." }],
+        "GET /outputs": () => [{ name: "week.html", path: "~/.config/ghost/out/week.html", bytes: 13, modified: "x" }],
+        "GET /watches": () => ({ watches: [watch], hooks: [hook], listening: ["127.0.0.1:8766"], problems: [] }),
       }),
     );
     expect((await client.retireConversation("brand")).ok).toBe(true);
     expect((await client.rehireConversation("brand")).detail).toBe("not retired");
-    expect((await client.moveConversation("brand", "sales")).department).toBe("sales");
-    expect(JSON.parse(posts.move)).toEqual({ department: "sales" });
-    expect((await client.departments())[0].permissions?.block).toEqual(["github.delete_*"]);
-    expect((await client.department("marketing")).agents).toEqual(["marketing", "brand"]);
-    await client.createDepartment({ name: "Marketing", aliases: ["the marketers"], voice: null });
-    expect(JSON.parse(posts.department).aliases).toEqual(["the marketers"]);
-    expect((await client.addRule("marketing", "UK dates.")).rules).toContain("UK dates");
+    expect(await client.conversations(false)).toEqual([]);
+    expect((await client.rules()).text).toBe("# Ghost\n");
+    expect((await client.addRule("UK dates.")).status).toBe("success");
     expect(JSON.parse(posts.rule)).toEqual({ text: "UK dates." });
-    expect((await client.departmentJournal("marketing"))[0].agent).toBe("Brand");
+    expect((await client.outputs())[0].name).toBe("week.html");
+    const watching = await client.watches();
+    expect(watching.watches[0].app).toBe("github");
+    expect(watching.hooks?.[0].path).toBe("/hooks/ci");
+    expect(watching.listening).toEqual(["127.0.0.1:8766"]);
   });
 
   it("posts a typed turn and surfaces errors", async () => {
