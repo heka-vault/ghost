@@ -512,7 +512,7 @@ def create_app(deps: Deps) -> FastAPI:
         st = deps.watches.state.get(w.source) if deps.watches is not None else None
         return WatchInfo(
             name=w.name,
-            server=w.server,
+            app=w.app,
             read=w.read,
             every_secs=w.every,
             steps=["check", *(["jev"] if w.jev else []), *(["model"] if w.model else [])],
@@ -581,8 +581,9 @@ def create_app(deps: Deps) -> FastAPI:
 
     @app.post("/departments", response_model=DepartmentView, tags=["departments"])
     async def create_department(req: DepartmentCreate) -> DepartmentView:
-        """A new department folder: the operator's action, with a short AGENTS.md, an
-        empty mcp.json and its department.json. The model never calls this."""
+        """A new department folder: the operator's action, with a short AGENTS.md and
+        its department.json; it reaches every connected app (ADR 0034). The model never
+        calls this."""
         if deps.departments is None:
             raise HTTPException(503, "departments are not available")
         from ghost_core.departments import DepartmentError

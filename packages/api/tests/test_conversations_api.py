@@ -259,3 +259,48 @@ def test_retire_rehire_and_seed_from(world):
 
     audit = client.get("/audit", params={"ability": "conversations"}).json()
     assert {e["operation"] for e in audit["items"]} >= {"retire", "rehire", "create"}
+
+
+def test_a_department_with_a_watch_and_a_hook_lists(world):
+    """``Watch.app`` is the app it reads (ADR 0034); the listing said ``server`` and failed."""
+    client, state, control, gate, writer, loaded, deps = world
+    watch = {
+        "app": "github",
+        "read": "list_workflow_runs",
+        "args": {"owner": "heka-vault", "repo": "ghost"},
+        "every": 60,
+        "items": "workflow_runs",
+        "fields": {"id": {"at": "id", "type": "int"}},
+        "key": "ci:{id}",
+        "title": "CI failed: {id}",
+    }
+    hook = {
+        "verify": "github",
+        "secret": "${GITHUB_HOOK_SECRET}",
+        "events": {
+            "workflow_run": {
+                "fields": {
+                    "id": {"at": "workflow_run.id", "type": "int"},
+                    "conclusion": {"at": "workflow_run.conclusion"},
+                },
+                "when": [{"field": "conclusion", "op": "==", "value": "failure"}],
+                "key": "ci:{id}",
+                "title": "CI failed: {id}",
+                "check": {
+                    "app": "github",
+                    "read": "get_workflow_run",
+                    "args": {"run_id": "{id}"},
+                    "fields": {"conclusion": {"at": "conclusion"}},
+                },
+            }
+        },
+    }
+    make_department(deps, "eng", watches={"ci": watch}, hooks={"ci": hook})
+    r = client.get("/departments")
+    assert r.status_code == 200, r.text
+    eng = next(d for d in r.json() if d["slug"] == "eng")
+    assert eng["problems"] == []
+    assert [(w["name"], w["app"]) for w in eng["watches"]] == [("ci", "github")]
+    assert [h["name"] for h in eng["hooks"]] == ["ci"]
+    one = client.get("/departments/eng")
+    assert one.status_code == 200 and one.json()["watches"][0]["read"] == "list_workflow_runs"
