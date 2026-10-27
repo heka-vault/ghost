@@ -79,6 +79,7 @@ import {
   changedKeys,
   echoReady,
   fuzzyWords,
+  isAppSecret,
   isOptionalSecret,
   isSet,
   jevNow,
@@ -665,7 +666,7 @@ export default function SettingsScreen(_: RouteProps) {
   };
   const navItems: NavItem[] = [
     ...(showSetup ? [{ id: "setup" as const, label: SECTION_TITLE.setup }] : []),
-    ...(["secrets", "model", "github", "lines", "skills", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
+    ...(["secrets", "model", "apps", "skills", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
     ...(mock && Prototype ? (["privacy", "sounds"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], prototype: true })) : []),
   ];
 
@@ -747,13 +748,16 @@ export default function SettingsScreen(_: RouteProps) {
   const setFuzzy = (n: number) => setValue(FUZZY, parseFuzzy(storedFuzzy) === n && parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : n.toFixed(2));
   const jev = v.GHOST_JEV || "auto";
   const jevStatus = jevNow(jev, s, draft.secrets);
-  const routing = truthy(v.GHOST_DEPARTMENT_ROUTING);
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
   const secretNames = s
     ? SECRET_ORDER.filter((n) => s.secrets.some((x) => x.name === n)).concat(s.secrets.map((x) => x.name).filter((n) => !SECRET_ORDER.includes(n)))
     : [];
-  const requiredSecrets = secretNames.filter((n) => !isOptionalSecret(n));
-  const optionalSecrets = secretNames.filter(isOptionalSecret);
+  const requiredSecrets = secretNames.filter((n) => !isOptionalSecret(n) && !isAppSecret(n));
+  const optionalSecrets = secretNames.filter((n) => isOptionalSecret(n) && !isAppSecret(n));
+  /** Keys Ghost keeps for the apps it connected (ADR 0034): set from Apps, replaceable here. */
+  const appSecrets = secretNames.filter(isAppSecret);
+  const appSecretsSet = appSecrets.filter((n) => isSet(s, n)).length;
+  const appSecretsBusy = appSecrets.some((n) => openSecrets.has(n) || restartSet.has(n));
   const optionalSet = optionalSecrets.filter((n) => isSet(s, n)).length;
   const optionalBusy = optionalSecrets.some((n) => openSecrets.has(n) || restartSet.has(n));
   const secretRow = (name: string) => (
@@ -851,6 +855,26 @@ export default function SettingsScreen(_: RouteProps) {
                     </Disclosure>
                   </div>
                 )}
+                {appSecrets.length > 0 && (
+                  <div className="set-optional-keys">
+                    <Disclosure
+                      defaultOpen={appSecretsBusy}
+                      summary={
+                        <span className="set-optional-keys__summary">
+                          Keys for your apps
+                          <span className="set-count t-num">
+                            {appSecretsSet} of {appSecrets.length} set
+                          </span>
+                        </span>
+                      }
+                    >
+                      <p className="set-help set-optional-keys__lead">
+                        Set when you connected each app under <a href={hrefFor("/apps")}>Apps</a>. Disconnecting an app leaves its key here until you clear it.
+                      </p>
+                      <div className="set-optional-keys__list">{appSecrets.map(secretRow)}</div>
+                    </Disclosure>
+                  </div>
+                )}
               </Card>
             </Section>
 
@@ -884,63 +908,27 @@ export default function SettingsScreen(_: RouteProps) {
                 )}
               </Section>
 
-              {/* ---------------------------------------------------------- GitHub */}
+              {/* ------------------------------------------------------------ Apps */}
               <Section
-                id={sectionDomId("github")}
-                title={SECTION_TITLE.github}
-                description="GitHub is an MCP server declared in your policy file, not a setting here (ADR 0022)."
+                id={sectionDomId("apps")}
+                title={SECTION_TITLE.apps}
+                description="Everything Ghost reads, watches or changes outside itself is an app you connect, not a setting here."
                 className="set-section"
               >
                 <Card padding="md">
                   <p className="set-github t-body">
-                    Its declaration under <span className="set-detail">[mcp.github]</span> in <span className="set-detail">~/.config/ghost/policy.toml</span> names the
-                    command Ghost runs, the repositories it may touch and the writes Ghost may make. The GitHub token above is what it signs in with; one token per
-                    server, so a second organization is a second server.
+                    Connect GitHub, Linear, Notion and more under Apps: sign in, paste a key, or run one on this computer. Every agent and department reaches them. What Ghost may not do,
+                    or asks first, is on Permissions.
                   </p>
                   <div className="set-github__links">
-                    <Button size="sm" variant="secondary" href={hrefFor("/servers")} trailingIcon={<ArrowRight />}>
-                      Open Servers
+                    <Button size="sm" variant="secondary" href={hrefFor("/apps")} trailingIcon={<ArrowRight />}>
+                      Open Apps
                     </Button>
-                    <Button size="sm" variant="ghost" href={`${window.location.pathname}?policy=toml#/policy`}>
-                      Edit the policy file
+                    <Button size="sm" variant="ghost" href={hrefFor("/permissions")}>
+                      Open Permissions
                     </Button>
                   </div>
                 </Card>
-                {!isSet(s, "GITHUB_TOKEN") && (
-                  <p className="set-note">
-                    Ghost has no GitHub token, so a GitHub server can’t sign in.{" "}
-                    <button type="button" className="set-link" onClick={() => go("secrets")}>
-                      Add a token
-                    </button>
-                  </p>
-                )}
-              </Section>
-
-              {/* ----------------------------------------------------------- Departments */}
-              <Section
-                id={sectionDomId("departments")}
-                title={SECTION_TITLE.departments}
-                description="What an agent does when you ask about something another department’s servers cover. It never changes anything outside its department, whatever you choose here."
-                className="set-section"
-              >
-                <Card list>
-                  <Row className="set-practice">
-                    <Checkbox
-                      id={fieldId("GHOST_DEPARTMENT_ROUTING")}
-                      checked={routing}
-                      onChange={(on) => setValue("GHOST_DEPARTMENT_ROUTING", on ? "1" : "0")}
-                      label={
-                        <span className="set-practice__label">
-                          Department routing <span className="set-detail">GHOST_DEPARTMENT_ROUTING</span>
-                        </span>
-                      }
-                      description={waits("GHOST_DEPARTMENT_ROUTING", "When a request belongs to another department, Ghost transfers you there instead of telling you where it belongs.")}
-                    />
-                  </Row>
-                </Card>
-                <p className="set-note">
-                  Off: Ghost says which department it belongs to and offers to transfer. Each department’s servers and their allowlists are its folder’s (<a href="#/departments">Departments</a>).
-                </p>
               </Section>
 
               {/* ----------------------------------------------------------- Skills */}

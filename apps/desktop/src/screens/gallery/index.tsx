@@ -597,7 +597,7 @@ function SaveBarSpecimens() {
         <SaveBar variant="restart" title="Restart Ghost to apply" detail="2 changes wait for it" command="systemctl --user restart ghostd" onDismiss={noop} />
       </Spec>
       <p className="t-small t-3">
-        One silhouette on every screen that commits a change (What Ghost may do, Settings, a line). It lives in the Page dock, at least 480 wide, growing with its words to the page width. After a save the toast is titled “Saved”, its body says when the change takes effect, with Undo where possible; the restart bar is the only exception and toasts nothing.
+        One silhouette on every screen that commits a change (Permissions, Settings, a line). It lives in the Page dock, at least 480 wide, growing with its words to the page width. After a save the toast is titled “Saved”, its body says when the change takes effect, with Undo where possible; the restart bar is the only exception and toasts nothing.
       </p>
     </>
   );
@@ -1092,7 +1092,7 @@ function Specimens({ theme }: { theme: string }) {
             <div className="g-page-bar is-titled">
               <div className="g-page-bar__inner">
                 <div className="g-page-bar__heading">
-                  <span className="g-page-bar__title">What Ghost may do</span>
+                  <span className="g-page-bar__title">Permissions</span>
                 </div>
                 <div className="g-page-bar__actions">
                   <ButtonSizeContext.Provider value="sm">

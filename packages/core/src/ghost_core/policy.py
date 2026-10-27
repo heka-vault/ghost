@@ -1,87 +1,92 @@
-"""Who may do what, decided by the operator, never by the model (ADR 0011, ADR 0024).
+"""The operator's file: what Ghost may do, how long a change waits for a yes, and how Ghost
+reaches the operator (ADR 0011, ADR 0030, ADR 0031, ADR 0034).
 
-* Each source enforces its own target allowlist (repositories, directories) through
-  ``Operation.allowed``; anything outside it is denied before autonomy is looked at.
-* ``AutonomyPolicy``: how much a source may do on its own, per operation and optionally
-  per target. Loaded from ``policy.toml``, which keeps ``[defaults]`` and the levels of
-  Ghost's own operations (``[conversations]``, ``[skills]``, ``[departments]``). A
-  server's levels live beside its declaration in the department's ``department.json``
-  (``ghost_core.departments``), merged over this file for that department's sessions.
-  The model cannot read or write any of it, and nothing a server returns reaches it.
+Everything runs unless the operator's permissions say otherwise (``ghost_core.permissions``):
+``[permissions]`` holds the mode and the ``block``, ``ask``, ``quiet`` and ``allow`` lists.
+A department's ``department.json`` may add ``block``, ``ask`` and ``quiet`` rules for its own
+sessions (``with_rules``), never ``allow``. The model cannot read or write any of it, and
+nothing an app returns reaches it.
+
+The older layout, a table per source with a level per operation (``[conversations]
+delete = "confirm"``, ``[github.targets."acme/app"] close = "deny"``), still reads: each
+entry becomes a rule in the list its level names.
 """
 
 from __future__ import annotations
 
-import enum
+import re
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
+
+from ghost_core.levels import Autonomy
+from ghost_core.permissions import (
+    LISTS,
+    Condition,
+    Mode,
+    Permissions,
+    Rule,
+)
 
 
 class PolicyError(PermissionError):
     pass
 
 
-class Autonomy(enum.StrEnum):
-    """How a write operation is handled, least to most autonomous."""
-
-    DENY = "deny"  # not offered to the model at all
-    CONFIRM = "confirm"  # propose, ask, wait for a spoken yes, then apply
-    ANNOUNCE = "announce"  # apply now, say briefly what happened
-    QUIET = "quiet"  # apply now, mention only if asked or if it failed
-
-
-Risk = Literal["low", "medium", "high"]
-
-# A source's suggested default per operation, used when the operator's file is silent.
-RISK_DEFAULTS: dict[str, Autonomy] = {
-    "low": Autonomy.ANNOUNCE,
-    "medium": Autonomy.CONFIRM,
-    "high": Autonomy.CONFIRM,
-}
+Risk = Literal["low", "medium", "high"]  # a source's own note; the level is the operator's
 
 ANY = "*"
 # Sections of earlier layouts that this file no longer carries: the ability packages (ADR
-# 0022), the servers and toolkits (ADR 0024, now mcp.json and department.json). Ignored
-# with a warning so an older file still loads.
-RETIRED_SECTIONS = {"abilities": "ADR 0022", "mcp": "ADR 0024: mcp.json", "toolkit": "ADR 0024"}
-
-OpLevels = Mapping[str, Autonomy]
+# 0022), the servers and toolkits (ADR 0024, then apps.json, ADR 0034). Ignored with a
+# warning so an older file still loads.
+RETIRED_SECTIONS = {"abilities": "ADR 0022", "mcp": "ADR 0034: apps.json", "toolkit": "ADR 0024"}
+_LEGACY_LIST = {
+    Autonomy.DENY: "block",
+    Autonomy.CONFIRM: "ask",
+    Autonomy.QUIET: "quiet",
+    Autonomy.ANNOUNCE: "allow",
+}
+_LEGACY_MODE = {
+    Autonomy.DENY: Mode.READ_ONLY,
+    Autonomy.CONFIRM: Mode.ASK,
+    Autonomy.ANNOUNCE: Mode.OPEN,
+    Autonomy.QUIET: Mode.OPEN,
+}
 
 
 @dataclass(frozen=True)
 class AutonomyPolicy:
-    """Resolution order: target+op, target+*, source+op, source+*, [defaults], risk.
+    """File shape::
 
-    File shape::
+    [permissions]
+    mode = "open"                 # open | ask | read-only: a change no rule names
+    block = ["gmail.delete_*"]
+    ask = ["github.issue_write(state=closed)"]
+    quiet = ["github.add_issue_labels"]
+    allow = []                    # exceptions, when mode is ask or read-only
 
-        [defaults]
-        autonomy = "confirm"          # optional; omit to fall back to each op's risk class
+    [defaults]
+    pending_ttl = 3600            # seconds a change Ghost asked about waits (ADR 0030)
 
-        [conversations]               # the agents' own operations (ADR 0014)
-        set_persona = "confirm"
-
-        [skills]
-        add = "confirm"
-
-        [github]                      # a server's levels may also sit here, by the name
-        close = "confirm"             # the gate knows it by; department.json wins
-        [github.targets."acme/public-app"]
-        close = "deny"
+    [routes]                      # ADR 0031
     """
 
-    default: Autonomy | None = None
-    skills: Mapping[str, OpLevels] = field(default_factory=dict)
-    targets: Mapping[str, Mapping[str, OpLevels]] = field(default_factory=dict)
+    permissions: Permissions = field(default_factory=Permissions)
+    # ADR 0030: how long a change at ``confirm`` waits on the waiting list; None is the
+    # default (``PENDING_TTL``).
+    pending_ttl: int | None = None
+    # ADR 0031: how Ghost reaches the operator (``ghost_core.routes.RoutePolicy``); None is
+    # the default policy. Kept here so it lives in the operator's one file.
+    routes: Any = None
     source: str = "<none>"
 
     @classmethod
     def load(cls, path: str | Path) -> AutonomyPolicy:
-        """A missing file is an empty policy: every operation falls back to its risk class."""
+        """A missing file is an empty policy: everything runs and is announced."""
         p = Path(path)
         if not p.exists():
             return cls(source=f"{p} (missing)")
@@ -93,15 +98,30 @@ class AutonomyPolicy:
             raw = tomllib.loads(text)
         except tomllib.TOMLDecodeError as e:
             raise ValueError(f"{source}: {e}") from None
-        default: Autonomy | None = None
-        skills: dict[str, dict[str, Autonomy]] = {}
-        targets: dict[str, dict[str, dict[str, Autonomy]]] = {}
+        permissions = Permissions()
+        pending_ttl: int | None = None
+        routes: Any = None
+        legacy: dict[str, list[Rule]] = {k: [] for k in LISTS}
+        legacy_mode: Mode | None = None
         for section, body in raw.items():
             if not isinstance(body, Mapping):
                 raise ValueError(f"{source}: [{section}] must be a table")
+            if section == "permissions":
+                permissions = Permissions.parse(body, f"{source}: [permissions]")
+                continue
             if section == "defaults":
                 if "autonomy" in body:
-                    default = _level(body["autonomy"], f"{source}: defaults.autonomy")
+                    level = _level(body["autonomy"], f"{source}: defaults.autonomy")
+                    legacy_mode = _LEGACY_MODE[level]
+                    if level is Autonomy.QUIET:
+                        legacy["quiet"].append(Rule(app=ANY))
+                if "pending_ttl" in body:
+                    pending_ttl = _seconds(body["pending_ttl"], f"{source}: defaults.pending_ttl")
+                continue
+            if section == "routes":
+                from ghost_core.routes import RoutePolicy  # here: routes imports the store
+
+                routes = RoutePolicy.parse(body, f"{source}: [routes]")
                 continue
             if section in RETIRED_SECTIONS:
                 logger.warning(
@@ -109,99 +129,130 @@ class AutonomyPolicy:
                     "ignored"
                 )
                 continue
-            ops: dict[str, Autonomy] = {}
-            for key, value in body.items():
-                if key == "targets":
-                    _parse_targets(value, section, section, targets, source)
-                    continue
-                ops[key] = _level(value, f"{source}: {section}.{key}")
-            skills.setdefault(section, {}).update(ops)
-        return cls(default=default, skills=skills, targets=targets, source=source)
+            _legacy_rules(section, body, legacy, source)
+        if legacy_mode is not None and "permissions" not in raw:
+            permissions = replace(permissions, mode=legacy_mode)
+        if any(legacy.values()):
+            permissions = Permissions(
+                mode=permissions.mode,
+                **{k: (*legacy[k], *getattr(permissions, k)) for k in LISTS},
+            )
+        return cls(
+            permissions=permissions,
+            source=source,
+            pending_ttl=pending_ttl,
+            routes=routes,
+        )
 
     def resolve(
-        self, skill: str, operation: str, target: str = "", risk: Risk = "medium"
+        self, source: str, operation: str, args: Mapping[str, Any] | None = None
     ) -> Autonomy:
-        """The level for this source, operation and target."""
-        for_target = self.targets.get(skill, {}).get(target.lower(), {})
-        for levels in (for_target, self.skills.get(skill, {})):
-            if operation in levels:
-                return levels[operation]
-            if ANY in levels:
-                return levels[ANY]
-        if self.default is not None:
-            return self.default
-        return RISK_DEFAULTS[risk]
+        """The level for this change. ``args`` are the call's arguments, for the rules
+        with argument patterns; None decides on the name alone."""
+        return self.permissions.resolve(source, operation, args)
 
-    @classmethod
-    def from_plain(
-        cls,
-        *,
-        default: str | None,
-        skills: Mapping[str, Mapping[str, str]],
-        targets: Mapping[str, Mapping[str, Mapping[str, str]]],
-    ) -> AutonomyPolicy:
-        """Build from plain strings (the API's structured update), validating levels."""
-        return cls(
-            default=_level(default, "defaults.autonomy") if default else None,
-            skills={
-                s: {op: _level(lv, f"{s}.{op}") for op, lv in ops.items()}
-                for s, ops in skills.items()
-            },
-            targets={
-                s: {
-                    t.lower(): {op: _level(lv, f"{s}.targets.{t}.{op}") for op, lv in ops.items()}
-                    for t, ops in ts.items()
-                }
-                for s, ts in targets.items()
-            },
-            source="<api>",
+    def with_rules(self, extra: Permissions, where: str = "") -> AutonomyPolicy:
+        """This policy with a department's rules added (they only ever add care)."""
+        if not any(getattr(extra, k) for k in LISTS):
+            return self
+        return replace(
+            self,
+            permissions=self.permissions.merged(extra),
+            source=f"{self.source} + {where}" if where else self.source,
         )
+
+    def with_permissions(self, permissions: Permissions) -> AutonomyPolicy:
+        return replace(self, permissions=permissions, source="<api>")
 
     def to_toml(self) -> str:
         """Render the file the operator owns. Shallow structure, so no TOML writer needed."""
         lines = [
-            "# Ghost autonomy policy (ADR 0011). Edited through the desktop app or by hand.",
+            "# Ghost's permissions (ADR 0034). Edited through the desktop app or by hand.",
+            "# Everything runs unless a rule below blocks it or asks first.",
+            "",
+            *self.permissions.to_toml(),
             "",
         ]
-        if self.default is not None:
-            lines += ["[defaults]", f'autonomy = "{self.default.value}"', ""]
-        for skill in sorted(set(self.skills) | set(self.targets)):
-            ops = self.skills.get(skill, {})
-            lines.append(f"[{_toml_key(skill)}]")
-            for op, lv in ops.items():
-                lines.append(f'{_toml_key(op)} = "{lv.value}"')
-            lines.append("")
-            for target, tops in self.targets.get(skill, {}).items():
-                lines.append(f'[{_toml_key(skill)}.targets."{target}"]')
-                for op, lv in tops.items():
-                    lines.append(f'{_toml_key(op)} = "{lv.value}"')
-                lines.append("")
+        if self.pending_ttl is not None:
+            lines += ["[defaults]", f"pending_ttl = {self.pending_ttl}", ""]
+        if self.routes is not None:
+            lines += [*self.routes.to_toml(), ""]
         return "\n".join(lines).rstrip() + "\n"
 
-    def describe(self, skill: str, operations: Mapping[str, Risk]) -> dict[str, Autonomy]:
-        """The skill-level resolution for each op; targets may still tighten it."""
-        return {op: self.resolve(skill, op, risk=risk) for op, risk in operations.items()}
+
+_HEADER = re.compile(r"^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$")
 
 
-def _toml_key(k: str) -> str:
-    return k if k.replace("_", "").replace("-", "").isalnum() else f'"{k}"'
+def write_permissions(text: str, permissions: Permissions) -> str:
+    """``text`` with its ``[permissions]`` table replaced by ``permissions``, everything
+    else kept as the operator wrote it (comments, ``[routes]``, ``[defaults]``). The older
+    per-source tables are folded in and dropped, since their rules are in the lists now,
+    and so is ``[defaults] autonomy``, which the mode replaces."""
+    keep_top = {"defaults", "routes", "permissions", *RETIRED_SECTIONS}
+    lines = text.splitlines()
+    out: list[str] = []
+    section: str | None = None
+    placed = False
+    rendered = permissions.to_toml()
+    for line in lines:
+        m = _HEADER.match(line)
+        if m:
+            section = m.group(1).strip().strip('"')
+            top = section.split(".", 1)[0].strip('"')
+            if top == "permissions":
+                if not placed:
+                    out.extend(rendered)
+                    placed = True
+                continue
+            if top not in keep_top:
+                continue
+            out.append(line)
+            continue
+        if section is None:
+            out.append(line)
+            continue
+        top = section.split(".", 1)[0].strip('"')
+        if top == "permissions" or top not in keep_top:
+            continue
+        if top == "defaults" and re.match(r"^\s*autonomy\s*=", line):
+            continue
+        out.append(line)
+    if not placed:
+        # After the opening comments, before the first table.
+        at = next((i for i, ln in enumerate(out) if _HEADER.match(ln)), len(out))
+        block = [*rendered, ""]
+        if at and out[at - 1].strip():
+            block = ["", *block]
+        out[at:at] = block
+    result = "\n".join(out).rstrip() + "\n"
+    AutonomyPolicy.parse(result, source="rendered")  # never write a file that won't read
+    return result
 
 
-def _parse_targets(
-    value: object,
-    skill: str,
-    where: str,
-    targets: dict[str, dict[str, dict[str, Autonomy]]],
-    source: str,
+def _legacy_rules(
+    section: str, body: Mapping[str, Any], out: dict[str, list[Rule]], source: str
 ) -> None:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{source}: [{where}.targets] must be a table")
-    for tname, tops in value.items():
-        if not isinstance(tops, Mapping):
-            raise ValueError(f"{source}: [{where}.targets.{tname}] must be a table")
-        targets.setdefault(skill, {})[tname.lower()] = {
-            op: _level(lv, f"{source}: {where}.targets.{tname}.{op}") for op, lv in tops.items()
-        }
+    """``[source] op = "level"`` and ``[source.targets."t"] op = "level"`` as rules."""
+    for key, value in body.items():
+        if key == "targets":
+            if not isinstance(value, Mapping):
+                raise ValueError(f"{source}: [{section}.targets] must be a table")
+            for tname, tops in value.items():
+                if not isinstance(tops, Mapping):
+                    raise ValueError(f"{source}: [{section}.targets.{tname}] must be a table")
+                for op, lv in tops.items():
+                    level = _level(lv, f"{source}: {section}.targets.{tname}.{op}")
+                    cond = (Condition("target", str(tname)),)
+                    out[_LEGACY_LIST[level]].append(Rule(section, str(op), cond))
+            continue
+        level = _level(value, f"{source}: {section}.{key}")
+        out[_LEGACY_LIST[level]].append(Rule(section, str(key)))
+
+
+def _seconds(value: object, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 60 <= value <= 7 * 86400:
+        raise ValueError(f"{where} must be a whole number of seconds from 60 to 604800")
+    return value
 
 
 def _level(value: object, where: str) -> Autonomy:
@@ -211,3 +262,6 @@ def _level(value: object, where: str) -> Autonomy:
         raise ValueError(
             f"{where}: {value!r} is not one of {', '.join(a.value for a in Autonomy)}"
         ) from None
+
+
+__all__ = ["ANY", "Autonomy", "AutonomyPolicy", "Mode", "Permissions", "PolicyError", "Risk"]

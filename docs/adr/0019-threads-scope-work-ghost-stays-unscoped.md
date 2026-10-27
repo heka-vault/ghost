@@ -1,6 +1,6 @@
 # 0019: Threads scope work; Ghost stays unscoped
 
-- **Status:** accepted
+- **Status:** accepted; the per-thread scope was superseded by ADR 0024 and the allowlists and ownership routing by ADR 0034
 - **Date:** 2026-10-19
 - **Amends:** ADR 0014 (a conversation gains a scope and a settled state; "same abilities and policy in every conversation" ends; a thread Ghost creates by voice starts with a persona Ghost wrote), ADR 0012 (abilities declare how they can be scoped)
 

@@ -1,175 +1,34 @@
-/* Owner: policy. */
+/* Owner: policy. Every class is prefixed policy-. Tokens only. */
 
-/* One measure for every row, so the one header's labels sit over every card's stops. */
-.policy-matrix, .policy-row, .policy-skeleton {
-  /* The stop pitch: one column per level, wide enough for “Do it and tell me” in the ruler. */
-  --policy-stop: var(--stop-pitch);
-  /* The “By risk” stop on Everything else, with its word to the left. */
-  --policy-lead: 72px;
-  --policy-pad: var(--space-5);
-  /* Hairline and stroke weights, until foundation has stroke tokens. */
-  --policy-stroke: var(--space-px);
-  --policy-stroke-strong: var(--focus-width);
-  /* The stops line up with the title and first description line, so rows never jump. */
-  --policy-stops-h: calc(var(--leading-md) + var(--leading-sm));
-}
-
-/* Disabled controls dim to the shared step. */
-.policy-matrix, .policy-file, .policy-row { --policy-opacity-disabled: var(--opacity-disabled); }
-
+.policy-file { --policy-opacity-disabled: var(--opacity-disabled); }
 .policy-notice { margin-bottom: var(--space-6); }
-/* “No policy file yet”: one line of body text, since nothing is wrong. */
 .policy-lead-note { margin: calc(var(--space-2) * -1) 0 var(--space-6); }
 .policy-actions { display: flex; align-items: center; gap: var(--space-3); }
+.policy-count { margin-left: var(--space-2); font-weight: var(--weight-regular); color: var(--text-3); }
 
-/* ------------------------------------------------------------- the column labels */
-/* Drawn once over the whole list and pinned flush under the compact bar. Opaque canvas, so
-   nothing peeks; the hairline shows only while pinned. Inset by the card's own hairline, so
-   each label sits exactly over its column of stops. */
-.policy-cols {
-  position: sticky; top: var(--policy-cols-top, var(--page-bar-height)); z-index: 2;
-  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4);
-  padding: var(--space-2) calc(var(--policy-pad) + var(--policy-stroke));
-  margin-bottom: var(--space-1);
-  background: var(--bg-canvas);
-}
-/* The key to the knobs, at the left end of the ruler, where the eye looks for one. */
-.policy-cols__legend { min-width: 0; padding-bottom: var(--space-0_5); color: var(--text-3); font-size: var(--text-sm); line-height: var(--leading-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.policy-cols.is-stuck { box-shadow: 0 var(--policy-stroke) 0 var(--border-subtle); }
-.policy-cols__levels { flex: none; display: grid; grid-template-columns: repeat(4, var(--policy-stop)); }
-.policy-cols__level {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1);
-  color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-medium);
-  white-space: nowrap;
-}
-.policy-cols__level svg { flex: none; color: var(--text-3); }
+/* ------------------------------------------------------------------ add a rule */
+.policy-add { display: flex; flex-direction: column; gap: var(--space-3); }
+.policy-add__row { display: flex; align-items: flex-start; gap: var(--space-3); }
+.policy-add__rule { flex: 1 1 auto; min-width: 0; }
+.policy-add__list { flex: none; width: calc(var(--space-20) * 2); }
+/* The button sits level with the controls, under the labels' line. */
+.policy-add__go { flex: none; margin-top: calc(var(--leading-md) + var(--space-2)); }
+.policy-examples { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; column-gap: var(--space-5); row-gap: var(--space-1); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.policy-example { padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; cursor: pointer; border-radius: var(--radius-xs); }
+.policy-example:hover { text-decoration: underline; }
+.policy-example .t-mono { font-size: var(--text-sm); font-variant-ligatures: none; }
 
+/* ----------------------------------------------------------------------- rules */
+.policy-rule { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-2_5) var(--space-3) var(--space-2_5) var(--space-4); min-width: 0; }
+.policy-rule__text { display: flex; flex-direction: column; gap: var(--space-0_5); min-width: 0; }
+.policy-rule__code { font-variant-ligatures: none; font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-md); color: var(--text-1); overflow-wrap: anywhere; }
+.policy-rule__words { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.policy-empty { margin: 0; padding: var(--space-3) var(--space-4); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-3); }
 
-/* ---------------------------------------------------------------------- the rows */
-.policy-card { overflow: visible; }
-.policy-card--default { margin-bottom: var(--space-10); }
-.policy-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) var(--control-sm) auto;
-  align-items: start;
-  padding: var(--space-3) var(--policy-pad);
-}
-.policy-row__text { display: flex; flex-direction: column; gap: var(--space-0_5); min-width: 0; padding-right: var(--space-2); }
-.policy-row__head { display: flex; align-items: center; flex-wrap: wrap; column-gap: var(--space-2_5); row-gap: var(--space-0_5); min-width: 0; min-height: var(--leading-md); }
-/* Risk and the key in the file: quiet secondary detail after the title. */
-.policy-row__meta { display: inline-flex; align-items: center; gap: var(--space-1_5); color: var(--text-3); font-size: var(--text-xs); line-height: var(--leading-xs); white-space: nowrap; }
-.policy-row__key { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); }
-.policy-row__title { color: var(--text-1); font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); }
-.policy-row__description { color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); }
-.policy-row__source { color: var(--text-3); font-size: var(--text-xs); line-height: var(--leading-xs); }
-.policy-row__warn { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--warn); font-size: var(--text-xs); line-height: var(--leading-xs); }
-.policy-row__warn svg { flex: none; }
-.policy-row__target { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--text-2); font-size: var(--text-xs); line-height: var(--leading-xs); }
-.policy-row__target svg { flex: none; color: var(--text-3); }
-.policy-row__target .t-mono { font-size: var(--text-xs); }
-/* The reset lives in a fixed gutter beside the track, so no row ever changes height: shown on
-   hover or focus within the row, and always while the row is unsaved. It is a Tab stop only on
-   an unsaved row (visible at rest); elsewhere Delete on the chosen stop does the same. */
-.policy-row__gutter {
-  display: flex; align-items: center; justify-content: center;
-  width: var(--control-sm); height: var(--policy-stops-h);
-}
-.policy-row__reset { opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
-.policy-row:hover .policy-row__reset, .policy-row:focus-within .policy-row__reset, .policy-row.is-edited .policy-row__reset,
-.policy-row__reset:focus-visible { opacity: 1; }
-@media (hover: none) { .policy-row__reset { opacity: 1; } }
-.policy-row__note { flex-wrap: wrap; column-gap: var(--space-1); }
-.policy-row__note .policy-link { margin-left: var(--space-1); color: var(--text-2); }
-
-/* A quiet text action inside a row: 12/16, no box, the focus ring follows its own edge. */
-.policy-link {
-  display: inline-flex; align-items: center; gap: var(--space-1);
-  margin: 0; padding: 0; border: 0; border-radius: var(--radius-xs); background: none;
-  color: var(--text-3); font: inherit; font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition: color var(--duration-fast) var(--ease-out);
-}
-.policy-link svg { flex: none; }
-.policy-link:hover { color: var(--text-1); }
-.policy-link:disabled { cursor: not-allowed; opacity: var(--policy-opacity-disabled); }
-.policy-link:disabled:hover { color: var(--text-3); }
-
-/* A value the operator wrote, set apart from prose (“the level `confirm` needs quotes”). */
-.policy-code { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-1); }
-
-/* Risk: the word alone, in the row's quiet meta color. High sits a step brighter at rest so it
-   can be found down a column, and turns amber only while the row lets Ghost act alone. */
-.policy-risk { flex: none; color: var(--text-3); font-size: var(--text-xs); line-height: var(--leading-xs); }
-.policy-risk--high { color: var(--text-2); font-weight: var(--weight-medium); }
-.policy-risk.is-alarm { color: var(--warn); }
-
-/* -------------------------------------------------------------------- the stops */
-.policy-stops { display: flex; align-items: center; height: var(--policy-stops-h); }
-.policy-stops__rail { position: relative; display: grid; grid-template-columns: repeat(4, var(--policy-stop)); height: 100%; }
-.policy-stops__track {
-  position: absolute; top: 50%; left: calc(var(--policy-stop) / 2); right: calc(var(--policy-stop) / 2);
-  height: var(--policy-stroke); background: var(--border-strong); pointer-events: none;
-}
-/* The tooltip anchor is the grid cell; the label fills it. */
-.policy-stop { position: relative; flex: 1 1 auto; display: grid; place-items: center; min-height: var(--policy-stops-h); cursor: pointer; }
-.policy-stop__input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
-.policy-stop__knob {
-  position: relative; display: grid; place-items: center;
-  width: var(--space-2); height: var(--space-2); border-radius: var(--radius-full);
-  background: var(--control-track);
-  pointer-events: none;
-  transition: width var(--duration-base) var(--ease-emphasized), height var(--duration-base) var(--ease-emphasized),
-    background-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
-}
-.policy-stop__knob::after {
-  content: ""; width: var(--space-1_5); height: var(--space-1_5); border-radius: var(--radius-full);
-  background: var(--on-accent); transform: scale(0);
-  transition: transform var(--duration-base) var(--ease-emphasized);
-}
-/* Hover previews where the knob would land: a smaller accent-tinted step, so the hollow
-   default on the same row stays the only full ring. */
-.policy-stop:not(.is-on):hover .policy-stop__knob {
-  width: var(--icon-xs); height: var(--icon-xs);
-  background: var(--accent-soft); box-shadow: inset 0 0 0 var(--policy-stroke) var(--accent);
-}
-.policy-stop.is-on .policy-stop__knob { width: var(--icon-md); height: var(--icon-md); background: var(--accent); }
-.policy-stop.is-on .policy-stop__knob::after { transform: scale(1); }
-/* The default showing through: hollow, in the secondary text color (7:1). */
-.policy-stops.is-inherited .policy-stop.is-on .policy-stop__knob { background: var(--bg-surface); box-shadow: inset 0 0 0 var(--policy-stroke-strong) var(--text-2); }
-.policy-stops.is-inherited .policy-stop.is-on .policy-stop__knob::after { background: var(--text-2); width: var(--space-1); height: var(--space-1); }
-/* Hovering the default offers to make it yours: the ring takes the accent. */
-.policy-stops.is-inherited:not(.is-disabled) .policy-stop.is-on:hover .policy-stop__knob { box-shadow: inset 0 0 0 var(--policy-stroke-strong) var(--accent); }
-.policy-stops.is-inherited:not(.is-disabled) .policy-stop.is-on:hover .policy-stop__knob::after { background: var(--accent); }
-.policy-stop__input:focus-visible + .policy-stop__knob { outline: var(--focus-outline); outline-offset: var(--focus-offset); }
-.policy-stop__input:focus-visible:not(:checked) + .policy-stop__knob { width: var(--icon-xs); height: var(--icon-xs); background: var(--accent-soft); box-shadow: inset 0 0 0 var(--policy-stroke) var(--accent); }
-.policy-stops.is-disabled .policy-stop { cursor: not-allowed; }
-.policy-stops.is-disabled .policy-stop__knob { opacity: var(--policy-opacity-disabled); }
-
-/* “By risk”: Everything else's own first stop on the same track, in words. The rail grows by
-   one stop to the left, so the four level columns stay under the ruler. The word sits left of
-   its knob, which is hollow when chosen, like every default on the page. */
-.policy-stops.has-lead .policy-stops__rail { grid-template-columns: var(--policy-lead) repeat(4, var(--policy-stop)); }
-.policy-stops.has-lead .policy-stops__track { left: calc(var(--policy-lead) / 2); }
-.policy-stop--lead .policy-stop__word {
-  position: absolute; right: calc(50% + var(--space-3)); top: 50%; transform: translateY(-50%);
-  color: var(--text-3); font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); white-space: nowrap;
-  transition: color var(--duration-fast) var(--ease-out);
-}
-.policy-stop--lead.is-on .policy-stop__word, .policy-stop--lead:hover .policy-stop__word { color: var(--text-2); }
-.policy-stop--lead.is-on .policy-stop__knob { background: var(--bg-surface); box-shadow: inset 0 0 0 var(--policy-stroke-strong) var(--text-2); }
-.policy-stop--lead.is-on .policy-stop__knob::after { background: var(--text-2); width: var(--space-1); height: var(--space-1); }
-.policy-stops.is-disabled .policy-stop__word { opacity: var(--policy-opacity-disabled); }
-
-/* ------------------------------------------------------------------ the sections */
-.policy-source { margin-top: 0; }
-.policy-source + .policy-source { margin-top: var(--space-10); }
-.policy-source__title { display: inline-flex; align-items: center; gap: var(--space-2); }
-.policy-source__id { white-space: nowrap; }
-.policy-card__foot {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
-  padding: var(--space-3) var(--space-3) var(--space-3) var(--policy-pad, var(--space-5));
-}
-.policy-card__foot .t-mono { font-size: var(--text-sm); }
-.policy-readers { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-8); }
+/* ------------------------------------------------------- Ghost's own operations */
+.policy-own { margin-top: var(--space-10); }
+.policy-own__lead { margin: 0 0 var(--space-3); max-width: 64ch; }
+.policy-foot { margin-top: var(--space-8); max-width: 72ch; }
 
 /* ----------------------------------------------------------------------- the file */
 .policy-file__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-2); }
@@ -200,7 +59,7 @@
   padding: var(--policy-toml-pad) var(--space-4);
   border: 0; background: transparent; resize: none;
   color: var(--text-1); font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-md);
-  white-space: pre; overflow-x: auto; overflow-y: hidden; tab-size: 4;
+  white-space: pre; overflow-x: auto; overflow-y: hidden; tab-size: 4; font-variant-ligatures: none;
 }
 .policy-toml__input:focus, .policy-toml__input:focus-visible { outline: none; }
 .policy-toml__input::placeholder { color: var(--text-3); }
@@ -211,14 +70,13 @@
 .policy-dock__notice { width: 100%; }
 
 /* ---------------------------------------------------------------------- skeleton */
-.policy-skeleton__group + .policy-skeleton__group { margin-top: var(--space-10); }
-.policy-skeleton__title { margin-bottom: var(--space-3); }
-.policy-skeleton .policy-cols { position: static; }
-.policy-skeleton .policy-row__gutter { visibility: hidden; }
-.policy-skeleton__title { display: flex; flex-direction: column; gap: var(--space-2); }
+.policy-skeleton { display: flex; flex-direction: column; gap: var(--space-4); }
+.policy-skeleton__modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin-bottom: var(--space-6); }
+.policy-skeleton__group { display: flex; flex-direction: column; gap: var(--space-3); }
+.policy-skeleton__group + .policy-skeleton__group { margin-top: var(--space-6); }
 .policy-skeleton__file {
   display: flex; flex-direction: column; justify-content: space-around;
-  height: calc(18 * var(--leading-md) + 2 * var(--space-3)); padding: var(--space-3) var(--space-4) var(--space-3) var(--space-12);
+  height: calc(12 * var(--leading-md) + 2 * var(--space-3)); padding: var(--space-3) var(--space-4) var(--space-3) var(--space-12);
   border-radius: var(--radius-md); background: var(--bg-sunken); box-shadow: inset 0 0 0 var(--space-px) var(--border-subtle);
 }
 

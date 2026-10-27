@@ -1,9 +1,9 @@
 """The write model every ability shares.
 
-An ability defines its own ``Target``, ``Snapshot`` and ``Change`` subclasses and a
-``Writer`` that applies them. The gate never names a concrete type: it snapshots,
-bounds, applies, reads back and audits through these four interfaces, so a
-GitHub issue, a local file and a calendar entry get the same protections.
+A source defines its own ``Target``, ``Snapshot`` and ``Change`` subclasses and a
+``Writer`` that applies them (an app's call, ``ghost_core.apps``; an agent's file). The
+gate never names a concrete type: it records, applies and audits through these four
+interfaces, so a call to an app and a local file get the same path.
 
 There is no undo machinery. Reversing a change is an ordinary change the model
 proposes (reopen the issue, set the labels back), through the same gate and policy.
@@ -19,6 +19,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 PROPOSAL_TTL = timedelta(seconds=60)
+# ADR 0030: a change at ``confirm`` waits this long on the waiting list unless the policy
+# file says otherwise ([defaults] pending_ttl).
+PENDING_TTL = timedelta(hours=1)
 MAX_STEPS = 4
 
 
@@ -47,6 +50,11 @@ class Target(BaseModel, frozen=True):
         means a request can't name it, so a confirm-level change on it always asks."""
         return set()
 
+    def rule_args(self) -> dict[str, object]:
+        """What a permission rule's argument patterns match (ADR 0034): an app's call
+        arguments, or ``target`` for Ghost's own operations."""
+        return {"target": self.scope()}
+
     def __str__(self) -> str:
         return self.spoken()
 
@@ -69,6 +77,9 @@ class Change(BaseModel, frozen=True):
     def describe(self) -> str:
         raise NotImplementedError
 
+    def rule_args(self) -> dict[str, object]:
+        return {}
+
 
 class ChangeSet(BaseModel, frozen=True):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -77,6 +88,12 @@ class ChangeSet(BaseModel, frozen=True):
 
     def describe(self) -> str:
         return "; ".join(s.describe() for s in self.steps)
+
+    def rule_args(self) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for s in self.steps:
+            out.update(s.rule_args())
+        return out
 
 
 class ProposalStatus(enum.StrEnum):
@@ -107,6 +124,9 @@ class Proposal(BaseModel, frozen=True):
     # it was recorded. The apps colour an audit entry by it.
     conversation: str | None = None
     department: str | None = None  # the department the agent works in (ADR 0024)
+    # The words that make the operator's plain request the yes (ADR 0017), read off this
+    # call (ADR 0034); empty falls back to the operation's own.
+    asked_by: tuple[str, ...] = ()
     created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime = Field(default_factory=lambda: utcnow() + PROPOSAL_TTL)
     status: ProposalStatus = ProposalStatus.PENDING

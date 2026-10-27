@@ -44,8 +44,12 @@ async def test_low_risk_announces_and_executes_at_once(writer, target):
     assert "Applied on acme/app#42" in sub.outcome.summary()
 
 
-async def test_high_risk_waits_for_confirmation(writer, target):
-    gate = make(writer)
+async def test_even_a_high_risk_change_runs_unless_an_ask_rule_names_it(writer, target):
+    """ADR 0034: the source's risk is its own note; the operator's rules decide."""
+    sub = await submit(make(writer), target, CLOSE, op="close", risk="high")
+    assert sub.autonomy is Autonomy.ANNOUNCE and sub.executed
+    writer.issues[target]["state"] = "open"
+    gate = make(writer, '[permissions]\nask = ["github_issues.close"]\n')
     sub = await submit(gate, target, CLOSE, op="close", risk="high")
     assert sub.autonomy is Autonomy.CONFIRM and not sub.executed
     assert gate.pending("s1").id == sub.proposal.id

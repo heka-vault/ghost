@@ -10,7 +10,7 @@
  * desktop app reads. Every request is signed, and so is every reply. An answer whose signature
  * doesn't check is never applied, which is what keeps the audio between this phone and its desk.
  */
-import type { AuditPage, ConversationView, GhostEvent, Status } from "@ghost/client-ts";
+import type { AuditPage, ConversationView, GhostEvent, Status, WaitingView } from "@ghost/client-ts";
 import { lineName } from "@ghost/ui";
 import { DeviceEventEmitter, type EmitterSubscription, PermissionsAndroid, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
@@ -22,6 +22,7 @@ import { signRequest, verifyResponse } from "../phone/signing";
 import type { AudioState, CallStats, Desk, DeskState, Link, Route, Via } from "./types";
 
 const POLL_MS = 4000;
+const WAITING_EVERY_TICKS = 8; // ~30 s: the desk counts the phone as showing the list while it reads it
 const POLL_IN_SESSION_MS = 15000;
 const REQUEST_MS = 8000;
 const GATHER_MS = 3000;
@@ -81,7 +82,7 @@ const MESSAGES: Record<string, string> = {
 };
 
 export class LiveDesk implements Desk {
-  private state: DeskState = { link: "connecting", via: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
+  private state: DeskState = { link: "connecting", via: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
   /** The address in use; null until one answers, and again once it stops answering. */
   private address: string | null = null;
   private listeners = new Set<() => void>();
@@ -89,6 +90,9 @@ export class LiveDesk implements Desk {
   private poll: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private auditLimit = 30;
+  /** The waiting count the desk last reported, and ticks since the list was read. */
+  private waitingSeen: number | null = null;
+  private ticksSinceWaiting = 0;
 
   private pc: RTCPeerConnection | null = null;
   private dc: DataChannel | null = null;
@@ -235,6 +239,13 @@ export class LiveDesk implements Desk {
         void this.loadAudit(this.auditLimit).catch(() => {});
         void this.loadLines().catch(() => {});
       }
+      // The waiting list (ADR 0029): when the count moved, and now and then, so the desk
+      // knows this phone has it on screen.
+      this.ticksSinceWaiting += 1;
+      if (hello.status.waiting !== this.waitingSeen || this.ticksSinceWaiting >= WAITING_EVERY_TICKS) {
+        this.waitingSeen = hello.status.waiting;
+        void this.loadWaiting().catch(() => {});
+      }
     } catch {
       this.failures += 1;
       const link: Link = this.failures >= OFFLINE_AFTER || this.state.link === "connecting" ? "offline" : "reconnecting";
@@ -272,6 +283,22 @@ export class LiveDesk implements Desk {
     this.set({ audit: page.items, auditTotal: page.total });
   }
 
+  private async loadWaiting() {
+    this.ticksSinceWaiting = 0;
+    const view = await this.request<WaitingView>("GET", "/waiting");
+    this.set({ waiting: view.items });
+  }
+
+  async acknowledge(key: string) {
+    await this.request("POST", "/waiting/ack", { key });
+    await this.loadWaiting();
+  }
+
+  async snooze(key: string, minutes: number) {
+    await this.request("POST", "/waiting/snooze", { key, minutes });
+    await this.loadWaiting();
+  }
+
   // ------------------------------------------------------------------ desk events
 
   private onStatus(status: Status) {
@@ -307,6 +334,9 @@ export class LiveDesk implements Desk {
       case "outcome":
         this.set({ outcomes: { ...this.state.outcomes, [e.outcome.proposal_id]: e.outcome } });
         void this.loadAudit(this.auditLimit).catch(() => {});
+        return;
+      case "waiting":
+        void this.loadWaiting().catch(() => {});
         return;
       case "conversation":
         if (this.state.status) this.set({ status: { ...this.state.status, conversation: e.active ?? null } });

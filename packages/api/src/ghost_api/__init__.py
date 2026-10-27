@@ -8,9 +8,18 @@ from ghost_api.app import (
     outcome_view,
     pending_view,
     status_snapshot,
+    waiting_view,
 )
 from ghost_api.client import GhostClient
-from ghost_api.models import AuditPage, Phase, PhoneDevice, PhonePairing, PhoneView, Status
+from ghost_api.models import (
+    AuditPage,
+    Phase,
+    PhoneDevice,
+    PhonePairing,
+    PhoneView,
+    Status,
+    WaitingView,
+)
 from ghost_api.server import ApiServer, default_socket_path
 from ghost_api.state import DaemonState
 
@@ -32,4 +41,6 @@ __all__ = [
     "pending_view",
     "status_snapshot",
     "audit_page",
+    "waiting_view",
+    "WaitingView",
 ]

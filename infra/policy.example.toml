@@ -1,31 +1,51 @@
-# Ghost autonomy policy (ADR 0011, ADR 0024). Copied to ~/.config/ghost/policy.toml by `make env`.
+# Ghost's permissions (ADR 0034). Copied to ~/.config/ghost/policy.toml by `make env`.
 #
-# For each of Ghost's own write operations, how much Ghost may do on its own:
-#   deny      not offered to the model at all
-#   confirm   Ghost asks first and waits for your spoken yes (or your plain request is the yes)
-#   announce  Ghost does it, then says so in a few words
-#   quiet     Ghost does it and only mentions it if asked, or if it failed
+# Ghost uses every tool of every app you connect. A change (closing an issue, sending a
+# message) happens at once and Ghost says so in a few words. Permissions are what you
+# want different:
+#   block   never offered to Ghost; refused if asked for
+#   ask     Ghost asks first and waits for your yes (a plain request is the yes:
+#           "close seventeen" closes it)
+#   quiet   Ghost does it and only mentions it if asked, or if it failed
+#   allow   an exception, when mode below is "ask" or "read-only"
 #
-# Anything you leave out falls back to the operation's declared risk: low announces, medium
-# and high confirm. Resolution order: target rule > source rule > [defaults] > risk.
+# A rule is an app, an app's tool, or a tool with argument patterns (shell globs):
+#   "gmail"                                 every tool of the app
+#   "github.delete_*"                       tools by name
+#   "github.issue_write(state=closed)"      only calls whose arguments match
+#   "github.*(repo!=site)"                  every call that is not about that repository
+#   "conversations.delete"                  one of Ghost's own operations
+# The most careful rule that matches wins: block, then ask, then quiet, then allow.
 #
-# Servers are not here any more. Each department's folder under ~/.config/ghost (Ghost's is
-# the folder itself) has an mcp.json with its servers and a department.json with their
-# writes and levels; see infra/example and docs/departments.md.
+# A department can add block, ask and quiet rules for its own agents in its
+# department.json ("permissions"); it can never allow more than this file.
 #
-# Ghost never writes this file, and nothing a server returns can change it.
-# Every write is logged; to reverse one, ask Ghost for the opposite change.
+# Ghost never writes this file, and nothing an app returns can change it.
+# Every change is logged; to reverse one, ask Ghost for the opposite change.
 
-[defaults]
-# autonomy = "confirm"        # uncomment to make everything ask unless listed below
+[permissions]
+mode = "open"                 # open | ask (every change asks) | read-only (no changes)
+block = []
+ask = []
+quiet = []
+allow = []
 
-[conversations]               # the agents (hire, retire, rename, persona, notes, ...)
-# set_persona = "confirm"
-# delete = "confirm"
+# [defaults]
+# pending_ttl = 3600          # seconds a change Ghost asked about waits on your list (ADR 0030)
 
-[skills]                      # Ghost's own skills folder
-# add = "confirm"
-# remove = "confirm"
-
-[departments]                 # a rule appended to a department's AGENTS.md, its memory
-# add_rule = "confirm"
+# How Ghost reaches you about what is waiting (ADR 0031). Ghost never edits this.
+# Routes, quietest first: digest (said at your next wake), desk (Ghost greets at the desk
+# and waits for your reply), desktop, phone, call, sms, whatsapp. Only the digest and the
+# phone are on unless you list more. "Ghost, nothing until two" pauses everything but the
+# digest until then.
+# [routes]
+# enabled = ["digest", "desk", "desktop", "phone"]
+# escalate_after = 15          # minutes a delivery waits for you to acknowledge it
+# quiet_hours = "22:00-07:00"  # nothing but the digest in these hours
+# batch_secs = 60              # a new item waits this long so others can go with it
+# calls_per_hour = 2
+# calls_per_day = 6
+# carry = "count"              # what an outside route may say: count, or title
+# greeting = "Got a minute?"   # what desk voice says before anything else
+# [routes.urgency]             # how loud a watch may get: digest, notify (the default), call
+# "eng/ci" = "call"

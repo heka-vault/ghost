@@ -1,9 +1,9 @@
 """What a source of tools gives Ghost: a prompt paragraph, typed read tools, write
 operations for the gate, and the pipeline hooks Ghost's own parts use.
 
-Sources are core: the lines (ADR 0014), Ghost's fixed intents, and every MCP server the
-operator declares (ADR 0022). There is no package mechanism any more; a ``ToolSource`` is
-built in code from what a server or a core module offers.
+Sources are core: the agents (ADR 0014), Ghost's fixed intents, and every app the operator
+connects (ADR 0034). There is no package mechanism; a ``ToolSource`` is built in code from
+what an app or a core module offers.
 """
 
 from __future__ import annotations
@@ -30,15 +30,20 @@ class ReadTool:
     properties: dict[str, Any]
     required: list[str]
     handler: ToolHandler
+    # The name a permission rule knows it by (an app's own tool name); the tool's when "".
+    operation: str = ""
 
 
 @dataclass(frozen=True)
 class Prepared:
-    """What an operation hands to the gate: a target, a typed change set, and why."""
+    """What an operation hands to the gate: a target, a typed change set, and why.
+    ``asked_by`` are the words that ask for this call, when they depend on it (an app's
+    tool, ADR 0034); empty means the operation's own."""
 
     target: Target
     changes: ChangeSet
     rationale: str = ""
+    asked_by: tuple[str, ...] = ()
 
 
 def _allow_all(_target: Target) -> bool:
@@ -47,11 +52,12 @@ def _allow_all(_target: Target) -> bool:
 
 @dataclass(frozen=True)
 class Operation:
-    """A named write. The model supplies ``properties``; ``prepare`` validates them into
-    a ``Prepared``; the gate applies it through ``writer`` at the autonomy level the
-    operator's policy gives this operation. ``risk`` is only the suggested default.
-    ``allowed`` is the source's own allowlist (repositories, directories, calendars);
-    the gate checks it before anything else."""
+    """A named change. The model supplies ``properties``; ``prepare`` validates them into
+    a ``Prepared``; the gate applies it through ``writer`` at the level the operator's
+    permissions give it (ADR 0034). ``risk`` is the source's own note, shown, never the
+    level. ``allowed`` is the source's own limit (an agent's folder); the gate checks it
+    before anything else. ``tool_name`` set: the model calls it as its own tool under that
+    name (an app's change); unset, through ``change``."""
 
     name: str
     description: str
@@ -65,6 +71,7 @@ class Operation:
     # confirm-level proposal follows a request that plainly asks for it on that target,
     # the request is the yes (ghost_core.request). Empty: always ask.
     asked_by: tuple[str, ...] = ()
+    tool_name: str | None = None
 
 
 # --- per-turn hooks ---------------------------------------------------------------
@@ -85,8 +92,10 @@ class Handled:
 
     say: str | None = None
     # hang_up ends the session; hold keeps it while the operator talks to someone else
-    # (ADR 0021); cancel drops a pending change.
-    action: Literal["hang_up", "hold", "cancel"] | None = None
+    # (ADR 0021); cancel drops a pending change; quiet is do-not-disturb until ``until``
+    # (ADR 0031), the operator's own words, never the model's.
+    action: Literal["hang_up", "hold", "cancel", "quiet"] | None = None
+    until: Any = None  # a datetime, for quiet
 
 
 class TurnInterceptor(Protocol):
@@ -117,7 +126,7 @@ ProcessorFactory = Callable[[], Any]  # -> pipecat FrameProcessor; one per sessi
 
 @dataclass(frozen=True)
 class Event:
-    kind: Literal["wake", "session_start", "session_end", "outcome", "error"]
+    kind: Literal["wake", "session_start", "session_end", "outcome", "error", "quiet"]
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -127,11 +136,8 @@ EventListener = Callable[[Event], Awaitable[None]]
 @dataclass
 class ToolSource:
     """One source of tools, as the pipeline and the gate take it. ``name`` is the key the
-    policy, the gate registry and the audit use (``github.close``; a department's own
-    server is ``marketing/figma``, ADR 0024). ``scope_kind`` and ``scope_items`` say what
-    the source's allowlist is (ADR 0019); a scoped source gets an ``ActiveScope`` as the
-    ``_scope`` argument of every read tool and ``prepare`` call, which names the
-    departments that cover an item outside it, and may give ``scoped_prompt``."""
+    permissions, the gate registry and the audit use (``github.issue_write``,
+    ``conversations.create``); ``title`` is how the operator knows it ("GitHub")."""
 
     name: str
     prompt: str = ""
@@ -140,6 +146,4 @@ class ToolSource:
     interceptors: list[TurnInterceptor] = field(default_factory=list)
     processors: dict[Slot, list[ProcessorFactory]] = field(default_factory=dict)
     listeners: list[EventListener] = field(default_factory=list)
-    scope_kind: str | None = None
-    scope_items: Callable[[], list[str]] | None = None
-    scoped_prompt: Callable[[Any], str] | None = None  # ActiveScope | None -> paragraph
+    title: str = ""

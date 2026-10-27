@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import sys
-from collections.abc import Awaitable, Callable, Sequence
-from datetime import timedelta
+import time
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,7 @@ from ghost_api import (
     PhonePairing,
     PhoneView,
     Status,
+    WaitingView,
     audit_page,
     create_app,
     default_socket_path,
@@ -28,7 +31,10 @@ from ghost_api import (
     pending_view,
     status_snapshot,
 )
+from ghost_api import waiting_view as build_waiting_view
+from ghost_api.app import APPS_ENV
 from ghost_api.conversations import conversation_view
+from ghost_api.files import read_env
 from ghost_api.models import ConversationView, StatusEvent
 from ghost_core import (
     AutonomyPolicy,
@@ -39,13 +45,21 @@ from ghost_core import (
     ToolSource,
     WriteGate,
 )
+from ghost_core.apps import APPS_FILE, Apps, load_apps
+from ghost_core.catalog import Catalog
 from ghost_core.conversations import GHOST, Conversations, Profile, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.department_tools import DepartmentTools, departments_source
-from ghost_core.departments import Departments, Fleet, all_sources
-from ghost_core.jev import JevClassifier, JevClient
-from ghost_core.mcp import Servers
+from ghost_core.departments import Departments
+from ghost_core.hooks import Hook, HookIntake, run_fixtures
+from ghost_core.jev import JevClassifier, JevClient, watch_decider
+from ghost_core.outputs import SOURCE as OUTPUTS
+from ghost_core.outputs import Outputs
+from ghost_core.routes import RouteEngine, RoutePolicy, spoken_digest
+from ghost_core.signin import SignIns
 from ghost_core.skills import Skills
+from ghost_core.waiting import Item, Items, WaitingList, waiting_source
+from ghost_core.watches import Watch, WatchRunner
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
@@ -62,14 +76,28 @@ from loguru import logger
 
 from ghostd.audio import Ducker, chime, restore_from_state
 from ghostd.config import GhostdSettings, runtime_dir
+from ghostd.deciders import model_decider
 from ghostd.dictation import is_dictating
+from ghostd.hooks import HooksListener
 from ghostd.phone import PhoneListener, PhoneStore, Refusal
+from ghostd.routes import (
+    GREETING_SECS,
+    REPLY_WINDOW_SECS,
+    SNOOZE_MINUTES,
+    DeskRoute,
+    DesktopRoute,
+    PhoneRoute,
+    context_note,
+    is_not_now,
+)
 from ghostd.wake import FileWakeDetector, SpokenWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
 DUCK_STATE = "duck.json"
 DEFAULT_WAKE_FUZZY = GhostdSettings.model_fields["wake_fuzzy"].default
 PHONE_STATE = "phone.json"
+WAITING_REFRESH_SECS = 15  # how often Ghost's own items are re-read and the routes tick
+AT_DESK_SECS = 15 * 60  # a desk session this recent means the operator is at the desk
 VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its session;
 # long enough for a cellular blip or a tunnel re-handshake away from home (ADR 0020)
@@ -81,9 +109,79 @@ PHONE_READY_SECS = 4.0
 PHONE_GREETING_LEAD_SECS = 0.3  # let the phone's playback settle before the first word
 PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then is dropped
 
+
 # While a phone session winds down after the phone has gone, Pipecat's output transport
 # reports its writes to the dead peer as errors. They are the expected tail of a hang-up,
 # not faults; the sinks drop them while this is set.
+def declared_watches(departments: Departments) -> list[Watch]:
+    """Every department's watches (ADR 0028), Ghost's first."""
+    return [w for d in departments.list() for w in d.watches.values()]
+
+
+def declared_urgency(departments: Departments) -> dict[str, str]:
+    """Each watch's and hook's declared urgency, by its items' source."""
+    out = {w.source: w.urgency for w in declared_watches(departments)}
+    out.update({h.source: h.urgency for h in declared_hooks(departments)})
+    return out
+
+
+def describe_routes(p: RoutePolicy) -> str:
+    quiet = f", quiet {p.quiet_hours[0]:%H:%M}-{p.quiet_hours[1]:%H:%M}" if p.quiet_hours else ""
+    return f"routes: {', '.join(p.enabled)}; escalate after {p.escalate_after} min{quiet}"
+
+
+def declared_hooks(departments: Departments) -> list[Hook]:
+    """Every department's webhooks (ADR 0027)."""
+    return [h for d in departments.list() for h in d.hooks.values()]
+
+
+def describe_watches(departments: Departments) -> list[str]:
+    """One line per watch for the log and ``ghostd check``."""
+    out = []
+    for d in departments.list():
+        for w in d.watches.values():
+            steps = "check" + (", jev" if w.jev else "") + (", model" if w.model else "")
+            out.append(
+                f"watch {d.slug}/{w.name}: {w.app}.{w.read} every {w.every}s, {steps}, {w.response}"
+            )
+        for p in d.problems:
+            if " watch " in p:
+                out.append(f"watch problem in {d.slug}: {p}")
+    return out
+
+
+def load_app_secrets(path: Path) -> None:
+    """The keys the desktop kept for connected apps (ADR 0034): into the environment, never
+    over a value the service already has (the vault's)."""
+    for key, value in read_env(path).items():
+        os.environ.setdefault(key, value)
+
+
+def ghost_problems(apps: Apps, departments: Departments) -> list[tuple[str, str, str | None]]:
+    """Ghost's own trouble, for the waiting list (ADR 0029): an app that isn't connected or
+    wants the operator to sign in again, a department folder that doesn't read."""
+    out: list[tuple[str, str, str | None]] = []
+    for name, spec in apps.specs.items():
+        state = apps.state(name)
+        if state == "connected":
+            continue
+        if state == "needs_sign_in":
+            out.append((f"app:{name}", f"{spec.shown} needs you to sign in again", None))
+        else:
+            why = apps.problem(name) or "not connected"
+            out.append((f"app:{name}", f"{spec.shown} isn't connected: {why}", None))
+    for d in departments.list():
+        if d.problems:
+            out.append(
+                (
+                    f"department:{d.slug}",
+                    f"{d.title}'s folder has a problem: {d.problems[0]}",
+                    None if d.is_ghost else d.slug,
+                )
+            )
+    return out
+
+
 _PHONE_TEARDOWN = {"on": False}
 _TEARDOWN_NOISE = ("writing audio to the transport", "can no longer do its job")
 
@@ -121,6 +219,12 @@ class Daemon:
         self.state = DaemonState(version=VERSION, wake_mode=cfg.wake_mode)
         self.session: GhostSession | None = None
         self.gate: WriteGate | None = None
+        self.waiting: WaitingList | None = None  # ADR 0029; set in run()
+        self.watch_runner: WatchRunner | None = None  # ADR 0028; set in run()
+        self.hook_intake: HookIntake | None = None  # ADR 0027; set in run()
+        self.routes: RouteEngine | None = None  # ADR 0031; set in run()
+        self._last_desk_session: float | None = None
+        self._phone_route = PhoneRoute()  # ADR 0031: the app's list, while it is open
         self._first_via = "voice"  # how the wake-time utterance arrived
         self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
@@ -131,10 +235,10 @@ class Daemon:
         self.conversations: Conversations | None = None
         self.skills: Skills | None = None
         self.departments: Departments | None = None
-        self.fleet: Fleet | None = None
+        self.apps: Apps | None = None
+        self.signins: SignIns | None = None
+        self.catalog: Catalog | None = None
         self._reach: Callable[[Profile], list[ToolSource]] | None = None
-        self._enter: Callable[[Profile], Awaitable[None]] | None = None
-        self._leave: Callable[[Profile], None] | None = None
         self._models: Models | None = None
         self._deps: Deps | None = None
         # The phone (ADR 0016). An accepted offer's connection goes on the queue; the
@@ -143,6 +247,8 @@ class Daemon:
         self._phone_q: asyncio.Queue[Any] = asyncio.Queue()
         self._phone_end = asyncio.Event()
         self._waiting = False  # the passive loop is waiting for a wake or a phone
+        # ADR 0032: Ghost has something to raise at the desk: (items, policy, result future).
+        self._raise_q: asyncio.Queue[Any] = asyncio.Queue()
         self._origin: str | None = None  # "desk" | "phone" while a session runs
 
     # --- Controller (called by the API) -------------------------------------
@@ -193,6 +299,109 @@ class Daemon:
         )
         return outcome
 
+    async def confirm_proposal(self, proposal_id: str):
+        """A Confirm on a change on the waiting list (ADR 0030). When it is the one the live
+        session is waiting on, the session hears the result too."""
+        if self.gate is None:
+            return None
+        live = self.gate.pending(self.state.session_id) if self.state.session_id else None
+        outcome = await self.gate.confirm_id(proposal_id, source="ui")
+        if outcome is None:
+            return None
+        self.state.outcome(outcome_view(outcome), "ui")
+        if live is not None and live.id == proposal_id:
+            self.state.set_pending(None)
+            if self.session:
+                await self.session.system_note(
+                    "[system] The operator confirmed from the desktop app. Verified result: "
+                    f"{outcome.summary()} Say what happened in a few words."
+                )
+        self._refresh_waiting_now()
+        return outcome
+
+    async def cancel_proposal(self, proposal_id: str) -> bool:
+        if self.gate is None:
+            return False
+        live = self.gate.pending(self.state.session_id) if self.state.session_id else None
+        if self.gate.cancel_id(proposal_id, "cancelled from the waiting list") is None:
+            return False
+        if live is not None and live.id == proposal_id:
+            self.state.set_pending(None)
+        self._refresh_waiting_now()
+        return True
+
+    def _on_signin_url(self, app: str, url: str) -> None:
+        """An app is waiting for the operator to sign in: the desktop opens the address."""
+        self.state.publish_apps(changed=app, sign_in_url=url)
+
+    def _refresh_waiting_now(self) -> None:
+        if self.waiting is not None:
+            self.waiting.refresh()
+
+    async def _refresh_waiting(self, waiting: WaitingList) -> None:
+        """Re-read Ghost's own items now and then (a change's time running out, a server
+        that went away; watches sync their own), and let the routes send what is due
+        (ADR 0031)."""
+        while True:
+            await asyncio.sleep(WAITING_REFRESH_SECS)
+            try:
+                waiting.refresh()
+                if self.routes is not None:
+                    await self.routes.tick()
+            except Exception:  # noqa: BLE001 - the list must not take the daemon down
+                logger.exception("waiting: refresh failed")
+
+    def _can_raise(self) -> bool:
+        """Desk voice may start (ADR 0032): the desk is idle, nothing else is about to
+        start, and dictation is off."""
+        return (
+            self.state.models_ready
+            and self._waiting
+            and self.session is None
+            and self.state.phase is Phase.PASSIVE
+            and self._phone_q.empty()
+            and self._raise_q.empty()
+            and not is_dictating(self.cfg.dictation_flag)
+        )
+
+    async def _reply_window(
+        self,
+        session: Any,
+        raised: tuple[list[Item], RoutePolicy, asyncio.Future[str]],
+        replied: asyncio.Event,
+        first_reply: list[str],
+    ) -> None:
+        """Wait for the operator's reply. Silence: not heard, the session ends quietly and
+        nothing heard was kept or sent. "Not now": snoozed. Anything else: heard."""
+        items, _policy, fut = raised
+        try:
+            await asyncio.wait_for(replied.wait(), REPLY_WINDOW_SECS + GREETING_SECS)
+        except TimeoutError:
+            logger.info("desk voice: no reply; handing on")
+            if not fut.done():
+                fut.set_result("not_heard")
+            await session.cancel()
+            return
+        if is_not_now(first_reply[0] if first_reply else ""):
+            until = datetime.now(UTC) + timedelta(minutes=SNOOZE_MINUTES)
+            if self.waiting is not None:
+                for i in items:
+                    self.waiting.items.snooze(i.key, until)
+            if not fut.done():
+                fut.set_result("delivered")
+            return
+        if not fut.done():
+            fut.set_result("heard")
+
+    def _at_desk(self) -> bool:
+        """The operator is at the desk: a desk session ran lately, or the desktop app is
+        connected to the event stream."""
+        recent = (
+            self._last_desk_session is not None
+            and time.monotonic() - self._last_desk_session < AT_DESK_SECS
+        )
+        return recent or self.state.bus.subscribers > 0
+
     async def cancel_pending(self) -> bool:
         if self.gate is None or self.state.session_id is None:
             return False
@@ -213,6 +422,8 @@ class Daemon:
         policy = AutonomyPolicy.load(self.cfg.policy_path)
         if self.gate is not None:
             self.gate.set_autonomy(policy)
+        if self.routes is not None:
+            self.routes.set_policy(policy.routes or RoutePolicy())
         if self.departments is not None:
             self.departments.refresh()  # the gate's hook rebuilds the departments' levels
         logger.info(f"policy reloaded from {policy.source}")
@@ -223,12 +434,6 @@ class Daemon:
         and the near-miss threshold are picked up by rebuilding the passive listener; the
         crossing-streams toggles (ADR 0019) by the next session, which reads them."""
         applied: list[str] = []
-        for key, attr in (("GHOST_DEPARTMENT_ROUTING", "department_routing"),):
-            if key in values:
-                on = str(values[key] or "").strip().lower() in ("1", "true", "yes", "on")
-                setattr(self.voice, attr, on)
-                logger.info(f"{key.removeprefix('GHOST_').lower()}: {'on' if on else 'off'}")
-                applied.append(key)
         if self._listener is None:
             return applied
         if "GHOST_WAKE_PHRASES" in values:
@@ -334,6 +539,21 @@ class Daemon:
     def audit(self, limit: int, offset: int) -> AuditPage:
         assert self._deps is not None
         return audit_page(self._deps.store, limit=limit, offset=offset)
+
+    def waiting_view(self) -> WaitingView:
+        """The phone's read of the waiting list; the fetch is the phone route's delivery."""
+        assert self._deps is not None
+        view = build_waiting_view(self._deps)
+        self._phone_route.fetched()
+        return view
+
+    def acknowledge_item(self, key: str) -> bool:
+        return self.waiting is not None and self.waiting.acknowledge(key)
+
+    def snooze_item(self, key: str, minutes: int) -> bool:
+        if self.waiting is None:
+            return False
+        return self.waiting.snooze(key, datetime.now(UTC) + timedelta(minutes=minutes))
 
     def admit_phone(self) -> Refusal | None:
         if self.state.phase is Phase.STARTING or not self.state.models_ready:
@@ -456,22 +676,30 @@ class Daemon:
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         store = Store(self.cfg.db_path)
         autonomy = AutonomyPolicy.load(self.cfg.policy_path)
-        # ADR 0024: the departments are folders; Ghost's servers connect now, a department's
-        # when a session enters it.
+        # ADR 0024: the departments are folders. ADR 0034: the apps are Ghost's, connected
+        # now, and every department reaches them.
         departments = Departments(self.cfg.config_dir)
         departments.ensure_layout()
         self.departments = departments
         for problem in departments.problems():
             logger.warning(f"departments: {problem}")
-        fleet = Fleet(departments, idle_secs=self.cfg.department_idle_secs)
-        self.fleet = fleet
-        await fleet.connect()
-        mcp = fleet.ghost
+        apps_file = load_apps(self.cfg.config_dir / APPS_FILE)
+        for problem in apps_file.problems:
+            logger.warning(f"apps: {problem}")
+        load_app_secrets(self.cfg.env_path.parent / APPS_ENV)
+        signins = SignIns(
+            self.cfg.data_dir / "apps", port=self.cfg.signin_port, on_url=self._on_signin_url
+        )
+        self.signins = signins
+        apps = Apps(apps_file.apps, auth_for=signins.auth_for)
+        self.apps = apps
+        await apps.connect()
+        self.catalog = Catalog(self.cfg.catalog_path)
         skills = Skills(self.cfg.skills_dir, self.cfg.home_skills_dir)  # ADR 0024
         self.skills = skills
-        # What Ghost's own sessions may call: its servers' offered reads and declared
-        # writes, and the skills (the index, read_skill, add and remove).
-        tool_sources: list[ToolSource] = [*mcp.sources(), skills.source()]
+        # What Ghost's own sessions may call: every connected app's tools, and the skills
+        # (the index, read_skill, add and remove).
+        tool_sources: list[ToolSource] = [*apps.sources(), skills.source()]
         jev = build_jev(self.cfg)
         classifier: ConfirmationClassifier = (
             JevClassifier(
@@ -490,10 +718,35 @@ class Daemon:
             classifier=classifier,
             on_decision=debug.audio,
         )
-        gate.attach_departments(departments)  # levels follow the folders (ADR 0024)
-        for a in tool_sources:  # declared writes go through the gate
+        gate.attach_departments(departments)  # their rules follow the folders (ADR 0024)
+        for a in tool_sources:  # every app's changes go through the gate
             gate.register(a.name, a.operations)
         self.gate = gate
+        registered = {a.name for a in apps.sources()}
+
+        def sync_apps() -> None:
+            """An app was connected, disconnected or came back: the gate follows, and so
+            does the next turn's list of tools."""
+            now = {src.name: src for src in apps.sources()}
+            for name in registered - set(now):
+                gate.unregister(name)
+            for name, src in now.items():
+                gate.register(name, src.operations)
+            registered.clear()
+            registered.update(now)
+            self.state.apps = sorted(now)
+            self._refresh_waiting_now()
+
+        apps.on_change.append(sync_apps)
+
+        async def read_for(department: str, app: str, tool: str, args: dict[str, Any]) -> Any:
+            """A read the daemon makes for a department (a watch's look, a webhook's check,
+            ADR 0027/0028): one of the app's read-only tools, unless the department's
+            permissions block it."""
+            if gate.blocks_read(app, tool, args, department):
+                raise ValueError(f"{app}.{tool} is blocked for {department}")
+            return await apps.read_for(app, tool, args)
+
         conversations = Conversations(
             store,
             departments,
@@ -506,66 +759,106 @@ class Daemon:
         department_tools = DepartmentTools(departments, store, conversations)
         gate.register(departments_source(department_tools).name, department_tools.operations())
         self.department_tools = department_tools
-
-        def register_department(slug: str) -> None:
-            """A department's own servers came up: their declared writes join the gate."""
-            d = departments.get(slug)
-            if d is None:
-                return
-            for src in fleet.sources_for(d):
-                gate.register(src.name, src.operations, department=slug)
-
-        def register_all() -> None:
-            """Every department's reachable sources, again: after the folders are
-            re-read, a declaration edited by hand is what the gate runs, never Ghost's
-            operation of the same name."""
-            for d in departments.list():
-                if not d.is_ghost:
-                    register_department(d.slug)
-
-        register_all()
-        departments.on_refresh.append(register_all)
-
-        async def enter(p: Profile) -> None:
-            """A transfer into an agent was decided (ADR 0024): its department's servers
-            start now, and the announcement covers the wait."""
-            await fleet.enter(p.department)
-            register_department(p.department)
-
-        def leave(p: Profile) -> None:
-            fleet.leave(p.department)
-
-        self._enter, self._leave = enter, leave
+        outputs = Outputs(departments, conversations)  # ADR 0033: what Ghost makes
+        gate.register(OUTPUTS, outputs.operations())
+        self.outputs = outputs
+        # ADR 0029: what needs the operator, with the changes waiting for a yes (ADR 0030).
+        waiting = WaitingList(
+            Items(store),
+            changes=gate.waiting,
+            problems=lambda: ghost_problems(apps, departments),
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
+        self.waiting = waiting
+        # ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
+        watch_runner = WatchRunner(
+            waiting.items,
+            lambda w: read_for(w.department, w.app, w.read, dict(w.args)),
+            jev=watch_decider(jev) if jev else None,
+            model=None if self.voice.llm_problems() else model_decider(self.voice.llm_target()),
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
+        self.watch_runner = watch_runner
+        # ADR 0027: webhooks, signed and parsed by declaration, checked through read_for.
+        hook_intake = HookIntake(
+            waiting.items,
+            store,
+            read=read_for,
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
+        self.hook_intake = hook_intake
+        # ADR 0031: how Ghost reaches the operator, by the operator's [routes].
+        self.routes = RouteEngine(
+            waiting.items,
+            policy=autonomy.routes or RoutePolicy(),
+            urgency_of=lambda item: declared_urgency(departments).get(item.source, "notify"),
+            at_desk=self._at_desk,
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
+        self.routes.add_route(DeskRoute(self._can_raise, self._raise_q))
+        self.routes.add_route(DesktopRoute(waiting.acknowledge))
+        self.routes.add_route(self._phone_route)
 
         def reach(p: Profile) -> list[ToolSource]:
-            """What a session with this agent reaches (ADR 0024): its department's own
-            servers and the ones it uses, the skills nearest first, and the agents' own
-            tools. Ghost reaches its own servers and every skill, with the skill writes."""
+            """What a session with this agent reaches (ADR 0024, ADR 0034): every connected
+            app (its department's permissions narrow them in the gate), the skills nearest
+            first, and the agents' own tools. Ghost also gets the skill writes."""
             d = conversations.department_of(p)
-            out: list[ToolSource] = list(fleet.sources_for(d))
+            out: list[ToolSource] = list(apps.sources())
             out.append(skills.source(d.skill_places(), writes=d.is_ghost))
             out.append(conversations_source(conversations))
             out.append(departments_source(department_tools))
+            out.append(outputs.source())
+            out.append(waiting_source(waiting))
             return out
 
         self._reach = reach
         pruned = conversations.prune()
         if pruned:
             logger.info(f"conversations: pruned {pruned} summarized turns past retention")
-        self.state.servers = list(mcp.servers)
+        self.state.apps = sorted(registered)
         events = Events()
-        api = await self._start_api(gate, store, all_sources(fleet), mcp, skills)
+        api = await self._start_api(gate, store, apps.sources(), skills)
         await self._start_phone()
+        waiting.refresh()
+        self.state.set_waiting(waiting.count())
+        refresher = asyncio.ensure_future(self._refresh_waiting(waiting))
+
+        def follow_watches() -> None:
+            """The folders were re-read: the declared watches and hooks again."""
+            watched = declared_watches(departments)
+            for w in watched:
+                if w.app not in apps.specs:
+                    logger.warning(
+                        f"watch {w.department}/{w.name}: reads {w.app}, which isn't connected"
+                    )
+            watch_runner.set_watches(watched)
+            for problem in hook_intake.set_hooks(declared_hooks(departments)):
+                logger.warning(f"hooks: {problem}")
+
+        follow_watches()
+        departments.on_refresh.append(follow_watches)
+        for line in describe_watches(departments):
+            logger.info(line)
+        hooks_listener = await self._start_hooks(hook_intake)
         logger.info(f"autonomy policy: {autonomy.source}")
+        logger.info(describe_routes(self.routes.policy))
+
+        async def on_event(event: Any) -> None:
+            if event.kind == "quiet" and event.data.get("until") is not None:
+                self.routes.quiet_until(event.data["until"])
+                logger.info(f"routes: quiet until {event.data['until']:%H:%M}")
+
+        events.add(on_event)
         logger.info(
             f"llm: {self.voice.llm_target().describe()}, thinking {self.voice.llm_thinking}"
         )
         for problem in self.voice.llm_problems():
             logger.error(f"llm: {problem}")
         logger.info(f"tts: {describe_tts(self.voice)}")
-        for line in describe_mcp(fleet, gate):
+        for line in describe_apps(apps, gate):
             logger.info(line)
-        logger.info(describe_skills(skills, set(mcp.servers)))
+        logger.info(describe_skills(skills, set(apps.specs)))
         logger.info(
             "confirmation classifier: "
             + (f"jev via {jev.provider}, regex fallback" if jev else "regex")
@@ -586,13 +879,21 @@ class Daemon:
         try:
             await self._passive(wake, models, tool_sources, gate, events, ducker)
         finally:
+            refresher.cancel()
+            await watch_runner.close()
+            for route in self.routes.routes.values():
+                if hasattr(route, "close"):
+                    await route.close()
+            if hooks_listener is not None:
+                await hooks_listener.stop()
             wake.close()
             ducker.restore()
             if self.phone_listener:
                 await self.phone_listener.stop()
             if api:
                 await api.stop()
-            await fleet.close()
+            await signins.close()
+            await apps.close()
             if jev:
                 await jev.aclose()
             store.close()
@@ -617,16 +918,22 @@ class Daemon:
             stop_task = asyncio.ensure_future(self._stop.wait())
             rearm_task = asyncio.ensure_future(self._rearm.wait())
             phone_task = asyncio.ensure_future(self._phone_q.get())
+            raise_task = asyncio.ensure_future(self._raise_q.get())
             self._waiting = True
             try:
                 await asyncio.wait(
-                    {wake_task, stop_task, rearm_task, phone_task},
+                    {wake_task, stop_task, rearm_task, phone_task, raise_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
             finally:
                 self._waiting = False
             stop_task.cancel()
             rearm_task.cancel()
+            raised = raise_task.result() if raise_task.done() else None
+            raise_task.cancel()
+            if raised is not None and (phone_task.done() or wake_task.done()):
+                raised[2].set_result("unavailable")  # the operator came first
+                raised = None
             phone = phone_task.result() if phone_task.done() else None
             phone_task.cancel()
             if phone is None and not self._phone_q.empty():  # accepted in the same tick
@@ -634,6 +941,11 @@ class Daemon:
             phone_conn, phone_line = phone if phone is not None else (None, GHOST)
             # Decided before the cancel below, which makes a pending task done too.
             woke = wake_task.done()
+            if raised is not None and (
+                self._stop.is_set() or is_dictating(self.cfg.dictation_flag)
+            ):
+                raised[2].set_result("unavailable")
+                raised = None
             if self._stop.is_set() or phone is not None or not woke:
                 wake_task.cancel()
                 await asyncio.gather(wake_task, return_exceptions=True)  # releases the mic
@@ -644,6 +956,11 @@ class Daemon:
                 if phone_conn is not None:
                     await _close_peer(phone_conn)
                 break
+            if raised is not None:  # ADR 0032: Ghost greets at the desk and waits
+                await self._conversation(
+                    models, tool_sources, gate, events, ducker, None, raised=raised
+                )
+                continue
             if phone_conn is not None:  # the phone takes the session; the desk mic is free
                 await self._conversation(
                     models,
@@ -682,7 +999,6 @@ class Daemon:
         gate: WriteGate,
         store: Store,
         sources: Sequence[ToolSource],
-        mcp: Servers | None = None,
         skills: Skills | None = None,
     ) -> ApiServer | None:
         socket_path = self.cfg.api_socket or default_socket_path()
@@ -692,11 +1008,15 @@ class Daemon:
             gate=gate,
             store=store,
             sources=sources,
-            mcp=mcp,
+            apps=self.apps,
+            catalog=self.catalog,
+            signins=self.signins,
             skills=skills,
             departments=self.departments,
-            fleet=self.fleet,
             department_tools=getattr(self, "department_tools", None),
+            waiting=self.waiting,
+            watches=self.watch_runner,
+            hooks=self.hook_intake,
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,
@@ -741,6 +1061,18 @@ class Daemon:
             return
         self.phone_listener = listener
 
+    async def _start_hooks(self, intake: HookIntake) -> HooksListener | None:
+        """The webhook listener, when GHOST_HOOKS_LISTEN is set (ADR 0027)."""
+        if not self.cfg.hooks_listen.strip():
+            return None
+        try:
+            listener = HooksListener(self.cfg.hooks_listen, intake)
+            await listener.start()
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error(f"hooks: listener not started on {self.cfg.hooks_listen!r}: {e}")
+            return None
+        return listener
+
     async def _conversation(
         self,
         models: Models,
@@ -752,11 +1084,15 @@ class Daemon:
         *,
         phone: Any = None,
         start_in: str = GHOST,
+        raised: tuple[list[Item], RoutePolicy, asyncio.Future[str]] | None = None,
     ) -> None:
         """One session. With ``phone`` (a negotiated SmallWebRTCConnection) the audio is
         the phone's: no ducking, no desk chime, the thinking sound in its track, and the
         session's events go to it over RTVI (ADR 0016). ``start_in`` is the thread the
-        session opens in: Ghost, or the one the phone called directly."""
+        session opens in: Ghost, or the one the phone called directly. With ``raised``
+        Ghost started it (ADR 0032): it greets with the operator's phrase, the items wait
+        in the context, and a reply within the window is the acknowledgment; silence ends
+        it with nothing kept."""
         origin = "phone" if phone is not None else "desk"
         if phone is None and not self._chimed:
             ducker.duck()
@@ -773,6 +1109,9 @@ class Daemon:
             self.state.add_turn(role, text)
             if role == "user":
                 self._refresh_pending()
+                if raised is not None and not replied.is_set():
+                    first_reply.append(text)
+                    replied.set()
 
         async def on_phase(phase: str) -> None:
             self.state.set_phase(Phase(phase), self.state.session_id)
@@ -790,11 +1129,19 @@ class Daemon:
                 # From here the phone may close the call before the desk's last write lands.
                 _PHONE_TEARDOWN["on"] = True
 
+        # ADR 0031: a bare wake in Ghost opens with what is waiting, said before anything
+        # else (the digest); a request in the same breath is answered instead.
+        digest = (
+            self.routes.digest()
+            if self.routes is not None
+            and start_in == GHOST
+            and not first_utterance
+            and raised is None
+            else []
+        )
+        replied = asyncio.Event()
+        first_reply: list[str] = []
         start_profile = self.conversations.get(start_in) if self.conversations else None
-        if start_profile is not None and not start_profile.is_ghost and self._enter is not None:
-            # A call straight into an agent (phone, desktop): its department's servers
-            # come up and their operations join the gate before the tools are built.
-            await self._enter(start_profile)
         session = build_session(
             self.voice,
             models=models,
@@ -806,8 +1153,6 @@ class Daemon:
             on_phase=on_phase,
             conversations=self.conversations,
             reach=self._reach,
-            on_enter=getattr(self, "_enter", None),
-            on_leave=getattr(self, "_leave", None),
             start_in=start_in,
             on_conversation=on_conversation,
             transport_factory=transport_factory,
@@ -816,8 +1161,18 @@ class Daemon:
             wake_fuzzy=self.cfg.wake_fuzzy,
             origin=origin,
             latency_log=self.cfg.latency_path,
+            **({"greeting": spoken_digest(digest)} if digest else {}),
+            **(
+                {"greeting": raised[1].greeting, "context_note": context_note(raised[0])}
+                if raised is not None
+                else {}
+            ),
         )
         self.session = session
+        if digest and self.routes is not None:
+            self.routes.heard_in_digest(digest)
+        if origin == "desk":
+            self._last_desk_session = time.monotonic()
         self._origin = origin
         self.state.set_phase(Phase.LISTENING, session.session_id, origin=origin)
         self.state.set_conversation(
@@ -838,6 +1193,11 @@ class Daemon:
                 asyncio.ensure_future(peer_gone.wait()),
                 asyncio.ensure_future(self._phone_end.wait()),
             }
+        if raised is not None:
+            self.state.set_phase(Phase.ASKING, session.session_id, origin=origin)
+            helpers.append(
+                asyncio.ensure_future(self._reply_window(session, raised, replied, first_reply))
+            )
         try:
             await session.start(open=phone is None)  # type: ignore[attr-defined]
             run_task = asyncio.ensure_future(session.run())
@@ -863,6 +1223,8 @@ class Daemon:
             for t in [*waits, *helpers]:
                 t.cancel()
             await asyncio.gather(*helpers, return_exceptions=True)
+            if raised is not None and not raised[2].done():
+                raised[2].set_result("not_heard")
             if events_q is not None:
                 self.state.bus.unsubscribe(events_q)
             if phone is not None:
@@ -872,10 +1234,13 @@ class Daemon:
             elif self.cfg.chime:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
-            if session.conversation is not None and self.fleet is not None:
-                self.fleet.leave(session.conversation.active.department)
+            # A change the session was still waiting on stays on the waiting list (ADR 0030).
+            if gate.set_aside(session.session_id, "session ended") is not None:
+                self._refresh_waiting_now()
             self.session = None
             self._origin = None
+            if origin == "desk":
+                self._last_desk_session = time.monotonic()
             logger.info(f"session {session.session_id} end")
             await events.emit("session_end", session_id=session.session_id, origin=origin)
 
@@ -1021,49 +1386,27 @@ def describe_skills(skills: Skills, servers: set[str]) -> str:
     return f"skills: {', '.join(items) if items else 'none'} (in {skills.ghost_dir})"
 
 
-def describe_mcp(fleet: Fleet, gate: WriteGate) -> list[str]:
-    """Ghost's servers as connected, then each department's as declared (they start when
-    a session enters the department, ADR 0024)."""
+def describe_apps(apps: Apps, gate: WriteGate | None = None) -> list[str]:
+    """Each app as connected: its reads and changes, and the changes Ghost's own
+    permissions block or ask about (ADR 0034)."""
     lines = []
-    mcp = fleet.ghost
-    ghost_policy = gate.policy_for(GHOST)
-    for name, spec in mcp.specs.items():
-        live = mcp.servers.get(name)
-        if live is None:
-            lines.append(f"  mcp {name} ({spec.transport}): not connected: {mcp.failed.get(name)}")
+    policy = gate.policy_for(GHOST) if gate is not None else AutonomyPolicy()
+    for name, spec in apps.specs.items():
+        live = apps.apps.get(name)
+        if live is None or not live.connected:
+            lines.append(f"  app {name} ({spec.transport}): not connected: {apps.problem(name)}")
             continue
-        offered = ", ".join(t.name for t in live.offered()) or "none"
-        ops = {o.name: o for o in live.operations()}
-        levels = ghost_policy.describe(name, {n: o.risk for n, o in ops.items()})
-        writes = ", ".join(f"{n}={lv.value}" for n, lv in levels.items())
-        undeclared = [
-            t.name
-            for t in live.tools
-            if not t.read_only and t.name not in {w.tool for w in spec.writes.values()}
-        ]
-        line = f"  mcp {name} ({spec.transport}): reads {offered}; writes {writes or 'none'}"
-        if undeclared:
-            line += f"; not declared, not offered: {', '.join(undeclared)}"
-        if spec.scope:
-            line += (
-                f" [scoped by {spec.scope.kind}: {', '.join(spec.scope.items) or 'no allowlist'}]"
-            )
+        reads = len(live.reads())
+        changes = live.changes()
+        careful = []
+        for t in changes:
+            level = policy.resolve(name, t.name)
+            if level.value in ("deny", "confirm"):
+                careful.append(f"{t.name}={'block' if level.value == 'deny' else 'ask'}")
+        line = f"  app {name} ({spec.transport}): {reads} reads, {len(changes)} changes"
+        if careful:
+            line += f"; {', '.join(careful)}"
         lines.append(line)
-    for d in fleet.departments.list():
-        if d.is_ghost:
-            continue
-        policy = gate.policy_for(d.slug)
-        for name, spec in d.servers.items():
-            levels = policy.describe(
-                d.source_name(name), {op: w.risk for op, w in spec.writes.items()}
-            )
-            writes = ", ".join(f"{n}={lv.value}" for n, lv in levels.items())
-            lines.append(
-                f"  mcp {d.slug}/{name} ({spec.transport}): starts on transfer; "
-                f"writes {writes or 'none'}"
-            )
-        for name in d.uses:
-            lines.append(f"  mcp {d.slug} uses {name} with its own declaration")
     return lines
 
 
@@ -1233,37 +1576,45 @@ def cli(argv: list[str] | None = None) -> None:
         except ValueError as e:
             problems.append(f"policy: {e}")
         departments = Departments(cfg.config_dir)
-        print(
-            "departments: "
-            + ", ".join(
-                f"{d.title} ({len(d.servers)} server(s), {len(d.uses)} used)"
-                for d in departments.list()
-            )
-        )
+        print("departments: " + ", ".join(d.title for d in departments.list()))
         for problem in departments.problems():
             print(f"  problem: {problem}")
             problems.append(problem)
-        if departments.ghost.servers:
+        for line in describe_watches(departments):
+            if not line.startswith("watch problem"):  # listed with the problems above
+                print(line)
+        for h in declared_hooks(departments):
+            failures = run_fixtures(h)
+            print(
+                f"hook {h.department}/{h.name}: {h.verify}, {len(h.events)} event(s), "
+                + ("fixtures pass" if not failures else f"{len(failures)} fixture(s) fail")
+            )
+            problems += [f"hook {h.department}/{h.name}: {f}" for f in failures]
+            if not os.environ.get(h.secret_name()):
+                problems.append(f"hook {h.department}/{h.name}: {h.secret_name()} is not set")
+        apps_file = load_apps(cfg.config_dir / APPS_FILE)
+        for problem in apps_file.problems:
+            print(f"  problem: {problem}")
+            problems.append(problem)
+        if apps_file.apps:
 
             async def probe() -> list[str]:
-                fleet = Fleet(departments)
-                await fleet.connect()
+                signins = SignIns(cfg.data_dir / "apps", port=cfg.signin_port)
+                apps = Apps(apps_file.apps, auth_for=signins.auth_for)
+                await apps.connect()
                 gate = WriteGate(Store(), autonomy=autonomy)
-                gate.set_department_policies(
-                    {d.slug: d.policy(autonomy) for d in departments.list()}
-                )
                 try:
-                    return describe_mcp(fleet, gate)
+                    return describe_apps(apps, gate)
                 finally:
-                    await fleet.close()
+                    await apps.close()
 
-            print("mcp servers:")
+            print("apps:")
             for line in asyncio.run(probe()):
                 print(line)
                 if "not connected" in line:
                     problems.append(line.strip())
         skills = Skills(cfg.skills_dir, cfg.home_skills_dir)
-        print(describe_skills(skills, set(departments.ghost.servers)))
+        print(describe_skills(skills, set(apps_file.apps)))
         problems += [f"skill {s.name}: {s.problem}" for s in skills.all() if s.problem]
         try:
             jev = build_jev(cfg)
@@ -1273,13 +1624,61 @@ def cli(argv: list[str] | None = None) -> None:
             problems.append(str(e))
         print("\n".join(problems) if problems else "config ok")
         sys.exit(1 if problems else 0)
+    elif cmd == "push":
+        sys.exit(push_cli(argv[1:]))
     else:
         print(
             "usage: ghostd [run|wake|say <text>|sleep|status|latency|perf|restore-volumes|"
-            "devices|check]"
+            "devices|check|push <department>/<hook> <event> [json]]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)
+
+
+def push_cli(args: list[str]) -> int:
+    """Send a signed delivery to the local webhook listener (ADR 0027), for a local
+    sender: ``ghostd push ghost/jobs done '{"job": "backup", "ok": false}'`` at the end of a
+    long job. The hook must use ``hmac``; its secret comes from the environment."""
+    import time
+    import uuid
+
+    import httpx
+    from ghost_core.hooks import H_EVENT, H_ID, H_SIG, H_TIME, sign_hmac
+
+    if len(args) < 2 or "/" not in args[0]:
+        print("usage: ghostd push <department>/<hook> <event> [json]", file=sys.stderr)
+        return 2
+    cfg = GhostdSettings()
+    slug, name = args[0].split("/", 1)
+    d = Departments(cfg.config_dir).get(slug)
+    hook = d.hooks.get(name) if d is not None else None
+    if hook is None or hook.verify != "hmac":
+        print(f"no hmac hook {args[0]} is declared", file=sys.stderr)
+        return 2
+    secret = os.environ.get(hook.secret_name(), "")
+    if not secret:
+        print(f"{hook.secret_name()} is not set", file=sys.stderr)
+        return 2
+    if not cfg.hooks_listen.strip():
+        print("GHOST_HOOKS_LISTEN is not set", file=sys.stderr)
+        return 2
+    body = (args[2] if len(args) > 2 else "{}").encode()
+    ts, delivery = str(int(time.time())), uuid.uuid4().hex
+    address = cfg.hooks_listen.split(",")[0].strip()
+    r = httpx.post(
+        f"http://{address}{hook.path}",
+        content=body,
+        headers={
+            "content-type": "application/json",
+            H_TIME: ts,
+            H_ID: delivery,
+            H_EVENT: args[1],
+            H_SIG: sign_hmac(secret, ts, delivery, body),
+        },
+        timeout=10,
+    )
+    print("accepted" if r.status_code < 400 else f"refused ({r.status_code})")
+    return 0 if r.status_code < 400 else 1
 
 
 if __name__ == "__main__":

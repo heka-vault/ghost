@@ -176,10 +176,6 @@ class VoiceSettings(BaseSettings):
     hold_timeout_secs: float = 1800.0
     smart_turn_threads: int = 2
 
-    # Department routing (ADR 0019, ADR 0024): a request about an item another department's
-    # declaration covers transfers the operator there by itself; off, Ghost offers.
-    department_routing: bool = False
-
     # Compaction (ADR 0014): Pipecat's in-session summarizer, tokens-only trigger. Gentle
     # on purpose; within one voice session it rarely fires. 0 disables it.
     compact_trigger_tokens: int = 24000

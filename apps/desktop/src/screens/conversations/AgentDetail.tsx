@@ -67,6 +67,12 @@ const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "p
 const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** What a department narrows (ADR 0034): “2 permissions of its own”, or that it has none. */
+const permissionWords = (p: { block: string[]; ask: string[]; quiet: string[] }) => {
+  const n = p.block.length + p.ask.length + p.quiet.length;
+  return n ? `${plural(n, "permission")} of its own` : "Ghost’s permissions";
+};
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 
 export function AgentDetail({ slug }: { slug: string }) {
@@ -441,7 +447,7 @@ export function AgentDetail({ slug }: { slug: string }) {
       const d = await moveAgent(client, slug, moveTo);
       setMoving(false);
       apply(d, false);
-      toast({ title: `Moved ${name} to ${departmentTitle(moveTo, departments)}`, description: "It works with that department’s servers, rules and memory from now on." });
+      toast({ title: `Moved ${name} to ${departmentTitle(moveTo, departments)}`, description: "It works with that department’s rules, permissions and memory from now on." });
     } catch (e) {
       fail(`Couldn’t move ${name}`, e);
     } finally {
@@ -801,7 +807,7 @@ export function AgentDetail({ slug }: { slug: string }) {
               id="conv-department"
               title="Department"
               description={
-                isGhost ? "Ghost is a department too: its servers, rules and skills live in its own folder." : `What this agent reaches: ${deptName}’s servers, skills and rules, and what ${deptName} knows.`
+                isGhost ? "Ghost is a department too: its rules and skills live in its own folder." : `What this agent works with: ${deptName}’s rules, skills and permissions, and what ${deptName} knows. Every department reaches Ghost’s apps.`
               }
               actions={!isDefault && !readOnly && !live ? <Button size="sm" variant="secondary" leadingIcon={<ArrowRightLeft />} onClick={() => setMoving(true)}>Move…</Button> : undefined}
             >
@@ -812,7 +818,7 @@ export function AgentDetail({ slug }: { slug: string }) {
                   </p>
                   <p className="conv-dept__sub">
                     {dept
-                      ? [dept.servers.length ? `${plural(dept.servers.length, "server")}${dept.uses.length ? ` and ${plural(dept.uses.length, "shared one")}` : ""}` : dept.uses.length ? plural(dept.uses.length, "shared server") : "no servers", plural(dept.skills.length, "skill"), dept.rules_lead ? `rules: ${dept.rules_lead}` : "no rules yet"].join(" · ")
+                      ? [permissionWords(dept.permissions), plural(dept.skills.length, "skill"), dept.rules_lead ? `rules: ${dept.rules_lead}` : "no rules yet"].join(" · ")
                       : "Loading the department…"}
                   </p>
                 </div>
@@ -972,7 +978,7 @@ export function AgentDetail({ slug }: { slug: string }) {
         dismissible={acting !== "move"}
         size="sm"
         title={`Move ${name}`}
-        description={`${name} keeps its name, persona, memory and transcript, and works with the destination’s servers, rules and shared memory from then on. There is no undo; moving back is another move.`}
+        description={`${name} keeps its name, persona, memory and transcript, and works with the destination’s rules, permissions and shared memory from then on. There is no undo; moving back is another move.`}
         footer={
           <>
             <Button variant="ghost" onClick={() => setMoving(false)} disabled={acting === "move"}>

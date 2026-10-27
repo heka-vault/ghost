@@ -85,7 +85,7 @@ export default function session(s: Scenario): SessionFixture {
   const pending: PendingProposal | null = s.pending
     ? {
         id: "7c1e4b2a9d8f4e6a8b3c5d7e9f1a2b4c",
-        ability: "github_heka",
+        ability: "github",
         operation: "close",
         target: "ghost-mock/app#151",
         summary: "On ghost-mock/app#151: close the issue, with a comment: “Duplicate of #148, which has the Safari cookie fix in review.”",
@@ -104,7 +104,7 @@ export default function session(s: Scenario): SessionFixture {
         match: /\bclose\b/i,
         reply: "Close that issue? Say yes, or press Confirm.",
         propose: {
-          ability: "github_heka",
+          ability: "github",
           operation: "close",
           target: "ghost-mock/app#163",
           summary: "On ghost-mock/app#163: close the issue.",

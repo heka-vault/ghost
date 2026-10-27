@@ -1,12 +1,12 @@
 """Bridge tool sources to Pipecat function calling.
 
-Two kinds of tool reach the model: a source's typed read tools and one shared
-``change`` that hands a typed change set to the gate (plus session tools: switch
-conversation, go to sleep). There is no undo tool: to take a change back the model
-proposes the reversing change through ``change``. What ``change`` does depends on
-the operator's autonomy policy (ADR 0011): the write either happens now and the
-verified result comes back, or a proposal waits for a spoken yes. The model never
-applies a write itself.
+Three kinds of tool reach the model: a source's typed read tools; each connected app's
+changes, under the app's name like its reads (ADR 0034); and one shared ``change`` for
+Ghost's own operations (the agents, the departments, the outputs), plus the session's
+tools (switch, hang up, hold). A change of either kind goes to the gate. What happens
+then is the operator's permissions (ADR 0011, ADR 0034): it happens now and the result
+comes back, or it waits for a spoken yes. There is no undo tool: to take a change back
+the model asks for the reversing change. The model never applies a change itself.
 """
 
 from __future__ import annotations
@@ -16,19 +16,17 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from ghost_core import (
-    SCOPE_ARG,
-    ActiveScope,
     Autonomy,
     Events,
     GateError,
     Operation,
-    OutOfScope,
     ToolSource,
     WriteGate,
 )
 from ghost_core.conversations import GHOST
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.department_tools import SOURCE as DEPARTMENTS
+from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.policy import PolicyError
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -47,6 +45,7 @@ OnCall = Callable[[str, dict[str, Any]], None]
 
 CHANGE_TOOL = "change"
 SWITCH_TOOL = "switch_conversation"
+BRING_UP_TOOL = "bring_up_change"
 
 
 def register_tools(
@@ -64,50 +63,13 @@ def register_tools(
     probe: LatencyProbe | None = None,
 ) -> list[FunctionSchema]:
     """``probe`` gets the time each step inside a call takes (ghost_voice.latency):
-    ``read`` for a read tool (the server behind it, an external API for GitHub), and
-    for ``change`` the source's ``prepare``, the gate's ``submit`` (snapshot, and the
-    write itself below ``confirm``) and the ``request`` check that may execute it."""
+    ``read`` for a read tool (the app behind it), and for a change the source's
+    ``prepare``, the gate's ``submit`` (the call itself below ``confirm``) and the
+    ``request`` check that may execute it."""
     probe = probe or NULL_PROBE
     events = events or Events()
     record = on_call or (lambda _n, _a: None)
     last_request = last_request or (lambda: ("", ""))
-
-    def scope_for(source: ToolSource) -> Callable[[], ActiveScope | None]:
-        """The active thread's scope for a scoped source, read at call time so a
-        switch mid-session is seen by the next call; None for an unscoped source."""
-        if conversations is None or not source.scope_kind:
-            return lambda: None
-        return lambda: conversations.scope_for(source.name)
-
-    async def out_of_scope(params: FunctionCallParams, e: OutOfScope) -> None:
-        """A request about something another department covers (ADR 0019). With
-        department routing on, transfer the operator and let that department handle it;
-        off, tell the model which department it belongs to so Ghost can offer."""
-        owner = conversations.owner_of(e.ability, e.item) if conversations else None
-        if (
-            owner is not None
-            and conversations is not None
-            and conversations.routing
-            and conversations.switch_allowed()
-        ):
-            request, _ = last_request()
-            await _transfer(
-                params,
-                conversations,
-                owner,
-                handoff=request,
-                result={"status": "routed", "to": owner.name, "item": e.item},
-                outcome=(
-                    f"They asked about {e.item}, which is yours, so Ghost routed them here. "
-                    "After your greeting, handle that request now."
-                ),
-            )
-            return
-        result: dict[str, Any] = {"error": str(e), "item": e.item}
-        if owner is not None:
-            result["belongs_to"] = owner.name
-            result["hint"] = f"offer to transfer them to {owner.name}"
-        await params.result_callback(result)
 
     def active_sources() -> list[ToolSource]:
         """What the active agent reaches (ADR 0024): its department's sources, or every
@@ -120,24 +82,36 @@ def register_tools(
         return conversations.department_slug() if conversations is not None else None
 
     def offered_ops(srcs: Sequence[ToolSource]) -> dict[str, dict[str, Operation]]:
-        """Operations the department's policy does not deny outright."""
+        """Operations the department's permissions do not block outright."""
         out: dict[str, dict[str, Operation]] = {}
         for a in srcs:
             offered = {
-                op.name: op
-                for op in a.operations
-                if gate.level(a.name, op.name, department=department()) is not Autonomy.DENY
+                op.name: op for op in a.operations if gate.offers(a.name, op.name, department())
             }
             if offered:
                 out[a.name] = offered
         return out
 
+    def offered_reads(srcs: Sequence[ToolSource]):
+        for a in srcs:
+            for tool in a.read_tools:
+                if gate_offers_read(a.name, tool.operation or tool.name):
+                    yield tool, a
+
+    def gate_offers_read(source: str, operation: str) -> bool:
+        return gate.offers(source, operation, department(), read=True)
+
     def change_schema(ops: dict[str, dict[str, Operation]]) -> FunctionSchema:
+        own = {
+            a: o
+            for a, aops in ops.items()
+            if (o := [op for op in aops.values() if op.tool_name is None])
+        }
         op_lines = "\n".join(
             f"- {aname}.{op.name}: {op.description} Args: {sorted(op.properties)}"
             f" (required: {op.required})"
-            for aname, aops in ops.items()
-            for op in aops.values()
+            for aname, aops in own.items()
+            for op in aops
         )
         return FunctionSchema(
             name=CHANGE_TOOL,
@@ -150,8 +124,9 @@ def register_tools(
             properties={
                 "ability": {
                     "type": "string",
-                    "enum": list(ops),
-                    "description": "The source: the server or 'conversations'.",
+                    "enum": list(own),
+                    "description": "What it changes: 'conversations' (the agents), "
+                    "'departments', 'outputs' or 'skills'.",
                 },
                 "operation": {"type": "string"},
                 "args": {"type": "object", "description": "Arguments for the operation."},
@@ -161,50 +136,75 @@ def register_tools(
         )
 
     def schemas_for(srcs: Sequence[ToolSource]) -> list[FunctionSchema]:
-        """The tools advertised for a list of sources: their reads, `change` for their
-        operations, and the session's own tools. A transfer advertises the new line's."""
-        out: list[FunctionSchema] = []
-        for a in srcs:
-            for tool in a.read_tools:
-                out.append(
-                    FunctionSchema(
-                        name=tool.name,
-                        description=tool.description,
-                        properties=tool.properties,
-                        required=tool.required,
-                    )
-                )
+        """The tools advertised for a list of sources: their reads, each app's changes
+        under their own names, `change` for Ghost's own operations, and the session's own
+        tools. A transfer advertises the new agent's."""
+        out: list[FunctionSchema] = [
+            FunctionSchema(
+                name=tool.name,
+                description=tool.description,
+                properties=tool.properties,
+                required=tool.required,
+            )
+            for tool, _ in offered_reads(srcs)
+        ]
         ops = offered_ops(srcs)
-        if ops:
+        for aops in ops.values():
+            for op in aops.values():
+                if op.tool_name is not None:
+                    out.append(
+                        FunctionSchema(
+                            name=op.tool_name,
+                            description=op.description,
+                            properties=op.properties,
+                            required=op.required,
+                        )
+                    )
+        if any(op.tool_name is None for aops in ops.values() for op in aops.values()):
             out.append(change_schema(ops))
         out.extend(session_schemas)
         return out
 
-    # Every read tool is one catch-all handler: a call goes to the version the active
-    # agent reaches now (a department's own servers come up after the session was built,
-    # ADR 0024), or is refused when its department does not reach it.
+    # Every read tool and every app's change is one catch-all handler: a call goes to the
+    # version the active agent reaches now (an app connected since the session was built
+    # is there), or is refused when the permissions block it.
     async def dispatch(params: FunctionCallParams) -> None:
         name = params.function_name
-        current = {t.name: (t, a) for a in active_sources() for t in a.read_tools}
+        reach_now = active_sources()
+        changes = {
+            op.tool_name: (op, aname)
+            for aname, aops in offered_ops(reach_now).items()
+            for op in aops.values()
+            if op.tool_name is not None
+        }
+        if name in changes:
+            op, aname = changes[name]
+            args = dict(params.arguments)
+            rationale = str(args.pop("rationale", "") or "")
+            await run_change(params, aname, op, args, rationale)
+            return
+        current = {t.name: (t, a) for t, a in offered_reads(reach_now)}
         hit = current.get(name)
         if hit is None:
             record(name, dict(params.arguments))
-            await params.result_callback({"error": f"{name} is not available in this department"})
+            await params.result_callback({"error": f"{name} is not available here"})
             return
         tool, a = hit
-        if a.name == DEPARTMENTS and conversations is not None:
+        if gate.blocks_read(a.name, tool.operation or tool.name, params.arguments, department()):
+            record(name, dict(params.arguments))
+            await params.result_callback(
+                {"error": f"{name} is blocked by the operator's permissions for that"}
+            )
+            return
+        if a.name in (DEPARTMENTS, OUTPUTS) and conversations is not None:
             params.arguments = {**params.arguments, "_active": conversations.active.slug}
-        await _wrap_read(tool.handler, record, probe, scope=scope_for(a), on_scope=out_of_scope)(
-            params
-        )
+        await _wrap_read(tool.handler, record, probe)(params)
 
     llm.register_function(None, dispatch)
 
-    def scope_now(srcs: Sequence[ToolSource], aname: str) -> ActiveScope | None:
-        src = next((s for s in srcs if s.name == aname), None)
-        return scope_for(src)() if src is not None else None
-
-    any_ops = any(a.operations for a in sources)
+    any_ops = conversations is not None or any(
+        op.tool_name is None for a in sources for op in a.operations
+    )
     session_schemas: list[FunctionSchema] = []  # switch, hang_up, hold; filled below
 
     async def change(params: FunctionCallParams) -> None:
@@ -220,21 +220,31 @@ def register_tools(
         if not aname and len(ops) == 1:
             aname = next(iter(ops))
         op = ops.get(aname, {}).get(op_name)
-        call_id = getattr(params, "tool_call_id", "")
         if op is None:
-            probe.tool_status(call_id, "error")
+            probe.tool_status(getattr(params, "tool_call_id", ""), "error")
             await params.result_callback({"error": f"unknown operation {aname!r}.{op_name!r}"})
             return
+        await run_change(
+            params, aname, op, dict(a.get("args") or {}), str(a.get("rationale") or "")
+        )
+
+    async def run_change(
+        params: FunctionCallParams,
+        aname: str,
+        op: Operation,
+        args: dict[str, Any],
+        rationale: str,
+    ) -> None:
+        """One change, from `change` or from an app's own tool: prepare, the gate, and
+        what the model is told."""
+        op_name = op.name
+        call_id = getattr(params, "tool_call_id", "")
         probe.tool_operation(call_id, f"{aname}.{op.name}")
-        args = dict(a.get("args") or {})
         record(f"{aname}.{op_name}", args)
-        if aname in (CONVERSATIONS, DEPARTMENTS) and conversations is not None:
+        if aname in (CONVERSATIONS, DEPARTMENTS, OUTPUTS) and conversations is not None:
             args["_active"] = conversations.active.slug
         if aname == DEPARTMENTS:
             args["_request"] = last_request()[0]  # a rule must be the operator's words
-        scope = scope_now(reach_now, aname)
-        if scope is not None:
-            args[SCOPE_ARG] = scope
         try:
             began = time.perf_counter()
             prepared = await op.prepare(args)
@@ -246,21 +256,17 @@ def register_tools(
                 operation=op.name,
                 target=prepared.target,
                 changes=prepared.changes,
-                rationale=str(a.get("rationale") or prepared.rationale),
-                scope=scope,
+                rationale=rationale or prepared.rationale,
                 conversation=conversations.active.slug if conversations else None,
                 department=department(),
+                asked_by=prepared.asked_by,
             )
             probe.tool_step(call_id, "submit", time.perf_counter() - began)
-        except OutOfScope as e:
-            probe.tool_status(call_id, "out_of_scope")
-            await out_of_scope(params, e)
-            return
         except (ValueError, PolicyError, GateError) as e:
             probe.tool_status(call_id, "error")
             await params.result_callback({"error": str(e)})
             return
-        except Exception as e:  # noqa: BLE001 - a server's failure (snapshot, write) is the answer
+        except Exception as e:  # noqa: BLE001 - an app's failure is the answer
             logger.warning(f"change {aname}.{op_name} failed: {type(e).__name__}: {e}")
             probe.tool_status(call_id, "error")
             await params.result_callback({"error": f"{aname}.{op_name} failed: {e}"})
@@ -310,8 +316,8 @@ def register_tools(
                     )
                     return
             # "Move this to accounting" (ADR 0024): the agent the operator is with moved
-            # departments, so the session is re-homed in place: that department's servers,
-            # rules, memory and voice, and "Moved to Accounting."
+            # departments, so the session is re-homed in place: that department's rules,
+            # memory and voice, and "Moved to Accounting."
             if (
                 aname == CONVERSATIONS
                 and op.name == "move"
@@ -384,7 +390,8 @@ def register_tools(
             {
                 "status": "needs_confirmation",
                 "summary": sub.proposal.preview,
-                "expires_in_secs": 60,
+                # ADR 0030: unanswered, it waits on the operator's waiting list.
+                "waits_minutes": int(gate.pending_ttl.total_seconds() // 60),
             }
         )
 
@@ -446,6 +453,40 @@ def register_tools(
             )
 
         llm.register_function(SWITCH_TOOL, switch)
+
+    session_schemas.append(
+        FunctionSchema(
+            name=BRING_UP_TOOL,
+            description=(
+                "Take up a change waiting on the operator's waiting list (its 'change' id "
+                "from waiting_list) when they ask about it: returns 'done' if their words "
+                "already asked for exactly it, else 'needs_confirmation' with a summary to "
+                "read out in one short sentence before you stop."
+            ),
+            properties={"change": {"type": "string"}},
+            required=["change"],
+        )
+    )
+
+    async def bring_up(params: FunctionCallParams) -> None:
+        change_id = str(params.arguments.get("change") or "")
+        record(BRING_UP_TOOL, dict(params.arguments))
+        p = gate.bring_back(change_id, session_id)
+        if p is None:
+            await params.result_callback({"error": "That change isn't waiting any more."})
+            return
+        # "Yes, close seventeen": the operator's own words may already be the yes (ADR 0017).
+        request, before = last_request()
+        outcome = await gate.confirm_by_request(session_id, request, question=before)
+        if outcome is not None:
+            await params.result_callback(
+                {"status": "done", "result": outcome.summary(), "state_now": _state(outcome)}
+            )
+            await events.emit("outcome", operation="confirmed", status=outcome.status)
+            return
+        await params.result_callback({"status": "needs_confirmation", "summary": p.preview})
+
+    llm.register_function(BRING_UP_TOOL, bring_up)
 
     session_schemas.append(
         FunctionSchema(
@@ -542,36 +583,18 @@ def _state(outcome) -> str:
     return outcome.readback.spoken() if outcome.readback else "unknown"
 
 
-OnScope = Callable[[FunctionCallParams, OutOfScope], Awaitable[None]]
-
-
 def _wrap_read(
     handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
     record: OnCall,
     probe: LatencyProbe = NULL_PROBE,
-    *,
-    scope: Callable[[], ActiveScope | None] = lambda: None,
-    on_scope: OnScope | None = None,
 ):
     async def run(params: FunctionCallParams) -> None:
         args = dict(params.arguments)
         record(params.function_name, args)
-        active = scope()
-        if active is not None:
-            args[SCOPE_ARG] = active
         began = time.perf_counter()
         status = "ok"
         try:
             result = await handler(args)
-        except OutOfScope as e:
-            call_id = getattr(params, "tool_call_id", "")
-            probe.tool_step(call_id, "read", time.perf_counter() - began)
-            probe.tool_status(call_id, "out_of_scope")
-            if on_scope is not None:
-                await on_scope(params, e)
-            else:
-                await params.result_callback({"error": str(e), "item": e.item})
-            return
         except (ValueError, PolicyError) as e:
             result = {"error": str(e)}
             status = "error"

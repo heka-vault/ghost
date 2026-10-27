@@ -28,7 +28,7 @@ let launchWantsStart = false;
 
 export default function Home() {
   const router = useRouter();
-  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy, via, conversations } = useDesk();
+  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy, via, conversations, waiting } = useDesk();
   const phone = usePhone();
   const { pairing } = phone;
   const { tone, title } = linkLabel(link);
@@ -52,6 +52,19 @@ export default function Home() {
   const keyGap = space[3];
   const keySize = Math.floor((width - 2 * space[5] - 2 * keyGap) / 3);
   const workstation = pairing?.workstation ?? "your desk";
+  // The waiting list, without what is snoozed (ADR 0029).
+  const shownWaiting = (waiting ?? []).filter((i) => i.state !== "snoozed");
+  const [acting, setActing] = useState<string | null>(null);
+  const act = async (key: string, run: () => Promise<void>) => {
+    setActing(key);
+    try {
+      await run();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setActing(null);
+    }
+  };
   const ready = online && !loadingModels && !deskBusy && !inSession;
 
   const start = async (conversation?: string) => {
@@ -170,6 +183,49 @@ export default function Home() {
         )}
       </View>
 
+      {/* What needs you (ADR 0029): read while the app is open; there is no push. A change
+          waiting for a yes is answered by voice, so a tap on one calls Ghost. */}
+      {shownWaiting.length > 0 && !inSession && link !== "connecting" ? (
+        <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
+          <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[3], marginLeft: space[1] }}>
+            What needs you
+          </Text>
+          <List>
+            {shownWaiting.map((item, i) => (
+              <View key={item.key}>
+                {i > 0 && <Divider />}
+                <Row
+                  top
+                  title={<Text size="lg" numberOfLines={2}>{item.title}</Text>}
+                  support={
+                    <Text size="md" color="text3" numberOfLines={1}>
+                      {waitingSource(item)}
+                      {item.state === "acknowledged" ? " · heard" : ""}
+                    </Text>
+                  }
+                  accessibilityLabel={item.source === "gate" ? `${item.title}. Call Ghost to answer it.` : item.title}
+                  onPress={item.source === "gate" && ready ? () => void start() : undefined}
+                  trailing={
+                    item.source === "gate" ? null : (
+                      <View style={{ gap: space[2] }}>
+                        {item.state !== "acknowledged" ? (
+                          <TouchButton size="md" loading={acting === item.key} onPress={() => void act(item.key, () => desk.acknowledge(item.key))}>
+                            Got it
+                          </TouchButton>
+                        ) : null}
+                        <TouchButton size="md" variant="ghost" onPress={() => void act(item.key, () => desk.snooze(item.key, 120))}>
+                          Later
+                        </TouchButton>
+                      </View>
+                    )
+                  }
+                />
+              </View>
+            ))}
+          </List>
+        </View>
+      ) : null}
+
       {/* The dial pad: Ghost and a key per department. A press calls its default agent; a department with more agents opens them in a sheet first. */}
       {keys.length > 1 && !inSession && link !== "connecting" ? (
         <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
@@ -278,3 +334,13 @@ export default function Home() {
     </Screen>
   );
 }
+
+/** Where an item came from, in plain words. */
+function waitingSource(item: { source: string; department?: string | null; delivered_via?: string | null }): string {
+  const [kind, rest] = item.source.includes(":") ? [item.source.slice(0, item.source.indexOf(":")), item.source.slice(item.source.indexOf(":") + 1)] : [item.source, ""];
+  if (kind === "watch") return `Watch ${rest}`;
+  if (kind === "hook") return `Webhook ${rest}`;
+  if (kind === "gate") return "Waiting for your yes · tap to call Ghost";
+  return "Ghost";
+}
+

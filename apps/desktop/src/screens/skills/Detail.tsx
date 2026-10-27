@@ -1,5 +1,5 @@
 /**
- * Owner: skills. The selected skill: where Ghost reads it from, the servers it names and
+ * Owner: skills. The selected skill: where Ghost reads it from, the apps it names and
  * whether each is connected, the files beside SKILL.md, and the instructions as the model
  * reads them. Skill text is untrusted (ADR 0023): shown as plain text, never acted on.
  */
@@ -7,7 +7,7 @@ import type { SkillBody, SkillInfo } from "@ghost/client-ts";
 import type { ReactNode, Ref } from "react";
 
 import { Badge, Button, Card, Notice, SkeletonText } from "../../ui";
-import { count, humanize, isGhosts, listWords, rootName, serverOf, tildePath } from "./model";
+import { count, humanize, isGhosts, listWords, rootName, appOf, tildePath } from "./model";
 
 export interface DetailProps {
   skill: SkillInfo;
@@ -27,8 +27,8 @@ export interface DetailProps {
 export function Detail({ skill: s, body, bodyError, error, online, removing, onRemove, headerAnchor }: DetailProps) {
   const name = humanize(s.name);
   const ghosts = isGhosts(s);
-  const missing = new Set(s.missing);
-  const needs = listWords(s.missing.map(serverOf));
+  const missing = new Set(s.missing.map(appOf));
+  const needs = listWords(s.missing.map(appOf));
   return (
     <article className="skl-detail" aria-labelledby="skl-detail-title">
       <header className="skl-detail__header">
@@ -94,8 +94,8 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
           description={
             s.requires.length > 0
               ? s.missing.length > 0
-                ? `The servers the skill names. Ghost still reads it, but what needs ${needs} can’t happen until that server is declared in the policy file and connects.`
-                : "The servers the skill names, every one connected."
+                ? `The apps the skill names. Ghost still reads it, but what needs ${needs} can’t happen until you connect ${s.missing.length === 1 ? "it" : "them"} under Apps.`
+                : "The apps the skill names, every one connected."
               : undefined
           }
         >
@@ -105,12 +105,12 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
                 <div key={r} className="skl-item skl-item--compact">
                   <div className="skl-item__text">
                     <p className="skl-item__title">
-                      {humanize(serverOf(r))}
-                      <span className="skl-item__id">{r}</span>
+                      {humanize(appOf(r))}
+                      <span className="skl-item__id">{appOf(r)}</span>
                     </p>
                   </div>
                   <span className="skl-item__state">
-                    {missing.has(r) ? (
+                    {missing.has(appOf(r)) ? (
                       <Badge tone="danger" dot size="sm">
                         Not connected
                       </Badge>
@@ -125,7 +125,7 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
             </Card>
           ) : (
             <p className="skl-none">
-              Nothing beyond Ghost itself. A skill names the servers it needs under <span className="t-mono">requires</span> in its front matter.
+              Nothing beyond Ghost itself. A skill names the apps it needs under <span className="t-mono">requires</span> in its front matter.
             </p>
           )}
         </Block>
@@ -172,7 +172,7 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
   );
 }
 
-/** A titled block, like Section, with its count beside the heading (as the Servers screen does). */
+/** A titled block, like Section, with its count beside the heading. */
 function Block({ title, count: n, description, children }: { title: string; count?: number; description?: ReactNode; children: ReactNode }) {
   return (
     <section className="skl-block">

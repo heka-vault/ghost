@@ -4,6 +4,73 @@
  */
 
 export interface paths {
+    "/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Apps
+         * @description Every app in apps.json: connected or not, and what each tool may do.
+         */
+        get: operations["list_apps_apps_get"];
+        put?: never;
+        /**
+         * Connect App
+         * @description Connect an app now and keep it in apps.json. An app that signs in comes back
+         *     with the address the browser should open; the desktop opens it.
+         */
+        post: operations["connect_app_apps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get App */
+        get: operations["get_app_apps__name__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect
+         * @description Disconnect: it leaves the tools at once and apps.json; its sign-in and the keys
+         *     Ghost kept for it are forgotten.
+         */
+        delete: operations["disconnect_apps__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{name}/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign In
+         * @description Sign in again, or reconnect an app that isn't connected.
+         */
+        post: operations["sign_in_apps__name__sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -13,6 +80,44 @@ export interface paths {
         };
         /** Audit */
         get: operations["audit_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalog
+         * @description Apps to connect, from Ghost's copy of the registry; first-party ones first when
+         *     nothing is searched. An old copy is refreshed in the background.
+         */
+        get: operations["catalog_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Catalog Entry */
+        get: operations["catalog_entry_catalog__name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -343,19 +448,21 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/mcp": {
+    "/permissions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+        /** Get Permissions */
+        get: operations["get_permissions_permissions_get"];
         /**
-         * Mcp Servers
-         * @description Ghost's servers, then each department's own (ADR 0024), connected or not.
+         * Put Permissions
+         * @description Change the mode, whole lists, or one rule; only ``[permissions]`` in the file is
+         *     rewritten, and the gate follows at once.
          */
-        get: operations["mcp_servers_mcp_get"];
-        put?: never;
+        put: operations["put_permissions_permissions_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -417,6 +524,43 @@ export interface paths {
         /** Put Policy */
         put: operations["put_policy_policy_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel One */
+        post: operations["cancel_one_proposals__proposal_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm One
+         * @description A Confirm on a change on the waiting list (ADR 0030): the stale check runs.
+         */
+        post: operations["confirm_one_proposals__proposal_id__confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -681,6 +825,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Waiting */
+        get: operations["waiting_waiting_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/waiting/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge
+         * @description The operator heard it: it stops alerting until it changes. Not a gate write;
+         *     it changes Ghost's own bookkeeping only.
+         */
+        post: operations["acknowledge_waiting_ack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/waiting/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Snooze */
+        post: operations["snooze_waiting_snooze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wake": {
         parameters: {
             query?: never;
@@ -708,6 +907,116 @@ export interface components {
             detail?: string | null;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * AppAction
+         * @description One of an app's tools, and what Ghost's own permissions say about it.
+         */
+        AppAction: {
+            /**
+             * Conditional
+             * @default false
+             */
+            conditional: boolean;
+            /** Description */
+            description: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "allow" | "ask" | "block" | "quiet";
+            /** Name */
+            name: string;
+            /** Reads */
+            reads: boolean;
+            /** Rule */
+            rule: string;
+        };
+        /**
+         * AppConnect
+         * @description Connect an app: from the catalog (``catalog`` and ``option``), from a URL, or from
+         *     another client's pasted config. Secret values go to Ghost's environment, never into
+         *     apps.json, and never come back out.
+         */
+        AppConnect: {
+            /** Catalog */
+            catalog?: string | null;
+            /** Config */
+            config?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Option */
+            option?: string | null;
+            /** Replace */
+            replace?: boolean | null;
+            /** Url */
+            url?: string | null;
+            /** Values */
+            values?: {
+                [key: string]: string;
+            } | null;
+        };
+        /** AppConnectResult */
+        AppConnectResult: {
+            /** Apps */
+            apps: components["schemas"]["AppView"][];
+            /** Sign In Url */
+            sign_in_url?: string | null;
+        };
+        /**
+         * AppsEvent
+         * @description An app was connected, disconnected or changed state: read ``GET /apps``. With
+         *     ``sign_in_url``, the app is waiting for the operator to sign in there; the desktop opens
+         *     it in the browser.
+         */
+        AppsEvent: {
+            /** Changed */
+            changed?: string | null;
+            /** Sign In Url */
+            sign_in_url?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "apps";
+        };
+        /**
+         * AppView
+         * @description A connected app: how it is reached, whether it is up, and what it can do.
+         */
+        AppView: {
+            /**
+             * Actions
+             * @default []
+             */
+            actions: components["schemas"]["AppAction"][];
+            /** Catalog */
+            catalog?: string | null;
+            /** Icon */
+            icon?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sign_in" | "key" | "local" | "custom";
+            /** Name */
+            name: string;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * Settings
+             * @default []
+             */
+            settings: string[];
+            /** Sign In Url */
+            sign_in_url?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "connected" | "connecting" | "needs_sign_in" | "failed" | "stopped";
+            /** Title */
+            title: string;
         };
         /** AuditEntry */
         AuditEntry: {
@@ -763,6 +1072,104 @@ export interface components {
             offset: number;
             /** Total */
             total: number;
+        };
+        /**
+         * CatalogEntryView
+         * @description An app in the catalog. Its text is the registry's: shown to the operator, never
+         *     to the model.
+         */
+        CatalogEntryView: {
+            /**
+             * Connected
+             * @default []
+             */
+            connected: string[];
+            /** Description */
+            description: string;
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
+            /** Icon */
+            icon?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Options
+             * @default []
+             */
+            options: components["schemas"]["CatalogOption"][];
+            /** Repository */
+            repository?: string | null;
+            /** Suggested Name */
+            suggested_name: string;
+            /** Title */
+            title: string;
+            /** Version */
+            version: string;
+            /** Website */
+            website?: string | null;
+        };
+        /**
+         * CatalogOption
+         * @description One way to connect: sign in, an API key, or run on this computer.
+         */
+        CatalogOption: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sign_in" | "key" | "local";
+            /** Label */
+            label: string;
+            /**
+             * Settings
+             * @default []
+             */
+            settings: components["schemas"]["CatalogSetting"][];
+        };
+        /** CatalogPage */
+        CatalogPage: {
+            /** Entries */
+            entries: components["schemas"]["CatalogEntryView"][];
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * Refreshing
+             * @default false
+             */
+            refreshing: boolean;
+            /** Total */
+            total: number;
+        };
+        /** CatalogSetting */
+        CatalogSetting: {
+            /**
+             * Choices
+             * @default []
+             */
+            choices: string[];
+            /** Default */
+            default?: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /**
+             * Secret
+             * @default false
+             */
+            secret: boolean;
         };
         /** CompactionView */
         CompactionView: {
@@ -973,9 +1380,30 @@ export interface components {
             voice?: string | null;
         };
         /**
+         * DepartmentPermissions
+         * @description What a department adds over Ghost's (``permissions`` in its department.json).
+         */
+        DepartmentPermissions: {
+            /**
+             * Ask
+             * @default []
+             */
+            ask: string[];
+            /**
+             * Block
+             * @default []
+             */
+            block: string[];
+            /**
+             * Quiet
+             * @default []
+             */
+            quiet: string[];
+        };
+        /**
          * DepartmentView
-         * @description A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
-         *     skills and agents. Ghost is one too.
+         * @description A department (ADR 0024): a folder under ~/.config/ghost with its rules, skills,
+         *     agents and the permissions that narrow what they may do (ADR 0034). Ghost is one too.
          */
         DepartmentView: {
             /**
@@ -993,6 +1421,11 @@ export interface components {
              * @default []
              */
             docs: string[];
+            /**
+             * Hooks
+             * @default []
+             */
+            hooks: components["schemas"]["HookInfo"][];
             /** Is Ghost */
             is_ghost: boolean;
             /**
@@ -1000,8 +1433,21 @@ export interface components {
              * @default
              */
             memory: string;
+            /**
+             * Outputs
+             * @default []
+             */
+            outputs: components["schemas"]["OutputInfo"][];
             /** Path */
             path: string;
+            /**
+             * @default {
+             *       "ask": [],
+             *       "block": [],
+             *       "quiet": []
+             *     }
+             */
+            permissions: components["schemas"]["DepartmentPermissions"];
             /**
              * Problems
              * @default []
@@ -1020,13 +1466,6 @@ export interface components {
              */
             rules_lead: string;
             /**
-             * Servers
-             * @default []
-             */
-            servers: string[];
-            /** Servers Up */
-            servers_up: boolean;
-            /**
              * Skills
              * @default []
              */
@@ -1035,13 +1474,13 @@ export interface components {
             slug: string;
             /** Title */
             title: string;
-            /**
-             * Uses
-             * @default []
-             */
-            uses: string[];
             /** Voice */
             voice?: string | null;
+            /**
+             * Watches
+             * @default []
+             */
+            watches: components["schemas"]["WatchInfo"][];
         };
         /** DeviceInfo */
         DeviceInfo: {
@@ -1073,10 +1512,53 @@ export interface components {
             /** Output Device */
             output_device: string | null;
         };
+        /**
+         * HookInfo
+         * @description A webhook the department takes (ADR 0027): on or off, and what came of deliveries
+         *     since the daemon started. Counts only; never a body.
+         */
+        HookInfo: {
+            /**
+             * Accepted
+             * @default {}
+             */
+            accepted: {
+                [key: string]: number;
+            };
+            /** Events */
+            events: string[];
+            /** Last */
+            last?: string | null;
+            /** Name */
+            name: string;
+            /** Off Reason */
+            off_reason?: string | null;
+            /** On */
+            on: boolean;
+            /** Path */
+            path: string;
+            /**
+             * Rejected
+             * @default {}
+             */
+            rejected: {
+                [key: string]: number;
+            };
+            /**
+             * Verify
+             * @enum {string}
+             */
+            verify: "github" | "hmac";
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ItemKey */
+        ItemKey: {
+            /** Key */
+            key: string;
         };
         /**
          * JournalEntry
@@ -1113,94 +1595,6 @@ export interface components {
              * @enum {string}
              */
             type: "log";
-        };
-        /** McpScopeInfo */
-        McpScopeInfo: {
-            /** Arguments */
-            arguments: string[];
-            /**
-             * Items
-             * @default []
-             */
-            items: string[];
-            /** Kind */
-            kind: string;
-        };
-        /**
-         * McpServerInfo
-         * @description One MCP server from the policy file (ADR 0022) and what Ghost got from it.
-         */
-        McpServerInfo: {
-            /** Connected */
-            connected: boolean;
-            /** Department */
-            department?: string | null;
-            /** Error */
-            error?: string | null;
-            /** Name */
-            name: string;
-            scope?: components["schemas"]["McpScopeInfo"] | null;
-            /**
-             * Tools
-             * @default []
-             */
-            tools: components["schemas"]["McpToolInfo"][];
-            /** Transport */
-            transport: string;
-            /**
-             * Writes
-             * @default []
-             */
-            writes: components["schemas"]["McpWriteInfo"][];
-        };
-        /** McpToolInfo */
-        McpToolInfo: {
-            /** Description */
-            description: string;
-            /** Name */
-            name: string;
-            /** Offered */
-            offered: boolean;
-        };
-        /**
-         * McpWriteInfo
-         * @description A declared write: the policy operation, the tool it calls, and its level.
-         */
-        McpWriteInfo: {
-            /**
-             * Asked By
-             * @default []
-             */
-            asked_by: string[];
-            /** Autonomy */
-            autonomy: string;
-            /** Offered */
-            offered: boolean;
-            /** Operation */
-            operation: string;
-            /**
-             * Properties
-             * @default {}
-             */
-            properties: {
-                [key: string]: unknown;
-            };
-            /** Read */
-            read?: string | null;
-            /**
-             * Required
-             * @default []
-             */
-            required: string[];
-            /** Risk */
-            risk: string;
-            /**
-             * Target
-             * @default []
-             */
-            target: string[];
-            /** Tool */
-            tool: string;
         };
         /** ModelsView */
         ModelsView: {
@@ -1266,6 +1660,23 @@ export interface components {
             /** Target */
             target: string;
         };
+        /**
+         * OutputInfo
+         * @description A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it.
+         */
+        OutputInfo: {
+            /** Bytes */
+            bytes: number;
+            /**
+             * Modified
+             * Format: date-time
+             */
+            modified: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+        };
         /** PendingEvent */
         PendingEvent: {
             pending: components["schemas"]["PendingProposal"] | null;
@@ -1298,10 +1709,60 @@ export interface components {
             target: string;
         };
         /**
+         * PermissionsUpdate
+         * @description Whole lists, the mode, or one rule moved; what is not given is kept.
+         */
+        PermissionsUpdate: {
+            /** Allow */
+            allow?: string[] | null;
+            /** Ask */
+            ask?: string[] | null;
+            /** Block */
+            block?: string[] | null;
+            /** Mode */
+            mode?: ("open" | "ask" | "read-only") | null;
+            /** Quiet */
+            quiet?: string[] | null;
+            set?: components["schemas"]["RuleSet"] | null;
+        };
+        /**
+         * PermissionsView
+         * @description ``[permissions]`` in policy.toml: everything runs unless a rule says otherwise.
+         */
+        PermissionsView: {
+            /**
+             * Allow
+             * @default []
+             */
+            allow: string[];
+            /**
+             * Ask
+             * @default []
+             */
+            ask: string[];
+            /**
+             * Block
+             * @default []
+             */
+            block: string[];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "open" | "ask" | "read-only";
+            /** Path */
+            path: string;
+            /**
+             * Quiet
+             * @default []
+             */
+            quiet: string[];
+        };
+        /**
          * Phase
          * @enum {string}
          */
-        Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold";
+        Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking";
         /** PhoneDevice */
         PhoneDevice: {
             /** Id */
@@ -1349,50 +1810,22 @@ export interface components {
         };
         /**
          * PolicyUpdate
-         * @description Either the raw TOML, or structured fields that are rendered to TOML.
+         * @description Either the raw TOML, or the routes rendered into it (the permissions have their own
+         *     route, ``PUT /permissions``).
          */
         PolicyUpdate: {
-            /** Default */
-            default?: string | null;
-            /** Skills */
-            skills?: {
-                [key: string]: {
-                    [key: string]: string;
-                };
-            } | null;
-            /** Targets */
-            targets?: {
-                [key: string]: {
-                    [key: string]: {
-                        [key: string]: string;
-                    };
-                };
-            } | null;
+            routes?: components["schemas"]["RoutesView"] | null;
             /** Text */
             text?: string | null;
         };
         /** PolicyView */
         PolicyView: {
-            /** Default */
-            default: string | null;
             /** Exists */
             exists: boolean;
             /** Path */
             path: string;
-            /** Skills */
-            skills: {
-                [key: string]: {
-                    [key: string]: string;
-                };
-            };
-            /** Targets */
-            targets: {
-                [key: string]: {
-                    [key: string]: {
-                        [key: string]: string;
-                    };
-                };
-            };
+            permissions: components["schemas"]["PermissionsView"];
+            routes?: components["schemas"]["RoutesView"] | null;
             /** Text */
             text: string;
         };
@@ -1404,12 +1837,59 @@ export interface components {
             name: string;
         };
         /**
+         * RoutesView
+         * @description ``[routes]`` in the policy file (ADR 0031): how Ghost reaches the operator.
+         */
+        RoutesView: {
+            /**
+             * Available
+             * @default []
+             */
+            available: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
+            /** Batch Secs */
+            batch_secs: number;
+            /** Calls Per Day */
+            calls_per_day: number;
+            /** Calls Per Hour */
+            calls_per_hour: number;
+            /**
+             * Carry
+             * @enum {string}
+             */
+            carry: "count" | "title";
+            /** Enabled */
+            enabled: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
+            /** Escalate After */
+            escalate_after: number;
+            /** Greeting */
+            greeting: string;
+            /** Quiet Hours */
+            quiet_hours?: string | null;
+            /**
+             * Urgency
+             * @default {}
+             */
+            urgency: {
+                [key: string]: "digest" | "notify" | "call";
+            };
+        };
+        /**
          * RuleAdd
          * @description A rule appended to a department's AGENTS.md, verbatim (ADR 0024).
          */
         RuleAdd: {
             /** Text */
             text: string;
+        };
+        /**
+         * RuleSet
+         * @description One toggle: move ``rule`` into ``level``'s list, or out of every list (None).
+         */
+        RuleSet: {
+            /** Level */
+            level?: ("allow" | "ask" | "block" | "quiet") | null;
+            /** Rule */
+            rule: string;
         };
         /** SampleRequest */
         SampleRequest: {
@@ -1536,14 +2016,18 @@ export interface components {
             /** Source */
             source: string;
         };
+        /** SnoozeRequest */
+        SnoozeRequest: {
+            /** Key */
+            key: string;
+            /** Minutes */
+            minutes: number;
+        };
         /**
          * SourceInfo
-         * @description A source of tools the gate knows: the lines (built in) or an MCP server. The
-         *     policy screen edits levels per operation from this list.
+         * @description A source of tools the gate knows: Ghost's own (built in) or a connected app.
          */
         SourceInfo: {
-            /** Department */
-            department?: string | null;
             /** Description */
             description: string;
             /** Kind */
@@ -1560,13 +2044,6 @@ export interface components {
              * @default []
              */
             read_tools: components["schemas"]["ReadToolInfo"][];
-            /**
-             * Scope Items
-             * @default []
-             */
-            scope_items: string[];
-            /** Scope Kind */
-            scope_kind?: string | null;
         };
         /** Status */
         Status: {
@@ -1575,6 +2052,11 @@ export interface components {
              * @default 1
              */
             api_version: string;
+            /**
+             * Apps
+             * @default []
+             */
+            apps: string[];
             /** Conversation */
             conversation?: string | null;
             /** Department */
@@ -1588,8 +2070,6 @@ export interface components {
             models_ready: boolean;
             pending?: components["schemas"]["PendingProposal"] | null;
             phase: components["schemas"]["Phase"];
-            /** Servers */
-            servers: string[];
             /** Session Id */
             session_id: string | null;
             /** Session Origin */
@@ -1598,6 +2078,11 @@ export interface components {
             uptime_secs: number;
             /** Version */
             version: string;
+            /**
+             * Waiting
+             * @default 0
+             */
+            waiting: number;
             /** Wake Mode */
             wake_mode: string;
         };
@@ -1683,6 +2168,69 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * WaitingEvent
+         * @description The waiting list changed: read ``GET /waiting`` for it.
+         */
+        WaitingEvent: {
+            /** Count */
+            count: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "waiting";
+        };
+        /**
+         * WaitingItemView
+         * @description One item that needs the operator. ``title`` comes from an outside system: show
+         *     it as text, never as markup. ``change`` is set for a change waiting for a yes.
+         */
+        WaitingItemView: {
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
+            /** Age Secs */
+            age_secs: number;
+            change?: components["schemas"]["PendingProposal"] | null;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Delivered At */
+            delivered_at?: string | null;
+            /** Delivered Via */
+            delivered_via?: string | null;
+            /** Department */
+            department?: string | null;
+            /**
+             * First Seen
+             * Format: date-time
+             */
+            first_seen: string;
+            /** Key */
+            key: string;
+            /** Link */
+            link?: string | null;
+            /** Snoozed Until */
+            snoozed_until?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "new" | "delivered" | "acknowledged" | "snoozed";
+            /** Title */
+            title: string;
+        };
+        /** WaitingView */
+        WaitingView: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["WaitingItemView"][];
+        };
         /** WakeRequest */
         WakeRequest: {
             /**
@@ -1696,6 +2244,48 @@ export interface components {
              */
             text?: string | null;
         };
+        /**
+         * WatchInfo
+         * @description A watch the department declares (ADR 0028) and how its last look went.
+         */
+        WatchInfo: {
+            /** App */
+            app: string;
+            /** Error */
+            error?: string | null;
+            /** Every Secs */
+            every_secs: number;
+            /** Last Ok */
+            last_ok?: string | null;
+            /** Last Run */
+            last_run?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Open
+             * @default 0
+             */
+            open: number;
+            /** Read */
+            read: string;
+            /**
+             * Response
+             * @enum {string}
+             */
+            response: "tell" | "record";
+            /**
+             * Seen
+             * @default 0
+             */
+            seen: number;
+            /** Steps */
+            steps: string[];
+            /**
+             * Urgency
+             * @enum {string}
+             */
+            urgency: "digest" | "notify" | "call";
+        };
     };
     responses: never;
     parameters: never;
@@ -1704,9 +2294,18 @@ export interface components {
     pathItems: never;
 }
 export type SchemaAck = components['schemas']['Ack'];
+export type SchemaAppAction = components['schemas']['AppAction'];
+export type SchemaAppConnect = components['schemas']['AppConnect'];
+export type SchemaAppConnectResult = components['schemas']['AppConnectResult'];
+export type SchemaAppsEvent = components['schemas']['AppsEvent'];
+export type SchemaAppView = components['schemas']['AppView'];
 export type SchemaAuditEntry = components['schemas']['AuditEntry'];
 export type SchemaAuditEventView = components['schemas']['AuditEventView'];
 export type SchemaAuditPage = components['schemas']['AuditPage'];
+export type SchemaCatalogEntryView = components['schemas']['CatalogEntryView'];
+export type SchemaCatalogOption = components['schemas']['CatalogOption'];
+export type SchemaCatalogPage = components['schemas']['CatalogPage'];
+export type SchemaCatalogSetting = components['schemas']['CatalogSetting'];
 export type SchemaCompactionView = components['schemas']['CompactionView'];
 export type SchemaConversationCreate = components['schemas']['ConversationCreate'];
 export type SchemaConversationDetail = components['schemas']['ConversationDetail'];
@@ -1715,22 +2314,24 @@ export type SchemaConversationMove = components['schemas']['ConversationMove'];
 export type SchemaConversationUpdate = components['schemas']['ConversationUpdate'];
 export type SchemaConversationView = components['schemas']['ConversationView'];
 export type SchemaDepartmentCreate = components['schemas']['DepartmentCreate'];
+export type SchemaDepartmentPermissions = components['schemas']['DepartmentPermissions'];
 export type SchemaDepartmentView = components['schemas']['DepartmentView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
+export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
+export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaJournalEntry = components['schemas']['JournalEntry'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
-export type SchemaMcpScopeInfo = components['schemas']['McpScopeInfo'];
-export type SchemaMcpServerInfo = components['schemas']['McpServerInfo'];
-export type SchemaMcpToolInfo = components['schemas']['McpToolInfo'];
-export type SchemaMcpWriteInfo = components['schemas']['McpWriteInfo'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
+export type SchemaOutputInfo = components['schemas']['OutputInfo'];
 export type SchemaPendingEvent = components['schemas']['PendingEvent'];
 export type SchemaPendingProposal = components['schemas']['PendingProposal'];
+export type SchemaPermissionsUpdate = components['schemas']['PermissionsUpdate'];
+export type SchemaPermissionsView = components['schemas']['PermissionsView'];
 export type SchemaPhase = components['schemas']['Phase'];
 export type SchemaPhoneDevice = components['schemas']['PhoneDevice'];
 export type SchemaPhonePairing = components['schemas']['PhonePairing'];
@@ -1739,7 +2340,9 @@ export type SchemaPolicyResult = components['schemas']['PolicyResult'];
 export type SchemaPolicyUpdate = components['schemas']['PolicyUpdate'];
 export type SchemaPolicyView = components['schemas']['PolicyView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
+export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
+export type SchemaRuleSet = components['schemas']['RuleSet'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];
 export type SchemaSecretState = components['schemas']['SecretState'];
@@ -1749,6 +2352,7 @@ export type SchemaSettingsView = components['schemas']['SettingsView'];
 export type SchemaSkillAdd = components['schemas']['SkillAdd'];
 export type SchemaSkillBody = components['schemas']['SkillBody'];
 export type SchemaSkillInfo = components['schemas']['SkillInfo'];
+export type SchemaSnoozeRequest = components['schemas']['SnoozeRequest'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
@@ -1757,9 +2361,159 @@ export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
 export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
+export type SchemaWaitingEvent = components['schemas']['WaitingEvent'];
+export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
+export type SchemaWaitingView = components['schemas']['WaitingView'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
+export type SchemaWatchInfo = components['schemas']['WatchInfo'];
 export type $defs = Record<string, never>;
 export interface operations {
+    list_apps_apps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppView"][];
+                };
+            };
+        };
+    };
+    connect_app_apps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppConnect"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConnectResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_app_apps__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_apps__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_in_apps__name__sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConnectResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     audit_audit_get: {
         parameters: {
             query?: {
@@ -1782,6 +2536,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalog_catalog_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalog_entry_catalog__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEntryView"];
                 };
             };
             /** @description Validation Error */
@@ -2435,12 +3253,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"];
                 };
             };
         };
     };
-    mcp_servers_mcp_get: {
+    get_permissions_permissions_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2455,7 +3273,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["McpServerInfo"][];
+                    "application/json": components["schemas"]["PermissionsView"];
+                };
+            };
+        };
+    };
+    put_permissions_permissions_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermissionsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2560,6 +3411,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_one_proposals__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_one_proposals__proposal_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeView"];
                 };
             };
             /** @description Validation Error */
@@ -2997,6 +3910,92 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["SampleRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    waiting_waiting_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitingView"];
+                };
+            };
+        };
+    };
+    acknowledge_waiting_ack_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemKey"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snooze_waiting_snooze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SnoozeRequest"];
             };
         };
         responses: {

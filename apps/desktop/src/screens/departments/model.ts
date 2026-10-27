@@ -19,11 +19,11 @@ export function listWords(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** What a department reaches, in a line: "2 servers, 1 shared · 3 skills · 4 agents". */
+/** What a department holds, in a line: "2 rules of its own · 3 skills · 4 agents". */
 export function reachWords(d: DepartmentView): string {
-  const servers = d.servers.length ? count(d.servers.length, "server") : d.uses.length ? "" : "no servers";
-  const shared = d.uses.length ? `${d.uses.length} shared` : "";
-  return [[servers, shared].filter(Boolean).join(", "), count(d.skills.length, "skill"), count(d.agents.length, "agent")].filter(Boolean).join(" · ");
+  const p = d.permissions;
+  const rules = p.block.length + p.ask.length + p.quiet.length;
+  return [rules ? `${count(rules, "permission")} of its own` : "", count(d.skills.length, "skill"), count(d.agents.length, "agent")].filter(Boolean).join(" · ");
 }
 
 /**
@@ -41,3 +41,17 @@ export async function revealFolder(path: string): Promise<{ ok: true } | { ok: f
     return { ok: false, path: shown };
   }
 }
+
+/** Open a file Ghost made with the operator's default app (ADR 0033); a browser can't. */
+export async function openFile(path: string): Promise<{ ok: true } | { ok: false; path: string }> {
+  const shown = tildePath(path);
+  if (!("__TAURI_INTERNALS__" in window)) return { ok: false, path: shown };
+  try {
+    const { openPath } = await import("@tauri-apps/plugin-opener");
+    await openPath(path);
+    return { ok: true };
+  } catch {
+    return { ok: false, path: shown };
+  }
+}
+

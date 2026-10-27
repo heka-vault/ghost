@@ -4,7 +4,7 @@
  * Ghost asks before a confirm-level change, a spoken yes or no settles it, the audit log
  * fills in. The voice side has no mic yet, so the Mock panel drives it through `act`.
  */
-import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn } from "@ghost/client-ts";
+import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn, WaitingItemView } from "@ghost/client-ts";
 
 import type { ConversationView } from "@ghost/client-ts";
 
@@ -80,9 +80,9 @@ export class MockDesk implements Desk {
   private muted = false;
 
   constructor() {
-    this.state = { link: "connecting", via: "Wi-Fi", lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, conversations: MOCK_LINES, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {} };
+    this.state = { link: "connecting", via: "Wi-Fi", lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, conversations: MOCK_LINES, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
     const audit = seedAudit();
-    setTimeout(() => this.set({ link: "online", status: this.status({}), audit, auditTotal: audit.length }), 700);
+    setTimeout(() => this.set({ link: "online", status: this.status({ waiting: 2 }), audit, auditTotal: audit.length, waiting: seedWaiting() }), 700);
   }
 
   getState = () => this.state;
@@ -101,7 +101,7 @@ export class MockDesk implements Desk {
 
   private status(patch: Partial<Status>): Status {
     return {
-      servers: ["github"],
+      apps: ["github"],
       api_version: "1",
       conversation: "ghost",
       models_ready: true,
@@ -110,6 +110,7 @@ export class MockDesk implements Desk {
       session_id: null,
       session_origin: null,
       ending: false,
+      waiting: 0,
       uptime_secs: 0,
       version: "0.1.0",
       wake_mode: "transcript",
@@ -169,6 +170,17 @@ export class MockDesk implements Desk {
 
   async loadAudit(_limit: number) {
     await sleep(200);
+  }
+
+  async acknowledge(key: string) {
+    await sleep(150);
+    this.set({ waiting: (this.state.waiting ?? []).map((i) => (i.key === key ? { ...i, state: "acknowledged", acknowledged_at: new Date().toISOString() } : i)) });
+  }
+
+  async snooze(key: string, minutes: number) {
+    await sleep(150);
+    const until = new Date(Date.now() + minutes * 60000).toISOString();
+    this.set({ waiting: (this.state.waiting ?? []).map((i) => (i.key === key ? { ...i, state: "snoozed", snoozed_until: until } : i)) });
   }
 
   setMuted(muted: boolean) {
@@ -285,3 +297,13 @@ export function isMock(desk: Desk): desk is MockDesk {
 }
 
 export type { Link };
+
+/** What the mock desk's waiting list starts with (ADR 0029). */
+function seedWaiting(): WaitingItemView[] {
+  const ago = (m: number) => new Date(Date.now() - m * 60000).toISOString();
+  return [
+    { key: "engineering:ci:1", source: "watch:engineering/ci", department: "engineering", title: "CI failed on main: test (ubuntu-latest)", state: "new", first_seen: ago(12), changed_at: ago(12), age_secs: 720, link: "https://github.com/heka-vault/ghost/actions" },
+    { key: "change:5f0c9a", source: "gate", department: null, title: "Waiting for your yes: On heka-vault/ghost#17: close the issue.", state: "delivered", first_seen: ago(40), changed_at: ago(40), age_secs: 2400, delivered_via: "digest", delivered_at: ago(30) },
+  ];
+}
+

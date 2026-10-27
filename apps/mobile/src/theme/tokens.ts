@@ -95,6 +95,7 @@ export function phaseColor(c: Colors, phase: GhostPhase): string {
     listening: c.phaseListening,
     thinking: c.phaseThinking,
     hold: c.phasePassive,
+    asking: c.phaseListening,
     speaking: c.phaseSpeaking,
     offline: c.phaseOffline,
   }[phase];

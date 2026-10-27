@@ -1,8 +1,8 @@
 /**
  * Owner: onboarding. PROTOTYPE: the first-run wizard at #/welcome.
  *
- * Eight steps in one place: welcome and the privacy promise, a model, a GitHub token (the
- * server and its repositories are the policy file's, ADR 0022), the microphone and echo
+ * Eight steps in one place: welcome and the privacy promise, a model, GitHub (an app,
+ * connected from Apps, ADR 0034), the microphone and echo
  * cancellation, the voice models, the background service, a first “Hey Ghost”, done. A rail on the left shows every step
  * and what's finished; the open step is the page's one focal point.
  *
@@ -177,8 +177,8 @@ export default function OnboardingPrototype({ params }: RouteProps) {
     const tasks = {
       welcome: true,
       model: !!settings && (settings.vault_managed || secret("ANTHROPIC_AUTH_TOKEN") || !!v.ANTHROPIC_BASE_URL),
-      // GitHub is a server in the policy file; the token is the one thing setup can give it. Without one, a fresh install practices on the mock server.
-      github: !!settings && secret("GITHUB_TOKEN"),
+      // GitHub is an app (ADR 0034), connected from Apps. Until it is, a fresh install practices on sample issues.
+      github: !!status?.apps.includes("github"),
       microphone: !!devices?.echo_cancel_active && !!v.GHOST_INPUT_DEVICE,
       models: modelsOnDisk,
       service: serviceUp && modelsOnDisk,

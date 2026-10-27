@@ -1,19 +1,14 @@
-"""``ghost-scripts``: the one way a skill's scripts run (ADR 0023), as an MCP server Ghost
-ships, so a run is a declared operation through the gate like any write.
+"""``ghost-scripts``: the one way a skill's scripts run (ADR 0023), as an app Ghost ships,
+so a run is a change through the gate like any other (ADR 0034).
 
-Declared in a department's ``mcp.json`` as a stdio server and in its ``department.json``
-scoped by skill, so the declaration says whose scripts may run and the gate asks
-(``confirm`` by default, ADR 0024)::
+Connected in ``apps.json`` like any app that runs on this computer; ``run`` is a change, so
+the operator's permissions decide whether it asks (``ask = ["scripts.run"]``)::
 
-    {"mcpServers": {"scripts": {"command": "ghost-scripts",
-                                "args": ["--skills", "~/.config/ghost/skills",
-                                         "--root", "~/projects/x"]}}}
+    {"apps": {"scripts": {"title": "Skill scripts", "command": "ghost-scripts",
+                          "args": ["--skills", "~/.config/ghost/skills",
+                                   "--root", "~/projects/x"]}}}
 
-    "scripts": {"scope": {"kind": "skill", "arguments": ["skill"], "items": ["month-close"]},
-                "writes": {"run": {"target": ["skill", "script"], "asked_by": ["run"],
-                                   "risk": "high", "bound": {"args": 12}}}}
-
-A script runs with a minimal environment (no secrets unless the server's ``env`` names
+A script runs with a minimal environment (no secrets unless the app's ``env`` names
 them), in its skill's folder, with a timeout and an output cap; the audit row carries the
 arguments and the outcome. ``list_scripts`` is the read.
 """

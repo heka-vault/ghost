@@ -27,7 +27,7 @@ def test_status_and_wake_sleep(world):
     client, state, control, *_ = world
     state.set_phase(Phase.PASSIVE)
     s = client.get("/status").json()
-    assert s["phase"] == "passive" and s["servers"] == [] and s["pending"] is None
+    assert s["phase"] == "passive" and s["apps"] == [] and s["pending"] is None
     assert client.post("/wake", json={"text": "what's up"}).json()["ok"] is True
     assert control.calls[-1] == ("wake", "what's up")
     assert client.get("/status").json()["session_id"] == "sess1"
@@ -99,41 +99,30 @@ def test_sources_listing(world):
     client, *_ = world
     out = client.get("/sources").json()
     by = {a["name"]: a for a in out}
-    assert by["fake"]["kind"] == "server" and by["fake"]["description"] == "A fake server."
+    assert by["fake"]["kind"] == "app" and by["fake"]["description"] == "fake"
     ops = {o["name"]: o for o in by["fake"]["operations"]}
     assert ops["flag"]["autonomy"] == "announce" and ops["nuke"]["autonomy"] == "confirm"
     assert by["fake"]["read_tools"][0]["name"] == "echo"
-    assert by["fake"]["scope_kind"] is None and by["fake"]["scope_items"] == []
-    # a scoped source (ADR 0019) says how and lists its whole allowlist
-    loaded = world[5]
-    loaded.scope_kind = "repository"
-    loaded.scope_items = lambda: ["acme/app", "acme/infra"]
-    by = {a["name"]: a for a in client.get("/sources").json()}
-    assert by["fake"]["scope_kind"] == "repository"
-    assert by["fake"]["scope_items"] == ["acme/app", "acme/infra"]
     assert by["conversations"]["kind"] == "built-in"
     conv_ops = {o["name"] for o in by["conversations"]["operations"]}
     assert {"retire", "rehire", "create", "rename"} <= conv_ops
-    assert by["fake"]["department"] is None
 
 
 def test_policy_round_trip_and_live_reload(world):
     client, state, control, gate, *_ = world
     v = client.get("/policy").json()
-    assert v["exists"] is False and v["skills"] == {}
-    r = client.put("/policy", json={"skills": {"fake": {"nuke": "announce"}}}).json()
-    assert r["applied"] is True
-    assert r["policy"]["skills"]["fake"]["nuke"] == "announce"
-    assert gate.level("fake", "nuke").value == "announce"  # reloaded live
-    text = r["policy"]["text"]
-    assert 'nuke = "announce"' in text
-    # raw text path, with a target rule
-    r2 = client.put(
-        "/policy", json={"text": text + '\n[fake.targets."docs"]\nnuke = "deny"\n'}
-    ).json()
-    assert r2["policy"]["targets"]["fake"]["docs"]["nuke"] == "deny"
+    assert v["exists"] is True and v["permissions"]["ask"] == ["fake.nuke"]
+    assert gate.level("fake", "nuke").value == "confirm"
+    # the raw text path, reloaded live
+    r = client.put("/policy", json={"text": '[permissions]\nquiet = ["fake.nuke"]\n'}).json()
+    assert r["applied"] is True and r["policy"]["permissions"]["quiet"] == ["fake.nuke"]
+    assert gate.level("fake", "nuke").value == "quiet"
+    # an older per-source table still reads, as a rule
+    r2 = client.put("/policy", json={"text": '[fake.targets."docs"]\nnuke = "deny"\n'}).json()
+    assert r2["policy"]["permissions"]["block"] == ["fake.nuke(target=docs)"]
     assert client.put("/policy", json={"text": "[fake]\nnuke = 'yolo'\n"}).status_code == 422
-    assert client.put("/policy", json={"skills": {"fake": {"nuke": "yolo"}}}).status_code == 422
+    bad = client.put("/policy", json={"text": '[permissions]\nblock = ["x.(y"]\n'})
+    assert bad.status_code == 422
 
 
 def test_settings_write_only_secrets(world):
@@ -222,7 +211,9 @@ def test_openapi_lists_every_route_with_tags(world):
         "/proposals/pending/confirm",
         "/audit",
         "/sources",
-        "/mcp",
+        "/apps",
+        "/catalog",
+        "/permissions",
         "/policy",
         "/settings",
         "/devices",
@@ -286,3 +277,63 @@ def test_phone_routes(world):
     assert client.delete("/phone").json()["ok"] is True
     assert client.delete("/phone").json()["ok"] is False
     assert client.get("/phone").json()["device"] is None
+
+
+async def test_a_change_from_a_hung_up_session_is_confirmed_from_the_waiting_list(world):
+    """ADR 0030: the session ends, the change waits, a Confirm by id applies it."""
+    client, state, control, gate, writer, *_ = world
+    state.set_phase(Phase.PASSIVE)
+    client.post("/wake")
+    sub = await pend(gate)
+    gate.set_aside("sess1", "hung up")
+    client.post("/sleep")
+    waiting = client.get("/waiting").json()
+    (item,) = waiting["items"]
+    assert item["source"] == "gate" and item["change"]["id"] == sub.proposal.id
+    assert waiting["count"] == 1 and item["state"] == "new"
+    out = client.post(f"/proposals/{sub.proposal.id}/confirm").json()
+    assert out["status"] == "success" and writer.tags == ["flagged"]
+    assert client.get("/waiting").json()["items"] == []
+    entry = client.get("/audit").json()["items"][0]
+    assert entry["status"] == "executed"
+    assert client.post(f"/proposals/{sub.proposal.id}/confirm").status_code == 409
+
+
+async def test_acknowledge_and_snooze_an_item(world):
+    client, state, control, gate, *_ = world
+    sub = await pend(gate)
+    gate.set_aside("sess1", "hung up")
+    key = client.get("/waiting").json()["items"][0]["key"]
+    assert client.post("/waiting/ack", json={"key": key}).json()["ok"] is True
+    view = client.get("/waiting").json()
+    assert view["items"][0]["state"] == "acknowledged" and view["count"] == 0
+    assert client.post("/waiting/snooze", json={"key": key, "minutes": 30}).json()["ok"]
+    assert client.get("/waiting").json()["items"][0]["state"] == "snoozed"
+    assert client.post("/waiting/ack", json={"key": "nope"}).json()["ok"] is False
+    assert client.post(f"/proposals/{sub.proposal.id}/cancel").json()["ok"] is True
+    assert client.get("/waiting").json()["items"] == []
+
+
+def test_routes_are_edited_as_fields_and_kept_with_the_levels(world):
+    client, *_, deps = world
+    deps.policy_path.write_text('[defaults]\npending_ttl = 900\n[fake]\nnuke = "confirm"\n')
+    view = client.get("/policy").json()["routes"]
+    assert view["enabled"] == ["digest", "phone"] and view["available"] == ["digest"]
+    routes = {
+        **view,
+        "enabled": ["desk", "digest"],
+        "quiet_hours": "22:00-07:00",
+        "greeting": "Eric, got a minute?",
+    }
+    r = client.put("/policy", json={"routes": routes})
+    assert r.status_code == 200, r.text
+    text = deps.policy_path.read_text()
+    assert (
+        '[routes]\nenabled = ["digest", "desk"]' in text and 'quiet_hours = "22:00-07:00"' in text
+    )
+    assert 'ask = ["fake.nuke"]' in text and "pending_ttl = 900" in text
+    client.put("/permissions", json={"set": {"rule": "fake.nuke", "level": "quiet"}})
+    text = deps.policy_path.read_text()
+    assert '"Eric, got a minute?"' in text and 'quiet = ["fake.nuke"]' in text  # kept [routes]
+    bad = client.put("/policy", json={"routes": {**routes, "escalate_after": 0}})
+    assert bad.status_code == 422

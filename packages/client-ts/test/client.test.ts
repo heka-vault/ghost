@@ -31,42 +31,50 @@ describe("GhostClient", () => {
           version: "t",
           api_version: "1",
           wake_mode: "file",
-          servers: ["github"],
+          apps: ["github"],
           pending: null,
         }),
       }),
     );
     const s = await client.status();
     expect(s.phase).toBe("passive");
-    expect(s.servers).toEqual(["github"]);
+    expect(s.apps).toEqual(["github"]);
   });
 
-  it("lists sources and servers (ADR 0022)", async () => {
+  it("lists apps, browses the catalog, connects and moves a permission (ADR 0034)", async () => {
+    const sent: Record<string, string> = {};
+    const app = {
+      name: "github",
+      title: "GitHub",
+      kind: "local",
+      state: "connected",
+      actions: [{ name: "issue_write", description: "Change an issue.", reads: false, level: "allow", rule: "github.issue_write", conditional: false }],
+      settings: ["GHOST_APP_GITHUB_TOKEN"],
+    };
+    const perms = { path: "/p", mode: "open", block: [], ask: [], quiet: [], allow: [] };
     const client = new GhostClient(
       fakeTransport({
-        "GET /sources": () => [
-          { name: "conversations", kind: "built-in", description: "Your lines", operations: [], read_tools: [], scope_items: [], scope_kind: null },
-          { name: "github", kind: "server", description: "Issues.", operations: [{ name: "close", description: "Close an issue.", risk: "high", autonomy: "confirm", properties: {}, required: [] }], read_tools: [], scope_kind: "repository", scope_items: ["acme/app"] },
-        ],
-        "GET /mcp": () => [
-          {
-            name: "github",
-            transport: "stdio",
-            connected: true,
-            error: null,
-            tools: [{ name: "issue_read", description: "Read an issue.", offered: true }],
-            writes: [{ operation: "close", tool: "issue_write", risk: "high", autonomy: "confirm", asked_by: ["close"], target: ["owner", "repo", "issue_number"], read: "issue_read", offered: true, properties: {}, required: [] }],
-            scope: { kind: "repository", arguments: ["owner", "repo"], items: ["acme/app"] },
-          },
-        ],
+        "GET /apps": () => [app],
+        "GET /catalog": () => ({ entries: [{ name: "app.linear/linear", title: "Linear", description: "Issues.", version: "1", featured: true, options: [{ id: "remote-0", kind: "sign_in", label: "Sign in", settings: [] }], suggested_name: "linear", connected: [] }], total: 1, refreshing: false }),
+        "POST /apps": (body) => {
+          sent.connect = body;
+          return { apps: [{ ...app, name: "linear", title: "Linear", kind: "sign_in", state: "connecting" }], sign_in_url: "https://linear.app/oauth" };
+        },
+        "PUT /permissions": (body) => {
+          sent.permissions = body;
+          return { ...perms, ask: ["github.issue_write"] };
+        },
       }),
     );
-    const sources = await client.sources();
-    expect(sources.map((s) => s.kind)).toEqual(["built-in", "server"]);
-    expect(sources[1].scope_kind).toBe("repository");
-    const servers = await client.mcp();
-    expect(servers[0].writes[0].read).toBe("issue_read");
-    expect(servers[0].tools[0].offered).toBe(true);
+    expect((await client.apps())[0].actions[0].level).toBe("allow");
+    const page = await client.catalog("linear");
+    expect(page.entries[0].options[0].kind).toBe("sign_in");
+    const res = await client.connectApp({ catalog: "app.linear/linear", option: "remote-0", values: {} });
+    expect(res.sign_in_url).toContain("linear.app");
+    expect(JSON.parse(sent.connect).option).toBe("remote-0");
+    const after = await client.updatePermissions({ set: { rule: "github.issue_write", level: "ask" } });
+    expect(after.ask).toEqual(["github.issue_write"]);
+    expect(JSON.parse(sent.permissions).set.level).toBe("ask");
   });
 
   it("lists, reads, adds and removes skills (ADR 0023)", async () => {
@@ -103,7 +111,7 @@ describe("GhostClient", () => {
   it("retires, rehires and moves an agent, and reads the departments (ADR 0024)", async () => {
     const posts: Record<string, string> = {};
     const agent = { id: "a1", slug: "brand", name: "Brand", aliases: [], department: "marketing", job: "the look", voice: "bm_george", speed: 1, own_voice: false, persona: "", memory: "", notes: [], created_at: "x", last_active_at: null, retired_at: null, active: false, is_ghost: false, is_default: false, turn_count: 0, compactions: 0, dir: "~" };
-    const dept = { slug: "marketing", title: "Marketing", aliases: [], path: "~/.config/ghost/departments/marketing", root: null, voice: null, is_ghost: false, rules_lead: "Marketing", rules: "# Marketing\n", memory: "", servers: [], uses: ["github"], servers_up: false, skills: [], docs: [], agents: ["marketing", "brand"], problems: [] };
+    const dept = { slug: "marketing", title: "Marketing", aliases: [], path: "~/.config/ghost/departments/marketing", root: null, voice: null, is_ghost: false, rules_lead: "Marketing", rules: "# Marketing\n", memory: "", permissions: { block: ["github.delete_*"], ask: [], quiet: [] }, skills: [], docs: [], agents: ["marketing", "brand"], problems: [] };
     const client = new GhostClient(
       fakeTransport({
         "POST /conversations/brand/retire": () => ({ ok: true, detail: null }),
@@ -129,7 +137,7 @@ describe("GhostClient", () => {
     expect((await client.rehireConversation("brand")).detail).toBe("not retired");
     expect((await client.moveConversation("brand", "sales")).department).toBe("sales");
     expect(JSON.parse(posts.move)).toEqual({ department: "sales" });
-    expect((await client.departments())[0].uses).toEqual(["github"]);
+    expect((await client.departments())[0].permissions?.block).toEqual(["github.delete_*"]);
     expect((await client.department("marketing")).agents).toEqual(["marketing", "brand"]);
     await client.createDepartment({ name: "Marketing", aliases: ["the marketers"], voice: null });
     expect(JSON.parse(posts.department).aliases).toEqual(["the marketers"]);

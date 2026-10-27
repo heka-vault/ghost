@@ -30,6 +30,12 @@ class _NoControl:
     async def cancel_pending(self):
         return False
 
+    async def confirm_proposal(self, proposal_id):
+        return None
+
+    async def cancel_proposal(self, proposal_id):
+        return False
+
     def reload_policy(self):
         raise NotImplementedError
 

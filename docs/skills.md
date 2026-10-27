@@ -16,7 +16,7 @@ may do.
 ---
 name: month-close
 description: Close the books each month, from reconciliation to the report.
-requires: [mcp:quickbooks]          # optional: servers it needs; the desktop shows "missing"
+requires: [app:quickbooks]          # optional: apps it needs; the desktop shows "missing"
 ---
 ```
 
@@ -55,10 +55,11 @@ between tools is common); links inside a skill are not.
 
 ## What a skill cannot do
 
-Skill text is untrusted like issue text. It cannot name a server the session does not have
-and cannot change a level or a scope. A skill's scripts never run from its text: they run
-only through `ghost-scripts`, a gated server scoped by skill ([departments.md](departments.md)).
+Skill text is untrusted like issue text. It cannot name an app the session does not have
+and cannot change a permission. A skill's scripts never run from its text: they run only
+through `ghost-scripts`, an app whose `run` goes through the gate like any change
+([departments.md](departments.md#scripts-run-only-through-the-gate)).
 
-`ghostd check` lists the skills found, where each came from, any problem, and any required
-server that is not connected; `GET /skills` on the control API and the desktop's Skills
+`ghostd check` lists the skills found, where each came from, any problem, and any app it
+requires that is not connected (`mcp:<name>`, the older form, still reads); `GET /skills` on the control API and the desktop's Skills
 screen show the same.

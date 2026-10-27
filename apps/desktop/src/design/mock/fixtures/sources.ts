@@ -1,12 +1,12 @@
 /**
- * Owner: policy. What the gate knows (GET /sources, ADR 0022): the agents and the
- * departments, built in, and one source per connected MCP server, with its operations at
- * their resolved levels, the reads it offers, and its allowlist. The policy screen edits
- * levels from this list.
+ * Owner: policy. What the gate knows (GET /sources, ADR 0034): Ghost's own operations (the
+ * agents and the departments, built in) and one source per connected app, its changes as
+ * operations and its reads as read tools. Each operation's `autonomy` is the level the
+ * permissions give it by name, in the gate's words; the mock works it out on every read.
  */
 import type { OperationInfo, SourceInfo } from "@ghost/client-ts";
 
-import type { ServerFixture } from "./mcp";
+import type { AppFixture } from "./apps";
 import type { Scenario } from "../scenarios";
 
 const c = (name: string, description: string, risk: string, autonomy: string, props: string[], required: string[] = []): OperationInfo => ({
@@ -38,9 +38,6 @@ export const CONVERSATIONS: SourceInfo = {
     c("switch", "Transfer the operator to a department or an agent.", "low", "announce", ["name"], ["name"]),
   ],
   read_tools: [{ name: "list_agents", description: "The departments and the agents in each, with names, aliases and jobs: who the operator can be transferred to." }],
-  scope_kind: null,
-  scope_items: [],
-  department: null,
 };
 
 /** The departments as a source (ADR 0024): a rule appended verbatim, a shared fact, the docs and the journal. */
@@ -56,38 +53,20 @@ export const DEPARTMENTS: SourceInfo = {
     { name: "read_department_doc", description: "A department's documents: with no file, the list; with one, its text." },
     { name: "department_journal", description: "What a department's agents have done, newest first: each change made through Ghost, by whom and to what." },
   ],
-  scope_kind: null,
-  scope_items: [],
-  department: null,
 };
 
-/** The declaration's description for an operation, as ghost_core.mcp builds it. */
-const DESCRIBED: Record<string, string> = {
-  comment: "Add a comment to an issue.",
-  set_labels: "Set an issue's labels to the full new list (read it first: labels replaces them all).",
-  close: "Close an issue (state_reason: completed, not_planned or duplicate).",
-  reopen: "Reopen a closed issue.",
-  add_note: "Add a note to today's page.",
-  create_event: "Create an event on the primary calendar.",
-};
-
-/** A connected server as a source: its offered writes are operations, its offered tools are reads. */
-export function sourceOf(f: ServerFixture): SourceInfo {
-  const { info } = f;
+/** A connected app as a source: its changes are operations, its reads are read tools. */
+export function sourceOf(f: AppFixture): SourceInfo {
   return {
-    name: info.name,
-    kind: "server",
-    description: f.prompt.split(". ")[0].replace(/\.?$/, "."),
-    operations: info.writes
-      .filter((w) => w.offered)
-      .map((w) => ({ name: w.operation, description: DESCRIBED[w.operation] ?? `${w.tool} on ${info.name}.`, risk: w.risk, autonomy: w.autonomy, properties: w.properties, required: w.required })),
-    read_tools: info.tools.filter((t) => t.offered).map((t) => ({ name: t.name, description: t.description })),
-    scope_kind: info.scope?.kind ?? null,
-    scope_items: info.scope ? [...info.scope.items] : [],
-    department: info.department ?? null,
+    name: f.view.name,
+    kind: "app",
+    description: f.view.title,
+    operations: f.tools.filter((t) => !t.reads).map((t) => ({ name: t.name, description: t.description, risk: "medium", autonomy: "announce", properties: {}, required: [] })),
+    read_tools: f.tools.filter((t) => t.reads).map((t) => ({ name: t.name, description: t.description })),
   };
 }
 
-export default function sources(_s: Scenario, servers: ServerFixture[]): SourceInfo[] {
-  return [structuredClone(CONVERSATIONS), structuredClone(DEPARTMENTS), ...servers.filter((f) => f.info.connected).map(sourceOf)];
+/** Ghost's own sources; the mock adds one per connected app when it answers. */
+export default function sources(_s: Scenario): SourceInfo[] {
+  return [structuredClone(CONVERSATIONS), structuredClone(DEPARTMENTS)];
 }

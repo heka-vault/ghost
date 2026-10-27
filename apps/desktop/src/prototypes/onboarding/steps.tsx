@@ -1,6 +1,7 @@
 /** Owner: onboarding. The account steps: welcome, model, GitHub, done. Voice steps live in voice.tsx. */
-import { ArrowRight, Ear, FlaskConical, Hand, KeyRound, MessagesSquare, Server, ShieldCheck } from "lucide-react";
+import { ArrowRight, Ear, FlaskConical, Hand, KeyRound, MessagesSquare, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useGhost } from "@ghost/ui";
 
 import { hrefFor, navigate } from "../../app/router";
 import {
@@ -280,110 +281,57 @@ export function ModelStep({ w }: { w: Wizard }) {
 /* ------------------------------------------------------------------------------ github */
 
 /**
- * The token is all this step saves. GitHub itself is an MCP server declared in the policy file
- * (ADR 0022), and which repositories Ghost may touch is that server's scope, so there is no
- * practice switch and no repository list here. A fresh install declares a practice server.
+ * GitHub is an app (ADR 0034): it connects from the catalog under Apps, by signing in, and
+ * every agent and department reaches it. This step only says whether it is connected and
+ * takes the operator there; there is no token or repository list here. Keeping Ghost to some
+ * repositories is a rule on Permissions.
  */
 export function GitHubStep({ w }: { w: Wizard }) {
-  const { online } = useLive();
-  const s = w.settings;
-  const tokenSet = s?.secrets.find((x) => x.name === "GITHUB_TOKEN")?.set ?? false;
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const dirty = !!token.trim();
-  const footNote = useSavesWhenBack(dirty);
-
-  const submit = async () => {
-    if (!s) return;
-    setError(null);
-    const value = token.trim();
-    if (!value) return w.next();
-    setBusy(true);
-    try {
-      await w.save({ values: null, secrets: { GITHUB_TOKEN: value } });
-      setToken("");
-      w.next();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const { status } = useGhost();
+  const connected = !!status?.apps.includes("github");
   return (
     <StepFrame
       id="github"
       title="Connect GitHub"
-      description="Ghost reaches GitHub through a server declared in your policy file. Give it a token to sign in with, or keep practicing on sample issues for now."
-      primary={{ label: "Continue", onClick: submit, loading: busy, disabled: (w.loading && !s) || (!online && (!w.done.github || dirty)) }}
+      description="Ghost reaches GitHub as an app. Sign in to it from Apps, or keep practicing on sample issues for now."
+      primary={{ label: "Continue", onClick: () => w.next() }}
       onBack={w.back}
       onSkip={w.done.github ? undefined : w.skip}
-      footNote={footNote}
       autoFocus={w.focusOnOpen}
-      notices={
-        <>
-          <NeedsGhost w={w} what="save a token" />
-          {error && (
-            <Notice tone="danger" title="Couldn’t save">
-              {error}
-            </Notice>
-          )}
-        </>
-      }
+      notices={<NeedsGhost w={w} what="connect an app" />}
     >
-      {!s ? (
-        <FieldsSkeleton />
-      ) : (
-        <div className="onb-fields onb-fields--loose">
-          <Field
-            label="GitHub token"
-            detail="GITHUB_TOKEN"
-            aside={<SecretBadge set={tokenSet} />}
-            help={tokenSet ? "Paste a new one only to replace it." : "Fine‑grained, with read and write access to issues. Saved on this computer only."}
-          >
-            <Input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              value={token}
-              placeholder={tokenSet ? "Replace…" : "github_pat_11A…"}
-              onChange={(e) => setToken(e.target.value)}
-            />
-          </Field>
-
-          <div>
-            <Card list>
-              {!tokenSet && (
-                <ListRow
-                  leading={<FlaskConical size={16} aria-hidden />}
-                  title="Using the practice GitHub for now"
-                  description="Sample issues, kept in memory. Nothing reaches github.com until a token is set."
-                />
-              )}
+      <div className="onb-fields onb-fields--loose">
+        <div>
+          <Card list>
+            {connected ? (
+              <ListRow leading={<KeyRound size={16} aria-hidden />} title="GitHub is connected" description="Ghost can look things up and make changes there, and tells you what it changed." />
+            ) : (
               <ListRow
-                leading={<Server size={16} aria-hidden />}
-                title="Repositories are chosen per server"
-                description={
-                  <>
-                    Each GitHub server in <span className="t-mono">~/.config/ghost/policy.toml</span> lists the repositories Ghost may touch under its{" "}
-                    <span className="t-mono">[mcp.github]</span> section. Nothing written in an issue can add to that list.
-                  </>
-                }
+                leading={<FlaskConical size={16} aria-hidden />}
+                title="Using the practice GitHub for now"
+                description="Sample issues, kept in memory. Nothing reaches github.com until you connect GitHub."
               />
-            </Card>
-            <div className="onb-links">
-              <Button size="sm" variant="secondary" href={hrefFor("/servers")} trailingIcon={<ArrowRight />}>
-                Open Servers
-              </Button>
-              <Button size="sm" variant="ghost" href={hrefFor("/policy")}>
-                Edit the policy file
-              </Button>
-            </div>
+            )}
+            <ListRow
+              leading={<ShieldCheck size={16} aria-hidden />}
+              title="Keep Ghost to some repositories"
+              description={
+                <>
+                  Add a rule on Permissions, such as <span className="t-mono">github.*(repo!=app)</span>. Nothing written in an issue can change it.
+                </>
+              }
+            />
+          </Card>
+          <div className="onb-links">
+            <Button size="sm" variant="secondary" href={hrefFor("/apps")} trailingIcon={<ArrowRight />}>
+              {connected ? "Open Apps" : "Connect GitHub in Apps"}
+            </Button>
+            <Button size="sm" variant="ghost" href={hrefFor("/permissions")}>
+              Open Permissions
+            </Button>
           </div>
         </div>
-      )}
+      </div>
     </StepFrame>
   );
 }
@@ -430,9 +378,9 @@ export function DoneStep({ w }: { w: Wizard }) {
           <Card list>
             <ListRow
               leading={<ShieldCheck size={16} aria-hidden />}
-              title="Decide what Ghost may do"
-              description="Let it close or label without asking, or never."
-              href={hrefFor("/policy")}
+              title="Set permissions"
+              description="Ghost uses its apps and tells you what it changed. Block a tool, or have it ask first."
+              href={hrefFor("/permissions")}
               chevron
             />
             <ListRow

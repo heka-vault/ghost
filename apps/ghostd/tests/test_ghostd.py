@@ -227,3 +227,46 @@ async def test_an_early_chime_without_a_session_restores_the_music(tmp_path, mon
     await asyncio.wait_for(d._passive(Wake(), None, [], None, Events(), ducker), 5)  # noqa: SLF001
     assert ducker.calls == ["duck", "restore"]
     assert d._chimed is False  # noqa: SLF001
+
+
+def test_ghosts_own_problems_are_items_for_the_waiting_list():
+    """ADR 0029, ADR 0034: an app that isn't connected, one that wants a new sign-in, a
+    folder that doesn't read."""
+    from types import SimpleNamespace
+
+    from ghost_core.apps import App, Apps, AppSpec
+    from ghostd.main import ghost_problems
+
+    specs = {
+        "github": AppSpec(name="github", title="GitHub", command="x"),
+        "figma": AppSpec(name="figma", command="y"),
+        "linear": AppSpec(name="linear", title="Linear", url="https://x", sign_in=True),
+    }
+    apps = Apps(specs, environ={})
+    up = App(specs["github"], environ={})
+    up._session = object()  # noqa: SLF001 - connected
+    apps.apps["github"] = up
+    apps.failed = {"figma": "setting FIGMA_TOKEN is not set", "linear": "needs sign-in"}
+    depts = [
+        SimpleNamespace(slug="ghost", title="Ghost", is_ghost=True, problems=[]),
+        SimpleNamespace(slug="sales", title="Sales", is_ghost=False, problems=["bad json"]),
+    ]
+    out = ghost_problems(apps, SimpleNamespace(list=lambda: depts))
+    assert [k for k, _, _ in out] == ["app:figma", "app:linear", "department:sales"]
+    assert out[1][1] == "Linear needs you to sign in again"
+    assert "FIGMA_TOKEN" in out[0][1] and out[2][2] == "sales"
+
+
+def test_the_route_engine_exists_before_routes_are_added_to_it():
+    """Daemon.run is not exercised end to end in tests (it loads the voice models); this
+    guards the order that broke startup on 2026-10-27."""
+    import inspect
+
+    from ghostd.main import Daemon
+
+    src = inspect.getsource(Daemon.run)
+    made = src.index("self.routes = RouteEngine(")
+    assert all(
+        made < i
+        for i in [m.start() for m in __import__("re").finditer(r"self\.routes\.add_route", src)]
+    )

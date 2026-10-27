@@ -85,8 +85,8 @@ export default function SkillsScreen(_: RouteProps) {
     }
   }, [client, fail]);
 
-  // What a skill is missing depends on which servers are connected, so re-read when that set changes.
-  const connectedKey = (status?.servers ?? []).join("\n");
+  // What a skill is missing depends on which apps are connected, so re-read when that set changes.
+  const connectedKey = (status?.apps ?? []).join("\n");
   useEffect(() => {
     void load();
   }, [load, connectedKey]);

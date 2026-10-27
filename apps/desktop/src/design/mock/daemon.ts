@@ -4,17 +4,23 @@
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
 import type {
+  AppConnect,
+  AppConnectResult,
+  AppView,
   AuditEntry,
+  CatalogEntryView,
+  CatalogPage,
   ConversationDetail,
   ConversationView,
   DepartmentView,
   DevicesView,
   GhostEvent,
   JournalEntry,
-  McpServerInfo,
   ModelsView,
   OutcomeView,
   PendingProposal,
+  PermissionsUpdate,
+  PermissionsView,
   PhonePairing,
   PhoneView,
   PolicyUpdate,
@@ -26,23 +32,22 @@ import type {
   Status,
   Turn,
   VoiceInfo,
+  WaitingItemView,
 } from "@ghost/client-ts";
 
+import { HttpError } from "./errors";
+import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/departments";
 import type { Fixtures } from "./fixtures";
-import type { ServerFixture } from "./fixtures/mcp";
-import { renderToml } from "./fixtures/policy";
-import { parsePolicy } from "../../screens/policy/model";
+import { renderPolicy } from "./fixtures/policy";
 import type { SessionFixture } from "./fixtures/session";
+import { sourceOf } from "./fixtures/sources";
+import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
 import { GHOST_SKILLS_DIR, type SkillFixture, missingOf } from "./fixtures/skills";
 import { hex, type Scenario, seeded } from "./scenarios";
 
-export class HttpError extends Error {
-  constructor(public status: number, public detail: string) {
-    super(detail);
-  }
-}
+export { HttpError };
 
 type Listener = (e: GhostEvent | Status) => void;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -90,8 +95,14 @@ function doneSummary(summary: string): string {
 
 const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-/** Mock-only knobs for the phone (ADR 0016), from the URL: see mock/index.ts. */
-export interface PhoneOptions {
+/** Mock-only knobs from the URL (the phone, ADR 0016; the catalog, ADR 0034): see mock/index.ts. */
+export interface MockOptions {
+  /**
+   * The catalog (?catalog=…): `slow`, the first copy takes 4 seconds (as on a first run);
+   * `problem`, the copy is three days old and the refresh failed; `empty`, the first copy
+   * hasn't arrived yet and doesn't for 8 seconds. First run is `slow` without asking.
+   */
+  catalog?: "slow" | "problem" | "empty" | null;
   /** The phone pairs this many ms after a code is issued (?phone=pairs). 0: it never does. */
   pairsAfterMs?: number;
   /** How long a pairing code lasts, in seconds (?phone=expires makes it short). The real one: 120. */
@@ -108,8 +119,10 @@ export class MockDaemon {
   private agents = new Map<string, AgentRecord>();
   /** The department folders (ADR 0024), without their agents, which are read off the agents. */
   private departments: Omit<DepartmentView, "agents">[];
-  /** The declared servers (GET /mcp) and what the gate knows (GET /sources), ADR 0022. */
-  private servers: ServerFixture[];
+  /** The apps in apps.json (GET /apps, ADR 0034) and the registry copy to connect more from (GET /catalog). */
+  private apps: AppFixture[];
+  private catalog: CatalogSeed[];
+  /** Ghost's own sources; each connected app adds one when GET /sources answers. */
   private sources: SourceInfo[];
   private policy: PolicyView;
   private audit: AuditEntry[];
@@ -119,13 +132,15 @@ export class MockDaemon {
   private voices: VoiceInfo[];
   private phone: PhoneView;
   private pairing: PhonePairing | null = null;
-  private phoneOpts: PhoneOptions;
+  private phoneOpts: MockOptions;
   /** The SKILL.md folders Ghost reads (ADR 0023): Ghost's own and the operator's. */
   private skills: SkillFixture[];
   private script: SessionFixture;
+  /** What needs the operator (ADR 0029). */
+  private waitingItems: WaitingItemView[];
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
-  constructor(scenario: Scenario, f: Fixtures, phoneOpts: PhoneOptions = {}) {
+  constructor(scenario: Scenario, f: Fixtures, phoneOpts: MockOptions = {}) {
     this.scenario = scenario;
     this.phone = f.settings.phone;
     this.phoneOpts = phoneOpts;
@@ -135,7 +150,8 @@ export class MockDaemon {
     for (const l of f.conversations.agents) this.agents.set(l.detail.slug, l);
     this.departments = f.departments;
     this.voices = f.conversations.voices;
-    this.servers = f.mcp;
+    this.apps = f.apps;
+    this.catalog = f.catalog;
     this.sources = f.sources;
     this.policy = f.policy;
     this.audit = f.audit;
@@ -143,6 +159,7 @@ export class MockDaemon {
     this.devices = f.settings.devices;
     this.models = f.settings.models;
     this.skills = f.skills;
+    this.waitingItems = f.waiting;
     const first = f.conversations.agents.find((l) => l.detail.slug === scenario.session)?.detail ?? null;
     this.status = {
       phase: scenario.phase,
@@ -152,12 +169,13 @@ export class MockDaemon {
       version: "0.1.0",
       api_version: "1",
       wake_mode: "transcript",
-      servers: this.servers.filter((f) => f.info.connected).map((f) => f.info.name),
+      apps: f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name),
       pending: this.pending,
       conversation: scenario.session,
       department: first ? first.department : null,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
+      waiting: f.waiting.filter((i) => i.state === "new" || i.state === "delivered").length,
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;
@@ -388,14 +406,14 @@ export class MockDaemon {
   /** GET /departments: each folder with its agents, the department's own first. */
   private departmentView(d: Omit<DepartmentView, "agents">): DepartmentView {
     const agents = [...this.agents.values()].filter((a) => a.detail.department === d.slug).map((a) => a.detail.slug).sort((a, b) => (a === d.slug ? -1 : b === d.slug ? 1 : a.localeCompare(b)));
-    return { ...structuredClone(d), agents, servers_up: d.slug === "ghost" || d.slug === this.status.department };
+    return { ...structuredClone(d), agents };
   }
   private createDepartment(name: string, aliases: string[], voice: string | null): DepartmentView {
     const title = name.trim();
     if (!title) throw new HttpError(422, "A department needs a name.");
     const slug = slugOf(title);
     if (slug === "ghost" || this.departments.some((d) => d.slug === slug)) throw new HttpError(409, `there is already a department called ${JSON.stringify(title)}`);
-    const d: Omit<DepartmentView, "agents"> = { slug, title, aliases, path: `${CONFIG_DIR}/departments/${slug}`, root: null, voice, is_ghost: false, rules_lead: title, rules: `# ${title}\n`, memory: "", servers: [], uses: [], servers_up: false, skills: [], docs: [], problems: [] };
+    const d: Omit<DepartmentView, "agents"> = { slug, title, aliases, path: `${CONFIG_DIR}/departments/${slug}`, root: null, voice, is_ghost: false, rules_lead: title, rules: `# ${title}\n`, memory: "", permissions: { block: [], ask: [], quiet: [] }, skills: [], docs: [], problems: [], watches: [], hooks: [], outputs: [] };
     this.departments.push(d);
     // Its own agent, named for it.
     const detail: ConversationDetail = {
@@ -429,9 +447,9 @@ export class MockDaemon {
   }
 
   // ------------------------------------------------------------------ skills (ADR 0023)
-  /** GET /skills as the daemon reports it: `missing` re-read from the servers connected now. */
+  /** GET /skills as the daemon reports it: `missing` re-read from the apps connected now. */
   private skillList(): SkillInfo[] {
-    const connected = new Set(this.servers.filter((f) => f.info.connected).map((f) => f.info.name));
+    const connected = new Set(this.connectedApps());
     return this.skills.map((f) => ({ ...f.info, missing: missingOf(f.info.requires, connected) }));
   }
   private skillNamed(name: string): SkillFixture | null {
@@ -474,6 +492,206 @@ export class MockDaemon {
     this.audited("skills", "remove", `skill:${name}`, `Removed the ${name} skill.`, "quiet");
   }
 
+  // ------------------------------------------------------------------ waiting (ADR 0029)
+  private waitingView() {
+    const count = this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length;
+    return { items: this.waitingItems, count };
+  }
+  private markWaiting(key: string, patch: Partial<WaitingItemView>): boolean {
+    const i = this.waitingItems.findIndex((x) => x.key === key);
+    if (i < 0) return false;
+    this.waitingItems[i] = { ...this.waitingItems[i], ...patch };
+    this.waitingChanged();
+    return true;
+  }
+  private dropWaiting(key: string) {
+    this.waitingItems = this.waitingItems.filter((x) => x.key !== key);
+    this.waitingChanged();
+  }
+  private waitingChanged() {
+    const { count } = this.waitingView();
+    this.emit({ type: "waiting", count });
+    this.pushStatus({ waiting: count });
+  }
+
+  // ------------------------------------------------------------------ apps (ADR 0034)
+  private connectedApps(): string[] {
+    return this.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name);
+  }
+  /** GET /apps/{name}: each tool at the level the permissions give it now, once the app is connected. */
+  private appView(f: AppFixture): AppView {
+    const p = this.policy.permissions;
+    const name = f.view.name;
+    const actions =
+      f.view.state === "connected"
+        ? f.tools.map((t) => ({ name: t.name, description: t.description, reads: t.reads, level: levelOf(p, name, t.name, t.reads), rule: `${name}.${t.name}`, conditional: conditionalFor(p, name, t.name) }))
+        : [];
+    return { ...structuredClone(f.view), actions };
+  }
+  /** GET /sources: Ghost's own, then each connected app, every operation at the level its name gets. */
+  private sourceList(): SourceInfo[] {
+    const p = this.policy.permissions;
+    const all = [...this.sources, ...this.apps.filter((a) => a.view.state === "connected").map(sourceOf)];
+    return all.map((src) => ({ ...src, operations: src.operations.map((op) => ({ ...op, autonomy: AUTONOMY[levelOf(p, src.name, op.name, false)] })) }));
+  }
+  private appsChanged(changed: string | null, sign_in_url: string | null = null) {
+    this.emit({ type: "apps", changed, sign_in_url });
+    this.pushStatus({ apps: this.connectedApps() });
+  }
+  private freeName(base: string): string {
+    const taken = new Set(this.apps.map((a) => a.view.name));
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(`${base}-${n}`)) n++;
+    return `${base}-${n}`;
+  }
+  private entryView(e: CatalogSeed): CatalogEntryView {
+    const { app, ...rest } = structuredClone(e);
+    return {
+      ...rest,
+      version: e.version ?? "1.0.0",
+      website: e.website ?? null,
+      repository: e.repository ?? null,
+      suggested_name: this.freeName(app),
+      connected: this.apps.filter((a) => a.view.catalog === e.name).map((a) => a.view.name),
+    };
+  }
+  private async catalogPage(search: string, offset: number, limit: number): Promise<CatalogPage> {
+    const opt = this.phoneOpts.catalog ?? (this.scenario.configured ? null : "slow");
+    // The first copy arrives 4 seconds after Ghost starts; every request before then waits for it.
+    if (opt === "slow") await sleep(Math.max(0, this.bootedAt + 4000 - Date.now()));
+    if (opt === "empty" && Date.now() - this.bootedAt < 8000) return { entries: [], total: 0, fetched_at: null, refreshing: true, problem: null };
+    const q = search.trim().toLowerCase();
+    const all = q
+      ? this.catalog.filter((c) => [c.title, c.description, c.name].some((x) => x.toLowerCase().includes(q)))
+      : [...this.catalog].sort((a, b) => Number(b.featured) - Number(a.featured));
+    return {
+      entries: all.slice(offset, offset + limit).map((e) => this.entryView(e)),
+      total: all.length,
+      fetched_at: new Date(Date.now() - (opt === "problem" ? 3 * 86400000 : 20 * 60000)).toISOString(),
+      refreshing: false,
+      problem: opt === "problem" ? "Couldn't reach registry.modelcontextprotocol.io: timed out after 20 seconds" : null,
+    };
+  }
+  /** The address a sign-in opens, as the authorization server would hand it back. */
+  private signInUrl(name: string, website: string | null | undefined): string {
+    const host = website ? new URL(website).host : `${name}.example.com`;
+    return `https://${host}/oauth/authorize?client_id=ghost-${hex(8, rand)}&redirect_uri=${encodeURIComponent("http://127.0.0.1:53682/callback")}&response_type=code&state=${hex(16, rand)}`;
+  }
+  /** Bring an app up a moment later: a sign-in finishes in the browser, a key or a command just connects. */
+  private settle(f: AppFixture, after: number, outcome: { problem?: string | null } = {}) {
+    this.later(after, () => {
+      if (!this.apps.includes(f)) return;
+      f.view.sign_in_url = null;
+      if (outcome.problem) Object.assign(f.view, { state: "failed", problem: outcome.problem });
+      else Object.assign(f.view, { state: "connected", problem: null });
+      this.appsChanged(f.view.name);
+    });
+  }
+  private connect(b: AppConnect): AppConnectResult {
+    const values = b.values ?? {};
+    const made: AppFixture[] = [];
+    let website: string | null = null;
+    if (b.config != null) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(b.config);
+      } catch (e) {
+        throw new HttpError(422, `the pasted config: not JSON (${(e as Error).message})`);
+      }
+      const root = (parsed && typeof parsed === "object" ? ((parsed as Record<string, unknown>).mcpServers ?? parsed) : null) as Record<string, Record<string, unknown>> | null;
+      if (!root || typeof root !== "object" || !Object.keys(root).length) throw new HttpError(422, "no apps in it");
+      for (const [key, entry] of Object.entries(root)) {
+        const name = key.toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-|-$/g, "");
+        const secrets = Object.keys({ ...((entry.env as object) ?? {}), ...((entry.headers as object) ?? {}) }).map((k) => `GHOST_APP_${name.toUpperCase().replace(/-/g, "_")}_${k.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`);
+        made.push({
+          view: { name, title: key, kind: entry.command ? "local" : secrets.length ? "key" : "custom", state: "connecting", problem: null, catalog: null, icon: null, sign_in_url: null, settings: secrets },
+          tools: GENERIC_TOOLS,
+        });
+      }
+    } else if (b.url != null) {
+      let u: URL | null = null;
+      try {
+        u = new URL(b.url);
+      } catch {
+        u = null;
+      }
+      if (!u || !/^https?:$/.test(u.protocol)) throw new HttpError(422, "the address must start with https://");
+      let name = b.name || u.hostname.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      name = name.replace(/^mcp-/, "").replace(/-com$/, "").replace(/^-+|-+$/g, "").slice(0, 40) || "app";
+      const key = (values.key ?? "").trim();
+      made.push({
+        view: { name, title: values.title || name, kind: key ? "key" : "sign_in", state: "connecting", problem: null, catalog: null, icon: null, sign_in_url: null, settings: key ? [`GHOST_APP_${name.toUpperCase().replace(/-/g, "_")}_KEY`] : [] },
+        tools: GENERIC_TOOLS,
+      });
+      website = `${u.protocol}//${u.host}`;
+    } else {
+      if (!b.catalog || !b.option) throw new HttpError(422, "give catalog and option, a url, or a config");
+      const entry = this.catalog.find((c) => c.name === b.catalog);
+      if (!entry) throw new HttpError(404, `${b.catalog} is not in the catalog`);
+      const option = entry.options.find((o) => o.id === b.option);
+      if (!option) throw new HttpError(422, `${entry.title} has no way to connect called ${b.option}`);
+      for (const s of option.settings) if (s.required && !(values[s.key] ?? "").trim() && !s.default) throw new HttpError(422, `${s.label} is required to connect ${entry.title}`);
+      const name = b.name || this.freeName(entry.app);
+      const env = name.toUpperCase().replace(/-/g, "_");
+      made.push({
+        view: { name, title: entry.title, kind: option.kind, state: "connecting", problem: null, catalog: entry.name, icon: entry.icon ?? null, sign_in_url: null, settings: option.settings.filter((s) => s.secret).map((s) => `GHOST_APP_${env}_${s.key.toUpperCase()}`) },
+        tools: TOOLS_BY_CATALOG[entry.name] ?? GENERIC_TOOLS,
+      });
+      website = entry.website ?? null;
+    }
+    for (const f of made) {
+      if (!/^[a-z][a-z-]*$/.test(f.view.name)) throw new HttpError(422, `'${f.view.name}': a name is lower-case letters and -`);
+      if (this.apps.some((a) => a.view.name === f.view.name) && !b.replace) throw new HttpError(409, `an app is already connected as ${f.view.name}`);
+    }
+    let url: string | null = null;
+    for (const f of made) {
+      this.apps = [...this.apps.filter((a) => a.view.name !== f.view.name), f];
+      if (f.view.kind === "sign_in") {
+        url = f.view.sign_in_url = this.signInUrl(f.view.name, website);
+        this.settle(f, 7000);
+      } else this.settle(f, 1400);
+    }
+    this.appsChanged(made[0]?.view.name ?? null, url);
+    return { apps: made.map((f) => this.appView(f)), sign_in_url: url };
+  }
+  /** POST /apps/{name}/sign-in: sign in again, or reconnect an app that isn't connected. */
+  private signIn(f: AppFixture): AppConnectResult {
+    const problem = f.view.state === "failed" && f.view.kind === "local" ? f.view.problem : null;
+    Object.assign(f.view, { state: "connecting", problem: null });
+    let url: string | null = null;
+    if (f.view.kind === "sign_in") {
+      const website = this.catalog.find((c) => c.name === f.view.catalog)?.website;
+      url = f.view.sign_in_url = this.signInUrl(f.view.name, website);
+      this.settle(f, 7000);
+    } else this.settle(f, 1500, { problem });
+    this.appsChanged(f.view.name, url);
+    return { apps: [this.appView(f)], sign_in_url: url };
+  }
+  /** PUT /permissions: the mode, whole lists, or one rule moved; only [permissions] is rewritten. */
+  private updatePermissions(u: PermissionsUpdate): PermissionsView {
+    let p: PermissionsView = { ...this.policy.permissions };
+    if (u.mode != null) {
+      if (!["open", "ask", "read-only"].includes(u.mode)) throw new HttpError(422, `'${u.mode}' is not a mode: open, ask or read-only`);
+      p.mode = u.mode;
+    }
+    for (const list of LISTS) {
+      const v = u[list];
+      if (v == null) continue;
+      p[list] = v.map((r) => {
+        try {
+          return ruleText(parseRule(r));
+        } catch (e) {
+          throw new HttpError(422, `${list}: ${(e as Error).message}`);
+        }
+      });
+    }
+    if (u.set) p = withRule(p, u.set.rule, u.set.level ?? null);
+    this.policy = { ...this.policy, exists: true, permissions: p, text: renderPolicy(p, this.policy.routes) };
+    this.appsChanged(null);
+    return p;
+  }
+
   // ------------------------------------------------------------------ router
   async handle(method: string, path: string, query: URLSearchParams, body: unknown): Promise<unknown> {
     const b = (body ?? {}) as Record<string, unknown>;
@@ -501,6 +719,19 @@ export class MockDaemon {
       this.reply("Okay, I won't.");
       return { ok: true };
     }
+    if (method === "GET" && path === "/waiting") return this.waitingView();
+    if (method === "POST" && path === "/waiting/ack") return { ok: this.markWaiting(String(b.key ?? ""), { state: "acknowledged", acknowledged_at: now() }) };
+    if (method === "POST" && path === "/waiting/snooze") {
+      const until = new Date(Date.now() + Number(b.minutes ?? 30) * 60000).toISOString();
+      return { ok: this.markWaiting(String(b.key ?? ""), { state: "snoozed", snoozed_until: until }) };
+    }
+    if ((r = m(/^\/proposals\/([^/]+)\/(confirm|cancel)$/))) {
+      const item = this.waitingItems.find((i) => i.change?.id === r![1]);
+      if (!item) throw new HttpError(409, "that change isn't waiting");
+      this.dropWaiting(item.key);
+      if (r[2] === "cancel") return { ok: true };
+      return { proposal_id: r[1], target: item.change!.target, status: "success", applied: [item.change!.summary], summary: `Applied on ${item.change!.target}.` } satisfies OutcomeView;
+    }
     if (method === "GET" && path === "/audit") {
       let items = this.audit;
       const ability = query.get("ability"), status = query.get("status"), sid = query.get("session_id");
@@ -511,30 +742,43 @@ export class MockDaemon {
       return { items: items.slice(offset, offset + limit), total: items.length, limit, offset };
     }
 
-    if (method === "GET" && path === "/sources") return this.sources;
-    if (method === "GET" && path === "/mcp") return this.servers.map((f): McpServerInfo => f.info);
+    if (method === "GET" && path === "/sources") return this.sourceList();
+    if (method === "GET" && path === "/apps") return this.apps.map((a) => this.appView(a));
+    if (method === "POST" && path === "/apps") return this.connect(b as AppConnect);
+    if ((r = m(/^\/apps\/([^/]+)(\/sign-in)?$/))) {
+      const name = decodeURIComponent(r[1]);
+      const f = this.apps.find((a) => a.view.name === name);
+      if (!f) throw new HttpError(404, `no app called '${name}'`);
+      if (method === "GET" && !r[2]) return this.appView(f);
+      if (method === "POST" && r[2]) return this.signIn(f);
+      if (method === "DELETE" && !r[2]) {
+        this.apps = this.apps.filter((a) => a !== f);
+        this.appsChanged(name);
+        return { ok: true, detail: null };
+      }
+    }
+    if (method === "GET" && path === "/catalog") return this.catalogPage(query.get("search") ?? "", Number(query.get("offset") ?? 0), Number(query.get("limit") ?? 40));
+    if (method === "GET" && (r = m(/^\/catalog\/(.+)$/))) {
+      const name = decodeURIComponent(r[1]);
+      const e = this.catalog.find((c) => c.name === name);
+      if (!e) throw new HttpError(404, `${name} is not in the catalog`);
+      return this.entryView(e);
+    }
+    if (method === "GET" && path === "/permissions") return this.policy.permissions;
+    if (method === "PUT" && path === "/permissions") return this.updatePermissions(b as PermissionsUpdate);
     if (method === "GET" && path === "/policy") return this.policy;
     if (method === "PUT" && path === "/policy") {
       const u = b as PolicyUpdate;
       if (u.text != null) {
         // As the daemon does: the file is read before it is written, and refused when it can't be.
-        const r = parsePolicy(u.text);
-        if (!r.ok && r.certain) throw new HttpError(422, `request: ${r.message}`);
-        this.policy = r.ok ? { ...this.policy, text: u.text, exists: true, default: r.data.default, skills: r.data.skills, targets: r.data.targets } : { ...this.policy, text: u.text, exists: true };
-      } else {
-        if (u.skills) this.policy.skills = u.skills;
-        if (u.default !== undefined) this.policy.default = u.default ?? null;
-        if (u.targets) this.policy.targets = u.targets;
-        this.policy = { ...this.policy, exists: true, text: renderToml(this.policy, this.servers) };
+        const permissions = readPolicyText(u.text, this.policy.path);
+        this.policy = { ...this.policy, text: u.text, exists: true, permissions };
+        this.appsChanged(null);
+      } else if (u.routes) {
+        if (u.routes.escalate_after < 1) throw new HttpError(422, "[routes].escalate_after is a whole number from 1 to 1440");
+        const routes = { ...u.routes, enabled: (["digest", "desk", "desktop", "phone", "call", "sms", "whatsapp"] as const).filter((x) => u.routes!.enabled.includes(x)) };
+        this.policy = { ...this.policy, routes, exists: true, text: renderPolicy(this.policy.permissions, routes) };
       }
-      // Levels apply live (ADR 0022): every source's operations and every server's declared
-      // writes read the new file's levels; a write set to deny is no longer offered.
-      for (const src of this.sources) for (const op of src.operations) op.autonomy = this.policy.skills[src.name]?.[op.name] ?? op.autonomy;
-      for (const f of this.servers)
-        for (const w of f.info.writes) {
-          w.autonomy = this.policy.skills[f.info.name]?.[w.operation] ?? w.autonomy;
-          w.offered = f.info.connected && w.autonomy !== "deny";
-        }
       return { applied: true, policy: this.policy };
     }
     if (method === "GET" && path === "/settings") return this.settings;

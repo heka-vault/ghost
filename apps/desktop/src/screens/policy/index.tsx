@@ -1,30 +1,42 @@
 /**
- * Owner: policy. What Ghost may do on its own (ADR 0011): a level per operation, written to
- * ~/.config/ghost/policy.toml through PUT /policy. The operator's file decides; the model
- * never sees this screen or the file.
+ * Owner: policy. Permissions (ADR 0034): Ghost uses every app it is connected to, and this
+ * screen holds the exceptions, in `[permissions]` of ~/.config/ghost/policy.toml. The mode says
+ * what a change no rule names does (Open, Ask before changes, Read only: the lockdown); the
+ * lists say what is blocked, asks first, runs quietly or is allowed anyway. The most careful
+ * rule that matches wins. Ghost's own operations (agents, departments, skills, outputs) are
+ * named by the same rules. The model never sees this screen or the file.
  *
- * Levels and TOML are two views of one text. The page keeps the file as text, reads the
- * levels out of it, and a level change rewrites only its own line, so switching views keeps
- * every edit and every save keeps the operator’s comments.
+ * Rules apply the moment they are set (`PUT /permissions`); the TOML view edits the whole file
+ * (`PUT /policy` with text) and saves through the dock, keeping the operator's comments.
+ *   #/permissions                 the rules
+ *   ?policy=toml#/permissions     the file (works anywhere; Departments link to it)
+ *   mock only: ?policy=dirty|invalid|load-error
  */
-import { ApiError, type PolicyView, type SourceInfo } from "@ghost/client-ts";
-import { autonomyLabel, useGhost } from "@ghost/ui";
-import { Code, SlidersHorizontal } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { ApiError, type AppView, type PermissionsView, type PolicyView, type SourceInfo } from "@ghost/client-ts";
+import { permissionLabel, permissionOf, useGhost } from "@ghost/ui";
+import { Code, Hand, Megaphone, ShieldOff, SlidersHorizontal, X } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
+import { Link, navigate, usePath } from "../../app/router";
 import { useDesign } from "../../design/context";
 import {
   Badge,
   Button,
   Card,
+  Disclosure,
+  Field,
+  IconButton,
+  Input,
   LiveStatus,
   Notice,
   Page,
+  RadioGroup,
   SegmentedControl,
   Section,
+  Select,
   Skeleton,
-  SkeletonText,
+  Table,
   errorText,
   useConfirm,
   useLive,
@@ -32,102 +44,79 @@ import {
 } from "../../ui";
 import { type BarState, SaveBar, useCopy } from "./Bar";
 import { useLeaveGuard } from "./guard";
-import { DefaultRow, LevelHeader, OperationRow, Rich, useStuckHeader } from "./Levels";
-import {
-  type PolicyData,
-  SOURCE_COPY,
-  changedKeys,
-  errorLine,
-  highRiskNote,
-  inherited,
-  isServer,
-  levelTable,
-  listWords,
-  operationText,
-  operationTitle,
-  parsePolicy,
-  setKey,
-  sourceText,
-  sourceTitle,
-  splitSources,
-  targetRules,
-} from "./model";
+import { LISTS, type Level, MODES, type Mode, OWN, errorLine, ruleApp, ruleWords, sentence } from "./model";
 import { TomlEditor } from "./TomlEditor";
 import "./policy.css";
 
-type Mode = "levels" | "toml";
+type View = "rules" | "toml";
 
-/**
- * Design states, read from the query before the hash (`?mock=passive&policy=dirty#/policy`).
- * `toml` works anywhere (the Servers screen links to the file this way); the rest only
- * while the mock layer is active.
- */
-type DesignState = "toml" | "dirty" | "invalid" | "load-error" | "inline" | null;
+/** Design states, read from the query before the hash. `toml` works anywhere; the rest only under the mock. */
+type DesignState = "toml" | "dirty" | "invalid" | "load-error" | null;
 function readDesignState(mock: boolean): DesignState {
   const v = new URLSearchParams(window.location.search).get("policy");
   if (v === "toml") return "toml";
   if (!mock) return null;
-  return v === "dirty" || v === "invalid" || v === "load-error" || v === "inline" ? v : null;
+  return v === "dirty" || v === "invalid" || v === "load-error" ? v : null;
 }
 
-/** A daemon message as a sentence: capitalized, ending in a period, without the “request:” source. */
-function sentence(s: string): string {
-  const t = s.replace(/^request:\s*/, "").trim();
-  if (!t) return t;
-  return t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".");
-}
 /** The same, without a leading “Line 4:” where the line is already named. */
 const lineless = (s: string) => sentence(s.replace(/^(request:\s*)?line \d+:\s*/i, ""));
 const DEFAULT_PATH = "~/.config/ghost/policy.toml";
+const MODE_ICON: Record<Mode, typeof Hand> = { open: Megaphone, ask: Hand, "read-only": ShieldOff };
 
-const fromView = (p: PolicyView): PolicyData => ({ default: p.default ?? null, skills: p.skills, targets: p.targets });
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-export default function PolicyScreen(_: RouteProps) {
-  const { client } = useGhost();
+export default function PermissionsScreen(_: RouteProps) {
+  const { client, appsVersion } = useGhost();
   const { online } = useLive();
   const toast = useToast();
   const { confirm, dialog } = useConfirm();
   const design = useDesign();
+  const path = usePath();
   const [designState] = useState(() => readDesignState(!!design));
 
-  /** Every source the gate knows (ADR 0022): the lines, and each connected server. */
-  const [sources, setSources] = useState<SourceInfo[] | null>(null);
+  useEffect(() => {
+    if (path === "/policy") navigate("/permissions", { replace: true });
+  }, [path]);
+
   const [policy, setPolicy] = useState<PolicyView | null>(null);
-  /** The file as the operator is editing it; both views read and write this. */
+  const [perms, setPerms] = useState<PermissionsView | null>(null);
+  const [sources, setSources] = useState<SourceInfo[] | null>(null);
+  const [apps, setApps] = useState<AppView[] | null>(null);
+  /** The file as the operator is editing it in TOML. */
   const [text, setText] = useState("");
-  const [mode, setMode] = useState<Mode>(designState === "toml" || designState === "invalid" ? "toml" : "levels");
-  const [saving, setSaving] = useState(false);
+  const [view, setView] = useState<View>(designState === "toml" || designState === "invalid" ? "toml" : "rules");
   const [loadError, setLoadError] = useState<string | null>(null);
-  /** `saved`: Ghost was asked to write it; otherwise the page found the fault before asking. */
-  const [saveError, setSaveError] = useState<{ message: string; line: number | null; saved: boolean } | null>(null);
-  /** The row whose last edit only TOML can make (“default”, or “source.op”). */
-  const [tomlOnly, setTomlOnly] = useState<string | null>(null);
-  /** Keys in the order the operator changed them, most recent first, for the dock’s summary. */
-  const editOrder = useRef<string[]>([]);
-  /** Bumped when a failed save should take the operator to the line at fault. */
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<{ message: string; line: number | null } | null>(null);
+  /** The rule (or "mode") being set, so only its control waits. */
+  const [setting, setSetting] = useState<string | null>(null);
+  const [ruleError, setRuleError] = useState<string | null>(null);
   const [showLine, setShowLine] = useState(0);
   const editor = useRef<HTMLTextAreaElement>(null);
 
+  const dirty = !!policy && text !== policy.text;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
   const adopt = useCallback((p: PolicyView) => {
     setPolicy(p);
+    setPerms(p.permissions);
     setText(p.text);
   }, []);
 
-  // Only the latest load may land (StrictMode runs the first effect twice).
   const loadSeq = useRef(0);
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     setLoadError(null);
     try {
-      if (designState === "load-error") {
+      if (import.meta.env.DEV && designState === "load-error") {
         await new Promise((r) => setTimeout(r, 200));
-        throw new ApiError(422, `${DEFAULT_PATH}: Invalid value (at line 14, column 9)`);
+        throw new ApiError(422, `${DEFAULT_PATH}: Invalid value (at line 4, column 9)`);
       }
-      const [a, p] = await Promise.all([client.sources(), client.policy()]);
+      const [p, s, a] = await Promise.all([client.policy(), client.sources(), client.apps().catch(() => null)]);
       if (seq !== loadSeq.current) return null;
-      setSources(a);
       adopt(p);
+      setSources(s);
+      setApps(a);
       return p;
     } catch (e) {
       if (seq === loadSeq.current) setLoadError(errorText(e));
@@ -135,31 +124,19 @@ export default function PolicyScreen(_: RouteProps) {
     }
   }, [client, adopt, designState]);
 
-  // First load, then the design state on top of it (mock only).
   useEffect(() => {
     let live = true;
-    load().then((p) => {
-      if (!live || !p) return;
-      if (designState === "dirty") {
-        let t: string | null = p.text;
-        t = t && setKey(t, ["mcp", "github_heka", "levels"], "comment", "quiet");
-        t = t && setKey(t, ["mcp", "github_heka", "levels"], "close", "quiet");
-        t = t && setKey(t, ["defaults"], "autonomy", "confirm");
-        if (t) setText(t);
-      } else if (designState === "invalid") {
-        const broken = p.text.replace(/^(close = "confirm")$/m, "close = confirm");
-        const r = parsePolicy(broken);
+    void load().then((p) => {
+      if (!live || !p || !import.meta.env.DEV) return;
+      if (designState === "dirty") setText(p.text.replace(/^mode = "open"$/m, 'mode = "ask"'));
+      else if (designState === "invalid") {
+        const broken = p.text.replace(/^mode = "open"$/m, "mode = open");
         setText(broken);
-        if (!r.ok) {
-          setSaveError({ message: r.message, line: r.line, saved: false });
+        const line = broken.split("\n").findIndex((l) => l === "mode = open") + 1;
+        if (line > 0) {
+          setSaveError({ message: `Invalid value (at line ${line}, column 8)`, line });
           setShowLine((n) => n + 1);
         }
-      } else if (designState === "inline") {
-        // Hand-written: Everything else as an inline table, which Levels won’t rewrite.
-        const lines = p.text.split("\n");
-        lines.splice(1, 0, 'defaults = { autonomy = "confirm" }');
-        setPolicy({ ...p, text: lines.join("\n") });
-        setText(lines.join("\n"));
       }
     });
     return () => {
@@ -167,131 +144,132 @@ export default function PolicyScreen(_: RouteProps) {
     };
   }, [load, designState]);
 
-  // ------------------------------------------------------------------------ the file
-  const saved = useMemo(() => (policy ? parsePolicy(policy.text) : null), [policy]);
-  const draft = useMemo(() => parsePolicy(text), [text]);
-  /** What the saved file sets. Ghost’s own reading when this page can’t follow the TOML. */
-  const savedData = useMemo<PolicyData | null>(() => (policy ? (saved?.ok ? saved.data : fromView(policy)) : null), [policy, saved]);
-  const draftData = draft.ok ? draft.data : null;
-  const shown = draftData ?? savedData;
-  /** Levels can change the file only while it reads cleanly here. */
-  const editable = !!draftData;
-
-  const changed = useMemo(
-    () =>
-      draftData && savedData ? changedKeys(draftData.skills, savedData.skills, draftData.default ?? "", savedData.default ?? "") : new Set<string>(),
-    [draftData, savedData],
-  );
-  const dirty = !!policy && text !== policy.text;
-
-  /**
-   * Apply one level edit to the text. `source` is null for [defaults]; a server's levels
-   * live under `[mcp.<name>.levels]`, a built-in's under `[<name>]` (levelTable). Back to
-   * the saved levels means back to the saved text.
-   */
-  const edit = (source: SourceInfo | null, key: string, level: string | null) => {
-    if (!policy || !savedData) return;
-    const table = source ? levelTable(source) : ["defaults"];
-    const id = source ? `${source.name}.${key}` : "default";
-    const next = setKey(text, table, key, level);
-    const r = next == null ? null : parsePolicy(next);
-    // The rewrite must read back as exactly this one change, or it belongs in TOML.
-    const landed = !!r?.ok && (source ? r.data.skills[source.name]?.[key] === (level ?? undefined) : (r.data.default ?? null) === (level || null));
-    if (next == null || !r || !landed) {
-      // Said under the row itself: a toast here would sit over the dock’s Save.
-      setTomlOnly(id);
+  // Another window, the voice, or a department changed the rules: read them again, unless the file is being edited here.
+  const firstApps = useRef(true);
+  useEffect(() => {
+    if (firstApps.current) {
+      firstApps.current = false;
       return;
     }
-    setTomlOnly(null);
-    editOrder.current = [id, ...editOrder.current.filter((k) => k !== id)];
-    const back = r.ok && changedKeys(r.data.skills, savedData.skills, r.data.default ?? "", savedData.default ?? "").size === 0;
-    setText(back && saved?.ok ? policy.text : next);
-    setSaveError(null);
-  };
-  const setLevel = (source: SourceInfo, op: string, level: string | null) => edit(source, op, level);
-  const setDefaultLevel = (level: string) => edit(null, "autonomy", level || null);
+    if (dirtyRef.current) return;
+    client
+      .policy()
+      .then((p) => !dirtyRef.current && adopt(p))
+      .catch(() => {});
+    client.sources().then(setSources).catch(() => {});
+    client.apps().then(setApps).catch(() => {});
+  }, [appsVersion, client, adopt]);
 
+  // ---------------------------------------------------------------------- rules
+  /** One change to the permissions, then the file and Ghost's own levels read back. */
+  const change = async (key: string, update: Parameters<typeof client.updatePermissions>[0], opts: { what: string; undo?: Parameters<typeof client.updatePermissions>[0]; onError?: (message: string) => void }) => {
+    if (!online || setting) return false;
+    setSetting(key);
+    try {
+      const p = await client.updatePermissions(update);
+      setPerms(p);
+      client.policy().then((v) => !dirtyRef.current && adopt(v)).catch(() => {});
+      client.sources().then(setSources).catch(() => {});
+      toast({
+        tone: "ok",
+        title: "Saved",
+        description: `${opts.what} Ghost follows it from its next turn.`,
+        action: opts.undo ? { label: "Undo", onClick: () => void change(key, opts.undo!, { what: "Put back as it was." }) } : undefined,
+      });
+      return true;
+    } catch (e) {
+      const message = sentence(errorText(e));
+      if (opts.onError) opts.onError(message);
+      else setRuleError(message);
+      return false;
+    } finally {
+      setSetting(null);
+    }
+  };
+
+  const listOf = (rule: string): Level | null => (perms ? (LISTS.find((l) => perms[l.list].includes(rule))?.list ?? null) : null);
+
+  const setMode = (mode: Mode) => {
+    if (!perms || mode === perms.mode) return;
+    const label = MODES.find((m) => m.value === mode)!.label;
+    void change("mode", { mode }, { what: `Mode: ${label.toLowerCase()}.`, undo: { mode: perms.mode } });
+  };
+
+  const removeRule = (rule: string) => {
+    const was = listOf(rule);
+    void change(rule, { set: { rule, level: null } }, { what: `Removed ${rule}.`, undo: was ? { set: { rule, level: was } } : undefined });
+  };
+
+  const titleOf = useCallback(
+    (app: string) => apps?.find((a) => a.name === app)?.title ?? OWN[app] ?? app,
+    [apps],
+  );
+  /** A rule that names no app Ghost has, and none of Ghost's own: it waits for one. */
+  const waiting = useCallback(
+    (rule: string) => {
+      const app = ruleApp(rule);
+      return !!app && !!apps && !OWN[app] && !apps.some((a) => a.name === app);
+    },
+    [apps],
+  );
+
+  // ----------------------------------------------------------------------- file
   const discard = () => {
     if (policy) setText(policy.text);
     setSaveError(null);
-    setTomlOnly(null);
   };
 
-  const switchMode = async (next: Mode) => {
-    if (next === mode) return;
-    setTomlOnly(null);
-    if (next === "levels" && !draft.ok && draft.certain) {
-      setSaveError({ message: draft.message, line: draft.line, saved: false });
-      setShowLine((n) => n + 1);
+  const switchView = async (next: View) => {
+    if (next === view) return;
+    if (next === "rules" && dirty) {
       const ok = await confirm({
-        title: `Line ${draft.line} needs a fix first`,
-        description: (
-          <>
-            <Rich text={lineless(draft.message)} /> Levels can show the file once it reads cleanly. Fix it here, or discard your edits to the file.
-          </>
-        ),
+        title: "Discard your edits to the file?",
+        description: "Rules change the file the moment you set them, so unsaved edits can’t wait in the background. Save them first, or discard them.",
         confirmLabel: "Discard edits",
         tone: "danger",
       });
       if (!ok) return;
       discard();
     }
-    setMode(next);
-  };
-
-  // ----------------------------------------------------------------------------- save
-  /** Levels apply the moment the file is written (ADR 0022); the sources read back the new ones. */
-  const finish = (r: { policy: PolicyView }) => {
-    adopt(r.policy);
-    client.sources().then(setSources).catch(() => {});
+    setView(next);
   };
 
   const putBack = async (previous: string) => {
     try {
-      const r = await client.updatePolicy({ text: previous });
-      finish(r);
+      adopt((await client.updatePolicy({ text: previous })).policy);
       setSaveError(null);
-      toast({ title: "Put back the previous levels" });
+      toast({ title: "Put back the file as it was" });
     } catch (e) {
-      setSaveError({ message: errorText(e), line: null, saved: true });
+      setSaveError({ message: errorText(e), line: null });
     }
   };
 
   const save = async () => {
     if (!dirty || saving || !online || !policy) return;
-    // Ghost would refuse it too: say which line now, without a round trip.
-    if (!draft.ok && draft.certain) {
-      setSaveError({ message: draft.message, line: draft.line, saved: true });
-      if (mode === "levels") setMode("toml");
-      setShowLine((n) => n + 1);
-      return;
-    }
     setSaving(true);
     setSaveError(null);
     const before = policy;
     try {
       const r = await client.updatePolicy({ text });
-      finish(r);
+      adopt(r.policy);
+      client.sources().then(setSources).catch(() => {});
       toast({
         tone: "ok",
         title: "Saved",
-        description: "Ghost uses the new levels from its next change.",
+        description: "Ghost follows the new permissions from its next turn.",
         action: before.exists ? { label: "Undo", onClick: () => void putBack(before.text) } : undefined,
       });
     } catch (e) {
       const message = errorText(e);
       const line = errorLine(message);
-      setSaveError({ message, line, saved: true });
-      if (line != null) {
-        if (mode === "levels") setMode("toml");
-        setShowLine((n) => n + 1);
-      }
+      setSaveError({ message, line });
+      if (line != null) setShowLine((n) => n + 1);
     } finally {
       setSaving(false);
     }
   };
 
-  // Ctrl S saves, as everywhere else on Linux.
+  // Ctrl S saves the file, as everywhere else on Linux.
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
@@ -307,7 +285,7 @@ export default function PolicyScreen(_: RouteProps) {
 
   // A failed save takes the operator to the line at fault: selected, centered in the panel.
   useEffect(() => {
-    if (!showLine || mode !== "toml" || !saveError?.line) return;
+    if (!showLine || view !== "toml" || !saveError?.line) return;
     const id = requestAnimationFrame(() => {
       const ta = editor.current;
       const main = document.getElementById("main");
@@ -325,147 +303,86 @@ export default function PolicyScreen(_: RouteProps) {
     });
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showLine, mode]);
+  }, [showLine, view]);
 
-  // Leaving with unsaved edits asks first.
-  useLeaveGuard(dirty && !saving, "/policy", () =>
-    confirm({
-      title: "Leave without saving?",
-      description: changed.size
-        ? `${plural(changed.size, "change")} to what Ghost may do ${changed.size === 1 ? "isn’t" : "aren’t"} saved. Leaving discards ${changed.size === 1 ? "it" : "them"}.`
-        : "Your edits to the policy file aren’t saved. Leaving discards them.",
-      confirmLabel: "Discard changes",
-      tone: "danger",
-    }),
+  useLeaveGuard(dirty && !saving, "/permissions", () =>
+    confirm({ title: "Leave without saving?", description: "Your edits to the policy file aren’t saved. Leaving discards them.", confirmLabel: "Discard changes", tone: "danger" }),
   );
 
-  // ---------------------------------------------------------------------------- views
-  const { writers, readers } = useMemo(() => splitSources(sources ?? []), [sources]);
-  const loading = !policy && !loadError;
+  // ---------------------------------------------------------------------- views
   const errorId = useId();
   const helpId = useId();
-  const header = useRef<HTMLDivElement>(null);
-  useStuckHeader(header, [mode, policy, sources]);
-  const openToml = () => void switchMode("toml");
 
-  const shownDefault = shown?.default ?? "";
-  const levels = shown && (
+  const rules = perms && (
     <>
-      {policy && !policy.exists && !dirty && (
+      {policy && !policy.exists && (
         <p className="policy-lead-note t-body-lg t-2">
-          No policy file yet. Every operation follows its risk; saving creates <span className="t-mono">{policy.path}</span>.
+          No policy file yet, so everything runs and Ghost says what it changed. Setting a rule creates <span className="t-mono">{policy.path}</span>.
         </p>
       )}
-      {!editable && (
-        <Notice
-          tone="warn"
-          title="Levels can’t change this file"
-          className="policy-notice"
-          action={
-            <Button size="sm" variant="secondary" leadingIcon={<Code />} onClick={openToml}>
-              Edit in TOML
-            </Button>
-          }
-        >
-          <span data-user-content>{!draft.ok && <Rich text={sentence(draft.message)} />}</span> The levels below are what Ghost uses now. Change them
-          in TOML.
+      {ruleError && (
+        <Notice tone="danger" title="Couldn’t change the permissions" onDismiss={() => setRuleError(null)} className="policy-notice">
+          {ruleError}
         </Notice>
       )}
 
-      <div className="policy-matrix">
-        <LevelHeader headerRef={header} />
+      <Section id="perm-mode" title="When no rule says otherwise" description="What Ghost does with a change no rule below names. Reads always run unless blocked.">
+        <RadioGroup<Mode>
+          variant="card"
+          columns={3}
+          aria-label="Mode"
+          value={perms.mode}
+          disabled={!online || setting === "mode"}
+          onChange={setMode}
+          options={MODES.map((m) => {
+            const Icon = MODE_ICON[m.value];
+            return { value: m.value, label: m.label, description: m.help, icon: <Icon size={16} /> };
+          })}
+        />
+      </Section>
 
-        <Card list className="policy-card policy-card--default">
-          <DefaultRow
-            value={shownDefault}
-            edited={changed.has("default")}
-            disabled={!editable}
-            tomlOnly={tomlOnly === "default"}
-            onOpenToml={openToml}
-            onChange={setDefaultLevel}
-          />
-        </Card>
+      <Section id="perm-add" title="Add a rule" description="A rule names an app, a tool, or a tool with what it’s called with. The most careful rule that matches wins: block, then ask first, then quiet, then allow.">
+        <AddRule disabled={!online} busy={!!setting && setting.startsWith("add:")} existing={(r) => listOf(r)} onAdd={(rule, list, onError) => change(`add:${rule}`, { set: { rule, level: list } }, { what: `${rule}: ${permissionLabel(list).toLowerCase()}.`, undo: { set: { rule, level: listOf(rule) } }, onError })} />
+      </Section>
 
-        {writers.map((a) => {
-          const title = sourceTitle(a.name);
-          const tRules = shown.targets[a.name] ?? {};
-          const targetNames = Object.keys(tRules);
-          const own = shown.skills[a.name] ?? {};
-          // A `*` line the operator wrote gets its own row, so it can be changed here too.
-          const wide = own["*"] != null || savedData?.skills[a.name]?.["*"] != null;
-          const rowFor = (name: string, risk: string, opTitle: string, description: ReactNode, inh: { level: string; from: string }) => (
-            <OperationRow
-              key={name}
-              source={a.name}
-              name={name}
-              risk={risk}
-              title={opTitle}
-              description={description}
-              own={own[name]}
-              inheritedLevel={inh.level}
-              inheritedFrom={inh.from === "source" ? `Set for all of ${title}` : ""}
-              edited={changed.has(`${a.name}.${name}`)}
-              targets={name === "*" ? [] : targetRules(shown.targets, a.name, name)}
-              riskNote={highRiskNote(a.name, name)}
-              disabled={!editable}
-              tomlOnly={tomlOnly === `${a.name}.${name}`}
-              onOpenToml={openToml}
-              onChange={(lv) => setLevel(a, name, lv)}
-            />
-          );
-          return (
-            <Section
-              key={a.name}
-              className="policy-source"
-              title={
-                <span className="policy-source__title">
-                  {title}
-                  {isServer(a) ? <Badge size="sm">Server</Badge> : <Badge size="sm">Built in</Badge>}
-                </span>
-              }
-              description={<span data-user-content={SOURCE_COPY[a.name] ? undefined : true}>{sourceText(a)}</span>}
-              actions={
-                // Where these levels live in the file: a server's under its declaration.
-                <span className="t-mono t-3 policy-source__id">{isServer(a) ? `mcp.${a.name}.levels` : a.name}</span>
-              }
-            >
-              <Card list className="policy-card">
-                {wide &&
-                  rowFor(
-                    "*",
-                    "",
-                    `All of ${title}`,
-                    `One level for everything ${title} does. An operation with its own level keeps it.`,
-                    { level: shownDefault, from: "default" },
-                  )}
-                {a.operations.map((op) =>
-                  rowFor(op.name, op.risk, operationTitle(a.name, op.name), operationText(a.name, op), inherited(shown.skills, shownDefault, a.name, op)),
-                )}
-                {targetNames.length > 0 && (
-                  <div className="policy-card__foot">
-                    <p className="t-small t-2">
-                      <span className="t-mono">{listWords(targetNames)}</span> {targetNames.length === 1 ? "has its own rules" : "have their own rules"}, and
-                      they win over the levels above. Change them in the file.
-                    </p>
-                    <Button size="sm" variant="ghost" leadingIcon={<Code />} onClick={openToml}>
-                      Edit in TOML
-                    </Button>
+      {LISTS.filter((l) => l.list !== "allow" || perms.mode !== "open" || perms.allow.length > 0).map((l) => (
+        <Section
+          key={l.list}
+          id={`perm-${l.list}`}
+          title={
+            <>
+              {l.title} <span className="policy-count t-num">{perms[l.list].length}</span>
+            </>
+          }
+          description={l.list === "allow" && perms.mode === "open" ? "In Open every change runs already. These matter once the mode asks or blocks." : l.help}
+        >
+          <Card list>
+            {perms[l.list].length === 0 ? (
+              <p className="policy-empty">{l.empty}</p>
+            ) : (
+              perms[l.list].map((rule) => (
+                <div key={rule} className="policy-rule">
+                  <div className="policy-rule__text">
+                    <span className="policy-rule__code">{rule}</span>
+                    <span className="policy-rule__words">
+                      {ruleWords(rule, titleOf)}
+                      {waiting(rule) && <span className="t-3"> · no app called {ruleApp(rule)} is connected yet</span>}
+                    </span>
                   </div>
-                )}
-              </Card>
-            </Section>
-          );
-        })}
-      </div>
+                  <IconButton size="sm" icon={<X />} label={`Remove ${rule}`} loading={setting === rule} disabled={!online || (!!setting && setting !== rule)} onClick={() => removeRule(rule)} />
+                </div>
+              ))
+            )}
+          </Card>
+        </Section>
+      ))}
 
-      {readers.length > 0 && (
-        <div className="policy-readers t-small t-3">
-          <p>
-            {listWords(readers.map((r) => sourceTitle(r.name)))} only {readers.length === 1 ? "reads" : "read"}, so there’s nothing to allow. A write on a
-            server is offered once you declare it in the file.
-          </p>
-        </div>
-      )}
+      <OwnOperations sources={sources} />
+
+      <p className="policy-foot t-small t-3">
+        A department can add its own blocked, ask-first and quiet rules for its sessions, in its folder; it can only narrow what Ghost does (<Link to="/departments">Departments</Link>). Each app’s tools, with these rules
+        applied, are on its page under <Link to="/apps">Apps</Link>.
+      </p>
     </>
   );
 
@@ -475,7 +392,6 @@ export default function PolicyScreen(_: RouteProps) {
         <span className="t-mono t-2">{policy.path}</span>
         <span className="t-small t-3">{dirty ? "Edited" : !policy.exists ? "Not created yet" : "Saved"}</span>
       </div>
-      {/* The fault is shown on its line and spoken by the dock; this only describes the field. */}
       {saveError && (
         <span id={errorId} className="sr-only">
           {saveError.line ? `Line ${saveError.line}: ` : ""}
@@ -492,103 +408,170 @@ export default function PolicyScreen(_: RouteProps) {
         label="Policy file"
         errorLine={saveError?.line ?? null}
         describedBy={saveError ? `${errorId} ${helpId}` : helpId}
-        placeholder={'[mcp.github.levels]\nclose = "confirm"'}
+        placeholder={'[permissions]\nmode = "open"\nblock = ["github.delete_*"]'}
       />
       <p id={helpId} className="t-small t-3 policy-file__help">
-        Ghost checks the file before writing it; if it doesn’t read cleanly, nothing changes. Comments stay as you write them, from here and from
-        Levels.
+        Ghost checks the file before writing it; if it doesn’t read cleanly, nothing changes. Comments stay as you write them. Rules set on the Rules view rewrite only <span className="t-mono">[permissions]</span>.
       </p>
     </div>
   );
 
-  // -------------------------------------------------------------------------- the dock
-  /** Every key in the order it appears on screen, so edits from TOML still read top to bottom. */
-  const screenOrder = useMemo(
-    () => ["default", ...writers.flatMap((a) => [`${a.name}.*`, ...a.operations.map((o) => `${a.name}.${o.name}`)])],
-    [writers],
-  );
-  const summary = useMemo(() => {
-    if (!draftData) return "";
-    const rank = (k: string) => {
-      const e = editOrder.current.indexOf(k);
-      if (e >= 0) return e;
-      const s = screenOrder.indexOf(k);
-      return 1000 + (s >= 0 ? s : 999);
-    };
-    const followers = writers.reduce(
-      (n, a) => (draftData.skills[a.name]?.["*"] ? n : n + a.operations.filter((o) => draftData.skills[a.name]?.[o.name] == null).length),
-      0,
-    );
-    const items = [...changed]
-      .sort((x, y) => rank(x) - rank(y))
-      .map((k) => {
-        if (k === "default") {
-          const lv = draftData.default ? autonomyLabel(draftData.default).toLowerCase() : "by risk";
-          return `Everything else: ${lv}${followers ? ` (${plural(followers, "operation")})` : ""}`;
-        }
-        const [source, op] = k.split(".");
-        const lv = draftData.skills[source]?.[op];
-        const name = op === "*" ? `All of ${sourceTitle(source)}` : operationTitle(source, op);
-        if (lv) return `${name}: ${autonomyLabel(lv).toLowerCase()}`;
-        // Back to the default: say what that lands on.
-        const info = writers.find((a) => a.name === source)?.operations.find((o) => o.name === op);
-        const inh = info ? inherited(draftData.skills, draftData.default ?? "", source, info).level : draftData.default;
-        return `${name}: default${inh ? `, ${autonomyLabel(inh).toLowerCase()}` : ""}`;
-      });
-    return items.join(" · ") || "Comments and layout only";
-  }, [changed, draftData, screenOrder, writers]);
-
   let bar: BarState | null = null;
-  if (dirty) {
-    const n = changed.size;
-    let title = n ? plural(n, "unsaved change") : "Unsaved edits to the file";
+  if (dirty && view === "toml") {
+    let title = "Unsaved edits to the file";
     let error: Extract<BarState, { kind: "dirty" }>["error"] = null;
     if (saveError) {
-      // “Couldn’t save” only after Ghost was asked; a fault found on the way to Levels just needs a fix.
-      title = saveError.saved ? `Couldn’t save${saveError.line ? ` · line ${saveError.line}` : ""}` : `Line ${saveError.line}`;
-      // After the dot the fault reads as the rest of the sentence: no capital, no period.
+      title = `Couldn’t save${saveError.line ? ` · line ${saveError.line}` : ""}`;
       const plain = lineless(saveError.message);
       const low = plain ? plain[0].toLowerCase() + plain.slice(1).replace(/\.$/, "") : plain;
-      const tail = saveError.saved ? " Nothing changed on disk." : "";
-      error = { text: <Rich text={saveError.line ? low : plain + tail} />, plain: plain + tail, line: saveError.line };
+      error = { text: saveError.line ? low : `${plain} Nothing changed on disk.`, plain: `${plain} Nothing changed on disk.`, line: saveError.line };
     }
-    bar = { kind: "dirty", title, summary, online, busy: saving, error };
+    bar = { kind: "dirty", title, summary: "", online, busy: saving, error };
   }
 
   return (
     <Page
       width="default"
-      title="What Ghost may do"
-      description="Choose how much Ghost does on its own for each kind of change. Every change is logged. To reverse one, ask Ghost to change it back."
+      title="Permissions"
+      description="Ghost uses every app you connect and tells you what it changed. Here you say what it may not do, and what it asks you first. Every change is logged; to reverse one, ask Ghost to change it back."
       status={<LiveStatus />}
       actions={
-        // Always there, so the header holds still while the policy loads.
-        <SegmentedControl<Mode>
+        <SegmentedControl<View>
           aria-label="Edit as"
-          value={mode}
+          value={view}
           disabled={!policy}
-          onChange={(m) => void switchMode(m)}
+          onChange={(v) => void switchView(v)}
           options={[
-            { value: "levels", label: "Levels", icon: <SlidersHorizontal /> },
+            { value: "rules", label: "Rules", icon: <SlidersHorizontal /> },
             { value: "toml", label: "TOML", icon: <Code /> },
           ]}
         />
       }
       dock={bar && <SaveBar state={bar} onSave={() => void save()} onDiscard={discard} />}
     >
-      {loadError ? (
-        <LoadError message={loadError} onRetry={() => void load()} />
-      ) : loading ? (
-        <PolicySkeleton mode={mode} />
-      ) : mode === "levels" ? (
-        levels
-      ) : (
-        toml
-      )}
+      {loadError ? <LoadError message={loadError} onRetry={() => void load()} /> : !policy ? <PermissionsSkeleton view={view} /> : view === "rules" ? rules : toml}
       {dialog}
     </Page>
   );
 }
+
+/* ------------------------------------------------------------------ add a rule */
+
+const EXAMPLES: { rule: string; says: string }[] = [
+  { rule: "gmail", says: "everything in an app" },
+  { rule: "github.delete_*", says: "tools by name" },
+  { rule: "github.issue_write(state=closed)", says: "one kind of call" },
+  { rule: "github.*(repo!=site)", says: "everything outside one repository" },
+];
+
+function AddRule({ disabled, busy, existing, onAdd }: { disabled: boolean; busy: boolean; existing: (rule: string) => Level | null; onAdd: (rule: string, list: Level, onError: (message: string) => void) => Promise<boolean> }) {
+  const [rule, setRule] = useState("");
+  const [list, setList] = useState<Level>("block");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const text = rule.trim();
+    if (!text) {
+      setError("Write a rule first, like github.delete_*.");
+      return;
+    }
+    if (existing(text) === list) {
+      setError(`${text} is already in that list.`);
+      return;
+    }
+    setError(null);
+    if (await onAdd(text, list, setError)) setRule("");
+  };
+
+  return (
+    <form className="policy-add" onSubmit={(e) => void submit(e)} noValidate>
+      <div className="policy-add__row">
+        <Field label="Rule" error={error ?? undefined} className="policy-add__rule">
+          <Input
+            mono
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="github.delete_*"
+            value={rule}
+            onChange={(e) => {
+              setRule(e.target.value);
+              setError(null);
+            }}
+          />
+        </Field>
+        <Field label="What Ghost does" className="policy-add__list">
+          <Select
+            value={list}
+            onChange={(e) => setList(e.target.value as Level)}
+            options={LISTS.map((l) => ({ value: l.list, label: permissionLabel(l.list) }))}
+          />
+        </Field>
+        <Button type="submit" variant="primary" className="policy-add__go" loading={busy} disabled={disabled}>
+          Add the rule
+        </Button>
+      </div>
+      <ul className="policy-examples" aria-label="Examples">
+        {EXAMPLES.map((x) => (
+          <li key={x.rule}>
+            <button type="button" className="policy-example" onClick={() => setRule(x.rule)}>
+              <span className="t-mono">{x.rule}</span>
+            </button>
+            <span className="t-3"> {x.says}</span>
+          </li>
+        ))}
+      </ul>
+    </form>
+  );
+}
+
+/* --------------------------------------------------- Ghost's own operations */
+
+/** Ghost's own operations, each at the level the rules give it by name. Read-only: rules change them. */
+function OwnOperations({ sources }: { sources: SourceInfo[] | null }) {
+  const own = useMemo(() => (sources ?? []).filter((s) => s.kind !== "app"), [sources]);
+  if (!sources) return <Skeleton width={180} height={14} />;
+  if (own.length === 0) return null;
+  const total = own.reduce((n, s) => n + s.operations.length, 0);
+  return (
+    <Disclosure summary={`What Ghost does itself: ${total} operations on your agents and departments`} className="policy-own">
+      <p className="t-small t-2 policy-own__lead">
+        Hiring, retiring and moving agents, rules and memory: named by the same rules, such as <span className="t-mono">conversations.delete</span>.
+      </p>
+      <Table density="compact">
+        <thead>
+          <tr>
+            <th>Operation</th>
+            <th>What it does</th>
+            <th className="is-shrink">Now</th>
+          </tr>
+        </thead>
+        <tbody>
+          {own.flatMap((s) =>
+            s.operations.map((op) => {
+              const level = permissionOf(op.autonomy);
+              return (
+                <tr key={`${s.name}.${op.name}`}>
+                  <td className="is-mono is-nowrap">
+                    {s.name}.{op.name}
+                  </td>
+                  <td className="is-muted">{op.description.split(/(?<=\.)\s/)[0]}</td>
+                  <td className="is-shrink">
+                    <Badge size="sm" tone={level === "block" ? "danger" : level === "ask" ? "warn" : "neutral"} variant={level === "allow" ? "outline" : "soft"}>
+                      {permissionLabel(level)}
+                    </Badge>
+                  </td>
+                </tr>
+              );
+            }),
+          )}
+        </tbody>
+      </Table>
+    </Disclosure>
+  );
+}
+
+/* -------------------------------------------------------------------- states */
 
 /** “~/.config/ghost/policy.toml: Invalid value (at line 14, column 9)” → where, what, and the path apart. */
 function splitLoadError(message: string): { where: string; what: string; path: string | null } {
@@ -630,8 +613,8 @@ function LoadError({ message, onRetry }: { message: string; onRetry: () => void 
   );
 }
 
-function PolicySkeleton({ mode }: { mode: Mode }) {
-  if (mode === "toml") {
+function PermissionsSkeleton({ view }: { view: View }) {
+  if (view === "toml") {
     return (
       <div className="policy-skeleton" aria-busy="true" aria-label="Loading the policy file">
         <div className="policy-file__head">
@@ -639,44 +622,30 @@ function PolicySkeleton({ mode }: { mode: Mode }) {
           <Skeleton width={40} height={12} />
         </div>
         <div className="policy-skeleton__file">
-          {Array.from({ length: 18 }, (_, i) => (
-            <Skeleton key={i} width={[0, 6, 12].includes(i) ? "38%" : i % 6 === 5 ? 0 : `${22 + ((i * 7) % 5) * 6}%`} height={10} />
+          {Array.from({ length: 12 }, (_, i) => (
+            <Skeleton key={i} width={[0, 6].includes(i) ? "38%" : `${22 + ((i * 7) % 5) * 6}%`} height={10} />
           ))}
         </div>
       </div>
     );
   }
   return (
-    <div className="policy-skeleton" aria-busy="true" aria-label="Loading what Ghost may do">
-      <div className="policy-cols" aria-hidden>
-        <div className="policy-cols__levels">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="policy-cols__level">
-              <Skeleton width={14} height={14} />
-              <Skeleton width={64} height={10} />
-            </div>
-          ))}
-        </div>
+    <div className="policy-skeleton" aria-busy="true" aria-label="Loading the permissions">
+      <Skeleton width={220} height={14} />
+      <div className="policy-skeleton__modes">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} height={88} radius="var(--radius-lg)" />
+        ))}
       </div>
-      {[1, 4].map((rows, c) => (
+      {[2, 3].map((rows, c) => (
         <div key={c} className="policy-skeleton__group">
-          {c > 0 && (
-            <div className="policy-skeleton__title">
-              <Skeleton width={120} height={14} />
-              <Skeleton width={320} height={10} />
-            </div>
-          )}
-          <Card list className="policy-card">
+          <Skeleton width={120} height={14} />
+          <Card list>
             {Array.from({ length: rows }, (_, i) => (
-              <div key={i} className="policy-row">
-                <div className="policy-row__text">
-                  <SkeletonText lines={2} />
-                </div>
-                <span className="policy-row__gutter" />
-                <div className="policy-stops is-empty">
-                  <div className="policy-stops__rail">
-                    <span className="policy-stops__track" />
-                  </div>
+              <div key={i} className="policy-rule">
+                <div className="policy-rule__text">
+                  <Skeleton width="40%" height={12} />
+                  <Skeleton width="65%" height={10} />
                 </div>
               </div>
             ))}

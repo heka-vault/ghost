@@ -20,6 +20,7 @@ from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.conversations import Conversations
 from ghost_core.department_tools import DepartmentTools
 from ghost_core.departments import Departments
+from ghost_core.waiting import Items, WaitingList
 
 
 class FakeControl:
@@ -71,6 +72,12 @@ class FakeControl:
         if p:
             self.state.set_pending(None)
         return p is not None
+
+    async def confirm_proposal(self, proposal_id):
+        return await self.gate.confirm_id(proposal_id, source="ui")
+
+    async def cancel_proposal(self, proposal_id):
+        return self.gate.cancel_id(proposal_id, "ui") is not None
 
     def apply_settings(self, values):
         self.applied = [k for k in values if k.startswith("GHOST_WAKE_")]
@@ -160,7 +167,7 @@ def make_source(writer) -> ToolSource:
     ]
     return ToolSource(
         name="fake",
-        prompt="A fake server. It echoes.",
+        prompt="A fake app. It echoes.",
         read_tools=[ReadTool("echo", "Echo.", {}, [], echo)],
         operations=ops,
     )
@@ -172,6 +179,8 @@ def world(tmp_path: Path):
     writer = FakeWriter()
     loaded = make_source(writer)
     policy_path = tmp_path / "policy.toml"
+    # ADR 0034: everything runs unless a rule asks; this world asks before a nuke.
+    policy_path.write_text('[permissions]\nask = ["fake.nuke"]\n')
     gate = WriteGate(store, autonomy=AutonomyPolicy.load(policy_path))
     gate.register("fake", loaded.operations)
     departments = Departments(tmp_path / "config")
@@ -209,6 +218,7 @@ def world(tmp_path: Path):
         conversations=conversations,
         departments=departments,
         department_tools=department_tools,
+        waiting=WaitingList(Items(store), changes=gate.waiting),
     )
     app = create_app(deps)
     client = TestClient(app)

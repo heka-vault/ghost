@@ -1,12 +1,13 @@
 /**
  * Owner: departments. The departments (ADR 0024): folders under ~/.config/ghost, each a
- * layer around a group of servers, skills, rules and a shared memory, with agents hired
- * into it. Ghost is one too.
- *   #/departments          every department: what it reaches, its agents, its problems
- *   #/departments/:slug    one department: rules, shared memory, servers, skills, docs,
+ * layer of rules, skills and a shared memory, with agents hired into it. Every department
+ * reaches the apps Ghost is connected to; its department.json may only narrow what its
+ * sessions may do there (ADR 0034). Ghost is one too.
+ *   #/departments          every department: its rules, its agents, its problems
+ *   #/departments/:slug    one department: rules, shared memory, permissions, skills, docs,
  *                          agents, the journal, Add rule, Open folder, New agent
  * The folder is the editor: Open folder reveals it; the screen shows and never rewrites
- * mcp.json or department.json. A rule added here goes through the gate, verbatim.
+ * department.json. A rule added here goes through the gate, verbatim.
  */
 import type { DepartmentView, JournalEntry } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
@@ -29,6 +30,7 @@ import {
   Notice,
   Page,
   Section,
+  relativeTime,
   Skeleton,
   Textarea,
   agentName,
@@ -39,7 +41,7 @@ import {
   useToast,
 } from "../../ui";
 import { newAgentSeed } from "../conversations/url";
-import { count, listWords, reachWords, revealFolder, tildePath } from "./model";
+import { count, listWords, openFile, reachWords, revealFolder, tildePath } from "./model";
 import "./departments.css";
 
 export default function DepartmentsScreen({ params }: RouteProps) {
@@ -75,7 +77,7 @@ function DepartmentsIndex() {
       width="default"
       title="Departments"
       status={<LiveStatus />}
-      description={<>A department is a folder: its servers, rules, skills and docs, a memory every agent in it shares, and the agents hired into it. Say {quoted("transfer me to marketing")} to work in one.</>}
+      description={<>A department is a folder: its rules, skills and docs, a memory every agent in it shares, and the agents hired into it. Every department reaches Ghost’s apps. Say {quoted("transfer me to marketing")} to work in one.</>}
       actions={
         <Button variant="primary" leadingIcon={<Plus />} disabled={!online} onClick={() => setCreating(true)}>
           New department
@@ -136,7 +138,7 @@ function DepartmentsIndex() {
             <EmptyState
               icon={<Building2 />}
               title="Start a department for each part of your work"
-              description={<>Marketing, accounting, a project: a folder with its own servers, rules and skills, and the agents you hire into it. Start one here, then say {quoted("transfer me to marketing")} in any session.</>}
+              description={<>Marketing, accounting, a project: a folder with its own rules and skills, and the agents you hire into it. Start one here, then say {quoted("transfer me to marketing")} in any session.</>}
               actions={
                 <Button variant="primary" leadingIcon={<Plus />} disabled={!online} onClick={() => setCreating(true)}>
                   New department
@@ -152,7 +154,7 @@ function DepartmentsIndex() {
         taken={(departments ?? []).flatMap((d) => [d.title.toLowerCase(), d.slug])}
         onCreated={(d) => {
           setCreating(false);
-          toast({ title: `Started ${d.title}`, description: "Open its folder to add servers and rules." });
+          toast({ title: `Started ${d.title}`, description: "Open its folder to add rules and skills." });
           navigate(`/departments/${d.slug}`);
         }}
       />
@@ -198,7 +200,7 @@ function NewDepartmentDialog({ open, onClose, taken, onCreated }: { open: boolea
       dismissible={!busy}
       size="md"
       title="New department"
-      description="A folder under ~/.config/ghost/departments with a short AGENTS.md, an empty mcp.json and its department.json. Add servers and rules in the folder."
+      description="A folder under ~/.config/ghost/departments with a short AGENTS.md and its department.json. Add rules and skills in the folder; it reaches the apps Ghost is connected to."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
@@ -271,6 +273,12 @@ function DepartmentDetail({ slug }: { slug: string }) {
     if (!d) return;
     const r = await revealFolder(d.path);
     if (!r.ok) toast({ title: `${d.title}’s folder`, description: `${r.path} (open it in your file manager; this build can’t open folders itself).` });
+  };
+
+  /** Reveal or open a file Ghost made; a browser build shows the path instead. */
+  const showFile = async (path: string, how: (p: string) => Promise<{ ok: true } | { ok: false; path: string }>) => {
+    const r = await how(path);
+    if (!r.ok) toast({ title: "Open it yourself", description: `${r.path} (this build can’t open files itself).` });
   };
 
   const addRule = async () => {
@@ -390,39 +398,60 @@ function DepartmentDetail({ slug }: { slug: string }) {
             </Card>
           </Section>
 
-          <Section
-            id="dept-servers"
-            title="Servers"
-            description={
-              d.is_ghost
-                ? "Ghost’s servers connect when Ghost starts. Declared in mcp.json and department.json in Ghost’s folder."
-                : `Its own servers start when a session enters ${title} and stay up for a while after. Declared in its mcp.json and department.json.`
-            }
-          >
-            <Card list>
-              {d.servers.length === 0 && d.uses.length === 0 ? (
-                <p className="dept-text dept-text--empty">No servers. Add one to mcp.json, and its writes to department.json.</p>
-              ) : (
-                <>
-                  {d.servers.map((s) => (
-                    <div key={s} className="dept-cell">
-                      <span className="dept-cell__text t-mono">{d.is_ghost ? s : `${d.slug}/${s}`}</span>
-                      <span className="dept-cell__meta">{d.servers_up ? "up" : d.is_ghost ? "not connected" : "starts on transfer"}</span>
-                    </div>
-                  ))}
-                  {d.uses.map((s) => (
-                    <div key={`use-${s}`} className="dept-cell">
-                      <span className="dept-cell__text t-mono">{s}</span>
-                      <span className="dept-cell__meta">Ghost’s, with {title}’s own declaration</span>
-                    </div>
-                  ))}
-                </>
-              )}
-            </Card>
-            <p className="t-small t-3">
-              Levels and declared writes show on <Link to="/servers">Servers</Link>.
-            </p>
-          </Section>
+          <DepartmentPermissions d={d} title={title} onOpenFolder={() => void openFolder()} />
+
+          {(d.watches.length > 0 || d.hooks.length > 0) && (
+            <Section
+              id="dept-watches"
+              title="Watches and webhooks"
+              description={<>What {title} keeps an eye on (ADR 0028) and the webhooks it takes (ADR 0027), declared in its department.json. Nothing here uses the model unless a watch asks for it.</>}
+            >
+              <Card list>
+                {d.watches.map((w) => (
+                  <div key={`w-${w.name}`} className="dept-cell">
+                    <span className="dept-cell__text">
+                      <span className="t-mono">{w.name}</span> <span className="t-3">reads {w.app}.{w.read} every {w.every_secs < 120 ? `${w.every_secs} s` : `${Math.round(w.every_secs / 60)} min`}</span>
+                    </span>
+                    <span className="dept-cell__meta">
+                      {w.error ? `can’t read: ${w.error}` : w.last_ok ? `${w.open} open · looked ${relativeTime(w.last_ok)}` : "not run yet"}
+                    </span>
+                  </div>
+                ))}
+                {d.hooks.map((h) => (
+                  <div key={`h-${h.name}`} className="dept-cell">
+                    <span className="dept-cell__text">
+                      <span className="t-mono">{h.name}</span> <span className="t-3">webhook at {h.path}</span>
+                    </span>
+                    <span className="dept-cell__meta">
+                      {h.on ? `${sumOf(h.accepted)} taken · ${sumOf(h.rejected)} refused` : `off: ${h.off_reason ?? "the listener is off"}`}
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            </Section>
+          )}
+
+          {d.outputs.length > 0 && (
+            <Section id="dept-outputs" title="Outputs" description={<>What Ghost made{d.is_ghost ? "" : ` for ${title}`}, in {d.is_ghost ? "Ghost’s" : "its"} out/ folder. Ghost never runs these; open them yourself.</>}>
+              <Card list>
+                {d.outputs.map((o) => (
+                  <div key={o.name} className="dept-cell">
+                    <span className="dept-cell__text">
+                      <span className="t-mono">{o.name}</span> <span className="t-3">{formatBytes(o.bytes)} · {relativeTime(o.modified)}</span>
+                    </span>
+                    <span className="dept-outputs__actions">
+                      <Button size="sm" variant="ghost" onClick={() => void showFile(o.path, revealFolder)}>
+                        Reveal
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => void showFile(o.path, openFile)}>
+                        Open
+                      </Button>
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            </Section>
+          )}
 
           <Section id="dept-skills" title="Skills" description={`Read first by every agent in ${title}, then your ~/.agents/skills, then Ghost’s own.`}>
             <Card list>
@@ -487,7 +516,7 @@ function DepartmentDetail({ slug }: { slug: string }) {
           </Section>
 
           <p className="dept-files t-small t-3">
-            The folder: <span className="t-mono">{tildePath(d.path)}</span>. {d.aliases.length ? <>Also answers to {listWords(d.aliases)}.</> : null} <TriangleAlert size={12} aria-hidden style={{ verticalAlign: "-2px" }} /> mcp.json and department.json are yours; Ghost reads them and never writes them.
+            The folder: <span className="t-mono">{tildePath(d.path)}</span>. {d.aliases.length ? <>Also answers to {listWords(d.aliases)}.</> : null} <TriangleAlert size={12} aria-hidden style={{ verticalAlign: "-2px" }} /> department.json is yours; Ghost reads it and never writes it.
           </p>
         </>
       )}
@@ -516,3 +545,65 @@ function DepartmentDetail({ slug }: { slug: string }) {
     </Page>
   );
 }
+
+/**
+ * What a department adds over Ghost's permissions (ADR 0034): only block, ask first and quiet,
+ * from its department.json. Read-only here; the folder is the editor.
+ */
+function DepartmentPermissions({ d, title, onOpenFolder }: { d: DepartmentView; title: string; onOpenFolder: () => void }) {
+  if (d.is_ghost) {
+    return (
+      <Section id="dept-permissions" title="Permissions" description="Ghost’s own permissions are everyone’s: every department starts from them.">
+        <p className="t-small t-2">
+          See and change them on <Link to="/permissions">Permissions</Link>; each app’s tools are under <Link to="/apps">Apps</Link>.
+        </p>
+      </Section>
+    );
+  }
+  const lists = [
+    { key: "block" as const, label: "Blocked" },
+    { key: "ask" as const, label: "Asks first" },
+    { key: "quiet" as const, label: "Quiet" },
+  ];
+  const rules = lists.flatMap((l) => d.permissions[l.key].map((rule) => ({ rule, label: l.label })));
+  return (
+    <Section
+      id="dept-permissions"
+      title="Permissions"
+      description={`What ${title} adds over Ghost’s permissions for its own sessions, from its department.json. A department can block, ask first or quiet; it can never allow more than Ghost does.`}
+      actions={
+        <Button size="sm" variant="ghost" leadingIcon={<FolderOpen />} onClick={onOpenFolder}>
+          Open folder
+        </Button>
+      }
+    >
+      <Card list>
+        {rules.length === 0 ? (
+          <p className="dept-text dept-text--empty">Nothing of its own: {title} works under Ghost’s permissions as they are.</p>
+        ) : (
+          rules.map((r) => (
+            <div key={`${r.label}-${r.rule}`} className="dept-cell">
+              <span className="dept-cell__text t-mono" data-user-content>
+                {r.rule}
+              </span>
+              <span className="dept-cell__meta">{r.label}</span>
+            </div>
+          ))
+        )}
+      </Card>
+      <p className="t-small t-3">
+        Ghost’s own are on <Link to="/permissions">Permissions</Link>. Edit {title}’s in <span className="t-mono">department.json</span>, under <span className="t-mono">permissions</span>.
+      </p>
+    </Section>
+  );
+}
+
+/** Deliveries counted by outcome or reason, added up. */
+function sumOf(counts: Record<string, number>): number {
+  return Object.values(counts).reduce((a, b) => a + b, 0);
+}
+
+function formatBytes(n: number): string {
+  return n < 1024 ? `${n} bytes` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+

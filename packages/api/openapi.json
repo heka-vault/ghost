@@ -25,6 +25,304 @@
         "title": "Ack",
         "type": "object"
       },
+      "AppAction": {
+        "description": "One of an app's tools, and what Ghost's own permissions say about it.",
+        "properties": {
+          "conditional": {
+            "default": false,
+            "title": "Conditional",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "allow",
+              "ask",
+              "block",
+              "quiet"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reads": {
+            "title": "Reads",
+            "type": "boolean"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "reads",
+          "level",
+          "rule"
+        ],
+        "title": "AppAction",
+        "type": "object"
+      },
+      "AppConnect": {
+        "description": "Connect an app: from the catalog (``catalog`` and ``option``), from a URL, or from\nanother client's pasted config. Secret values go to Ghost's environment, never into\napps.json, and never come back out.",
+        "properties": {
+          "catalog": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "option": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Option"
+          },
+          "replace": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replace"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Values"
+          }
+        },
+        "title": "AppConnect",
+        "type": "object"
+      },
+      "AppConnectResult": {
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/AppView"
+            },
+            "title": "Apps",
+            "type": "array"
+          },
+          "sign_in_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sign In Url"
+          }
+        },
+        "required": [
+          "apps"
+        ],
+        "title": "AppConnectResult",
+        "type": "object"
+      },
+      "AppView": {
+        "description": "A connected app: how it is reached, whether it is up, and what it can do.",
+        "properties": {
+          "actions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AppAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "catalog": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "kind": {
+            "enum": [
+              "sign_in",
+              "key",
+              "local",
+              "custom"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "settings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Settings",
+            "type": "array"
+          },
+          "sign_in_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sign In Url"
+          },
+          "state": {
+            "enum": [
+              "connected",
+              "connecting",
+              "needs_sign_in",
+              "failed",
+              "stopped"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "kind",
+          "state"
+        ],
+        "title": "AppView",
+        "type": "object"
+      },
+      "AppsEvent": {
+        "description": "An app was connected, disconnected or changed state: read ``GET /apps``. With\n``sign_in_url``, the app is waiting for the operator to sign in there; the desktop opens\nit in the browser.",
+        "properties": {
+          "changed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed"
+          },
+          "sign_in_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sign In Url"
+          },
+          "type": {
+            "const": "apps",
+            "default": "apps",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "AppsEvent",
+        "type": "object"
+      },
       "AuditEntry": {
         "properties": {
           "ability": {
@@ -169,6 +467,227 @@
           "offset"
         ],
         "title": "AuditPage",
+        "type": "object"
+      },
+      "CatalogEntryView": {
+        "description": "An app in the catalog. Its text is the registry's: shown to the operator, never\nto the model.",
+        "properties": {
+          "connected": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Connected",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "featured": {
+            "default": false,
+            "title": "Featured",
+            "type": "boolean"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CatalogOption"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "suggested_name": {
+            "title": "Suggested Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "description",
+          "version",
+          "suggested_name"
+        ],
+        "title": "CatalogEntryView",
+        "type": "object"
+      },
+      "CatalogOption": {
+        "description": "One way to connect: sign in, an API key, or run on this computer.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "sign_in",
+              "key",
+              "local"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "settings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CatalogSetting"
+            },
+            "title": "Settings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "CatalogOption",
+        "type": "object"
+      },
+      "CatalogPage": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntryView"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "refreshing": {
+            "default": false,
+            "title": "Refreshing",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entries",
+          "total"
+        ],
+        "title": "CatalogPage",
+        "type": "object"
+      },
+      "CatalogSetting": {
+        "properties": {
+          "choices": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "secret": {
+            "default": false,
+            "title": "Secret",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "CatalogSetting",
         "type": "object"
       },
       "CompactionView": {
@@ -738,8 +1257,39 @@
         "title": "DepartmentCreate",
         "type": "object"
       },
+      "DepartmentPermissions": {
+        "description": "What a department adds over Ghost's (``permissions`` in its department.json).",
+        "properties": {
+          "ask": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ask",
+            "type": "array"
+          },
+          "block": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Block",
+            "type": "array"
+          },
+          "quiet": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Quiet",
+            "type": "array"
+          }
+        },
+        "title": "DepartmentPermissions",
+        "type": "object"
+      },
       "DepartmentView": {
-        "description": "A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,\nskills and agents. Ghost is one too.",
+        "description": "A department (ADR 0024): a folder under ~/.config/ghost with its rules, skills,\nagents and the permissions that narrow what they may do (ADR 0034). Ghost is one too.",
         "properties": {
           "agents": {
             "default": [],
@@ -765,6 +1315,14 @@
             "title": "Docs",
             "type": "array"
           },
+          "hooks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HookInfo"
+            },
+            "title": "Hooks",
+            "type": "array"
+          },
           "is_ghost": {
             "title": "Is Ghost",
             "type": "boolean"
@@ -774,9 +1332,25 @@
             "title": "Memory",
             "type": "string"
           },
+          "outputs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OutputInfo"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/DepartmentPermissions",
+            "default": {
+              "ask": [],
+              "block": [],
+              "quiet": []
+            }
           },
           "problems": {
             "default": [],
@@ -807,18 +1381,6 @@
             "title": "Rules Lead",
             "type": "string"
           },
-          "servers": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Servers",
-            "type": "array"
-          },
-          "servers_up": {
-            "title": "Servers Up",
-            "type": "boolean"
-          },
           "skills": {
             "default": [],
             "items": {
@@ -835,14 +1397,6 @@
             "title": "Title",
             "type": "string"
           },
-          "uses": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Uses",
-            "type": "array"
-          },
           "voice": {
             "anyOf": [
               {
@@ -853,14 +1407,21 @@
               }
             ],
             "title": "Voice"
+          },
+          "watches": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WatchInfo"
+            },
+            "title": "Watches",
+            "type": "array"
           }
         },
         "required": [
           "slug",
           "title",
           "path",
-          "is_ghost",
-          "servers_up"
+          "is_ghost"
         ],
         "title": "DepartmentView",
         "type": "object"
@@ -971,6 +1532,99 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HookInfo": {
+        "description": "A webhook the department takes (ADR 0027): on or off, and what came of deliveries\nsince the daemon started. Counts only; never a body.",
+        "properties": {
+          "accepted": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Accepted",
+            "type": "object"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "off_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Off Reason"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "rejected": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Rejected",
+            "type": "object"
+          },
+          "verify": {
+            "enum": [
+              "github",
+              "hmac"
+            ],
+            "title": "Verify",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "verify",
+          "events",
+          "on"
+        ],
+        "title": "HookInfo",
+        "type": "object"
+      },
+      "ItemKey": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "ItemKey",
+        "type": "object"
+      },
       "JournalEntry": {
         "description": "One thing an agent did in a department: an executed write from the audit.",
         "properties": {
@@ -1034,205 +1688,6 @@
           "at"
         ],
         "title": "LogEvent",
-        "type": "object"
-      },
-      "McpScopeInfo": {
-        "properties": {
-          "arguments": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Arguments",
-            "type": "array"
-          },
-          "items": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "arguments"
-        ],
-        "title": "McpScopeInfo",
-        "type": "object"
-      },
-      "McpServerInfo": {
-        "description": "One MCP server from the policy file (ADR 0022) and what Ghost got from it.",
-        "properties": {
-          "connected": {
-            "title": "Connected",
-            "type": "boolean"
-          },
-          "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "scope": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/McpScopeInfo"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tools": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/McpToolInfo"
-            },
-            "title": "Tools",
-            "type": "array"
-          },
-          "transport": {
-            "title": "Transport",
-            "type": "string"
-          },
-          "writes": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/McpWriteInfo"
-            },
-            "title": "Writes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name",
-          "transport",
-          "connected"
-        ],
-        "title": "McpServerInfo",
-        "type": "object"
-      },
-      "McpToolInfo": {
-        "properties": {
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "offered": {
-            "title": "Offered",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "offered"
-        ],
-        "title": "McpToolInfo",
-        "type": "object"
-      },
-      "McpWriteInfo": {
-        "description": "A declared write: the policy operation, the tool it calls, and its level.",
-        "properties": {
-          "asked_by": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Asked By",
-            "type": "array"
-          },
-          "autonomy": {
-            "title": "Autonomy",
-            "type": "string"
-          },
-          "offered": {
-            "title": "Offered",
-            "type": "boolean"
-          },
-          "operation": {
-            "title": "Operation",
-            "type": "string"
-          },
-          "properties": {
-            "additionalProperties": true,
-            "default": {},
-            "title": "Properties",
-            "type": "object"
-          },
-          "read": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Read"
-          },
-          "required": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Required",
-            "type": "array"
-          },
-          "risk": {
-            "title": "Risk",
-            "type": "string"
-          },
-          "target": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Target",
-            "type": "array"
-          },
-          "tool": {
-            "title": "Tool",
-            "type": "string"
-          }
-        },
-        "required": [
-          "operation",
-          "tool",
-          "risk",
-          "autonomy",
-          "offered"
-        ],
-        "title": "McpWriteInfo",
         "type": "object"
       },
       "ModelsView": {
@@ -1407,6 +1862,36 @@
         "title": "OutcomeView",
         "type": "object"
       },
+      "OutputInfo": {
+        "description": "A file Ghost made in the department's out/ folder (ADR 0033). Ghost never runs it.",
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "bytes",
+          "modified"
+        ],
+        "title": "OutputInfo",
+        "type": "object"
+      },
       "PendingEvent": {
         "properties": {
           "pending": {
@@ -1481,6 +1966,151 @@
         "title": "PendingProposal",
         "type": "object"
       },
+      "PermissionsUpdate": {
+        "description": "Whole lists, the mode, or one rule moved; what is not given is kept.",
+        "properties": {
+          "allow": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow"
+          },
+          "ask": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask"
+          },
+          "block": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "open",
+                  "ask",
+                  "read-only"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "quiet": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiet"
+          },
+          "set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleSet"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "PermissionsUpdate",
+        "type": "object"
+      },
+      "PermissionsView": {
+        "description": "``[permissions]`` in policy.toml: everything runs unless a rule says otherwise.",
+        "properties": {
+          "allow": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Allow",
+            "type": "array"
+          },
+          "ask": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ask",
+            "type": "array"
+          },
+          "block": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Block",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "open",
+              "ask",
+              "read-only"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "quiet": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Quiet",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "mode"
+        ],
+        "title": "PermissionsView",
+        "type": "object"
+      },
       "Phase": {
         "enum": [
           "starting",
@@ -1488,7 +2118,8 @@
           "listening",
           "thinking",
           "speaking",
-          "hold"
+          "hold",
+          "asking"
         ],
         "title": "Phase",
         "type": "string"
@@ -1618,55 +2249,17 @@
         "type": "object"
       },
       "PolicyUpdate": {
-        "description": "Either the raw TOML, or structured fields that are rendered to TOML.",
+        "description": "Either the raw TOML, or the routes rendered into it (the permissions have their own\nroute, ``PUT /permissions``).",
         "properties": {
-          "default": {
+          "routes": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RoutesView"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Default"
-          },
-          "skills": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Skills"
-          },
-          "targets": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "additionalProperties": {
-                    "additionalProperties": {
-                      "type": "string"
-                    },
-                    "type": "object"
-                  },
-                  "type": "object"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Targets"
+            ]
           },
           "text": {
             "anyOf": [
@@ -1685,17 +2278,6 @@
       },
       "PolicyView": {
         "properties": {
-          "default": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default"
-          },
           "exists": {
             "title": "Exists",
             "type": "boolean"
@@ -1704,28 +2286,18 @@
             "title": "Path",
             "type": "string"
           },
-          "skills": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Skills",
-            "type": "object"
+          "permissions": {
+            "$ref": "#/components/schemas/PermissionsView"
           },
-          "targets": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
+          "routes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoutesView"
               },
-              "type": "object"
-            },
-            "title": "Targets",
-            "type": "object"
+              {
+                "type": "null"
+              }
+            ]
           },
           "text": {
             "title": "Text",
@@ -1736,9 +2308,7 @@
           "path",
           "exists",
           "text",
-          "default",
-          "skills",
-          "targets"
+          "permissions"
         ],
         "title": "PolicyView",
         "type": "object"
@@ -1761,6 +2331,107 @@
         "title": "ReadToolInfo",
         "type": "object"
       },
+      "RoutesView": {
+        "description": "``[routes]`` in the policy file (ADR 0031): how Ghost reaches the operator.",
+        "properties": {
+          "available": {
+            "default": [],
+            "items": {
+              "enum": [
+                "digest",
+                "desk",
+                "desktop",
+                "phone",
+                "call",
+                "sms",
+                "whatsapp"
+              ],
+              "type": "string"
+            },
+            "title": "Available",
+            "type": "array"
+          },
+          "batch_secs": {
+            "title": "Batch Secs",
+            "type": "integer"
+          },
+          "calls_per_day": {
+            "title": "Calls Per Day",
+            "type": "integer"
+          },
+          "calls_per_hour": {
+            "title": "Calls Per Hour",
+            "type": "integer"
+          },
+          "carry": {
+            "enum": [
+              "count",
+              "title"
+            ],
+            "title": "Carry",
+            "type": "string"
+          },
+          "enabled": {
+            "items": {
+              "enum": [
+                "digest",
+                "desk",
+                "desktop",
+                "phone",
+                "call",
+                "sms",
+                "whatsapp"
+              ],
+              "type": "string"
+            },
+            "title": "Enabled",
+            "type": "array"
+          },
+          "escalate_after": {
+            "title": "Escalate After",
+            "type": "integer"
+          },
+          "greeting": {
+            "title": "Greeting",
+            "type": "string"
+          },
+          "quiet_hours": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiet Hours"
+          },
+          "urgency": {
+            "additionalProperties": {
+              "enum": [
+                "digest",
+                "notify",
+                "call"
+              ],
+              "type": "string"
+            },
+            "default": {},
+            "title": "Urgency",
+            "type": "object"
+          }
+        },
+        "required": [
+          "enabled",
+          "escalate_after",
+          "batch_secs",
+          "calls_per_hour",
+          "calls_per_day",
+          "carry",
+          "greeting"
+        ],
+        "title": "RoutesView",
+        "type": "object"
+      },
       "RuleAdd": {
         "description": "A rule appended to a department's AGENTS.md, verbatim (ADR 0024).",
         "properties": {
@@ -1775,6 +2446,39 @@
           "text"
         ],
         "title": "RuleAdd",
+        "type": "object"
+      },
+      "RuleSet": {
+        "description": "One toggle: move ``rule`` into ``level``'s list, or out of every list (None).",
+        "properties": {
+          "level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "allow",
+                  "ask",
+                  "block",
+                  "quiet"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "rule": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule"
+        ],
+        "title": "RuleSet",
         "type": "object"
       },
       "SampleRequest": {
@@ -2080,20 +2784,29 @@
         "title": "SkillInfo",
         "type": "object"
       },
-      "SourceInfo": {
-        "description": "A source of tools the gate knows: the lines (built in) or an MCP server. The\npolicy screen edits levels per operation from this list.",
+      "SnoozeRequest": {
         "properties": {
-          "department": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department"
+          "key": {
+            "title": "Key",
+            "type": "string"
           },
+          "minutes": {
+            "maximum": 10080.0,
+            "minimum": 1.0,
+            "title": "Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "minutes"
+        ],
+        "title": "SnoozeRequest",
+        "type": "object"
+      },
+      "SourceInfo": {
+        "description": "A source of tools the gate knows: Ghost's own (built in) or a connected app.",
+        "properties": {
           "description": {
             "title": "Description",
             "type": "string"
@@ -2121,25 +2834,6 @@
             },
             "title": "Read Tools",
             "type": "array"
-          },
-          "scope_items": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Scope Items",
-            "type": "array"
-          },
-          "scope_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope Kind"
           }
         },
         "required": [
@@ -2156,6 +2850,14 @@
             "default": "1",
             "title": "Api Version",
             "type": "string"
+          },
+          "apps": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Apps",
+            "type": "array"
           },
           "conversation": {
             "anyOf": [
@@ -2201,13 +2903,6 @@
           "phase": {
             "$ref": "#/components/schemas/Phase"
           },
-          "servers": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Servers",
-            "type": "array"
-          },
           "session_id": {
             "anyOf": [
               {
@@ -2242,6 +2937,11 @@
             "title": "Version",
             "type": "string"
           },
+          "waiting": {
+            "default": 0,
+            "title": "Waiting",
+            "type": "integer"
+          },
           "wake_mode": {
             "title": "Wake Mode",
             "type": "string"
@@ -2253,8 +2953,7 @@
           "models_ready",
           "uptime_secs",
           "version",
-          "wake_mode",
-          "servers"
+          "wake_mode"
         ],
         "title": "Status",
         "type": "object"
@@ -2443,6 +3142,178 @@
         "title": "VoiceInfo",
         "type": "object"
       },
+      "WaitingEvent": {
+        "description": "The waiting list changed: read ``GET /waiting`` for it.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "type": {
+            "const": "waiting",
+            "default": "waiting",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "WaitingEvent",
+        "type": "object"
+      },
+      "WaitingItemView": {
+        "description": "One item that needs the operator. ``title`` comes from an outside system: show\nit as text, never as markup. ``change`` is set for a change waiting for a yes.",
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "age_secs": {
+            "title": "Age Secs",
+            "type": "integer"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changed_at": {
+            "format": "date-time",
+            "title": "Changed At",
+            "type": "string"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "delivered_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered Via"
+          },
+          "department": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "title": "First Seen",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "snoozed_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snoozed Until"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "new",
+              "delivered",
+              "acknowledged",
+              "snoozed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "source",
+          "title",
+          "state",
+          "first_seen",
+          "changed_at",
+          "age_secs"
+        ],
+        "title": "WaitingItemView",
+        "type": "object"
+      },
+      "WaitingView": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WaitingItemView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "WaitingView",
+        "type": "object"
+      },
       "WakeRequest": {
         "properties": {
           "conversation": {
@@ -2472,6 +3343,107 @@
         },
         "title": "WakeRequest",
         "type": "object"
+      },
+      "WatchInfo": {
+        "description": "A watch the department declares (ADR 0028) and how its last look went.",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "every_secs": {
+            "title": "Every Secs",
+            "type": "integer"
+          },
+          "last_ok": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ok"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "open": {
+            "default": 0,
+            "title": "Open",
+            "type": "integer"
+          },
+          "read": {
+            "title": "Read",
+            "type": "string"
+          },
+          "response": {
+            "enum": [
+              "tell",
+              "record"
+            ],
+            "title": "Response",
+            "type": "string"
+          },
+          "seen": {
+            "default": 0,
+            "title": "Seen",
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "urgency": {
+            "enum": [
+              "digest",
+              "notify",
+              "call"
+            ],
+            "title": "Urgency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "app",
+          "read",
+          "every_secs",
+          "steps",
+          "response",
+          "urgency"
+        ],
+        "title": "WatchInfo",
+        "type": "object"
       }
     }
   },
@@ -2482,6 +3454,198 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/apps": {
+      "get": {
+        "description": "Every app in apps.json: connected or not, and what each tool may do.",
+        "operationId": "list_apps_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppView"
+                  },
+                  "title": "Response List Apps Apps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Apps",
+        "tags": [
+          "apps"
+        ]
+      },
+      "post": {
+        "description": "Connect an app now and keep it in apps.json. An app that signs in comes back\nwith the address the browser should open; the desktop opens it.",
+        "operationId": "connect_app_apps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppConnect"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConnectResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connect App",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/apps/{name}": {
+      "delete": {
+        "description": "Disconnect: it leaves the tools at once and apps.json; its sign-in and the keys\nGhost kept for it are forgotten.",
+        "operationId": "disconnect_apps__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect",
+        "tags": [
+          "apps"
+        ]
+      },
+      "get": {
+        "operationId": "get_app_apps__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get App",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/apps/{name}/sign-in": {
+      "post": {
+        "description": "Sign in again, or reconnect an app that isn't connected.",
+        "operationId": "sign_in_apps__name__sign_in_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConnectResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sign In",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
     "/audit": {
       "get": {
         "operationId": "audit_audit_get",
@@ -2583,6 +3747,116 @@
         "summary": "Audit",
         "tags": [
           "writes"
+        ]
+      }
+    },
+    "/catalog": {
+      "get": {
+        "description": "Apps to connect, from Ghost's copy of the registry; first-party ones first when\nnothing is searched. An old copy is refreshed in the background.",
+        "operationId": "catalog_catalog_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 40,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Catalog",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/catalog/{name}": {
+      "get": {
+        "operationId": "catalog_entry_catalog__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntryView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Catalog Entry",
+        "tags": [
+          "apps"
         ]
       }
     },
@@ -3499,12 +4773,14 @@
                 "schema": {
                   "discriminator": {
                     "mapping": {
+                      "apps": "#/components/schemas/AppsEvent",
                       "conversation": "#/components/schemas/ConversationEvent",
                       "log": "#/components/schemas/LogEvent",
                       "outcome": "#/components/schemas/OutcomeEvent",
                       "pending": "#/components/schemas/PendingEvent",
                       "status": "#/components/schemas/StatusEvent",
-                      "turn": "#/components/schemas/TurnEvent"
+                      "turn": "#/components/schemas/TurnEvent",
+                      "waiting": "#/components/schemas/WaitingEvent"
                     },
                     "propertyName": "type"
                   },
@@ -3526,6 +4802,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/ConversationEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WaitingEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AppsEvent"
                     }
                   ],
                   "title": "Response Events Schema Events Schema Get"
@@ -3541,29 +4823,64 @@
         ]
       }
     },
-    "/mcp": {
+    "/permissions": {
       "get": {
-        "description": "Ghost's servers, then each department's own (ADR 0024), connected or not.",
-        "operationId": "mcp_servers_mcp_get",
+        "operationId": "get_permissions_permissions_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/McpServerInfo"
-                  },
-                  "title": "Response Mcp Servers Mcp Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/PermissionsView"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Mcp Servers",
+        "summary": "Get Permissions",
         "tags": [
-          "mcp"
+          "permissions"
+        ]
+      },
+      "put": {
+        "description": "Change the mode, whole lists, or one rule; only ``[permissions]`` in the file is\nrewritten, and the gate follows at once.",
+        "operationId": "put_permissions_permissions_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Permissions",
+        "tags": [
+          "permissions"
         ]
       }
     },
@@ -3756,6 +5073,91 @@
           }
         },
         "summary": "Confirm",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/proposals/{proposal_id}/cancel": {
+      "post": {
+        "operationId": "cancel_one_proposals__proposal_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel One",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/proposals/{proposal_id}/confirm": {
+      "post": {
+        "description": "A Confirm on a change on the waiting list (ADR 0030): the stale check runs.",
+        "operationId": "confirm_one_proposals__proposal_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm One",
         "tags": [
           "writes"
         ]
@@ -4243,6 +5645,110 @@
         "summary": "Sample Voice",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/waiting": {
+      "get": {
+        "operationId": "waiting_waiting_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Waiting",
+        "tags": [
+          "waiting"
+        ]
+      }
+    },
+    "/waiting/ack": {
+      "post": {
+        "description": "The operator heard it: it stops alerting until it changes. Not a gate write;\nit changes Ghost's own bookkeeping only.",
+        "operationId": "acknowledge_waiting_ack_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge",
+        "tags": [
+          "waiting"
+        ]
+      }
+    },
+    "/waiting/snooze": {
+      "post": {
+        "operationId": "snooze_waiting_snooze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnoozeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Snooze",
+        "tags": [
+          "waiting"
         ]
       }
     },

@@ -1,6 +1,6 @@
 # 0011: The operator's policy sets autonomy per operation; the gate bounds and records every write
 
-- **Status:** accepted; amended by ADR 0015 (no undo)
+- **Status:** accepted; amended by ADR 0015 (no undo); amended by ADR 0030 (a pending change waits on the waiting list); amended by ADR 0034 (permissions: everything runs unless a rule blocks it or asks first; the levels' defaults and where they are set)
 - **Date:** 2026-10-17
 - **Amends:** ADR 0007 (the confirmation clause)
 

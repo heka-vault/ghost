@@ -10,9 +10,11 @@ goodbye hangs up, a wait holds."""
 from __future__ import annotations
 
 import random
+from datetime import datetime
 
 from ghost_core import Handled, UserTurn
 from ghost_core.confirmation import has_negation, normalize
+from ghost_core.routes import parse_quiet
 
 _FILLERS = {"ghost", "okay", "ok", "hey", "oh", "um", "so", "please"}
 
@@ -183,7 +185,22 @@ class QuickIntents:
             return Handled(say=random.choice(HOLD_ACKS), action="hold")
         if turn.pending and phrases & CANCEL:
             return Handled(say="Dropped it.", action="cancel")
+        until = parse_quiet(turn.text, datetime.now().astimezone())
+        if until is not None:  # ADR 0031: the operator's words set it; no model
+            return Handled(
+                say=f"Okay, nothing until {_spoken_time(until)}.", action="quiet", until=until
+            )
         return None
+
+
+def _spoken_time(t: datetime) -> str:
+    hour = t.hour % 12 or 12
+    half = "in the morning" if t.hour < 12 else ("in the afternoon" if t.hour < 18 else "tonight")
+    if t.hour == 12 and t.minute == 0:
+        return "noon"
+    when = f"{hour}" if t.minute == 0 else f"{hour}:{t.minute:02d}"
+    tomorrow = t.date() != datetime.now(t.tzinfo).date()
+    return f"{when} {half}" + (" tomorrow" if tomorrow else "")
 
 
 def _goodbye(words: list[str]) -> bool:

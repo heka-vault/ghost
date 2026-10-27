@@ -231,7 +231,7 @@ export default function AuditScreen(_: RouteProps) {
         : more
           ? `Older changes aren’t loaded yet, and may match.${online ? "" : " They load once Ghost is back."}`
           : q
-            ? "Try fewer words, an issue number, or an operation like close."
+            ? "Try fewer words, a name, or an operation like close."
             : "Try another status or source.";
   const empty = !log.loading && !log.error && log.total === 0 && log.items.length === 0;
 
@@ -280,8 +280,8 @@ export default function AuditScreen(_: RouteProps) {
               title="No changes yet"
               description={"When Ghost changes something, or asks\u00a0to, it shows up here with every step it took."}
               actions={
-                <Button variant="secondary" size="sm" href={hrefFor("/policy")}>
-                  See what Ghost may do
+                <Button variant="secondary" size="sm" href={hrefFor("/permissions")}>
+                  See permissions
                 </Button>
               }
             />

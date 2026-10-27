@@ -122,7 +122,12 @@ def wired():
     llm = FakeLLM()
     writer = FakeWriter()
     loaded = fake_source(writer)
-    gate = WriteGate(Store(), autonomy=AutonomyPolicy.parse('[fake]\nnever = "deny"\n'))
+    gate = WriteGate(
+        Store(),
+        autonomy=AutonomyPolicy.parse(
+            '[permissions]\nblock = ["fake.never"]\nask = ["fake.nuke"]\n'
+        ),
+    )
     gate.register("fake", loaded.operations)
     slept = []
 
@@ -140,7 +145,7 @@ def test_prompt_includes_fragments_and_persona():
 
 def test_only_reads_change_and_sleep_are_exposed(wired):
     _, _, schemas, _, _ = wired
-    assert sorted(s.name for s in schemas) == ["change", "echo", "hang_up"]
+    assert sorted(s.name for s in schemas) == ["bring_up_change", "change", "echo", "hang_up"]
 
 
 def test_denied_ops_are_not_offered(wired):
@@ -170,7 +175,7 @@ async def test_low_risk_change_is_done_at_once(wired):
     assert writer.tags == ["flagged"]
 
 
-async def test_high_risk_change_needs_confirmation(wired):
+async def test_a_change_an_ask_rule_names_needs_confirmation(wired):
     llm, gate, _, _, writer = wired
     p = call("nuke")
     await llm.functions["change"](p)
@@ -217,9 +222,9 @@ async def test_hang_up_calls_back(wired):
     assert llm.pushed == []  # the model's own goodbye is spoken, not a fixed word
 
 
-def test_prompt_carries_the_department_and_follows_the_routing_setting():
+def test_prompt_carries_the_department_and_tells_ghost_to_use_its_tools():
     plain = build_system_prompt(["F"])
-    assert "standing instructions" not in plain and "ask whether to transfer them" in plain
+    assert "standing instructions" not in plain and "Use your tools." in plain
     agent = build_system_prompt(
         ["F"],
         name="Brand",
@@ -248,5 +253,3 @@ def test_prompt_carries_the_department_and_follows_the_routing_setting():
         ["F"], roster="- Marketing: the brand. Agents: Brand (brand design)"
     )
     assert "The departments, each with its agents" in ghost and "Brand (brand design)" in ghost
-    routed = build_system_prompt(["F"], routing=True)
-    assert "transfers the operator there by itself" in routed

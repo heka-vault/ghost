@@ -187,7 +187,7 @@ daemon, on strict terms:
    an allowlist). Anything else in the body is dropped at the door; a body that doesn't
    fit is rejected whole.
 3. **Checked at the source.** A webhook that says run 123 failed is a hint: Ghost reads
-   run 123 from GitHub through the declared read, and the read is what it believes.
+   run 123 from GitHub through one of its read-only tools, and the read is what it believes.
 4. **No raw text to the model,** and a webhook can never write, confirm or change a
    permission. It produces an observation; the watch's response decides what happens.
 
@@ -362,13 +362,10 @@ phone app and the tunnel are all what this needs. What moves:
   backlog into the next increment.
 - **#10 (routines)** becomes the **act** response, triggered by an observation as
   well as by a schedule.
-- **New ADRs, in order:** the public listener for webhooks (ADR 0027, accepted); watches
-  and observations (polled, pushed, the local endpoint; deterministic, then Jev, then a
-  model); responses (record, tell, act) and the waiting list; reaching the operator
-  (routes, the interruption budget, the privacy rule for outbound messages);
-  Ghost-initiated sessions at the desk and on the phone; what Ghost makes and where it
-  writes it.
-- **New words for GLOSSARY.md:** *watch* (what the operator declares to observe, polled
+- **New ADRs:** 0027 (the public listener for webhooks), 0028 (watches), 0029 (responses
+  and the waiting list), 0030 (a pending change outlives the session), 0031 (routes),
+  0032 (Ghost may start a session), 0033 (outputs).
+- **New words, now in GLOSSARY.md:** *watch* (what the operator declares to observe, polled
   or pushed), *item*, *response* (record, tell or act; not *rule*, which stays a line
   of `AGENTS.md`), *waiting list*, *route* (how Ghost reaches the operator).
 

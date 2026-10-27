@@ -254,6 +254,7 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
 .g-status-dot.is-passive { --c: var(--phase-passive); }
 .g-status-dot.is-hold { --c: var(--phase-passive); }
 .g-status-dot.is-listening { --c: var(--phase-listening); }
+.g-status-dot.is-asking { --c: var(--phase-listening); }
 .g-status-dot.is-thinking { --c: var(--phase-thinking); animation: g-breathe 0.9s var(--ease-in-out) infinite; }
 .g-status-dot.is-speaking { --c: var(--phase-speaking); }
 .g-status-dot.is-offline { --c: var(--phase-offline); }
@@ -757,6 +758,7 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
 .g-voice.is-starting .g-voice__ring { border-color: var(--border); border-top-color: var(--c); animation: g-spin 1.6s linear infinite; }
 
 .g-voice.is-listening { --c: var(--phase-listening); }
+.g-voice.is-asking { --c: var(--phase-listening); }
 .g-voice.is-listening .g-voice__halo { opacity: 1; }
 .g-voice.is-listening .g-voice__ripple { animation: g-voice-ripple 2.4s var(--ease-out) infinite; }
 .g-voice.is-listening.has-level .g-voice__ripple { animation: none; }

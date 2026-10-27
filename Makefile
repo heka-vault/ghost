@@ -50,18 +50,18 @@ env: ## render ~/.config/ghost/env from the secrets store; seeds settings.env, p
 	fi
 	@if [[ ! -e "$(POLICY)" ]]; then \
 	  mkdir -p "$(dir $(POLICY))"; cp infra/policy.example.toml "$(POLICY)"; \
-	  echo "seeded $(POLICY); edit it to set how much Ghost may do on its own"; \
+	  echo "seeded $(POLICY); edit it to block what Ghost may not do, or ask first"; \
 	fi
-	@for f in mcp.json department.json AGENTS.md; do \
+	@for f in apps.json department.json AGENTS.md; do \
 	  if [[ ! -e "$(dir $(POLICY))$$f" ]]; then \
 	    cp "infra/example/$$f" "$(dir $(POLICY))$$f"; \
-	    echo "seeded $(dir $(POLICY))$$f (ADR 0024: Ghost's servers and declarations)"; \
+	    echo "seeded $(dir $(POLICY))$$f (ADR 0034: the apps connected to Ghost)"; \
 	  fi; \
 	done
 	@mkdir -p "$(dir $(POLICY))departments" "$(dir $(POLICY))agents"
 	infra/systemd/ghost-render-env.sh
 
-policy: ## show the autonomy level Ghost resolves for every operation
+policy: ## show each connected app and the changes your permissions block or ask about
 	@$(load_env) $(UV) run ghostd check
 
 check: ## config sanity (models, endpoint, devices) using $(ENV_FILE)
@@ -92,7 +92,7 @@ restart: stop start ## stop ghostd, wait for it, start it again
 wake: ## simulate the wake word (through the API socket when ghostd is running)
 	@$(UV) run ghostd wake
 
-say: ## type a turn to the running Ghost: make say TEXT="what needs my sign-off"
+say: ## type a turn to the running Ghost: make say TEXT="what needs me?"
 	@$(UV) run ghostd say "$(TEXT)"
 
 status: ## the running daemon's status as JSON

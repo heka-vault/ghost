@@ -11,7 +11,7 @@
  * to change something back the operator asks Ghost, which makes the opposite change through
  * the gate like any other.
  */
-import type { AuditEntry, ConversationView, OutcomeView, PendingProposal, Status, Turn } from "@ghost/client-ts";
+import type { AuditEntry, ConversationView, OutcomeView, PendingProposal, Status, Turn, WaitingItemView } from "@ghost/client-ts";
 
 /** How the phone reaches the desk right now. */
 export type Link = "connecting" | "online" | "reconnecting" | "offline";
@@ -61,6 +61,9 @@ export interface DeskState {
   auditTotal: number;
   /** Outcomes by proposal id, as the gate reports them. */
   outcomes: Record<string, OutcomeView>;
+  /** What needs the operator (ADR 0029), oldest first; null until the first read. Read
+   *  while the app is open: there is no push (2026-10-27). */
+  waiting: WaitingItemView[] | null;
 }
 
 export interface Desk {
@@ -74,6 +77,11 @@ export interface Desk {
   retry(): Promise<void>;
   /** Ask for more of the audit log. */
   loadAudit(limit: number): Promise<void>;
+  /** The operator heard it: it stops reminding until it changes. Not a write anywhere, so a
+   *  tap is fine; a change waiting for a yes is still answered by voice. */
+  acknowledge(key: string): Promise<void>;
+  /** Not now: it comes back after `minutes`. */
+  snooze(key: string, minutes: number): Promise<void>;
   /** Stop or resume sending the phone's mic; the session stays open. */
   setMuted(muted: boolean): void;
   /** Send the call's audio somewhere else (speaker, Bluetooth, headset, earpiece). */

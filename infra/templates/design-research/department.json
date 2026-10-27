@@ -1,9 +1,4 @@
 {
   "title": "Design research",
-  "aliases": ["design", "research"],
-  "servers": {
-    "mobbin": {
-      "reads": ["search_screens", "search_flows", "search_sections"]
-    }
-  }
+  "aliases": ["design", "research"]
 }

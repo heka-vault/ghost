@@ -3,7 +3,7 @@ import { Check, CircleCheck, Copy, KeyRound, RotateCw, X } from "lucide-react";
 import { type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, IconButton, Input, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
-import { KEY_LABEL, SECRET_INFO, type SectionId, SECTION_TITLE, joinList, listWords, lowerFirst, sectionDomId, splitLines, splitList } from "./model";
+import { APP_SECRET_INFO, SECRET_INFO, type SectionId, SECTION_TITLE, isAppSecret, joinList, listWords, lowerFirst, sectionDomId, secretLabel, splitLines, splitList } from "./model";
 
 /* ------------------------------------------------------------------- ChipsInput */
 export interface ChipsInputProps {
@@ -256,8 +256,8 @@ export const secretActionId = (name: string) => `set-secret-${name}-action`;
  * Closing the field (Cancel, Escape) puts focus back on the button that opened it.
  */
 export function SecretRow({ name, set, value, open, onOpen, onChange, onCancel, onSubmit, disabled, waiting }: SecretRowProps) {
-  const info = SECRET_INFO[name] ?? { help: "", placeholder: "Paste the value" };
-  const label = KEY_LABEL[name] ?? name;
+  const info = SECRET_INFO[name] ?? (isAppSecret(name) ? APP_SECRET_INFO : { help: "", placeholder: "Paste the value" });
+  const label = secretLabel(name);
   const typed = !!value;
   const inputId = `set-secret-${name}`;
   const helpId = `${inputId}-help`;

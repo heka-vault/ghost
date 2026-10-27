@@ -19,12 +19,12 @@ export function tildePath(path: string | null | undefined): string {
   return path.replace(/^(?:\/home\/[^/]+|\/Users\/[^/]+|\/root)(?=\/|$)/, "~");
 }
 
-/** "mcp:quickbooks" → "quickbooks": the server a requirement names. Anything else stays as written. */
-export const serverOf = (requirement: string) => requirement.replace(/^mcp:/, "");
+/** "quickbooks": the app a requirement names (ADR 0034). An older SKILL.md may still write "mcp:quickbooks". */
+export const appOf = (requirement: string) => requirement.replace(/^(?:mcp|app):/, "");
 
-const WORDS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", mcp: "MCP", api: "API", url: "URL", pr: "PR", id: "ID" };
+const WORDS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", api: "API", url: "URL", pr: "PR", id: "ID" };
 
-/** "github_heka" → "GitHub heka": a server's name as the Servers screen says it. */
+/** "github" → "GitHub", "month-close" → "Month close": a name as words. */
 export function humanize(name: string): string {
   const words = name.split(/[_\-.]+/).filter(Boolean).map((w) => WORDS[w.toLowerCase()] ?? w.toLowerCase());
   if (words.length === 0) return name;
@@ -39,7 +39,7 @@ export function listWords(items: string[]): string {
 }
 
 /** "needs quickbooks", "needs quickbooks and calendar": the one warning on a list row. */
-export const needsWords = (missing: string[]) => `needs ${listWords(missing.map(serverOf))}`;
+export const needsWords = (missing: string[]) => `needs ${listWords(missing.map(appOf))}`;
 
 export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 

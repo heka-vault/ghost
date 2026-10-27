@@ -27,10 +27,20 @@ export type AuditEntry = Schemas["AuditEntry"];
 export type SourceInfo = Schemas["SourceInfo"];
 export type OperationInfo = Schemas["OperationInfo"];
 export type ReadToolInfo = Schemas["ReadToolInfo"];
-export type McpServerInfo = Schemas["McpServerInfo"];
-export type McpToolInfo = Schemas["McpToolInfo"];
-export type McpWriteInfo = Schemas["McpWriteInfo"];
-export type McpScopeInfo = Schemas["McpScopeInfo"];
+/** A connected app (ADR 0034): how it is reached, whether it is up, what each tool may do. */
+export type AppView = Schemas["AppView"];
+export type AppAction = Schemas["AppAction"];
+export type AppConnect = Schemas["AppConnect"];
+export type AppConnectResult = Schemas["AppConnectResult"];
+export type CatalogPage = Schemas["CatalogPage"];
+export type CatalogEntryView = Schemas["CatalogEntryView"];
+export type CatalogOption = Schemas["CatalogOption"];
+export type CatalogSetting = Schemas["CatalogSetting"];
+/** `[permissions]` in policy.toml: everything runs unless a rule blocks it or asks first. */
+export type PermissionsView = Schemas["PermissionsView"];
+export type PermissionsUpdate = Schemas["PermissionsUpdate"];
+export type PermissionLevel = Schemas["RuleSet"]["level"];
+export type DepartmentPermissions = Schemas["DepartmentPermissions"];
 export type PolicyView = Schemas["PolicyView"];
 export type PolicyUpdate = Schemas["PolicyUpdate"];
 export type PolicyResult = Schemas["PolicyResult"];
@@ -58,6 +68,12 @@ export type DepartmentView = Schemas["DepartmentView"];
 export type DepartmentCreate = Schemas["DepartmentCreate"];
 export type JournalEntry = Schemas["JournalEntry"];
 export type RuleAdd = Schemas["RuleAdd"];
+export type WaitingItemView = Schemas["WaitingItemView"];
+export type WaitingView = Schemas["WaitingView"];
+export type WatchInfo = Schemas["WatchInfo"];
+export type HookInfo = Schemas["HookInfo"];
+export type RoutesView = Schemas["RoutesView"];
+export type OutputInfo = Schemas["OutputInfo"];
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -66,7 +82,9 @@ export type GhostEvent =
   | Schemas["PendingEvent"]
   | Schemas["OutcomeEvent"]
   | Schemas["LogEvent"]
-  | Schemas["ConversationEvent"];
+  | Schemas["ConversationEvent"]
+  | Schemas["WaitingEvent"]
+  | Schemas["AppsEvent"];
 
 export type Unsubscribe = () => void;
 
@@ -128,20 +146,69 @@ export class GhostClient {
   cancel() {
     return unwrap(this.api.POST("/proposals/pending/cancel"));
   }
+  /** Confirm a change on the waiting list by id, with or without a session (ADR 0030). */
+  confirmProposal(id: string) {
+    return unwrap(this.api.POST("/proposals/{proposal_id}/confirm", { params: { path: { proposal_id: id } } }));
+  }
+  cancelProposal(id: string) {
+    return unwrap(this.api.POST("/proposals/{proposal_id}/cancel", { params: { path: { proposal_id: id } } }));
+  }
+
+  // --- the waiting list (ADR 0029) ------------------------------------------------
+  /** What needs the operator: items from watches and Ghost's own, with their state. */
+  waiting() {
+    return unwrap(this.api.GET("/waiting"));
+  }
+  /** The operator heard it: it stops alerting until it changes. */
+  acknowledge(key: string) {
+    return unwrap(this.api.POST("/waiting/ack", { body: { key } }));
+  }
+  snooze(key: string, minutes: number) {
+    return unwrap(this.api.POST("/waiting/snooze", { body: { key, minutes } }));
+  }
   audit(query: paths["/audit"]["get"]["parameters"]["query"] = {}) {
     return unwrap(this.api.GET("/audit", { params: { query } }));
   }
 
   // --- configuration ---------------------------------------------------------------
-  /** Every source of tools the gate knows (ADR 0022): the agents and the departments, built in,
-   *  and each MCP server, with its operations at their resolved levels and its allowlist. */
+  /** Every source of tools the gate knows: Ghost's own (the agents, the departments) and each
+   *  connected app, with its operations at the level the permissions give them by name. */
   sources() {
     return unwrap(this.api.GET("/sources"));
   }
-  /** Every declared MCP server (ADR 0024): Ghost's and each department's own, connected or not,
-   *  their tools, and the writes declared for the gate. Read-only; the folders are the place to change them. */
-  mcp() {
-    return unwrap(this.api.GET("/mcp"));
+
+  // --- apps (ADR 0034) ---------------------------------------------------------------
+  /** Every app in apps.json, connected or not, with each tool and what Ghost's permissions say. */
+  apps() {
+    return unwrap(this.api.GET("/apps"));
+  }
+  app(name: string) {
+    return unwrap(this.api.GET("/apps/{name}", { params: { path: { name } } }));
+  }
+  /** Apps to connect, from Ghost's copy of the registry; first-party ones first when nothing is searched. */
+  catalog(search = "", offset = 0, limit = 40) {
+    return unwrap(this.api.GET("/catalog", { params: { query: { search, offset, limit } } }));
+  }
+  catalogEntry(name: string) {
+    return unwrap(this.api.GET("/catalog/{name}", { params: { path: { name } } }));
+  }
+  /** Connect from the catalog, from a URL, or from another client's pasted config. Secrets go in,
+   *  never come out. An app that signs in comes back with `sign_in_url` for the browser. */
+  connectApp(body: AppConnect) {
+    return unwrap(this.api.POST("/apps", { body }));
+  }
+  signIn(name: string) {
+    return unwrap(this.api.POST("/apps/{name}/sign-in", { params: { path: { name } } }));
+  }
+  disconnectApp(name: string) {
+    return unwrap(this.api.DELETE("/apps/{name}", { params: { path: { name } } }));
+  }
+  permissions() {
+    return unwrap(this.api.GET("/permissions"));
+  }
+  /** The mode, whole lists, or one rule moved (`set: {rule, level}`; level null clears it). */
+  updatePermissions(update: PermissionsUpdate) {
+    return unwrap(this.api.PUT("/permissions", { body: update }));
   }
   policy() {
     return unwrap(this.api.GET("/policy"));
@@ -239,7 +306,7 @@ export class GhostClient {
   }
 
   // --- departments (ADR 0024) --------------------------------------------------------------
-  /** Every department, Ghost first: its folder, rules, servers, skills, agents and problems. */
+  /** Every department, Ghost first: its folder, rules, permissions, skills, agents and problems. */
   departments() {
     return unwrap(this.api.GET("/departments"));
   }
@@ -274,7 +341,7 @@ export class GhostClient {
   }
 
   // --- skills (ADR 0023, ADR 0024) -----------------------------------------------------------
-  /** Every SKILL.md folder Ghost reads for itself: its own and the operator's, with the servers
+  /** Every SKILL.md folder Ghost reads for itself: its own and the operator's, with the apps
    *  each needs, which of those aren't connected, and any problem that keeps it from being offered. */
   skills() {
     return unwrap(this.api.GET("/skills"));

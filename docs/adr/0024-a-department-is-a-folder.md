@@ -1,6 +1,6 @@
 # 0024: A department is a folder; agents are hired into it and move between them
 
-- **Status:** accepted 2026-10-25 (reviews 2026-10-21, 22 and 25; the last against OpenBot, #12)
+- **Status:** accepted 2026-10-25 (reviews 2026-10-21, 22 and 25; the last against OpenBot, #12); servers per department (`mcp.json`, `use`, the declarations, `root_servers`) superseded by ADR 0034: apps are Ghost's, and a department narrows them with permissions
 - **Date:** 2026-10-22
 - **Supersedes:** ADR 0023's toolkits, templates and departments-as-lines; ADR 0022's servers
   in the policy file; ADR 0019's per-conversation scope; the words *line* and *toolkit*
