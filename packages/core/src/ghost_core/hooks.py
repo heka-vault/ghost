@@ -13,8 +13,9 @@ the model never sees a body:
    are (``ghost_core.watches``). A field that breaks its constraint rejects the delivery
    whole; everything not declared is dropped at the door. ``resolve`` checks close an
    item; ``when`` checks open one; anything else is ignored.
-3. **Checked at the source.** With ``check``, the reference is read again through the
-   department's declared read (its allowlist applies) and that read is what is believed;
+3. **Checked at the source.** With ``check``, the reference is read again through one of
+   a connected app's read-only tools (the department's permissions apply) and that read is
+   what is believed;
    a read that fails or doesn't hold rejects the delivery. Without ``check`` the item is
    marked unchecked.
 
@@ -72,7 +73,7 @@ class Rejected(Exception):
 
 @dataclass(frozen=True)
 class ReadBack:
-    server: str
+    app: str
     read: str
     args: Mapping[str, Any]  # values may be "{field}" templates
     fields: Mapping[str, FieldSpec]
@@ -196,8 +197,9 @@ def _parse_event(name: str, body: object, where: str) -> HookEvent:
     check = None
     raw = body.get("check")
     if raw is not None:
-        if not isinstance(raw, Mapping) or not raw.get("server") or not raw.get("read"):
-            raise WatchError(f"{where}: check names the server and the read")
+        app = raw.get("app", raw.get("server")) if isinstance(raw, Mapping) else None
+        if not isinstance(raw, Mapping) or not app or not raw.get("read"):
+            raise WatchError(f"{where}: check names the app and the read")
         args = raw.get("args", {})
         if not isinstance(args, Mapping):
             raise WatchError(f"{where}: check.args must be an object")
@@ -209,7 +211,7 @@ def _parse_event(name: str, body: object, where: str) -> HookEvent:
         rb_when = tuple(
             _parse_check(c, rb_fields, f"{where}: check.when") for c in raw.get("when") or []
         )
-        check = ReadBack(str(raw["server"]), str(raw["read"]), dict(args), rb_fields, rb_when)
+        check = ReadBack(str(app), str(raw["read"]), dict(args), rb_fields, rb_when)
     return HookEvent(name, fields, key, title, link, when, resolve, check)
 
 
@@ -268,8 +270,8 @@ def verify(
 # --- parsing and checking -----------------------------------------------------------------
 
 Outcome = Literal["item", "resolved", "ignored"]
-# (department, server, read, args) -> the read's result; raises when it can't, or when the
-# reference is outside the department's allowlist.
+# (department, app, read, args) -> the read's result; raises when it can't, or when the
+# department's permissions block it.
 Reader = Callable[[str, str, str, dict[str, Any]], Awaitable[Any]]
 
 
@@ -316,7 +318,7 @@ async def parse(hook: Hook, d: Delivery, read: Reader | None) -> Parsed:
             raise Rejected("not confirmed at the source")
         try:
             result = await read(
-                hook.department, ev.check.server, ev.check.read, _fill(ev.check.args, fields)
+                hook.department, ev.check.app, ev.check.read, _fill(ev.check.args, fields)
             )
         except Exception as e:  # noqa: BLE001 - outside the allowlist, a failed read
             raise Rejected(f"not confirmed at the source ({type(e).__name__})") from None

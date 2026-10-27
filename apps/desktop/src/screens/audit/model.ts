@@ -70,12 +70,12 @@ export const STATUS_ORDER = ["executed", "pending", "claimed", "failed", "partia
 
 /* ---------------------------------------------------------------------------- words */
 
-/** "github_heka.close": the source (a server's name, the agents or the departments) and the operation. */
+/** "github.issue_write": the source (an app's name, the agents or the departments) and the operation. */
 export function opName(e: AuditEntry): string {
   return `${e.ability}.${e.operation}`;
 }
 
-/** Source names read as words in the filter: the built-in ones are "Agents" and "Departments", a server goes by its humanized name ("GitHub heka"; a department's own as "marketing/figma"). */
+/** Source names read as words in the filter: the built-in ones are "Agents" and "Departments", an app goes by its name in words ("GitHub", "Github acme"). */
 export function sourceLabel(name: string): string {
   if (name === "conversations") return "Agents";
   if (name === "departments") return "Departments";

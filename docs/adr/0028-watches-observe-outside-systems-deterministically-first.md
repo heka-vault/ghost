@@ -1,6 +1,6 @@
 # 0028: Watches observe outside systems, deterministically first
 
-- **Status:** accepted (built 2026-10-27 for polled watches: `ghost_core.watches`, `Fleet.watch_read`; pushed ones are ADR 0027's listener)
+- **Status:** accepted (built 2026-10-27 for polled watches: `ghost_core.watches`, `Fleet.watch_read`; pushed ones are ADR 0027's listener); amended by ADR 0034 (a watch reads a connected app's read-only tool, `app` for `server`)
 - **Date:** 2026-10-27
 
 Ghost is to notice things on its own ([direction.md](../direction.md)): a red build, a

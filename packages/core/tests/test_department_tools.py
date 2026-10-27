@@ -33,7 +33,10 @@ def world(tmp_path: Path):
     store = Store()
     convs = Conversations(store, departments)
     tools = DepartmentTools(departments, store, convs)
-    gate = WriteGate(store, autonomy=AutonomyPolicy.parse(f"[{SOURCE}]\nremember = 'announce'\n"))
+    # ADR 0034: everything runs unless a rule asks first; this world asks for a rule.
+    gate = WriteGate(
+        store, autonomy=AutonomyPolicy.parse(f"[permissions]\nask = ['{SOURCE}.add_rule']\n")
+    )
     gate.register(SOURCE, tools.operations())
     gate.register(CONVERSATIONS, convs.operations())
     return cfg, departments, store, convs, tools, gate
@@ -54,12 +57,21 @@ async def submit(gate, tools, op, **args):
     )
 
 
+async def test_by_default_a_rule_is_added_and_announced(world):
+    cfg, departments, store, convs, tools, _ = world
+    gate = WriteGate(store)
+    gate.register(SOURCE, tools.operations())
+    sub = await submit(gate, tools, "add_rule", department="marketing", text="Be brief.")
+    assert sub.autonomy is Autonomy.ANNOUNCE and sub.outcome.status == "success"
+    assert (cfg / "departments" / "marketing" / "AGENTS.md").read_text().endswith("Be brief.\n")
+
+
 async def test_add_rule_appends_verbatim_at_confirm_after_a_spoken_yes(world):
     cfg, departments, store, convs, tools, gate = world
     sub = await submit(
         gate, tools, "add_rule", department="the marketers", text="Always use UK dates."
     )
-    assert sub.autonomy is Autonomy.CONFIRM and sub.outcome is None  # medium risk: ask
+    assert sub.autonomy is Autonomy.CONFIRM and sub.outcome is None  # the ask rule
     assert sub.proposal.preview == "On Marketing: add the rule: Always use UK dates.."
     # The request is never the yes here: the text the model wrote is read back, and the
     # operator's yes to that exact text is what writes it (nothing in code can tell a

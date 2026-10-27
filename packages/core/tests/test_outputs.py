@@ -8,7 +8,7 @@ import stat
 from pathlib import Path
 
 import pytest
-from ghost_core import Autonomy, Store, WriteGate
+from ghost_core import Autonomy, AutonomyPolicy, Store, WriteGate
 from ghost_core.conversations import Conversations
 from ghost_core.departments import Departments
 from ghost_core.outputs import MAX_BYTES, SOURCE, OutputError, Outputs, OutputTarget, list_outputs
@@ -66,13 +66,18 @@ async def test_a_department_writes_into_its_own_out_folder(world):
     assert sub.proposal.target.scope() == "marketing"
 
 
-async def test_replacing_asks_first(world):
+async def test_replacing_is_its_own_operation_and_an_ask_rule_makes_it_wait(world):
     _, _, outputs, gate = world
     await make(gate, outputs, name="week.html", content=PAGE, _active="ghost")
     with pytest.raises(OutputError, match="replace"):
         await make(gate, outputs, name="week.html", content=PAGE, _active="ghost")
     sub = await make(
         gate, outputs, "replace", name="week.html", content=PAGE + "<p>v2", _active="ghost"
+    )
+    assert sub.autonomy is Autonomy.ANNOUNCE and sub.outcome.status == "success"  # ADR 0034
+    gate.set_autonomy(AutonomyPolicy.parse('[permissions]\nask = ["outputs.replace"]\n'))
+    sub = await make(
+        gate, outputs, "replace", name="week.html", content=PAGE + "<p>v3", _active="ghost"
     )
     assert sub.autonomy is Autonomy.CONFIRM and sub.outcome is None  # waits for a yes
 

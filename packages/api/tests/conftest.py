@@ -167,7 +167,7 @@ def make_source(writer) -> ToolSource:
     ]
     return ToolSource(
         name="fake",
-        prompt="A fake server. It echoes.",
+        prompt="A fake app. It echoes.",
         read_tools=[ReadTool("echo", "Echo.", {}, [], echo)],
         operations=ops,
     )
@@ -179,6 +179,8 @@ def world(tmp_path: Path):
     writer = FakeWriter()
     loaded = make_source(writer)
     policy_path = tmp_path / "policy.toml"
+    # ADR 0034: everything runs unless a rule asks; this world asks before a nuke.
+    policy_path.write_text('[permissions]\nask = ["fake.nuke"]\n')
     gate = WriteGate(store, autonomy=AutonomyPolicy.load(policy_path))
     gate.register("fake", loaded.operations)
     departments = Departments(tmp_path / "config")

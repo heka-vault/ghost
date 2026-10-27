@@ -62,7 +62,7 @@ class Skill:
     description: str
     path: Path  # the folder
     source: str  # "ghost", "home", or the department it belongs to
-    requires: tuple[str, ...] = ()  # "mcp:<server>" names the skill needs
+    requires: tuple[str, ...] = ()  # "app:<name>" the skill needs ("mcp:<name>", the older form)
     problem: str | None = None  # why it is not offered, when it is not
 
     @property
@@ -97,14 +97,16 @@ class Skill:
                     return out
         return out
 
-    def missing(self, servers: Iterable[str]) -> list[str]:
-        """The servers this skill names that are not connected."""
-        have = set(servers)
+    def apps(self) -> list[str]:
+        """The apps this skill says it needs (ADR 0034)."""
         return [
-            r.removeprefix("mcp:")
-            for r in self.requires
-            if r.startswith("mcp:") and r.removeprefix("mcp:") not in have
+            r.split(":", 1)[1] for r in self.requires if r.startswith(("app:", "mcp:")) and ":" in r
         ]
+
+    def missing(self, connected: Iterable[str]) -> list[str]:
+        """The apps this skill needs that are not connected."""
+        have = set(connected)
+        return [a for a in self.apps() if a not in have]
 
 
 def parse_front_matter(text: str) -> tuple[dict[str, Any], str]:

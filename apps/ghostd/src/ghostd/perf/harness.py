@@ -27,11 +27,11 @@ from ghost_core import (
     Store,
     WriteGate,
 )
+from ghost_core.apps import APPS_FILE, Apps, load_apps
 from ghost_core.conversations import GHOST, Conversations, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
-from ghost_core.departments import Departments, load_department
+from ghost_core.departments import Departments
 from ghost_core.jev import JevClassifier, JevClient
-from ghost_core.mcp import Servers
 from ghost_voice import VoiceSettings, build_session
 from ghost_voice import llm as llm_module
 from ghost_voice import prompt as prompt_module
@@ -64,6 +64,8 @@ HISTORY = (
     ("user", "Leave it for now. Anything else urgent?"),
     ("assistant", "The webhook rotation is a security fix, so that one."),
 )
+
+PERF_POLICY = '[permissions]\nask = ["github.issue_write(state=closed)"]\n'
 
 
 def thinking_for(model: str, requested: str | None) -> str | None:
@@ -430,19 +432,17 @@ class Bench:
 
     async def _env(self, tmp: Path, settings: VoiceSettings, cfg: RunConfig) -> dict[str, Any]:
         store = Store(tmp / "ghost.db")
-        # The example policy declares the mock GitHub server (ADR 0022); its state file
-        # goes under this run's directory so every run starts from the seed.
-        # The example layout (infra/example) declares the mock GitHub server (ADR 0024).
-        example = load_department(GHOST, self.gdsettings.infra_dir / "example", is_ghost=True)
-        autonomy = example.policy(
-            AutonomyPolicy.load(self.gdsettings.infra_dir / "policy.example.toml")
-        )
-        github = example.servers["github"]
-        servers = Servers(
+        # The example layout (infra/example) connects the mock GitHub app (ADR 0034); its
+        # state file goes under this run's directory so every run starts from the seed.
+        # The shipped policy runs everything (ADR 0034); the harness asks before a close so
+        # the scenarios that measure the yes (ADR 0017) have one to measure.
+        autonomy = AutonomyPolicy.parse(PERF_POLICY, source="perf")
+        github = load_apps(self.gdsettings.infra_dir / "example" / APPS_FILE).apps["github"]
+        servers = Apps(
             {"github": replace(github, args=("--state", str(tmp / "data" / "mock-github.json")))}
         )
         await servers.connect()
-        if "github" not in servers.servers:
+        if "github" not in servers.apps:
             raise RuntimeError(f"mock GitHub server did not start: {servers.failed}")
         sources = servers.sources()
         jev = None
@@ -468,6 +468,11 @@ class Bench:
         gate = WriteGate(store, autonomy=autonomy, classifier=classifier)
         for a in sources:
             gate.register(a.name, a.operations)
+        # Ghost's standing instructions name the repositories, as an operator's would: the
+        # app's tools take owner and repo, and nothing else in the prompt says which.
+        (tmp / "config").mkdir(parents=True, exist_ok=True)
+        rules = self.gdsettings.infra_dir / "example" / "AGENTS.md"
+        (tmp / "config" / "AGENTS.md").write_text(rules.read_text())
         departments = Departments(tmp / "config")
         departments.ensure_layout()
         conversations = Conversations(
@@ -519,7 +524,7 @@ def check_line(line: Line, records: list[dict[str, Any]], *, ended: bool) -> lis
     if missing:
         out.append(f"expected {sorted(missing)}, got {sorted(names) or 'no tools'}")
     if line.status and line.status not in {t.get("status") for t in used}:
-        got = sorted({str(t.get("status")) for t in used if t["name"] == "change"})
+        got = sorted({str(t.get("status")) for t in used if t.get("op")})
         out.append(f"expected status {line.status}, got {got or 'none'}")
     if line.intercepted and not any(r.get("intercepted") for r in records):
         out.append("expected the quick intents to take it")

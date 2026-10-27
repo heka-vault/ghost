@@ -187,7 +187,7 @@ daemon, on strict terms:
    an allowlist). Anything else in the body is dropped at the door; a body that doesn't
    fit is rejected whole.
 3. **Checked at the source.** A webhook that says run 123 failed is a hint: Ghost reads
-   run 123 from GitHub through the declared read, and the read is what it believes.
+   run 123 from GitHub through one of its read-only tools, and the read is what it believes.
 4. **No raw text to the model,** and a webhook can never write, confirm or change a
    permission. It produces an observation; the watch's response decides what happens.
 

@@ -6,14 +6,13 @@
 import type { DevicesView, SettingsView } from "@ghost/client-ts";
 
 /** Page sections, in order. The id is also the `?section=` deep link. */
-export type SectionId = "setup" | "secrets" | "model" | "github" | "departments" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
+export type SectionId = "setup" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
   secrets: "Secrets",
   model: "Model",
-  github: "Servers",
-  departments: "Departments",
+  apps: "Apps",
   skills: "Skills",
   voice: "Voice and wake",
   audio: "Microphone and speakers",
@@ -29,7 +28,6 @@ export const sectionDomId = (id: SectionId) => `set-${id}`;
 export const VALUE_KEYS = [
   "ANTHROPIC_BASE_URL",
   "GHOST_LLM_MODEL",
-  "GHOST_DEPARTMENT_ROUTING",
   "GHOST_INPUT_DEVICE",
   "GHOST_WAKE_PHRASES",
   "GHOST_WAKE_FUZZY",
@@ -40,7 +38,6 @@ export type ValueKey = (typeof VALUE_KEYS)[number];
 export const KEY_LABEL: Record<string, string> = {
   ANTHROPIC_BASE_URL: "Model endpoint",
   GHOST_LLM_MODEL: "Model",
-  GHOST_DEPARTMENT_ROUTING: "Department routing",
   GHOST_INPUT_DEVICE: "Microphone",
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
@@ -56,7 +53,6 @@ export const KEY_LABEL: Record<string, string> = {
 export const KEY_SECTION: Record<string, SectionId> = {
   ANTHROPIC_BASE_URL: "model",
   GHOST_LLM_MODEL: "model",
-  GHOST_DEPARTMENT_ROUTING: "departments",
   GHOST_INPUT_DEVICE: "audio",
   GHOST_WAKE_PHRASES: "voice",
   GHOST_WAKE_FUZZY: "voice",
@@ -72,12 +68,26 @@ export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
   ANTHROPIC_AUTH_TOKEN: { help: "Lets Ghost think and talk. Not needed if your own endpoint takes no key.", placeholder: "sk-ant-…" },
-  GITHUB_TOKEN: { help: "What a GitHub server signs in with, named ${GITHUB_TOKEN} in a department’s mcp.json.", placeholder: "github_pat_…" },
+  GITHUB_TOKEN: { help: "For a GitHub app you added by hand whose config names ${GITHUB_TOKEN}. Apps you connect under Apps keep their own key.", optional: true, placeholder: "github_pat_…" },
   TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev keys are set.", optional: true, placeholder: "ts_…" },
   OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when the endpoint setting is openrouter.", optional: true, placeholder: "sk-or-…" },
   HF_TOKEN: { help: "Speeds up the first download of the voice models.", optional: true, placeholder: "hf_…" },
   ELEVENLABS_API_KEY: { help: "Ghost speaks with an ElevenLabs voice when the voice engine is elevenlabs. Only what Ghost says is sent.", optional: true, placeholder: "sk_…" },
 };
+
+/** A key Ghost keeps for an app it connected (ADR 0034): GHOST_APP_<APP>_<KEY>. */
+export const isAppSecret = (name: string) => name.startsWith("GHOST_APP_");
+
+/** "GHOST_APP_MOBBIN_KEY" → "Mobbin key": an app's key in words; the name stays as detail. */
+export function secretLabel(name: string): string {
+  if (KEY_LABEL[name]) return KEY_LABEL[name];
+  if (!isAppSecret(name)) return name;
+  const words = name.slice("GHOST_APP_".length).toLowerCase().split("_").filter(Boolean);
+  if (!words.length) return name;
+  return words[0][0].toUpperCase() + words[0].slice(1) + (words.length > 1 ? ` ${words.slice(1).join(" ")}` : "");
+}
+
+export const APP_SECRET_INFO = { help: "Set when you connected the app. Replace it if the app asks for a new one.", placeholder: "Paste the new key" };
 
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const DEFAULT_FUZZY = 0.9;

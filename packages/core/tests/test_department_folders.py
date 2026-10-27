@@ -1,5 +1,5 @@
-"""Departments as folders (ADR 0024): discovery, mcp.json, department.json, the levels a
-department's session runs under, and a server seen through another declaration."""
+"""Departments as folders (ADR 0024): discovery, department.json, a root read in place, and
+the permissions a department adds over the operator's (ADR 0034)."""
 
 from __future__ import annotations
 
@@ -11,55 +11,21 @@ from ghost_core import Autonomy, AutonomyPolicy
 from ghost_core.departments import (
     DEPARTMENT_FILE,
     GHOST,
-    MCP_FILE,
     RULES_FILE,
     DepartmentError,
     Departments,
     discover,
     load_department,
-    looks_like_secret,
-    parse_mcp_json,
-    render_mcp_json,
 )
-from ghost_core.mcp import ServerSpec, fill_secrets, secret_names
-from test_mcp_writes import connected, spec
 
-MCP = {
-    "mcpServers": {
-        "figma": {
-            "command": "figma-mcp",
-            "args": ["--stdio"],
-            "env": {"FIGMA_TOKEN": "${FIGMA_TOKEN}"},
-        },
-        "mobbin": {
-            "type": "http",
-            "url": "http://proxy.lan:8318/mobbin/mcp",
-            "headers": {"Authorization": "Bearer ${env:MCP_PROXY_KEY}"},
-        },
-    },
-    "use": ["github"],
-}
-DECLARATION = {
+MARKETING = {
     "title": "Marketing",
     "aliases": ["the marketers"],
     "voice": "bf_emma",
-    "servers": {
-        "github": {
-            "reads": ["issue_read", "list_issues"],
-            "scope": {"kind": "repository", "arguments": ["owner", "repo"], "items": ["acme/web"]},
-            "writes": {
-                "comment": {
-                    "tool": "add_issue_comment",
-                    "target": ["owner", "repo", "issue_number"],
-                    "read": {"tool": "issue_read", "with": {"method": "get"}},
-                    "asked_by": ["comment"],
-                    "risk": "low",
-                }
-            },
-            "levels": {"comment": "confirm"},
-            "targets": {"Acme/Web": {"comment": "deny"}},
-        },
-        "figma": {"levels": {"export": "quiet"}},
+    "permissions": {
+        "block": ["github.*(repo!=web)"],
+        "ask": ["github.add_issue_comment"],
+        "quiet": ["figma.export"],
     },
 }
 
@@ -72,16 +38,10 @@ def write(folder: Path, name: str, data: object) -> None:
 @pytest.fixture
 def config(tmp_path: Path) -> Path:
     cfg = tmp_path / "ghost"
-    write(cfg, MCP_FILE, {"mcpServers": {"github": {"command": "github-mcp-server"}}})
-    write(
-        cfg,
-        DEPARTMENT_FILE,
-        {"servers": {"github": {"levels": {"close": "announce"}}}},
-    )
+    write(cfg, DEPARTMENT_FILE, {"title": "Ghost"})
     write(cfg, RULES_FILE, "# Ghost\n\nBe brief.\n")
     marketing = cfg / "departments" / "marketing"
-    write(marketing, MCP_FILE, MCP)
-    write(marketing, DEPARTMENT_FILE, DECLARATION)
+    write(marketing, DEPARTMENT_FILE, MARKETING)
     write(marketing, RULES_FILE, "# Marketing: the brand and the channels\n\nUK dates.\n")
     (marketing / "docs").mkdir()
     (marketing / "docs" / "voice.md").write_text("Warm, never salesy.\n")
@@ -96,7 +56,6 @@ def test_discovery_reads_ghost_and_each_folder(config: Path):
     assert set(found) == {GHOST, "marketing"}  # "Bad Name" is skipped
     ghost = found[GHOST]
     assert ghost.is_ghost and ghost.title == "Ghost" and ghost.path == config
-    assert set(ghost.servers) == {"github"} and ghost.uses == ()
     assert ghost.rules_lead() == "Ghost" and ghost.problems == []
     m = found["marketing"]
     assert m.title == "Marketing" and m.aliases == ("the marketers",) and m.voice == "bf_emma"
@@ -110,73 +69,39 @@ def test_discovery_reads_ghost_and_each_folder(config: Path):
     assert m.problems == []
 
 
-def test_mcp_json_is_the_portable_shape(config: Path):
-    m = discover(config)["marketing"]
-    assert set(m.servers) == {"figma", "mobbin"} and m.uses == ("github",)
-    figma, mobbin = m.servers["figma"], m.servers["mobbin"]
-    assert figma.transport == "stdio" and figma.args == ("--stdio",)
-    assert figma.env == {"FIGMA_TOKEN": "${FIGMA_TOKEN}"}
-    assert mobbin.transport == "http" and mobbin.headers["Authorization"].endswith("MCP_PROXY_KEY}")
-    # secrets in either spelling come from the environment only
-    assert fill_secrets("Bearer ${env:K}", {"K": "x"}) == "Bearer x"
-    assert fill_secrets("${K} $K", {"K": "x"}) == "x x"
-    assert secret_names("a ${env:ONE} $TWO ${THREE}") == ["ONE", "TWO", "THREE"]
-    with pytest.raises(KeyError):
-        fill_secrets("${env:MISSING}", {})
-    # the declaration shapes what the gate sees of each server
-    assert set(figma.writes) == set() and m.declared("figma").levels == {"export": Autonomy.QUIET}
-    gh = m.declared("github")
-    assert gh.reads == ("issue_read", "list_issues") and gh.scope.items == ("acme/web",)
-    assert set(gh.writes) == {"comment"} and gh.writes["comment"].asked_by == ("comment",)
-    assert gh.targets == {"acme/web": {"comment": Autonomy.DENY}}
-    assert m.covers("github", "ACME/web") and not m.covers("github", "acme/app")
-    assert not m.covers("figma", "anything")  # no scope declared
-    # round trip
-    again = parse_mcp_json(render_mcp_json(m.servers, m.uses), "x")
-    assert again.servers == m.servers and again.uses == ("github",)
-
-
-def test_mcp_json_problems_name_the_entry_and_keep_the_rest():
-    file = parse_mcp_json(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "ok": {"command": "x"},
-                    "both": {"command": "x", "url": "http://y"},
-                    "sse": {"type": "sse", "url": "http://y"},
-                    "Bad Name": {"command": "x"},
-                    "leaky": {"command": "x", "env": {"TOKEN": "ghp_" + "a" * 36}},
-                    "odd": {"command": "x", "disabled": True},
-                },
-                "use": ["ok", "github"],
-                "extra": 1,
-            }
-        ),
-        "mcp.json",
+def test_a_department_adds_care_over_the_operators_permissions(config: Path):
+    base = AutonomyPolicy.parse(
+        '[permissions]\nallow = ["github.*"]\n[conversations]\nrename = "quiet"\n'
     )
-    assert set(file.servers) == {"ok", "leaky", "odd"} and file.uses == ("github",)
-    text = "\n".join(file.problems)
-    assert "both needs exactly one of url or command" in text
-    assert "transport 'sse'" in text and "Bad Name" in text
-    assert "leaky: env TOKEN looks like a literal secret" in text
-    assert "odd: key(s) disabled are not read" in text
-    assert "ok is both a server here and a use" in text and "unknown key(s) extra" in text
-    assert looks_like_secret("sk-abcdefghijklmnop") and looks_like_secret("Bearer " + "q" * 20)
-    assert not looks_like_secret("${env:TOKEN}") and not looks_like_secret("http://x.y/mcp")
-    with pytest.raises(DepartmentError, match="not JSON"):
-        parse_mcp_json("{", "f")
-    assert parse_mcp_json("", "f").servers == {}
+    found = discover(config)
+    p = found["marketing"].policy(base)
+    assert p.resolve("github", "issue_write", {"repo": "app"}) is Autonomy.DENY
+    assert p.resolve("github", "issue_write", {"repo": "web"}) is Autonomy.ANNOUNCE
+    assert p.resolve("github", "add_issue_comment", {"repo": "web"}) is Autonomy.CONFIRM
+    assert p.resolve("figma", "export") is Autonomy.QUIET
+    assert p.resolve("conversations", "rename") is Autonomy.QUIET  # the file's own stay
+    g = found[GHOST].policy(base)
+    assert g.resolve("github", "issue_write", {"repo": "app"}) is Autonomy.ANNOUNCE
+    assert base.resolve("figma", "export") is Autonomy.ANNOUNCE  # untouched
+
+
+def test_a_department_cannot_allow_and_ghost_keeps_its_permissions_in_the_policy(tmp_path):
+    folder = tmp_path / "departments" / "ops"
+    write(folder, DEPARTMENT_FILE, {"permissions": {"allow": ["github"]}})
+    d = load_department("ops", folder)
+    assert any("only block, ask or quiet" in p for p in d.problems)
+    assert d.permissions.allow == ()
+    ghost = tmp_path / "g"
+    write(ghost, DEPARTMENT_FILE, {"permissions": {"block": ["gmail"]}})
+    g = load_department(GHOST, ghost, is_ghost=True)
+    assert any("policy.toml" in p for p in g.problems) and g.permissions.block == ()
 
 
 def test_department_json_problems_do_not_lose_the_department(tmp_path: Path):
     folder = tmp_path / "departments" / "ops"
     write(folder, DEPARTMENT_FILE, "{not json")
     d = load_department("ops", folder)
-    assert (
-        d.title == "Ops"
-        and d.servers == {}
-        and any("not json" in p.lower() or "Expecting" in p for p in d.problems)
-    )
+    assert d.title == "Ops" and any("Expecting" in p for p in d.problems)
     write(
         folder,
         DEPARTMENT_FILE,
@@ -184,17 +109,18 @@ def test_department_json_problems_do_not_lose_the_department(tmp_path: Path):
             "title": "Ops",
             "root": str(tmp_path / "nowhere"),
             "bogus": 1,
-            "servers": {"books": {"levels": {"post": "loud"}}, "stray": {}},
+            "servers": {"books": {"levels": {"post": "quiet"}}},
+            "permissions": {"block": ["not a rule!"]},
         },
     )
-    write(folder, MCP_FILE, {"mcpServers": {"books": {"command": "books-mcp"}}})
+    write(folder, "mcp.json", {"mcpServers": {"books": {"command": "books-mcp"}}})
     d = load_department("ops", folder)
     text = "\n".join(d.problems)
     assert "root" in text and "is not a folder" in text and d.root is None
     assert "unknown key(s) bogus" in text
-    assert "'loud' is not one of" in text
-    assert "stray is declared but mcp.json neither starts nor uses it" in text
-    assert set(d.servers) == {"books"}  # the broken declaration is left out, the server stays
+    assert "servers is no longer read" in text  # ADR 0034: apps are Ghost's
+    assert "connect its apps in Ghost's Apps screen" in text
+    assert "is not a rule" in text
 
 
 def test_a_root_is_read_in_place_and_agents_stay_home(tmp_path: Path):
@@ -209,61 +135,32 @@ def test_a_root_is_read_in_place_and_agents_stay_home(tmp_path: Path):
     write(folder, DEPARTMENT_FILE, {"root": str(repo)})
     d = load_department("heka", folder)
     assert d.root == repo and d.rules_lead() == "Heka" and d.docs() == ["runbook.md"]
-    # the repository's own server file starts nothing until the operator says so: it
-    # names commands to run and the secrets to hand them
-    assert d.servers == {} and len(d.problems) == 1 and "root_servers" in d.problems[0]
-    write(folder, DEPARTMENT_FILE, {"root": str(repo), "root_servers": True})
-    d = load_department("heka", folder)
-    assert set(d.servers) == {"gh"} and d.problems == []
+    assert d.problems == []  # the repository's own .mcp.json is its coding tools' business
     assert [str(p.relative_to(repo)) for p, _ in d.skill_places()] == [
         ".agents/skills",
         ".claude/skills",
     ]
     assert d.agents_dir == folder / "agents"  # never in the repository
-    # Ghost keeps its resources at the config root
+    # Ghost keeps its resources at the config root; its old mcp.json is named
     ghost_dir = tmp_path / "g"
     write(ghost_dir, DEPARTMENT_FILE, {"root": str(repo)})
-    write(ghost_dir, MCP_FILE, {"mcpServers": {}, "use": ["gh"]})
+    write(ghost_dir, "mcp.json", {"mcpServers": {}})
     g = load_department(GHOST, ghost_dir, is_ghost=True)
-    assert g.root is None and g.uses == () and len(g.problems) == 2
+    assert g.root is None and len(g.problems) == 2
+    assert any("rename it" in p and "apps.json" in p for p in g.problems)
 
 
-def test_levels_live_beside_the_declaration_and_name_the_source(config: Path):
-    base = AutonomyPolicy.parse(
-        '[defaults]\nautonomy = "confirm"\n[conversations]\nrename = "quiet"\n'
-    )
-    found = discover(config)
-    m = found["marketing"]
-    assert m.source_name("figma") == "marketing/figma"  # its own server
-    assert m.source_name("github") == "github"  # one it uses keeps the bare name
-    assert found[GHOST].source_name("github") == "github"
-    p = m.policy(base)
-    assert p.resolve("marketing/figma", "export") is Autonomy.QUIET
-    assert p.resolve("github", "comment", "acme/web") is Autonomy.DENY  # the target rule
-    assert p.resolve("github", "comment", "acme/other") is Autonomy.CONFIRM
-    assert p.resolve("conversations", "rename") is Autonomy.QUIET  # the file's own stay
-    assert p.resolve("github", "close", risk="low") is Autonomy.CONFIRM  # [defaults]
-    g = found[GHOST].policy(base)
-    assert g.resolve("github", "close") is Autonomy.ANNOUNCE  # Ghost's department.json
-    assert g.resolve("github", "comment", "acme/web") is Autonomy.CONFIRM  # not marketing's
-    assert base.resolve("marketing/figma", "export", risk="low") is Autonomy.CONFIRM  # untouched
-
-
-def test_registry_resolves_lists_covers_and_creates(config: Path):
+def test_registry_resolves_lists_and_creates(config: Path):
     reg = Departments(config)
     assert [d.slug for d in reg.list()] == [GHOST, "marketing"]
     assert reg.resolve("the marketers").slug == "marketing"
     assert reg.resolve("move this to marketing").slug == "marketing"
     assert reg.resolve("ghost").is_ghost and reg.resolve("legal") is None
-    assert [d.slug for d in reg.covering("github", "acme/web")] == ["marketing"]
-    assert reg.covering("github", "acme/app") == []
     assert reg.problems() == []
     d = reg.create("Design Research", aliases=["research"], voice="am_adam")
     assert d.slug == "design-research" and d.title == "Design Research" and d.voice == "am_adam"
     assert (d.path / RULES_FILE).read_text().startswith("# Design Research")
-    assert (d.path / "agents").is_dir() and json.loads((d.path / MCP_FILE).read_text()) == {
-        "mcpServers": {}
-    }
+    assert (d.path / "agents").is_dir() and not (d.path / "mcp.json").exists()
     assert reg.resolve("research").slug == "design-research"
     with pytest.raises(DepartmentError, match="already"):
         reg.create("marketing")
@@ -271,49 +168,3 @@ def test_registry_resolves_lists_covers_and_creates(config: Path):
         reg.create("Ghost")
     reg.ensure_layout()
     assert (config / "agents").is_dir()
-
-
-async def test_a_view_shares_the_connection_but_not_the_declaration():
-    """A department that uses one of Ghost's servers reaches it through its own reads,
-    scope and writes, over the one process Ghost started."""
-    from ghost_core.departments import parse_declaration
-
-    async with connected(spec()) as (server, world):
-        decl = parse_declaration(
-            "github",
-            {
-                "reads": ["issue_read"],
-                "scope": {
-                    "kind": "repository",
-                    "arguments": ["owner", "repo"],
-                    "items": ["acme/web"],
-                },
-                "writes": {
-                    "retitle": {
-                        "tool": "issue_write",
-                        "with": {"method": "update"},
-                        "args": ["owner", "repo", "issue_number", "title"],
-                        "target": ["owner", "repo", "issue_number"],
-                    }
-                },
-            },
-            "d.json",
-        )
-        view = server.view(decl.applied_to(server.spec))
-        assert view.connected and view.tools is server.tools
-        assert [t.name for t in view.offered()] == ["issue_read"]
-        assert {t.name for t in server.offered()} == {"issue_read", "list_issues"}
-        assert [o.name for o in view.operations()] == ["retitle"]
-        assert "close" in {o.name for o in server.operations()}
-        prepared = await view.operations()[0].prepare({"issue_number": 7, "title": "Typo!"})
-        assert prepared.target.scope() == "acme/web"  # the view's one item fills itself in
-        with pytest.raises(ValueError, match="not an allowed repository"):
-            await view.operations()[0].prepare(
-                {"owner": "acme", "repo": "app", "issue_number": 42, "title": "x"}
-            )
-        out = await view.call(
-            "issue_read", {"method": "get", "owner": "acme", "repo": "web", "issue_number": 7}
-        )
-        assert out["title"] == "Typo"
-        with pytest.raises(ValueError, match="cannot be called"):
-            server.view(ServerSpec(name="other", command="x"))

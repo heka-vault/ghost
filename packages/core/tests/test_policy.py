@@ -18,27 +18,24 @@ close = "deny"
 """
 
 
-def test_resolution_order():
+def test_the_older_layout_reads_as_rules_and_the_most_careful_wins():
+    """ADR 0034: a per-source table becomes rules; ``[defaults] autonomy`` the mode."""
     p = AutonomyPolicy.parse(FILE)
-    # target beats skill
-    assert p.resolve("github_issues", "comment", "acme/public") is Autonomy.CONFIRM
-    assert p.resolve("github_issues", "comment", "acme/other") is Autonomy.QUIET
-    # target rule for an op the skill section doesn't mention
-    assert p.resolve("github_issues", "close", "acme/public") is Autonomy.DENY
-    # skill rule
-    assert p.resolve("github_issues", "set_labels", "acme/other") is Autonomy.ANNOUNCE
-    # [defaults] beats risk class
-    assert p.resolve("github_issues", "close", "acme/other", risk="low") is Autonomy.CONFIRM
-    # wildcard
-    assert p.resolve("notes", "append", "", risk="high") is Autonomy.ANNOUNCE
+    public, other = {"target": "acme/public"}, {"target": "acme/other"}
+    # an ask for one target beats a quiet for every target
+    assert p.resolve("github_issues", "comment", public) is Autonomy.CONFIRM
+    assert p.resolve("github_issues", "comment", other) is Autonomy.QUIET
+    assert p.resolve("github_issues", "close", public) is Autonomy.DENY
+    assert p.resolve("github_issues", "set_labels", other) is Autonomy.ANNOUNCE
+    # what no rule names takes the mode, here "ask" from defaults.autonomy
+    assert p.resolve("github_issues", "close", other) is Autonomy.CONFIRM
+    assert p.resolve("notes", "append") is Autonomy.ANNOUNCE  # the wildcard
 
 
-def test_missing_file_falls_back_to_risk(tmp_path):
+def test_a_missing_file_runs_everything(tmp_path):
     p = AutonomyPolicy.load(tmp_path / "nope.toml")
     assert "missing" in p.source
-    assert p.resolve("x", "y", risk="low") is Autonomy.ANNOUNCE
-    assert p.resolve("x", "y", risk="medium") is Autonomy.CONFIRM
-    assert p.resolve("x", "y", risk="high") is Autonomy.CONFIRM
+    assert p.resolve("x", "y") is Autonomy.ANNOUNCE
 
 
 def test_load_reads_file(tmp_path):
@@ -61,28 +58,32 @@ def test_bad_files_name_the_problem(text, needle):
         AutonomyPolicy.parse(text)
 
 
-def test_describe_lists_every_op():
-    p = AutonomyPolicy.parse('[github_issues]\nclose = "deny"\n')
-    out = p.describe("github_issues", {"close": "high", "comment": "low"})
-    assert out == {"close": Autonomy.DENY, "comment": Autonomy.ANNOUNCE}
-
-
 def test_example_layout_parses():
     """infra/example is what `make env` seeds: the policy file and Ghost's folder."""
     from pathlib import Path
 
+    from ghost_core.apps import APPS_FILE, load_apps
     from ghost_core.departments import load_department
+    from ghost_core.permissions import Mode
 
     infra = Path(__file__).parents[3] / "infra"
     p = AutonomyPolicy.parse((infra / "policy.example.toml").read_text())
-    assert all(not ops for ops in p.skills.values()) and p.default is None
+    assert p.permissions.mode is Mode.OPEN and not any(p.permissions.rules().values())
     ghost = load_department("ghost", infra / "example", is_ghost=True)
-    assert ghost.problems == [] and set(ghost.servers) == {"github"}
-    assert set(ghost.servers["github"].writes) == {"comment", "set_labels", "close", "reopen"}
-    merged = ghost.policy(p)
-    assert merged.resolve("github", "set_labels") is Autonomy.ANNOUNCE
-    assert merged.resolve("github", "close") is Autonomy.CONFIRM
+    assert ghost.problems == []
+    apps = load_apps(infra / "example" / APPS_FILE)
+    assert apps.problems == () and set(apps.apps) == {"github"}
+    for folder in sorted((infra / "templates").iterdir()):
+        if folder.is_dir():
+            assert load_department(folder.name, folder).problems == [], folder.name
+    assert ghost.policy(p).resolve("github", "issue_write") is Autonomy.ANNOUNCE
     assert ghost.rules_lead() == "Ghost"
+    triage = load_department("triage", infra / "templates" / "triage")
+    t = triage.policy(p)
+    assert t.resolve("github", "issue_write", {"owner": "acme"}) is Autonomy.DENY
+    assert t.resolve("github", "issue_write", {"owner": "ghost-mock"}) is Autonomy.ANNOUNCE
+    closing = {"owner": "ghost-mock", "state": "closed"}
+    assert t.resolve("github", "issue_write", closing) is Autonomy.CONFIRM
 
 
 def test_abilities_section_is_ignored():

@@ -7,7 +7,7 @@
 
 /* ------------------------------------------------------------------ two panes */
 .skl-panes {
-  /* Pending shared tokens: --pane-list-width (280) and a detail measure (760), as Servers. */
+  /* Pending shared tokens: --pane-list-width (280) and a detail measure (760). */
   --skl-list-width: calc(var(--space-20) * 3.5);
   --skl-measure: calc(var(--space-20) * 9.5);
   display: grid;
@@ -95,7 +95,7 @@
 
 .skl-sections { margin-top: var(--space-8); }
 
-/* A titled block, like Section, with its action on the heading's line (as Servers). */
+/* A titled block, like Section, with its action on the heading's line. */
 .skl-block { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .skl-block + .skl-block { margin-top: var(--space-10); }
 .skl-block__header { display: flex; flex-direction: column; gap: var(--space-0_5); }

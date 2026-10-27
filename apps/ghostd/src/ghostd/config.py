@@ -42,13 +42,16 @@ class GhostdSettings(BaseSettings):
         return self.latency_log or self.data_dir / "latency.jsonl"
 
     # Departments (ADR 0024): everything the operator edits lives under config_dir: Ghost's
-    # AGENTS.md, mcp.json and department.json at the root, each department under
+    # AGENTS.md, apps.json and department.json at the root, each department under
     # departments/<slug>/, and every agent's persona.md, memory.md and notes.md under its
     # department's agents/. The transcript and the registry mirror are in the database.
     # Summarized turns older than the retention window are pruned daily.
     config_dir: Path = Path.home() / ".config" / "ghost"
-    # A department's own servers stay up this long after a session leaves it.
-    department_idle_secs: float = 600.0
+    # Apps (ADR 0034): a sign-in's browser comes back to 127.0.0.1 on this port, only while
+    # a sign-in is open. Fixed, because an app's registration names it exactly.
+    signin_port: int = 47823
+    # The catalog's copy of the app registry, refreshed at most hourly.
+    catalog_path: Path = Path.home() / ".cache" / "ghost" / "catalog.json"
     # Skills (ADR 0024): Ghost's own SKILL.md folders, and the operator's, read after a
     # department's own (a project's skills come in through a department's root).
     skills_dir: Path = Path.home() / ".config" / "ghost" / "skills"

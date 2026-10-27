@@ -376,16 +376,6 @@ class Conversations:
                 return v
         return self.default_voice
 
-    def owners_of(self, server: str, item: str) -> list[Profile]:
-        """Where a request about ``item`` on ``server`` can be routed (ADR 0019): the
-        default agent of each department whose declaration covers it."""
-        out: list[Profile] = []
-        for d in self.departments.covering(server, item):
-            p = self.default_agent(d.slug)
-            if p is not None and not p.retired:
-                out.append(p)
-        return out
-
     # --- what a session loads -------------------------------------------------
 
     def resume(self, slug: str) -> ResumeContext:
@@ -956,7 +946,7 @@ def _speed(value: object, default: float | None) -> float | None:
 
 def conversations_source(convs: Conversations) -> ToolSource:
     """The agents' own read tools and operations as a tool source, so the gate, the policy
-    file and the audit treat them like any server's (ADR 0014)."""
+    file and the audit treat them like any app's (ADR 0014, ADR 0034)."""
     return ToolSource(
         name=SOURCE,
         prompt="",

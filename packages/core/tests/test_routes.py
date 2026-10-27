@@ -165,8 +165,9 @@ def test_routes_live_in_the_policy_file_and_round_trip():
     )
     p = AutonomyPolicy.parse(text)
     assert p.routes.enabled == ("digest", "desk", "phone")  # quietest first
-    assert "conversations" in p.skills and "routes" not in p.skills
-    assert AutonomyPolicy.parse(p.to_toml()).routes == p.routes
+    assert [str(r) for r in p.permissions.ask] == ["conversations.delete"]
+    again = AutonomyPolicy.parse(p.to_toml())
+    assert again.routes == p.routes and again.permissions == p.permissions
 
 
 @pytest.mark.parametrize(

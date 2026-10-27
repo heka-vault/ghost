@@ -276,8 +276,8 @@ def build_session(
     ``on_hang_up`` is called when the session is ending (a goodbye, the idle timeout, a
     hold that ran out). ``wake_phrases`` are what brings a session back from hold (ADR
     0021); the desk's wake phrases by default. ``reach``, ``on_enter`` and ``on_leave``
-    are the departments (ADR 0024): what an agent's session reaches, and the hooks that
-    start a department's servers on a transfer and release them after.
+    are the departments (ADR 0024): what an agent's session reaches, and hooks run on
+    either side of a transfer.
 
     ``context_note`` goes into the model's context before the greeting without running
     it: why Ghost started this session itself (ADR 0032), for the operator's reply."""
@@ -317,7 +317,6 @@ def build_session(
             keep_messages=settings.compact_keep_messages,
             start=start_in,
             on_switch=switched,
-            routing=settings.department_routing,
             reach=reach,  # ADR 0024: what the agent's department reaches
             on_enter=on_enter,
             on_leave=on_leave,

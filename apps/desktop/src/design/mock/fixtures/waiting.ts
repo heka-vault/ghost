@@ -59,10 +59,10 @@ export default function waiting(s: Scenario): WaitingItemView[] {
   ];
   if (s.data === "busy") {
     items.push({
-      key: "server:mobbin",
+      key: "app:linear",
       source: "ghost",
       department: null,
-      title: "The mobbin server isn't running: secret MCP_PROXY_KEY is not set",
+      title: "Linear needs you to sign in again",
       state: "new",
       first_seen: ago(3),
       changed_at: ago(3),

@@ -297,11 +297,11 @@ export function AgentsIndex() {
                 title={g.slug === "ghost" ? "Ghost" : title}
                 description={
                   g.slug === "ghost" ? (
-                    <>Where every wake lands. Agents hired here work with Ghost’s own servers and skills.</>
+                    <>Where every wake lands. Agents hired here work with Ghost’s own rules and skills.</>
                   ) : (
                     <>
                       {dept?.rules_lead ? <span data-user-content>{dept.rules_lead} </span> : null}
-                      <Link to={`/departments/${g.slug}`}>The {title} department</Link>: its servers, rules and skills.
+                      <Link to={`/departments/${g.slug}`}>The {title} department</Link>: its rules, skills and permissions.
                     </>
                   )
                 }

@@ -1,9 +1,7 @@
 {
   "title": "Accounting",
   "aliases": ["the books", "finance"],
-  "servers": {
-    "books": {
-      "levels": {}
-    }
+  "permissions": {
+    "ask": ["books.*"]
   }
 }

@@ -1,54 +1,17 @@
-/** Owner: policy. The autonomy policy file as the daemon reports it. */
-import type { PolicyView } from "@ghost/client-ts";
+/**
+ * Owner: policy. The policy file as the daemon reports it (ADR 0034): `[permissions]`, what
+ * the operator blocks or wants asked first, and `[routes]` (ADR 0031). Everything not named
+ * runs; the mode says what a change no rule names does.
+ */
+import type { PermissionsView, PolicyView } from "@ghost/client-ts";
 
-import type { ServerFixture } from "./mcp";
+import { permissionsToml } from "../permissions";
 import type { Scenario } from "../scenarios";
 
-/** ghost_core.policy.to_toml’s first line. */
-const HEADER = "# Ghost autonomy policy (ADR 0011, ADR 0022). Edited through the desktop app or by hand.";
+export const POLICY_PATH = "~/.config/ghost/policy.toml";
 
-/** A TOML key: bare when it can be, quoted otherwise (`"*"`, `"ghost-mock/app"`). */
-const key = (k: string) => (/^[A-Za-z0-9_-]+$/.test(k) ? k : JSON.stringify(k));
-
-/**
- * The text Ghost writes for a policy, mirroring ghost_core.policy.to_toml: [defaults], then
- * each declared server (its `[mcp.<name>]` declaration as the file had it, then its levels
- * and target tables), then every other source in name order with its target tables right
- * after it. No comments: a structured save rewrites the file without them.
- */
-export function renderToml(p: Pick<PolicyView, "default" | "skills" | "targets">, servers: ServerFixture[]): string {
-  const lines = [HEADER, ""];
-  if (p.default) lines.push("[defaults]", `autonomy = "${p.default}"`, "");
-  const names = new Set(servers.map((f) => f.info.name));
-  const levels = (table: string, ops: Record<string, string> | undefined) => {
-    if (!ops || !Object.keys(ops).length) return;
-    lines.push(`[${table}]`);
-    for (const [op, lv] of Object.entries(ops)) lines.push(`${key(op)} = "${lv}"`);
-    lines.push("");
-  };
-  const targetTables = (table: string, ts: Record<string, Record<string, string>> | undefined) => {
-    for (const [target, ops] of Object.entries(ts ?? {})) levels(`${table}.targets."${target}"`, ops);
-  };
-  for (const f of servers) {
-    lines.push(f.toml.trimEnd(), "");
-    levels(`mcp.${key(f.info.name)}.levels`, p.skills[f.info.name]);
-    targetTables(`mcp.${key(f.info.name)}`, p.targets[f.info.name]);
-  }
-  for (const skill of [...new Set([...Object.keys(p.skills), ...Object.keys(p.targets)])].filter((n) => !names.has(n)).sort()) {
-    levels(key(skill), p.skills[skill] ?? {});
-    targetTables(key(skill), p.targets[skill]);
-  }
-  return lines.join("\n").trimEnd() + "\n";
-}
-
-/** A file the operator has been into by hand: a few comments that a TOML save keeps. */
-function withComments(text: string): string {
-  return text
-    .replace(/^\[conversations\]$/m, "# Lines: anything that rewrites who a line is waits for my yes.\n[conversations]")
-    .replace(/^\[mcp\.github_heka\]$/m, "# The heka organisation's GitHub. One token, the repositories it may touch under scope.\n[mcp.github_heka]")
-    .replace(/^\[mcp\.github_heka\.levels\]$/m, "# Triage. Labels are cheap; closing and reopening wait for my yes.\n[mcp.github_heka.levels]")
-    .replace(/^(\[mcp\.github_heka\.targets\."ghost-mock\/infra"\])$/m, "# infra is shared with the platform team. Never close there.\n$1");
-}
+/** ghost_core.policy's first line. */
+const HEADER = "# Ghost's policy (ADR 0034): what it may not do, what it asks first, and how it reaches you.";
 
 /** [routes] as the daemon reports it (ADR 0031): the digest, desk voice and the phone. */
 export const ROUTES: NonNullable<PolicyView["routes"]> = {
@@ -64,22 +27,46 @@ export const ROUTES: NonNullable<PolicyView["routes"]> = {
   available: ["digest", "desk", "desktop"],
 };
 
-export default function policy(s: Scenario, servers: ServerFixture[]): PolicyView {
-  const path = "~/.config/ghost/policy.toml";
-  if (s.data === "empty") {
-    // No file yet: the daemon reports empty text.
-    return { default: null, skills: {}, targets: {}, path, exists: false, text: "", routes: { ...ROUTES, enabled: ["digest", "phone"], quiet_hours: null } };
+function routesToml(r: NonNullable<PolicyView["routes"]>): string {
+  const lines = ["[routes]", `enabled = [${r.enabled.map((e) => JSON.stringify(e)).join(", ")}]`, `escalate_after = ${r.escalate_after}`];
+  if (r.quiet_hours) lines.push(`quiet_hours = "${r.quiet_hours}"`);
+  lines.push(`greeting = ${JSON.stringify(r.greeting)}`);
+  return lines.join("\n");
+}
+
+/** The text Ghost writes: its header, `[permissions]`, then `[routes]`. A file the operator has edited keeps its comments in the mock only until a structured save. */
+export function renderPolicy(p: PermissionsView, routes: PolicyView["routes"], comments = false): string {
+  let perms = permissionsToml(p);
+  if (comments) perms = `# Everything runs. These are the exceptions.\n${perms}`;
+  return [HEADER, "", perms, "", routes ? routesToml(routes) : ""].join("\n").trimEnd() + "\n";
+}
+
+export function permissions(s: Scenario): PermissionsView {
+  const base: PermissionsView = { path: POLICY_PATH, mode: "open", block: [], ask: [], quiet: [], allow: [] };
+  if (s.data === "empty") return base;
+  if (s.data === "busy") {
+    return {
+      ...base,
+      mode: "ask",
+      block: ["github.delete_file", "github-acme.*(repo=public-app)", "calendar.delete_event"],
+      ask: ["conversations.delete", "conversations.reset"],
+      quiet: ["conversations.remember"],
+      allow: ["github.add_issue_comment", "github.issue_write(state=open)", "calendar.create_event", "departments.remember"],
+    };
   }
-  const skills: PolicyView["skills"] = {
-    github_heka: { set_labels: "quiet", comment: "announce", close: "confirm", reopen: "confirm" },
-    conversations: { set_persona: "confirm", reset: "confirm", delete: "confirm" },
+  return {
+    ...base,
+    block: ["github.delete_file", "github.*(owner!=ghost-mock)"],
+    ask: ["github.merge_pull_request", "github.issue_write(state=closed)", "conversations.delete", "conversations.reset"],
+    quiet: ["conversations.remember"],
   };
-  const targets: PolicyView["targets"] =
-    s.data === "busy"
-      ? { github_heka: { "ghost-mock/infra": { close: "deny", comment: "confirm" } }, github_work: { "acme/public-app": { close: "deny", comment: "confirm" } } }
-      : { github_heka: { "ghost-mock/infra": { close: "deny" } } };
-  // Busy: the calendar sets one level for everything it does with a `*` line.
-  if (s.data === "busy") skills.calendar = { "*": "confirm" };
-  const p = { default: null, skills, targets };
-  return { ...p, path, exists: true, text: withComments(renderToml(p, servers)), routes: ROUTES };
+}
+
+export default function policy(s: Scenario): PolicyView {
+  const perms = permissions(s);
+  if (s.data === "empty") {
+    // No file yet: the daemon reports empty text and the defaults.
+    return { path: POLICY_PATH, exists: false, text: "", permissions: perms, routes: { ...ROUTES, enabled: ["digest", "phone"], quiet_hours: null } };
+  }
+  return { path: POLICY_PATH, exists: true, text: renderPolicy(perms, ROUTES, true), permissions: perms, routes: ROUTES };
 }

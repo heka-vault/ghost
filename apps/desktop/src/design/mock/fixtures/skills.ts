@@ -1,14 +1,14 @@
 /**
  * Owner: skills. The SKILL.md folders Ghost reads (ADR 0023), as GET /skills reports them:
  * Ghost's own under ~/.config/ghost/skills, the operator's under ~/.agents/skills, and a
- * department's own read in place (ADR 0024). `missing` is worked out here from the servers the mock has
- * connected, so a skill that needs a server no scenario declares (quickbooks) shows as missing
- * everywhere, and one that needs the calendar is ready only in Busy, where that server exists.
+ * department's own read in place (ADR 0024). `requires` names apps (ADR 0034); `missing` is worked out
+ * here from the apps the mock has connected, so a skill that needs an app no scenario connects
+ * (quickbooks) shows as missing everywhere, and one that needs the calendar is ready only in Busy.
  */
 import type { SkillInfo } from "@ghost/client-ts";
 
 import type { Scenario } from "../scenarios";
-import type { ServerFixture } from "./mcp";
+import type { AppFixture } from "./apps";
 
 export interface SkillFixture {
   info: SkillInfo;
@@ -59,7 +59,7 @@ A reminder goes out at 7, 14 and 30 days overdue, in the words in reminders.md. 
     name: "month-close",
     description: "Close the books each month, from reconciliation to the report.",
     source: "ghost",
-    requires: ["mcp:quickbooks"],
+    requires: ["quickbooks"],
     files: ["checklist.md"],
     body: `# Month close
 
@@ -84,7 +84,7 @@ Two sentences: where cash stands and the one thing that moved most. Offer the fu
     name: "triage",
     description: "Sort new heka issues: label, ask for what is missing, hand the clear ones to an agent.",
     source: HEKA,
-    requires: ["mcp:github_heka"],
+    requires: ["github"],
     files: ["labels.md"],
     body: `# Triage
 
@@ -102,7 +102,7 @@ Never rename a label. Never close an issue from here; propose that separately an
     name: "release-notes",
     description: "Write release notes from the merged pull requests since the last tag.",
     source: HEKA,
-    requires: ["mcp:github_heka"],
+    requires: ["github"],
     body: `# Release notes
 
 List the pull requests merged since the last tag, group them as Added, Changed and Fixed, and write one plain line per change in the operator's voice. Leave out dependency bumps and anything marked chore. Read the Added lines aloud; the rest go in the file.
@@ -112,7 +112,7 @@ List the pull requests merged since the last tag, group them as Added, Changed a
     name: "design-review",
     description: "Compare a screen against real apps on Mobbin before changing it.",
     source: "ghost",
-    requires: ["mcp:mobbin"],
+    requires: ["mobbin"],
     files: ["checklist.md"],
     body: `# Design review
 
@@ -123,7 +123,7 @@ Before redesigning a screen, find three apps on Mobbin that solve the same job a
     name: "standup",
     description: "A two-minute morning briefing: today's calendar, what's waiting on you, what's overdue.",
     source: "ghost",
-    requires: ["mcp:calendar", "mcp:github_heka"],
+    requires: ["calendar", "github"],
     body: `# Standup
 
 When the operator says "morning" or asks for the standup, say in this order, each in one sentence:
@@ -139,7 +139,7 @@ Stop there. Offer the rest only if asked.
     name: "expense-report",
     description: "Turn a month of receipts into the expense report the accountant wants.",
     source: "ghost",
-    requires: ["mcp:quickbooks"],
+    requires: ["quickbooks"],
     files: ["categories.md", "report.md"],
     body: `# Expense report
 
@@ -158,7 +158,7 @@ A new machine joins in three steps, each its own change: a WireGuard peer (peer.
   },
 };
 
-/** A seed as GET /skills reports it, with `missing` worked out from the servers connected now. */
+/** A seed as GET /skills reports it, with `missing` worked out from the apps connected now. */
 export function skillInfo(seed: Seed, connected: Set<string>): SkillInfo {
   const requires = seed.requires ?? [];
   return {
@@ -172,17 +172,17 @@ export function skillInfo(seed: Seed, connected: Set<string>): SkillInfo {
   };
 }
 
-/** The servers a skill needs that aren't connected: "mcp:<name>" entries with no connected server. */
+/** The apps a skill needs that aren't connected. */
 export function missingOf(requires: string[], connected: Set<string>): string[] {
-  return requires.filter((r) => r.startsWith("mcp:") && !connected.has(r.slice(4)));
+  return requires.filter((r) => !connected.has(r));
 }
 
 const NORMAL = ["invoicing", "month-close", "triage"];
 const BUSY = ["invoicing", "month-close", "design-review", "standup", "expense-report", "triage", "release-notes", "fleet-onboarding"];
 
-export default function skills(s: Scenario, servers: ServerFixture[]): SkillFixture[] {
+export default function skills(s: Scenario, apps: AppFixture[]): SkillFixture[] {
   if (s.data === "empty") return [];
-  const connected = new Set(servers.filter((f) => f.info.connected).map((f) => f.info.name));
+  const connected = new Set(apps.filter((f) => f.view.state === "connected").map((f) => f.view.name));
   const names = s.data === "busy" ? BUSY : NORMAL;
   return names.map((n) => ({ info: skillInfo(SEEDS[n], connected), body: SEEDS[n].body }));
 }

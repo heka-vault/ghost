@@ -101,7 +101,7 @@ export class MockDesk implements Desk {
 
   private status(patch: Partial<Status>): Status {
     return {
-      servers: ["github"],
+      apps: ["github"],
       api_version: "1",
       conversation: "ghost",
       models_ready: true,

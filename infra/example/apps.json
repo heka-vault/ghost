@@ -1,6 +1,7 @@
 {
-  "mcpServers": {
+  "apps": {
     "github": {
+      "title": "GitHub",
       "command": "ghost-mock-github",
       "args": ["--state", "~/.local/share/ghost/mock-github.json"]
     }

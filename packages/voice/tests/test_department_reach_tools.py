@@ -1,6 +1,6 @@
-"""A department's own tools get a handler even though its servers come up after the
-session was built (ADR 0024 review): every read goes through one catch-all dispatched to
-the active agent's reach."""
+"""Tools that arrive after the session was built (an app connected since, ADR 0034) get a
+handler: every read goes through one catch-all dispatched to the active agent's reach, and
+a department's permissions decide what is advertised there."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ async def test_the_department_s_own_reads_are_dispatched(tmp_path: Path):
     cfg = tmp_path / "ghost"
     (cfg / "departments" / "marketing").mkdir(parents=True)
     (cfg / "departments" / "marketing" / "department.json").write_text(
-        json.dumps({"title": "Marketing"})
+        json.dumps({"title": "Marketing", "permissions": {"block": ["figma"]}})
     )
     (cfg / "departments" / "marketing" / "docs").mkdir()
     (cfg / "departments" / "marketing" / "docs" / "voice.md").write_text("Never salesy.\n")
@@ -33,26 +33,22 @@ async def test_the_department_s_own_reads_are_dispatched(tmp_path: Path):
     store = Store()
     convs = Conversations(store, deps, default_voice="af_heart")
     gate = WriteGate(store, autonomy=AutonomyPolicy())
+    gate.attach_departments(deps)
     agents = conversations_source(convs)
     gate.register("conversations", agents.operations)
     dtools = DepartmentTools(deps, store, convs)
     gate.register("departments", dtools.operations())
     figma = ToolSource(
-        name="marketing/figma",
-        read_tools=[ReadTool("figma_get_file", "x", {}, [], read)],
+        name="figma",
+        read_tools=[ReadTool("figma_get_file", "x", {}, [], read, operation="get_file")],
         operations=[
-            Operation(
-                "export", "x", {}, [], prepare=None, writer=None, risk="low", allowed=lambda t: True
-            )
+            Operation("export", "x", {}, [], prepare=None, writer=None, tool_name="figma_export")
         ],
     )
-    gate.register("marketing/figma", figma.operations, department="marketing")
+    connected: list[ToolSource] = []  # figma connects after the session is built
 
     def reach(p):
-        out = [agents, departments_source(dtools)]
-        if p.department == "marketing":
-            out.insert(0, figma)
-        return out
+        return [*connected, agents, departments_source(dtools)]
 
     marketing = convs.default_agent("marketing")
     for start in ("ghost", marketing.slug):
@@ -71,21 +67,23 @@ async def test_the_department_s_own_reads_are_dispatched(tmp_path: Path):
 
         async def hang(): ...
 
-        schemas = register_tools(
+        register_tools(
             llm, sources=[agents], gate=gate, session_id="s", on_hang_up=hang, conversations=rt
         )
-        advertised = {s.name for s in schemas}
+        connected[:] = [figma]
+        gate.register("figma", figma.operations)
+        advertised = {s.name for s in rt.tool_schemas(rt.sources_for())}
         assert {"read_department_doc", "department_journal"} <= advertised
         p = FakeParams(llm, "read_department_doc", {"file": "voice.md"})
         await llm.functions["read_department_doc"](p)
         if start == "ghost":
-            assert "figma_get_file" not in advertised
+            assert {"figma_get_file", "figma_export"} <= advertised  # connected since
             assert p.result.get("error")  # Ghost has no docs; the handler ran
             p = FakeParams(llm, "figma_get_file", {})
             await llm.functions["figma_get_file"](p)
-            assert "not available in this department" in p.result["error"]
+            assert p.result == {"ok": True}
         else:
-            assert "figma_get_file" in advertised
+            assert "figma_get_file" not in advertised and "figma_export" not in advertised
             assert p.result == {
                 "department": "Marketing",
                 "file": "voice.md",
@@ -93,4 +91,5 @@ async def test_the_department_s_own_reads_are_dispatched(tmp_path: Path):
             }
             p = FakeParams(llm, "figma_get_file", {})
             await llm.functions["figma_get_file"](p)
-            assert p.result == {"ok": True}
+            assert "not available here" in p.result["error"]  # marketing blocks figma
+        connected.clear()

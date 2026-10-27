@@ -1,12 +1,12 @@
-"""The write gate (ADR 0007, ADR 0011, ADR 0022).
+"""The write gate (ADR 0007, ADR 0011, ADR 0034).
 
-Every write from every source comes through here. Sources (the lines, each MCP server's
-declared writes) register their operations at startup; the operator's policy decides how
-autonomous each one is; the gate does the same work at every level: the source's
-allowlist, snapshot, bounded steps, idempotency, stale check, readback, audit row. At
-``confirm`` a spoken yes sits between proposal and execution. At ``announce`` and
-``quiet`` the write happens at once. Reversing a write is a new change through
-``submit`` like any other.
+Every change from every source comes through here. Sources (the agents, each connected
+app's changes) register their operations; the operator's permissions decide how each call
+runs (everything runs and is announced unless a rule blocks it or asks first); the gate
+does the same work at every level: the source's own limit, the proposal, the steps, the
+read-back where the source has one, the audit row. At ``confirm`` a spoken yes sits
+between proposal and execution. At ``announce`` and ``quiet`` the change happens at once.
+Reversing a change is a new change through ``submit`` like any other.
 
 A change at ``confirm`` waits on the waiting list (ADR 0030), not in the session: while
 attached, the session's next turn answers it; set aside (a turn about something else, a
@@ -39,7 +39,6 @@ from ghost_core.models import (
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy, PolicyError
 from ghost_core.request import asked_for
-from ghost_core.scope import ActiveScope
 from ghost_core.source import Operation
 from ghost_core.store import Store
 
@@ -92,53 +91,41 @@ class WriteGate:
     ) -> None:
         self._store = store
         self._autonomy = autonomy or AutonomyPolicy()
-        # ADR 0024: a department's sessions run under the file plus that department's own
-        # levels (department.json), by slug; a department not here runs under the file.
+        # ADR 0024, ADR 0034: a department's sessions run under the file plus that
+        # department's own rules (department.json), by slug; one not here runs under the file.
         self._department_policies: dict[str, AutonomyPolicy] = {}
         self._classifier = classifier or RegexClassifier()
         self._log = on_decision or (lambda _msg: None)
         self._ops: dict[tuple[str, str], Operation] = {}
-        # ADR 0024: a department sees a server it uses through its own declaration, so
-        # its operations (allowlist, pinned arguments, bounds, asked_by) are registered
-        # under the department and looked up there first; Ghost's are the fallback.
-        self._department_ops: dict[str, dict[tuple[str, str], Operation]] = {}
-        self._department_abilities: dict[str, set[str]] = {}  # sources a department owns
         self._departments: Any = None
         self.last_classification: Classification | None = None
 
     # --- registry ------------------------------------------------------
 
-    def register(
-        self, ability: str, operations: Iterable[Operation], *, department: str | None = None
-    ) -> None:
-        table = self._ops if department is None else self._department_ops.setdefault(department, {})
-        if department is not None:
-            self._department_abilities.setdefault(department, set()).add(ability)
+    def register(self, ability: str, operations: Iterable[Operation]) -> None:
+        """A source's operations, replacing whatever it registered before (an app that
+        reconnected may have other tools)."""
+        self.unregister(ability)
         for op in operations:
-            table[(ability, op.name)] = op
+            self._ops[(ability, op.name)] = op
 
-    def _lookup(self, ability: str, name: str, department: str | None) -> Operation | None:
-        if department is not None:
-            op = self._department_ops.get(department, {}).get((ability, name))
-            if op is not None:
-                return op
-            if ability in self._department_abilities.get(department, ()):
-                # The department sees this source through its own declaration: Ghost's
-                # operation of the same name is never a stand-in for one it lacks.
-                return None
+    def unregister(self, ability: str) -> None:
+        """A source left (an app was disconnected). A change of it waiting for a yes stays
+        on the list and fails as unknown if confirmed."""
+        for key in [k for k in self._ops if k[0] == ability]:
+            del self._ops[key]
+
+    def _lookup(self, ability: str, name: str, department: str | None = None) -> Operation | None:
         return self._ops.get((ability, name))
 
     def operation(self, ability: str, name: str, department: str | None = None) -> Operation:
-        op = self._lookup(ability, name, department)
+        op = self._lookup(ability, name)
         if op is None:
             raise GateError(f"unknown operation {ability}.{name}")
         return op
 
     def operations(self, ability: str, department: str | None = None) -> list[Operation]:
-        table: dict[tuple[str, str], Operation] = dict(self._ops)
-        if department is not None:
-            table.update(self._department_ops.get(department, {}))
-        return [op for (a, _), op in table.items() if a == ability]
+        return [op for (a, _), op in self._ops.items() if a == ability]
 
     @property
     def autonomy(self) -> AutonomyPolicy:
@@ -188,11 +175,30 @@ class WriteGate:
         operation: str,
         target: Target | None = None,
         department: str | None = None,
+        *,
+        args: Mapping[str, Any] | None = None,
     ) -> Autonomy:
-        op = self.operation(ability, operation, department)
-        return self.policy_for(department).resolve(
-            ability, operation, target.scope() if target else "", risk=op.risk
-        )
+        """The level a call runs at. ``args`` (else the target's) are what a rule's
+        argument patterns match; with neither, the name alone decides."""
+        self.operation(ability, operation)
+        if args is None and target is not None:
+            args = target.rule_args()
+        return self.policy_for(department).resolve(ability, operation, args)
+
+    def offers(
+        self, ability: str, operation: str, department: str | None = None, *, read: bool = False
+    ) -> bool:
+        """Whether the model is offered this tool at all in a department's sessions: a
+        rule with argument patterns never takes a tool away, it refuses the call."""
+        perms = self.policy_for(department).permissions
+        if read:
+            return perms.offers_read(ability, operation)
+        return perms.offers_change(ability, operation)
+
+    def blocks_read(
+        self, ability: str, operation: str, args: Mapping[str, Any], department: str | None
+    ) -> bool:
+        return self.policy_for(department).permissions.blocks(ability, operation, args)
 
     # --- submit ---------------------------------------------------------
 
@@ -205,23 +211,21 @@ class WriteGate:
         target: Target,
         changes: ChangeSet,
         rationale: str,
-        scope: ActiveScope | None = None,
         conversation: str | None = None,
         department: str | None = None,
+        asked_by: tuple[str, ...] = (),
     ) -> Submission:
-        """``scope`` is the active agent's view for this source (ADR 0019): a target
-        outside it is refused here, before policy or autonomy. None means unscoped.
-        ``conversation`` is the agent the session is in and ``department`` where it
-        works (ADR 0024), kept on the proposal for the audit; the department's own
-        levels decide the autonomy."""
-        op = self.operation(ability, operation, department)
+        """``conversation`` is the agent the session is in and ``department`` where it
+        works (ADR 0024), kept on the proposal for the audit; the department's own rules
+        are added to the operator's. ``asked_by`` are the words that ask for this call,
+        when the source reads them off it (ADR 0034)."""
+        op = self.operation(ability, operation)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
-        if scope is not None:
-            scope.check_write(target.scope())  # raises OutOfScope, a PolicyError
-        level = self.level(ability, operation, target, department=department)
+        args = {**target.rule_args(), **changes.rule_args()}
+        level = self.level(ability, operation, department=department, args=args)
         if level is Autonomy.DENY:
-            raise PolicyError(f"{ability}.{operation} is not allowed on {target.scope()}")
+            raise PolicyError(f"{ability}.{operation} is blocked by the operator's permissions")
         proposal = await self._propose(
             session_id=session_id,
             ability=ability,
@@ -232,6 +236,7 @@ class WriteGate:
             autonomy=level,
             conversation=conversation,
             department=department,
+            asked_by=asked_by,
         )
         self._log(f"gate: {ability}.{operation} on {target} -> {level.value}")
         if level is Autonomy.CONFIRM:
@@ -255,8 +260,9 @@ class WriteGate:
         op = self.operation(ability, operation)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
-        if self.level(ability, operation, target) is Autonomy.DENY:
-            raise PolicyError(f"{ability}.{operation} is not allowed on {target.scope()}")
+        args = {**target.rule_args(), **changes.rule_args()}
+        if self.level(ability, operation, args=args) is Autonomy.DENY:
+            raise PolicyError(f"{ability}.{operation} is blocked by the operator's permissions")
         proposal = await self._propose(
             session_id=session_id,
             ability=ability,
@@ -278,14 +284,11 @@ class WriteGate:
         target: Target,
         changes: ChangeSet,
         rationale: str,
-        scope: ActiveScope | None = None,
     ) -> Proposal:
         """The confirm path regardless of policy. Writes nothing."""
         op = self.operation(ability, operation)
         if not op.allowed(target):
             raise PolicyError(f"{target.spoken()} is not allowed for {ability}.{operation}")
-        if scope is not None:
-            scope.check_write(target.scope())
         return await self._propose(
             session_id=session_id,
             ability=ability,
@@ -308,8 +311,9 @@ class WriteGate:
         autonomy: Autonomy,
         conversation: str | None = None,
         department: str | None = None,
+        asked_by: tuple[str, ...] = (),
     ) -> Proposal:
-        writer = self.operation(ability, operation, department).writer
+        writer = self.operation(ability, operation).writer
         # One attached at a time: a new one sets the old aside, on the waiting list.
         self._detach(session_id, "a newer change")
         snapshot = await writer.fetch(target)
@@ -325,6 +329,7 @@ class WriteGate:
             autonomy=autonomy.value,
             conversation=conversation,
             department=department,
+            asked_by=tuple(asked_by),
             expires_at=utcnow() + self.pending_ttl,
         )
         self._store.insert_proposal(proposal)
@@ -476,12 +481,11 @@ class WriteGate:
         p = self.pending(session_id, now)
         if p is None:
             return None
-        op = self._lookup(p.ability, p.operation, p.department)
-        if op is None or not op.asked_by:
+        op = self._lookup(p.ability, p.operation)
+        verbs = p.asked_by or (op.asked_by if op is not None else ())
+        if op is None or not verbs:
             return None
-        if not asked_for(
-            request, verbs=op.asked_by, mentions=p.target.mentions(), context=question
-        ):
+        if not asked_for(request, verbs=verbs, mentions=p.target.mentions(), context=question):
             return None
         self._store.event(
             p.id,
@@ -524,7 +528,7 @@ class WriteGate:
 
     async def _execute(self, p: Proposal, now: datetime | None = None) -> Outcome:
         now = now or utcnow()
-        writer = self.operation(p.ability, p.operation, p.department).writer
+        writer = self.operation(p.ability, p.operation).writer
         # Stale check: the target must not have changed since the snapshot.
         current = await writer.fetch(p.target)
         if current.version != p.snapshot.version:

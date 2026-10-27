@@ -8,7 +8,7 @@ the operator heard it; only acknowledged (or snoozed) stops the alerting, and an
 changes alerts again.
 
 The **waiting list** is the open items whose response is ``tell``, with Ghost's own: the
-changes waiting for a yes (ADR 0030) and the servers and departments with a problem. It is
+changes waiting for a yes (ADR 0030) and the apps and departments with a problem. It is
 a projection over the store; ``WaitingList.refresh`` re-reads Ghost's own each time.
 
 Everything in an item is data: its title and fields come from outside systems and never
@@ -243,7 +243,7 @@ Problems = Callable[[], Sequence[tuple[str, str, str | None]]]  # (key, title, d
 class WaitingList:
     """The waiting list (ADR 0029). ``changes`` returns the changes waiting for a yes (the
     gate's ``waiting``); ``problems`` returns Ghost's own trouble as (key, title,
-    department): a server down, a department folder that doesn't read. ``on_change`` runs
+    department): an app not connected, a department folder that doesn't read. ``on_change`` runs
     after a refresh that found something new, changed or resolved, and after an
     acknowledge or snooze."""
 

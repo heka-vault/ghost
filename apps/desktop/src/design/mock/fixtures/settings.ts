@@ -26,18 +26,23 @@ function phone(s: Scenario): PhoneView {
 }
 
 const SECRET_NAMES = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "HF_TOKEN", "OPENROUTER_API_KEY", "TYPESAFE_API_KEY"];
+/** Keys Ghost keeps for the apps it connected (ADR 0034), as fixtures/apps.ts names them. */
+const APP_SECRETS: Record<string, string[]> = {
+  empty: [],
+  normal: ["GHOST_APP_MOBBIN_KEY"],
+  busy: ["GHOST_APP_GITHUB_ACME_KEY", "GHOST_APP_MOBBIN_KEY", "GHOST_APP_SENTRY_SENTRY_ACCESS_TOKEN"],
+};
 
 export default function settings(s: Scenario): SettingsFixture {
   const configured = s.configured;
-  const set = new Set(configured ? ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "OPENROUTER_API_KEY"] : []);
+  const apps = APP_SECRETS[s.data] ?? [];
+  const set = new Set(configured ? ["ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY", ...apps] : []);
   const values: Record<string, string> = configured
     ? {
         GHOST_INPUT_DEVICE: "ghost.mic",
         GHOST_WAKE_PHRASES: "hey ghost,okay ghost",
         GHOST_WAKE_FUZZY: "0.8",
         GHOST_JEV: "auto",
-        // Threads (ADR 0019): both crossing-streams settings off by default; no per-owner tokens yet.
-        GHOST_DEPARTMENT_ROUTING: "0",
         ...(s.data === "busy"
           ? {
               GHOST_LLM_MODEL: "claude-sonnet-5-5",
@@ -52,7 +57,7 @@ export default function settings(s: Scenario): SettingsFixture {
       settings_path: "~/.config/ghost/settings.env",
       env_path: "~/.config/ghost/env",
       values,
-      secrets: SECRET_NAMES.map((name) => ({ name, set: set.has(name) })),
+      secrets: [...SECRET_NAMES, ...apps].map((name) => ({ name, set: set.has(name) })),
       vault_managed: configured && s.data === "busy",
     },
     devices: {

@@ -70,32 +70,32 @@ sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp
 sudo ufw allow from 192.168.1.0/24 proto udp
 ```
 
-Say "what needs me?", talk it through, and "that's all" when done. How much
-Ghost may do without asking is in `~/.config/ghost/policy.toml` (seeded by `make env`
-from `infra/policy.example.toml`): per operation, `deny`, `confirm`, `announce`, or
-`quiet`. Every write is logged; to reverse one, ask Ghost and it proposes the opposite change.
-Ghost's MCP servers are in `~/.config/ghost/mcp.json` (seeded from `infra/example/`; a
-streamable HTTP `url` or a stdio `command`, `${NAME}` in a header or env value is a secret
-from the environment) and what the gate may do with them in `department.json` beside it.
-Their read-only tools are offered to the model; `ghostd check` and the control API's
-`/mcp` show what each server gave. Ctrl+C stops the daemon; a goodbye only
-ends the conversation.
+Say "what needs me?", talk it through, and "that's all" when done. Ghost uses every
+app you connect: it looks things up, makes the changes you ask for, and says what it did.
+What you want blocked, or asked about first, is in `~/.config/ghost/policy.toml` (seeded
+by `make env` from `infra/policy.example.toml`): `block`, `ask`, `quiet` and `allow`
+rules over an app, a tool or its arguments, and a `mode` (`open`, `ask`, `read-only`) for
+the rest. Every change is logged; to reverse one, ask Ghost for the opposite change. The
+connected apps are in `~/.config/ghost/apps.json` (seeded from `infra/example/` with a
+pretend GitHub); `ghostd check` and the desktop's Apps screen show what each one gave.
+Ctrl+C stops the daemon; a goodbye only ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
 cancellation with [infra/pipewire/](infra/pipewire/). To teach Ghost something new,
-declare an MCP server in a department's `mcp.json` ([docs/mcp.md](docs/mcp.md)): its
-reads are offered to the model, its writes by declaration through the gate. A department
-is a folder with its rules, servers, skills and agents
+connect an app ([docs/apps.md](docs/apps.md)): from the desktop's catalog (sign in, an API
+key, or a package that runs on this computer), by address, or by pasting another tool's
+config. A department is a folder with its rules, permissions, skills and agents
 ([docs/departments.md](docs/departments.md)); skills are folders of instructions
-([docs/skills.md](docs/skills.md)). GitHub issues come
-through the official GitHub server; `ghost-mock-github` stands in before a token exists.
+([docs/skills.md](docs/skills.md)). `ghost-mock-github` stands in for GitHub before you
+connect the real one.
 
 ## Desktop app
 
 `apps/desktop` is a Tauri 2 app (React) that talks to the daemon over its socket. Speaking
 is the product; the app is the companion: the live session with a Confirm card for changes
 that need your okay, your agents grouped by department and their voices, the departments
-themselves, what Ghost may do on its own, the audit log, servers, skills and settings. It follows the system's light or dark theme.
+themselves, the apps you connect and the catalog to connect more, permissions, the audit
+log, skills and settings. It follows the system's light or dark theme.
 
 <table>
   <tr>
@@ -103,7 +103,7 @@ themselves, what Ghost may do on its own, the audit log, servers, skills and set
     <td width="50%"><img src="docs/screenshots/conversations.webp" alt="The Accounting agent: voice, persona, memory and pinned notes"><br><sub><b>Agents.</b> Each agent keeps its own voice, persona and memory, in its department.</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/policy.webp" alt="Per-operation autonomy levels"><br><sub><b>What Ghost may do.</b> One level per operation, from not allowed to quietly.</sub></td>
+    <td><img src="docs/screenshots/policy.webp" alt="Permissions"><br><sub><b>Permissions.</b> Everything runs unless you block it or want to be asked first.</sub></td>
     <td><img src="docs/screenshots/audit.webp" alt="The audit log with statuses and filters"><br><sub><b>Audit log.</b> Every change Ghost made or asked to make, and how it went.</sub></td>
   </tr>
   <tr>

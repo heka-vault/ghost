@@ -1,6 +1,6 @@
 """What reaches the voice is speech, not a document.
 
-The model is told to answer in plain sentences, but tool results and server notices pull
+The model is told to answer in plain sentences, but tool results and app notices pull
 it toward Markdown now and then (a Mobbin notice once put a ``---`` rule in a reply, which
 Kokoro cannot say). This filter runs inside the TTS service on each chunk of text, after
 sentence aggregation: it drops lines with nothing to say, unwraps links and emphasis, and

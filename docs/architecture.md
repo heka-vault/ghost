@@ -4,7 +4,7 @@
 
 ## Shape
 
-One operator, one Linux workstation that is on 24/7 (ADR 0001). Everything runs there as `systemd --user` services started directly with `uv` (ADR 0009). Only two things leave the machine: LLM calls, and GitHub API calls.
+One operator, one Linux workstation that is on 24/7 (ADR 0001). Everything runs there as `systemd --user` services started directly with `uv` (ADR 0009). Only two kinds of thing leave the machine: LLM calls, and calls to the apps the operator connected (ADR 0034).
 
 ```mermaid
 flowchart LR
@@ -18,20 +18,48 @@ flowchart LR
       STT --> LLM[LLM + skill tools]
       LLM --> TTS[Kokoro<br/>local]
     end
-    LLM --> SK[MCP servers<br/>github, mobbin, ...]
-    SK --> DOM[core<br/>gate, policy, audit]
+    LLM -->|reads| SK[Apps<br/>github, linear, ...]
+    LLM -->|changes| DOM[core<br/>gate, permissions, audit]
+    DOM --> SK
     DOM --> DB[(SQLite WAL)]
   end
   LLM <-->|HTTPS| PROXY[Anthropic-compatible endpoint<br/>Claude]
-  DOM -->|fine-grained PAT| GH[GitHub REST]
-  SK -->|reads| GH
+  SK -->|signed in, or a key| EXT[GitHub, Linear, ...]
 ```
 
 The phone app (`apps/mobile`, Expo, Android) is a second transport into the same pipeline (ADR 0005, ADR 0013), so the gate, the policy and Jev apply unchanged. It never uses the control API. A question from Ghost is answered by voice on the phone: there is no Confirm button there. Its screens read a small `Desk` interface (`apps/mobile/src/desk/types.ts`). With the screen off a session keeps the mic through a microphone foreground service (`apps/mobile/modules/ghost-call`, a local Expo module) with an End action in its notification, and routes audio to a car or headset when one is connected. It reaches the house through the phone listener below (ADR 0016): on the LAN directly, and from anywhere else through the operator's own WireGuard network, where the desk and the phone are peers of a hub that forwards only between the two (ADR 0020). Nothing public is added: no STUN, no TURN, no relay; the tunnel is the operator's.
 
-### MCP servers
+### Apps
 
-Each department declares its MCP servers in its folder (ADR 0022, ADR 0024): `mcp.json` in the shape other clients share (a streamable HTTP `url` with `headers`, or a stdio `command` with `args` and `env`; `${NAME}` in either is a secret from the environment, filled at connect time and never logged; `use` reaches one of Ghost's servers instead), and `department.json` with what the gate may do with each (`reads`, `scope`, `writes.<op>`, `levels`, `targets`). `ghostd` connects Ghost's at start and a department's on the first transfer into it (`ghost_core.mcp`, `ghost_core.departments.Fleet`), reads each server's tools, and offers to the model the ones the server marks read-only or the folder lists under `reads`, as ordinary typed read tools under the server's name. A write is offered only once declared (the tool, pinned arguments, the target arguments, the read that shows the target, the words that ask for it, risk and bounds); then it is a gate operation like any other, with its level from the folder, the operator's plain request as the yes, snapshot, stale check, read-back and audit. A `scope` declaration says which arguments name the scoped item and lists the allowlist, which is also what the department owns. A server that fails to connect is logged, reported as its department's problem and skipped; `ghostd check`, `GET /mcp`, `GET /departments` and the desktop's Servers and Departments screens show each server's state, reads, writes and levels. Everything a server sends is data: the model sees the first sentence of each description, results are trimmed, and nothing in them changes a level or a scope. See [mcp.md](mcp.md).
+The operator connects an app to Ghost once and every department reaches it (ADR 0034).
+`~/.config/ghost/apps.json` lists them: a URL Ghost signs in to (OAuth, `ghost_core.signin`,
+tokens in a 0600 file per app, the browser back on a loopback address only while a sign-in
+is open) or sends a key to, or a command it runs on this computer; secrets are `${NAME}`
+from the environment, and the keys the desktop keeps for apps are in `apps.env` beside
+`env`. The desktop's Apps screen connects them from Ghost's own copy of the public app
+registry (`ghost_core.catalog`: the first-party apps first, then the rest in the
+background, refreshed at most hourly), by address, or from another tool's pasted config.
+`ghostd` connects them at start (`ghost_core.apps.Apps`) and one connected later joins
+the gate at once and the tools from the next session. Every tool is offered under the
+app's name: one the app marks read-only is a read, called directly; every other tool is a
+change, which goes to the gate. An app that fails to connect, or wants a new sign-in, is on
+the waiting list and the Apps screen and is skipped. Everything an app sends is data: the
+model sees the first sentence of each description, results are trimmed, and nothing in
+them changes a permission. See [apps.md](apps.md).
+
+### Permissions
+
+Everything runs unless the operator says otherwise (ADR 0034). `[permissions]` in
+`policy.toml` holds `block`, `ask`, `quiet` and `allow` rules over an app, a tool, or a
+tool's arguments (`github.issue_write(state=closed)`, `github.*(repo!=site)`), and the
+`mode` for what no rule names (`open`, `ask`, `read-only`). The most careful match wins.
+A department's `department.json` adds `block`, `ask` and `quiet` rules for its own
+sessions and never `allow` (`Department.policy`, `WriteGate.policy_for`). A tool an
+unconditional `block` names is not offered; a rule with argument patterns refuses the
+calls it matches. Ghost's own operations (`conversations.*`, `skills.*`, `departments.*`,
+`outputs.*`) take the same rules. The desktop edits them on the Permissions screen and per
+tool on an app's page; only the `[permissions]` table of the file is rewritten
+(`ghost_core.policy.write_permissions`).
 
 ### Skills
 
@@ -39,7 +67,7 @@ A skill is a `SKILL.md` folder (ADR 0023, ADR 0024), read nearest first: the dep
 
 ### Departments and agents
 
-A department is a folder (ADR 0024): `~/.config/ghost/departments/<slug>/` with `AGENTS.md` (its rules, in every agent's prompt), `mcp.json`, `department.json` (title, aliases, voice, an optional `root` whose files are read in place, and the declarations), a shared `memory.md`, `skills/`, `docs/` and `agents/`; Ghost is the config folder itself (`ghost_core.departments`). An agent is a conversation (ADR 0014) hired into a department (`conversations.create`), moved between them with its folder, memory and transcript (`conversations.move`; a running session follows), retired and rehired. A session in a department is built from what its folder gives (`Fleet.sources_for`, `Skills.source`, the department's `read_department_doc` and the agents' tools): every read tool is registered once and dispatched to the active agent's reach, and a transfer swaps the prompt, the voice and the advertised tools. Ghost writes into a folder only through the gate: an agent's files, the shared memory (`departments.remember`) and a rule appended verbatim to `AGENTS.md` (`departments.add_rule`, `ghost_core.department_tools`); never `mcp.json` or `department.json`. `infra/templates/` ships three folders to copy; `ghost-scripts` runs a skill's scripts as a gated, skill-scoped server. See [departments.md](departments.md).
+A department is a folder (ADR 0024): `~/.config/ghost/departments/<slug>/` with `AGENTS.md` (its rules, in every agent's prompt), `department.json` (title, aliases, voice, an optional `root` whose files are read in place, and the permissions that narrow what its agents may do), a shared `memory.md`, `skills/`, `docs/` and `agents/`; Ghost is the config folder itself (`ghost_core.departments`). An agent is a conversation (ADR 0014) hired into a department (`conversations.create`), moved between them with its folder, memory and transcript (`conversations.move`; a running session follows), retired and rehired. A session in a department is built from every connected app, less what its permissions block, and what its folder gives (`Skills.source`, the department's `read_department_doc` and the agents' tools): every read tool is registered once and dispatched to the active agent's reach, and a transfer swaps the prompt, the voice and the advertised tools. Ghost writes into a folder only through the gate: an agent's files, the shared memory (`departments.remember`) and a rule appended verbatim to `AGENTS.md` (`departments.add_rule`, `ghost_core.department_tools`); never `department.json`. `infra/templates/` ships three folders to copy; `ghost-scripts` runs a skill's scripts as an app whose `run` is a change through the gate. See [departments.md](departments.md).
 
 ### The phone listener
 
@@ -55,8 +83,8 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 |---|---|
 | `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021) |
 | `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
-| `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending confirm-level change with Confirm and Cancel, audit, abilities, the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
-| `core` | The write gate and what feeds it (ADR 0007, 0011, 0022, 0024): tool sources (`ghost_core.source.ToolSource`), the MCP client with the write declaration (`ghost_core.mcp`), the department folders and their servers' lifecycle (`ghost_core.departments`, `ghost_core.department_tools`), the operator's autonomy policy, proposals over typed targets and change sets, the confirmation classifier, the audit store, and the agents (ADR 0014). Imports nothing from the other packages. |
+| `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending change with Confirm and Cancel, audit, the apps (connect, disconnect, sign in) and the catalog, the permissions and the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
+| `core` | The write gate and what feeds it (ADR 0007, 0011, 0024, 0034): tool sources (`ghost_core.source.ToolSource`), the apps (`ghost_core.apps`), their catalog and sign-in (`ghost_core.catalog`, `ghost_core.signin`), the department folders (`ghost_core.departments`, `ghost_core.department_tools`), the operator's permissions (`ghost_core.permissions`, `ghost_core.policy`), proposals over typed targets and change sets, the confirmation classifier, the audit store, and the agents (ADR 0014). Imports nothing from the other packages. |
 | `core/conversations` | The agents (ADR 0014, ADR 0024): the registry mirrored from the folders, the transcript, every compaction version, and the files per agent under its department's `agents/<slug>/` (`agent.json`, `persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
 
@@ -67,31 +95,25 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking; Ghost waits a short grace in case you go on, and the model starts answering during it, its answer held until the turn is confirmed and dropped if you keep talking (`GHOST_TURN_SPECULATE`; a held answer that reaches a tool call is withdrawn and the confirmed turn makes the call). Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks a clause at a time, so the voice starts after the first few words (`GHOST_TTS_CLAUSES`). Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off. While Ghost speaks, Parakeet re-reads your unfinished speech every 0.3 s (`GHOST_BARGE_IN_INTERIM_SECS`), so you needn't pause first; those interim words only ever decide barge-in, and the turn, the transcript and the model get the final transcript. Every tool call in a reply runs, not only the last (Pipecat's Anthropic service keeps one); and the model's output cap (`GHOST_LLM_MAX_TOKENS`, 2000 tokens) counts tool calls too, so a reply that hits it is redone in smaller steps rather than losing them (`ghost_voice.llm`).
    A typed turn from the desktop app (`POST /session/say`) enters the same pipeline after
    the STT stage, so it meets the same tools and the same gate as speech.
-4. **Transfer.** Every session opens in `ghost`. "Transfer me to accounting" (a department's name lands on its default agent) is an LLM tool: Ghost's voice announces it, a short tone plays, the TTS voice and the system prompt change (Ghost's rules, the department's rules and shared memory, the agent's persona and memory), the tools become what the department reaches, its own servers start if they are not up, and the context is replaced with that agent's rolling summary, pinned notes and recent turns; the agent greets with a one-line recap. "Back to Ghost" returns. "Save this as accounting" hires the agent and carries this session's turns into it. A transfer cancels any change waiting for a yes.
+4. **Transfer.** Every session opens in `ghost`. "Transfer me to accounting" (a department's name lands on its default agent) is an LLM tool: Ghost's voice announces it, a short tone plays, the TTS voice and the system prompt change (Ghost's rules, the department's rules and shared memory, the agent's persona and memory), the tools become what the department reaches, and the context is replaced with that agent's rolling summary, pinned notes and recent turns; the agent greets with a one-line recap. "Back to Ghost" returns. "Save this as accounting" hires the agent and carries this session's turns into it. A transfer cancels any change waiting for a yes.
 5. **Hold and hang up.** "Hang on, Ghost" puts the session on hold: the gate after STT drops everything the mic hears, unlogged, until an utterance that starts by addressing Ghost resumes it with the rest as the next turn; a hold ends quietly after 30 minutes (ADR 0021). A goodbye ("talk to you later", "bye", "that's all") or the idle timeout (45 s default) ends the pipeline, restores each music stream to its exact previous volume, and returns to passive. Every spoken turn was persisted as it happened; the next wake is `ghost` again.
 
-### Departments own items (ADR 0024)
+### What a department reaches (ADR 0024, ADR 0034)
 
-A department's server declaration carries an allowlist (`scope.items`), and those items
-are what the department **owns**. On every call the pipeline hands the server the active
-agent's reach: read tools list only what the department covers, a department with one item
-stops asking for it ("close seventeen"), and the server's prompt paragraph names only the
-department's items. The gate refuses a write whose target is outside the department's
-allowlist before policy or autonomy are consulted. Ghost reaches its own servers and
-allowlists.
-
-A request about an item another department owns gets a tool result naming the owner, and
-Ghost offers to transfer; with `GHOST_DEPARTMENT_ROUTING=1` (off by default) it transfers
-and hands the request over. A retired agent (announce-level) leaves voice routing and the
-model's list, keeps its transcript, memory and audit, and can be rehired. An agent is
-moved to another department with its folder, memory and transcript; a running session in
-it follows.
+Every department reaches every connected app; its `permissions` narrow that for its own
+sessions: a `block` rule takes a tool away or refuses the calls it matches
+(`github.*(repo!=site)` keeps a department to one repository), an `ask` rule makes a change
+wait for a yes, a `quiet` one keeps it unmentioned. A department can never `allow` what the
+operator's file does not. A retired agent leaves voice routing and the model's list, keeps
+its transcript, memory and audit, and can be rehired. An agent is moved to another
+department with its folder, memory and transcript; a running session in it follows, under
+the destination's rules.
 
 ### The waiting list (ADR 0029)
 
 What needs the operator is one list (`ghost_core.waiting`): items with stable keys in the
-`items` table, from watches and from Ghost itself (a change waiting for a yes, a server of
-Ghost's that is down, a department folder with a problem). A source syncs the whole set it
+`items` table, from watches and from Ghost itself (a change waiting for a yes, an app that
+isn't connected or wants a new sign-in, a department folder with a problem). A source syncs the whole set it
 sees; a new key is news, a key that is gone is resolved. An item is delivered when a route
 passed it on and acknowledged when the operator heard it; only acknowledged or snoozed stops
 the alerting, and a changed item alerts again. `GET /waiting`, `POST /waiting/ack` and
@@ -126,49 +148,52 @@ Each conversation loads only its own persona, memory and notes. The memory is a 
 
 Speech-to-text runs inside our own process, so the backend observes the transcribed
 user turn directly. `core` accepts a confirmation only from a transcript frame the
-pipeline produced for the current session, never from LLM output. How much Ghost does
-without asking is the operator's call (ADR 0011):
+pipeline produced for the current session, never from LLM output. What Ghost does without
+asking is the operator's call (ADR 0011, ADR 0034); by default, everything:
 
-1. The LLM calls `change` on a source's operation (a server's declared write, or a line operation): the operation's `prepare` turns the
-   arguments into a target and a typed change set.
-2. `core` checks the source's own allowlist, then resolves the autonomy level for
-   this source, operation, and target from `~/.config/ghost/policy.toml` (`deny`,
-   `confirm`, `announce`, `quiet`; a missing entry falls back to the operation's
-   risk class).
-3. `core` fetches the target through the source's writer (for a server, the declared read) and stores an immutable
-   proposal with that snapshot.
-4. At `announce` or `quiet` the proposal is executed at once. At `confirm` it is
-   attached to the session: the next user turn answers it, and the classifier (Jev when
-   configured, else the regex allowlist, negation guard in both) must call it a clear
-   yes; a no cancels it. A turn about something else, a hang-up or a transfer sets it
-   aside instead (ADR 0030): it waits on the waiting list for `[defaults] pending_ttl`
+1. The LLM calls a change: an app's tool under its own name (`github_issue_write`), or
+   `change` for one of Ghost's own operations. The source's `prepare` turns the arguments
+   into a target and a typed change set: for an app, checked against the tool's own schema
+   and bounded (16,000 characters a string, 100 items a list), with the words that would
+   ask for it read off the tool's name and short arguments.
+2. `core` checks the source's own limit, then resolves the level from the permissions for
+   this source, tool and arguments: the operator's rules plus the active department's,
+   the most careful match, else the mode (`open` announces).
+3. `core` stores an immutable proposal. For one of Ghost's own operations the writer
+   snapshots the target first; an app's change is not read before or after, and the audit
+   row says so.
+4. At `announce` or `quiet` the proposal is executed at once. At `ask` (`confirm`) it is
+   attached to the session: the operator's own request, when it plainly asks for that
+   call, is the yes (ADR 0017); otherwise the next user turn answers it, and the classifier
+   (Jev when configured, else the regex allowlist, negation guard in both) must call it a
+   clear yes; a no cancels it. A turn about something else, a hang-up or a transfer sets
+   it aside instead (ADR 0030): it waits on the waiting list for `[defaults] pending_ttl`
    (an hour unless set), and a Confirm by id in the operator's app, or Ghost taking it
-   up again (`bring_up_change`) and a yes, applies it. Either way the target must not
-   have changed since the snapshot.
-5. Execution claims the proposal atomically, applies each step through the writer, reads
-   the target back, and records success, partial, or failed. Anything created carries a
-   hidden idempotency marker so a retry never duplicates it.
-6. The model gets the verified result and says what happened in a few words, or asks
-   one short question when confirmation is needed. There is no undo (ADR 0015): asked to
-   change something back, Ghost proposes the opposite change like any other.
+   up again (`bring_up_change`) and a yes, applies it.
+5. Execution claims the proposal atomically, applies each step through the writer, and
+   records success, partial, or failed. For an app, what it answered (the new issue's
+   number, the sent message) comes back as the read-back, trimmed.
+6. The model says what happened in a few words, or asks one short question when the
+   change waits. There is no undo (ADR 0015): asked to change something back, Ghost asks
+   for the opposite change like any other.
 
 ## Repository layout
 
 ```text
 ghost/
 ├── apps/
-│   ├── ghostd/          # Python daemon: wake, sessions, server connections, control API server, phone listener
-│   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, policy, audit, settings
+│   ├── ghostd/          # Python daemon: wake, sessions, apps, control API server, phone listener
+│   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, apps, permissions, audit, settings
 │   └── mobile/          # Expo + React Native, Android: Home, session, activity
 ├── packages/
-│   ├── core/            # Python: tool sources, MCP client and declaration, departments, gate, policy, confirmation, audit, conversations
+│   ├── core/            # Python: tool sources, apps, catalog, sign-in, departments, gate, permissions, confirmation, audit, conversations
 │   ├── voice/           # Python: Pipecat pipeline factory, Parakeet, sounddevice transport, slots
 │   ├── api/             # Python: FastAPI on the Unix socket; openapi.json is the contract
 │   ├── client-ts/       # TypeScript: GENERATED from packages/api/openapi.json (pnpm gen)
 │   └── ui/              # TypeScript: React pieces shared by desktop and mobile
 ├── packaging/           # Dockerfile.build, build-debs.sh, debian/ control files and unit
 ├── infra/
-│   ├── example/         # Ghost's seed folder: mcp.json, department.json, AGENTS.md (make env)
+│   ├── example/         # Ghost's seed folder: apps.json, department.json, AGENTS.md (make env)
 │   ├── templates/       # three department folders to copy under ~/.config/ghost/departments/
 │   ├── systemd/         # ghostd.service for a checkout + env renderer
 │   └── pipewire/        # echo-cancel config
@@ -181,8 +206,8 @@ TypeScript. They never import each other; the only crossing is
 
 Python 3.12. Import direction is strictly
 `ghostd -> {voice, api} -> core`; `core` imports nothing from the others, and nothing
-knows a server by name: `ghostd` connects to whatever the department folders declare. See
-[mcp.md](mcp.md) to declare one.
+knows an app by name: `ghostd` connects whatever `apps.json` lists. See
+[apps.md](apps.md) to connect one.
 
 ### How the gate is wired into the pipeline
 
@@ -204,8 +229,9 @@ Ghost's last reply as context: a clear yes executes, anything else cancels. Tran
 that arrive while Ghost is still speaking are not evidence at all: the operator has
 not heard the question yet, and the text may be Ghost's own voice. The verified
 outcome is appended to the context as a system note, so the model's next sentence
-describes what actually happened. The model's tools are the servers', the agents' and the departments' read tools,
-`change`, `hang_up` and `hold`. There is no tool that bypasses the gate.
+describes what actually happened. The model's tools are every connected app's tools (reads called directly, changes through
+the gate), the agents' and the departments' read tools, `change`, `hang_up` and `hold`.
+There is no change that bypasses the gate.
 
 The local audio transport is a `sounddevice` port of Pipecat's PyAudio one, so the
 install needs no compiled extension; PortAudio comes with the wheel and talks to

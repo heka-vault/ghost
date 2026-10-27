@@ -67,7 +67,7 @@ export function groupByDepartment<T extends AgentView>(agents: T[]): DepartmentG
 }
 const firstIndex = <T extends AgentView>(g: DepartmentGroup<T>, agents: T[]) => Math.min(...[g.head, ...g.agents].filter((x): x is T => !!x).map((a) => agents.indexOf(a)));
 
-/** "GitHub heka" for github_heka: the source's name in words, used as a card heading. */
+/** "GitHub" for github: the source's name in words, used as a card heading. */
 export function sourceWords(name: string): string {
   if (name === "conversations") return "Agents";
   if (name === "departments") return "Departments";

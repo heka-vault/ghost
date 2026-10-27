@@ -11,6 +11,9 @@
  *   ...&phone=off|unpaired|paired   the phone listener off, on with no phone, or a phone paired
  *   ...&phone=pairs    on with no phone; the phone pairs 5s after you ask for a code
  *   ...&phone=expires  on with no phone; codes last 8s, so the expired code can be seen
+ *   ...&catalog=slow     the catalog's first copy takes 4s (first run does this by itself)
+ *   ...&catalog=problem  the copy is three days old and the refresh failed
+ *   ...&catalog=empty    the first copy hasn't arrived, and doesn't for 8s
  */
 import type { Transport } from "@ghost/client-ts";
 
@@ -35,6 +38,7 @@ export function createMock(name: string): { transport: Transport; design: Design
   const daemon = new MockDaemon(scenario, fixtures, {
     pairsAfterMs: phone === "pairs" ? 5000 : 0,
     codeTtlSecs: phone === "expires" ? 8 : 120,
+    catalog: (["slow", "problem", "empty"] as const).find((c) => c === params.get("catalog")) ?? null,
   });
   const latency = Number(params.get("latency") ?? 140);
 

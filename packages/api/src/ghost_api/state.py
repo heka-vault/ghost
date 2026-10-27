@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pydantic import TypeAdapter
 
 from ghost_api.models import (
+    AppsEvent,
     ConversationEvent,
     Event,
     LogEvent,
@@ -71,7 +72,7 @@ class DaemonState:
         self.phase = Phase.STARTING
         self.session_id: str | None = None
         self.models_ready = False
-        self.servers: list[str] = []
+        self.apps: list[str] = []  # the apps connected now (ADR 0034)
         self.pending: PendingProposal | None = None
         self.conversation: str | None = None
         self.department: str | None = None  # the department the session's agent works in
@@ -134,6 +135,10 @@ class DaemonState:
             self.department = department if self.session_id else None
         self.bus.publish(ConversationEvent(active=self.conversation, changed=changed))
         self._publish_status()
+
+    def publish_apps(self, changed: str | None = None, sign_in_url: str | None = None) -> None:
+        """An app changed (ADR 0034); with ``sign_in_url`` it waits for the browser."""
+        self.bus.publish(AppsEvent(changed=changed, sign_in_url=sign_in_url))
 
     def set_pending(self, pending: PendingProposal | None) -> None:
         self.pending = pending

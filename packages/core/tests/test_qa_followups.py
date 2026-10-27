@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from ghost_core import AutonomyPolicy, Store, WriteGate
-from ghost_core.mcp import Servers, ServerSpec, ToolError, _brief, _coerce
+from ghost_core.apps import Apps, AppSpec, ToolError, _brief, _coerce
 from ghost_core.skills import SOURCE, Skills
 
 PROBE = """
@@ -27,18 +27,17 @@ async def test_stdio_child_gets_only_its_declared_environment(tmp_path: Path):
     script.write_text(PROBE)
     os.environ["GHOST_QA_UNRELATED_SECRET"] = "must-not-leak"
     try:
-        spec = ServerSpec(
+        spec = AppSpec(
             name="probe",
             command=os.environ.get("VIRTUAL_ENV", str(Path(os.sys.executable).parent.parent))
             and os.sys.executable,
             args=(str(script),),
             env={"PROBE_OWN": "$GHOST_QA_OWN"},
-            reads=("env",),
         )
-        servers = Servers({"probe": spec}, environ={**os.environ, "GHOST_QA_OWN": "given"})
+        servers = Apps({"probe": spec}, environ={**os.environ, "GHOST_QA_OWN": "given"})
         await servers.connect()
-        assert "probe" in servers.servers, servers.failed
-        server = servers.servers["probe"]
+        assert "probe" in servers.apps, servers.failed
+        server = servers.apps["probe"]
         assert (await server.call("env", {"name": "PROBE_OWN"})) == {"result": "given"}
         assert (await server.call("env", {"name": "GHOST_QA_UNRELATED_SECRET"})) == {
             "result": "<unset>"
@@ -55,36 +54,11 @@ async def test_stdio_child_gets_only_its_declared_environment(tmp_path: Path):
         os.environ.pop("GHOST_QA_UNRELATED_SECRET", None)
 
 
-def test_server_names_are_slugs():
-    from ghost_core.mcp import parse_servers
+def test_app_names_are_slugs():
+    from ghost_core.apps import parse_apps_json
 
-    with pytest.raises(ValueError, match="server name"):
-        parse_servers({"github.heka": {"url": "http://x"}}, "test")
-
-
-def test_department_levels_merge_over_the_plain_section():
-    """A department.json's levels for a server sit over the file's own section for it
-    (ADR 0024); the file's other operations stay."""
-    from pathlib import Path as P
-
-    from ghost_core.departments import Declaration
-    from ghost_core.departments import Department as Dept
-    from ghost_core.policy import Autonomy
-
-    base = AutonomyPolicy.parse('[github]\ncomment = "quiet"\nclose = "announce"\n')
-    d = Dept(
-        slug="ghost",
-        path=P("/nonexistent"),
-        title="Ghost",
-        declarations={"github": Declaration(levels={"close": Autonomy.CONFIRM})},
-    )
-    p = d.policy(base)
-    assert {k: v.value for k, v in p.skills["github"].items()} == {
-        "close": "confirm",
-        "comment": "quiet",
-    }
-    again = AutonomyPolicy.parse(p.to_toml())
-    assert again.skills == p.skills
+    f = parse_apps_json('{"apps": {"github.heka": {"url": "http://x"}}}', "test")
+    assert f.apps == {} and "name" in f.problems[0]
 
 
 def test_brief_keeps_abbreviations():

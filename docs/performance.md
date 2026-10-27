@@ -19,16 +19,16 @@ starts, broken into stages:
 | hold | final transcript → turn closed (Smart Turn, the turn grace) |
 | intercept | quick intents, the gate's request check, Jev or regex on a yes |
 | model | each model call: request → first token, and → last token; tokens in, out, cached |
-| tools | each tool call by name, including the external API behind it (GitHub, an MCP server: a Mobbin search through the fleet proxy is 3 to 9 s, all of it the server's) |
-| write | the gate: snapshot, write, read back, audit |
+| tools | each tool call by name, including the app behind it (a Mobbin search through the fleet proxy is 3 to 9 s, all of it the app's) |
+| write | the gate: the level, the call, the audit |
 | voice | text to Ghost → first audio out → Ghost heard (bot started speaking) |
 | transport | phone only: WebRTC each way |
 
 Outside a turn: Start on the phone → greeting heard; pairing; the phone's `/hello` and
 `/audit`; control API calls from the desktop app; daemon start → models ready.
-A transfer into a department whose own servers are not up starts them on that turn
-(ADR 0024): `Fleet.enter` logs the start with its seconds, and the servers stay up for
-`department_idle_secs` after the last session leaves, so only the first transfer pays.
+Apps connect at daemon start (ADR 0034), so a transfer starts nothing. What an app costs on
+every turn is its tools in the prompt: measure `make perf` after connecting one, and
+narrow or block what it costs too much ([apps.md](apps.md#performance)).
 
 Every live turn writes its timeline, timings only and never text, to
 `~/.local/share/ghost/latency.jsonl`, with one line in the daemon log. `make latency`

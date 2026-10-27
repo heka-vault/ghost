@@ -4,6 +4,73 @@
  */
 
 export interface paths {
+    "/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Apps
+         * @description Every app in apps.json: connected or not, and what each tool may do.
+         */
+        get: operations["list_apps_apps_get"];
+        put?: never;
+        /**
+         * Connect App
+         * @description Connect an app now and keep it in apps.json. An app that signs in comes back
+         *     with the address the browser should open; the desktop opens it.
+         */
+        post: operations["connect_app_apps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get App */
+        get: operations["get_app_apps__name__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect
+         * @description Disconnect: it leaves the tools at once and apps.json; its sign-in and the keys
+         *     Ghost kept for it are forgotten.
+         */
+        delete: operations["disconnect_apps__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{name}/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign In
+         * @description Sign in again, or reconnect an app that isn't connected.
+         */
+        post: operations["sign_in_apps__name__sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -13,6 +80,44 @@ export interface paths {
         };
         /** Audit */
         get: operations["audit_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalog
+         * @description Apps to connect, from Ghost's copy of the registry; first-party ones first when
+         *     nothing is searched. An old copy is refreshed in the background.
+         */
+        get: operations["catalog_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Catalog Entry */
+        get: operations["catalog_entry_catalog__name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -343,19 +448,21 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/mcp": {
+    "/permissions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+        /** Get Permissions */
+        get: operations["get_permissions_permissions_get"];
         /**
-         * Mcp Servers
-         * @description Ghost's servers, then each department's own (ADR 0024), connected or not.
+         * Put Permissions
+         * @description Change the mode, whole lists, or one rule; only ``[permissions]`` in the file is
+         *     rewritten, and the gate follows at once.
          */
-        get: operations["mcp_servers_mcp_get"];
-        put?: never;
+        put: operations["put_permissions_permissions_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -801,6 +908,116 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /**
+         * AppAction
+         * @description One of an app's tools, and what Ghost's own permissions say about it.
+         */
+        AppAction: {
+            /**
+             * Conditional
+             * @default false
+             */
+            conditional: boolean;
+            /** Description */
+            description: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "allow" | "ask" | "block" | "quiet";
+            /** Name */
+            name: string;
+            /** Reads */
+            reads: boolean;
+            /** Rule */
+            rule: string;
+        };
+        /**
+         * AppConnect
+         * @description Connect an app: from the catalog (``catalog`` and ``option``), from a URL, or from
+         *     another client's pasted config. Secret values go to Ghost's environment, never into
+         *     apps.json, and never come back out.
+         */
+        AppConnect: {
+            /** Catalog */
+            catalog?: string | null;
+            /** Config */
+            config?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Option */
+            option?: string | null;
+            /** Replace */
+            replace?: boolean | null;
+            /** Url */
+            url?: string | null;
+            /** Values */
+            values?: {
+                [key: string]: string;
+            } | null;
+        };
+        /** AppConnectResult */
+        AppConnectResult: {
+            /** Apps */
+            apps: components["schemas"]["AppView"][];
+            /** Sign In Url */
+            sign_in_url?: string | null;
+        };
+        /**
+         * AppsEvent
+         * @description An app was connected, disconnected or changed state: read ``GET /apps``. With
+         *     ``sign_in_url``, the app is waiting for the operator to sign in there; the desktop opens
+         *     it in the browser.
+         */
+        AppsEvent: {
+            /** Changed */
+            changed?: string | null;
+            /** Sign In Url */
+            sign_in_url?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "apps";
+        };
+        /**
+         * AppView
+         * @description A connected app: how it is reached, whether it is up, and what it can do.
+         */
+        AppView: {
+            /**
+             * Actions
+             * @default []
+             */
+            actions: components["schemas"]["AppAction"][];
+            /** Catalog */
+            catalog?: string | null;
+            /** Icon */
+            icon?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sign_in" | "key" | "local" | "custom";
+            /** Name */
+            name: string;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * Settings
+             * @default []
+             */
+            settings: string[];
+            /** Sign In Url */
+            sign_in_url?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "connected" | "connecting" | "needs_sign_in" | "failed" | "stopped";
+            /** Title */
+            title: string;
+        };
         /** AuditEntry */
         AuditEntry: {
             /** Ability */
@@ -855,6 +1072,104 @@ export interface components {
             offset: number;
             /** Total */
             total: number;
+        };
+        /**
+         * CatalogEntryView
+         * @description An app in the catalog. Its text is the registry's: shown to the operator, never
+         *     to the model.
+         */
+        CatalogEntryView: {
+            /**
+             * Connected
+             * @default []
+             */
+            connected: string[];
+            /** Description */
+            description: string;
+            /**
+             * Featured
+             * @default false
+             */
+            featured: boolean;
+            /** Icon */
+            icon?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Options
+             * @default []
+             */
+            options: components["schemas"]["CatalogOption"][];
+            /** Repository */
+            repository?: string | null;
+            /** Suggested Name */
+            suggested_name: string;
+            /** Title */
+            title: string;
+            /** Version */
+            version: string;
+            /** Website */
+            website?: string | null;
+        };
+        /**
+         * CatalogOption
+         * @description One way to connect: sign in, an API key, or run on this computer.
+         */
+        CatalogOption: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sign_in" | "key" | "local";
+            /** Label */
+            label: string;
+            /**
+             * Settings
+             * @default []
+             */
+            settings: components["schemas"]["CatalogSetting"][];
+        };
+        /** CatalogPage */
+        CatalogPage: {
+            /** Entries */
+            entries: components["schemas"]["CatalogEntryView"][];
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * Refreshing
+             * @default false
+             */
+            refreshing: boolean;
+            /** Total */
+            total: number;
+        };
+        /** CatalogSetting */
+        CatalogSetting: {
+            /**
+             * Choices
+             * @default []
+             */
+            choices: string[];
+            /** Default */
+            default?: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /**
+             * Secret
+             * @default false
+             */
+            secret: boolean;
         };
         /** CompactionView */
         CompactionView: {
@@ -1065,9 +1380,30 @@ export interface components {
             voice?: string | null;
         };
         /**
+         * DepartmentPermissions
+         * @description What a department adds over Ghost's (``permissions`` in its department.json).
+         */
+        DepartmentPermissions: {
+            /**
+             * Ask
+             * @default []
+             */
+            ask: string[];
+            /**
+             * Block
+             * @default []
+             */
+            block: string[];
+            /**
+             * Quiet
+             * @default []
+             */
+            quiet: string[];
+        };
+        /**
          * DepartmentView
-         * @description A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
-         *     skills and agents. Ghost is one too.
+         * @description A department (ADR 0024): a folder under ~/.config/ghost with its rules, skills,
+         *     agents and the permissions that narrow what they may do (ADR 0034). Ghost is one too.
          */
         DepartmentView: {
             /**
@@ -1105,6 +1441,14 @@ export interface components {
             /** Path */
             path: string;
             /**
+             * @default {
+             *       "ask": [],
+             *       "block": [],
+             *       "quiet": []
+             *     }
+             */
+            permissions: components["schemas"]["DepartmentPermissions"];
+            /**
              * Problems
              * @default []
              */
@@ -1122,13 +1466,6 @@ export interface components {
              */
             rules_lead: string;
             /**
-             * Servers
-             * @default []
-             */
-            servers: string[];
-            /** Servers Up */
-            servers_up: boolean;
-            /**
              * Skills
              * @default []
              */
@@ -1137,11 +1474,6 @@ export interface components {
             slug: string;
             /** Title */
             title: string;
-            /**
-             * Uses
-             * @default []
-             */
-            uses: string[];
             /** Voice */
             voice?: string | null;
             /**
@@ -1264,94 +1596,6 @@ export interface components {
              */
             type: "log";
         };
-        /** McpScopeInfo */
-        McpScopeInfo: {
-            /** Arguments */
-            arguments: string[];
-            /**
-             * Items
-             * @default []
-             */
-            items: string[];
-            /** Kind */
-            kind: string;
-        };
-        /**
-         * McpServerInfo
-         * @description One MCP server from the policy file (ADR 0022) and what Ghost got from it.
-         */
-        McpServerInfo: {
-            /** Connected */
-            connected: boolean;
-            /** Department */
-            department?: string | null;
-            /** Error */
-            error?: string | null;
-            /** Name */
-            name: string;
-            scope?: components["schemas"]["McpScopeInfo"] | null;
-            /**
-             * Tools
-             * @default []
-             */
-            tools: components["schemas"]["McpToolInfo"][];
-            /** Transport */
-            transport: string;
-            /**
-             * Writes
-             * @default []
-             */
-            writes: components["schemas"]["McpWriteInfo"][];
-        };
-        /** McpToolInfo */
-        McpToolInfo: {
-            /** Description */
-            description: string;
-            /** Name */
-            name: string;
-            /** Offered */
-            offered: boolean;
-        };
-        /**
-         * McpWriteInfo
-         * @description A declared write: the policy operation, the tool it calls, and its level.
-         */
-        McpWriteInfo: {
-            /**
-             * Asked By
-             * @default []
-             */
-            asked_by: string[];
-            /** Autonomy */
-            autonomy: string;
-            /** Offered */
-            offered: boolean;
-            /** Operation */
-            operation: string;
-            /**
-             * Properties
-             * @default {}
-             */
-            properties: {
-                [key: string]: unknown;
-            };
-            /** Read */
-            read?: string | null;
-            /**
-             * Required
-             * @default []
-             */
-            required: string[];
-            /** Risk */
-            risk: string;
-            /**
-             * Target
-             * @default []
-             */
-            target: string[];
-            /** Tool */
-            tool: string;
-        };
         /** ModelsView */
         ModelsView: {
             /** Cache Dir */
@@ -1465,6 +1709,56 @@ export interface components {
             target: string;
         };
         /**
+         * PermissionsUpdate
+         * @description Whole lists, the mode, or one rule moved; what is not given is kept.
+         */
+        PermissionsUpdate: {
+            /** Allow */
+            allow?: string[] | null;
+            /** Ask */
+            ask?: string[] | null;
+            /** Block */
+            block?: string[] | null;
+            /** Mode */
+            mode?: ("open" | "ask" | "read-only") | null;
+            /** Quiet */
+            quiet?: string[] | null;
+            set?: components["schemas"]["RuleSet"] | null;
+        };
+        /**
+         * PermissionsView
+         * @description ``[permissions]`` in policy.toml: everything runs unless a rule says otherwise.
+         */
+        PermissionsView: {
+            /**
+             * Allow
+             * @default []
+             */
+            allow: string[];
+            /**
+             * Ask
+             * @default []
+             */
+            ask: string[];
+            /**
+             * Block
+             * @default []
+             */
+            block: string[];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "open" | "ask" | "read-only";
+            /** Path */
+            path: string;
+            /**
+             * Quiet
+             * @default []
+             */
+            quiet: string[];
+        };
+        /**
          * Phase
          * @enum {string}
          */
@@ -1516,52 +1810,22 @@ export interface components {
         };
         /**
          * PolicyUpdate
-         * @description Either the raw TOML, or structured fields that are rendered to TOML.
+         * @description Either the raw TOML, or the routes rendered into it (the permissions have their own
+         *     route, ``PUT /permissions``).
          */
         PolicyUpdate: {
-            /** Default */
-            default?: string | null;
             routes?: components["schemas"]["RoutesView"] | null;
-            /** Skills */
-            skills?: {
-                [key: string]: {
-                    [key: string]: string;
-                };
-            } | null;
-            /** Targets */
-            targets?: {
-                [key: string]: {
-                    [key: string]: {
-                        [key: string]: string;
-                    };
-                };
-            } | null;
             /** Text */
             text?: string | null;
         };
         /** PolicyView */
         PolicyView: {
-            /** Default */
-            default: string | null;
             /** Exists */
             exists: boolean;
             /** Path */
             path: string;
+            permissions: components["schemas"]["PermissionsView"];
             routes?: components["schemas"]["RoutesView"] | null;
-            /** Skills */
-            skills: {
-                [key: string]: {
-                    [key: string]: string;
-                };
-            };
-            /** Targets */
-            targets: {
-                [key: string]: {
-                    [key: string]: {
-                        [key: string]: string;
-                    };
-                };
-            };
             /** Text */
             text: string;
         };
@@ -1616,6 +1880,16 @@ export interface components {
         RuleAdd: {
             /** Text */
             text: string;
+        };
+        /**
+         * RuleSet
+         * @description One toggle: move ``rule`` into ``level``'s list, or out of every list (None).
+         */
+        RuleSet: {
+            /** Level */
+            level?: ("allow" | "ask" | "block" | "quiet") | null;
+            /** Rule */
+            rule: string;
         };
         /** SampleRequest */
         SampleRequest: {
@@ -1751,12 +2025,9 @@ export interface components {
         };
         /**
          * SourceInfo
-         * @description A source of tools the gate knows: the lines (built in) or an MCP server. The
-         *     policy screen edits levels per operation from this list.
+         * @description A source of tools the gate knows: Ghost's own (built in) or a connected app.
          */
         SourceInfo: {
-            /** Department */
-            department?: string | null;
             /** Description */
             description: string;
             /** Kind */
@@ -1773,13 +2044,6 @@ export interface components {
              * @default []
              */
             read_tools: components["schemas"]["ReadToolInfo"][];
-            /**
-             * Scope Items
-             * @default []
-             */
-            scope_items: string[];
-            /** Scope Kind */
-            scope_kind?: string | null;
         };
         /** Status */
         Status: {
@@ -1788,6 +2052,11 @@ export interface components {
              * @default 1
              */
             api_version: string;
+            /**
+             * Apps
+             * @default []
+             */
+            apps: string[];
             /** Conversation */
             conversation?: string | null;
             /** Department */
@@ -1801,8 +2070,6 @@ export interface components {
             models_ready: boolean;
             pending?: components["schemas"]["PendingProposal"] | null;
             phase: components["schemas"]["Phase"];
-            /** Servers */
-            servers: string[];
             /** Session Id */
             session_id: string | null;
             /** Session Origin */
@@ -1982,6 +2249,8 @@ export interface components {
          * @description A watch the department declares (ADR 0028) and how its last look went.
          */
         WatchInfo: {
+            /** App */
+            app: string;
             /** Error */
             error?: string | null;
             /** Every Secs */
@@ -2009,8 +2278,6 @@ export interface components {
              * @default 0
              */
             seen: number;
-            /** Server */
-            server: string;
             /** Steps */
             steps: string[];
             /**
@@ -2027,9 +2294,18 @@ export interface components {
     pathItems: never;
 }
 export type SchemaAck = components['schemas']['Ack'];
+export type SchemaAppAction = components['schemas']['AppAction'];
+export type SchemaAppConnect = components['schemas']['AppConnect'];
+export type SchemaAppConnectResult = components['schemas']['AppConnectResult'];
+export type SchemaAppsEvent = components['schemas']['AppsEvent'];
+export type SchemaAppView = components['schemas']['AppView'];
 export type SchemaAuditEntry = components['schemas']['AuditEntry'];
 export type SchemaAuditEventView = components['schemas']['AuditEventView'];
 export type SchemaAuditPage = components['schemas']['AuditPage'];
+export type SchemaCatalogEntryView = components['schemas']['CatalogEntryView'];
+export type SchemaCatalogOption = components['schemas']['CatalogOption'];
+export type SchemaCatalogPage = components['schemas']['CatalogPage'];
+export type SchemaCatalogSetting = components['schemas']['CatalogSetting'];
 export type SchemaCompactionView = components['schemas']['CompactionView'];
 export type SchemaConversationCreate = components['schemas']['ConversationCreate'];
 export type SchemaConversationDetail = components['schemas']['ConversationDetail'];
@@ -2038,6 +2314,7 @@ export type SchemaConversationMove = components['schemas']['ConversationMove'];
 export type SchemaConversationUpdate = components['schemas']['ConversationUpdate'];
 export type SchemaConversationView = components['schemas']['ConversationView'];
 export type SchemaDepartmentCreate = components['schemas']['DepartmentCreate'];
+export type SchemaDepartmentPermissions = components['schemas']['DepartmentPermissions'];
 export type SchemaDepartmentView = components['schemas']['DepartmentView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
@@ -2046,10 +2323,6 @@ export type SchemaHttpValidationError = components['schemas']['HTTPValidationErr
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaJournalEntry = components['schemas']['JournalEntry'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
-export type SchemaMcpScopeInfo = components['schemas']['McpScopeInfo'];
-export type SchemaMcpServerInfo = components['schemas']['McpServerInfo'];
-export type SchemaMcpToolInfo = components['schemas']['McpToolInfo'];
-export type SchemaMcpWriteInfo = components['schemas']['McpWriteInfo'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
@@ -2057,6 +2330,8 @@ export type SchemaOutcomeView = components['schemas']['OutcomeView'];
 export type SchemaOutputInfo = components['schemas']['OutputInfo'];
 export type SchemaPendingEvent = components['schemas']['PendingEvent'];
 export type SchemaPendingProposal = components['schemas']['PendingProposal'];
+export type SchemaPermissionsUpdate = components['schemas']['PermissionsUpdate'];
+export type SchemaPermissionsView = components['schemas']['PermissionsView'];
 export type SchemaPhase = components['schemas']['Phase'];
 export type SchemaPhoneDevice = components['schemas']['PhoneDevice'];
 export type SchemaPhonePairing = components['schemas']['PhonePairing'];
@@ -2067,6 +2342,7 @@ export type SchemaPolicyView = components['schemas']['PolicyView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
 export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
+export type SchemaRuleSet = components['schemas']['RuleSet'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];
 export type SchemaSecretState = components['schemas']['SecretState'];
@@ -2092,6 +2368,152 @@ export type SchemaWakeRequest = components['schemas']['WakeRequest'];
 export type SchemaWatchInfo = components['schemas']['WatchInfo'];
 export type $defs = Record<string, never>;
 export interface operations {
+    list_apps_apps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppView"][];
+                };
+            };
+        };
+    };
+    connect_app_apps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppConnect"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConnectResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_app_apps__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_apps__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_in_apps__name__sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConnectResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     audit_audit_get: {
         parameters: {
             query?: {
@@ -2114,6 +2536,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalog_catalog_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalog_entry_catalog__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEntryView"];
                 };
             };
             /** @description Validation Error */
@@ -2767,12 +3253,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"];
                 };
             };
         };
     };
-    mcp_servers_mcp_get: {
+    get_permissions_permissions_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2787,7 +3273,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["McpServerInfo"][];
+                    "application/json": components["schemas"]["PermissionsView"];
+                };
+            };
+        };
+    };
+    put_permissions_permissions_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermissionsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -1,11 +1,10 @@
-"""Ghost core: the write gate, the policy, the audit, the lines and the MCP servers
-(ADR 0007, 0011, 0014, 0022).
+"""Ghost core: the write gate, the permissions, the audit, the agents and the apps
+(ADR 0007, 0011, 0014, 0034).
 
-Flow: a source (an MCP server's declared write, a line operation) turns the model's
-arguments into a typed change set -> the gate resolves the operator's autonomy policy for
-that operation -> either the write happens now (``announce``/``quiet``) or it waits for a
-spoken yes observed in the pipeline's own transcript (``confirm``) -> bounded steps,
-readback, audit log.
+Flow: a source (a connected app's tool, an agent operation) turns the model's arguments
+into a typed change set -> the gate resolves the operator's permissions for that call ->
+either the change happens now (``announce``/``quiet``) or it waits for a spoken yes
+observed in the pipeline's own transcript (``confirm``) -> the steps, the audit log.
 """
 
 from ghost_core.confirmation import (
@@ -29,7 +28,6 @@ from ghost_core.models import (
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy, PolicyError, Risk
 from ghost_core.request import asked_for, number_mentions
-from ghost_core.scope import SCOPE_ARG, ActiveScope, OutOfScope, scope_of
 from ghost_core.source import (
     Event,
     EventListener,
@@ -47,8 +45,6 @@ from ghost_core.store import Store
 from ghost_core.writer import Writer
 
 __all__ = [
-    "SCOPE_ARG",
-    "ActiveScope",
     "Autonomy",
     "AutonomyPolicy",
     "Change",
@@ -61,7 +57,6 @@ __all__ = [
     "GateError",
     "Handled",
     "Operation",
-    "OutOfScope",
     "Outcome",
     "PolicyError",
     "Prepared",
@@ -86,5 +81,4 @@ __all__ = [
     "classify_confirmation",
     "has_negation",
     "number_mentions",
-    "scope_of",
 ]

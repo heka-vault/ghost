@@ -8,14 +8,12 @@ from datetime import timedelta
 import pytest
 from ghost_core import Store
 from ghost_core.departments import load_department
-from ghost_core.mcp import ServerSpec
 from ghost_core.models import utcnow
 from ghost_core.waiting import Items
 from ghost_core.watches import WatchError, WatchRunner, parse_watch, render
-from test_mcp import attached
 
 CI = {
-    "server": "github",
+    "app": "github",
     "read": "list_workflow_runs",
     "args": {"owner": "heka-vault", "repo": "ghost", "status": "failure"},
     "every": 60,
@@ -224,24 +222,17 @@ async def test_set_watches_resolves_the_items_of_a_removed_watch():
 # --- in the department folder and against a server ------------------------------------
 
 
-def test_a_department_reads_its_watches_and_refuses_one_on_a_server_it_lacks(tmp_path):
+def test_a_department_reads_its_watches_and_the_older_word_still_reads(tmp_path):
     folder = tmp_path / "eng"
     folder.mkdir()
-    (folder / "mcp.json").write_text(json.dumps({"use": ["github"]}))
-    body = {"watches": {"ci": CI, "pages": {**CI, "server": "figma"}, "Bad Name": CI}}
+    older = {k: v for k, v in CI.items() if k != "app"} | {"server": "figma"}
+    body = {"watches": {"ci": CI, "pages": older, "Bad Name": CI}}
     (folder / "department.json").write_text(json.dumps(body))
     d = load_department("eng", folder)
-    assert list(d.watches) == ["ci"]
-    assert any("figma" in p for p in d.problems) and any("Bad Name" in p for p in d.problems)
+    assert list(d.watches) == ["ci", "pages"]
+    assert d.watches["ci"].app == "github" and d.watches["pages"].app == "figma"
+    assert any("Bad Name" in p for p in d.problems)
     assert not any("unknown key" in p for p in d.problems)
-
-
-async def test_a_watch_reads_only_what_the_server_offers_untrimmed():
-    async with attached(ServerSpec(name="fake", url="memory://")) as server:
-        out = await server.watch_read("lookup", {"query": "ghost", "limit": 2})
-        assert out == {"query": "ghost", "hits": ["a", "b"]}
-        with pytest.raises(ValueError, match="not a read"):
-            await server.watch_read("create", {"title": "x"})  # a write, never
 
 
 async def test_jev_as_a_watch_step_answers_only_with_a_confident_declared_choice():

@@ -422,29 +422,3 @@ def test_list_agents_tool_groups_by_department_and_hides_retired(world):
         ("brand", "the look"),
         ("marketing", None),
     ]
-
-
-def test_owners_route_to_the_department_that_covers_an_item(tmp_path: Path):
-    deps = layout(tmp_path, "legal")
-    folder = deps.get("legal").path
-    (folder / "department.json").write_text(
-        json.dumps(
-            {
-                "title": "Legal",
-                "servers": {
-                    "github": {
-                        "scope": {
-                            "kind": "repository",
-                            "arguments": ["owner", "repo"],
-                            "items": ["acme/contracts"],
-                        }
-                    }
-                },
-            }
-        )
-    )
-    (folder / "mcp.json").write_text(json.dumps({"mcpServers": {}, "use": ["github"]}))
-    deps.refresh()
-    convs = Conversations(Store(), deps)
-    assert [p.slug for p in convs.owners_of("github", "ACME/contracts")] == ["legal"]
-    assert convs.owners_of("github", "acme/app") == []

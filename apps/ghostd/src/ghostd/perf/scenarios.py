@@ -104,7 +104,7 @@ SCENARIOS: dict[str, Scenario] = {
             (
                 Line(
                     "Mark app 151 ready for agent.",
-                    tools=frozenset({"change"}),
+                    tools=frozenset({"github_issue_write"}),
                     status="done:announce",
                 ),
             ),
@@ -112,17 +112,23 @@ SCENARIOS: dict[str, Scenario] = {
         ),
         Scenario(
             "confirm_plain",
-            "a confirm change asked plainly: the request is the yes (ADR 0017)",
-            (Line("Close infra 17.", tools=frozenset({"change"}), status="done:request"),),
+            "a change that asks, asked for plainly: the request is the yes (ADR 0017)",
+            (
+                Line(
+                    "Close infra 17.",
+                    tools=frozenset({"github_issue_write"}),
+                    status="done:request",
+                ),
+            ),
             check=_closed("ghost-mock/infra#17"),
         ),
         Scenario(
             "confirm_yes",
-            "a confirm change that needs a spoken yes (Jev or regex)",
+            "a change that asks and needs a spoken yes (Jev or regex)",
             (
                 Line(
                     "I think infra 17 can probably be closed now.",
-                    tools=frozenset({"change"}),
+                    tools=frozenset({"github_issue_write"}),
                     status="needs_confirmation",
                 ),
                 Line("Yes, go ahead."),
@@ -154,7 +160,9 @@ SCENARIOS: dict[str, Scenario] = {
                     "Tell me more about the dark mode one.", tools=frozenset({"github_issue_read"})
                 ),
                 Line(
-                    "Mark it ready for agent.", tools=frozenset({"change"}), status="done:announce"
+                    "Mark it ready for agent.",
+                    tools=frozenset({"github_issue_write"}),
+                    status="done:announce",
                 ),
                 Line("Thanks, that's everything.", ends=True, intercepted=True),
             ),

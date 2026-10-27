@@ -8,7 +8,7 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,7 +32,9 @@ from ghost_api import (
     status_snapshot,
 )
 from ghost_api import waiting_view as build_waiting_view
+from ghost_api.app import APPS_ENV
 from ghost_api.conversations import conversation_view
+from ghost_api.files import read_env
 from ghost_api.models import ConversationView, StatusEvent
 from ghost_core import (
     AutonomyPolicy,
@@ -43,16 +45,18 @@ from ghost_core import (
     ToolSource,
     WriteGate,
 )
+from ghost_core.apps import APPS_FILE, Apps, load_apps
+from ghost_core.catalog import Catalog
 from ghost_core.conversations import GHOST, Conversations, Profile, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.department_tools import DepartmentTools, departments_source
-from ghost_core.departments import Departments, Fleet, all_sources
+from ghost_core.departments import Departments
 from ghost_core.hooks import Hook, HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
-from ghost_core.mcp import Servers
 from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.outputs import Outputs
 from ghost_core.routes import RouteEngine, RoutePolicy, spoken_digest
+from ghost_core.signin import SignIns
 from ghost_core.skills import Skills
 from ghost_core.waiting import Item, Items, WaitingList, waiting_source
 from ghost_core.watches import Watch, WatchRunner
@@ -131,13 +135,6 @@ def declared_hooks(departments: Departments) -> list[Hook]:
     return [h for d in departments.list() for h in d.hooks.values()]
 
 
-def is_own_server(departments: Departments, w: Watch) -> bool:
-    """The watch reads one of its department's own servers (not Ghost's, not a use), so
-    those servers stay up while the daemon runs."""
-    d = departments.get(w.department)
-    return d is not None and not d.is_ghost and w.server in d.servers
-
-
 def describe_watches(departments: Departments) -> list[str]:
     """One line per watch for the log and ``ghostd check``."""
     out = []
@@ -145,8 +142,7 @@ def describe_watches(departments: Departments) -> list[str]:
         for w in d.watches.values():
             steps = "check" + (", jev" if w.jev else "") + (", model" if w.model else "")
             out.append(
-                f"watch {d.slug}/{w.name}: {w.server}.{w.read} every {w.every}s, "
-                f"{steps}, {w.response}"
+                f"watch {d.slug}/{w.name}: {w.app}.{w.read} every {w.every}s, {steps}, {w.response}"
             )
         for p in d.problems:
             if " watch " in p:
@@ -154,17 +150,26 @@ def describe_watches(departments: Departments) -> list[str]:
     return out
 
 
-def ghost_problems(fleet: Fleet, departments: Departments) -> list[tuple[str, str, str | None]]:
-    """Ghost's own trouble, for the waiting list (ADR 0029): a server of Ghost's that
-    didn't start or stopped, a department folder that doesn't read."""
+def load_app_secrets(path: Path) -> None:
+    """The keys the desktop kept for connected apps (ADR 0034): into the environment, never
+    over a value the service already has (the vault's)."""
+    for key, value in read_env(path).items():
+        os.environ.setdefault(key, value)
+
+
+def ghost_problems(apps: Apps, departments: Departments) -> list[tuple[str, str, str | None]]:
+    """Ghost's own trouble, for the waiting list (ADR 0029): an app that isn't connected or
+    wants the operator to sign in again, a department folder that doesn't read."""
     out: list[tuple[str, str, str | None]] = []
-    seen: set[str] = set()
-    for name, why in fleet.ghost.failed.items():
-        seen.add(name)
-        out.append((f"server:{name}", f"The {name} server isn't running: {why}", None))
-    for name, server in fleet.ghost.servers.items():
-        if name not in seen and server.failed:
-            out.append((f"server:{name}", f"The {name} server stopped: {server.failed}", None))
+    for name, spec in apps.specs.items():
+        state = apps.state(name)
+        if state == "connected":
+            continue
+        if state == "needs_sign_in":
+            out.append((f"app:{name}", f"{spec.shown} needs you to sign in again", None))
+        else:
+            why = apps.problem(name) or "not connected"
+            out.append((f"app:{name}", f"{spec.shown} isn't connected: {why}", None))
     for d in departments.list():
         if d.problems:
             out.append(
@@ -230,10 +235,10 @@ class Daemon:
         self.conversations: Conversations | None = None
         self.skills: Skills | None = None
         self.departments: Departments | None = None
-        self.fleet: Fleet | None = None
+        self.apps: Apps | None = None
+        self.signins: SignIns | None = None
+        self.catalog: Catalog | None = None
         self._reach: Callable[[Profile], list[ToolSource]] | None = None
-        self._enter: Callable[[Profile], Awaitable[None]] | None = None
-        self._leave: Callable[[Profile], None] | None = None
         self._models: Models | None = None
         self._deps: Deps | None = None
         # The phone (ADR 0016). An accepted offer's connection goes on the queue; the
@@ -324,6 +329,10 @@ class Daemon:
             self.state.set_pending(None)
         self._refresh_waiting_now()
         return True
+
+    def _on_signin_url(self, app: str, url: str) -> None:
+        """An app is waiting for the operator to sign in: the desktop opens the address."""
+        self.state.publish_apps(changed=app, sign_in_url=url)
 
     def _refresh_waiting_now(self) -> None:
         if self.waiting is not None:
@@ -425,12 +434,6 @@ class Daemon:
         and the near-miss threshold are picked up by rebuilding the passive listener; the
         crossing-streams toggles (ADR 0019) by the next session, which reads them."""
         applied: list[str] = []
-        for key, attr in (("GHOST_DEPARTMENT_ROUTING", "department_routing"),):
-            if key in values:
-                on = str(values[key] or "").strip().lower() in ("1", "true", "yes", "on")
-                setattr(self.voice, attr, on)
-                logger.info(f"{key.removeprefix('GHOST_').lower()}: {'on' if on else 'off'}")
-                applied.append(key)
         if self._listener is None:
             return applied
         if "GHOST_WAKE_PHRASES" in values:
@@ -673,22 +676,30 @@ class Daemon:
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         store = Store(self.cfg.db_path)
         autonomy = AutonomyPolicy.load(self.cfg.policy_path)
-        # ADR 0024: the departments are folders; Ghost's servers connect now, a department's
-        # when a session enters it.
+        # ADR 0024: the departments are folders. ADR 0034: the apps are Ghost's, connected
+        # now, and every department reaches them.
         departments = Departments(self.cfg.config_dir)
         departments.ensure_layout()
         self.departments = departments
         for problem in departments.problems():
             logger.warning(f"departments: {problem}")
-        fleet = Fleet(departments, idle_secs=self.cfg.department_idle_secs)
-        self.fleet = fleet
-        await fleet.connect()
-        mcp = fleet.ghost
+        apps_file = load_apps(self.cfg.config_dir / APPS_FILE)
+        for problem in apps_file.problems:
+            logger.warning(f"apps: {problem}")
+        load_app_secrets(self.cfg.env_path.parent / APPS_ENV)
+        signins = SignIns(
+            self.cfg.data_dir / "apps", port=self.cfg.signin_port, on_url=self._on_signin_url
+        )
+        self.signins = signins
+        apps = Apps(apps_file.apps, auth_for=signins.auth_for)
+        self.apps = apps
+        await apps.connect()
+        self.catalog = Catalog(self.cfg.catalog_path)
         skills = Skills(self.cfg.skills_dir, self.cfg.home_skills_dir)  # ADR 0024
         self.skills = skills
-        # What Ghost's own sessions may call: its servers' offered reads and declared
-        # writes, and the skills (the index, read_skill, add and remove).
-        tool_sources: list[ToolSource] = [*mcp.sources(), skills.source()]
+        # What Ghost's own sessions may call: every connected app's tools, and the skills
+        # (the index, read_skill, add and remove).
+        tool_sources: list[ToolSource] = [*apps.sources(), skills.source()]
         jev = build_jev(self.cfg)
         classifier: ConfirmationClassifier = (
             JevClassifier(
@@ -707,10 +718,35 @@ class Daemon:
             classifier=classifier,
             on_decision=debug.audio,
         )
-        gate.attach_departments(departments)  # levels follow the folders (ADR 0024)
-        for a in tool_sources:  # declared writes go through the gate
+        gate.attach_departments(departments)  # their rules follow the folders (ADR 0024)
+        for a in tool_sources:  # every app's changes go through the gate
             gate.register(a.name, a.operations)
         self.gate = gate
+        registered = {a.name for a in apps.sources()}
+
+        def sync_apps() -> None:
+            """An app was connected, disconnected or came back: the gate follows, and so
+            does the next turn's list of tools."""
+            now = {src.name: src for src in apps.sources()}
+            for name in registered - set(now):
+                gate.unregister(name)
+            for name, src in now.items():
+                gate.register(name, src.operations)
+            registered.clear()
+            registered.update(now)
+            self.state.apps = sorted(now)
+            self._refresh_waiting_now()
+
+        apps.on_change.append(sync_apps)
+
+        async def read_for(department: str, app: str, tool: str, args: dict[str, Any]) -> Any:
+            """A read the daemon makes for a department (a watch's look, a webhook's check,
+            ADR 0027/0028): one of the app's read-only tools, unless the department's
+            permissions block it."""
+            if gate.blocks_read(app, tool, args, department):
+                raise ValueError(f"{app}.{tool} is blocked for {department}")
+            return await apps.read_for(app, tool, args)
+
         conversations = Conversations(
             store,
             departments,
@@ -730,14 +766,14 @@ class Daemon:
         waiting = WaitingList(
             Items(store),
             changes=gate.waiting,
-            problems=lambda: ghost_problems(fleet, departments),
+            problems=lambda: ghost_problems(apps, departments),
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.waiting = waiting
         # ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
         watch_runner = WatchRunner(
             waiting.items,
-            fleet.watch_read,
+            lambda w: read_for(w.department, w.app, w.read, dict(w.args)),
             jev=watch_decider(jev) if jev else None,
             model=None if self.voice.llm_problems() else model_decider(self.voice.llm_target()),
             on_change=lambda: self.state.set_waiting(waiting.count()),
@@ -747,7 +783,7 @@ class Daemon:
         hook_intake = HookIntake(
             waiting.items,
             store,
-            read=fleet.read_for,
+            read=read_for,
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.hook_intake = hook_intake
@@ -763,42 +799,12 @@ class Daemon:
         self.routes.add_route(DesktopRoute(waiting.acknowledge))
         self.routes.add_route(self._phone_route)
 
-        def register_department(slug: str) -> None:
-            """A department's own servers came up: their declared writes join the gate."""
-            d = departments.get(slug)
-            if d is None:
-                return
-            for src in fleet.sources_for(d):
-                gate.register(src.name, src.operations, department=slug)
-
-        def register_all() -> None:
-            """Every department's reachable sources, again: after the folders are
-            re-read, a declaration edited by hand is what the gate runs, never Ghost's
-            operation of the same name."""
-            for d in departments.list():
-                if not d.is_ghost:
-                    register_department(d.slug)
-
-        register_all()
-        departments.on_refresh.append(register_all)
-
-        async def enter(p: Profile) -> None:
-            """A transfer into an agent was decided (ADR 0024): its department's servers
-            start now, and the announcement covers the wait."""
-            await fleet.enter(p.department)
-            register_department(p.department)
-
-        def leave(p: Profile) -> None:
-            fleet.leave(p.department)
-
-        self._enter, self._leave = enter, leave
-
         def reach(p: Profile) -> list[ToolSource]:
-            """What a session with this agent reaches (ADR 0024): its department's own
-            servers and the ones it uses, the skills nearest first, and the agents' own
-            tools. Ghost reaches its own servers and every skill, with the skill writes."""
+            """What a session with this agent reaches (ADR 0024, ADR 0034): every connected
+            app (its department's permissions narrow them in the gate), the skills nearest
+            first, and the agents' own tools. Ghost also gets the skill writes."""
             d = conversations.department_of(p)
-            out: list[ToolSource] = list(fleet.sources_for(d))
+            out: list[ToolSource] = list(apps.sources())
             out.append(skills.source(d.skill_places(), writes=d.is_ghost))
             out.append(conversations_source(conversations))
             out.append(departments_source(department_tools))
@@ -810,24 +816,23 @@ class Daemon:
         pruned = conversations.prune()
         if pruned:
             logger.info(f"conversations: pruned {pruned} summarized turns past retention")
-        self.state.servers = list(mcp.servers)
+        self.state.apps = sorted(registered)
         events = Events()
-        api = await self._start_api(gate, store, all_sources(fleet), mcp, skills)
+        api = await self._start_api(gate, store, apps.sources(), skills)
         await self._start_phone()
         waiting.refresh()
         self.state.set_waiting(waiting.count())
         refresher = asyncio.ensure_future(self._refresh_waiting(waiting))
 
         def follow_watches() -> None:
-            """The folders were re-read: the declared watches again, and a department
-            whose own servers no watch reads any more may idle out."""
+            """The folders were re-read: the declared watches and hooks again."""
             watched = declared_watches(departments)
+            for w in watched:
+                if w.app not in apps.specs:
+                    logger.warning(
+                        f"watch {w.department}/{w.name}: reads {w.app}, which isn't connected"
+                    )
             watch_runner.set_watches(watched)
-            needed = {w.department for w in watched if is_own_server(departments, w)}
-            for slug in list(fleet.pinned - needed):
-                fleet.unpin(slug)
-            for slug in needed - fleet.pinned:
-                asyncio.ensure_future(fleet.pin(slug))
             for problem in hook_intake.set_hooks(declared_hooks(departments)):
                 logger.warning(f"hooks: {problem}")
 
@@ -851,9 +856,9 @@ class Daemon:
         for problem in self.voice.llm_problems():
             logger.error(f"llm: {problem}")
         logger.info(f"tts: {describe_tts(self.voice)}")
-        for line in describe_mcp(fleet, gate):
+        for line in describe_apps(apps, gate):
             logger.info(line)
-        logger.info(describe_skills(skills, set(mcp.servers)))
+        logger.info(describe_skills(skills, set(apps.specs)))
         logger.info(
             "confirmation classifier: "
             + (f"jev via {jev.provider}, regex fallback" if jev else "regex")
@@ -887,7 +892,8 @@ class Daemon:
                 await self.phone_listener.stop()
             if api:
                 await api.stop()
-            await fleet.close()
+            await signins.close()
+            await apps.close()
             if jev:
                 await jev.aclose()
             store.close()
@@ -993,7 +999,6 @@ class Daemon:
         gate: WriteGate,
         store: Store,
         sources: Sequence[ToolSource],
-        mcp: Servers | None = None,
         skills: Skills | None = None,
     ) -> ApiServer | None:
         socket_path = self.cfg.api_socket or default_socket_path()
@@ -1003,10 +1008,11 @@ class Daemon:
             gate=gate,
             store=store,
             sources=sources,
-            mcp=mcp,
+            apps=self.apps,
+            catalog=self.catalog,
+            signins=self.signins,
             skills=skills,
             departments=self.departments,
-            fleet=self.fleet,
             department_tools=getattr(self, "department_tools", None),
             waiting=self.waiting,
             watches=self.watch_runner,
@@ -1136,10 +1142,6 @@ class Daemon:
         replied = asyncio.Event()
         first_reply: list[str] = []
         start_profile = self.conversations.get(start_in) if self.conversations else None
-        if start_profile is not None and not start_profile.is_ghost and self._enter is not None:
-            # A call straight into an agent (phone, desktop): its department's servers
-            # come up and their operations join the gate before the tools are built.
-            await self._enter(start_profile)
         session = build_session(
             self.voice,
             models=models,
@@ -1151,8 +1153,6 @@ class Daemon:
             on_phase=on_phase,
             conversations=self.conversations,
             reach=self._reach,
-            on_enter=getattr(self, "_enter", None),
-            on_leave=getattr(self, "_leave", None),
             start_in=start_in,
             on_conversation=on_conversation,
             transport_factory=transport_factory,
@@ -1234,8 +1234,6 @@ class Daemon:
             elif self.cfg.chime:
                 await asyncio.to_thread(chime, False, self.voice.output_device)
             ducker.restore()
-            if session.conversation is not None and self.fleet is not None:
-                self.fleet.leave(session.conversation.active.department)
             # A change the session was still waiting on stays on the waiting list (ADR 0030).
             if gate.set_aside(session.session_id, "session ended") is not None:
                 self._refresh_waiting_now()
@@ -1388,49 +1386,27 @@ def describe_skills(skills: Skills, servers: set[str]) -> str:
     return f"skills: {', '.join(items) if items else 'none'} (in {skills.ghost_dir})"
 
 
-def describe_mcp(fleet: Fleet, gate: WriteGate) -> list[str]:
-    """Ghost's servers as connected, then each department's as declared (they start when
-    a session enters the department, ADR 0024)."""
+def describe_apps(apps: Apps, gate: WriteGate | None = None) -> list[str]:
+    """Each app as connected: its reads and changes, and the changes Ghost's own
+    permissions block or ask about (ADR 0034)."""
     lines = []
-    mcp = fleet.ghost
-    ghost_policy = gate.policy_for(GHOST)
-    for name, spec in mcp.specs.items():
-        live = mcp.servers.get(name)
-        if live is None:
-            lines.append(f"  mcp {name} ({spec.transport}): not connected: {mcp.failed.get(name)}")
+    policy = gate.policy_for(GHOST) if gate is not None else AutonomyPolicy()
+    for name, spec in apps.specs.items():
+        live = apps.apps.get(name)
+        if live is None or not live.connected:
+            lines.append(f"  app {name} ({spec.transport}): not connected: {apps.problem(name)}")
             continue
-        offered = ", ".join(t.name for t in live.offered()) or "none"
-        ops = {o.name: o for o in live.operations()}
-        levels = ghost_policy.describe(name, {n: o.risk for n, o in ops.items()})
-        writes = ", ".join(f"{n}={lv.value}" for n, lv in levels.items())
-        undeclared = [
-            t.name
-            for t in live.tools
-            if not t.read_only and t.name not in {w.tool for w in spec.writes.values()}
-        ]
-        line = f"  mcp {name} ({spec.transport}): reads {offered}; writes {writes or 'none'}"
-        if undeclared:
-            line += f"; not declared, not offered: {', '.join(undeclared)}"
-        if spec.scope:
-            line += (
-                f" [scoped by {spec.scope.kind}: {', '.join(spec.scope.items) or 'no allowlist'}]"
-            )
+        reads = len(live.reads())
+        changes = live.changes()
+        careful = []
+        for t in changes:
+            level = policy.resolve(name, t.name)
+            if level.value in ("deny", "confirm"):
+                careful.append(f"{t.name}={'block' if level.value == 'deny' else 'ask'}")
+        line = f"  app {name} ({spec.transport}): {reads} reads, {len(changes)} changes"
+        if careful:
+            line += f"; {', '.join(careful)}"
         lines.append(line)
-    for d in fleet.departments.list():
-        if d.is_ghost:
-            continue
-        policy = gate.policy_for(d.slug)
-        for name, spec in d.servers.items():
-            levels = policy.describe(
-                d.source_name(name), {op: w.risk for op, w in spec.writes.items()}
-            )
-            writes = ", ".join(f"{n}={lv.value}" for n, lv in levels.items())
-            lines.append(
-                f"  mcp {d.slug}/{name} ({spec.transport}): starts on transfer; "
-                f"writes {writes or 'none'}"
-            )
-        for name in d.uses:
-            lines.append(f"  mcp {d.slug} uses {name} with its own declaration")
     return lines
 
 
@@ -1600,13 +1576,7 @@ def cli(argv: list[str] | None = None) -> None:
         except ValueError as e:
             problems.append(f"policy: {e}")
         departments = Departments(cfg.config_dir)
-        print(
-            "departments: "
-            + ", ".join(
-                f"{d.title} ({len(d.servers)} server(s), {len(d.uses)} used)"
-                for d in departments.list()
-            )
-        )
+        print("departments: " + ", ".join(d.title for d in departments.list()))
         for problem in departments.problems():
             print(f"  problem: {problem}")
             problems.append(problem)
@@ -1622,27 +1592,29 @@ def cli(argv: list[str] | None = None) -> None:
             problems += [f"hook {h.department}/{h.name}: {f}" for f in failures]
             if not os.environ.get(h.secret_name()):
                 problems.append(f"hook {h.department}/{h.name}: {h.secret_name()} is not set")
-        if departments.ghost.servers:
+        apps_file = load_apps(cfg.config_dir / APPS_FILE)
+        for problem in apps_file.problems:
+            print(f"  problem: {problem}")
+            problems.append(problem)
+        if apps_file.apps:
 
             async def probe() -> list[str]:
-                fleet = Fleet(departments)
-                await fleet.connect()
+                signins = SignIns(cfg.data_dir / "apps", port=cfg.signin_port)
+                apps = Apps(apps_file.apps, auth_for=signins.auth_for)
+                await apps.connect()
                 gate = WriteGate(Store(), autonomy=autonomy)
-                gate.set_department_policies(
-                    {d.slug: d.policy(autonomy) for d in departments.list()}
-                )
                 try:
-                    return describe_mcp(fleet, gate)
+                    return describe_apps(apps, gate)
                 finally:
-                    await fleet.close()
+                    await apps.close()
 
-            print("mcp servers:")
+            print("apps:")
             for line in asyncio.run(probe()):
                 print(line)
                 if "not connected" in line:
                     problems.append(line.strip())
         skills = Skills(cfg.skills_dir, cfg.home_skills_dir)
-        print(describe_skills(skills, set(departments.ghost.servers)))
+        print(describe_skills(skills, set(apps_file.apps)))
         problems += [f"skill {s.name}: {s.problem}" for s in skills.all() if s.problem]
         try:
             jev = build_jev(cfg)

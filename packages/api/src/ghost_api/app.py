@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
 import subprocess
 from collections.abc import Sequence
 from datetime import datetime, timedelta
@@ -38,6 +39,7 @@ from ghost_api.models import (
     AuditEventView,
     AuditPage,
     DepartmentCreate,
+    DepartmentPermissions,
     DepartmentView,
     DeviceInfo,
     DevicesView,
@@ -45,15 +47,12 @@ from ghost_api.models import (
     HookInfo,
     ItemKey,
     JournalEntry,
-    McpScopeInfo,
-    McpServerInfo,
-    McpToolInfo,
-    McpWriteInfo,
     ModelsView,
     OperationInfo,
     OutcomeView,
     OutputInfo,
     PendingProposal,
+    PermissionsView,
     PhonePairing,
     PhoneView,
     PolicyResult,
@@ -125,10 +124,11 @@ class Deps:
         output_device: str | None,
         stt_model: str,
         conversations: Any = None,  # ghost_core.conversations.Conversations
-        mcp: Any = None,  # ghost_core.mcp.Servers: Ghost's own
+        apps: Any = None,  # ghost_core.apps.Apps (ADR 0034)
+        catalog: Any = None,  # ghost_core.catalog.Catalog
+        signins: Any = None,  # ghost_core.signin.SignIns
         skills: Any = None,  # ghost_core.skills.Skills
         departments: Any = None,  # ghost_core.departments.Departments
-        fleet: Any = None,  # ghost_core.departments.Fleet
         department_tools: Any = None,  # ghost_core.department_tools.DepartmentTools
         waiting: Any = None,  # ghost_core.waiting.WaitingList
         watches: Any = None,  # ghost_core.watches.WatchRunner
@@ -138,10 +138,11 @@ class Deps:
         self.watches = watches
         self.hooks = hooks
         self.conversations = conversations
-        self.mcp = mcp
+        self.apps = apps
+        self.catalog = catalog
+        self.signins = signins
         self.skills = skills
         self.departments = departments
-        self.fleet = fleet
         self.department_tools = department_tools
         self.state = state
         self.control = control
@@ -159,11 +160,33 @@ class Deps:
         self.stt_model = stt_model
 
 
-def mcp_secret_names(values: dict[str, str]) -> set[str]:
-    """The secret names the operator listed for MCP servers (GHOST_MCP_SECRETS, a comma
-    list): settable from the desktop like the built-in ones, never readable."""
-    raw = values.get("GHOST_MCP_SECRETS", "") or ""
-    return {n.strip() for n in raw.split(",") if n.strip() and n.strip().isupper()}
+APPS_ENV = "apps.env"  # app secrets, beside env: the vault renderer rewrites env whole
+
+
+def apps_env_path(deps: Deps) -> Path:
+    """Where the apps' secrets are kept (ADR 0034): 0600, never in the vault's rendering."""
+    return deps.env_path.parent / APPS_ENV
+
+
+def app_secret_names(values: dict[str, str], apps: Any = None) -> set[str]:
+    """The secret names the connected apps refer to (``${NAME}`` in apps.json, ADR 0034),
+    and any the operator listed in GHOST_APP_SECRETS (a comma list; GHOST_MCP_SECRETS is
+    its older name): settable from the desktop like the built-in ones, never readable."""
+    raw = (values.get("GHOST_APP_SECRETS") or "") + "," + (values.get("GHOST_MCP_SECRETS") or "")
+    names = {n.strip() for n in raw.split(",") if n.strip() and n.strip().isupper()}
+    if apps is not None:
+        for spec in apps.specs.values():
+            names.update(spec.secrets())
+    return names
+
+
+def permissions_view(p: AutonomyPolicy, path: Path) -> PermissionsView:
+    """``[permissions]`` as the desktop edits it (ADR 0034)."""
+    return PermissionsView(
+        path=str(path),
+        mode=p.permissions.mode.value,  # type: ignore[arg-type]
+        **p.permissions.rules(),
+    )
 
 
 def pending_view(p: Proposal, at: datetime | None = None) -> PendingProposal:
@@ -208,7 +231,9 @@ def status_snapshot(deps: Deps) -> Status:
         uptime_secs=st.uptime_secs,
         version=st.version,
         wake_mode=st.wake_mode,
-        servers=list(deps.mcp.servers) if deps.mcp is not None else [],
+        apps=sorted(n for n in deps.apps.apps if deps.apps.is_up(n))
+        if deps.apps is not None
+        else [],
         pending=pending,
         conversation=st.conversation,
         department=st.department,
@@ -305,6 +330,9 @@ def create_app(deps: Deps) -> FastAPI:
         from ghost_api.conversations import add_conversation_routes
 
         add_conversation_routes(app, deps)
+    from ghost_api.apps import add_app_routes
+
+    add_app_routes(app, deps)
 
     # --- status + control -------------------------------------------------------
 
@@ -419,68 +447,6 @@ def create_app(deps: Deps) -> FastAPI:
         ok = await deps.control.forget_phone()
         return Ack(ok=ok, detail=None if ok else "no phone paired")
 
-    # --- mcp servers (ADR 0022) ----------------------------------------------------
-
-    def server_info(name: str, spec, servers, department: str | None) -> McpServerInfo:
-        live = servers.servers.get(name) if servers is not None else None
-        autonomy = deps.gate.policy_for(department)
-        source = name if department in (None, "ghost") else f"{department}/{name}"
-        offered = {t.name for t in live.offered()} if live else set()
-        ops = {o.name: o for o in live.operations()} if live else {}
-        writes = []
-        for op_name, w in spec.writes.items():
-            level = autonomy.resolve(source, op_name, risk=w.risk)  # type: ignore[arg-type]
-            built = ops.get(op_name)
-            writes.append(
-                McpWriteInfo(
-                    operation=op_name,
-                    tool=w.tool,
-                    risk=w.risk,
-                    autonomy=level.value,
-                    asked_by=list(w.asked_by),
-                    target=list(w.target),
-                    read=w.read.tool if w.read else None,
-                    offered=built is not None and level.value != "deny",
-                    properties=built.properties if built else {},
-                    required=list(built.required) if built else [],
-                )
-            )
-        return McpServerInfo(
-            name=name,
-            transport=spec.transport,
-            connected=live is not None,
-            error=servers.failed.get(name) if servers is not None else "not started",
-            tools=[
-                McpToolInfo(name=t.name, description=t.description, offered=t.name in offered)
-                for t in (live.tools if live else [])
-            ],
-            writes=writes,
-            scope=McpScopeInfo(
-                kind=spec.scope.kind,
-                arguments=list(spec.scope.arguments),
-                items=list(spec.scope.items),
-            )
-            if spec.scope
-            else None,
-            department=None if department in (None, "ghost") else department,
-        )
-
-    @app.get("/mcp", response_model=list[McpServerInfo], tags=["mcp"])
-    async def mcp_servers() -> list[McpServerInfo]:
-        """Ghost's servers, then each department's own (ADR 0024), connected or not."""
-        out = []
-        if deps.mcp is not None:
-            for name, spec in deps.mcp.specs.items():
-                out.append(server_info(name, spec, deps.mcp, None))
-        if deps.departments is not None and deps.fleet is not None:
-            for d in deps.departments.list():
-                if d.is_ghost:
-                    continue
-                own = deps.fleet.own.get(d.slug)
-                for name, spec in d.servers.items():
-                    out.append(server_info(name, spec, own, d.slug))
-        return out
-
     # --- departments (ADR 0024) --------------------------------------------------------
 
     def department_view(d) -> DepartmentView:
@@ -505,16 +471,15 @@ def create_app(deps: Deps) -> FastAPI:
             rules_lead=d.rules_lead(),
             rules=d.rules(),
             memory=d.memory(),
-            servers=list(d.servers),
-            uses=list(d.uses),
-            servers_up=deps.fleet.is_up(d.slug) if deps.fleet is not None else d.is_ghost,
+            permissions=DepartmentPermissions(
+                block=[str(r) for r in d.permissions.block],
+                ask=[str(r) for r in d.permissions.ask],
+                quiet=[str(r) for r in d.permissions.quiet],
+            ),
             skills=skills,
             docs=d.docs(),
             agents=agents,
-            problems=[
-                *d.problems,
-                *(deps.fleet.failures(d.slug) if deps.fleet is not None else []),
-            ],
+            problems=list(d.problems),
             watches=[watch_info(w) for w in getattr(d, "watches", {}).values()],
             hooks=[hook_info(h) for h in getattr(d, "hooks", {}).values()],
             outputs=[
@@ -635,13 +600,15 @@ def create_app(deps: Deps) -> FastAPI:
     UI_SESSION = "ui"  # the desktop's own session id for audited edits (as conversations.py)
 
     def skill_info(skill) -> SkillInfo:
-        servers = set(deps.mcp.servers) if deps.mcp is not None else set()
+        servers = (
+            {n for n in deps.apps.apps if deps.apps.is_up(n)} if deps.apps is not None else set()
+        )
         return SkillInfo(
             name=skill.name,
             description=skill.description,
             source=skill.source,
             path=str(skill.path),
-            requires=list(skill.requires),
+            requires=skill.apps(),
             missing=skill.missing(servers),
             files=skill.files(),
             problem=skill.problem,
@@ -706,7 +673,7 @@ def create_app(deps: Deps) -> FastAPI:
         await skill_change("remove", {"name": name})
         return Ack(ok=True, detail=None)
 
-    # --- sources: what the gate knows (ADR 0022) ---------------------------------
+    # --- sources: what the gate knows (ADR 0034) ---------------------------------
 
     @app.get("/sources", response_model=list[SourceInfo], tags=["sources"])
     async def sources() -> list[SourceInfo]:
@@ -718,7 +685,7 @@ def create_app(deps: Deps) -> FastAPI:
                     name=op.name,
                     description=op.description,
                     risk=op.risk,
-                    autonomy=autonomy.resolve(name, op.name, risk=op.risk).value,
+                    autonomy=autonomy.resolve(name, op.name).value,
                     properties=op.properties,
                     required=list(op.required),
                 )
@@ -727,8 +694,8 @@ def create_app(deps: Deps) -> FastAPI:
 
         out = []
         if deps.conversations is not None:
-            # The agents' own operations (ADR 0014): built in, always on, and tunable in
-            # the policy file like any server's.
+            # The agents' own operations (ADR 0014): built in, always on, and named in
+            # the permissions like any app's.
             from ghost_core.conversations import SOURCE as CONVERSATIONS
 
             out.append(
@@ -742,7 +709,7 @@ def create_app(deps: Deps) -> FastAPI:
                             name="switch",
                             description="Transfer the operator to a department or an agent.",
                             risk="low",
-                            autonomy=autonomy.resolve(CONVERSATIONS, "switch", risk="low").value,
+                            autonomy=autonomy.resolve(CONVERSATIONS, "switch").value,
                             properties={"name": {"type": "string"}},
                             required=["name"],
                         )
@@ -768,49 +735,21 @@ def create_app(deps: Deps) -> FastAPI:
                     ],
                 )
             )
-        listed = {s.name for s in deps.sources}
-        if deps.mcp is not None:
-            # A declared server that did not connect still has operations the policy
-            # names; show them (from the declaration alone) so their levels can be set.
-            for name, spec in deps.mcp.specs.items():
-                if name in listed or name in deps.mcp.servers:
-                    continue
-                out.append(
-                    SourceInfo(
-                        name=name,
-                        kind="server",
-                        description=f"Not connected: {deps.mcp.failed.get(name, 'unknown')}",
-                        operations=[
-                            OperationInfo(
-                                name=op,
-                                description=w.description or f"{w.tool} ({op})",
-                                risk=w.risk,
-                                autonomy=autonomy.resolve(name, op, risk=w.risk).value,  # type: ignore[arg-type]
-                                properties={},
-                                required=list(w.target),
-                            )
-                            for op, w in spec.writes.items()
-                        ],
-                        scope_kind=spec.scope.kind if spec.scope else None,
-                        scope_items=list(spec.scope.items) if spec.scope else [],
-                    )
-                )
-        for src in deps.sources:
-            if deps.conversations is not None and src.name == "conversations":
+        apps = deps.apps.sources() if deps.apps is not None else deps.sources
+        for src in apps:
+            if src.name in (s.name for s in out):
                 continue
-            department = src.name.rpartition("/")[0] or None
-            policy = deps.gate.policy_for(department)
             out.append(
                 SourceInfo(
                     name=src.name,
-                    kind="server",
-                    description=(src.prompt.split(". ", 1)[0] + ".") if src.prompt else src.name,
+                    kind="app",
+                    description=src.title or src.name,
                     operations=[
                         OperationInfo(
                             name=op.name,
                             description=op.description,
                             risk=op.risk,
-                            autonomy=policy.resolve(src.name, op.name, risk=op.risk).value,
+                            autonomy=autonomy.resolve(src.name, op.name).value,
                             properties=op.properties,
                             required=list(op.required),
                         )
@@ -819,11 +758,6 @@ def create_app(deps: Deps) -> FastAPI:
                     read_tools=[
                         ReadToolInfo(name=t.name, description=t.description) for t in src.read_tools
                     ],
-                    scope_kind=src.scope_kind,
-                    scope_items=list(src.scope_items())
-                    if src.scope_kind and src.scope_items
-                    else [],
-                    department=department,
                 )
             )
         return out
@@ -837,12 +771,7 @@ def create_app(deps: Deps) -> FastAPI:
             path=str(deps.policy_path),
             exists=deps.policy_path.exists(),
             text=text,
-            default=p.default.value if p.default else None,
-            skills={s: {op: lv.value for op, lv in ops.items()} for s, ops in p.skills.items()},
-            targets={
-                s: {t: {op: lv.value for op, lv in ops.items()} for t, ops in ts.items()}
-                for s, ts in p.targets.items()
-            },
+            permissions=permissions_view(p, deps.policy_path),
             routes=routes_view(p.routes),
         )
 
@@ -884,16 +813,9 @@ def create_app(deps: Deps) -> FastAPI:
             text = update.text
         else:
             current = policy_view()
-            try:
-                policy = AutonomyPolicy.from_plain(
-                    default=update.default if update.default is not None else current.default,
-                    skills=update.skills if update.skills is not None else current.skills,
-                    targets=update.targets if update.targets is not None else current.targets,
-                )
-            except ValueError as e:
-                raise HTTPException(422, str(e)) from None
-            # The levels editor doesn't know the rest of [defaults]: keep it as it was.
+            # The routes editor doesn't know the rest of the file: keep it as it was.
             kept = AutonomyPolicy.parse(current.text) if current.text else AutonomyPolicy()
+            policy = kept
             routes = kept.routes
             if update.routes is not None:
                 from ghost_core.routes import RouteError, RoutePolicy
@@ -905,7 +827,7 @@ def create_app(deps: Deps) -> FastAPI:
                     routes = RoutePolicy.parse(raw)
                 except RouteError as e:
                     raise HTTPException(422, str(e)) from None
-            policy = dataclasses.replace(policy, pending_ttl=kept.pending_ttl, routes=routes)
+            policy = dataclasses.replace(policy, routes=routes)
             text = policy.to_toml()
         deps.policy_path.parent.mkdir(parents=True, exist_ok=True)
         deps.policy_path.write_text(text if text.endswith("\n") else text + "\n")
@@ -919,16 +841,20 @@ def create_app(deps: Deps) -> FastAPI:
 
     def settings_view() -> SettingsView:
         # ``values`` is whatever non-secret keys settings.env holds; the desktop app owns
-        # the list it offers. GHOST_DEPARTMENT_ROUTING (ADR 0019) is a plain value.
+        # the list it offers.
         env = read_env(deps.env_path)
         values = {k: v for k, v in read_env(deps.settings_path).items() if k not in SECRET_KEYS_SET}
+        env = {**read_env(apps_env_path(deps)), **env}
         return SettingsView(
             settings_path=str(deps.settings_path),
             env_path=str(deps.env_path),
             values=values,
             secrets=[
                 SecretState(name=k, set=bool(env.get(k)))
-                for k in [*SECRET_KEYS, *sorted(mcp_secret_names(values) - SECRET_KEYS_SET)]
+                for k in [
+                    *SECRET_KEYS,
+                    *sorted(app_secret_names(values, deps.apps) - SECRET_KEYS_SET),
+                ]
             ],
             vault_managed=deps.vault_env_path.exists(),
         )
@@ -951,11 +877,19 @@ def create_app(deps: Deps) -> FastAPI:
                 update_env(deps.env_path, update.values, mode=0o600)
                 applied = deps.control.apply_settings(update.values)
             if update.secrets:
-                allowed = SECRET_KEYS_SET | mcp_secret_names(read_env(deps.settings_path))
+                allowed = SECRET_KEYS_SET | app_secret_names(
+                    read_env(deps.settings_path), deps.apps
+                )
                 bad = [k for k in update.secrets if k not in allowed]
                 if bad:
                     raise HTTPException(422, f"unknown secrets {bad}")
-                update_env(deps.env_path, update.secrets, mode=0o600)
+                own = {k: v for k, v in update.secrets.items() if k in SECRET_KEYS_SET}
+                apps = {k: v for k, v in update.secrets.items() if k not in SECRET_KEYS_SET}
+                if own:
+                    update_env(deps.env_path, own, mode=0o600)
+                if apps:  # kept out of env, which the vault renderer rewrites
+                    update_env(apps_env_path(deps), apps, mode=0o600)
+                    os.environ.update({k: v for k, v in apps.items() if v})
                 logger.info(f"settings: secrets updated: {sorted(update.secrets)}")
         except ValueError as e:
             raise HTTPException(422, str(e)) from None

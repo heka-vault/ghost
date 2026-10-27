@@ -10,8 +10,8 @@ operator always hears the exact text read back and says yes (the words the model
 what gets written, so the readback is the check). ``departments.remember`` appends a line to
 the department's shared ``memory.md``, which every agent in it reads as data. A department
 whose resources live in a ``root`` keeps its rules there and Ghost does not write into a
-root: ``add_rule`` refuses and says where to edit. ``mcp.json`` and ``department.json``
-have no voice path at all.
+root: ``add_rule`` refuses and says where to edit. ``department.json``, ``apps.json`` and
+the permissions have no voice path at all.
 """
 
 from __future__ import annotations

@@ -119,7 +119,7 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
       dismissible={!busy}
       size="md"
       title="New agent"
-      description="An agent has its own persona, job and memory, and works in a department: its servers, rules and skills. Transfer to it in any session."
+      description="An agent has its own persona, job and memory, and works in a department: its rules, skills and permissions. Transfer to it in any session."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
@@ -144,7 +144,7 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], departments
         </Field>
         <Field
           label="Department"
-          help={department === "ghost" ? <>Works with Ghost’s own servers and skills, like Ghost.</> : <>Works with {deptTitle}’s servers, skills and rules, and reads what {deptTitle} knows. {quoted(`transfer me to ${deptTitle.toLowerCase()}`)} still lands on the department’s own agent.</>}
+          help={department === "ghost" ? <>Works with Ghost’s own rules and skills, like Ghost.</> : <>Works with {deptTitle}’s rules, skills and permissions, and reads what {deptTitle} knows. {quoted(`transfer me to ${deptTitle.toLowerCase()}`)} still lands on the department’s own agent.</>}
         >
           <Select value={department} onChange={(e) => setDepartment(e.target.value)} options={[{ value: "ghost", label: "Ghost" }, ...departments.filter((d) => !d.is_ghost).map((d) => ({ value: d.slug, label: d.title }))]} />
         </Field>

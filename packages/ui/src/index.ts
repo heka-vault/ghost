@@ -1,7 +1,7 @@
 /** Shared pieces for the Ghost apps. Everything but ghost.tsx is plain TypeScript, safe for React Native, including the mascot (mascot.ts, wisp.ts). */
 export { useGhost, GhostProvider } from "./ghost";
 export type { GhostState } from "./ghost";
-export { phaseLabel, autonomyLabel } from "./labels";
+export { phaseLabel, autonomyLabel, permissionLabel, permissionOf } from "./labels";
 export { phaseOf, phaseText, agentName, lineName, relativeTime, formatTime, formatDateTime, errorText, quoted, statusLabel, statusTone } from "./format";
 export type { GhostPhase, Tone } from "./format";
 export { splitSummary, neverHappened, didNotHappen, pastTense, shortTarget } from "./audit";

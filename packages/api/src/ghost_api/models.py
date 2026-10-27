@@ -44,7 +44,7 @@ class Status(BaseModel):
     version: str
     api_version: str = API_VERSION
     wake_mode: str
-    servers: list[str]  # the MCP servers connected at start (ADR 0022)
+    apps: list[str] = []  # the apps connected now (ADR 0034)
     pending: PendingProposal | None = None
     conversation: str | None = None  # slug of the agent the session is with (ADR 0014)
     department: str | None = None  # the department it works in (ADR 0024)
@@ -123,6 +123,16 @@ class WaitingEvent(BaseModel):
     count: int
 
 
+class AppsEvent(BaseModel):
+    """An app was connected, disconnected or changed state: read ``GET /apps``. With
+    ``sign_in_url``, the app is waiting for the operator to sign in there; the desktop opens
+    it in the browser."""
+
+    type: Literal["apps"] = "apps"
+    changed: str | None = None
+    sign_in_url: str | None = None
+
+
 Event = Annotated[
     StatusEvent
     | TurnEvent
@@ -130,7 +140,8 @@ Event = Annotated[
     | OutcomeEvent
     | LogEvent
     | ConversationEvent
-    | WaitingEvent,
+    | WaitingEvent
+    | AppsEvent,
     Field(discriminator="type"),
 ]
 
@@ -233,7 +244,7 @@ class OperationInfo(BaseModel):
     name: str
     description: str
     risk: str
-    autonomy: str  # resolved at the source level; targets may tighten it
+    autonomy: str  # by name alone; a rule with argument patterns may decide some calls
     properties: dict[str, Any]
     required: list[str]
 
@@ -243,44 +254,134 @@ class ReadToolInfo(BaseModel):
     description: str
 
 
-class McpToolInfo(BaseModel):
+# --- apps and permissions (ADR 0034) ---------------------------------------------
+
+Level = Literal["allow", "ask", "block", "quiet"]
+
+
+class AppAction(BaseModel):
+    """One of an app's tools, and what Ghost's own permissions say about it."""
+
     name: str
+    description: str  # the app's, first sentence: untrusted text, shown to the operator only
+    reads: bool  # read-only, by the app's own word; anything else is a change
+    level: Level  # for a change; a read is allow or block
+    rule: str  # the rule that names just this tool ("github.issue_write")
+    conditional: bool = False  # a rule with argument patterns may decide some calls
+
+
+class AppView(BaseModel):
+    """A connected app: how it is reached, whether it is up, and what it can do."""
+
+    name: str  # its short name: the rules' and the tools' prefix
+    title: str
+    kind: Literal["sign_in", "key", "local", "custom"]
+    state: Literal["connected", "connecting", "needs_sign_in", "failed", "stopped"]
+    problem: str | None = None  # why it is not connected; never a secret
+    catalog: str | None = None  # the catalog entry it came from
+    icon: str | None = None
+    actions: list[AppAction] = []
+    sign_in_url: str | None = None  # waiting for the operator's browser
+    settings: list[str] = []  # the environment names it needs (secret values never shown)
+
+
+class CatalogSetting(BaseModel):
+    key: str
+    label: str
+    secret: bool = False
+    required: bool = True
+    default: str | None = None
+    choices: list[str] = []
+
+
+class CatalogOption(BaseModel):
+    """One way to connect: sign in, an API key, or run on this computer."""
+
+    id: str
+    kind: Literal["sign_in", "key", "local"]
+    label: str
+    settings: list[CatalogSetting] = []
+
+
+class CatalogEntryView(BaseModel):
+    """An app in the catalog. Its text is the registry's: shown to the operator, never
+    to the model."""
+
+    name: str  # the registry's name, reverse-DNS
+    title: str
     description: str
-    offered: bool  # read-only (or listed under reads): the model may call it today
+    version: str
+    website: str | None = None
+    repository: str | None = None
+    icon: str | None = None
+    featured: bool = False
+    options: list[CatalogOption] = []
+    suggested_name: str  # the short name it would be connected under
+    connected: list[str] = []  # the names it is connected under already
 
 
-class McpWriteInfo(BaseModel):
-    """A declared write: the policy operation, the tool it calls, and its level."""
-
-    operation: str
-    tool: str
-    risk: str
-    autonomy: str  # resolved at the server level; a target rule may still tighten it
-    asked_by: list[str] = []
-    target: list[str] = []
-    read: str | None = None  # the read that shows the target; None: no stale check
-    offered: bool  # the tool exists on the server and the level is not deny
-    properties: dict[str, Any] = {}
-    required: list[str] = []
+class CatalogPage(BaseModel):
+    entries: list[CatalogEntryView]
+    total: int
+    fetched_at: datetime | None = None  # when Ghost's copy was last refreshed
+    refreshing: bool = False
+    problem: str | None = None
 
 
-class McpScopeInfo(BaseModel):
-    kind: str
-    arguments: list[str]
-    items: list[str] = []
+class AppConnect(BaseModel):
+    """Connect an app: from the catalog (``catalog`` and ``option``), from a URL, or from
+    another client's pasted config. Secret values go to Ghost's environment, never into
+    apps.json, and never come back out."""
+
+    catalog: str | None = None
+    option: str | None = None
+    name: str | None = Field(default=None, max_length=40)
+    values: dict[str, str] | None = None
+    url: str | None = None
+    config: str | None = Field(default=None, max_length=20000)
+    replace: bool | None = None
 
 
-class McpServerInfo(BaseModel):
-    """One MCP server from the policy file (ADR 0022) and what Ghost got from it."""
+class AppConnectResult(BaseModel):
+    apps: list[AppView]
+    sign_in_url: str | None = None
 
-    name: str
-    transport: str  # "http" or "stdio"
-    connected: bool
-    error: str | None = None  # why it is not connected; never a secret
-    tools: list[McpToolInfo] = []
-    writes: list[McpWriteInfo] = []
-    scope: McpScopeInfo | None = None
-    department: str | None = None  # the department whose own server this is; None: Ghost's
+
+class PermissionsView(BaseModel):
+    """``[permissions]`` in policy.toml: everything runs unless a rule says otherwise."""
+
+    path: str
+    mode: Literal["open", "ask", "read-only"]
+    block: list[str] = []
+    ask: list[str] = []
+    quiet: list[str] = []
+    allow: list[str] = []
+
+
+class RuleSet(BaseModel):
+    """One toggle: move ``rule`` into ``level``'s list, or out of every list (None)."""
+
+    rule: str = Field(min_length=1, max_length=300)
+    level: Level | None = None
+
+
+class PermissionsUpdate(BaseModel):
+    """Whole lists, the mode, or one rule moved; what is not given is kept."""
+
+    mode: Literal["open", "ask", "read-only"] | None = None
+    block: list[str] | None = None
+    ask: list[str] | None = None
+    quiet: list[str] | None = None
+    allow: list[str] | None = None
+    set: RuleSet | None = None
+
+
+class DepartmentPermissions(BaseModel):
+    """What a department adds over Ghost's (``permissions`` in its department.json)."""
+
+    block: list[str] = []
+    ask: list[str] = []
+    quiet: list[str] = []
 
 
 class SkillInfo(BaseModel):
@@ -290,8 +391,8 @@ class SkillInfo(BaseModel):
     description: str
     source: str  # "ghost" for Ghost's own folder, "home" for the operator's, else a department
     path: str
-    requires: list[str] = []  # "mcp:<server>" names it needs
-    missing: list[str] = []  # the required servers that are not connected
+    requires: list[str] = []  # the apps it says it needs
+    missing: list[str] = []  # the ones that are not connected
     files: list[str] = []  # the files beside SKILL.md
     problem: str | None = None  # why it is not offered to the model (ADR 0024), if it is not
 
@@ -312,7 +413,7 @@ class WatchInfo(BaseModel):
     """A watch the department declares (ADR 0028) and how its last look went."""
 
     name: str
-    server: str
+    app: str
     read: str
     every_secs: int
     steps: list[str]  # "check", then "jev" and "model" where declared
@@ -350,8 +451,8 @@ class OutputInfo(BaseModel):
 
 
 class DepartmentView(BaseModel):
-    """A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
-    skills and agents. Ghost is one too."""
+    """A department (ADR 0024): a folder under ~/.config/ghost with its rules, skills,
+    agents and the permissions that narrow what they may do (ADR 0034). Ghost is one too."""
 
     slug: str
     title: str
@@ -363,9 +464,7 @@ class DepartmentView(BaseModel):
     rules_lead: str = ""  # the first line of AGENTS.md
     rules: str = ""  # AGENTS.md, as the prompt carries it
     memory: str = ""  # the shared memory every agent in it reads
-    servers: list[str] = []  # its own servers' names (mcp.json)
-    uses: list[str] = []  # Ghost's servers it reaches through its own declaration
-    servers_up: bool  # its own servers are connected now
+    permissions: DepartmentPermissions = DepartmentPermissions()
     skills: list[str] = []  # the skills its sessions read first
     docs: list[str] = []
     agents: list[str] = []  # slugs, the department's own first
@@ -392,23 +491,19 @@ class JournalEntry(BaseModel):
 
     at: datetime
     agent: str  # the agent's name, or its slug when it is gone
-    operation: str  # "github.close"
+    operation: str  # "github.issue_write"
     target: str
     what: str  # the proposal's preview
 
 
 class SourceInfo(BaseModel):
-    """A source of tools the gate knows: the lines (built in) or an MCP server. The
-    policy screen edits levels per operation from this list."""
+    """A source of tools the gate knows: Ghost's own (built in) or a connected app."""
 
     name: str
-    kind: str  # "built-in" or "server"
+    kind: str  # "built-in" or "app"
     description: str
     operations: list[OperationInfo] = []
     read_tools: list[ReadToolInfo] = []
-    scope_kind: str | None = None  # how the source's allowlist names items (ADR 0019)
-    scope_items: list[str] = []  # the whole allowlist, in Target.scope() form
-    department: str | None = None  # the department whose server this is; None for Ghost's
 
 
 RouteName = Literal["digest", "desk", "desktop", "phone", "call", "sms", "whatsapp"]
@@ -434,25 +529,21 @@ class PolicyView(BaseModel):
     path: str
     exists: bool
     text: str
-    default: str | None
-    skills: dict[str, dict[str, str]]
-    targets: dict[str, dict[str, dict[str, str]]]
+    permissions: PermissionsView
     routes: RoutesView | None = None
 
 
 class PolicyUpdate(BaseModel):
-    """Either the raw TOML, or structured fields that are rendered to TOML."""
+    """Either the raw TOML, or the routes rendered into it (the permissions have their own
+    route, ``PUT /permissions``)."""
 
     text: str | None = None
-    default: str | None = None
-    skills: dict[str, dict[str, str]] | None = None
-    targets: dict[str, dict[str, dict[str, str]]] | None = None
     routes: RoutesView | None = None
 
 
 class PolicyResult(BaseModel):
     policy: PolicyView
-    applied: bool  # autonomy levels reloaded live
+    applied: bool  # reloaded live
 
 
 # --- settings -------------------------------------------------------------------

@@ -50,7 +50,7 @@ CI = {
             "key": "ci:{repo}",
             "title": "CI failed on {repo}: {name}",
             "check": {
-                "server": "github",
+                "app": "github",
                 "read": "get_workflow_run",
                 "args": {"repo": "{repo}", "run_id": "{id}"},
                 "fields": {"conclusion": {"at": "conclusion"}},
@@ -311,17 +311,12 @@ def test_a_hook_without_its_secret_or_fixtures_stays_off(tmp_path):
 def test_a_department_reads_its_hooks(tmp_path):
     folder = tmp_path / "eng"
     folder.mkdir()
-    (folder / "mcp.json").write_text(json.dumps({"use": ["github"]}))
+    check = {k: v for k, v in CI["events"]["workflow_run"]["check"].items() if k != "app"}
     other = {
         **CI,
-        "events": {
-            "x": {
-                **CI["events"]["workflow_run"],
-                "check": {**CI["events"]["workflow_run"]["check"], "server": "jira"},
-            }
-        },
+        "events": {"x": {**CI["events"]["workflow_run"], "check": {**check, "server": "jira"}}},
     }
     (folder / "department.json").write_text(json.dumps({"hooks": {"ci": CI, "tickets": other}}))
     d = load_department("eng", folder)
-    assert list(d.hooks) == ["ci"] and d.hooks["ci"].folder == folder / "hooks" / "ci"
-    assert any("jira" in p for p in d.problems)
+    assert list(d.hooks) == ["ci", "tickets"] and d.hooks["ci"].folder == folder / "hooks" / "ci"
+    assert d.hooks["tickets"].events["x"].check.app == "jira"  # the older word still reads

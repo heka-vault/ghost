@@ -1,6 +1,6 @@
 # 0022: MCP servers are core; abilities are retired
 
-- **Status:** accepted (implemented 2026-10-20: reads, the write declaration, the GitHub server at parity, abilities retired)
+- **Status:** accepted (implemented 2026-10-20: reads, the write declaration, the GitHub server at parity, abilities retired); the write declarations and the reads list superseded by ADR 0034 (apps connected to Ghost, every tool offered)
 - **Date:** 2026-10-20
 - **Supersedes:** ADR 0006 and ADR 0012 (capabilities as modular skills, then as installable abilities)
 

@@ -3,10 +3,10 @@
 ``ConversationRuntime`` knows which agent the session is in, builds the system prompt
 from what its department reaches plus the department's rules and shared memory and the
 agent's persona, seeds the LLM context from its memory, notes and recent turns, records
-what is said, and performs a transfer: the department's servers are started if they are
-not up, Ghost's voice announces it, a short tone plays, the TTS voice changes, the context
-is replaced, and the agent greets with a one-line recap. A transfer cancels any proposal
-still waiting for a yes. A move re-homes the session the same way, in place.
+what is said, and performs a transfer: Ghost's voice announces it, a short tone plays, the
+TTS voice changes, the context is replaced, and the agent greets with a one-line recap. A
+transfer cancels any proposal still waiting for a yes. A move re-homes the session the
+same way, in place.
 
 Compaction persistence lives here too: when Pipecat's summarizer applies a summary,
 the text is written to ``memory.md`` through the gate as a quiet, audited write.
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from ghost_core import ActiveScope, GateError, ToolSource, WriteGate
+from ghost_core import GateError, ToolSource, WriteGate
 from ghost_core.conversations import (
     GHOST,
     SOURCE,
@@ -103,15 +103,13 @@ class ConversationRuntime:
         start: str = GHOST,
         on_switch: Callable[[Profile], Awaitable[None]] | None = None,
         reach: Reach | None = None,
-        routing: bool = False,
         on_enter: OnEnter | None = None,
         on_leave: OnLeave | None = None,
     ) -> None:
         """``reach(agent)`` gives the sources a session in that agent's department gets
         (ADR 0024); None means every session gets ``fragments`` and whatever tools were
         registered, as before departments. ``on_enter`` runs before a transfer's frames are
-        built (the department's servers start then); ``on_leave`` after one, with the
-        agent left. ``routing`` is the operator's department-routing setting (ADR 0019)."""
+        built; ``on_leave`` after one, with the agent left."""
         self._conversations = conversations
         self._gate = gate
         self._session_id = session_id
@@ -121,7 +119,6 @@ class ConversationRuntime:
         self._on_leave = on_leave
         # Set by register_tools: the schemas for a list of sources, for a transfer.
         self.tool_schemas: Callable[[list[ToolSource]], list[Any]] | None = None
-        self.routing = routing
         self._tts_settings = tts_settings
         self._llm_settings = llm_settings
         self._sample_rate = sample_rate
@@ -148,8 +145,8 @@ class ConversationRuntime:
         return self._reach is not None
 
     def sources_for(self, profile: Profile | None = None) -> list[ToolSource]:
-        """The sources a session in this agent reaches (ADR 0024): its department's, read
-        on every call, so a server that came up since is seen at once."""
+        """The sources a session in this agent reaches (ADR 0024, ADR 0034): read on every
+        call, so an app connected since is seen at once."""
         if self._reach is None:
             return []
         return list(self._reach(profile or self.active))
@@ -178,12 +175,7 @@ class ConversationRuntime:
         if self._reach is None:
             fragments = list(self._fragments)
         else:
-            fragments = []
-            for src in self.sources_for(p):
-                if src.scope_kind and src.scoped_prompt:
-                    fragments.append(src.scoped_prompt(self.scope_for(src.name, p)))
-                elif src.prompt:
-                    fragments.append(src.prompt)
+            fragments = [src.prompt for src in self.sources_for(p) if src.prompt]
         d = self._conversations.department_of(p)
         return build_system_prompt(
             [f for f in fragments if f],
@@ -197,35 +189,11 @@ class ConversationRuntime:
             rules_from_root=d.root is not None,
             memory=d.memory(),
             roster=self.roster() if p.is_ghost else "",
-            routing=self.routing,
         )
-
-    # --- scope (ADR 0019) -------------------------------------------------------------
-
-    def scope_for(self, ability: str, profile: Profile | None = None) -> ActiveScope:
-        """What the pipeline hands a scoped source on each call: unscoped (the server's own
-        allowlist is the limit), naming the departments that cover an item outside it."""
-        p = profile or self.active
-        convs = self._conversations
-        server = ability.rpartition("/")[2]
-
-        def owners(item: str) -> list[str]:
-            return [q.name for q in convs.owners_of(server, item) if q.department != p.department]
-
-        return ActiveScope(ability=ability, thread=p.name, items=None, owners=owners)
 
     def department_slug(self) -> str:
         """The department the active agent works in (ADR 0024), for the audit."""
         return self.active.department
-
-    def owner_of(self, ability: str, item: str) -> Profile | None:
-        """The agent to route a request about ``item`` to: the default agent of the first
-        other department whose declaration covers it."""
-        server = ability.rpartition("/")[2]
-        for q in self._conversations.owners_of(server, item):
-            if q.department != self.active.department:
-                return q
-        return None
 
     def initial_messages(self, profile: Profile | None = None) -> list[dict[str, Any]]:
         p = profile or self.active
@@ -272,7 +240,7 @@ class ConversationRuntime:
 
     def switch_allowed(self) -> bool:
         try:
-            level = self._gate.autonomy.resolve(SOURCE, "switch", risk="low")
+            level = self._gate.autonomy.resolve(SOURCE, "switch")
         except Exception:  # noqa: BLE001
             return True
         return level is not Autonomy.DENY
@@ -292,7 +260,7 @@ class ConversationRuntime:
         result has been appended to the context (``settled`` is cleared until then).
         ``outcome`` is what just happened (a created agent), told to the new agent so it
         does not redo it. ``rehome`` re-enters the same agent after a move (ADR 0024):
-        the destination's servers, rules, memory and voice, in place."""
+        the destination's rules, memory, permissions and voice, in place."""
         origin = self.active
         if target.slug == origin.slug and not rehome:
             return []
@@ -301,7 +269,7 @@ class ConversationRuntime:
             self._gate.set_aside(self._session_id, "switched conversation")
         self.settled.clear()
         if self._on_enter is not None:
-            await self._on_enter(target)  # the department's servers, before anything is said
+            await self._on_enter(target)
         dept = self._conversations.department_of(target)
         if rehome:
             line = f"Moved to {dept.title}."

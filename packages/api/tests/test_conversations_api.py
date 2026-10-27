@@ -167,7 +167,8 @@ def test_departments_have_their_own_agent_and_agents_are_hired_into_them(world):
     assert set(deps_view) == {"ghost", "marketing"}
     m = deps_view["marketing"]
     assert m["title"] == "Marketing" and m["agents"] == ["marketing", "brand"]
-    assert m["rules_lead"] == "Marketing" and m["servers"] == [] and m["problems"] == []
+    assert m["rules_lead"] == "Marketing" and m["permissions"]["block"] == []
+    assert m["problems"] == []
     assert m["path"].endswith("departments/marketing")
     assert client.get("/departments/marketing").json()["slug"] == "marketing"
     assert client.get("/departments/nope").status_code == 404
@@ -180,7 +181,7 @@ def test_create_department_from_the_desktop(world):
     d = r.json()
     assert d["slug"] == "design-research" and d["agents"] == ["design-research"]
     folder = deps.departments.config_dir / "departments" / "design-research"
-    assert (folder / "AGENTS.md").is_file() and (folder / "mcp.json").is_file()
+    assert (folder / "AGENTS.md").is_file() and not (folder / "mcp.json").exists()
     assert client.post("/departments", json={"name": "design research"}).status_code == 409
     assert ("reload_policy",) in control.calls
     assert client.get("/conversations/design-research").json()["is_default"]

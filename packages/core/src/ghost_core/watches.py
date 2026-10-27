@@ -1,8 +1,8 @@
 """Watches (ADR 0028): a department observes an outside system, deterministically first.
 
 A watch is declared by the operator in ``department.json`` under ``watches`` and never
-written by the model. A polled watch calls a read the department already reaches, on an
-interval, from the daemon; no model is involved in that. What comes back is untrusted
+written by the model. A polled watch calls one of a connected app's read-only tools, on an
+interval, from the daemon (ADR 0034); no model is involved in that. What comes back is untrusted
 data: the watch keeps only the fields it names (a path, a type, a constraint) and drops
 the rest, then decides in declared steps, cheapest first:
 
@@ -19,7 +19,7 @@ Example::
 
     "watches": {
       "ci": {
-        "server": "github", "read": "list_workflow_runs",
+        "app": "github", "read": "list_workflow_runs",
         "args": {"owner": "heka-vault", "repo": "ghost", "status": "failure"},
         "every": 60, "items": "workflow_runs",
         "fields": {
@@ -63,7 +63,8 @@ STR_MAX = 200
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _PATH = re.compile(r"^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$")
 _WATCH_KEYS = {
-    "server",
+    "app",
+    "server",  # the older word for app (ADR 0034), still read
     "read",
     "args",
     "every",
@@ -180,7 +181,7 @@ class Ask:
 class Watch:
     name: str
     department: str
-    server: str
+    app: str
     read: str
     args: Mapping[str, Any]
     every: int
@@ -203,7 +204,7 @@ class Watch:
 
     def observe(self, result: Any) -> list[dict[str, Scalar]]:
         """The kept fields of each result. A result that breaks a constraint is dropped
-        whole; the rest of what the server sent is never kept."""
+        whole; the rest of what the app sent is never kept."""
         rows = result if not self.items else _at(result, self.items)
         if isinstance(rows, Mapping):
             rows = [rows]
@@ -285,9 +286,9 @@ def parse_watch(name: str, body: object, department: str, where: str) -> Watch:
     unknown = sorted(set(body) - _WATCH_KEYS)
     if unknown:
         raise WatchError(f"{where}: unknown key(s) {', '.join(unknown)}")
-    server, read = body.get("server"), body.get("read")
-    if not isinstance(server, str) or not server or not isinstance(read, str) or not read:
-        raise WatchError(f"{where}: server and read are required")
+    app, read = body.get("app", body.get("server")), body.get("read")
+    if not isinstance(app, str) or not app or not isinstance(read, str) or not read:
+        raise WatchError(f"{where}: app and read are required")
     args = body.get("args", {})
     if not isinstance(args, Mapping):
         raise WatchError(f"{where}: args must be an object")
@@ -323,7 +324,7 @@ def parse_watch(name: str, body: object, department: str, where: str) -> Watch:
     return Watch(
         name=name,
         department=department,
-        server=server,
+        app=app,
         read=read,
         args=dict(args),
         every=every,

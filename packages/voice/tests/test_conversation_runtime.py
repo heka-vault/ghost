@@ -13,7 +13,6 @@ from ghost_core import (
     Change,
     ChangeSet,
     Operation,
-    OutOfScope,
     Prepared,
     ReadTool,
     Snapshot,
@@ -101,10 +100,6 @@ def layout(tmp_path: Path, *departments: str, **declaration) -> Departments:
             json.dumps({"title": name.title(), **declaration.get(name, {})})
         )
         (folder / "AGENTS.md").write_text(f"# {name.title()}: the {name} desk\n")
-        if "servers" in declaration.get(name, {}):
-            (folder / "mcp.json").write_text(
-                json.dumps({"mcpServers": {}, "use": list(declaration[name]["servers"])})
-            )
     return Departments(cfg)
 
 
@@ -336,7 +331,7 @@ def test_transfer_tone_is_short_mono_pcm():
     assert 0.15 * 24000 * 2 < len(data) < 0.4 * 24000 * 2
 
 
-# --- departments: prompt, reads, routing (ADR 0019, ADR 0024) ---------------------------
+# --- departments: prompt, reads, permissions (ADR 0024, ADR 0034) ----------------------
 
 
 class Issue(Target, frozen=True):
@@ -351,6 +346,9 @@ class Issue(Target, frozen=True):
 
     def spoken(self):
         return f"{self.repo}#{self.number}"
+
+    def rule_args(self):
+        return {"repo": self.repo, "number": self.number}
 
 
 class Snap(Snapshot, frozen=True):
@@ -376,29 +374,14 @@ class RepoWriter:
         self.applied.append((target.repo, target.number, change.tag))
 
 
-def repo_source(writer, name: str, allowed: list[str]) -> ToolSource:
-    """Like a GitHub server declared with a scope: reads and writes checked against its
-    allowlist; an item another department covers is OutOfScope through the ActiveScope
-    the pipeline passes as ``_scope`` (ghost_core.mcp does the same)."""
-
-    def check(args, item):
-        scope = args.get("_scope")
-        if item in allowed:
-            return
-        owners = scope.owners(item) if scope is not None else []
-        if owners:
-            raise OutOfScope(name, item, owners)
-        raise ValueError(f"{item} is not an allowed repository for {name}")
+def repo_source(writer, name: str) -> ToolSource:
+    """Like a connected GitHub app (ADR 0034): every department reaches it; a
+    department's own permissions narrow what its calls may touch."""
 
     async def list_issues(args):
-        repo = args.get("repo")
-        if repo:
-            check(args, repo)
-            return {"repos": [repo]}
-        return {"repos": list(allowed)}
+        return {"repos": [args["repo"]] if args.get("repo") else ["acme/app", "acme/infra"]}
 
     async def prepare(args):
-        check(args, args["repo"])
         return Prepared(
             Issue(repo=args["repo"], number=int(args["number"])),
             ChangeSet(steps=(Label(tag="bug"),)),
@@ -406,9 +389,16 @@ def repo_source(writer, name: str, allowed: list[str]) -> ToolSource:
 
     return ToolSource(
         name=name,
-        prompt=f"{name.upper()} REPOS: " + ", ".join(allowed),
+        prompt=f"{name.upper()} is connected.",
         read_tools=[
-            ReadTool(f"{name}_list_issues", "List.", {"repo": {"type": "string"}}, [], list_issues)
+            ReadTool(
+                f"{name}_list_issues",
+                "List.",
+                {"repo": {"type": "string"}},
+                [],
+                list_issues,
+                operation="list_issues",
+            )
         ],
         operations=[
             Operation(
@@ -418,60 +408,37 @@ def repo_source(writer, name: str, allowed: list[str]) -> ToolSource:
                 ["number"],
                 prepare=prepare,
                 writer=writer,
-                risk="low",
+                tool_name=f"{name}_set_labels",
             )
         ],
-        scope_kind="repository",
-        scope_items=lambda: list(allowed),
     )
 
 
-def covering(*items: str) -> dict:
-    return {
-        "servers": {
-            "github": {
-                "scope": {
-                    "kind": "repository",
-                    "arguments": ["owner", "repo"],
-                    "items": list(items),
-                }
-            }
-        }
-    }
+def only(repo: str) -> dict:
+    return {"permissions": {"block": [f"github.*(repo!={repo})"]}}
 
 
 @pytest.fixture
 def departments(tmp_path: Path):
-    """Ghost reaches acme/app and acme/infra through its own github server; the app and
-    infra departments each use it with a declaration covering one repository."""
+    """Ghost and two departments reach one github app; app and infra each block every call
+    that is not about their own repository."""
 
-    def build(*, routing=False):
+    def build():
         store = Store()
         writer = RepoWriter()
-        deps = layout(
-            tmp_path,
-            "app",
-            "infra",
-            app=covering("acme/app"),
-            infra=covering("acme/infra"),
-        )
+        deps = layout(tmp_path, "app", "infra", app=only("acme/app"), infra=only("acme/infra"))
         convs = Conversations(
             store, deps, default_voice="af_heart", voices=("af_heart", "am_adam", "bf_emma")
         )
         gate = WriteGate(store)
+        gate.attach_departments(deps)
         agents = conversations_source(convs)
         gate.register(SOURCE, agents.operations)
-        ghost_github = repo_source(writer, "github", ["acme/app", "acme/infra"])
-        views = {
-            "app": repo_source(writer, "github", ["acme/app"]),
-            "infra": repo_source(writer, "github", ["acme/infra"]),
-        }
-        gate.register("github", ghost_github.operations)
+        github = repo_source(writer, "github")
+        gate.register("github", github.operations)
 
         def reach(p):
-            if p.department == GHOST:
-                return [ghost_github, agents]
-            return [views[p.department], agents]
+            return [github, agents]
 
         rt = ConversationRuntime(
             convs,
@@ -482,7 +449,6 @@ def departments(tmp_path: Path):
             llm_settings=LLMSettings,
             sample_rate=24000,
             reach=reach,
-            routing=routing,
         )
         llm = FakeLLM()
         heard = ["label app seventeen bug"]
@@ -491,7 +457,7 @@ def departments(tmp_path: Path):
 
         register_tools(
             llm,
-            sources=[ghost_github, agents],
+            sources=[github, agents],
             gate=gate,
             session_id="s1",
             on_hang_up=on_sleep,
@@ -506,110 +472,45 @@ def departments(tmp_path: Path):
 
 async def test_the_department_shapes_the_prompt_and_the_calls(departments):
     _, convs, gate, rt, llm, writer = departments()
-    # Ghost: its own server, every repo, the roster of departments
+    # Ghost: the app, every repo, the roster of departments
     prompt = rt.system_prompt()
-    assert "GITHUB REPOS: acme/app, acme/infra" in prompt and "FRAG" not in prompt
+    assert "GITHUB is connected." in prompt and "FRAG" not in prompt
     assert "- App: App: the app desk" in prompt and "- Infra" in prompt
-    assert rt.scope_for("github").items is None and rt.scope_for("github").thread == "Ghost"
     p = FakeParams(llm, "github_list_issues", {})
     await llm.functions["github_list_issues"](p)
     assert p.result == {"repos": ["acme/app", "acme/infra"]}
 
     await rt.switch(convs.get("app"))
     prompt = rt.system_prompt()
-    assert "GITHUB REPOS: acme/app" in prompt and "acme/infra" not in prompt
+    assert "GITHUB is connected." in prompt  # every department reaches the app
     assert "You are App, the operator's App department" in prompt
     assert "App department's standing instructions" in prompt and "the app desk" in prompt
     assert "The departments, each" not in prompt  # only Ghost lists them
-    s = rt.scope_for("github")
-    assert s.owners("acme/infra") == ["Infra"] and s.owners("acme/app") == []  # not itself
     assert rt.department_slug() == "app"
-    p = FakeParams(llm, "github_list_issues", {})
+    p = FakeParams(llm, "github_list_issues", {"repo": "acme/app"})
     await llm.functions["github_list_issues"](p)
     assert p.result == {"repos": ["acme/app"]}
-    # the scope never reaches the transcript record
-    assert all("_scope" not in t.text for t in convs.turns("app"))
 
-    # a write inside the department's scope goes through
-    p = FakeParams(
-        llm,
-        "change",
-        {
-            "ability": "github",
-            "operation": "set_labels",
-            "args": {"repo": "acme/app", "number": 17},
-        },
-    )
-    await llm.functions["change"](p)
+    # a change inside what the department allows goes through, as its own tool
+    p = FakeParams(llm, "github_set_labels", {"repo": "acme/app", "number": 17})
+    await llm.functions[None](p)
     assert p.result["status"] == "done" and writer.applied == [("acme/app", 17, "bug")]
 
 
-async def test_outside_the_department_with_routing_off_names_the_owner(departments):
+async def test_what_a_department_blocks_is_refused_and_nothing_is_written(departments):
     _, convs, gate, rt, llm, writer = departments()
     await rt.switch(convs.get("app"))
-    llm.pushed.clear()
-    # a read: refused, with the department that covers it
     p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})
     await llm.functions["github_list_issues"](p)
-    assert p.result == {
-        "error": "acme/infra is outside this department; it belongs to the Infra department",
-        "item": "acme/infra",
-        "belongs_to": "Infra",
-        "hint": "offer to transfer them to Infra",
-    }
-    assert rt.active.slug == "app" and llm.pushed == []
-    # a write: the same, and nothing was written or proposed
-    p = FakeParams(
-        llm,
-        "change",
-        {
-            "ability": "github",
-            "operation": "set_labels",
-            "args": {"repo": "acme/infra", "number": 17},
-        },
-    )
-    await llm.functions["change"](p)
-    assert p.result["belongs_to"] == "Infra" and writer.applied == [] and gate.pending("s1") is None
-    # an item nobody covers: a plain refusal from the server's allowlist
-    p = FakeParams(llm, "github_list_issues", {"repo": "other/x"})
-    await llm.functions["github_list_issues"](p)
-    assert p.result == {"error": "other/x is not an allowed repository for github"}
-
-
-async def test_department_routing_transfers_and_hands_over_the_request(departments):
-    _, convs, gate, rt, llm, writer = departments(routing=True)
-    await rt.switch(convs.get("app"))
-    assert "transfers the operator there by itself" in rt.system_prompt()
-    llm.pushed.clear()
-    p = FakeParams(
-        llm,
-        "change",
-        {
-            "ability": "github",
-            "operation": "set_labels",
-            "args": {"repo": "acme/infra", "number": 17},
-        },
-    )
-    await llm.functions["change"](p)
-    assert p.result == {"status": "routed", "to": "Infra", "item": "acme/infra"}
-    assert p.properties.run_llm is False
-    assert rt.active.slug == "infra" and writer.applied == []  # that department handles it
-    assert llm.pushed[0].text == "Transferring you to Infra."
-    note = [f for f in llm.pushed if isinstance(f, LLMMessagesUpdateFrame)][0].messages[-1][
-        "content"
-    ]
-    assert "Ghost routed them here" in note and "label app seventeen bug" in note
-    # a read outside the department routes the same way
-    await rt.switch(convs.get("app"))
-    llm.pushed.clear()
-    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})
-    await llm.functions["github_list_issues"](p)
-    assert p.result["status"] == "routed" and rt.active.slug == "infra"
-    # from Ghost, which covers both, nothing routes
+    assert "blocked" in p.result["error"]
+    p = FakeParams(llm, "github_set_labels", {"repo": "acme/infra", "number": 17})
+    await llm.functions[None](p)
+    assert "blocked" in p.result["error"] and writer.applied == [] and gate.pending("s1") is None
+    # from Ghost, which blocks nothing, the same calls run
     await rt.switch(convs.get(GHOST))
-    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})
-    await llm.functions["github_list_issues"](p)
-    assert p.result == {"repos": ["acme/infra"]} and rt.active.slug == GHOST
+    p = FakeParams(llm, "github_set_labels", {"repo": "acme/infra", "number": 17})
+    await llm.functions[None](p)
+    assert p.result["status"] == "done" and writer.applied == [("acme/infra", 17, "bug")]
 
 
 async def test_a_voice_hired_agent_joins_the_department_and_the_tools_follow(departments):
@@ -713,7 +614,8 @@ async def test_moving_the_active_agent_rehomes_the_session(departments):
         rationale="",
     )
     await rt.switch(convs.get("brand"))
-    assert "GITHUB REPOS: acme/app" in rt.system_prompt()
+    assert "App department's standing instructions" in rt.system_prompt()
+    assert gate.blocks_read("github", "list_issues", {"repo": "acme/infra"}, "app")
     llm.pushed.clear()
     heard = "move this to infra"
     rt.record("user", heard)
@@ -734,8 +636,10 @@ async def test_moving_the_active_agent_rehomes_the_session(departments):
     moved = convs.get("brand")
     assert moved.department == "infra" and moved.id == prepared.target and True or True
     assert rt.active.slug == "brand" and rt.active.department == "infra"
-    assert "GITHUB REPOS: acme/infra" in rt.system_prompt() and "acme/app" not in rt.system_prompt()
     assert "Infra department's standing instructions" in rt.system_prompt()
+    p = FakeParams(llm, "github_list_issues", {"repo": "acme/infra"})  # infra's rules now
+    await llm.functions["github_list_issues"](p)
+    assert p.result == {"repos": ["acme/infra"]}
     assert convs.files.dir("brand").parent.parent.name == "infra"
     # a department's own agent does not move: the model is told to hire there instead
     await rt.switch(convs.get("app"))

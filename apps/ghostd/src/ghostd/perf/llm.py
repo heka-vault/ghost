@@ -27,8 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ghost_core import AutonomyPolicy, Store, WriteGate
-from ghost_core.departments import load_department
-from ghost_core.mcp import Servers
+from ghost_core.apps import APPS_FILE, Apps, load_apps
 from ghost_voice import VoiceSettings
 from ghost_voice.config import LLM_MAX_TOKENS, openrouter_model
 from ghost_voice.config import OPENROUTER_ANTHROPIC_URL as OPENROUTER_ANTHROPIC
@@ -101,14 +100,13 @@ class Sample:
 
 async def ghost_prompt_and_tools() -> tuple[str, list[Any]]:
     """The system prompt and tool schemas a real session sends, from the mock GitHub
-    server the example policy declares."""
+    app the example connects."""
     tmp = Path(tempfile.mkdtemp(prefix="ghost-perf-llm-"))
     store = Store(tmp / "ghost.db")
     infra = GhostdSettings().infra_dir
-    example = load_department("ghost", infra / "example", is_ghost=True)
-    autonomy = example.policy(AutonomyPolicy.load(infra / "policy.example.toml"))
-    github = example.servers["github"]
-    servers = Servers({"github": replace(github, args=("--state", str(tmp / "mock-github.json")))})
+    autonomy = AutonomyPolicy.load(infra / "policy.example.toml")
+    github = load_apps(infra / "example" / APPS_FILE).apps["github"]
+    servers = Apps({"github": replace(github, args=("--state", str(tmp / "mock-github.json")))})
     await servers.connect()
     sources = servers.sources()
     gate = WriteGate(store, autonomy=autonomy)
