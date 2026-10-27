@@ -43,10 +43,11 @@ from ghost_core.conversations import GHOST, Conversations, Profile, conversation
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.department_tools import DepartmentTools, departments_source
 from ghost_core.departments import Departments, Fleet, all_sources
-from ghost_core.jev import JevClassifier, JevClient
+from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.mcp import Servers
 from ghost_core.skills import Skills
 from ghost_core.waiting import Items, WaitingList, waiting_source
+from ghost_core.watches import Watch, WatchRunner
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
@@ -63,6 +64,7 @@ from loguru import logger
 
 from ghostd.audio import Ducker, chime, restore_from_state
 from ghostd.config import GhostdSettings, runtime_dir
+from ghostd.deciders import model_decider
 from ghostd.dictation import is_dictating
 from ghostd.phone import PhoneListener, PhoneStore, Refusal
 from ghostd.wake import FileWakeDetector, SpokenWakeDetector, WakeDetector
@@ -87,6 +89,34 @@ PHONE_CONNECT_SECS = 30  # an accepted offer whose peer hasn't connected by then
 # While a phone session winds down after the phone has gone, Pipecat's output transport
 # reports its writes to the dead peer as errors. They are the expected tail of a hang-up,
 # not faults; the sinks drop them while this is set.
+def declared_watches(departments: Departments) -> list[Watch]:
+    """Every department's watches (ADR 0028), Ghost's first."""
+    return [w for d in departments.list() for w in d.watches.values()]
+
+
+def is_own_server(departments: Departments, w: Watch) -> bool:
+    """The watch reads one of its department's own servers (not Ghost's, not a use), so
+    those servers stay up while the daemon runs."""
+    d = departments.get(w.department)
+    return d is not None and not d.is_ghost and w.server in d.servers
+
+
+def describe_watches(departments: Departments) -> list[str]:
+    """One line per watch for the log and ``ghostd check``."""
+    out = []
+    for d in departments.list():
+        for w in d.watches.values():
+            steps = "check" + (", jev" if w.jev else "") + (", model" if w.model else "")
+            out.append(
+                f"watch {d.slug}/{w.name}: {w.server}.{w.read} every {w.every}s, "
+                f"{steps}, {w.response}"
+            )
+        for p in d.problems:
+            if " watch " in p:
+                out.append(f"watch problem in {d.slug}: {p}")
+    return out
+
+
 def ghost_problems(fleet: Fleet, departments: Departments) -> list[tuple[str, str, str | None]]:
     """Ghost's own trouble, for the waiting list (ADR 0029): a server of Ghost's that
     didn't start or stopped, a department folder that doesn't read."""
@@ -148,6 +178,7 @@ class Daemon:
         self.session: GhostSession | None = None
         self.gate: WriteGate | None = None
         self.waiting: WaitingList | None = None  # ADR 0029; set in run()
+        self.watch_runner: WatchRunner | None = None  # ADR 0028; set in run()
         self._first_via = "voice"  # how the wake-time utterance arrived
         self._start_in = GHOST  # the line a manual wake opens the session in (a Call)
         self._manual: FileWakeDetector | None = None
@@ -586,6 +617,15 @@ class Daemon:
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.waiting = waiting
+        # ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
+        watch_runner = WatchRunner(
+            waiting.items,
+            fleet.watch_read,
+            jev=watch_decider(jev) if jev else None,
+            model=None if self.voice.llm_problems() else model_decider(self.voice.llm_target()),
+            on_change=lambda: self.state.set_waiting(waiting.count()),
+        )
+        self.watch_runner = watch_runner
 
         def register_department(slug: str) -> None:
             """A department's own servers came up: their declared writes join the gate."""
@@ -640,6 +680,20 @@ class Daemon:
         waiting.refresh()
         self.state.set_waiting(waiting.count())
         refresher = asyncio.ensure_future(self._refresh_waiting(waiting))
+
+        def follow_watches() -> None:
+            """The folders were re-read: the declared watches again, and a department
+            whose own servers no watch reads any more may idle out."""
+            watched = declared_watches(departments)
+            watch_runner.set_watches(watched)
+            needed = {w.department for w in watched if is_own_server(departments, w)}
+            for slug in list(fleet.pinned - needed):
+                fleet.unpin(slug)
+
+        follow_watches()
+        departments.on_refresh.append(follow_watches)
+        for line in describe_watches(departments):
+            logger.info(line)
         logger.info(f"autonomy policy: {autonomy.source}")
         logger.info(
             f"llm: {self.voice.llm_target().describe()}, thinking {self.voice.llm_thinking}"
@@ -671,6 +725,7 @@ class Daemon:
             await self._passive(wake, models, tool_sources, gate, events, ducker)
         finally:
             refresher.cancel()
+            await watch_runner.close()
             wake.close()
             ducker.restore()
             if self.phone_listener:
@@ -783,6 +838,7 @@ class Daemon:
             fleet=self.fleet,
             department_tools=getattr(self, "department_tools", None),
             waiting=self.waiting,
+            watches=self.watch_runner,
             policy_path=self.cfg.policy_path,
             settings_path=self.cfg.settings_path,
             env_path=self.cfg.env_path,
@@ -1332,6 +1388,9 @@ def cli(argv: list[str] | None = None) -> None:
         for problem in departments.problems():
             print(f"  problem: {problem}")
             problems.append(problem)
+        for line in describe_watches(departments):
+            if not line.startswith("watch problem"):  # listed with the problems above
+                print(line)
         if departments.ghost.servers:
 
             async def probe() -> list[str]:

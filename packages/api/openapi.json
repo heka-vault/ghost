@@ -853,6 +853,14 @@
               }
             ],
             "title": "Voice"
+          },
+          "watches": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WatchInfo"
+            },
+            "title": "Watches",
+            "type": "array"
           }
         },
         "required": [
@@ -2681,6 +2689,107 @@
           }
         },
         "title": "WakeRequest",
+        "type": "object"
+      },
+      "WatchInfo": {
+        "description": "A watch the department declares (ADR 0028) and how its last look went.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "every_secs": {
+            "title": "Every Secs",
+            "type": "integer"
+          },
+          "last_ok": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ok"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "open": {
+            "default": 0,
+            "title": "Open",
+            "type": "integer"
+          },
+          "read": {
+            "title": "Read",
+            "type": "string"
+          },
+          "response": {
+            "enum": [
+              "tell",
+              "record"
+            ],
+            "title": "Response",
+            "type": "string"
+          },
+          "seen": {
+            "default": 0,
+            "title": "Seen",
+            "type": "integer"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "urgency": {
+            "enum": [
+              "digest",
+              "notify",
+              "call"
+            ],
+            "title": "Urgency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "server",
+          "read",
+          "every_secs",
+          "steps",
+          "response",
+          "urgency"
+        ],
+        "title": "WatchInfo",
         "type": "object"
       }
     }

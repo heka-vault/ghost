@@ -122,6 +122,69 @@ A request about an item another department owns (a repository in its allowlist) 
 tool result that names the owner, and Ghost offers to transfer; with
 `GHOST_DEPARTMENT_ROUTING=1` it transfers and hands the request over.
 
+## Watches
+
+A department can watch an outside system (ADR 0028): `watches` in `department.json`, one
+object per watch, written by the operator, never by the model. The daemon calls the read
+on an interval itself; nothing about noticing needs a model.
+
+```json
+"watches": {
+  "ci": {
+    "server": "github",
+    "read": "list_workflow_runs",
+    "args": {"owner": "heka-vault", "repo": "ghost", "status": "failure"},
+    "every": 60,
+    "items": "workflow_runs",
+    "fields": {
+      "id": {"at": "id", "type": "int"},
+      "branch": {"at": "head_branch", "pattern": "^[\\w./-]+$"},
+      "name": {"at": "name", "max": 120},
+      "url": {"at": "html_url", "pattern": "^https://github\\.com/.*"}
+    },
+    "when": [{"field": "branch", "op": "==", "value": "main"}],
+    "key": "ci:{id}",
+    "title": "CI failed on {branch}: {name}",
+    "link": "{url}",
+    "response": "tell"
+  }
+}
+```
+
+- **`server` and `read`**: a server the department starts or uses, and one of the reads
+  its declaration offers. The allowlist applies as for the model's reads; a write is never
+  a watch's read. The result is not trimmed for speech, but is capped.
+- **`fields`**: what to keep from each result (`items` is the path to the list), each a
+  dotted path with a `type` (`str`, `int`, `float`, `bool`) and optionally a `pattern`, a
+  `max` length or an `enum`. A result whose field breaks its constraint is dropped whole;
+  everything else the server sent is never kept.
+- **`when`**: checks over the fields (`==`, `!=`, `in`, `not_in`, `>`, `>=`, `<`, `<=`,
+  `exists`), all of which must hold; `for_minutes` waits until a result has held that long.
+- **`key`, `title`, `link`**: `{field}` templates, nothing else. The key makes one failure
+  one item however often it is seen; a key that is gone next time is resolved.
+- **`response`**: `tell` puts the item on the waiting list, `record` keeps it without
+  alerting. `urgency` (`digest`, `notify`, `call`) is for the route policy (ADR 0031).
+- **`jev` and `model`** (optional): where the check can't decide, a typed question:
+
+  ```json
+  "jev": {
+    "question": "Is this the known flaky end-to-end test, or a new failure?",
+    "fields": ["name"],
+    "choices": {"tell": "a new failure", "record": "the known flaky test"},
+    "default": "tell"
+  }
+  ```
+
+  `fields` is what may leave the machine for it; `choices` are two or more of `tell`,
+  `record` and `drop`; the `default` applies when Jev is off, late, unsure, or answers
+  anything else. `model` takes the same shape and is asked only when Jev isn't declared or
+  couldn't say. An answer is remembered while the item's fields stay the same.
+
+A department with a watch on its own servers keeps them up while the daemon runs; a server
+whose transport died is started again before the next look, backing off while it fails.
+`ghostd check` lists the watches, `GET /departments` shows each one's last look, error and
+open items, and a watch that doesn't read is a problem on the department and stays off.
+
 ## The journal
 
 Every write in a department, by any of its agents, is in the audit with the agent and the

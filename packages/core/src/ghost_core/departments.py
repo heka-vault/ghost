@@ -61,6 +61,7 @@ from ghost_core.mcp import (
     source_of,
 )
 from ghost_core.policy import Autonomy, AutonomyPolicy
+from ghost_core.watches import Watch, parse_watches
 
 GHOST = "ghost"
 DEPARTMENTS_DIR = "departments"
@@ -89,6 +90,7 @@ _DEPARTMENT_KEYS = {
     "root",
     "root_servers",
     "servers",
+    "watches",  # ADR 0028
 }
 # A literal that is probably a token: a known prefix, or a bearer value with no reference.
 _SECRET_SHAPES = re.compile(r"^(ghp_|github_pat_|gho_|sk-|xox[abp]-|AKIA|glpat-|Bearer\s+\S{16,})")
@@ -286,6 +288,7 @@ class Department:
     servers: dict[str, ServerSpec] = field(default_factory=dict)  # its own, declared
     uses: tuple[str, ...] = ()  # Ghost's servers it reaches through its own declaration
     declarations: dict[str, Declaration] = field(default_factory=dict)
+    watches: dict[str, Watch] = field(default_factory=dict)  # ADR 0028
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -535,6 +538,15 @@ def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Departm
     for name in declarations:
         if name not in servers and name not in uses:
             problems.append(f"{file}: {name} is declared but {MCP_FILE} neither starts nor uses it")
+    watches, watch_problems = parse_watches(data.get("watches"), slug, str(file))
+    problems.extend(watch_problems)
+    for wname, w in list(watches.items()):
+        if w.server not in servers and w.server not in uses:
+            problems.append(
+                f"{file}: watch {wname} reads {w.server}, which this department neither "
+                "starts nor uses; the watch is off"
+            )
+            del watches[wname]
     return Department(
         slug=slug,
         path=path,
@@ -547,6 +559,7 @@ def load_department(slug: str, path: Path, *, is_ghost: bool = False) -> Departm
         servers=servers,
         uses=uses,
         declarations=declarations,
+        watches=watches,
         problems=problems,
     )
 
@@ -754,6 +767,8 @@ class Fleet:
         self._starting: dict[str, asyncio.Future[Servers | None]] = {}
         self.started: dict[str, float] = {}  # slug -> how long the last start took
         self._failed: dict[str, dict[str, str]] = {}  # slug -> server -> why, last start
+        # ADR 0028: a department with a watch keeps its servers up while the daemon runs.
+        self.pinned: set[str] = set()
 
     def failures(self, slug: str) -> list[str]:
         """The department's servers that did not connect at the last start, for the
@@ -817,7 +832,7 @@ class Fleet:
     def leave(self, slug: str) -> None:
         """The session left the department: its servers stay up for ``idle_secs``, then
         close, so a quick return costs nothing and an idle department costs nothing."""
-        if slug == GHOST or slug not in self.own:
+        if slug == GHOST or slug not in self.own or slug in self.pinned:
             return
         self._cancel_timer(slug)
         try:
@@ -834,6 +849,51 @@ class Fleet:
 
         timer_box.append(loop.call_later(self.idle_secs, fire))
         self._timers[slug] = timer_box[0]
+
+    async def pin(self, slug: str) -> None:
+        """Keep the department's own servers up (a watch reads them). Started now if they
+        are not up; ``unpin`` lets them idle out again."""
+        if slug == GHOST:
+            return
+        self.pinned.add(slug)
+        await self.enter(slug)
+
+    def unpin(self, slug: str) -> None:
+        if slug in self.pinned:
+            self.pinned.discard(slug)
+            self.leave(slug)
+
+    def watch_server(self, d: Department, name: str) -> Any:
+        """The server a watch in ``d`` reads, seen through ``d``'s declaration (its reads
+        and its allowlist): Ghost's for Ghost, the department's own, or a use of Ghost's.
+        None when it is not up."""
+        if d.is_ghost:
+            return self.ghost.servers.get(name)
+        if name in d.uses:
+            server = self.ghost.servers.get(name)
+            return server.view(d.spec_for_use(server.spec)) if server is not None else None
+        own = self.own.get(d.slug)
+        return own.servers.get(name) if own is not None else None
+
+    async def watch_read(self, watch: Watch) -> Any:
+        """A watch's read (ADR 0028): the daemon calls it, no model. It must be a read the
+        department reaches, its allowlist applies, and the result is not trimmed. A server
+        whose transport died is brought back first."""
+        d = self.departments.get(watch.department)
+        if d is None:
+            raise ValueError(f"no department {watch.department}")
+        servers = self.ghost if d.is_ghost or watch.server in d.uses else self.own.get(d.slug)
+        if servers is None:
+            await self.pin(d.slug)
+            servers = self.own.get(d.slug)
+            if servers is None:
+                raise ValueError(f"{d.title}'s servers are not up")
+        if not servers.is_up(watch.server):
+            await servers.revive(watch.server)
+        server = self.watch_server(d, watch.server)
+        if server is None:
+            raise ValueError(f"{watch.server} is not connected")
+        return await server.watch_read(watch.read, dict(watch.args))
 
     async def stop(self, slug: str) -> None:
         self._cancel_timer(slug)

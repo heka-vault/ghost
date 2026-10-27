@@ -307,6 +307,23 @@ class SkillAdd(BaseModel):
     replace: bool = False
 
 
+class WatchInfo(BaseModel):
+    """A watch the department declares (ADR 0028) and how its last look went."""
+
+    name: str
+    server: str
+    read: str
+    every_secs: int
+    steps: list[str]  # "check", then "jev" and "model" where declared
+    response: Literal["tell", "record"]
+    urgency: Literal["digest", "notify", "call"]
+    last_run: datetime | None = None
+    last_ok: datetime | None = None
+    error: str | None = None
+    seen: int = 0  # results the last look kept
+    open: int = 0  # items it holds open now
+
+
 class DepartmentView(BaseModel):
     """A department (ADR 0024): a folder under ~/.config/ghost with its servers, rules,
     skills and agents. Ghost is one too."""
@@ -328,6 +345,7 @@ class DepartmentView(BaseModel):
     docs: list[str] = []
     agents: list[str] = []  # slugs, the department's own first
     problems: list[str] = []  # what is wrong in its files, for the operator
+    watches: list[WatchInfo] = []  # ADR 0028
 
 
 class DepartmentCreate(BaseModel):

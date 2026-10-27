@@ -72,6 +72,7 @@ from ghost_api.models import (
     WaitingItemView,
     WaitingView,
     WakeRequest,
+    WatchInfo,
 )
 from ghost_api.state import DaemonState, now
 
@@ -125,8 +126,10 @@ class Deps:
         fleet: Any = None,  # ghost_core.departments.Fleet
         department_tools: Any = None,  # ghost_core.department_tools.DepartmentTools
         waiting: Any = None,  # ghost_core.waiting.WaitingList
+        watches: Any = None,  # ghost_core.watches.WatchRunner
     ) -> None:
         self.waiting = waiting
+        self.watches = watches
         self.conversations = conversations
         self.mcp = mcp
         self.skills = skills
@@ -505,6 +508,24 @@ def create_app(deps: Deps) -> FastAPI:
                 *d.problems,
                 *(deps.fleet.failures(d.slug) if deps.fleet is not None else []),
             ],
+            watches=[watch_info(w) for w in getattr(d, "watches", {}).values()],
+        )
+
+    def watch_info(w) -> WatchInfo:
+        st = deps.watches.state.get(w.source) if deps.watches is not None else None
+        return WatchInfo(
+            name=w.name,
+            server=w.server,
+            read=w.read,
+            every_secs=w.every,
+            steps=["check", *(["jev"] if w.jev else []), *(["model"] if w.model else [])],
+            response=w.response,
+            urgency=w.urgency,
+            last_run=st.last_run if st else None,
+            last_ok=st.last_ok if st else None,
+            error=st.error if st else None,
+            seen=st.seen if st else 0,
+            open=st.open if st else 0,
         )
 
     @app.get("/departments", response_model=list[DepartmentView], tags=["departments"])

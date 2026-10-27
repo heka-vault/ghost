@@ -1134,6 +1134,11 @@ export interface components {
             uses: string[];
             /** Voice */
             voice?: string | null;
+            /**
+             * Watches
+             * @default []
+             */
+            watches: components["schemas"]["WatchInfo"][];
         };
         /** DeviceInfo */
         DeviceInfo: {
@@ -1868,6 +1873,48 @@ export interface components {
              */
             text?: string | null;
         };
+        /**
+         * WatchInfo
+         * @description A watch the department declares (ADR 0028) and how its last look went.
+         */
+        WatchInfo: {
+            /** Error */
+            error?: string | null;
+            /** Every Secs */
+            every_secs: number;
+            /** Last Ok */
+            last_ok?: string | null;
+            /** Last Run */
+            last_run?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Open
+             * @default 0
+             */
+            open: number;
+            /** Read */
+            read: string;
+            /**
+             * Response
+             * @enum {string}
+             */
+            response: "tell" | "record";
+            /**
+             * Seen
+             * @default 0
+             */
+            seen: number;
+            /** Server */
+            server: string;
+            /** Steps */
+            steps: string[];
+            /**
+             * Urgency
+             * @enum {string}
+             */
+            urgency: "digest" | "notify" | "call";
+        };
     };
     responses: never;
     parameters: never;
@@ -1935,6 +1982,7 @@ export type SchemaWaitingEvent = components['schemas']['WaitingEvent'];
 export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
 export type SchemaWaitingView = components['schemas']['WaitingView'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
+export type SchemaWatchInfo = components['schemas']['WatchInfo'];
 export type $defs = Record<string, never>;
 export interface operations {
     audit_audit_get: {

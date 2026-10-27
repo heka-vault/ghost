@@ -73,6 +73,7 @@ MAX_TEXT_CHARS = 4000  # a string argument of a write, unless the declaration bo
 MAX_LIST_ITEMS = 20  # a list argument of a write, unless the declaration bounds it
 MAX_RESULT_TEXT = 1200  # a string in a result, so one issue body never fills the context
 MAX_RESULT_ITEMS = 30
+MAX_WATCH_BYTES = 2_000_000  # a watch's read is not trimmed for speech, but it is capped
 BRIEF_MAX = 240
 RISKS = ("low", "medium", "high")
 # $NAME, ${NAME} or ${env:NAME} (the shape other clients' mcp.json files use, ADR 0024)
@@ -873,6 +874,27 @@ class Server:
         except ToolError as e:
             return {"error": str(e)}
 
+    async def watch_read(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        """A watch's read (ADR 0028): one the declaration offers, the allowlist applied as
+        for the model's own reads, untrimmed but capped. Raises ``ToolError`` or
+        ``ValueError``; never writes."""
+        tool = next((t for t in self.offered() if t.name == tool_name), None)
+        if tool is None:
+            raise ValueError(f"{tool_name} is not a read {self.spec.name} offers here")
+        args = {k: v for k, v in args.items() if k != SCOPE_ARG}
+        sc = self.spec.scope
+        if sc is not None and set(sc.arguments) & set(tool.properties):
+            self._fill_scope(args, None)
+            item = sc.item_of(args)
+            if item:
+                self._check_item(item, None, write=False)
+            elif sc.items:
+                raise ValueError(f"name the {sc.kind} to watch: {' and '.join(sc.arguments)}")
+        data = await self.call(tool.name, args, trim=False)
+        if len(json.dumps(data, default=str)) > MAX_WATCH_BYTES:
+            raise ValueError(f"{tool_name} returned more than a watch reads")
+        return data
+
     def _fill_scope(self, args: dict[str, Any], scope: ActiveScope | None) -> None:
         """The scope arguments from the allowlist when it has one item: "issue 17" is
         enough then."""
@@ -1112,6 +1134,36 @@ class Servers:
     @property
     def connected(self) -> bool:
         return bool(self.servers)
+
+    def is_up(self, name: str) -> bool:
+        server = self.servers.get(name)
+        return server is not None and server.connected
+
+    async def revive(self, name: str) -> bool:
+        """Start a server again whose transport died or that failed at start (a watch
+        reads it, ADR 0028). The caller backs off; this tries once."""
+        spec = self.specs.get(name)
+        if spec is None:
+            return False
+        old = self.servers.pop(name, None)
+        if old is not None:
+            with contextlib.suppress(Exception):
+                await old.close()
+        server = Server(spec, self._environ)
+        try:
+            await server.connect()
+        except KeyError as e:
+            self.failed[name] = f"secret {e.args[0]} is not set"
+            await server.close()
+            return False
+        except Exception as e:  # noqa: BLE001
+            self.failed[name] = _reason(e)
+            await server.close()
+            return False
+        self.servers[name] = server
+        self.failed.pop(name, None)
+        logger.info(f"mcp {name}: connected again")
+        return True
 
     async def close(self) -> None:
         for server in self.servers.values():
