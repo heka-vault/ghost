@@ -89,7 +89,7 @@ pub struct Retired {
 
 /// An issue-like target for the gate's tests, independent of any source.
 #[cfg(any(test, feature = "fakes"))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FakeIssue {
     pub owner: String,
     pub repo: String,

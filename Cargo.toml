@@ -30,6 +30,11 @@ zeroize = { version = "1", features = ["derive"] }
 subtle = "2"
 regex = "1"
 sha2 = "0.10"
+toml = { version = "0.8", features = ["preserve_order"] }
+async-trait = "0.1"
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+wiremock = "0.6"
 unicode-normalization = "0.1"
 tempfile = "3"
 
