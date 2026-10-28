@@ -8,6 +8,7 @@
 
 pub mod codec;
 pub mod confirmation;
+pub mod connection;
 pub mod conversations;
 pub mod events;
 #[cfg(any(test, feature = "fakes"))]
@@ -16,6 +17,7 @@ pub mod folder;
 pub mod gate;
 pub mod jev;
 pub mod levels;
+pub mod mock_github;
 pub mod models;
 pub mod outputs;
 pub mod password_import;
@@ -26,6 +28,7 @@ pub mod redact;
 pub mod request;
 pub mod routes;
 pub mod rules;
+pub mod scripts_server;
 pub mod skill_catalog;
 pub mod skills;
 pub mod source;

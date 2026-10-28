@@ -33,6 +33,7 @@ allow = [
   "CDLA-Permissive-2.0", # webpki-roots, the CA bundle behind reqwest's rustls-tls
   # webpki-roots: Mozilla's CA bundle, which reqwest's rustls-tls ships (the skills catalog).
   "CDLA-Permissive-2.0",
+  "CDLA-Permissive-2.0", # webpki-roots: Mozilla's CA bundle, under reqwest's rustls-tls
 ]
 confidence-threshold = 0.8
 
