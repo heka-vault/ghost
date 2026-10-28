@@ -15,6 +15,7 @@ pub mod events;
 pub mod fakes;
 pub mod folder;
 pub mod gate;
+pub mod hooks;
 pub mod jev;
 pub mod levels;
 pub mod mock_github;
@@ -36,6 +37,7 @@ pub mod store;
 pub mod targets;
 pub mod time;
 pub mod waiting;
+pub mod watches;
 
 pub use confirmation::{
     ConfirmationClassifier, ConfirmationContext, RegexClassifier, Verdict, classify_confirmation,
