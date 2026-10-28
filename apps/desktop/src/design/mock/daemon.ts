@@ -574,8 +574,9 @@ export class MockDaemon {
       return hit;
     }
     if (inRepo.length === 1) return inRepo[0];
-    const names = inRepo.map((c) => c.listing.skill);
-    throw new HttpError(409, `${source} has ${names.length} skills; name one, like ${source}/${names[0]}: ${names.join(", ")}`);
+    // As the daemon says it: each skill by its folder's path, never by a name two can share.
+    const folders = inRepo.map((c) => c.skillPath.replace(/\/?SKILL\.md$/, "") || "the top folder");
+    throw new HttpError(409, `${source} has ${folders.length} skills; name one, like ${source}/${inRepo[0].listing.skill}. Its skills' folders: ${folders.join(", ")}`);
   }
   /** Stage a skill: what the daemon hands back after fetching it, pinned to a commit. */
   private stageSkill(c: CatalogSkill, commit: string, updateOf: string | null): SkillPreview {
