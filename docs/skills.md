@@ -54,10 +54,16 @@ list. Everything here is the operator's doing, from the desktop (`ghost_core.ski
   gives itself), and every file downloaded at that commit and checked against the tree's
   blob hash. The folder is staged under `~/.cache/ghost/skill-previews/` (cleared at start;
   a look lasts 30 minutes) and the operator reads the whole SKILL.md and the list of
-  scripts before anything is installed. All of it is the source's text.
+  scripts before anything is installed. All of it is the source's text. What is installed
+  is that staged folder, so nothing goes in that the operator wasn't shown; the only change
+  is the `name` in its front matter, set to the folder it is installed as.
+- **Which skill.** A repository with more than one skill asks which, naming each by its
+  folder's path (`skills/here-now`, `.claude/skills/here-now`). When two skills share a
+  name, Ghost never picks one: it asks for the folder's `github.com` address.
 - **Limits.** A link or a submodule in the folder refuses the skill, as does a path that
-  would leave it, more than 200 files or more than 2 MB (checked from the tree before
-  anything is downloaded). Files are written 0644: nothing is made runnable, and nothing is
+  would leave it, more than 200 files, more than 2 MB, or a SKILL.md over 60 KB, longer
+  than the look shows whole (checked from the tree before anything is downloaded, and the
+  SKILL.md again once it is). A long SKILL.md is refused, never cut. Files are written 0644: nothing is made runnable, and nothing is
   run. A script still runs only through `ghost-scripts`, as a change through the gate.
 - **Install** is `skills.install`, a sibling of `skills.add` that the gate registers and the
   model is never offered: it copies the staged folder into `~/.config/ghost/skills/<name>/`
@@ -72,12 +78,17 @@ list. Everything here is the operator's doing, from the desktop (`ghost_core.ski
   Ghost once whether each source has moved on: the branch's commit now, and if that changed,
   whether the skill's folder hash did (a change elsewhere in the repository is not an
   update). Ghost asks GitHub then, never in the background and never on a turn. **Update…**
-  fetches the new version for the same look, and installs it over the old one.
+  fetches the new version for the same look, and installs it over the old one: edits the
+  operator made to Ghost's copy are replaced, and the look says so. The new copy is made
+  beside the old and swapped in by renaming, so an update that fails partway leaves the
+  old skill and its `.skill-lock.json` entry as they were.
 - **The network.** Ghost talks to skills.sh, `api.github.com` (two requests a look, one or
   two a skill per update check) and `raw.githubusercontent.com`, without signing in, so
   GitHub's limit of 60 API requests an hour applies; when it is used up, the page says until
-  when. Nothing from these sources reaches the model: not the search, not the text, not
-  the update check.
+  when. The catalog's search results, the look before installing and the update check are
+  the operator's only: no session queries the catalog or GitHub, and none of it reaches the
+  model. An installed skill does: that is what it is for. Like any skill, the model reads
+  its SKILL.md and files on demand with `read_skill`, as untrusted text (below).
 
 Control API: `GET /skill-catalog?search=`, `POST /skill-catalog/preview`,
 `POST /skill-catalog/install`, `GET /skill-catalog/updates` and
