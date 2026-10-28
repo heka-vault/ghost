@@ -7,6 +7,7 @@
 //! observed in the pipeline's own transcript (`confirm`) -> the steps, the audit log.
 
 pub mod apps;
+pub mod catalog;
 pub mod codec;
 pub mod confirmation;
 pub mod connection;
@@ -27,6 +28,7 @@ pub mod password_import;
 pub mod passwords;
 pub mod permissions;
 pub mod policy;
+pub mod provenance;
 pub mod redact;
 pub mod request;
 pub mod routes;
