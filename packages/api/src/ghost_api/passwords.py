@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -102,14 +102,32 @@ def referenced(deps: Any) -> set[str]:
     return set(used_by(deps)) | {"GITHUB_TOKEN"}
 
 
-def password_check(deps: Any) -> Callable[[str], bool]:
+def password_check(
+    deps: Any, pending: Mapping[str, str | None] | None = None
+) -> Callable[[str], bool]:
     """Whether a settings.env key is a password, so ``/settings`` neither shows nor writes
     it (ADR 0036): one Ghost, an app or a webhook names, any model provider's, one shaped
-    like a password, or one the vault or a plaintext file not imported yet holds."""
+    like a password, or one the vault or a plaintext file not imported yet holds. Names
+    compare without case.
+
+    ``pending``: an update about to be written. The settings it would leave behind count
+    too, so one update can't name a password (``GHOST_LLM_PASSWORD``, ``GHOST_APP_SECRETS``)
+    and write its value in plain text at once."""
+    settings = read_env(deps.settings_path)
+    for k, v in (pending or {}).items():
+        if v is None:
+            settings.pop(k, None)
+        else:
+            settings[k] = v
+    listed = ",".join(settings.get(k) or "" for k in ("GHOST_APP_SECRETS", "GHOST_MCP_SECRETS"))
     named = referenced(deps) | PASSWORD_NAMES | password_names()
+    named |= {n.strip() for n in listed.split(",")}  # any case: the check folds it
+    named |= {model_password(settings), (settings.get("GHOST_LLM_PASSWORD") or "").strip()}
+    named.discard("")
     vault: Passwords | None = deps.passwords
     held = set(vault.names()) if vault is not None and vault.is_open else set()
-    return lambda k: is_password_name(k, named) or k in held
+    named |= held
+    return lambda k: is_password_name(k, named)
 
 
 def passwords_view(deps: Any) -> PasswordsView:
@@ -169,6 +187,19 @@ async def revive_apps_using(deps: Any, names: Iterable[str]) -> None:
                 logger.warning(f"passwords: {spec.name} didn't connect ({type(e).__name__})")
 
 
+def check_passwords(values: dict[str, str | None]) -> dict[str, str]:
+    """The values to save, stripped, each checked as the vault will: a 422 that never
+    echoes a value, before anything else changes."""
+    put = {k: v.strip() for k, v in values.items() if v is not None}
+    try:
+        for k, v in put.items():
+            check_name(k)
+            check_value(v)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return put
+
+
 def save_passwords(deps: Any, values: dict[str, str | None]) -> bool:
     """Into the vault (None forgets one). True when one of them is Ghost's own, which it
     picks up at its next start; the model connection's own keys are used from the next
@@ -176,12 +207,9 @@ def save_passwords(deps: Any, values: dict[str, str | None]) -> bool:
     vault: Passwords | None = deps.passwords
     if vault is None:
         raise HTTPException(503, "the vault is not available")
-    put = {k: v.strip() for k, v in values.items() if v is not None}
+    put = check_passwords(values)
     gone = [k for k, v in values.items() if v is None]
     try:
-        for k, v in put.items():
-            check_name(k)
-            check_value(v)
         if put:
             vault.set_many(put)
         if gone:

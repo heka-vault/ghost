@@ -167,6 +167,29 @@ def test_settings_never_shows_or_writes_a_password(world):
     assert "proxy-access" not in r.text
 
 
+def test_one_update_cant_name_a_password_and_write_it(world):
+    """The check is built from the settings the update leaves behind: naming a password
+    and writing its value in the same PUT is refused, and names compare without case."""
+    client, *_, deps = world
+    deps.settings_path.write_text("GHOST_REPOS=acme/app\n")
+    value = "sk-the-value-0123456789"
+    for values in (
+        {"GHOST_LLM_PASSWORD": "NEW_ONE", "NEW_ONE": value},
+        {"GHOST_APP_SECRETS": "PLAIN_NAME", "PLAIN_NAME": value},
+        {"openai_api_key": value},
+        {"smtp_pass": value},
+        {"DB_PASSWD": value},
+        {"GOOGLE_CREDENTIALS": value},
+    ):
+        r = client.put("/settings", json={"values": values})
+        assert r.status_code == 422, values
+        assert value not in r.text
+    assert read_env(deps.settings_path) == {"GHOST_REPOS": "acme/app"}
+    # Naming one alone is a setting like any other.
+    r = client.put("/settings", json={"values": {"GHOST_LLM_PASSWORD": "NEW_ONE"}})
+    assert r.status_code == 200
+
+
 def test_no_validation_error_echoes_what_was_sent(world):
     """FastAPI's 422 carries each error's input; Ghost's says where and why only."""
     client, *_ = world

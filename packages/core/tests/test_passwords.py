@@ -258,6 +258,13 @@ def test_child_env_leaves_every_password_out(tmp_path):
         ("GHOST_APP_MOBBIN_KEY", True),
         ("MCP_PROXY_KEY", True),
         ("SOME_PASSWORD", True),
+        ("SMTP_PASS", True),
+        ("DB_PASSWD", True),
+        ("GOOGLE_CREDENTIALS", True),
+        ("openai_api_key", True),
+        ("Github_Token", True),
+        ("ghost_app_x_key", True),
+        ("ghost_llm_model", False),
         ("ANTHROPIC_BASE_URL", False),
         ("GHOST_LLM_MODEL", False),
         ("GHOST_JEV", False),
@@ -267,3 +274,4 @@ def test_child_env_leaves_every_password_out(tmp_path):
 def test_which_names_are_passwords(name, expected):
     assert is_password_name(name) is expected
     assert is_password_name("CUSTOM", ["CUSTOM"])
+    assert is_password_name("custom", ["CUSTOM"])

@@ -388,6 +388,21 @@ def test_a_key_waits_for_a_locked_keyring_and_nothing_changes(world, tmp_path, m
     assert started == []
 
 
+def test_a_refused_key_leaves_nothing_half_connected(world, tmp_path, monkeypatch):
+    """The vault's checks run before apps.json changes: a key it won't take refuses the
+    whole connection, and never echoes the value."""
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    for bad in ("k" * 16_001, "two\nlines-0123456789"):
+        r = client.post(
+            "/apps",
+            json={"url": "https://mcp.example.com/mcp", "name": "example", "values": {"key": bad}},
+        )
+        assert r.status_code == 422 and bad not in r.text
+        assert "example" not in load_apps(deps.policy_path.parent / "apps.json").apps
+        assert deps.passwords.names() == []
+    assert started == []
+
+
 POSTHOG_SIX = Path(__file__).parents[2] / "core" / "tests" / "fixtures" / "catalog_posthog.json"
 
 

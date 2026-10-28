@@ -50,7 +50,7 @@ from ghost_api.models import (
     PermissionsUpdate,
     PermissionsView,
 )
-from ghost_api.passwords import save_passwords
+from ghost_api.passwords import check_passwords, save_passwords
 
 CONNECT_WAIT_SECS = 10.0  # how long POST /apps waits for a connection or a sign-in address
 FIRST_COPY_WAIT_SECS = 15.0  # the catalog's first copy, so the screen has something to show
@@ -389,6 +389,7 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
                 )
         if secrets and (deps.passwords is None or not deps.passwords.is_open):
             raise HTTPException(423, "Your keyring is locked. Unlock it, then connect again.")
+        check_passwords(dict(secrets))  # a refused password changes nothing either
         save(specs)  # first: a file that won't take the entry changes nothing
         keep_secrets(secrets)
         url = await start(specs)

@@ -5,9 +5,10 @@ Before the vault, Ghost's passwords were plaintext: ``~/.config/ghost/env``, whi
 the desktop kept for apps. The import takes the values from heka-vault (when its config,
 ``~/.config/heka-vault/ghost.env``, is on this computer), then from those two files, puts
 them in the vault, checks the vault reads each value back, and removes the plaintext files,
-unless a value couldn't be imported (too long, or not one line): then the files stay. The
-non-secret settings in ``env`` (``ANTHROPIC_BASE_URL``, and anything the renderer copied)
-move to ``settings.env``, which is plain text. A password already in the vault is kept.
+unless a value couldn't be imported (too long, or not one line) or a file holds another
+value than the vault for a name already in it: then the files stay. The non-secret settings
+in ``env`` (``ANTHROPIC_BASE_URL``, and anything the renderer copied) move to
+``settings.env``, which is plain text. A password already in the vault is kept.
 
 Nothing here prints, logs or returns a value: the report names the passwords.
 """
@@ -22,8 +23,10 @@ from loguru import logger
 
 from ghost_core.envfile import read_env, update_env
 from ghost_core.passwords import (
+    MAX_VALUE_CHARS,
     Passwords,
     VaultClosed,
+    check_name,
     check_value,
     is_password_name,
 )
@@ -60,6 +63,8 @@ class ImportReport:
     settings: list[str] = field(default_factory=list)  # moved to settings.env
     removed: list[Path] = field(default_factory=list)  # plaintext files deleted
     skipped: list[str] = field(default_factory=list)  # not imported; their files were kept
+    # kept, but a plaintext file holds another value: the files were kept
+    differ: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # what else to know; never a value
 
 
@@ -136,25 +141,35 @@ def import_passwords(
         _from_heka(heka_env, named, fetch, found, moved, report)
 
     env_path = config_dir / LEGACY_ENV
+    in_files: dict[str, set[str]] = {}  # name -> every value a plaintext file holds for it
     for k, v in read_env(env_path).items():
         if is_password_name(k, named):
             found[k] = v
+            in_files.setdefault(k, set()).add(v.strip())
         elif k not in settings:
             moved[k] = v
-    found.update(read_env(config_dir / LEGACY_APPS_ENV))
+    for k, v in read_env(config_dir / LEGACY_APPS_ENV).items():
+        found[k] = v
+        in_files.setdefault(k, set()).add(v.strip())
     in_settings = [k for k in settings if is_password_name(k, named)]
     for k in in_settings:
         found[k] = settings[k]
+        in_files.setdefault(k, set()).add(settings[k].strip())
 
     new: dict[str, str] = {}
     for name in sorted(found):
         value = found[name].strip()
         if name in vault:  # the vault's copy wins, even over one that can't be imported
             report.kept.append(name)
+            # A file holding another value may hold the only copy of it: compared, never
+            # shown.
+            if any(v and not vault.holds(name, v) for v in in_files.get(name, ())):
+                report.differ.append(name)
             continue
         if not value:
             continue  # nothing to lose
         try:
+            check_name(name)
             check_value(value)
         except ValueError as e:
             report.skipped.append(name)
@@ -184,30 +199,47 @@ def import_passwords(
     moved.pop("CLIPROXY_BASE_URL", None)
     changes: dict[str, str | None] = {k: v for k, v in moved.items() if k not in settings}
     # A password written into settings.env leaves it, once it is in the vault.
-    changes.update(dict.fromkeys(k for k in in_settings if k not in report.skipped))
+    stay = set(report.skipped) | set(report.differ)
+    changes.update(dict.fromkeys(k for k in in_settings if k not in stay))
     if changes:
         update_env(settings_path, changes, mode=0o600)
     report.settings = sorted(k for k, v in changes.items() if v is not None)
 
     plain = [p for p in (env_path, config_dir / LEGACY_APPS_ENV) if p.exists()]
+    files = " and ".join(_tilde(p) for p in plain) or _tilde(settings_path)
+    were = "were" if len(plain) > 1 else "was"
     if report.skipped:
-        # A skipped value may be the only copy: no file that may hold it is deleted.
-        if plain:
-            files = " and ".join(_tilde(p) for p in plain)
-            report.notes.append(
-                f"{files} {'were' if len(plain) > 1 else 'was'} kept, since"
-                f" {', '.join(report.skipped)} {'are' if len(report.skipped) > 1 else 'is'}"
-                " still only there. Add it on Settings › Passwords, then import again"
-                " to remove the plain files."
-            )
+        # A skipped value may be the only copy: no file that may hold it is deleted. The
+        # vault takes no more than Settings › Passwords does, so that is no way in either.
+        many = len(report.skipped) > 1
+        report.notes.append(
+            f"{files} {were} kept, since {', '.join(report.skipped)}"
+            f" {'are' if many else 'is'} still only there, and Ghost can't keep"
+            f" {'them' if many else 'it'}: a password is one line of at most"
+            f" {MAX_VALUE_CHARS:,} characters, named in capital letters, digits and _."
+            " If what uses it takes a shorter form, save that on Settings › Passwords;"
+            " otherwise copy it somewhere safe. Then take it out of the file and import"
+            " again to remove the plain files."
+        )
+    if report.differ:
+        # The vault's copy is kept and used; the file's may be the only copy of another.
+        many = len(report.differ) > 1
+        report.notes.append(
+            f"{files} {were} kept, since {', '.join(report.differ)}"
+            f" {'have' if many else 'has'} another value there than in Ghost's passwords."
+            " Ghost uses the one in its passwords. If the file's is the right one, save it"
+            " on Settings › Passwords. Then take it out of the file and import again to"
+            " remove the plain files."
+        )
+    if report.skipped or report.differ:
         plain = []
     for path in plain:
         path.unlink()
         report.removed.append(path)
     if heka_env is not None and heka_env.is_file():
         report.notes.append(
-            f"{_tilde(heka_env)} still holds heka-vault's read token. Ghost doesn't read it"
-            " any more; delete it when nothing else needs it."
+            f"{_tilde(heka_env)} still holds the password Ghost read heka-vault with. Ghost"
+            " doesn't read it any more; delete it when nothing else needs it."
         )
     if not (report.imported or report.kept or report.removed or report.settings):
         report.notes.append("There was nothing to import.")

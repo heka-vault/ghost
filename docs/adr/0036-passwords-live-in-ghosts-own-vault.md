@@ -70,8 +70,9 @@ and `ghostd passwords import` (`make passwords-import`) read heka-vault once, wh
 (`~/.config/heka-vault/ghost.env`) is on this computer, then `env` and `apps.env`; put every
 password in the vault (one already there is kept); check that the vault reads each value back;
 move the non-secret settings `env` held (`ANTHROPIC_BASE_URL`) into `settings.env`; and delete
-`env` and `apps.env`, unless a value couldn't be imported (too long, or not one line): then
-both stay, and the report says which to add by hand before importing again. heka-vault's own
+`env` and `apps.env`, unless a value couldn't be imported (too long, or not one line) or a
+file holds another value than the vault's copy of a name: then both stay, and the report names
+which (never a value) to take out of the files before importing again. heka-vault's own
 config is the operator's to delete. After the import
 the vault is the only source; until it, the daemon still reads the two files, redacts their
 values and keeps them from child processes, and the waiting list asks for the import.

@@ -802,7 +802,7 @@ def create_app(deps: Deps) -> FastAPI:
             if update.values:
                 # settings.env is plain text: a password never goes there (ADR 0036). One
                 # written there by hand may be taken out (None).
-                is_password = password_check(deps)
+                is_password = password_check(deps, update.values)
                 bad = sorted(
                     k for k, v in update.values.items() if v is not None and is_password(k)
                 )

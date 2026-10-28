@@ -95,16 +95,42 @@ def test_heka_vault_is_read_once_and_the_files_win(tmp_path):
     # The env file's base URL is explicit, so CLIPROXY's isn't used.
     assert read_env(config / "settings.env")["ANTHROPIC_BASE_URL"] == "http://proxy.lan:8317"
     assert any("heka-vault didn't answer for 1" in n for n in report.notes)
-    assert any("still holds heka-vault's read token" in n for n in report.notes)
+    assert any("still holds the password Ghost read heka-vault with" in n for n in report.notes)
     assert heka.exists()  # heka-vault's own file is the operator's to delete
 
 
-def test_a_password_already_in_the_vault_is_kept(tmp_path):
+def test_a_password_already_in_the_vault_with_the_same_value_lets_the_files_go(tmp_path):
+    config, vault = world(tmp_path)
+    vault.set("ANTHROPIC_AUTH_TOKEN", "sk-ant-from-env-file-123")
+    report = import_passwords(vault, config)
+    assert report.kept == ["ANTHROPIC_AUTH_TOKEN"] and report.differ == []
+    assert not (config / "env").exists() and not (config / "apps.env").exists()
+
+
+def test_a_password_already_in_the_vault_with_another_value_keeps_the_files(tmp_path):
+    """The vault's copy wins, but the file's other value may be the only copy of it: the
+    files stay, and the note names the password, never either value."""
     config, vault = world(tmp_path)
     vault.set("ANTHROPIC_AUTH_TOKEN", "sk-ant-set-in-ghost-999")
+    (config / "settings.env").write_text("GHOST_JEV=auto\nANTHROPIC_AUTH_TOKEN=sk-ant-in-set\n")
     report = import_passwords(vault, config)
     assert report.kept == ["ANTHROPIC_AUTH_TOKEN"]
+    assert report.differ == ["ANTHROPIC_AUTH_TOKEN"]
     assert vault.value("ANTHROPIC_AUTH_TOKEN") == "sk-ant-set-in-ghost-999"
+    assert report.removed == []
+    assert (config / "env").exists() and (config / "apps.env").exists()
+    assert read_env(config / "settings.env")["ANTHROPIC_AUTH_TOKEN"] == "sk-ant-in-set"
+    assert "MCP_PROXY_KEY" in report.imported  # the rest still goes into the vault
+    note = next(n for n in report.notes if "another value" in n)
+    assert "ANTHROPIC_AUTH_TOKEN" in note and "Settings › Passwords" in note
+    for value in ("sk-ant-set-in-ghost-999", "sk-ant-from-env-file-123", "sk-ant-in-set"):
+        assert value not in repr(report)
+
+    # Taken out of the files, the next import removes them.
+    (config / "env").write_text("ANTHROPIC_BASE_URL=http://proxy.lan:8317\n")
+    (config / "settings.env").write_text("GHOST_JEV=auto\n")
+    again = import_passwords(vault, config)
+    assert again.differ == [] and not (config / "env").exists()
 
 
 def test_a_password_written_into_settings_env_leaves_it(tmp_path):
@@ -153,14 +179,31 @@ def test_a_value_that_cant_be_imported_keeps_the_files(tmp_path, bad):
     assert "GHOST_APP_MOBBIN_KEY" in report.imported
     assert report.removed == []
     assert (config / "env").exists() and (config / "apps.env").exists()
-    assert any("were kept" in n and "GHOST_APP_HUGE_KEY" in n for n in report.notes)
+    note = next(n for n in report.notes if "were kept" in n)
+    assert "GHOST_APP_HUGE_KEY" in note and "16,000 characters" in note
+    assert "take it out of the file" in note  # not "add it on Settings", which refuses it too
     assert bad not in repr(report)
 
-    # Added by hand, the next import keeps the vault's copy and removes the files.
+    # A shorter form saved by hand: the file's value is another one, so the files stay
+    # until it is taken out of them.
     vault.set("GHOST_APP_HUGE_KEY", "a-good-value-by-hand")
     again = import_passwords(vault, config)
-    assert again.skipped == [] and "GHOST_APP_HUGE_KEY" in again.kept
+    assert again.skipped == [] and again.differ == ["GHOST_APP_HUGE_KEY"]
+    assert (config / "apps.env").exists()
+    (config / "apps.env").write_text('GHOST_APP_MOBBIN_KEY="Bearer mob-0123456789"\n')
+    third = import_passwords(vault, config)
+    assert third.differ == [] and "GHOST_APP_HUGE_KEY" not in third.kept
     assert not (config / "env").exists() and not (config / "apps.env").exists()
+
+
+def test_a_name_the_vault_cant_take_keeps_the_files(tmp_path):
+    """A lowercase name shaped like a password counts as one, but the vault names are
+    capitals: it is skipped, and the files stay."""
+    config, vault = world(tmp_path)
+    (config / "apps.env").write_text("openai_api_key=sk-lower-0123456789\n")
+    report = import_passwords(vault, config)
+    assert report.skipped == ["openai_api_key"]
+    assert (config / "apps.env").exists() and report.removed == []
 
 
 def test_the_read_back_compares_values_not_names(tmp_path, monkeypatch):

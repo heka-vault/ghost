@@ -1176,6 +1176,7 @@ class Daemon:
             level="INFO",
             format="{message}",
             filter=quiet_phone_teardown,
+            diagnose=False,
         )
         return server
 

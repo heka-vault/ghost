@@ -124,8 +124,13 @@ async def _run(a: argparse.Namespace, out: Path) -> int:
     from ghostd.perf.scenarios import DEFAULT, SCENARIOS
 
     logger.remove()
+    # diagnose=False: a traceback never prints its frames' variables, where a key may sit
+    # out of the redactor's sight (ADR 0036).
     logger.add(
-        sys.stderr, level=a.log_level.upper(), format="{time:HH:mm:ss.SSS} {level} {message}"
+        sys.stderr,
+        level=a.log_level.upper(),
+        format="{time:HH:mm:ss.SSS} {level} {message}",
+        diagnose=False,
     )
     names = _csv(a.scenario) or list(DEFAULT)
     unknown = [n for n in names if n not in SCENARIOS]

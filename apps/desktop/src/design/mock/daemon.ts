@@ -4,6 +4,7 @@
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
 import type {
+  Ack,
   AppConnect,
   AppConnectResult,
   AppView,
@@ -848,7 +849,13 @@ export class MockDaemon {
       if (!/^[a-z][a-z-]*$/.test(f.view.name)) throw new HttpError(422, `'${f.view.name}': a name is lower-case letters and -`);
       if (this.apps.some((a) => a.view.name === f.view.name) && !b.replace) throw new HttpError(409, `an app is already connected as ${f.view.name}`);
     }
-    // A key goes into the vault before apps.json changes, and a locked vault refuses it (423).
+    // A key goes into the vault before apps.json changes, and a locked vault refuses it (423); so
+    // does one the vault won't take (422), checked first so a refusal changes nothing.
+    if (made.some((f) => f.view.kind !== "sign_in" && f.view.settings?.length)) this.requireVault();
+    for (const v of Object.values(values)) {
+      if (v != null && v.length > 16_000) throw new HttpError(422, "a password is at most 16000 characters");
+      if (v != null && /[\n\0]/.test(v)) throw new HttpError(422, "a password is one line");
+    }
     for (const f of made) if (f.view.kind !== "sign_in") this.keepPasswords(f.view.settings ?? [], f.view.title);
     let url: string | null = null;
     for (const f of made) {
@@ -860,6 +867,23 @@ export class MockDaemon {
     }
     this.appsChanged(made[0]?.view.name ?? null, url);
     return { apps: made.map((f) => this.appView(f)), sign_in_url: url, problems: [] };
+  }
+  /** DELETE /apps/{name}, as the daemon does it: the passwords Ghost kept for the app (its own
+   *  GHOST_APP_ names no other app refers to) are forgotten with it, so while the keyring is
+   *  locked nothing changes (423). */
+  private disconnect(f: AppFixture): Ack {
+    const others = new Set(this.apps.filter((a) => a !== f).flatMap((a) => a.view.settings ?? []));
+    const own = (f.view.settings ?? []).filter((n) => n.startsWith("GHOST_APP_") && !others.has(n));
+    if (own.length && this.passwords.vault.state !== "open")
+      throw new HttpError(423, "Your keyring is locked, so Ghost can’t forget this app’s passwords. Unlock it on Settings › Passwords, then disconnect again.");
+    this.apps = this.apps.filter((a) => a !== f);
+    if (own.length) {
+      this.passwords.passwords = this.passwords.passwords.filter((x) => !own.includes(x.name));
+      this.settings = { ...this.settings, secrets: this.settings.secrets.filter((x) => !own.includes(x.name)) };
+      this.syncSecrets();
+    }
+    this.appsChanged(f.view.name);
+    return { ok: true, detail: null };
   }
   /* ------------------------------------------------------------- passwords (ADR 0036) */
   /** While the keyring is locked nothing is readable, not even which are set (`set: null`). */
@@ -940,7 +964,7 @@ export class MockDaemon {
       settings: files.length ? ["ANTHROPIC_BASE_URL"] : [],
       removed: files.filter((f) => f.kind === "file").map((f) => f.path),
       notes: heka
-        ? ["~/.config/heka-vault/ghost.env still holds heka-vault’s read token. Ghost doesn’t read it any more; delete it when nothing else needs it."]
+        ? ["~/.config/heka-vault/ghost.env still holds the password Ghost read heka-vault with. Ghost doesn’t read it any more; delete it when nothing else needs it."]
         : files.length
           ? []
           : ["There was nothing to import."],
@@ -1044,11 +1068,7 @@ export class MockDaemon {
       if (!f) throw new HttpError(404, `no app called '${name}'`);
       if (method === "GET" && !r[2]) return this.appView(f);
       if (method === "POST" && r[2]) return this.signIn(f);
-      if (method === "DELETE" && !r[2]) {
-        this.apps = this.apps.filter((a) => a !== f);
-        this.appsChanged(name);
-        return { ok: true, detail: null };
-      }
+      if (method === "DELETE" && !r[2]) return this.disconnect(f);
     }
     if (method === "GET" && path === "/catalog") return this.catalogPage(query.get("search") ?? "", Number(query.get("offset") ?? 0), Number(query.get("limit") ?? 40));
     if (method === "GET" && (r = m(/^\/catalog\/(.+)$/))) {

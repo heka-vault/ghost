@@ -71,18 +71,34 @@ GHOST_USES: dict[str, str] = {
     "HF_TOKEN": "Voice model downloads",
     "GITHUB_TOKEN": "An app you added by hand that names ${GITHUB_TOKEN}",
 }
-_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET", "_PASSWORD", "_PAT", "_API_KEY")
+_SECRET_SUFFIXES = (
+    "_TOKEN",
+    "_KEY",
+    "_SECRET",
+    "_PASSWORD",
+    "_PASS",
+    "_PASSWD",
+    "_PAT",
+    "_API_KEY",
+    "_CREDENTIALS",
+)
 
 
 def is_password_name(name: str, referenced: Iterable[str] = ()) -> bool:
     """Whether a KEY in a plaintext env file is a password: one Ghost reads, one an app or
     a webhook names, a key Ghost kept for an app, or a name shaped like one. Ghost's own
-    settings (``GHOST_*``) are not, except an app's key (``GHOST_APP_*``)."""
-    if name in GHOST_USES or name in set(referenced) or name.startswith("GHOST_APP_"):
+    settings (``GHOST_*``) are not, except an app's key (``GHOST_APP_*``). Case doesn't
+    matter: ``openai_api_key`` is as much a password as ``OPENAI_API_KEY``."""
+    upper = name.upper()
+    if (
+        upper in GHOST_USES
+        or upper in {r.upper() for r in referenced}
+        or upper.startswith("GHOST_APP_")
+    ):
         return True
-    if name.startswith("GHOST_"):
+    if upper.startswith("GHOST_"):
         return False
-    return name.endswith(_SECRET_SUFFIXES)
+    return upper.endswith(_SECRET_SUFFIXES)
 
 
 class KeyringLocked(Exception):

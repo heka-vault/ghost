@@ -133,6 +133,37 @@ def test_no_log_line_carries_a_password(tmp_path):
     assert "bad token [password: ANTHROPIC_AUTH_TOKEN]" in out.getvalue()
 
 
+def test_every_log_sink_leaves_out_frame_variables():
+    """loguru's ``diagnose`` prints each traceback frame's variables, which the redactor
+    never sees: every sink Ghost adds turns it off (ADR 0036)."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    missing = []
+    for top in ("apps", "packages", "docs/benchmarks/scripts"):
+        for path in (root / top).rglob("*.py"):
+            if "tests" in path.parts or "node_modules" in path.parts or ".venv" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "logger"
+                ):
+                    off = any(
+                        k.arg == "diagnose"
+                        and isinstance(k.value, ast.Constant)
+                        and k.value.value is False
+                        for k in node.keywords
+                    )
+                    if not off:
+                        missing.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert missing == []
+
+
 def test_no_exception_in_the_log_carries_a_password(tmp_path):
     """``logger.exception`` adds the exception's own text, which the message check missed."""
     vault = Passwords(tmp_path / "passwords.vault", MemoryKeyring())
