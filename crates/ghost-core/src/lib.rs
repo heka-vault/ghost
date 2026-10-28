@@ -13,6 +13,7 @@ pub mod events;
 #[cfg(any(test, feature = "fakes"))]
 pub mod fakes;
 pub mod gate;
+pub mod hooks;
 pub mod levels;
 pub mod models;
 pub mod permissions;
@@ -22,6 +23,7 @@ pub mod request;
 pub mod source;
 pub mod store;
 pub mod time;
+pub mod watches;
 
 pub use confirmation::{
     ConfirmationClassifier, ConfirmationContext, RegexClassifier, Verdict, classify_confirmation,
