@@ -1,0 +1,41 @@
+# cargo-deny policy for the workspace (ADR 0039). The daemon holds the operator's passwords, so
+# a known vulnerability in a dependency fails CI; licenses are an allowlist; crates come from
+# crates.io only.
+[graph]
+targets = [{ triple = "x86_64-unknown-linux-gnu" }]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+# Transitive crates that stop being maintained are a fact of life under a GUI toolkit; a
+# workspace crate's own dependency going unmaintained is ours to deal with.
+unmaintained = "workspace"
+
+[licenses]
+version = 2
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Zlib",
+  "MPL-2.0",
+  "CC0-1.0",
+  "BSL-1.0",
+  "0BSD",
+  "OpenSSL",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -1,0 +1,20 @@
+[package]
+name = "ghostd"
+description = "Ghost's daemon: wake, sessions, apps, the control API, the phone and hooks listeners"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ghostd"
+path = "src/main.rs"
+
+[dependencies]
+ghost-api.workspace = true
+
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

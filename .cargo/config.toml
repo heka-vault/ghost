@@ -1,0 +1,4 @@
+# lld links the workspace in a fraction of the time ld takes; clang drives it.
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]

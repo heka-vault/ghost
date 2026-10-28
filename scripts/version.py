@@ -77,8 +77,11 @@ COPIES: tuple[Copy, ...] = (
     _top_json("packages/client-ts/package.json"),
     _top_json("packages/ui/package.json"),
     _top_json("apps/mobile/app.json", indent=4),  # expo.version
+    # The Cargo workspace: its [workspace.package] version is inherited by the daemon's crates
+    # under crates/; the shell keeps its own copy; one lock file at the root.
+    _project_toml("Cargo.toml"),
     _project_toml("apps/desktop/src-tauri/Cargo.toml"),
-    _lock("apps/desktop/src-tauri/Cargo.lock", "heka-ghost-desktop"),
+    _lock("Cargo.lock", "heka-ghost-desktop"),
     _top_json("apps/desktop/src-tauri/tauri.conf.json"),
     # The phone's call module (apps/mobile/android itself is generated and not committed).
     Copy(GRADLE_MODULE, r"^version = '([^']*)'$"),

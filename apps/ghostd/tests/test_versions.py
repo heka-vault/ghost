@@ -58,8 +58,11 @@ def every_copy() -> dict[str, str]:
     ):
         out[p] = _json(p)["version"]
     out["apps/mobile/app.json"] = _json("apps/mobile/app.json")["expo"]["version"]
-    out["Cargo.toml"] = _toml("apps/desktop/src-tauri/Cargo.toml")["package"]["version"]
-    cargo = _toml("apps/desktop/src-tauri/Cargo.lock")["package"]
+    out["Cargo.toml"] = _toml("Cargo.toml")["workspace"]["package"]["version"]
+    out["apps/desktop/src-tauri/Cargo.toml"] = _toml("apps/desktop/src-tauri/Cargo.toml")[
+        "package"
+    ]["version"]
+    cargo = _toml("Cargo.lock")["package"]
     out["Cargo.lock"] = next(p["version"] for p in cargo if p["name"] == "heka-ghost-desktop")
     # Gradle has no parser here: every quoted value on a version line, however it is written.
     gradle = (ROOT / version_script.GRADLE_MODULE).read_text()

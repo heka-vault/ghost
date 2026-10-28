@@ -1,0 +1,29 @@
+# The Rust workspace: the daemon's crates under crates/ and the desktop app's Tauri shell
+# (ADR 0039). One lock file; `cargo build --workspace` builds both binaries the bundle ships.
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "2026.10.0"
+edition = "2024"
+license = "MIT"
+authors = ["Eric Polerecky"]
+rust-version = "1.98"
+
+[workspace.dependencies]
+ghost-api = { path = "crates/ghost-api" }
+
+anyhow = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "io-util", "fs"] }
+axum = { version = "0.8", features = ["json", "ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[profile.release]
+debug = 1 # line tables, so a panic in the journal has a location
+lto = "thin"
+codegen-units = 4

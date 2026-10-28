@@ -49,32 +49,37 @@ jobs:
       - name: desktop frontend builds
         run: pnpm build
 
-  # The Tauri shell of the desktop app. The .debs are built by release.yml, not here.
-  desktop-shell:
+  # The Rust workspace: the daemon's crates and the Tauri shell (ADR 0039). Clippy is
+  # strict, every test runs, and cargo-deny fails on a known vulnerability or a license
+  # outside deny.toml's allowlist.
+  rust:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run: { working-directory: apps/desktop/src-tauri }
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: system libraries
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-      - run: rustup component add rustfmt clippy
+          sudo apt-get install -y -qq --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev clang libclang-dev lld \
+            libpipewire-0.3-dev libspa-0.2-dev libpulse-dev libasound2-dev \
+            libespeak-ng-dev libopus-dev
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: apps/desktop/src-tauri }
-      - run: cargo fmt --check
+      - uses: taiki-e/install-action@nextest
+      - run: cargo fmt --all --check
       # generate_context! wants the frontend's folder to exist; its contents don't matter to a check.
-      - run: mkdir -p ../dist
-      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: mkdir -p apps/desktop/dist
+      - run: cargo clippy --workspace --locked --all-targets -- -D warnings
+      - run: cargo nextest run --workspace --locked
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with: { command: check }
 
   # The one check main's ruleset requires, so adding or renaming a job above needs no
   # settings change.
   ci-ok:
     if: always()
-    needs: [python, typescript, desktop-shell]
+    needs: [python, typescript, rust]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
