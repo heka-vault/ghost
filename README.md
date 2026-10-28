@@ -132,6 +132,11 @@ packaged or not. In development, `?mock=<scenario>` (for example `?mock=pending`
 component in every state. The design rules are in
 [docs/design-system.md](docs/design-system.md). `make deb` builds the installable packages.
 
+To try a commit as your real Ghost, `make deploy` builds HEAD into
+`~/.local/share/ghost/runtime/<commit>/`, runs `ghostd check` against `~/.config/ghost`, and
+only then switches the `ghostd` user service to it and restarts it; no root and no .deb.
+`make deploy-rollback` goes back to the build before, `make deploy-off` back to the package.
+
 Changes go to `main` through pull requests; the `ci` workflow (lint, tests, schema and client
 current, typecheck, the desktop build and the Tauri shell) must pass before one merges.
 

@@ -32,7 +32,7 @@ First increment running on the workstation: generic write gate where everything 
 
 ## Commits
 
-Conventional commits. Every change reaches `main` through a pull request: `main` takes no direct pushes, and a PR merges only when the `ci` workflow passes (`.github/workflows/ci.yml`: ruff, pytest, `openapi.json` and the TS client current, typecheck, vitest, the desktop build, rustfmt and clippy on the Tauri shell; the ruleset requires its `ci-ok` job) and the branch is up to date with `main`. Run `make lint test` and `pnpm typecheck` before pushing. Don't merge a red PR or ask for a bypass; fix the check.
+Conventional commits. Every change reaches `main` through a pull request: `main` takes no direct pushes, and a PR merges only when the `ci` workflow passes (`.github/workflows/ci.yml`: ruff, pytest, `openapi.json` and the TS client current, typecheck, vitest, the desktop build, rustfmt and clippy on the Tauri shell; the ruleset requires its `ci-ok` job) and the branch is up to date with `main`. Run `make lint test` and `pnpm typecheck` before pushing. Don't merge a red PR or ask for a bypass; fix the check. To run a commit as the operator's own Ghost, `make deploy` (a checked build of HEAD in `~/.local/share/ghost/runtime/`, no root; `make deploy-rollback`); never point the service at the working tree.
 
 ## Agent skills
 
