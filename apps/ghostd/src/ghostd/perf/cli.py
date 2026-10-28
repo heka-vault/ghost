@@ -1,10 +1,10 @@
 """``ghostd perf``: the latency harness and its micro-benchmarks.
 
-    ghostd perf run    [--scenario a,b] [--runs N] [--model m1,m2] [--endpoint proxy,openrouter]
+    ghostd perf run    [--scenario a,b] [--runs N] [--model m1,m2] [--endpoint current,openrouter]
                        [--thinking between_tools,adaptive] [--transport desk,webrtc]
                        [--history N] [--set turn_grace_secs=0.4] [--no-jev] [--out DIR]
     ghostd perf micro  [--only stt,tts,jev,turn] [--n N]
-    ghostd perf llm    [--model ...] [--endpoint ...] [--openrouter-models a,b] [--n N]
+    ghostd perf llm    [--model ...] [--endpoint current,openrouter] [--openrouter-models a]
     ghostd perf report DIR/records.json
 
 Comma lists in ``run`` make a matrix: every combination runs every scenario. Output goes
@@ -43,7 +43,11 @@ def main(argv: list[str]) -> int:
     r.add_argument("--scenario", default="", help="comma list (default: all)")
     r.add_argument("--runs", type=int, default=3)
     r.add_argument("--model", default="", help="comma list (default: GHOST_LLM_MODEL)")
-    r.add_argument("--endpoint", default="proxy", help="proxy, openrouter (comma list)")
+    r.add_argument(
+        "--endpoint",
+        default="current",
+        help="current (the model connection), a provider id, proxy, openrouter (comma list)",
+    )
     r.add_argument("--thinking", default="", help="between_tools, adaptive")
     r.add_argument("--transport", default="desk", help="desk, webrtc (comma list)")
     r.add_argument("--history", type=int, default=0, help="seed N earlier turns")
@@ -66,7 +70,7 @@ def main(argv: list[str]) -> int:
 
     lm = sub.add_parser("llm", help="model and endpoint TTFB with Ghost's real prompt and tools")
     lm.add_argument("--model", default="claude-sonnet-5-5,claude-haiku-5-5")
-    lm.add_argument("--endpoint", default="proxy,openrouter")
+    lm.add_argument("--endpoint", default="current", help="current, proxy, openrouter, +sysbp")
     lm.add_argument("--openrouter-models", default="", help="non-Anthropic models via OpenRouter")
     lm.add_argument("--thinking", default="between_tools")
     lm.add_argument("--n", type=int, default=4)
@@ -137,7 +141,7 @@ async def _run(a: argparse.Namespace, out: Path) -> int:
         )
         for model, endpoint, thinking, transport, ablate in itertools.product(
             _csv(a.model) or [default_model],
-            _csv(a.endpoint) or ["proxy"],
+            _csv(a.endpoint) or ["current"],
             _csv(a.thinking) or [""],
             _csv(a.transport) or ["desk"],
             parse_ablations(a.ablate),

@@ -8,7 +8,7 @@ watch takes its declared default. It is never asked whether something may be don
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from loguru import logger
@@ -20,12 +20,12 @@ SYSTEM = (
 )
 
 
-def model_decider(target: Any, *, max_tokens: int = 8):
-    """``target`` is ``ghost_voice.config.LLMTarget``: the same endpoint and model as the
-    voice, its key from the environment."""
-    from anthropic import AsyncAnthropic
-
-    client = AsyncAnthropic(api_key=target.api_key or None, base_url=target.base_url)
+def model_decider(target: Callable[[], Any | None], *, max_tokens: int = 8):
+    """``target()`` gives the model connection's ``LLMTarget`` (ADR 0037), or None while
+    it can't be reached: the same provider and model as the voice, its key read by name
+    from the environment. It is asked at each decision, so a connection saved from the
+    desktop applies at once."""
+    from ghost_voice.llm import model_client
 
     async def decide(
         question: str, fields: Mapping[str, Any], choices: Mapping[str, str]
@@ -34,17 +34,17 @@ def model_decider(target: Any, *, max_tokens: int = 8):
             {"question": question, "fields": dict(fields), "choices": dict(choices)},
             default=str,
         )
+        to = target()
+        if to is None:  # no model connection yet: the watch takes its default
+            return None
         try:
-            msg = await client.messages.create(
-                model=target.model,
-                max_tokens=max_tokens,
-                system=SYSTEM,
-                messages=[{"role": "user", "content": body}],
+            answer = await model_client(to).complete(
+                system=SYSTEM, user=body, max_tokens=max_tokens
             )
         except Exception as e:  # noqa: BLE001 - the watch takes its default
             logger.info(f"watch model step failed: {type(e).__name__}")
             return None
-        text = "".join(getattr(b, "text", "") for b in msg.content).strip().lower()
+        text = answer.strip().lower()
         word = text.split()[0].strip(".,!\"'") if text else ""
         return word if word in choices else None
 

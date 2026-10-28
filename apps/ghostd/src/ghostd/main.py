@@ -63,6 +63,7 @@ from ghost_core.skills import Skills
 from ghost_core.waiting import Item, Items, WaitingList, waiting_source
 from ghost_core.watches import WatchRunner
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
+from ghost_voice.config import LLM_FIELDS
 from ghost_voice.elevenlabs import describe_tts, tts_problems
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
@@ -99,6 +100,7 @@ from ghostd.routes import (
 from ghostd.wake import FileWakeDetector, SpokenWakeDetector, WakeDetector
 
 WAKE_FILE = "wake"
+LLM_ENV_KEYS = frozenset(LLM_FIELDS.values())  # the model connection's settings (ADR 0037)
 DUCK_STATE = "duck.json"
 DEFAULT_WAKE_FUZZY = GhostdSettings.model_fields["wake_fuzzy"].default
 PHONE_STATE = "phone.json"
@@ -450,16 +452,18 @@ class Daemon:
     def apply_settings(self, values: dict[str, str | None]) -> list[str]:
         """Apply what can change without a restart; return those keys. The wake phrases
         and the near-miss threshold are picked up by rebuilding the passive listener; the
-        crossing-streams toggles (ADR 0019) by the next session, which reads them."""
-        applied: list[str] = []
+        crossing-streams toggles (ADR 0019) by the next session, which reads them; the
+        model connection (ADR 0037) by the next session and the next model step."""
+        applied = self._apply_model(values)
         if self._listener is None:
             return applied
+        wake: list[str] = []
         if "GHOST_WAKE_PHRASES" in values:
             phrases = parse_phrases(values["GHOST_WAKE_PHRASES"])
             self.cfg.wake_phrases = values["GHOST_WAKE_PHRASES"] or ""
             self._listener.set_phrases(phrases)
             logger.info(f"wake phrases: {', '.join(repr(p) for p in phrases)}")
-            applied.append("GHOST_WAKE_PHRASES")
+            wake.append("GHOST_WAKE_PHRASES")
         if "GHOST_WAKE_FUZZY" in values:
             try:
                 fuzzy = float(values["GHOST_WAKE_FUZZY"] or DEFAULT_WAKE_FUZZY)
@@ -469,10 +473,38 @@ class Daemon:
                 self.cfg.wake_fuzzy = fuzzy
                 self._listener.set_phrases(self._listener._phrases, fuzzy)
                 logger.info(f"wake fuzzy threshold: {fuzzy:g}")
-                applied.append("GHOST_WAKE_FUZZY")
-        if applied:
+                wake.append("GHOST_WAKE_FUZZY")
+        if wake:
             self._rearm.set()
-        return applied
+        return applied + wake
+
+    def _apply_model(self, values: dict[str, str | None]) -> list[str]:
+        """The model connection's keys, live: the environment the next session reads, and
+        the voice settings' copy of them. A turn in flight keeps the model it started on."""
+        keys = [k for k in values if k in LLM_ENV_KEYS]
+        if not keys:
+            return []
+        before = {k: os.environ.get(k) for k in keys}
+        for k in keys:
+            if values[k]:
+                os.environ[k] = values[k] or ""
+            else:
+                os.environ.pop(k, None)
+        try:
+            fresh = VoiceSettings()  # type: ignore[call-arg]
+        except ValueError as e:
+            for k, v in before.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            logger.warning(f"llm: the new connection waits for a restart ({type(e).__name__})")
+            return []
+        self.voice = self.voice.model_copy(update={f: getattr(fresh, f) for f in LLM_FIELDS})
+        logger.info(f"llm: {self.voice.llm_target().describe()} from the next session")
+        for problem in self.voice.llm_problems():
+            logger.warning(f"llm: {problem}")
+        return keys
 
     # --- conversations (ADR 0014) ------------------------------------------------
 
@@ -844,7 +876,9 @@ class Daemon:
             waiting.items,
             lambda w: read_for(w.app, w.read, dict(w.args)),
             jev=watch_decider(jev) if jev else None,
-            model=None if self.voice.llm_problems() else model_decider(self.voice.llm_target()),
+            model=model_decider(
+                lambda: None if self.voice.llm_problems() else self.voice.llm_target()
+            ),
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.watch_runner = watch_runner

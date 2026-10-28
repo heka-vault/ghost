@@ -28,6 +28,7 @@ from ghost_core import (
     WriteGate,
 )
 from ghost_core.apps import APPS_FILE, Apps, load_apps
+from ghost_core.connection import PROVIDERS
 from ghost_core.conversations import GHOST, Conversations, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.jev import JevClassifier, JevClient
@@ -49,7 +50,7 @@ from ghostd.perf.scenarios import Line, Scenario
 #   tts_clauses     Kokoro gets whole sentences again (GHOST_TTS_CLAUSES=false)
 #   prompt_lines    the system prompt without the lead-short and parallel-lookup lines
 #   system_cache    no cache marker on the system prompt
-#   shared_client   a new AsyncAnthropic per session, as before
+#   shared_client   a new SDK client per session, as before
 #   speculate       the model waits out the turn grace (GHOST_TURN_SPECULATE=false)
 ABLATIONS = ("tts_clauses", "prompt_lines", "system_cache", "shared_client", "speculate")
 # A plausible record of earlier sessions, for --history: generic, like the seed issues.
@@ -77,8 +78,8 @@ def thinking_for(model: str, requested: str | None) -> str | None:
 
 @dataclass
 class RunConfig:
-    model: str = "claude-sonnet-5-5"
-    endpoint: str = "proxy"  # proxy: ANTHROPIC_BASE_URL; openrouter: its Anthropic API
+    model: str = ""  # "": the connection's model
+    endpoint: str = "current"  # the model connection; or a provider id, proxy, openrouter
     thinking: str | None = None  # None: Ghost's default (GHOST_LLM_THINKING)
     transport: str = "desk"  # desk: scripted devices; webrtc: aiortc peer on loopback
     history: int = 0  # earlier turns seeded into the ghost conversation's record
@@ -88,7 +89,7 @@ class RunConfig:
 
     @property
     def label(self) -> str:
-        parts = [self.model, self.endpoint]
+        parts = [self.model or "default model", self.endpoint]
         if self.ablate:
             parts.append(
                 "before" if set(ABLATIONS) <= self.ablate else "-" + "-".join(sorted(self.ablate))
@@ -166,13 +167,23 @@ def parse_ablations(spec: str) -> list[frozenset[str]]:
 
 def make_settings(cfg: RunConfig) -> VoiceSettings:
     base = VoiceSettings()  # type: ignore[call-arg]
-    update: dict[str, Any] = {"input_device": None, "output_device": None, "llm_model": cfg.model}
+    update: dict[str, Any] = {"input_device": None, "output_device": None}
+    if cfg.model:
+        update["llm_model"] = cfg.model
     thinking = thinking_for(cfg.model, cfg.thinking)
     if thinking:
         update["llm_thinking"] = thinking
-    if cfg.endpoint not in LLM_ENDPOINTS:
-        raise SystemExit(f"unknown endpoint {cfg.endpoint!r} ({', '.join(LLM_ENDPOINTS)})")
-    update["llm_endpoint"] = cfg.endpoint
+    # current: the model connection as configured (ADR 0037); a provider id: that
+    # provider as it comes; proxy or openrouter: the settings from before the connection.
+    # Another provider takes none of the configured one's address, protocol or password.
+    plain = dict(llm_base_url="", llm_protocol="", llm_password="", llm_headers="")
+    if cfg.endpoint in LLM_ENDPOINTS:
+        update.update(plain, llm_provider="", llm_endpoint=cfg.endpoint)
+    elif cfg.endpoint in PROVIDERS:
+        update.update(plain, llm_provider=cfg.endpoint)
+    elif cfg.endpoint != "current":
+        known = ", ".join(["current", *PROVIDERS, *LLM_ENDPOINTS])
+        raise SystemExit(f"unknown endpoint {cfg.endpoint!r} ({known})")
     if "tts_clauses" in cfg.ablate:
         update["tts_clauses"] = False
     if "speculate" in cfg.ablate:

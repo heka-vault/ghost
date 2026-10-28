@@ -5,13 +5,15 @@ streams (cache markers on the last two user messages, as its Anthropic adapter d
 
 - ``plain``: a hello, no tool. TTFB, total, and the stream span (first byte to last;
   near zero with many output tokens means the endpoint buffered the reply).
-- ``tool``: "what needs my sign-off": the call to list_awaiting_signoff, then the answer
+- ``tool``: "what needs my sign-off": the call to a GitHub read, then the answer
   after a canned tool result. Time to the complete tool call, then the answer's TTFB.
 - caching: every repeat after the first should read the prefix from the cache.
 
-Endpoints: ``proxy`` is ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN (Ghost's own),
-``openrouter`` is OpenRouter's Anthropic Messages API with OPENROUTER_API_KEY. Non-
-Anthropic models go through OpenRouter's OpenAI-compatible API. Keys are never printed.
+Endpoints: ``current`` is the model connection as configured (ADR 0037), through the
+same client a session uses, on whichever protocol it speaks; ``proxy`` is ANTHROPIC_BASE_URL
+with ANTHROPIC_AUTH_TOKEN, ``openrouter`` is OpenRouter's Anthropic Messages API with
+OPENROUTER_API_KEY. ``--openrouter-models`` go through OpenRouter's OpenAI-compatible API.
+Keys are never printed.
 Spend is small: a few thousand input tokens per call, mostly cached.
 """
 
@@ -31,6 +33,7 @@ from ghost_core.apps import APPS_FILE, Apps, load_apps
 from ghost_voice import VoiceSettings
 from ghost_voice.config import LLM_MAX_TOKENS, openrouter_model
 from ghost_voice.config import OPENROUTER_ANTHROPIC_URL as OPENROUTER_ANTHROPIC
+from ghost_voice.llm import shared_client
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.tools import register_tools
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -209,7 +212,7 @@ async def _anthropic_call(
 
 
 async def _openai_call(
-    client, model: str, system: str, tools, messages
+    client, model: str, system: str, tools, messages, cap_param: str = "max_tokens"
 ) -> tuple[Sample, dict[str, Any] | None]:
     s = Sample()
     began = time.perf_counter()
@@ -221,9 +224,9 @@ async def _openai_call(
             model=model,
             messages=[{"role": "system", "content": system}, *messages],
             tools=tools,
-            max_tokens=LLM_MAX_TOKENS,
             stream=True,
             stream_options={"include_usage": True},
+            **{cap_param: LLM_MAX_TOKENS},
         )
         async for chunk in stream:
             now = time.perf_counter()
@@ -331,6 +334,26 @@ async def run_llm(
                 }
                 for m in models
             ]
+    if "current" in endpoints:
+        # What a session sends now: the connection's protocol, model and shared client.
+        target = voice.llm_target()
+        current: dict[str, Any] = {
+            "ep": "current",
+            "label": target.model,
+            "wire": target.model,
+            "client": shared_client(target),
+            "cap": target.cap_param,
+        }
+        if target.protocol == "anthropic":
+            haiku = "haiku" in target.model
+            current.update(
+                kind="anthropic",
+                thinking=thinking_for(target.model, None if haiku else thinking),
+                sysbp=True,
+            )
+        else:
+            current.update(kind="openai")
+        targets.append(current)
     if openrouter_models and or_key:
         oclient = AsyncOpenAI(api_key=or_key, base_url=OPENROUTER_OPENAI)
         targets += [
@@ -345,7 +368,7 @@ async def run_llm(
         for i, t in enumerate(targets):
             plain, tool1, tool2 = samples[i]
             if t["kind"] == "anthropic":
-                sysbp = t["ep"].endswith("+sysbp")
+                sysbp = t["ep"].endswith("+sysbp") or t.get("sysbp", False)
                 s0, _ = await _anthropic_call(
                     t["client"],
                     t["wire"],
@@ -394,12 +417,18 @@ async def run_llm(
                 )
                 tool2.append(s2)
             else:
+                cap = t.get("cap", "max_tokens")
                 s0, _ = await _openai_call(
-                    t["client"], t["wire"], system, o_tools, [{"role": "user", "content": hello}]
+                    t["client"],
+                    t["wire"],
+                    system,
+                    o_tools,
+                    [{"role": "user", "content": hello}],
+                    cap,
                 )
                 plain.append(s0)
                 s1, call = await _openai_call(
-                    t["client"], t["wire"], system, o_tools, [{"role": "user", "content": ask}]
+                    t["client"], t["wire"], system, o_tools, [{"role": "user", "content": ask}], cap
                 )
                 tool1.append(s1)
                 if call is None:
@@ -426,7 +455,7 @@ async def run_llm(
                         "content": json.dumps(TOOL_RESULT),
                     },
                 ]
-                s2, _ = await _openai_call(t["client"], t["wire"], system, o_tools, msgs)
+                s2, _ = await _openai_call(t["client"], t["wire"], system, o_tools, msgs, cap)
                 tool2.append(s2)
         print(f"  round {rnd + 1}/{n} done")
     rows: list[dict[str, Any]] = []
@@ -482,7 +511,7 @@ def _row(
         "answer_out": int(statistics.median(answer_outs)) if answer_outs else None,
         "cold_ttfb": plain[0].ttfb if plain else None,
         "warm_ttfb": _p50(later_ttfb),
-        "tool_ok": f"{sum(1 for s in tool1 if s.tool == 'list_awaiting_signoff')}/{len(tool1)}",
+        "tool_ok": f"{sum(1 for s in tool1 if (s.tool or '').startswith('github_'))}/{len(tool1)}",
         "words": _p50([float(s.words) for s in tool2 if s.words is not None]),
         "cache": f"{int(statistics.median(reads)) if reads else '-'}/"
         f"{int(statistics.median(writes)) if writes else '-'}",
