@@ -837,7 +837,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       "What Ghost hears with, how it wakes, and how it sounds."
     ) : (
       <>
-        Talk to Ghost from your phone, at home or away through your own tunnel. No one else’s server is in between. Ghost pairs with one phone, yours. Pairing another replaces it.
+        Talk to Ghost from your phone, at home or away through your own tunnel, with nothing of anyone else’s in between.
       </>
     );
 

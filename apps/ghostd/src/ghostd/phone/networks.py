@@ -28,12 +28,16 @@ SYS_NET = Path("/sys/class/net")
 
 def _normal(host: str) -> str | None:
     """An IP in one spelling (``fe80::1%wg0`` and ``[fe80::1]`` as ``fe80::1``); None for a
-    host name or anything else that isn't an IP."""
+    host name or anything else that isn't an IP. An IPv4 phone on a ``[::]`` listener arrives
+    IPv4-mapped (``::ffff:192.168.1.20``), and is the IPv4 address it wraps."""
     host = host.strip().removeprefix("[").removesuffix("]").split("%", 1)[0]
     try:
-        return ipaddress.ip_address(host).compressed
+        ip = ipaddress.ip_address(host)
     except ValueError:
         return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.compressed
 
 
 def system_addresses() -> dict[str, str]:

@@ -544,6 +544,9 @@ def test_networks_tell_home_from_tunnel_by_the_interface(tmp_path):
     assert n.of("192.168.1.20") == "home"
     assert n.of("10.8.0.4") == "tunnel"
     assert n.of("[fd00:0::4]") == "tunnel" and n.of("fd00::4%wg0") == "tunnel"
+    # An IPv4 phone on a [::] listener: the local address arrives IPv4-mapped.
+    assert n.of("::ffff:192.168.1.20") == "home" and n.of("[::ffff:10.8.0.4]") == "tunnel"
+    assert n.of("::ffff:0.0.0.0") is None
     assert n.of("0.0.0.0") is None and n.of("::") is None  # every interface: can't tell
     assert n.of("192.0.2.1") is None and n.of("desk.local") is None and n.of(None) is None
     assert len(reads) == 1  # one read serves every lookup until it is stale

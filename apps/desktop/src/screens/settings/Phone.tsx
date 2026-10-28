@@ -2,7 +2,8 @@
  * Owner: settings. The Phone page (ADR 0016, ADR 0020): whether the phone listener is on, the
  * paired phone and how it last reached Ghost (home network or tunnel), each address and its
  * network, and pairing. Ghost pairs with exactly one phone, the operator's; pairing another
- * replaces it, and the page and the dialog both say so. With no address on a tunnel, a short
+ * replaces it, and the page (once, beside the paired phone) and the dialog both say so. With
+ * no address on a tunnel, a short
  * guide says how to reach Ghost away from home. The page header carries the title and what
  * it is for.
  *
@@ -28,6 +29,8 @@ import { CommandCopy, Row } from "./parts";
 
 const POLL_MS = 1500;
 const PORT = "8765";
+/** Decided on #36: said once on the page, beside the paired phone. */
+const ONE_PHONE = "Ghost pairs with one phone. Pairing another replaces this one.";
 
 /** “482913” as “482 913”: two groups of three are easier to read off and type. */
 const grouped = (code: string) => `${code.slice(0, 3)} ${code.slice(3)}`;
@@ -128,6 +131,7 @@ export function PhoneSection({ settingsPath, openOnLoad }: { settingsPath: strin
                 <>
                   Paired <time dateTime={device.paired_at}>{relativeTime(device.paired_at)}</time> · <Reached device={device} />
                   {status?.session_origin === "phone" && <span className="set-phone__live"> · in a session now</span>}
+                  <span className="set-phone__one">{ONE_PHONE}</span>
                 </>
               }
               trailing={

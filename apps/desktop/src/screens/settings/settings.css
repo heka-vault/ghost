@@ -161,6 +161,7 @@
 /* ------------------------------------------------------------------ phone */
 .set-phone__icon { color: var(--text-2); flex: none; }
 .set-phone__live { color: var(--ok); }
+.set-phone__one { display: block; margin-top: var(--space-0_5); }
 .set-phone__actions { display: inline-flex; align-items: center; gap: var(--space-3); }
 .set-phone-off { display: flex; flex-direction: column; gap: var(--space-2); }
 .set-phone-off__commands { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); margin: var(--space-1) 0; }
