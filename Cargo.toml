@@ -58,7 +58,7 @@ nix = { version = "0.31", features = ["net", "hostname"] }
 tower = { version = "0.5", features = ["util"] }
 # The audio engine (crates/ghost-audio): PipeWire through the project's own binding, a
 # realtime-safe ring between its thread and tokio, WAV assets.
-pipewire = { version = "0.10", features = ["v1_2_0"] } # the workstation runs PipeWire 1.6
+pipewire = { version = "0.10", features = ["v1_0_0"] } # bindings for PipeWire 1.0 and up: the workstation runs 1.6, the CI runner 1.0.5
 libspa = "0.10"
 rtrb = "0.4"
 hound = "3.5"
