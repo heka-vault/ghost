@@ -17,8 +17,7 @@ const Switcher = import.meta.env.DEV ? lazy(() => import("../design/chrome").the
 /** Below this window height the Prototypes group starts collapsed, so the nav fits without scrolling. */
 const SHORT_WINDOW = 840;
 const PROTOS_KEY = "ghost.sidebar.prototypes";
-const SETTINGS_KEY = "ghost.sidebar.settings";
-/** Collapsed to the icon rail: kept across restarts, unlike the folds above. */
+/** Collapsed to the icon rail: kept across restarts, unlike the fold above. */
 const COLLAPSED_KEY = "ghost.sidebar.collapsed";
 const TOGGLE_SHORTCUT = "mod+b";
 
@@ -126,25 +125,15 @@ export function Sidebar() {
     };
   }, [client, connected, conversationsVersion]);
 
-  // Agents are the section below, not a nav item: one word, one place (GLOSSARY.md). The
-  // session and the configuration screens fold under the pinned Settings row (2026-10-24).
+  // Agents are the section below, not a nav item: one word, one place (GLOSSARY.md). Apps is
+  // a page of Settings with a row of its own here; the rest of Settings is behind the pinned
+  // Settings row, which has its own nav (2026-10-28). The session is the status card.
   const main = ROUTES.filter((r) => r.component && r.nav?.group === "main" && r.id !== "conversations");
   const footer = ROUTES.filter((r) => r.component && r.nav?.group === "footer");
-  const under = ROUTES.filter((r) => r.component && r.nav?.group === "settings");
   const protos = design ? ROUTES.filter((r) => r.component && r.nav?.group === "prototype") : [];
-  const inSettings = under.some((r) => r.id === current) || footer.some((r) => r.id === current);
-  // The Settings group: open while one of its screens is the page, else as the operator last
-  // left it (closed to start). Landing on one of them opens it; Settings itself doesn't.
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(() => sessionStorage.getItem(SETTINGS_KEY) === "open");
-  const toggleSettings = () => {
-    const next = !settingsOpen;
-    setSettingsOpen(next);
-    sessionStorage.setItem(SETTINGS_KEY, next ? "open" : "closed");
-  };
-  useEffect(() => {
-    if (under.some((r) => r.id === current)) setSettingsOpen(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current]);
+  // Any page of Settings but Apps, which has its own row: then Settings is the section.
+  const inSettings = ROUTES.some((r) => r.id === current && r.area === "settings");
+  const settingsCurrent = inSettings && !main.some((r) => r.id === current);
 
   const inSession = !!status?.session_id;
   const active = status?.conversation ?? null;
@@ -310,23 +299,8 @@ export function Sidebar() {
         <nav aria-label="Settings">
           <ul className="sidebar__group" role="list">
             {footer.map((r) => (
-              <NavItem
-                key={r.id}
-                route={r}
-                rail={rail}
-                current={current === r.id}
-                section={inSettings && current !== r.id}
-                // A waiting okay stays visible while the Session row is folded away.
-                badge={!settingsOpen && pending && connected ? 1 : undefined}
-                fold={
-                  under.length && !rail
-                    ? { open: settingsOpen, onToggle: toggleSettings, controls: "sidebar-settings-list", label: settingsOpen ? "Hide the settings screens" : "Show the settings screens" }
-                    : undefined
-                }
-              />
+              <NavItem key={r.id} route={r} rail={rail} current={settingsCurrent} section={inSettings && !settingsCurrent} />
             ))}
-            {settingsOpen &&
-              under.map((r) => <NavItem key={r.id} route={r} rail={rail} current={current === r.id} sub badge={r.id === "session" && pending && connected ? 1 : undefined} />)}
           </ul>
         </nav>
         {design && Switcher && !rail && (
@@ -358,22 +332,14 @@ export function StatusCard({ phase, title, sub, rail = false }: { phase: GhostPh
   );
 }
 
-/** A fold control at the row's end: the row still navigates; the chevron opens or closes the group under it. */
-interface Fold {
-  open: boolean;
-  onToggle: () => void;
-  controls: string;
-  label: string;
-}
-
-function NavItem({ route, current, section, badge, sub, fold, rail = false }: { route: RouteDef; current: boolean; section?: boolean; badge?: number; sub?: boolean; fold?: Fold; rail?: boolean }) {
+function NavItem({ route, current, section, badge, rail = false }: { route: RouteDef; current: boolean; section?: boolean; badge?: number; rail?: boolean }) {
   const Icon = route.nav!.icon;
   const label = route.nav!.label;
   return (
-    <li className={cx(fold && "sidebar__head")}>
+    <li>
       <RailTip rail={rail} content={badge != null ? `${label} · ${badge} waiting` : label}>
       <a
-        className={cx("sidebar__item", sub && "sidebar__item--sub", current && "is-current", section && "is-section")}
+        className={cx("sidebar__item", current && "is-current", section && "is-section")}
         href={hrefFor(route.path)}
         aria-current={current ? "page" : undefined}
         aria-label={rail ? (badge != null ? `${label}, ${badge} waiting` : label) : undefined}
@@ -387,11 +353,6 @@ function NavItem({ route, current, section, badge, sub, fold, rail = false }: { 
         )}
       </a>
       </RailTip>
-      {fold && (
-        <button type="button" className={cx("sidebar__fold", fold.open && "is-open")} aria-expanded={fold.open} aria-controls={fold.controls} aria-label={fold.label} onClick={fold.onToggle}>
-          <ChevronDown size={14} aria-hidden />
-        </button>
-      )}
     </li>
   );
 }

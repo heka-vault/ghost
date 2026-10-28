@@ -6,8 +6,9 @@ import { useDesign } from "../design/context";
 import { useConnection } from "./connection";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Offline } from "./Offline";
-import { hrefFor, usePath } from "./router";
-import { resolve } from "./routes";
+import { hrefFor, navigate, usePath } from "./router";
+import { SETTINGS_PAGES, redirectFor, resolve, settingsPageOf } from "./routes";
+import { SettingsFrame } from "./SettingsFrame";
 import { useSetupNeeded } from "./setup";
 import { Sidebar } from "./Sidebar";
 import "./shell.css";
@@ -17,8 +18,14 @@ const PrototypeStrip = import.meta.env.DEV ? lazy(() => import("../design/chrome
 
 /** The app shell: sidebar, global connection banners, and the routed screen. */
 export function App() {
-  const path = usePath();
+  const raw = usePath();
+  // An old address (#/apps, #/audit, #/settings) shows its new page at once; the hash follows.
+  const path = redirectFor(raw) ?? raw;
+  useEffect(() => {
+    if (path !== raw) navigate(path, { replace: true });
+  }, [path, raw]);
   const match = resolve(path);
+  const settingsPage = match?.route.area === "settings" ? settingsPageOf(path) : null;
   const { state, phase, loadingModels } = useConnection();
   const design = useDesign();
   const setupNeeded = useSetupNeeded(path, state === "online");
@@ -26,13 +33,14 @@ export function App() {
   // it with useSetupPromptHere(); then the banner steps aside: one signal per place.
   const [setupClaims, setSetupClaims] = useState(0);
   const claimSetupPrompt = useCallback((d: number) => setSetupClaims((n) => Math.max(0, n + d)), []);
-  const setupHref = hrefFor(design ? "/welcome" : "/settings");
+  const setupHref = hrefFor(design ? "/welcome" : SETTINGS_PAGES[0].path);
   const live = useMemo<LiveState>(
     () => ({ connection: state, phase, online: state === "online", loadingModels, setupNeeded, setupHref, claimSetupPrompt }),
     [state, phase, loadingModels, setupNeeded, setupHref, claimSetupPrompt],
   );
-  // Settings (and the onboarding prototype) are where setup happens: no banner pointing at itself.
-  const setupHere = path === "/settings" || path === "/welcome" || setupClaims > 0;
+  // The settings screen (General, Model, Passwords…) and the onboarding prototype are where
+  // setup happens: no banner pointing at itself.
+  const setupHere = match?.route.id === "settings" || path === "/welcome" || setupClaims > 0;
   const main = useRef<HTMLElement | null>(null);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
@@ -72,14 +80,15 @@ export function App() {
     onScroll();
   }, [path, onScroll]);
 
+  const title = settingsPage?.label ?? match?.route.title;
   useEffect(() => {
-    document.title = match ? (match.route.id === "session" ? "Ghost" : `${match.route.title} · Ghost`) : "Not found · Ghost";
-  }, [match?.route.id]);
+    document.title = match ? (match.route.id === "session" ? "Ghost" : `${title} · Ghost`) : "Not found · Ghost";
+  }, [match?.route.id, title]);
 
   const Screen = match?.route.component;
   const bare = match?.route.chrome === "bare";
   const screen = match && Screen ? (
-    <ErrorBoundary key={match.route.id} name={match.route.title}>
+    <ErrorBoundary key={match.route.id} name={title ?? match.route.title}>
       {/* A bare route (tray, phone) loads behind its own quiet placeholder, never the desktop page's shape. */}
       <Suspense fallback={bare ? <BareSkeleton /> : <ScreenSkeleton />}>
         <Screen params={match.params} />
@@ -154,7 +163,16 @@ export function App() {
             </Suspense>
           )}
           <PageChromeContext.Provider value={chrome}>
-            <div className="shell__scroll">{gated ? state === "offline" ? <Offline /> : <ScreenSkeleton /> : screen}</div>
+            <div className="shell__scroll">
+              {gated ? (
+                state === "offline" ? <Offline /> : <ScreenSkeleton />
+              ) : settingsPage ? (
+                // Settings has its own nav beside the page; it stays put while a page loads.
+                <SettingsFrame current={settingsPage.id}>{screen}</SettingsFrame>
+              ) : (
+                screen
+              )}
+            </div>
           </PageChromeContext.Provider>
         </main>
       </div>

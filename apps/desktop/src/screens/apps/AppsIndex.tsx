@@ -1,5 +1,5 @@
 /**
- * Owner: apps. #/apps: the apps Ghost is connected to, then the catalog to add more from.
+ * Owner: apps. #/settings/apps: the apps Ghost is connected to, then the catalog to add more from.
  * Everything a connected app offers runs (ADR 0034); a change is announced. What to block or
  * have Ghost ask first is set on each app's page, or for everything on Permissions.
  */
@@ -63,7 +63,7 @@ export function AppsIndex() {
       title="Apps"
       description="What Ghost connects to. It uses everything an app offers and tells you what it changed. Block a tool or have Ghost ask first on the app’s page, or for everything on Permissions."
       actions={
-        <Button variant="secondary" href={hrefFor("/permissions")} leadingIcon={<ShieldCheck />}>
+        <Button variant="secondary" href={hrefFor("/settings/permissions")} leadingIcon={<ShieldCheck />}>
           Permissions
         </Button>
       }
@@ -160,7 +160,7 @@ function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof 
 
   return (
     <ListRow
-      href={hrefFor(`/apps/${encodeURIComponent(a.name)}`)}
+      href={hrefFor(`/settings/apps/${encodeURIComponent(a.name)}`)}
       leading={<AppIcon title={a.title} icon={a.icon} />}
       title={a.title}
       description={line}

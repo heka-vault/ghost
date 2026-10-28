@@ -5,12 +5,17 @@
  */
 import type { DevicesView, SettingsView } from "@ghost/client-ts";
 
-/** Page sections, in order. The id is also the `?section=` deep link. */
-export type SectionId = "setup" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
+/**
+ * Sections, in page order. The id is also the `?section=` deep link, which lands on the
+ * section's page. `apps` and `skills` were sections of the one long page; they are pages of
+ * their own now, and their old links land there.
+ */
+export type SectionId = "setup" | "about" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
-  secrets: "Secrets",
+  about: "About Ghost",
+  secrets: "Passwords",
   model: "Model",
   apps: "Apps",
   skills: "Skills",
@@ -21,6 +26,29 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   privacy: "Privacy",
   sounds: "Sounds",
 };
+
+/** The pages this screen draws (SETTINGS_SCREEN_PAGES in app/routes.tsx). */
+export type PageId = "general" | "model" | "passwords" | "sound" | "phone";
+
+/** The settings page each section is on (#/settings/<page>). */
+export const SECTION_PAGE: Record<SectionId, string> = {
+  setup: "general",
+  about: "general",
+  privacy: "general",
+  model: "model",
+  secrets: "passwords",
+  apps: "apps",
+  skills: "skills",
+  voice: "sound",
+  audio: "sound",
+  models: "sound",
+  sounds: "sound",
+  phone: "phone",
+};
+export const isSectionId = (v: string | null): v is SectionId => !!v && v in SECTION_PAGE;
+
+/** Ghost's voice, edited on Sound with the rest: it lives on Ghost's agent, not in settings.env. */
+export const GHOST_VOICE = "ghost:voice";
 
 export const sectionDomId = (id: SectionId) => `set-${id}`;
 
@@ -42,6 +70,7 @@ export const KEY_LABEL: Record<string, string> = {
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
   GHOST_JEV: "How Ghost hears your yes",
+  [GHOST_VOICE]: "Ghost’s voice",
   ANTHROPIC_AUTH_TOKEN: "Anthropic token",
   GITHUB_TOKEN: "GitHub token",
   HF_TOKEN: "Hugging Face token",
@@ -57,6 +86,7 @@ export const KEY_SECTION: Record<string, SectionId> = {
   GHOST_WAKE_PHRASES: "voice",
   GHOST_WAKE_FUZZY: "voice",
   GHOST_JEV: "voice",
+  [GHOST_VOICE]: "voice",
 };
 
 /** Keys the daemon applies without a restart (ghostd `apply_settings`). Everything else waits. */
@@ -142,7 +172,7 @@ export interface Draft {
 
 const isSet = (s: SettingsView | null, name: string) => !!s?.secrets.find((x) => x.name === name)?.set;
 
-export const JEV_NEEDS_KEY = "Jev needs a TypeSafe or OpenRouter key. Add one under Secrets, or choose Automatic.";
+export const JEV_NEEDS_KEY = "Jev needs a TypeSafe or OpenRouter key. Add one under Passwords, or choose Automatic.";
 
 /** Which Jev path is live (or would be after a restart) for these values and secrets. */
 export function jevNow(mode: string, s: SettingsView | null, draftSecrets: Record<string, string>): { label: string; ok: boolean } {
@@ -183,7 +213,7 @@ export function changedKeys(d: Draft, s: SettingsView | null): string[] {
   return out;
 }
 
-const PROPER = new Set(["Anthropic", "Hugging", "Jev"]);
+const PROPER = new Set(["Anthropic", "Hugging", "Jev", "Ghost’s"]);
 
 /** "Wake phrases, model and GitHub token" */
 export function listWords(keys: string[]): string {
@@ -198,7 +228,7 @@ export function listWords(keys: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** Lowercase the first letter unless the first word is a name (GitHub, Anthropic, Hugging Face). */
+/** Lowercase the first letter unless the first word is a name (GitHub, Anthropic, Hugging Face, Ghost’s). */
 export function lowerFirst(s: string) {
   const first = s.split(" ")[0];
   return /[A-Z]/.test(first.slice(1)) || PROPER.has(first) ? s : s.charAt(0).toLowerCase() + s.slice(1);

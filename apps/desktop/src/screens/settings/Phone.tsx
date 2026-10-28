@@ -1,6 +1,8 @@
 /**
- * Owner: settings. The Phone section (ADR 0016): whether the phone listener is on, the paired
- * phone, and pairing one. Pairing is a short focused task, so it is a Dialog: the address and a
+ * Owner: settings. The Phone page (ADR 0016): whether the phone listener is on, the paired
+ * phone, and pairing one. Ghost pairs with exactly one phone; pairing another replaces it, and
+ * the page and the dialog both say so. The page header carries the title and what it is for.
+ * Pairing is a short focused task, so it is a Dialog: the address and a
  * six-digit code, large and in mono, with the code's countdown and a New code action. The
  * dialog polls GET /phone while it is open (the daemon sends no event when a phone pairs), and
  * flips to “Paired with Pixel 9” the moment the phone spends the code.
@@ -14,7 +16,7 @@ import { Check, Smartphone } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Card, Dialog, Disclosure, ListRow, Notice, Section, Skeleton, Spinner, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
-import { SECTION_TITLE, sectionDomId, tildePath } from "./model";
+import { sectionDomId, tildePath } from "./model";
 import { CommandCopy, Row } from "./parts";
 
 const POLL_MS = 1500;
@@ -84,12 +86,7 @@ export function PhoneSection({ settingsPath, openOnLoad }: { settingsPath: strin
   const device = phone?.device ?? null;
 
   return (
-    <Section
-      id={sectionDomId("phone")}
-      title={SECTION_TITLE.phone}
-      description="Talk to Ghost from your phone while it’s on your home network. Nothing goes over the internet."
-      className="set-section"
-    >
+    <Section id={sectionDomId("phone")} className="set-section">
       {confirmDialog}
       {!phone && error && (
         <Notice tone="danger" title="Couldn’t check the phone" action={<Button size="sm" onClick={() => void load()}>Try again</Button>}>
@@ -130,16 +127,21 @@ export function PhoneSection({ settingsPath, openOnLoad }: { settingsPath: strin
                 </>
               }
               trailing={
-                <Button size="sm" variant="danger-ghost" loading={forgetting} disabled={!online} onClick={() => void forget()}>
-                  Forget this phone
-                </Button>
+                <span className="set-phone__actions">
+                  <Button size="sm" variant="ghost" disabled={!online} onClick={() => setPairOpen(true)}>
+                    Pair another phone
+                  </Button>
+                  <Button size="sm" variant="danger-ghost" loading={forgetting} disabled={!online} onClick={() => void forget()}>
+                    Forget this phone
+                  </Button>
+                </span>
               }
             />
           ) : (
             <ListRow
               leading={<Smartphone size={16} aria-hidden className="set-phone__icon" />}
               title="No phone paired"
-              description="Pair once. After that your phone can start a session from home, or from anywhere through your tunnel."
+              description="Pair once. After that your phone can start a session from home, or from anywhere through your tunnel. Ghost pairs with one phone."
               trailing={
                 <Button ref={pairButton} size="sm" variant="secondary" disabled={!online} onClick={() => setPairOpen(true)}>
                   Pair a phone
@@ -302,7 +304,11 @@ function PairDialog({ open, before, onClose, onPaired }: { open: boolean; before
       onClose={onClose}
       size="md"
       title={paired ? `Paired with ${paired}` : "Pair a phone"}
-      description={paired ? undefined : "On your phone, open Ghost and tap Enter the address. Then type both of these."}
+      description={
+        paired
+          ? undefined
+          : `On your phone, open Ghost and tap Enter the address. Then type both of these. ${before ? "Ghost pairs with one phone. Pairing another replaces this one." : "Ghost pairs with one phone."}`
+      }
       footer={footer}
       className="set-pair"
     >

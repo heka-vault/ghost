@@ -64,6 +64,7 @@
   --icon-lg: 20px;
   --sidebar-width: 244px;
   --sidebar-rail-width: 56px;    /* the sidebar collapsed to icons (Ctrl+B) */
+  --settings-nav-width: 216px;   /* the settings area's own nav, inside the page panel */
   --nav-item-height: 28px;       /* sidebar rows: Linear density */
   --nav-item-height-2line: 40px; /* sidebar line rows with a status line */
   --count-size: 18px;            /* count pills and badges-sm */

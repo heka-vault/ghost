@@ -8,8 +8,8 @@
  *
  * Rules apply the moment they are set (`PUT /permissions`); the TOML view edits the whole file
  * (`PUT /policy` with text) and saves through the dock, keeping the operator's comments.
- *   #/permissions                 the rules
- *   ?policy=toml#/permissions     the file (works anywhere)
+ *   #/settings/permissions                 the rules
+ *   ?policy=toml#/settings/permissions     the file (works anywhere)
  *   mock only: ?policy=dirty|invalid|load-error
  */
 import { ApiError, type AppView, type PermissionsView, type PolicyView, type SourceInfo } from "@ghost/client-ts";
@@ -18,7 +18,7 @@ import { Code, Hand, Megaphone, ShieldOff, SlidersHorizontal, X } from "lucide-r
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
-import { Link, navigate, usePath } from "../../app/router";
+import { Link } from "../../app/router";
 import { useDesign } from "../../design/context";
 import {
   Badge,
@@ -69,12 +69,7 @@ export default function PermissionsScreen(_: RouteProps) {
   const toast = useToast();
   const { confirm, dialog } = useConfirm();
   const design = useDesign();
-  const path = usePath();
   const [designState] = useState(() => readDesignState(!!design));
-
-  useEffect(() => {
-    if (path === "/policy") navigate("/permissions", { replace: true });
-  }, [path]);
 
   const [policy, setPolicy] = useState<PolicyView | null>(null);
   const [perms, setPerms] = useState<PermissionsView | null>(null);
@@ -304,7 +299,7 @@ export default function PermissionsScreen(_: RouteProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showLine, view]);
 
-  useLeaveGuard(dirty && !saving, "/permissions", () =>
+  useLeaveGuard(dirty && !saving, "/settings/permissions", () =>
     confirm({ title: "Leave without saving?", description: "Your edits to the policy file aren’t saved. Leaving discards them.", confirmLabel: "Discard changes", tone: "danger" }),
   );
 
@@ -379,7 +374,7 @@ export default function PermissionsScreen(_: RouteProps) {
       <OwnOperations sources={sources} />
 
       <p className="policy-foot t-small t-3">
-        These apply to Ghost and every agent alike. Each app’s tools, with these rules applied, are on its page under <Link to="/apps">Apps</Link>.
+        These apply to Ghost and every agent alike. Each app’s tools, with these rules applied, are on its page under <Link to="/settings/apps">Apps</Link>.
       </p>
     </>
   );
@@ -431,7 +426,7 @@ export default function PermissionsScreen(_: RouteProps) {
     <Page
       width="default"
       title="Permissions"
-      description="Ghost uses every app you connect and tells you what it changed. Here you say what it may not do, and what it asks you first. Every change is logged; to reverse one, ask Ghost to change it back."
+      description="Everything runs: Ghost uses every app you connect and tells you what it changed. This is where you block, or have Ghost ask you first about, anything you want handled differently. Every change is in the audit log; to reverse one, ask Ghost to change it back."
       actions={
         <SegmentedControl<View>
           aria-label="Edit as"

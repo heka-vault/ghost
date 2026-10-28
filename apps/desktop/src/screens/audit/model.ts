@@ -371,7 +371,7 @@ export function matches(hay: string, query: string): boolean {
 
 /**
  * Initial filters from the query string (before the hash), so every state has a URL:
- * `?mock=busy&status=attention&q=safari#/audit`. Read once on mount; never written back,
+ * `?mock=busy&status=attention&q=safari#/settings/audit`. Read once on mount; never written back,
  * because the query survives navigation to other routes.
  */
 export function initialParams(): { status: string; source: string; q: string; open: string | null; fail: boolean; failMore: boolean } {

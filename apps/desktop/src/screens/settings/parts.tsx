@@ -1,5 +1,5 @@
-/** Owner: settings. Page-local pieces: chips input, secret row, save bar, section rail, setup list. */
-import { Check, CircleCheck, Copy, KeyRound, RotateCw, X } from "lucide-react";
+/** Owner: settings. Page-local pieces: chips input, secret row, save bar, setup list. */
+import { Check, CircleCheck, Copy, KeyRound, X } from "lucide-react";
 import { type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, IconButton, Input, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
@@ -453,71 +453,6 @@ export function SaveBar({ state, onSave, onDiscard, onDismiss, onFix, copyRef, s
   );
 }
 
-/* ---------------------------------------------------------------------- PageNav */
-export interface NavItem {
-  id: SectionId;
-  label: string;
-  /** A small mark after the label: unsaved changes, or a restart still owed. */
-  mark?: "dirty" | "restart" | "error";
-  prototype?: boolean;
-}
-
-const MARK_LABEL = { dirty: "unsaved changes", restart: "restart to apply", error: "needs a fix" };
-
-/**
- * The "on this page" rail to the right of the column (Neon). Tracks the section in view. One
- * Tab stop (the current section, like Tabs and SegmentedControl): ArrowUp/Down and Home/End
- * move between sections, Enter or Space goes there.
- */
-export function PageNav({ items, active, onGo }: { items: NavItem[]; active: SectionId | null; onGo: (id: SectionId) => void }) {
-  const list = useRef<HTMLUListElement>(null);
-  const stop = items.some((it) => it.id === active) ? active : items[0]?.id;
-  const buttons = () => Array.from(list.current?.querySelectorAll<HTMLButtonElement>(".set-nav__item") ?? []);
-  const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    const all = buttons();
-    const to =
-      e.key === "ArrowDown" ? Math.min(i + 1, all.length - 1)
-      : e.key === "ArrowUp" ? Math.max(i - 1, 0)
-      : e.key === "Home" ? 0
-      : e.key === "End" ? all.length - 1
-      : -1;
-    if (to < 0) return;
-    e.preventDefault();
-    all[to]?.focus();
-  };
-  return (
-    <nav className="set-nav" aria-label="Settings sections">
-      <ul ref={list} className="set-nav__list">
-        {items.map((it, i) => (
-          <li key={it.id} className={cx(it.prototype && !items[i - 1]?.prototype && "set-nav__group")}>
-            {it.prototype && !items[i - 1]?.prototype && <span className="set-nav__heading">Prototype</span>}
-            <button
-              type="button"
-              className={cx("set-nav__item", active === it.id && "is-current", it.prototype && "is-prototype")}
-              aria-current={active === it.id ? "location" : undefined}
-              tabIndex={it.id === stop ? 0 : -1}
-              onKeyDown={(e) => onKey(e, i)}
-              onClick={() => onGo(it.id)}
-            >
-              <span className="set-nav__label">{it.label}</span>
-              {it.mark === "restart" ? (
-                <span className="set-nav__restart">
-                  <RotateCw aria-hidden />
-                  <span className="sr-only">, {MARK_LABEL.restart}</span>
-                </span>
-              ) : it.mark ? (
-                <span className={cx("set-nav__mark", `is-${it.mark}`)}>
-                  <span className="sr-only">, {MARK_LABEL[it.mark]}</span>
-                </span>
-              ) : null}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}
-
 /* ----------------------------------------------------------------- SetupSection */
 export interface SetupStep {
   id: string;
@@ -528,7 +463,7 @@ export interface SetupStep {
   target: SectionId;
 }
 
-/** First run: the three things between a fresh install and “Hey Ghost”. The page's focal point. */
+/** First run: the things between a fresh install and “Hey Ghost”, leading General. Each step goes to its page. */
 export function SetupSection({ steps, onGo }: { steps: SetupStep[]; onGo: (id: SectionId) => void }) {
   const done = steps.filter((s) => s.done).length;
   return (

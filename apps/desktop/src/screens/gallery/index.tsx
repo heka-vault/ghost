@@ -758,7 +758,7 @@ function Specimens({ theme }: { theme: string }) {
         </Spec>
         <Spec label="Link form">
           <Button href="https://github.com/ghost-mock/app/issues/151" target="_blank" trailingIcon={<ArrowUpRight />}>Open on GitHub</Button>
-          <Button variant="ghost" href="#/audit">See the audit log</Button>
+          <Button variant="ghost" href="#/settings/audit">See the audit log</Button>
           <IconButton href="https://github.com/ghost-mock/app" target="_blank" label="Open the repository" icon={<ArrowUpRight />} />
         </Spec>
         <Spec label="Live">
@@ -1139,7 +1139,7 @@ function Specimens({ theme }: { theme: string }) {
             <p className="t-2">Reconnecting: the same words as the sidebar card, the dot still under the moving banner, writes off.</p>
           </div>
           <p className="t-small t-3">
-            Automatic for every Page with a header. The actions are the header’s own, moved into the bar, not a copy: one instance, one tab stop. Scroll <a href={scenarioHref("busy", "/audit")}>the audit log in Busy</a> to see it live.
+            Automatic for every Page with a header. The actions are the header’s own, moved into the bar, not a copy: one instance, one tab stop. Scroll <a href={scenarioHref("busy", "/settings/audit")}>the audit log in Busy</a> to see it live.
           </p>
         </Spec>
       </Block>

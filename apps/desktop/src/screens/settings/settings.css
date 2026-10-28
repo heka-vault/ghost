@@ -2,8 +2,6 @@
 
 /* Page-local sizes derived from tokens until the foundation names them (listed in shared_requests). */
 .set-page {
-  --set-rail-width: calc(var(--sidebar-width) - var(--space-3)); /* 232px: "Microphone and speakers" plus its restart mark */
-  --set-mark-size: var(--space-1_5); /* unsaved / error dot in the rail (6px) */
   --set-ring-width: var(--space-px); /* hollow step ring */
   --set-chip-input-min: calc(var(--space-20) + var(--space-10)); /* 120px before the chip input wraps */
   --set-secret-action: calc(var(--space-20) + var(--space-3));    /* 92px: Replace…, Add… and Cancel share one width */
@@ -20,8 +18,8 @@
 .set-layout :where(input, select, textarea, button, a, [tabindex]) {
   scroll-margin-top: calc(var(--set-sticky-offset) - var(--page-bar-height));
 }
-.set-form { margin-top: var(--space-10); }
-.set-form + .set-section { margin-top: var(--space-10); }
+/* Sections, a form of them, a notice: 40px apart, as Section + Section is. */
+.set-layout > * + * { margin-top: var(--space-10); }
 /* Rows inside a card: one rhythm for fields, secrets and custom blocks. */
 .set-row { padding: var(--space-4); }
 
@@ -48,43 +46,6 @@
 /* A section title with its status right after it: one line, the badge level with the name. */
 .set-title-tag { display: inline-flex; align-items: center; gap: var(--space-2_5); }
 .set-title-tag .set-count { font-weight: var(--weight-regular); }
-
-/* ------------------------------------------------------- on this page rail */
-.set-nav {
-  position: absolute; top: 0; bottom: 0;
-  left: calc(100% + var(--space-12));
-  width: var(--set-rail-width);
-}
-.set-nav__list {
-  position: sticky; top: calc(var(--set-sticky-offset) + var(--space-6));
-  display: flex; flex-direction: column;
-  margin: 0; padding: 0; list-style: none;
-  border-left: 1px solid var(--border-subtle);
-}
-.set-nav__group { margin-top: var(--space-3); }
-.set-nav__heading {
-  display: block; padding: var(--space-1) var(--space-3);
-  font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium);
-  text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-3);
-}
-.set-nav__item {
-  position: relative; display: flex; align-items: center; gap: var(--space-2);
-  width: 100%; height: var(--nav-item-height); margin-left: -1px; padding: 0 var(--space-3);
-  border: 0; border-left: 2px solid transparent; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: none; font: inherit; font-size: var(--text-md); text-align: left; color: var(--text-2);
-  cursor: pointer;
-  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
-}
-.set-nav__item:hover { color: var(--text-1); background: var(--bg-hover); }
-.set-nav__item.is-current { color: var(--text-1); font-weight: var(--weight-medium); border-left-color: var(--text-1); }
-.set-nav__item:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
-.set-nav__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.set-nav__mark { flex: none; width: var(--set-mark-size); height: var(--set-mark-size); border-radius: var(--radius-full); }
-.set-nav__mark.is-dirty { background: var(--text-2); }
-.set-nav__mark.is-error { background: var(--danger); }
-.set-nav__restart { display: inline-flex; flex: none; color: var(--warn); }
-.set-nav__restart svg { width: var(--icon-xs); height: var(--icon-xs); }
-@media (max-width: 1199px) { .set-nav { display: none; } }
 
 /* ------------------------------------------------------------------ chips */
 .set-chips {
@@ -157,13 +118,6 @@
 .set-optional-keys__list .set-secret + .set-secret { border-top: 1px solid var(--border-subtle); }
 .set-optional-keys__list .set-secret:last-child { padding-bottom: var(--space-1); }
 
-/* --------------------------------------------------------------- github */
-.set-github { margin: 0; max-width: 64ch; color: var(--text-2); }
-.set-github__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
-
-/* ---------------------------------------------------------------- lines */
-.set-practice__label { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); }
-
 /* ---------------------------------------------------------------- voice */
 .set-jev { width: 100%; }
 .set-promise-line { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
@@ -208,6 +162,7 @@
 /* ------------------------------------------------------------------ phone */
 .set-phone__icon { color: var(--text-2); flex: none; }
 .set-phone__live { color: var(--ok); }
+.set-phone__actions { display: inline-flex; align-items: center; gap: var(--space-3); }
 .set-phone-off { display: flex; flex-direction: column; gap: var(--space-2); }
 .set-phone-off__commands { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); margin: var(--space-1) 0; }
 .set-phone-off__commands .set-command code { white-space: normal; overflow-wrap: anywhere; }

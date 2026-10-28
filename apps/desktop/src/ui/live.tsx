@@ -49,7 +49,7 @@ export function useLive(): LiveState {
     online: connected,
     loadingModels: connected && !!status && (!status.models_ready || status.phase === "starting"),
     setupNeeded: false,
-    setupHref: "#/settings",
+    setupHref: "#/settings/general",
     claimSetupPrompt: () => {},
   };
 }

@@ -323,10 +323,10 @@ export function GitHubStep({ w }: { w: Wizard }) {
             />
           </Card>
           <div className="onb-links">
-            <Button size="sm" variant="secondary" href={hrefFor("/apps")} trailingIcon={<ArrowRight />}>
+            <Button size="sm" variant="secondary" href={hrefFor("/settings/apps")} trailingIcon={<ArrowRight />}>
               {connected ? "Open Apps" : "Connect GitHub in Apps"}
             </Button>
-            <Button size="sm" variant="ghost" href={hrefFor("/permissions")}>
+            <Button size="sm" variant="ghost" href={hrefFor("/settings/permissions")}>
               Open Permissions
             </Button>
           </div>
@@ -380,7 +380,7 @@ export function DoneStep({ w }: { w: Wizard }) {
               leading={<ShieldCheck size={16} aria-hidden />}
               title="Set permissions"
               description="Ghost uses its apps and tells you what it changed. Block a tool, or have it ask first."
-              href={hrefFor("/permissions")}
+              href={hrefFor("/settings/permissions")}
               chevron
             />
             <ListRow

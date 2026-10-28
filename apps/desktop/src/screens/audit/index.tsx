@@ -280,7 +280,7 @@ export default function AuditScreen(_: RouteProps) {
               title="No changes yet"
               description={"When Ghost changes something, or asks\u00a0to, it shows up here with every step it took."}
               actions={
-                <Button variant="secondary" size="sm" href={hrefFor("/permissions")}>
+                <Button variant="secondary" size="sm" href={hrefFor("/settings/permissions")}>
                   See permissions
                 </Button>
               }
