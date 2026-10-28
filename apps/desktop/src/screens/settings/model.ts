@@ -3,7 +3,7 @@
  * lives on the page, whether the daemon picks it up live, and how to check it. Pure data and
  * functions; no React.
  */
-import type { DevicesView, SettingsView } from "@ghost/client-ts";
+import type { DevicesView, ModelConnectionView, SettingsView } from "@ghost/client-ts";
 
 /**
  * Sections, in page order. The id is also the `?section=` deep link, which lands on the
@@ -54,8 +54,13 @@ export const sectionDomId = (id: SectionId) => `set-${id}`;
 
 /** Every non-secret key the screen edits. Order matters only for the dirty summary. */
 export const VALUE_KEYS = [
-  "ANTHROPIC_BASE_URL",
+  "GHOST_LLM_PROVIDER",
   "GHOST_LLM_MODEL",
+  "GHOST_LLM_PROTOCOL",
+  "GHOST_LLM_BASE_URL",
+  "GHOST_LLM_PASSWORD",
+  "GHOST_LLM_HEADERS",
+  "GHOST_LLM_TIMEOUT_SECS",
   "GHOST_INPUT_DEVICE",
   "GHOST_WAKE_PHRASES",
   "GHOST_WAKE_FUZZY",
@@ -63,9 +68,28 @@ export const VALUE_KEYS = [
 ] as const;
 export type ValueKey = (typeof VALUE_KEYS)[number];
 
+/** The model connection's settings (ADR 0037), saved with the rest and live from the next session. */
+export const CONNECTION_KEYS = [
+  "GHOST_LLM_PROVIDER",
+  "GHOST_LLM_MODEL",
+  "GHOST_LLM_PROTOCOL",
+  "GHOST_LLM_BASE_URL",
+  "GHOST_LLM_PASSWORD",
+  "GHOST_LLM_HEADERS",
+  "GHOST_LLM_TIMEOUT_SECS",
+] as const;
+
 export const KEY_LABEL: Record<string, string> = {
-  ANTHROPIC_BASE_URL: "Model endpoint",
+  GHOST_LLM_PROVIDER: "Model provider",
   GHOST_LLM_MODEL: "Model",
+  GHOST_LLM_PROTOCOL: "Model protocol",
+  GHOST_LLM_BASE_URL: "Model address",
+  GHOST_LLM_PASSWORD: "Model password name",
+  GHOST_LLM_HEADERS: "Extra headers",
+  GHOST_LLM_TIMEOUT_SECS: "Model timeout",
+  ANTHROPIC_API_KEY: "Anthropic key",
+  OPENAI_API_KEY: "OpenAI key",
+  LLM_API_KEY: "Model key",
   GHOST_INPUT_DEVICE: "Microphone",
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
@@ -81,8 +105,7 @@ export const KEY_LABEL: Record<string, string> = {
 };
 
 export const KEY_SECTION: Record<string, SectionId> = {
-  ANTHROPIC_BASE_URL: "model",
-  GHOST_LLM_MODEL: "model",
+  ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, "model" as SectionId])),
   GHOST_INPUT_DEVICE: "audio",
   GHOST_WAKE_PHRASES: "voice",
   GHOST_WAKE_FUZZY: "voice",
@@ -91,17 +114,20 @@ export const KEY_SECTION: Record<string, SectionId> = {
 };
 
 /** Keys the daemon applies without a restart (ghostd `apply_settings`). Everything else waits. */
-export const LIVE_KEYS = new Set(["GHOST_WAKE_PHRASES", "GHOST_WAKE_FUZZY"]);
+export const LIVE_KEYS = new Set<string>(["GHOST_WAKE_PHRASES", "GHOST_WAKE_FUZZY", ...CONNECTION_KEYS]);
 
 /** Ghost's own passwords, in the order the page shows them: what Ghost needs first, then the optional ones. */
 export const SECRET_ORDER = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "HF_TOKEN", "ELEVENLABS_API_KEY"];
 export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
-  ANTHROPIC_AUTH_TOKEN: { help: "Lets Ghost think and talk. Not needed if your own endpoint takes no key.", placeholder: "sk-ant-…" },
+  ANTHROPIC_AUTH_TOKEN: { help: "For CLIProxy or another Anthropic-compatible address, when it takes one.", placeholder: "sk-ant-…" },
+  ANTHROPIC_API_KEY: { help: "Lets Ghost think and talk through Anthropic.", optional: true, placeholder: "sk-ant-api…" },
+  OPENAI_API_KEY: { help: "Lets Ghost think and talk through OpenAI.", optional: true, placeholder: "sk-…" },
+  LLM_API_KEY: { help: "The password for a model address of your own.", optional: true, placeholder: "Paste the value" },
   GITHUB_TOKEN: { help: "For a GitHub app you added by hand whose config names ${GITHUB_TOKEN}. Apps you connect under Apps keep their own password.", optional: true, placeholder: "github_pat_…" },
   TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev passwords are set.", optional: true, placeholder: "ts_…" },
-  OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when the endpoint setting is openrouter.", optional: true, placeholder: "sk-or-…" },
+  OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when it goes through OpenRouter. Signing in under Model sets it.", optional: true, placeholder: "sk-or-…" },
   HF_TOKEN: { help: "Speeds up the first download of the voice models.", optional: true, placeholder: "hf_…" },
   ELEVENLABS_API_KEY: { help: "Ghost speaks with an ElevenLabs voice when the voice engine is elevenlabs. Only what Ghost says is sent.", optional: true, placeholder: "sk_…" },
 };
@@ -120,7 +146,6 @@ export function secretLabel(name: string): string {
 
 export const APP_SECRET_INFO = { help: "Set when you connected the app. Replace it if the app asks for a new one.", placeholder: "Paste the new password" };
 
-export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const DEFAULT_FUZZY = 0.9;
 
 export const truthy = (v: string | undefined) => ["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase());
@@ -189,8 +214,7 @@ export function jevNow(mode: string, s: SettingsView | null, draftSecrets: Recor
 /** Field errors for the current draft, by key. Empty when it can be saved. */
 export function validate(d: Draft, s: SettingsView | null): Record<string, string> {
   const e: Record<string, string> = {};
-  const url = (d.values.ANTHROPIC_BASE_URL ?? "").trim();
-  if (url && !/^https?:\/\/\S+$/.test(url)) e.ANTHROPIC_BASE_URL = "Use a full URL, like https://api.anthropic.com or http://localhost:8080.";
+  Object.assign(e, validateConnection(d.values));
   if ((d.values.GHOST_JEV || "auto") === "on" && !jevNow("on", s, d.secrets).ok) e.GHOST_JEV = jevNow("on", s, d.secrets).label;
   if (d.values.GHOST_WAKE_PHRASES != null && d.values.GHOST_WAKE_PHRASES !== "" && splitList(d.values.GHOST_WAKE_PHRASES).length === 0)
     e.GHOST_WAKE_PHRASES = "Add at least one phrase.";
@@ -235,8 +259,46 @@ export function lowerFirst(s: string) {
   return /[A-Z]/.test(first.slice(1)) || PROPER.has(first) ? s : s.charAt(0).toLowerCase() + s.slice(1);
 }
 
-/** Ghost can answer: an Anthropic token or a model endpoint. Same test as the shell's banner. */
-export const modelReady = (s: SettingsView | null, v: Values) => isSet(s, "ANTHROPIC_AUTH_TOKEN") || !!(v.ANTHROPIC_BASE_URL ?? "").trim();
+/** Ghost can answer: the model connection has nothing missing (`GET /model`). Same test as the shell's banner. */
+export const modelReady = (conn: ModelConnectionView | null) => !!conn?.ready;
+
+/* ------------------------------------------------------------- the model connection */
+const HEADER_NAME = /^[A-Za-z0-9!#%&'*+.^_`|~-]+$/;
+
+/** The connection's own field errors, as ghost_core.connection checks them. */
+export function validateConnection(v: Values): Record<string, string> {
+  const e: Record<string, string> = {};
+  const base = (v.GHOST_LLM_BASE_URL ?? "").trim();
+  if (base && !/^https?:\/\/\S+$/.test(base)) e.GHOST_LLM_BASE_URL = "Use a full URL, like http://localhost:8080/v1.";
+  else if (v.GHOST_LLM_PROVIDER === "custom" && !base) e.GHOST_LLM_BASE_URL = "Give the address your server answers on.";
+  const t = (v.GHOST_LLM_TIMEOUT_SECS ?? "").trim();
+  if (t && !(Number(t) > 0)) e.GHOST_LLM_TIMEOUT_SECS = "Use a number of seconds, like 60.";
+  const pw = (v.GHOST_LLM_PASSWORD ?? "").trim();
+  if (pw && !/^[A-Z][A-Z0-9_]{1,63}$/.test(pw)) e.GHOST_LLM_PASSWORD = "Use capitals, digits and underscores, like MY_MODEL_KEY.";
+  for (const part of (v.GHOST_LLM_HEADERS ?? "").split(";")) {
+    if (!part.trim()) continue;
+    const i = part.indexOf(":");
+    const name = i < 0 ? "" : part.slice(0, i).trim();
+    if (i < 0 || !HEADER_NAME.test(name)) {
+      e.GHOST_LLM_HEADERS = "Write each as Name: value, separated by semicolons.";
+      break;
+    }
+    if (/["\\$\n\r]/.test(part.slice(i + 1))) {
+      e.GHOST_LLM_HEADERS = `${name}’s value can’t hold quotes, backslashes or $. Keep keys in the password.`;
+      break;
+    }
+  }
+  return e;
+}
+
+/** The five ways in, as the page offers them. OpenAI, Ollama and LM Studio share one. */
+export type ProviderChoice = "anthropic" | "openrouter" | "cliproxy" | "openai-compatible" | "custom";
+export const OPENAI_COMPATIBLE = ["openai", "ollama", "lmstudio"] as const;
+export const choiceOf = (provider: string): ProviderChoice =>
+  (OPENAI_COMPATIBLE as readonly string[]).includes(provider) ? "openai-compatible" : (provider as ProviderChoice);
+
+/** "412 ms", "1.24 s": a time to first token, the way the perf report reads. */
+export const msWords = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`);
 export const echoReady = (d: DevicesView | null) => !!d?.echo_cancel_active;
 export { isSet };
 

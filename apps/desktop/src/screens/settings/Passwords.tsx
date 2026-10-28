@@ -28,7 +28,10 @@ export function passwordTitle(p: Pick<PasswordInfo, "name" | "used_by" | "ghost"
   return isAppSecret(p.name) ? secretLabel(p.name) : p.name;
 }
 const TITLES: Record<string, string> = {
-  ANTHROPIC_AUTH_TOKEN: "Anthropic",
+  ANTHROPIC_AUTH_TOKEN: "CLIProxy",
+  ANTHROPIC_API_KEY: "Anthropic",
+  OPENAI_API_KEY: "OpenAI",
+  LLM_API_KEY: "Your model address",
   OPENROUTER_API_KEY: "OpenRouter",
   TYPESAFE_API_KEY: "TypeSafe",
   ELEVENLABS_API_KEY: "ElevenLabs",
@@ -248,7 +251,7 @@ function importWords(r: PasswordImportResult): string {
 
 /* ------------------------------------------------------------------------------ a row */
 
-function PasswordRow({
+export function PasswordRow({
   p,
   open,
   onOpen,

@@ -52,7 +52,10 @@ const SECRET_NAMES = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "HF_TOKEN", "OPENR
 /** What Ghost itself reads each of its own passwords for (ghost_core.passwords.GHOST_USES). */
 export const GHOST_USES: Record<string, string> = {
   ANTHROPIC_AUTH_TOKEN: "The model connection",
-  OPENROUTER_API_KEY: "Jev, and the model when the endpoint is OpenRouter",
+  ANTHROPIC_API_KEY: "The model connection",
+  OPENAI_API_KEY: "The model connection",
+  LLM_API_KEY: "The model connection",
+  OPENROUTER_API_KEY: "Jev, and the model when it goes through OpenRouter",
   TYPESAFE_API_KEY: "Jev",
   ELEVENLABS_API_KEY: "The ElevenLabs voice",
   HF_TOKEN: "Voice model downloads",
@@ -122,15 +125,14 @@ export default function settings(s: Scenario): SettingsFixture {
   const values: Record<string, string> = configured
     ? {
         GHOST_INPUT_DEVICE: "ghost.mic",
-        GHOST_WAKE_PHRASES: "hey ghost,okay ghost",
+        GHOST_WAKE_PHRASES: s.data === "busy" ? "hey ghost,okay ghost,ghost wake up" : "hey ghost,okay ghost",
         GHOST_WAKE_FUZZY: "0.8",
         GHOST_JEV: "auto",
+        // The model connection (ADR 0036): busy names its provider, CLIProxy on the LAN; normal
+        // still has the older setting, OpenRouter by GHOST_LLM_ENDPOINT, as the operator did.
         ...(s.data === "busy"
-          ? {
-              GHOST_LLM_MODEL: "claude-sonnet-5-5",
-              GHOST_WAKE_PHRASES: "hey ghost,okay ghost,ghost wake up",
-            }
-          : {}),
+          ? { GHOST_LLM_PROVIDER: "cliproxy", GHOST_LLM_BASE_URL: "http://192.168.1.5:8317", GHOST_LLM_MODEL: "claude-sonnet-5-5" }
+          : { GHOST_LLM_ENDPOINT: "openrouter" }),
       }
     : // First run: nothing set yet, the default microphone.
       {};

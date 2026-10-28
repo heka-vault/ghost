@@ -31,7 +31,7 @@
  * hold a state for review (`pairing` opens the Pair a phone dialog on Phone; the phone's own
  * states are `?phone=off|unpaired|paired|pairs|expires`, see Phone.tsx).
  */
-import type { DevicesView, ModelsView, SettingsView } from "@ghost/client-ts";
+import type { DevicesView, ModelConnectionView, ModelsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
 import {
@@ -80,7 +80,6 @@ import {
   useToast,
 } from "../../ui";
 import {
-  DEFAULT_MODEL,
   type Draft,
   GHOST_VOICE,
   JEV_NEEDS_KEY,
@@ -120,6 +119,7 @@ import {
   valueChanged,
 } from "./model";
 import { GhostVoice } from "./GhostVoice";
+import { ModelSection } from "./ModelSection";
 import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PasswordsSection } from "./Passwords";
 import { PhoneSection } from "./Phone";
@@ -177,6 +177,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const [devices, setDevices] = useState<DevicesView | null>(null);
   const [devicesError, setDevicesError] = useState<string | null>(null);
   const [models, setModels] = useState<ModelsView | null>(null);
+  // The model connection as Ghost resolves it (ADR 0037): provider, readiness, the providers offered.
+  const [conn, setConn] = useState<ModelConnectionView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({ values: {}, secrets: {} });
   const [restored, setRestored] = useState(false);
@@ -226,6 +228,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         },
       ),
       client.models().catch(() => null),
+      client.modelConnection().then(setConn, () => null),
     ]);
     // echoidle: installed but not running yet, the state Reinstall repairs.
     if (dv) setDevices(forced === "echoidle" ? { ...dv, echo_cancel_active: false, echo_cancel_source_present: true } : dv);
@@ -338,9 +341,9 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       });
       if (forced === "error") setSaveError("Ghost couldn’t write ~/.config/ghost/settings.env: permission denied. Check who owns the file, then save again.");
     } else if (forced === "invalid") {
-      setDraft({ values: { ...v, ANTHROPIC_BASE_URL: "api.example.com" }, secrets: {} });
+      setDraft({ values: { ...v, GHOST_LLM_PROVIDER: "custom", GHOST_LLM_BASE_URL: "api.example.com" }, secrets: {} });
     } else if (forced === "restart") {
-      setRestartKeys(["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]);
+      setRestartKeys(["GHOST_INPUT_DEVICE", "OPENROUTER_API_KEY"]);
       setLastApplied(["GHOST_WAKE_PHRASES"]);
       setLiveMarks(["GHOST_WAKE_PHRASES"]);
     }
@@ -485,6 +488,10 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     setSaveError(null);
     setDraft((d) => ({ ...d, values: { ...d.values, [k]: v } }));
   };
+  const setValues = (patch: Record<string, string>) => {
+    setSaveError(null);
+    setDraft((d) => ({ ...d, values: { ...d.values, ...patch } }));
+  };
   const discard = () => {
     if (!s) return;
     const back = returnTarget();
@@ -549,6 +556,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
           })
         : null;
       if (r) {
+        void client.modelConnection().then(setConn, () => null);
         setS(r.settings);
         setDraft({ values: { ...r.settings.values }, secrets: {} });
         storeDraft(null);
@@ -698,9 +706,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   /* ---------------------------------------------------------------- derived */
   const v = draft.values;
   const mock = !!design;
-  const ready = !!s && modelReady(s, v);
   // Until both basics are done, the page leads with them.
-  const showSetup = !!s && !!devices && !(modelReady(s, s.values) && echoReady(devices));
+  const showSetup = !!s && !!devices && !!conn && !(modelReady(conn) && echoReady(devices));
   const restartSet = new Set(restartKeys);
 
   const secretNamesAll = [...SECRET_ORDER, ...(s?.secrets.map((x) => x.name) ?? [])];
@@ -730,10 +737,10 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         {
           id: "model",
           title: "Give Ghost a model",
-          done: modelReady(s, s.values),
-          doneText: isSet(s, "ANTHROPIC_AUTH_TOKEN") ? "Anthropic password saved." : "Using your own model endpoint.",
-          todoText: "Add the Anthropic password, or point Ghost at your own endpoint.",
-          target: isSet(s, "ANTHROPIC_AUTH_TOKEN") || !s.values.ANTHROPIC_BASE_URL ? "secrets" : "model",
+          done: modelReady(conn),
+          doneText: conn ? `${conn.wire_model}, through ${conn.providers.find((p) => p.id === conn.provider)?.title ?? conn.provider}.` : "",
+          todoText: "Pick a provider and give it its password, or sign in to OpenRouter.",
+          target: "model",
         },
         {
           id: "echo",
@@ -816,13 +823,14 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       .settings()
       .then((sv) => setS(sv))
       .catch(() => {});
+    client.modelConnection().then(setConn, () => {});
   };
 
   const description: ReactNode =
     page === "general" ? (
       "What Ghost is running, and where it keeps its settings."
     ) : page === "model" ? (
-      "Where Ghost sends a session to think. Leave both empty to use Anthropic’s defaults."
+      "Where Ghost thinks: every session, its tool calls and its summaries go to this model."
     ) : page === "passwords" ? (
       "Every API key, token and account password Ghost holds, in its own vault, locked with your keyring."
     ) : page === "sound" ? (
@@ -897,32 +905,27 @@ export default function SettingsScreen({ params: route }: RouteProps) {
           </Section>
         )}
 
-        {s && (page === "model" || page === "sound") && (
+        {s && page === "model" && (
+          <ModelSection
+            s={s}
+            conn={conn}
+            values={v}
+            online={online}
+            mock={mock}
+            setValues={setValues}
+            help={help}
+            err={err}
+            fieldId={fieldId}
+            waiting={restartSet}
+            onPassword={(restart) => {
+              if (restart.length) passwordRestart(restart);
+              passwordChanged();
+            }}
+          />
+        )}
+
+        {s && page === "sound" && (
           <form onSubmit={submit} autoComplete="off" className="set-form">
-            {page === "model" && (
-              <Section id={sectionDomId("model")} className="set-section">
-                <Card list>
-                  <Row>
-                    <Field layout="inline" id={fieldId("ANTHROPIC_BASE_URL")} label="Model endpoint" detail="ANTHROPIC_BASE_URL" help={help("ANTHROPIC_BASE_URL", "Any Anthropic-compatible URL.")} error={err("ANTHROPIC_BASE_URL")}>
-                      <Input value={v.ANTHROPIC_BASE_URL ?? ""} placeholder="https://api.anthropic.com" inputMode="url" spellCheck={false} onChange={(e) => setValue("ANTHROPIC_BASE_URL", e.target.value)} />
-                    </Field>
-                  </Row>
-                  <Row>
-                    <Field layout="inline" id={fieldId("GHOST_LLM_MODEL")} label="Model" detail="GHOST_LLM_MODEL" help={help("GHOST_LLM_MODEL", `Empty means ${DEFAULT_MODEL}.`)}>
-                      <Input mono value={v.GHOST_LLM_MODEL ?? ""} placeholder={DEFAULT_MODEL} spellCheck={false} onChange={(e) => setValue("GHOST_LLM_MODEL", e.target.value)} />
-                    </Field>
-                  </Row>
-                </Card>
-                {!ready && (
-                  <p className="set-note">
-                    Ghost can’t answer until it has the Anthropic password or an endpoint.{" "}
-                    <button type="button" className="set-link" onClick={() => focusKey("ANTHROPIC_AUTH_TOKEN")}>
-                      Add it
-                    </button>
-                  </p>
-                )}
-              </Section>
-            )}
             {page === "sound" && (
               <>
                 {/* -------------------------------------------------- Voice and wake */}

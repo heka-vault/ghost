@@ -103,7 +103,7 @@
 .set-pw { display: flex; flex-direction: column; gap: var(--space-4); }
 /* Replace… (one width with Add… and Cancel), then the row's More, or its empty slot. */
 .set-pw__actions { display: grid; grid-template-columns: var(--set-secret-action) var(--control-sm); align-items: center; gap: var(--space-1); }
-.set-pw .set-secret__state { grid-template-columns: auto auto; }
+.set-pw .set-secret__state, .set-model-key .set-secret__state { grid-template-columns: auto auto; }
 .set-pw__new .set-secret__edit { flex-wrap: wrap; }
 .set-pw__foot { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 .set-error { margin-top: var(--space-1); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--danger); }
@@ -205,3 +205,8 @@
 }
 .set-pair__done .set-help { margin: var(--space-1_5) 0 0; }
 
+
+/* ------------------------------------------------------------------ model (ADR 0037) */
+.set-model-legacy { margin: 0 0 var(--space-3); }
+.set-model-test { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.set-model-test__main { min-width: 0; display: grid; gap: var(--space-0_5); }

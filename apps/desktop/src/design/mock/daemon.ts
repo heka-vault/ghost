@@ -14,6 +14,7 @@ import type {
   ConversationView,
   DevicesView,
   GhostEvent,
+  ModelDraft,
   ModelsView,
   OutcomeView,
   OutputInfo,
@@ -45,6 +46,7 @@ import { pairLink } from "@ghost/client-ts";
 
 import { DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
+import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
@@ -173,6 +175,14 @@ export class MockDaemon {
   private settings: SettingsView;
   /** Ghost's vault (ADR 0036): names and metadata; the mock never keeps a value either. */
   private passwords: PasswordsView;
+  /** The model connection (ADR 0036), resolved from the settings above. */
+  private model = new MockModel(
+    () => this.settings,
+    // Its password is the vault's, like every other (ADR 0036).
+    (name) => this.passwords.vault.state === "open" && !!this.passwords.passwords.find((x) => x.name === name)?.set,
+    (name) => this.keepPasswords([name], "Jev, and the model when it goes through OpenRouter"),
+    () => this.passwords.vault.state === "open",
+  );
   private devices: DevicesView;
   private models: ModelsView;
   private voices: VoiceInfo[];
@@ -876,7 +886,8 @@ export class MockDaemon {
     if (row) Object.assign(row, { set: true, updated: at, added: row.added ?? at });
     else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [], added: at, updated: at, last_used: null });
     this.syncSecrets();
-    return { passwords: this.passwordsView(), restart_required: !!row?.ghost };
+    // The model connection reads its own by name at each session (ADR 0037): no restart.
+    return { passwords: this.passwordsView(), restart_required: !!row?.ghost && !isModelOnly(name) };
   }
   private deletePassword(name: string): PasswordResult {
     this.requireVault();
@@ -1050,7 +1061,7 @@ export class MockDaemon {
       for (const [k, v] of Object.entries(u.values ?? {})) {
         if (v == null) delete this.settings.values[k];
         else this.settings.values[k] = v;
-        if (k.startsWith("GHOST_WAKE")) applied.push(k);
+        if (k.startsWith("GHOST_WAKE") || isConnectionKey(k)) applied.push(k);
         else restart = true;
       }
       for (const [k, v] of Object.entries(u.secrets ?? {})) {
@@ -1070,6 +1081,10 @@ export class MockDaemon {
       return this.passwordsView();
     }
     if (method === "POST" && path === "/passwords/import") return this.importPasswords();
+    if (method === "GET" && path === "/model") return this.model.view();
+    if (method === "POST" && path === "/model/models") return await sleep(300), this.model.list(b as ModelDraft);
+    if (method === "POST" && path === "/model/test") return await sleep(900), this.model.test(b as ModelDraft);
+    if (method === "POST" && path === "/model/sign-in") return this.model.startSignIn();
     if (method === "GET" && path === "/devices") return this.devices;
     if (method === "POST" && path === "/setup/echo-cancel") {
       await sleep(700);

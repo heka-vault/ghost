@@ -305,3 +305,14 @@ def test_no_sign_in_while_the_vault_is_locked(world, env):
     r = client.post("/model/sign-in")
     assert r.status_code == 423 and "Unlock" in r.json()["detail"]
     assert deps.signins.urls == []  # nobody was sent to sign in
+
+
+def test_no_list_is_asked_for_without_the_key(world, env):
+    client, *_ = world
+
+    async def never(conn, env):
+        raise AssertionError("asked without a key")
+
+    env.setattr(model_routes, "list_models", never)
+    r = client.post("/model/models", json={"values": {"GHOST_LLM_PROVIDER": "anthropic"}})
+    assert r.json()["error"] == "Add the key to see the models it offers."

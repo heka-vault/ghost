@@ -172,6 +172,17 @@ def add_model_routes(app: FastAPI, deps: Deps) -> None:
         default = conn.spec.default_model or None
         if not conn.base_url:
             return ModelListView(models=[], default=default, error="Give it an address first.")
+        # OpenRouter lists its models to anyone; the others want the key, so don't ask
+        # without one.
+        if (
+            conn.password
+            and not conn.spec.password_optional
+            and not conn.spec.sign_in
+            and not conn.password_set(env)
+        ):
+            return ModelListView(
+                models=[], default=default, error="Add the key to see the models it offers."
+            )
         try:
             found = await list_models(conn, env)
         except ValueError as e:
