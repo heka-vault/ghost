@@ -36,14 +36,14 @@ The operator connects an app to Ghost once and every agent reaches it (ADR 0034)
 tokens in a 0600 file per app, the browser back on a loopback address only while a sign-in
 is open) or sends a key to, or a command it runs on this computer; secrets are `${NAME}`
 from the environment, and the keys the desktop keeps for apps are in `apps.env` beside
-`env`. The desktop's Apps screen connects them from Ghost's own copy of the public app
+`env`. The desktop's Apps page (Settings › Apps) connects them from Ghost's own copy of the public app
 registry (`ghost_core.catalog`: the first-party apps first, then the rest in the
 background, refreshed at most hourly), by address, or from another tool's pasted config.
 `ghostd` connects them at start (`ghost_core.apps.Apps`) and one connected later joins
 the gate at once and the tools from the next session. Every tool is offered under the
 app's name: one the app marks read-only is a read, called directly; every other tool is a
 change, which goes to the gate. An app that fails to connect, or wants a new sign-in, is on
-the waiting list and the Apps screen and is skipped. Everything an app sends is data: the
+the waiting list and the Apps page and is skipped. Everything an app sends is data: the
 model sees the first sentence of each description, results are trimmed, and nothing in
 them changes a permission. See [apps.md](apps.md).
 
@@ -56,7 +56,7 @@ tool's arguments (`github.issue_write(state=closed)`, `github.*(repo!=site)`), a
 There is one set: nothing narrows it per agent (ADR 0035, `WriteGate.policy_for`). A tool an
 unconditional `block` names is not offered; a rule with argument patterns refuses the
 calls it matches. Ghost's own operations (`conversations.*`, `skills.*`, `rules.add`,
-`outputs.*`) take the same rules. The desktop edits them on the Permissions screen and per
+`outputs.*`) take the same rules. The desktop edits them on Settings › Permissions and per
 tool on an app's page; only the `[permissions]` table of the file is rewritten
 (`ghost_core.policy.write_permissions`).
 
@@ -183,7 +183,7 @@ asking is the operator's call (ADR 0011, ADR 0034); by default, everything:
 ghost/
 ├── apps/
 │   ├── ghostd/          # Python daemon: wake, sessions, apps, control API server, phone listener
-│   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, apps, permissions, audit, settings
+│   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, settings (apps, permissions, audit and the rest)
 │   └── mobile/          # Expo + React Native, Android: Home, session, activity
 ├── packages/
 │   ├── core/            # Python: tool sources, apps, catalog, sign-in, Ghost's folder, gate, permissions, confirmation, audit, conversations

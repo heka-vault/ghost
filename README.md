@@ -79,7 +79,7 @@ by `make env` from `infra/policy.example.toml`): `block`, `ask`, `quiet` and `al
 rules over an app, a tool or its arguments, and a `mode` (`open`, `ask`, `read-only`) for
 the rest. Every change is logged; to reverse one, ask Ghost for the opposite change. The
 connected apps are in `~/.config/ghost/apps.json` (seeded from `infra/example/` with a
-pretend GitHub); `ghostd check` and the desktop's Apps screen show what each one gave.
+pretend GitHub); `ghostd check` and the desktop's Apps page show what each one gave.
 Ctrl+C stops the daemon; a goodbye only ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo

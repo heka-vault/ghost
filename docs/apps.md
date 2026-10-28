@@ -60,7 +60,7 @@ anything a result asks it to repeat. Results are trimmed to the size of a spoken
 ## Permissions
 
 Permissions are rules in `~/.config/ghost/policy.toml`. Edit them on the desktop's
-Permissions screen, or on an app's page, where each tool has Allow, Ask first and Block:
+Settings › Permissions page, or on an app's page, where each tool has Allow, Ask first and Block:
 
 ```toml
 [permissions]
@@ -137,11 +137,11 @@ connect or disconnect; you can edit it by hand too.
 - **The catalog's copy** is `~/.cache/ghost/catalog.json`. The first copy fetches the
   first-party apps in a second or two, then the rest of the registry in the background,
   which takes a few minutes and is searchable as it comes in. After that, only what
-  changed, at most once an hour, when the Apps screen opens. The registry asks host apps to
+  changed, at most once an hour, when the Apps page opens. The registry asks host apps to
   keep their own copy like this, not to query it live.
 
 An app that fails to connect is skipped and named: in the log, on your waiting list,
-under `ghostd check` and on the Apps screen. The daemon runs without it.
+under `ghostd check` and on the Apps page. The daemon runs without it.
 
 ## Watches and webhooks
 

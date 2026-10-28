@@ -36,7 +36,7 @@ In this order, and the first folder with a name wins:
 
 A folder without `SKILL.md` is not a skill and is ignored. A `SKILL.md` whose `name` is not
 the folder's name, or whose front matter will not parse, is a **problem**: `ghostd check`,
-`GET /skills` and the desktop's Skills screen list it with the reason, and it is never
+`GET /skills` and the desktop's Skills page (Settings › Skills) list it with the reason, and it is never
 offered to the model. A skill folder that is itself a symlink is followed (linking skills
 between tools is common); links inside a skill are not.
 
@@ -56,4 +56,4 @@ through `ghost-scripts`, an app whose `run` goes through the gate like any chang
 
 `ghostd check` lists the skills found, where each came from, any problem, and any app it
 requires that is not connected (`mcp:<name>`, the older form, still reads); `GET /skills` on the control API and the desktop's Skills
-screen show the same.
+page show the same.
