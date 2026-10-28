@@ -16,7 +16,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use tokio::sync::RwLock;
 
-use crate::models::{Phase, Status};
+use crate::models::{API_VERSION, Build, Phase, Status};
 
 /// What the daemon knows about itself, read by every route that reports it.
 #[derive(Debug)]
@@ -61,6 +61,8 @@ pub fn status_snapshot(st: &DaemonState) -> Status {
         models_ready: st.models_ready,
         uptime_secs: st.uptime_secs(),
         version: st.version.clone(),
+        build: Build::default(),
+        api_version: API_VERSION.to_string(),
         wake_mode: st.wake_mode.clone(),
         apps: st.apps.clone(),
         pending: None,
