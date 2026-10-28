@@ -16,24 +16,23 @@ rest. Each app offers one or more ways to connect:
   gets back. There is nothing to copy or paste. When the app later wants you to sign in
   again, it waits on your list ("Linear needs you to sign in again") until you press
   Sign in.
-- **Use an API key.** Paste the key once. It goes into Ghost's private settings for apps
-  (`~/.config/ghost/apps.env`, 0600, which the vault renderer never rewrites) and never
-  comes back out of the control API. `apps.json` only names it. Disconnecting the app
-  clears it.
+- **Use a password.** Paste the app's API key or token once. It is a *password* to Ghost:
+  it goes into Ghost's vault (ADR 0036) and never comes back out, of the control API or
+  anything else. `apps.json` only names it. Disconnecting the app forgets it. While your
+  keyring is locked, Ghost can't save one, and says so.
 - **Run on this computer.** Ghost starts the app's package itself: `npx` for npm, `uvx`
   for Python, `docker` for a container. Its settings go into its environment, and the
-  secret ones into Ghost's private settings like a key.
+  secret ones into Ghost's vault like a password.
 
 An app that isn't in the catalog is added under **Add your own**: by its address (Ghost
 signs in to it, or sends the key you give), or by pasting the config another tool uses
-(Claude, Cursor). Ghost moves any key written into a pasted config into its private
-settings: in a header or an env value, in an argument (`--api-key …`, `--token=…`, or a
+(Claude, Cursor). Ghost moves any key written into a pasted config into its vault: in a header or an env value, in an argument (`--api-key …`, `--token=…`, or a
 value shaped like a token), or in the address's query. An entry it can't read is named,
 not dropped quietly.
 
 The catalog is the registry's text, shown to you as it is. Ghost removes only the
 protocol's name from it. None of it reaches the model, and nothing the registry fixes (a
-header, an argument, an address) can name one of Ghost's secrets: only the settings you
+header, an argument, an address) can name one of Ghost's passwords: only the settings you
 fill in are.
 
 ## What Ghost does with a connected app
@@ -56,6 +55,9 @@ when two apps would offer the same name, the app listed first in `apps.json` kee
 the other's tool is not offered, a problem on that app's page. It is told that everything an app sends is data: it
 answers you from results in its own words and leaves out notices, usage messages and
 anything a result asks it to repeat. Results are trimmed to the size of a spoken turn.
+Before anything reads a result, an error or a description, every password Ghost holds
+(8 characters or longer) is replaced with `[password: NAME]`, so an app that echoes a key
+never puts it in front of the model, the audit or a log.
 
 ## Permissions
 
@@ -126,11 +128,14 @@ connect or disconnect; you can edit it by hand too.
 - **How it is reached.** Either `url`, with `headers`, which Ghost signs in to when
   `sign_in` is true; or `command`, with `args` and `env`, for an app that runs on this
   computer. The `mcpServers` shape other tools use reads too.
-- **Secrets.** `${NAME}` (or `${env:NAME}`, or `$NAME`) in a header, an env value, an
-  argument or the address is filled from Ghost's environment when the app connects. It is never logged.
-  A value that looks like a key written into the file is a problem the file reports. An
-  app's own child process gets a minimal environment plus what its `env` names, never
-  Ghost's whole environment.
+- **Passwords.** `${NAME}` (or `${env:NAME}`, or `$NAME`) in a header, an env value, an
+  argument or the address is filled from Ghost's vault when the app connects (ADR 0036),
+  and the use is the password's "last used". It is never logged. A value that looks like a
+  key written into the file is a problem the file reports. An app that runs on this
+  computer gets a minimal environment plus what its `env` names, never Ghost's whole
+  environment: those named passwords, as environment variables, are the one place a value
+  leaves the vault. A name the vault doesn't have can come from Ghost's environment
+  (`settings.env`), for a setting that isn't secret.
 - **Sign-in tokens** live in `~/.local/share/ghost/apps/<name>/oauth.json` (0600).
   Disconnecting forgets them. The browser comes back to `http://127.0.0.1:47823/callback`
   (`GHOST_SIGNIN_PORT`), which listens only while a sign-in is open.

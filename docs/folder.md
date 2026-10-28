@@ -15,7 +15,7 @@ code and the control API keep *conversation* for an agent (`ghost_core.conversat
 ├── skills/.skill-lock.json  # where the skills installed from GitHub came from (skills.md)
 ├── out/               # what Ghost makes (ADR 0033)
 ├── agents/<slug>/     # agent.json, persona.md, memory.md, notes.md (ghost: agent zero)
-└── policy.toml, env, settings.env, apps.env
+└── policy.toml, settings.env   # settings.env holds no secret; passwords are in Ghost's vault (ADR 0036)
 ```
 
 The operator edits the folder with any editor; Ghost writes into it only through the gate:
@@ -177,8 +177,8 @@ addresses, nothing else on them). Every step before an item is deterministic and
   seen before is refused too, whatever id it carries (its hash is kept beside the
   delivery, never the body). `hmac` is Ghost's own scheme for local senders:
   `X-Ghost-Signature: sha256=` HMAC of `<X-Ghost-Timestamp>.<X-Ghost-Delivery>.<body>`, a
-  five-minute window, and `X-Ghost-Event` names the event. The secret is `${NAME}` from
-  the environment; a hook whose secret isn't set stays off, and an empty one verifies
+  five-minute window, and `X-Ghost-Event` names the event. The secret is `${NAME}`, a
+  password in Ghost's vault (ADR 0036); a hook whose secret isn't set stays off, and an empty one verifies
   nothing.
 - **`events`**: only declared events count; anything else is ignored. Each event needs
   `when` or `resolve` (or both): they say which deliveries count, and an event with

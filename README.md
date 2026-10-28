@@ -30,7 +30,7 @@ with [docs/architecture.md](docs/architecture.md) and the decisions in [docs/adr
 Needs Python 3.12 (via `uv`) and PipeWire with the PulseAudio shim.
 
 ```bash
-make setup           # once: uv workspace, pnpm install, secrets from the store, the echo-cancelled mic "ghost.mic"
+make setup           # once: uv workspace, pnpm install, Ghost's folder, the echo-cancelled mic "ghost.mic"
 make dev             # the daemon and the desktop app from this checkout, logging to this terminal; Ctrl+C stops both
 make reload          # from another terminal, after a Python change: restarts the daemon, not the app
 ```
@@ -51,14 +51,23 @@ only to your terminal.
 
 While it runs, `make status` shows the daemon's state and `make say TEXT="..."` types a turn
 to it through the control socket (`$XDG_RUNTIME_DIR/ghost/api.sock`), which is what the
-desktop app uses. `make help` lists the rest, grouped by what you are doing (`ci` before a push, `start`/`stop` for a background daemon,
-`~/.config/ghost/settings.env`, which `make env` seeds and folds into the rendered file.
+desktop app uses. `make help` lists the rest, grouped by what you are doing (`ci` before a push, `start`/`stop` for a background daemon).
+Non-secret settings are in `~/.config/ghost/settings.env`, which `make env` seeds.
 
-The model is reached through `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN` by default.
-`GHOST_LLM_ENDPOINT=openrouter` in `settings.env` sends it to OpenRouter's Anthropic API
-instead, with `OPENROUTER_API_KEY` from the secrets store and `GHOST_LLM_MODEL` mapped to
+Passwords (every API key, token and account password Ghost holds) are in Ghost's own vault,
+`~/.local/share/ghost/passwords.vault`, encrypted, its key in your login keyring (ADR 0036).
+Save them on the desktop's Settings › Passwords, or with
+`uv run ghostd passwords set ANTHROPIC_AUTH_TOKEN` (the value is read without echo);
+`make passwords` lists them by name. A value is never shown again, and anything an app
+sends back with one in it has it replaced before Ghost reads it. Coming from heka-vault or
+the old `~/.config/ghost/env` and `apps.env`? `make passwords-import` moves them into the
+vault once and deletes the plain files.
+
+The model is reached through `ANTHROPIC_BASE_URL` with the `ANTHROPIC_AUTH_TOKEN` password
+by default. `GHOST_LLM_ENDPOINT=openrouter` in `settings.env` sends it to OpenRouter's Anthropic API
+instead, with the `OPENROUTER_API_KEY` password and `GHOST_LLM_MODEL` mapped to
 OpenRouter's id (`claude-sonnet-5-5` is `anthropic/claude-sonnet-5.5`). `make check` prints
-which endpoint and model are in use, never a key. `make latency` shows where recent turns
+which endpoint and model are in use, never a password. `make latency` shows where recent turns
 spent their time ([docs/benchmarks/latency-harness.md](docs/benchmarks/latency-harness.md)).
 
 The phone app joins over the home LAN only (ADR 0016). Set `GHOST_PHONE_LISTEN` in
@@ -84,8 +93,8 @@ Ctrl+C stops the daemon; a goodbye only ends the conversation.
 
 Deploy as a user service with [infra/systemd/](infra/systemd/) and set up echo
 cancellation with [infra/pipewire/](infra/pipewire/). To teach Ghost something new,
-connect an app ([docs/apps.md](docs/apps.md)): from the desktop's catalog (sign in, an API
-key, or a package that runs on this computer), by address, or by pasting another tool's
+connect an app ([docs/apps.md](docs/apps.md)): from the desktop's catalog (sign in, a
+password, or a package that runs on this computer), by address, or by pasting another tool's
 config. Ghost's folder holds the rules every agent reads, what it watches, what it makes
 and its agents ([docs/folder.md](docs/folder.md)); skills are folders of instructions
 ([docs/skills.md](docs/skills.md)). `ghost-mock-github` stands in for GitHub before you
@@ -109,8 +118,8 @@ log, skills and settings. It follows the system's light or dark theme.
     <td><img src="docs/screenshots/audit.webp" alt="The audit log with statuses and filters"><br><sub><b>Audit log.</b> Every change Ghost made or asked to make, and how it went.</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/settings.webp" alt="Settings: write-only secrets, model, GitHub"><br><sub><b>Settings.</b> Secrets are write-only: the app only learns set or not set.</sub></td>
-    <td><img src="docs/screenshots/welcome.webp" alt="First-run wizard, prototype"><br><sub><b>First run</b> (prototype). Setup in eight steps, from model key to the first “Hey Ghost”.</sub></td>
+    <td><img src="docs/screenshots/settings.webp" alt="Settings: write-only passwords, model, GitHub"><br><sub><b>Settings.</b> Passwords are write-only: the app only learns set or not set.</sub></td>
+    <td><img src="docs/screenshots/welcome.webp" alt="First-run wizard, prototype"><br><sub><b>First run</b> (prototype). Setup in eight steps, from the model’s password to the first “Hey Ghost”.</sub></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/review.webp" alt="Review queue, prototype"><br><sub><b>Review queue</b> (prototype). What is waiting on your sign-off, and why.</sub></td>

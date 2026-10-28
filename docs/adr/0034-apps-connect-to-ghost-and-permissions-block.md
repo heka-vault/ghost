@@ -1,6 +1,6 @@
 # 0034: Apps connect to Ghost; everything runs unless a permission blocks it
 
-- **Status:** accepted (decided 2026-10-27)
+- **Status:** accepted (decided 2026-10-27); amended by ADR 0036 (an app's key is a password in Ghost's vault)
 - **Date:** 2026-10-27
 - **Supersedes:** ADR 0022's write declarations and the reads list; ADR 0024's servers per
   department (`mcp.json`, `use`, the declarations in `department.json`, `root_servers`) and
