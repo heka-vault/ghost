@@ -44,6 +44,7 @@ pub use connection::{
     App, AuthFor, CALL_TIMEOUT, CONNECT_TIMEOUT, SIGN_IN_TIMEOUT, Session, SessionError,
     StderrRelay,
 };
+pub(crate) use spec::SECRET;
 pub(crate) use spec::truthy as spec_truthy;
 pub use spec::{
     APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, RESERVED_NAMES, app_name_problem, edit_apps,

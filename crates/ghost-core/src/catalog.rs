@@ -66,105 +66,10 @@ static VAR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap());
 const REMOTE_TYPES: [&str; 2] = ["streamable-http", "http"];
 
-// --- what the catalog needs of ghost_core.apps --------------------------------------------
-//
-// `ghost_core.apps` is not ported yet. The catalog needs five small things of it: the shape
-// of an app in `apps.json`, the rules for an app's name, and the environment name of an
-// app's secret. They are carried here, word for word, until `crate::apps` lands; then this
-// section becomes a `use crate::apps::{...}`.
-
-pub static APP_NAME_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{0,39}$").unwrap());
-/// The names of Ghost's own tool sources (`ghost_core.source.ToolSource`): the gate, the
-/// permissions (`skills.*`) and the audit key on them, so an app may not take one.
-pub const RESERVED_NAMES: [&str; 5] = ["conversations", "outputs", "rules", "skills", "waiting"];
-/// `$NAME`, `${NAME}` or `${env:NAME}` (the shape other clients' config files use).
-static SECRET: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\$\{(?:env:)?([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)").unwrap());
-
-/// One app as `apps.json` names it (a stand-in for `crate::apps::AppSpec`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct AppSpec {
-    pub name: String,
-    pub title: String,
-    pub url: Option<String>,
-    pub headers: BTreeMap<String, String>,
-    pub command: Option<String>,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-    /// The catalog entry it was connected from.
-    pub catalog: Option<String>,
-    /// Ghost signs in to it (OAuth) when it asks.
-    pub sign_in: bool,
-}
-
-impl AppSpec {
-    pub fn transport(&self) -> &'static str {
-        if self.url.is_some() { "http" } else { "stdio" }
-    }
-
-    /// The environment names this app needs.
-    pub fn secrets(&self) -> Vec<String> {
-        let mut names: Vec<String> = Vec::new();
-        for value in std::iter::once(self.url.clone().unwrap_or_default())
-            .chain(self.headers.values().cloned())
-            .chain(self.env.values().cloned())
-            .chain(self.args.iter().cloned())
-        {
-            for n in secret_names(&value) {
-                if !names.contains(&n) {
-                    names.push(n);
-                }
-            }
-        }
-        names
-    }
-}
-
-/// Why `name` can't name an app, or None.
-pub fn app_name_problem(name: &str) -> Option<String> {
-    if !APP_NAME_RE.is_match(name) {
-        return Some("an app's name is lower-case letters, digits, _ or - (up to 40)".to_string());
-    }
-    if RESERVED_NAMES.contains(&name) {
-        return Some(format!(
-            "{name} is the name of Ghost's own tools; give the app another name"
-        ));
-    }
-    None
-}
-
-/// The environment names a value refers to.
-pub fn secret_names(value: &str) -> Vec<String> {
-    SECRET
-        .captures_iter(value)
-        .filter_map(|c| {
-            c.get(1)
-                .or_else(|| c.get(2))
-                .map(|m| m.as_str().to_string())
-        })
-        .collect()
-}
-
-/// The environment name a secret of an app is kept under: `GHOST_APP_GITHUB_TOKEN`.
-pub fn secret_name(app: &str, key: &str) -> String {
-    let mut out = String::from("GHOST_APP_");
-    let mut body = String::new();
-    let mut pending = false;
-    for c in format!("{app}_{key}").to_uppercase().chars() {
-        if c.is_ascii_uppercase() || c.is_ascii_digit() {
-            if pending && !body.is_empty() {
-                body.push('_');
-            }
-            pending = false;
-            body.push(c);
-        } else {
-            pending = true;
-        }
-    }
-    out.push_str(&body);
-    out
-}
+pub(crate) use crate::apps::SECRET;
+pub use crate::apps::{
+    APP_NAME_RE, AppSpec, RESERVED_NAMES, app_name_problem, secret_name, secret_names,
+};
 
 // --- the types ----------------------------------------------------------------------------
 
@@ -1074,7 +979,7 @@ pub fn connect(
             name: app_name.to_string(),
             title,
             url: Some(fill(url)),
-            headers,
+            headers: headers.into_iter().collect(),
             sign_in: option.kind == Kind::SignIn,
             catalog,
             ..AppSpec::default()
@@ -1717,7 +1622,14 @@ mod tests {
         spec.args.iter().map(String::as_str).collect()
     }
 
-    fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    fn map(pairs: &[(&str, &str)]) -> indexmap::IndexMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn bmap(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
