@@ -28,7 +28,6 @@ import {
   Field,
   IconButton,
   Input,
-  LiveStatus,
   Notice,
   Page,
   RadioGroup,
@@ -433,7 +432,6 @@ export default function PermissionsScreen(_: RouteProps) {
       width="default"
       title="Permissions"
       description="Ghost uses every app you connect and tells you what it changed. Here you say what it may not do, and what it asks you first. Every change is logged; to reverse one, ask Ghost to change it back."
-      status={<LiveStatus />}
       actions={
         <SegmentedControl<View>
           aria-label="Edit as"

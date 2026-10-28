@@ -9,7 +9,7 @@ import { useGhost } from "@ghost/ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
-import { Card, Field, Input, LiveStatus, Notice, Page, SaveBar, Section, Select, Skeleton, Switch, errorText, useToast } from "../../ui";
+import { Card, Field, Input, Notice, Page, SaveBar, Section, Select, Skeleton, Switch, errorText, useToast } from "../../ui";
 import "./routes.css";
 
 type Name = RoutesView["enabled"][number];
@@ -76,7 +76,6 @@ export default function RoutesScreen(_: RouteProps) {
   return (
     <Page
       title="How Ghost reaches you"
-      status={<LiveStatus />}
       description="When something needs you, Ghost starts with the quietest way you’ve turned on and moves up only if you haven’t heard it. Saved in your policy file under [routes]."
       dock={
         dirty && (

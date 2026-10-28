@@ -17,7 +17,7 @@ import { type KeyboardEvent, type RefObject, useContext, useEffect, useId, useLa
 import { hrefFor } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, ButtonSizeContext, Card, EmptyState, IconButton, Input, Kbd, LiveStatus, Notice, Page, Select, Skeleton, errorText, formatTime, useLive } from "../../ui";
+import { Button, ButtonSizeContext, Card, EmptyState, IconButton, Input, Kbd, Notice, Page, Select, Skeleton, errorText, formatTime, useLive } from "../../ui";
 import { AuditRow, type LiveChange } from "./AuditRow";
 import { ATTENTION, STATUS_ORDER, groupByDay, haystack, initialParams, matches, outcomeLabel, outcomeOf, sourceLabel } from "./model";
 import { MAX_LOADED, PAGE, useAuditLog } from "./useAuditLog";
@@ -254,7 +254,7 @@ export default function AuditScreen(_: RouteProps) {
   ) : null;
 
   return (
-    <Page width="wide" title="Audit log" description="Every change Ghost made or asked to make, and how it went." status={<LiveStatus />} actions={actions}>
+    <Page width="wide" title="Audit log" description="Every change Ghost made or asked to make, and how it went." actions={actions}>
       <div className="audit" ref={root}>
         {log.error != null && !log.loading && (log.items.length === 0 || online) && (
           <Notice

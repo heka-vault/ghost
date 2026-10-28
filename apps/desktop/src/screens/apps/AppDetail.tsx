@@ -12,7 +12,7 @@ import { ChevronLeft, ExternalLink, Megaphone, MoreHorizontal, RotateCw, SearchX
 import { useCallback, useEffect, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
-import { Badge, Button, Card, EmptyState, Field, IconButton, LiveStatus, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, errorText, quoted, useLive, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, Field, IconButton, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, errorText, quoted, useLive, useToast } from "../../ui";
 import { useAppActions } from "./actions";
 import { AppIcon } from "./AppIcon";
 import { type Level, appConditionalRules, choose, conditionalRules, coversWholeApp, decidingRule, kindWords, listOf, listVerb, sentence, stateWords, toolLabel } from "./model";
@@ -112,7 +112,6 @@ export function AppDetail({ name }: { name: string }) {
           Apps
         </Link>
       }
-      status={<LiveStatus />}
       description={
         app && state ? (
           <span className="apps-meta">

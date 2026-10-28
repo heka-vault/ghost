@@ -23,7 +23,6 @@ import {
   Input,
   SaveBar,
   LineGlyph,
-  LiveStatus,
   Menu,
   type MenuItem,
   Notice,
@@ -527,7 +526,8 @@ export function AgentDetail({ slug }: { slug: string }) {
   // when the header scrolls away. The description keeps the agent's facts.
   const state = lineState({ live, pending: !!pending, connection, phase, lastActive: detail?.last_active_at ?? null });
   const waiting = state.tone === "waiting";
-  const pageStatus = live ? <LineStateText state={state} connection={connection} phase={phase} /> : <LiveStatus />;
+  // Only this agent's own live state; Ghost's overall state is in the sidebar.
+  const pageStatus = live ? <LineStateText state={state} connection={connection} phase={phase} /> : undefined;
   const description = detail ? (
     <span className="conv-meta">{meta.map((m, i) => (i === 0 ? m[0].toUpperCase() + m.slice(1) : m)).join(" · ")}</span>
   ) : loadError ? undefined : (

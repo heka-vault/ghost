@@ -18,7 +18,7 @@ import { type DragEvent, type KeyboardEvent, type ReactNode, useCallback, useEff
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
 import { inTauri } from "../../transport";
-import { Button, Card, EmptyState, ListRow, LiveStatus, Notice, Page, Skeleton, SkeletonText, cx, errorText, scrollIntoPanel, useConfirm, useLive, useToast } from "../../ui";
+import { Button, Card, EmptyState, ListRow, Notice, Page, Skeleton, SkeletonText, cx, errorText, scrollIntoPanel, useConfirm, useLive, useToast } from "../../ui";
 import { AddDialog } from "./AddDialog";
 import { Detail } from "./Detail";
 import { GHOST_SKILLS_DIR, humanize, needsWords, saysInstalled, sourceWord, tildePath } from "./model";
@@ -251,7 +251,6 @@ export default function SkillsScreen(_: RouteProps) {
     <Page
       width="wide"
       title="Skills"
-      status={<LiveStatus />}
       description="Folders with a SKILL.md that tell Ghost how to do a kind of task; it reads one when a request calls for it. A skill shapes what Ghost does, never what it may do."
       actions={
         <Button variant="secondary" leadingIcon={<FolderPlus />} onClick={() => setAddOpen(true)} disabled={!online}>

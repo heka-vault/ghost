@@ -21,7 +21,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, LiveStatus, Notice, Page, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Notice, Page, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
 import { type OwnSettle, useDecisions, useLastSession, useLines, useObservedSwitches } from "./hooks";
 import { Transcript } from "./Transcript";
@@ -280,15 +280,7 @@ export default function SessionScreen(_: RouteProps) {
       bare={startOnly}
       title={inSession ? lineLabel : "Ghost"}
       leading={<LineGlyph slug={line} name={lineLabel} size="lg" />}
-      status={
-        onPhone ? (
-          <>
-            <LiveStatus /> · on your phone
-          </>
-        ) : (
-          <LiveStatus />
-        )
-      }
+      status={onPhone ? "On your phone" : undefined}
       dock={
         showDock ? (
           <div className="session-dock" ref={dock}>

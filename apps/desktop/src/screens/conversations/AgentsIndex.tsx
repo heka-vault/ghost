@@ -21,7 +21,6 @@ import {
   EmptyState,
   LineGlyph,
   ListRow,
-  LiveStatus,
   Notice,
   Page,
   Section,
@@ -215,7 +214,6 @@ export function AgentsIndex() {
     <Page
       width="default"
       title="Agents"
-      status={<LiveStatus />}
       description={
         <>
           The agents you can be transferred to. Say {quoted("transfer me to brand")}, {quoted("get me the Q3 audit")}, or {quoted("back to Ghost")}. Each keeps its own persona, job and memory, and every one follows Ghost’s rules below.

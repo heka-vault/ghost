@@ -105,7 +105,7 @@ export function Sidebar() {
   const activeAgent = agents.find((l) => l.slug === active);
   // The card says "Not running" only once the shell says offline, the same moment the Offline
   // page appears. Until then it is a neutral, still "Connecting…": never a false alarm. The
-  // same liveLabel() feeds every page's <LiveStatus />, so the two never disagree.
+  // same liveLabel() feeds <LiveStatus /> wherever it is used, so the two never disagree.
   const { dot: cardPhase, title } = liveLabel(state, phase);
   // The footer never moves between states: the last known version, or a reserved empty row.
   const version = useRef<string | null>(null);

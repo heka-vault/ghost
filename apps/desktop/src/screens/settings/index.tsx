@@ -50,7 +50,6 @@ import {
   Input,
   ListRow,
   Menu,
-  LiveStatus,
   Notice,
   Page,
   Progress,
@@ -780,7 +779,6 @@ export default function SettingsScreen(_: RouteProps) {
     <Page
       width="narrow"
       title="Settings"
-      status={<LiveStatus />}
       description={
         <>
           How Ghost connects, listens and speaks. Saved to <span className="set-path">{tildePath(s?.settings_path) || "~/.config/ghost/settings.env"}</span>.

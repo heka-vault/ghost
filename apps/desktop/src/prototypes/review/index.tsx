@@ -30,7 +30,6 @@ import {
   EmptyState,
   IconButton,
   LineGlyph,
-  LiveStatus,
   Notice,
   Page,
   PendingChange,
@@ -508,7 +507,6 @@ export default function ReviewPrototype(_: RouteProps) {
       width="wide"
       title="Review queue"
       description={q.view === "week" ? "What you decided this week and what it freed up." : "Issues waiting on your yes or no, ranked by what a decision unblocks."}
-      status={<LiveStatus />}
       actions={viewSwitch}
       dock={dock}
     >

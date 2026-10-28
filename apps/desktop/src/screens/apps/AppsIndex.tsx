@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { hrefFor } from "../../app/router";
 import { useDesign } from "../../design/context";
-import { Badge, Button, Card, EmptyState, IconButton, Input, ListRow, LiveStatus, Menu, Notice, Page, Section, Skeleton, Spinner, errorText, relativeTime, useLive } from "../../ui";
+import { Badge, Button, Card, EmptyState, IconButton, Input, ListRow, Menu, Notice, Page, Section, Skeleton, Spinner, errorText, relativeTime, useLive } from "../../ui";
 import { useAppActions } from "./actions";
 import { AddOwnDialog } from "./AddOwnDialog";
 import { AppIcon } from "./AppIcon";
@@ -61,7 +61,6 @@ export function AppsIndex() {
     <Page
       width="default"
       title="Apps"
-      status={<LiveStatus />}
       description="What Ghost connects to. It uses everything an app offers and tells you what it changed. Block a tool or have Ghost ask first on the app’s page, or for everything on Permissions."
       actions={
         <Button variant="secondary" href={hrefFor("/permissions")} leadingIcon={<ShieldCheck />}>
