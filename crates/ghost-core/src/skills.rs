@@ -70,7 +70,7 @@ pub const MAX_SKILL_BYTES: u64 = 2_000_000;
 /// Where each installed skill came from, beside the skills.
 pub const LOCK_FILE: &str = ".skill-lock.json";
 
-static NAME_RE: LazyLock<Regex> =
+pub(crate) static NAME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9._-]{0,63}$").unwrap());
 static FRONT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\A---\s*\n(.*?)\n---\s*\n?").unwrap());
@@ -96,7 +96,7 @@ pub enum SkillsError {
 /// Where an installed skill was fetched from, as `~/.agents/.skill-lock.json` records
 /// it: the repository, the path of its SKILL.md there, the commit it was pinned to, and
 /// the folder's git tree hash at that commit (what changes when the skill does).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SkillOrigin {
     /// "owner/repo" on GitHub.
     pub source: String,
@@ -112,6 +112,18 @@ pub struct SkillOrigin {
 }
 
 impl SkillOrigin {
+    /// An origin the catalog fills in before it is installed: no ref, not installed yet.
+    pub fn new(source: &str, skill_path: &str, commit: &str, folder_hash: &str) -> Self {
+        Self {
+            source: source.into(),
+            skill_path: skill_path.into(),
+            commit: commit.into(),
+            folder_hash: folder_hash.into(),
+            git_ref: None,
+            installed_at: String::new(),
+        }
+    }
+
     pub fn source_url(&self) -> String {
         format!("https://github.com/{}", self.source)
     }

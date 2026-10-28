@@ -26,6 +26,7 @@ pub mod redact;
 pub mod request;
 pub mod routes;
 pub mod rules;
+pub mod skill_catalog;
 pub mod skills;
 pub mod source;
 pub mod store;
