@@ -48,6 +48,9 @@ function phone(s: Scenario): PhoneView {
 }
 
 const SECRET_NAMES = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "HF_TOKEN", "OPENROUTER_API_KEY", "TYPESAFE_API_KEY", "ELEVENLABS_API_KEY"];
+/** Keys only one model provider uses (ghost_api.passwords.PROVIDER_ONLY): the mock daemon lists
+ *  each once it is set or once its provider is the one in use, as GET /passwords does. */
+export const PROVIDER_ONLY = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"];
 
 /** What Ghost itself reads each of its own passwords for (ghost_core.passwords.GHOST_USES). */
 export const GHOST_USES: Record<string, string> = {
@@ -91,7 +94,7 @@ function passwords(s: Scenario, set: Set<string>, apps: string[]): PasswordsView
       ...extra,
     };
   };
-  const rows = [...SECRET_NAMES, ...apps].map((n) => row(n));
+  const rows = [SECRET_NAMES[0], ...PROVIDER_ONLY, ...SECRET_NAMES.slice(1), ...apps].map((n) => row(n));
   // Busy: a webhook's password the operator added by hand, and one a hand-written app needs.
   if (s.data === "busy") {
     rows.push(row("JOBS_HOOK_SECRET", { set: true, used_by: ["Webhook jobs"], added: ago(60 * 24 * 20), updated: ago(60 * 24 * 20), last_used: ago(45) }));
@@ -128,7 +131,7 @@ export default function settings(s: Scenario): SettingsFixture {
         GHOST_WAKE_PHRASES: s.data === "busy" ? "hey ghost,okay ghost,ghost wake up" : "hey ghost,okay ghost",
         GHOST_WAKE_FUZZY: "0.8",
         GHOST_JEV: "auto",
-        // The model connection (ADR 0036): busy names its provider, CLIProxy on the LAN; normal
+        // The model connection (ADR 0037): busy names its provider, CLIProxy on the LAN; normal
         // still has the older setting, OpenRouter by GHOST_LLM_ENDPOINT, as the operator did.
         ...(s.data === "busy"
           ? { GHOST_LLM_PROVIDER: "cliproxy", GHOST_LLM_BASE_URL: "http://192.168.1.5:8317", GHOST_LLM_MODEL: "claude-sonnet-5-5" }

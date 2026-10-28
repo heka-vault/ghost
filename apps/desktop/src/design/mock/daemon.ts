@@ -52,6 +52,7 @@ import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
 import type { Fixtures } from "./fixtures";
 import { renderPolicy } from "./fixtures/policy";
+import { PROVIDER_ONLY } from "./fixtures/settings";
 import type { SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
@@ -175,7 +176,7 @@ export class MockDaemon {
   private settings: SettingsView;
   /** Ghost's vault (ADR 0036): names and metadata; the mock never keeps a value either. */
   private passwords: PasswordsView;
-  /** The model connection (ADR 0036), resolved from the settings above. */
+  /** The model connection (ADR 0037), resolved from the settings above. */
   private model = new MockModel(
     () => this.settings,
     // Its password is the vault's, like every other (ADR 0036).
@@ -857,9 +858,12 @@ export class MockDaemon {
   private passwordsView(): PasswordsView {
     const p = this.passwords;
     const closed = p.vault.state !== "open";
+    // A provider's own key is listed once it is set, or while its provider is in use (ADR 0037).
+    const inUse = this.model.view().password;
+    const listed = p.passwords.filter((x) => !PROVIDER_ONLY.includes(x.name) || (x.set && !closed) || x.name === inUse);
     return {
       ...p,
-      passwords: p.passwords.map((x) => (closed ? { ...x, set: null, added: null, updated: null, last_used: null } : { ...x })),
+      passwords: listed.map((x) => (closed ? { ...x, set: null, added: null, updated: null, last_used: null } : { ...x })),
       importable: [...(p.importable ?? [])],
     };
   }

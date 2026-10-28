@@ -87,9 +87,9 @@ export const KEY_LABEL: Record<string, string> = {
   GHOST_LLM_PASSWORD: "Model password name",
   GHOST_LLM_HEADERS: "Extra headers",
   GHOST_LLM_TIMEOUT_SECS: "Model timeout",
-  ANTHROPIC_API_KEY: "Anthropic key",
-  OPENAI_API_KEY: "OpenAI key",
-  LLM_API_KEY: "Model key",
+  ANTHROPIC_API_KEY: "Anthropic password",
+  OPENAI_API_KEY: "OpenAI password",
+  LLM_API_KEY: "Password for your own address",
   GHOST_INPUT_DEVICE: "Microphone",
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
@@ -121,10 +121,10 @@ export const SECRET_ORDER = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "TYPESAFE_A
 export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
-  ANTHROPIC_AUTH_TOKEN: { help: "For CLIProxy or another Anthropic-compatible address, when it takes one.", placeholder: "sk-ant-…" },
+  ANTHROPIC_AUTH_TOKEN: { help: "For CLIProxy or another Anthropic-compatible address, when it takes one.", optional: true, placeholder: "sk-ant-…" },
   ANTHROPIC_API_KEY: { help: "Lets Ghost think and talk through Anthropic.", optional: true, placeholder: "sk-ant-api…" },
   OPENAI_API_KEY: { help: "Lets Ghost think and talk through OpenAI.", optional: true, placeholder: "sk-…" },
-  LLM_API_KEY: { help: "The password for a model address of your own.", optional: true, placeholder: "Paste the value" },
+  LLM_API_KEY: { help: "For your own address, when it takes one.", optional: true, placeholder: "Paste the value" },
   GITHUB_TOKEN: { help: "For a GitHub app you added by hand whose config names ${GITHUB_TOKEN}. Apps you connect under Apps keep their own password.", optional: true, placeholder: "github_pat_…" },
   TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev passwords are set.", optional: true, placeholder: "ts_…" },
   OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when it goes through OpenRouter. Signing in under Model sets it.", optional: true, placeholder: "sk-or-…" },
@@ -270,7 +270,7 @@ export function validateConnection(v: Values): Record<string, string> {
   const e: Record<string, string> = {};
   const base = (v.GHOST_LLM_BASE_URL ?? "").trim();
   if (base && !/^https?:\/\/\S+$/.test(base)) e.GHOST_LLM_BASE_URL = "Use a full URL, like http://localhost:8080/v1.";
-  else if (v.GHOST_LLM_PROVIDER === "custom" && !base) e.GHOST_LLM_BASE_URL = "Give the address your server answers on.";
+  else if (v.GHOST_LLM_PROVIDER === "custom" && !base) e.GHOST_LLM_BASE_URL = "Give the address your model answers on.";
   const t = (v.GHOST_LLM_TIMEOUT_SECS ?? "").trim();
   if (t && !(Number(t) > 0)) e.GHOST_LLM_TIMEOUT_SECS = "Use a number of seconds, like 60.";
   const pw = (v.GHOST_LLM_PASSWORD ?? "").trim();

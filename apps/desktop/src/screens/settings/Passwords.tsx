@@ -31,7 +31,7 @@ const TITLES: Record<string, string> = {
   ANTHROPIC_AUTH_TOKEN: "CLIProxy",
   ANTHROPIC_API_KEY: "Anthropic",
   OPENAI_API_KEY: "OpenAI",
-  LLM_API_KEY: "Your model address",
+  LLM_API_KEY: "Your own address",
   OPENROUTER_API_KEY: "OpenRouter",
   TYPESAFE_API_KEY: "TypeSafe",
   ELEVENLABS_API_KEY: "ElevenLabs",

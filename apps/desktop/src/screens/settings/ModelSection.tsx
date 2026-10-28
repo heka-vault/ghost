@@ -32,9 +32,9 @@ const CHOICES: { value: ProviderChoice; label: string; description: string }[] =
   { value: "openrouter", label: "OpenRouter", description: "Sign in, then Claude or any other model OpenRouter offers." },
   { value: "cliproxy", label: "Claude subscription", description: "Your Claude plan, through CLIProxy running on your network." },
   { value: "openai-compatible", label: "OpenAI or a local model", description: "OpenAI with an API key, or Ollama or LM Studio on this computer." },
-  { value: "custom", label: "Your own address", description: "Any server that speaks Anthropic’s or OpenAI’s API." },
+  { value: "custom", label: "Your own address", description: "Any address that speaks Anthropic’s or OpenAI’s API." },
 ];
-const SERVERS = [
+const OPENAI_COMPATIBLE_CHOICES = [
   { value: "openai", label: "OpenAI" },
   { value: "ollama", label: "Ollama" },
   { value: "lmstudio", label: "LM Studio" },
@@ -43,6 +43,9 @@ const PROTOCOLS = [
   { value: "anthropic", label: "Anthropic" },
   { value: "openai", label: "OpenAI" },
 ];
+/** The page's form, rendered by the settings screen: the fields name it so Enter saves, while
+ *  the key's row stays a form of its own (forms can't nest). */
+export const MODEL_FORM_ID = "set-model-form";
 const SIGN_IN_POLL_MS = 1500;
 const SIGN_IN_POLLS = 400; // ten minutes, as long as OpenRouter's code lasts
 
@@ -236,6 +239,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
       error={err("GHOST_LLM_BASE_URL")}
     >
       <Input
+        form={MODEL_FORM_ID}
         value={eff.GHOST_LLM_BASE_URL ?? ""}
         placeholder={spec?.base_url || (protocol === "openai" ? "http://gpu-box:8000/v1" : "https://llm.example.com")}
         inputMode="url"
@@ -266,8 +270,8 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         <Card list>
           {choiceOf(provider) === "openai-compatible" && (
             <Row>
-              <Field layout="inline" label="Server" help="OpenAI’s own, or a model on this computer." controlWidth="auto">
-                <SegmentedControl value={provider} onChange={pick} options={SERVERS} disabled={!online} />
+              <Field layout="inline" label="Provider" help="OpenAI’s own, or a model on this computer." controlWidth="auto">
+                <SegmentedControl value={provider} onChange={pick} options={OPENAI_COMPATIBLE_CHOICES} disabled={!online} />
               </Field>
             </Row>
           )}
@@ -321,7 +325,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
           {baseHere && <Row>{baseField}</Row>}
           {provider === "custom" && (
             <Row>
-              <Field layout="inline" label="Speaks" detail="GHOST_LLM_PROTOCOL" help="The API your server answers with." controlWidth="auto">
+              <Field layout="inline" label="Speaks" detail="GHOST_LLM_PROTOCOL" help="The API your address answers with." controlWidth="auto">
                 <SegmentedControl value={protocol} onChange={(p) => edit({ GHOST_LLM_PROTOCOL: p })} options={PROTOCOLS} disabled={!online} />
               </Field>
             </Row>
@@ -336,6 +340,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
               error={err("GHOST_LLM_MODEL")}
             >
               <Input
+                form={MODEL_FORM_ID}
                 mono
                 list={listId}
                 value={eff.GHOST_LLM_MODEL ?? ""}
@@ -381,7 +386,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
                 help={help("GHOST_LLM_PASSWORD", `The password that holds the key. Empty means ${spec?.password || "none"}.`)}
                 error={err("GHOST_LLM_PASSWORD")}
               >
-                <Input mono value={eff.GHOST_LLM_PASSWORD ?? ""} placeholder={spec?.password || "MY_MODEL_KEY"} spellCheck={false} onChange={(e) => edit({ GHOST_LLM_PASSWORD: e.target.value.toUpperCase() })} />
+                <Input form={MODEL_FORM_ID} mono value={eff.GHOST_LLM_PASSWORD ?? ""} placeholder={spec?.password || "MY_MODEL_KEY"} spellCheck={false} onChange={(e) => edit({ GHOST_LLM_PASSWORD: e.target.value.toUpperCase() })} />
               </Field>
             </Row>
             <Row>
@@ -394,7 +399,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
                 help={help("GHOST_LLM_HEADERS", "Sent with every call, as written. Name: value, separated by semicolons.")}
                 error={err("GHOST_LLM_HEADERS")}
               >
-                <Input mono value={eff.GHOST_LLM_HEADERS ?? ""} placeholder="X-Title: Ghost" spellCheck={false} onChange={(e) => edit({ GHOST_LLM_HEADERS: e.target.value })} />
+                <Input form={MODEL_FORM_ID} mono value={eff.GHOST_LLM_HEADERS ?? ""} placeholder="X-Title: Ghost" spellCheck={false} onChange={(e) => edit({ GHOST_LLM_HEADERS: e.target.value })} />
               </Field>
             </Row>
             <Row>
@@ -408,7 +413,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
                 error={err("GHOST_LLM_TIMEOUT_SECS")}
                 controlWidth={120}
               >
-                <Input value={eff.GHOST_LLM_TIMEOUT_SECS ?? ""} placeholder="60" inputMode="decimal" onChange={(e) => edit({ GHOST_LLM_TIMEOUT_SECS: e.target.value })} />
+                <Input form={MODEL_FORM_ID} value={eff.GHOST_LLM_TIMEOUT_SECS ?? ""} placeholder="60" inputMode="decimal" onChange={(e) => edit({ GHOST_LLM_TIMEOUT_SECS: e.target.value })} />
               </Field>
             </Row>
           </Card>

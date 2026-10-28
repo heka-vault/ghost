@@ -14,7 +14,7 @@ export const MODEL_PROVIDERS: ModelProviderView[] = [
   { id: "openai", title: "OpenAI", blurb: "GPT models, with an API key from the OpenAI platform.", protocol: "openai", base_url: "https://api.openai.com/v1", password: "OPENAI_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "gpt-5" },
   { id: "ollama", title: "Ollama", blurb: "A model running on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:11434/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
   { id: "lmstudio", title: "LM Studio", blurb: "A model LM Studio serves on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:1234/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
-  { id: "custom", title: "Your own URL", blurb: "Any server that speaks Anthropic’s or OpenAI’s API.", protocol: "anthropic", base_url: "", password: "LLM_API_KEY", password_optional: true, sign_in: false, local: false, default_model: null },
+  { id: "custom", title: "Your own address", blurb: "Any address that speaks Anthropic’s or OpenAI’s API.", protocol: "anthropic", base_url: "", password: "LLM_API_KEY", password_optional: true, sign_in: false, local: false, default_model: null },
 ];
 
 const MODELS: Record<string, { id: string; name?: string }[]> = {

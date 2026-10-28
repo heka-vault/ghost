@@ -145,8 +145,8 @@ PROVIDERS: dict[str, Provider] = {
         ),
         Provider(
             id="custom",
-            title="Your own URL",
-            blurb="Any server that speaks Anthropic’s or OpenAI’s API.",
+            title="Your own address",
+            blurb="Any address that speaks Anthropic’s or OpenAI’s API.",
             protocol="anthropic",
             base_url="",
             password="LLM_API_KEY",

@@ -119,7 +119,7 @@ import {
   valueChanged,
 } from "./model";
 import { GhostVoice } from "./GhostVoice";
-import { ModelSection } from "./ModelSection";
+import { MODEL_FORM_ID, ModelSection } from "./ModelSection";
 import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PasswordsSection } from "./Passwords";
 import { PhoneSection } from "./Phone";
@@ -906,6 +906,12 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         )}
 
         {s && page === "model" && (
+          <>
+          {/* The page's fields name this form (`form=`), since the key's row is a form of its
+              own and forms can't nest: Enter in any of them saves, as on the other pages. */}
+          <form id={MODEL_FORM_ID} onSubmit={submit} autoComplete="off" className="sr-only">
+            <button type="submit" tabIndex={-1} aria-hidden />
+          </form>
           <ModelSection
             s={s}
             conn={conn}
@@ -922,11 +928,11 @@ export default function SettingsScreen({ params: route }: RouteProps) {
               passwordChanged();
             }}
           />
+          </>
         )}
 
         {s && page === "sound" && (
           <form onSubmit={submit} autoComplete="off" className="set-form">
-            {page === "sound" && (
               <>
                 {/* -------------------------------------------------- Voice and wake */}
                 <Section
@@ -1182,7 +1188,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                   </Card>
                 </Section>
               </>
-            )}
             {/* Lets Enter in any field submit; the visible Save lives in the dock. */}
             <button type="submit" className="sr-only" tabIndex={-1} aria-hidden />
           </form>
