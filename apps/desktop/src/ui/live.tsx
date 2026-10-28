@@ -25,6 +25,8 @@ export interface LiveState {
   loadingModels: boolean;
   /** Online with no Anthropic token and no model endpoint: Ghost can’t answer yet. */
   setupNeeded: boolean;
+  /** Why, when it is only the keyring being locked (ADR 0036): unlock, nothing to set up. */
+  setupLocked?: boolean;
   /** Where “Finish setup” goes (Settings, or the onboarding prototype in mock mode). */
   setupHref: string;
   /** Used by useSetupPromptHere(); screens never call it. */

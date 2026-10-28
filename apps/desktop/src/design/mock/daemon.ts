@@ -227,6 +227,14 @@ export class MockDaemon {
     this.models = f.settings.models;
     this.skills = f.skills;
     this.waitingItems = f.waiting;
+    // The daemon's own item while the keyring is locked (ghostd.passwords.problems).
+    if (options.vault === "locked") {
+      const at = new Date().toISOString();
+      this.waitingItems = [
+        { key: "passwords:locked", source: "ghost", title: "Unlock your keyring so Ghost can read its passwords", state: "new", first_seen: at, changed_at: at, age_secs: 0 },
+        ...this.waitingItems,
+      ];
+    }
     this.status = {
       phase: scenario.phase,
       session_id: f.session.sessionId,
@@ -240,7 +248,7 @@ export class MockDaemon {
       conversation: scenario.session,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
-      waiting: f.waiting.filter((i) => i.state === "new" || i.state === "delivered").length,
+      waiting: this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length,
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;
@@ -845,13 +853,13 @@ export class MockDaemon {
     return { apps: made.map((f) => this.appView(f)), sign_in_url: url, problems: [] };
   }
   /* ------------------------------------------------------------- passwords (ADR 0036) */
-  /** While the keyring is locked nothing is readable, not even which are set. */
+  /** While the keyring is locked nothing is readable, not even which are set (`set: null`). */
   private passwordsView(): PasswordsView {
     const p = this.passwords;
     const closed = p.vault.state !== "open";
     return {
       ...p,
-      passwords: p.passwords.map((x) => (closed ? { ...x, set: false, added: null, updated: null, last_used: null } : { ...x })),
+      passwords: p.passwords.map((x) => (closed ? { ...x, set: null, added: null, updated: null, last_used: null } : { ...x })),
       importable: [...(p.importable ?? [])],
     };
   }
@@ -1078,7 +1086,10 @@ export class MockDaemon {
     if (method === "DELETE" && (r = m(/^\/passwords\/([^/]+)$/))) return this.deletePassword(decodeURIComponent(r[1]));
     if (method === "POST" && path === "/passwords/unlock") {
       await sleep(900); // the keyring's own prompt, answered
-      if (this.passwords.vault.state === "locked") this.passwords.vault = { ...this.passwords.vault, state: "open", problem: null };
+      if (this.passwords.vault.state === "locked") {
+        this.passwords.vault = { ...this.passwords.vault, state: "open", problem: null };
+        this.dropWaiting("passwords:locked");
+      }
       return this.passwordsView();
     }
     if (method === "POST" && path === "/passwords/import") return this.importPasswords();

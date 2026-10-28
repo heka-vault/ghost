@@ -28,15 +28,18 @@ export function App() {
   const settingsPage = match?.route.area === "settings" ? settingsPageOf(path) : null;
   const { state, phase, loadingModels } = useConnection();
   const design = useDesign();
-  const setupNeeded = useSetupNeeded(path, state === "online");
+  const setup = useSetupNeeded(path, state === "online");
+  const setupNeeded = setup.needed;
   // A screen whose focal point is the setup prompt itself (the session's start state) claims
   // it with useSetupPromptHere(); then the banner steps aside: one signal per place.
   const [setupClaims, setSetupClaims] = useState(0);
   const claimSetupPrompt = useCallback((d: number) => setSetupClaims((n) => Math.max(0, n + d)), []);
-  const setupHref = hrefFor(design ? "/welcome" : SETTINGS_PAGES[0].path);
+  // A locked keyring (ADR 0036) is fixed on Passwords, by unlocking: nothing to set up.
+  const passwordsPage = SETTINGS_PAGES.find((p) => p.id === "passwords") ?? SETTINGS_PAGES[0];
+  const setupHref = hrefFor(setup.locked ? passwordsPage.path : design ? "/welcome" : SETTINGS_PAGES[0].path);
   const live = useMemo<LiveState>(
-    () => ({ connection: state, phase, online: state === "online", loadingModels, setupNeeded, setupHref, claimSetupPrompt }),
-    [state, phase, loadingModels, setupNeeded, setupHref, claimSetupPrompt],
+    () => ({ connection: state, phase, online: state === "online", loadingModels, setupNeeded, setupLocked: setup.locked, setupHref, claimSetupPrompt }),
+    [state, phase, loadingModels, setupNeeded, setup.locked, setupHref, claimSetupPrompt],
   );
   // The settings screen (General, Model, Passwords…) and the onboarding prototype are where
   // setup happens: no banner pointing at itself.
@@ -147,11 +150,17 @@ export function App() {
           )}
           {state === "online" && !loadingModels && setupNeeded && !setupHere && (
             <div className="shell-banner shell-banner--setup" role="status">
-              <span>
-                <strong>Ghost needs a model password before it can answer.</strong> Add the Anthropic password or a model endpoint.
-              </span>
+              {setup.locked ? (
+                <span>
+                  <strong>Your keyring is locked.</strong> Ghost can’t read its passwords, the model’s included, until it’s unlocked.
+                </span>
+              ) : (
+                <span>
+                  <strong>Ghost needs a model password before it can answer.</strong> Add the Anthropic password or a model endpoint.
+                </span>
+              )}
               <Button size="sm" className="shell-banner__action" href={setupHref}>
-                Finish setup
+                {setup.locked ? "Unlock…" : "Finish setup"}
               </Button>
             </div>
           )}

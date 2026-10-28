@@ -1,16 +1,27 @@
 import { useGhost } from "@ghost/ui";
 import { useEffect, useState } from "react";
 
+export interface SetupState {
+  /** Ghost can't answer yet: the model connection is missing something. */
+  needed: boolean;
+  /**
+   * Why, when it is the keyring: Ghost's vault is locked (ADR 0036), so the model's password
+   * can't be read. Nothing is missing; the operator unlocks, never re-enters a password.
+   */
+  locked: boolean;
+}
+
 /**
- * True when Ghost can't answer yet: the model connection is missing something. The same test
+ * Whether Ghost can't answer yet: the model connection is missing something. The same test
  * the Settings screen uses for its first-run card. Reads `GET /model`, which reports the
- * Password only as set or not set; no value ever reaches the app. Re-checked on every route
+ * Password only as set or not set; no value ever reaches the app. When something is missing,
+ * `GET /passwords` says whether it is only the keyring being locked. Re-checked on every route
  * change (so it clears the moment you leave Settings after saving) and when the window
  * regains focus. False while unknown: never flash a setup prompt on a configured machine.
  */
-export function useSetupNeeded(path: string, online: boolean): boolean {
+export function useSetupNeeded(path: string, online: boolean): SetupState {
   const { client } = useGhost();
-  const [needed, setNeeded] = useState(false);
+  const [state, setState] = useState<SetupState>({ needed: false, locked: false });
   const [focus, setFocus] = useState(0);
 
   useEffect(() => {
@@ -24,10 +35,15 @@ export function useSetupNeeded(path: string, online: boolean): boolean {
     let live = true;
     client
       .modelConnection()
-      .then((m) => {
+      .then(async (m) => {
         // The model connection (ADR 0037) says whether anything is missing: a key, a sign-in,
         // an address. Its Password is reported only as set or not set.
-        if (live) setNeeded(!m.ready);
+        if (m.ready) {
+          if (live) setState({ needed: false, locked: false });
+          return;
+        }
+        const vault = await client.passwords().then((v) => v.vault.state, () => null);
+        if (live) setState({ needed: true, locked: vault === "locked" });
       })
       .catch(() => {});
     return () => {
@@ -35,5 +51,5 @@ export function useSetupNeeded(path: string, online: boolean): boolean {
     };
   }, [client, online, path, focus]);
 
-  return online && needed;
+  return { needed: online && state.needed, locked: online && state.needed && state.locked };
 }

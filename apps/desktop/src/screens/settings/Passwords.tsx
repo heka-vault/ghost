@@ -2,7 +2,7 @@
  * Owner: settings. Settings › Passwords (#/settings/passwords): Ghost's vault (ADR 0036).
  *
  * Every password Ghost knows of, by name: what uses it, when Ghost last filled it in, and
- * Set or Not set. Add, replace and delete each save at once on their own row; a value goes
+ * Set or Not set (Unknown while the keyring is locked: `set` is null then). Add, replace and delete each save at once on their own row; a value goes
  * in and never comes back (the page never holds one after its Save). Passwords still in
  * plain files are offered for a one-time import at the top, and a locked keyring says so
  * with an Unlock.
@@ -281,7 +281,7 @@ export function PasswordRow({
   const helpId = `${inputId}-help`;
   const info = SECRET_INFO[p.name];
   // Required and missing is the one that asks for attention: the model's, before setup is done.
-  const variant = !p.set && p.ghost && !info?.optional ? "secondary" : "ghost";
+  const variant = p.set === false && p.ghost && !info?.optional ? "secondary" : "ghost";
 
   const close = () => {
     setValue("");
@@ -322,7 +322,10 @@ export function PasswordRow({
           </p>
         </div>
         <div className="set-secret__state">
-          {p.set ? (
+          {p.set == null ? (
+            // The vault is closed: whether it is set can't be known until the keyring unlocks.
+            <Badge size="sm">Unknown</Badge>
+          ) : p.set ? (
             <Badge tone="ok" size="sm" dot>
               Set
             </Badge>

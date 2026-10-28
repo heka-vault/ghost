@@ -508,7 +508,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     const n = dirtyKeys.length;
     toast({
       title: `Discarded ${n} change${n === 1 ? "" : "s"}`,
-      description: typed ? `A typed secret isn’t kept; the other${valueKeys.length === 1 ? "" : "s"} can come back.` : undefined,
+      description: typed ? `A typed password isn’t kept; the other${valueKeys.length === 1 ? "" : "s"} can come back.` : undefined,
       action:
         valueKeys.length || voiceBefore
           ? {
@@ -623,10 +623,10 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       if (!a || !to || stays || layoutRef.current?.contains(a)) return;
       e.preventDefault();
       e.stopPropagation();
-      const what = names.length === 1 ? `the ${lowerFirst(listWords(names))}` : `${names.length} secrets`;
+      const what = names.length === 1 ? `the ${lowerFirst(listWords(names))}` : `${names.length} passwords`;
       void confirm({
         title: `Leave without saving ${what}?`,
-        description: "Ghost never keeps a secret you haven’t saved, so you’d paste it again. Your other changes stay here until you come back.",
+        description: "Ghost never keeps a password you haven’t saved, so you’d paste it again. Your other changes stay here until you come back.",
         confirmLabel: "Leave without saving",
         cancelLabel: "Stay",
         tone: "danger",
