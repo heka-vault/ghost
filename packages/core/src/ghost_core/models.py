@@ -123,7 +123,6 @@ class Proposal(BaseModel, frozen=True):
     # The thread (ADR 0014) the session was in when the model proposed this; None before
     # it was recorded. The apps colour an audit entry by it.
     conversation: str | None = None
-    department: str | None = None  # the department the agent works in (ADR 0024)
     # The words that make the operator's plain request the yes (ADR 0017), read off this
     # call (ADR 0034); empty falls back to the operation's own.
     asked_by: tuple[str, ...] = ()
@@ -166,7 +165,7 @@ class Outcome(BaseModel, frozen=True):
     def summary(self) -> str:
         """Terse form for the model to paraphrase after an autonomous write."""
         if self.status == "success":
-            return f"Applied on {self.target}: {'; '.join(self.applied)}."
+            return f"Applied on {self.target}: {'; '.join(self.applied).rstrip('.')}."
         if self.status == "partial":
             return (
                 f"Partly applied on {self.target}: {'; '.join(self.applied)}. "

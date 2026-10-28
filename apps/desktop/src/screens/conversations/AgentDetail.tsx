@@ -1,15 +1,15 @@
 /**
- * Owner: conversations. One agent (#/agents/:slug): its persona and voice, its department
- * and job, its memory and pinned notes, its transcript and every version of its memory.
- * Edits collect in a draft and go in with Save; each field Ghost writes is an audited gate
- * write, the same as if it had been said. Pinning a note, compacting, switching, moving,
- * retiring, reset and delete happen at once. Call opens a session with this agent and Hang
- * up ends it; the composer in the dock types to the agent, opening the session when there
- * is none. Open folder reveals the agent's files (ADR 0024).
+ * Owner: conversations. One agent (#/agents/:slug): its persona and voice, its job, its
+ * memory and pinned notes, its transcript and every version of its memory. Edits collect in
+ * a draft and go in with Save; each field Ghost writes is an audited gate write, the same as
+ * if it had been said. Pinning a note, compacting, switching, retiring, reset and delete
+ * happen at once. Call opens a session with this agent and Hang up ends it; the composer in
+ * the dock types to the agent, opening the session when there is none. Open folder reveals
+ * the agent's files (ADR 0035).
  */
-import { type CompactionView, type ConversationDetail, type ConversationView, type DepartmentView, type TurnView } from "@ghost/client-ts";
+import { type CompactionView, type ConversationDetail, type ConversationView, type TurnView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { Archive, ArchiveRestore, ArrowLeftRight, ArrowRightLeft, Brain, Building2, ChevronLeft, Clock, CloudOff, FolderOpen, Layers, MoreHorizontal, Phone, PhoneOff, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, FolderOpen, Layers, MoreHorizontal, Phone, PhoneOff, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
@@ -17,7 +17,6 @@ import { useDesign } from "../../design/context";
 import {
   Button,
   Card,
-  Dialog,
   EmptyState,
   Field,
   IconButton,
@@ -30,7 +29,6 @@ import {
   Notice,
   Page,
   Section,
-  Select,
   Skeleton,
   SkeletonText,
   Slider,
@@ -51,14 +49,14 @@ import { History } from "./History";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
 import { Composer } from "../session/Composer";
-import { departmentTitle, moveAgent, rehireAgent, retireAgent, retiredAt } from "./threads";
+import { rehireAgent, retireAgent, retiredAt } from "./threads";
 import { Transcript } from "./Transcript";
 // The composer's styles live with the session screen, which may not have been opened yet.
 import "../session/session.css";
 import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
 import { PlayingBars, VoicePicker, voiceTitle } from "./VoicePicker";
 import { type Voice, parseVoice, voiceKind } from "./voices";
-import { revealFolder } from "../departments/model";
+import { revealFolder } from "../watching/model";
 
 type TabId = "persona" | "memory" | "transcript" | "history";
 const TABS: TabId[] = ["persona", "memory", "transcript", "history"];
@@ -68,11 +66,6 @@ const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** What a department narrows (ADR 0034): “2 permissions of its own”, or that it has none. */
-const permissionWords = (p: { block: string[]; ask: string[]; quiet: string[] }) => {
-  const n = p.block.length + p.ask.length + p.quiet.length;
-  return n ? `${plural(n, "permission")} of its own` : "Ghost’s permissions";
-};
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 
 export function AgentDetail({ slug }: { slug: string }) {
@@ -88,8 +81,6 @@ export function AgentDetail({ slug }: { slug: string }) {
   const [turns, setTurns] = useState<TurnView[]>([]);
   const [versions, setVersions] = useState<CompactionView[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
-  /** The departments (ADR 0024): the agent's own, for its title and voice, and the destinations of a move. */
-  const [departments, setDepartments] = useState<DepartmentView[]>([]);
   /** Every agent, for the live one's name in the composer. */
   const [agents, setAgents] = useState<ConversationView[]>([]);
   const [missing, setMissing] = useState(false);
@@ -101,12 +92,10 @@ export function AgentDetail({ slug }: { slug: string }) {
     return t && TABS.includes(t) ? t : "transcript";
   });
   const [picker, setPicker] = useState(false);
-  const [moving, setMoving] = useState(false);
-  const [moveTo, setMoveTo] = useState("");
   const [saving, setSaving] = useState(false);
   const [hearing, setHearing] = useState<string | null>(null);
   const [pinning, setPinning] = useState(false);
-  const [acting, setActing] = useState<"switch" | "compact" | "retire" | "rehire" | "move" | "call" | "hangup" | "send" | null>(null);
+  const [acting, setActing] = useState<"switch" | "compact" | "retire" | "rehire" | "call" | "hangup" | "send" | null>(null);
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -118,11 +107,6 @@ export function AgentDetail({ slug }: { slug: string }) {
   // Retired (ADR 0024): off the roster and voice routing, everything readable, nothing editable.
   const retired = retiredAt(detail);
   const readOnly = retired !== null;
-  // The department's own agent (named for it) keeps its name and cannot move, retire or be deleted.
-  const isDefault = !!detail?.is_default;
-  const department = detail?.department ?? "ghost";
-  const dept = departments.find((d) => d.slug === department) ?? null;
-  const deptName = departmentTitle(department, departments);
 
   const setTab = (t: TabId) => {
     setTabState(t);
@@ -156,7 +140,7 @@ export function AgentDetail({ slug }: { slug: string }) {
       setDetail(d);
       setBase(next);
       setDraftState(merged);
-      if (dirtyKeys(merged, next, d.is_default).length) drafts.set(slug, { draft: merged, base: next });
+      if (dirtyKeys(merged, next, d.is_ghost).length) drafts.set(slug, { draft: merged, base: next });
       else drafts.delete(slug);
     },
     [slug],
@@ -167,7 +151,7 @@ export function AgentDetail({ slug }: { slug: string }) {
     const next = { ...draftRef.current, ...patch };
     draftRef.current = next;
     setDraftState(next);
-    if (dirtyKeys(next, baseRef.current, detail.is_default).length) drafts.set(slug, { draft: next, base: baseRef.current });
+    if (dirtyKeys(next, baseRef.current, detail.is_ghost).length) drafts.set(slug, { draft: next, base: baseRef.current });
     else drafts.delete(slug);
   };
 
@@ -221,10 +205,6 @@ export function AgentDetail({ slug }: { slug: string }) {
   useEffect(() => {
     let on = true;
     client
-      .departments()
-      .then((d) => on && setDepartments(d))
-      .catch(() => on && setDepartments([]));
-    client
       .conversations()
       .then((l) => on && setAgents(l))
       .catch(() => {});
@@ -234,8 +214,8 @@ export function AgentDetail({ slug }: { slug: string }) {
   }, [client, conversationsVersion]);
 
   // ---------------------------------------------------------------- derived
-  const dirty = useMemo(() => (draft && base && detail ? dirtyKeys(draft, base, detail.is_default) : []), [draft, base, detail]);
-  // The voice heard: the agent's own when it has one, else its department's (the detail reports the one in force).
+  const dirty = useMemo(() => (draft && base && detail ? dirtyKeys(draft, base, detail.is_ghost) : []), [draft, base, detail]);
+  // The voice heard: the agent's own when it has one, else Ghost's (the detail reports the one in force).
   const heardId = draft?.voice || detail?.voice || "af_heart";
   const voice = draft ? (voices.find((v) => v.id === heardId) ?? parseVoice(heardId)) : null;
   const pickable = useMemo(() => (draft && !voices.some((v) => v.id === heardId) ? [...voices, parseVoice(heardId)] : voices), [voices, draft, heardId]);
@@ -438,23 +418,6 @@ export function AgentDetail({ slug }: { slug: string }) {
     }
   };
 
-  // Move (ADR 0024): the agent's folder goes into another department; it keeps its name,
-  // persona, memory and transcript and works with that department's tools from then on.
-  const move = async () => {
-    if (!moveTo || moveTo === department) return;
-    setActing("move");
-    try {
-      const d = await moveAgent(client, slug, moveTo);
-      setMoving(false);
-      apply(d, false);
-      toast({ title: `Moved ${name} to ${departmentTitle(moveTo, departments)}`, description: "It works with that department’s rules, permissions and memory from now on." });
-    } catch (e) {
-      fail(`Couldn’t move ${name}`, e);
-    } finally {
-      setActing(null);
-    }
-  };
-
   const openFolder = async () => {
     if (!detail) return;
     const r = await revealFolder(detail.dir);
@@ -503,8 +466,8 @@ export function AgentDetail({ slug }: { slug: string }) {
     if (o === "voice") setPicker(true);
     if (import.meta.env.DEV && design && !live) {
       if (o === "reset") void reset();
-      if (o === "delete" && !isDefault) void remove();
-      if (o === "retire" && !isDefault && !readOnly) void retire();
+      if (o === "delete" && !isGhost) void remove();
+      if (o === "retire" && !isGhost && !readOnly) void retire();
     }
     if (design && readParam("dirty") && draftRef.current) {
       setDraft({ persona: `${draftRef.current.persona}\nRead amounts in dollars, never cents.`.trim(), voice: "bm_lewis" });
@@ -550,9 +513,7 @@ export function AgentDetail({ slug }: { slug: string }) {
   const meta: string[] = [];
   if (detail) {
     if (isGhost) meta.push("Every wake lands here");
-    else if (isDefault) meta.push(`the ${deptName} department’s own agent`);
-    else meta.push(`in ${deptName}`);
-    if (detail.job && !isDefault) meta.push(detail.job);
+    else if (detail.job) meta.push(detail.job);
     if (retired) meta.push(`retired ${relativeTime(retired)}`);
     if (!live) meta.push(detail.last_active_at ? `last used ${relativeTime(detail.last_active_at)}` : "not used yet");
     if (detail.turn_count) {
@@ -576,9 +537,8 @@ export function AgentDetail({ slug }: { slug: string }) {
   );
 
   // Reset and delete need the session elsewhere. On the live agent the menu says so and offers
-  // the way out (back to Ghost). Every agent keeps them behind the same More menu; a
-  // department's own agent has no Move, Retire or Delete, and while it is live its Reset is
-  // disabled with the reason.
+  // the way out (back to Ghost). Every agent keeps them behind the same More menu; Ghost
+  // has no Retire or Delete, and while it is live its Reset is disabled with the reason.
   const mark = (keys: DraftKey[]) => (dirty.some((k) => keys.includes(k)) ? " (unsaved)" : "");
   const settingsItems: MenuItem[] = [
     { heading: "Settings" },
@@ -595,7 +555,7 @@ export function AgentDetail({ slug }: { slug: string }) {
       trigger={<IconButton label={`More for ${name}`} icon={<MoreHorizontal />} variant="secondary" disabled={!online} />}
       items={[
         ...settingsItems,
-        ...((isDefault
+        ...((isGhost
           ? [live ? { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset(), ...busyHere } : { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset() }]
           : readOnly
             ? [
@@ -607,14 +567,11 @@ export function AgentDetail({ slug }: { slug: string }) {
             ? [
                 { label: "Switch to Ghost", icon: <ArrowLeftRight />, onSelect: () => void switchTo("ghost") },
                 "separator",
-                // Not red while it can't be chosen: a red label reads as available.
-                { label: `Move ${name}…`, icon: <ArrowRightLeft />, onSelect: () => setMoving(true), disabled: true, reason: "Ghost is with this agent; say “move this to …” instead" },
                 { label: `Retire ${name}…`, icon: <Archive />, onSelect: () => void retire(), ...busyHere },
                 { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset(), ...busyHere },
                 { label: `Delete ${name}…`, icon: <Trash2 />, onSelect: () => void remove(), ...busyHere },
               ]
             : [
-                { label: `Move ${name}…`, icon: <ArrowRightLeft />, onSelect: () => setMoving(true) },
                 { label: `Retire ${name}…`, icon: <Archive />, onSelect: () => void retire() },
                 { label: `Reset ${name}…`, icon: <RotateCcw />, onSelect: () => void reset() },
                 "separator",
@@ -709,8 +666,6 @@ export function AgentDetail({ slug }: { slug: string }) {
       />
     ) : composerDock || undefined;
 
-  const destinations = departments.filter((d) => d.slug !== department);
-
   return (
     <Page
       width="default"
@@ -783,8 +738,6 @@ export function AgentDetail({ slug }: { slug: string }) {
               description={
                 isGhost ? (
                   <>Ghost is where every wake starts, and {quoted("back to Ghost")} returns here. Its persona is in your words and goes into the prompt as written; Ghost never rewrites it.</>
-                ) : isDefault ? (
-                  <>The department’s own agent speaks as the department’s rules (its AGENTS.md). A persona here adds to that, in your words, as written.</>
                 ) : (
                   "In your words. It goes into the prompt as written; Ghost never rewrites it."
                 )
@@ -803,29 +756,7 @@ export function AgentDetail({ slug }: { slug: string }) {
               />
             </Section>
 
-            <Section
-              id="conv-department"
-              title="Department"
-              description={
-                isGhost ? "Ghost is a department too: its rules and skills live in its own folder." : `What this agent works with: ${deptName}’s rules, skills and permissions, and what ${deptName} knows. Every department reaches Ghost’s apps.`
-              }
-              actions={!isDefault && !readOnly && !live ? <Button size="sm" variant="secondary" leadingIcon={<ArrowRightLeft />} onClick={() => setMoving(true)}>Move…</Button> : undefined}
-            >
-              <Card padding="none">
-                <div className="conv-dept">
-                  <p className="conv-dept__lead">
-                    <Building2 size={14} aria-hidden /> <Link to={`/departments/${department}`}>{deptName}</Link>
-                  </p>
-                  <p className="conv-dept__sub">
-                    {dept
-                      ? [permissionWords(dept.permissions), plural(dept.skills.length, "skill"), dept.rules_lead ? `rules: ${dept.rules_lead}` : "no rules yet"].join(" · ")
-                      : "Loading the department…"}
-                  </p>
-                </div>
-              </Card>
-            </Section>
-
-            <Section id="conv-voice" title="Voice" description={draft.voice ? "Its own voice." : `${deptName}’s voice: a move changes it, so a move can be heard.`}>
+            <Section id="conv-voice" title="Voice" description={isGhost ? "Ghost’s voice, which every agent without its own speaks in." : draft.voice ? "Its own voice." : "Ghost’s voice, until you give it one of its own."}>
               <Card list>
                 <div className="conv-voice">
                   <IconButton
@@ -846,14 +777,14 @@ export function AgentDetail({ slug }: { slug: string }) {
                           {voice && voiceKind(voice)}
                           <span className="t-3"> · </span>
                           <span className="t-mono t-3">{heardId}</span>
-                          {!draft.voice && <span className="t-3"> · the department’s</span>}
+                          {!draft.voice && !isGhost && <span className="t-3"> · Ghost’s</span>}
                         </>
                       )}
                     </p>
                   </div>
-                  {draft.voice && !isGhost && !isDefault && (
+                  {draft.voice && !isGhost && (
                     <Button variant="ghost" disabled={readOnly} onClick={() => setDraft({ voice: "" })}>
-                      Use the department’s
+                      Use Ghost’s voice
                     </Button>
                   )}
                   <Button variant="secondary" disabled={readOnly} onClick={() => setPicker(true)}>
@@ -869,24 +800,24 @@ export function AgentDetail({ slug }: { slug: string }) {
 
             <Section id="conv-name" title="How you reach it" description={<>What you say in a session: {quoted(`transfer me to ${(draft.name.trim() || name).toLowerCase()}`)}.</>}>
               <Card list>
-                {!isDefault && (
+                {!isGhost && (
                   <Field layout="inline" label="Name" className="conv-cell" error={draft.name.trim() ? undefined : "An agent needs a name."}>
                     <Input value={draft.name} placeholder={name} disabled={readOnly} onChange={(e) => setDraft({ name: e.target.value })} />
                   </Field>
                 )}
-                {!isDefault && (
+                {!isGhost && (
                   <Field layout="inline" label="Also answers to" help="Other names, separated by commas." className="conv-cell">
                     <Input value={draft.aliases} placeholder={aliasExample(draft.name || name)} disabled={readOnly} onChange={(e) => setDraft({ aliases: e.target.value })} />
                   </Field>
                 )}
-                {!isDefault && (
+                {!isGhost && (
                   <Field layout="inline" label="Job" help="What it was hired for, in a line." className="conv-cell">
                     <Input value={draft.job} placeholder="brand design" maxLength={200} disabled={readOnly} onChange={(e) => setDraft({ job: e.target.value })} />
                   </Field>
                 )}
-                {isDefault && (
+                {isGhost && (
                   <div className="conv-cell">
-                    <p className="t-small t-2">{isGhost ? "Ghost keeps its name." : `Named for its department: ${quoted(`transfer me to ${deptName.toLowerCase()}`)} lands here.`}</p>
+                    <p className="t-small t-2">Ghost keeps its name.</p>
                   </div>
                 )}
               </Card>
@@ -932,7 +863,7 @@ export function AgentDetail({ slug }: { slug: string }) {
               <Notes notes={draft.notes} saved={base?.notes ?? []} onChange={(notes) => setDraft({ notes })} onPin={pin} pinning={pinning} disabled={!online || readOnly} />
             </Section>
             <p className="conv-files t-small t-3">
-              Persona, memory and notes are files in <span className="t-mono">{detail.dir}</span>. {dept && !isGhost ? <>What the whole department knows is on <Link to={`/departments/${department}`}>its page</Link>.</> : null}
+              Persona, memory and notes are files in <span className="t-mono">{detail.dir}</span>. Memory is this agent’s own; no other agent reads it.
             </p>
           </>
         ) : tab === "transcript" ? (
@@ -972,28 +903,6 @@ export function AgentDetail({ slug }: { slug: string }) {
           onHear={(id) => void hear(id)}
         />
       )}
-      <Dialog
-        open={moving}
-        onClose={() => setMoving(false)}
-        dismissible={acting !== "move"}
-        size="sm"
-        title={`Move ${name}`}
-        description={`${name} keeps its name, persona, memory and transcript, and works with the destination’s rules, permissions and shared memory from then on. There is no undo; moving back is another move.`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setMoving(false)} disabled={acting === "move"}>
-              Cancel
-            </Button>
-            <Button variant="primary" loading={acting === "move"} disabled={!moveTo || moveTo === department || !online} onClick={() => void move()}>
-              Move to {moveTo ? departmentTitle(moveTo, departments) : "…"}
-            </Button>
-          </>
-        }
-      >
-        <Field label="Department">
-          <Select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} options={[{ value: "", label: "Pick a department" }, ...destinations.map((d) => ({ value: d.slug, label: d.title }))]} />
-        </Field>
-      </Dialog>
       {dialog}
     </Page>
   );

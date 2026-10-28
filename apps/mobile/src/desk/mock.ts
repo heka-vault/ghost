@@ -52,8 +52,8 @@ function seedAudit(): AuditEntry[] {
         { at: ago(60 * 3 + 4), event: "finished", detail: { status: "success" } },
       ],
     }),
-    entry("ghost-mock/app#199", "reopen", "On ghost-mock/app#199: reopened the issue.", "executed", 60 * 3 + 5, { conversation: "heka-workshop", department: "heka-workshop" }),
-    entry("ghost-mock/app#212", "set_labels", "On ghost-mock/app#212: labels: add bug, priority-high.", "executed", 60 * 3 + 6, { conversation: "q3-audit", department: "accounting" }),
+    entry("ghost-mock/app#199", "reopen", "On ghost-mock/app#199: reopened the issue.", "executed", 60 * 3 + 5, { conversation: "heka-workshop" }),
+    entry("ghost-mock/app#212", "set_labels", "On ghost-mock/app#212: labels: add bug, priority-high.", "executed", 60 * 3 + 6, { conversation: "q3-audit" }),
     entry("ghost-mock/app#199", "close", "On ghost-mock/app#199: closed the issue.", "executed", 60 * 3 + 9),
     entry("ghost-mock/infra#64", "close", "On ghost-mock/infra#64: close the issue, with a comment: “Duplicate of #61.”", "expired", 60 * 26, {
       autonomy: "confirm",
@@ -65,12 +65,12 @@ function seedAudit(): AuditEntry[] {
 export type MockAct = "ask" | "yes" | "no" | "talk" | "drop" | "deskDown" | "deskUp" | "deskSession";
 
 const MOCK_LINES: ConversationView[] = [
-  { id: "a0", slug: "ghost", name: "Ghost", aliases: [], department: "ghost", job: "", voice: "af_heart", speed: 1, own_voice: false, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", retired_at: null, active: false, is_ghost: true, is_default: true },
-  { id: "a1", slug: "heka-workshop", name: "Heka workshop", aliases: ["workshop"], department: "ghost", job: "the workshop", voice: "am_adam", speed: 1, own_voice: true, created_at: "2026-10-18T09:00:00Z", last_active_at: "2026-10-20T11:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: false },
-  { id: "a2", slug: "quotient-research", name: "Quotient research", aliases: [], department: "ghost", job: "", voice: "bf_emma", speed: 1, own_voice: true, created_at: "2026-10-19T09:00:00Z", last_active_at: "2026-10-19T18:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: false },
-  // A department's own agent and an agent hired into it (ADR 0024): the dial pad shows one key, which opens both.
-  { id: "a3", slug: "accounting", name: "Accounting", aliases: ["the books"], department: "accounting", job: "", voice: "bm_george", speed: 1.05, own_voice: false, created_at: "2026-10-02T09:00:00Z", last_active_at: "2026-10-20T09:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: true },
-  { id: "a4", slug: "q3-audit", name: "Q3 audit", aliases: ["the audit"], department: "accounting", job: "the auditors’ questions", voice: "bm_george", speed: 1.05, own_voice: false, created_at: "2026-10-14T09:00:00Z", last_active_at: "2026-10-19T15:00:00Z", retired_at: null, active: false, is_ghost: false, is_default: false },
+  { id: "a0", slug: "ghost", name: "Ghost", aliases: [], job: "", voice: "af_heart", speed: 1, own_voice: false, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", retired_at: null, active: false, is_ghost: true },
+  { id: "a1", slug: "heka-workshop", name: "Heka workshop", aliases: ["workshop"], job: "the workshop", voice: "am_adam", speed: 1, own_voice: true, created_at: "2026-10-18T09:00:00Z", last_active_at: "2026-10-20T11:00:00Z", retired_at: null, active: false, is_ghost: false },
+  { id: "a2", slug: "quotient-research", name: "Quotient research", aliases: [], job: "", voice: "bf_emma", speed: 1, own_voice: true, created_at: "2026-10-19T09:00:00Z", last_active_at: "2026-10-19T18:00:00Z", retired_at: null, active: false, is_ghost: false },
+  // Two more agents, each its own key on the dial pad (ADR 0035).
+  { id: "a3", slug: "accounting", name: "Accounting", aliases: ["the books"], job: "the books", voice: "bm_george", speed: 1.05, own_voice: true, created_at: "2026-10-02T09:00:00Z", last_active_at: "2026-10-20T09:00:00Z", retired_at: null, active: false, is_ghost: false },
+  { id: "a4", slug: "q3-audit", name: "Q3 audit", aliases: ["the audit"], job: "the auditors’ questions", voice: "af_heart", speed: 1.05, own_voice: false, created_at: "2026-10-14T09:00:00Z", last_active_at: "2026-10-19T15:00:00Z", retired_at: null, active: false, is_ghost: false },
 ];
 
 export class MockDesk implements Desk {
@@ -302,8 +302,8 @@ export type { Link };
 function seedWaiting(): WaitingItemView[] {
   const ago = (m: number) => new Date(Date.now() - m * 60000).toISOString();
   return [
-    { key: "engineering:ci:1", source: "watch:engineering/ci", department: "engineering", title: "CI failed on main: test (ubuntu-latest)", state: "new", first_seen: ago(12), changed_at: ago(12), age_secs: 720, link: "https://github.com/heka-vault/ghost/actions" },
-    { key: "change:5f0c9a", source: "gate", department: null, title: "Waiting for your yes: On heka-vault/ghost#17: close the issue.", state: "delivered", first_seen: ago(40), changed_at: ago(40), age_secs: 2400, delivered_via: "digest", delivered_at: ago(30) },
+    { key: "ci:1", source: "watch:ci", title: "CI failed on main: test (ubuntu-latest)", state: "new", first_seen: ago(12), changed_at: ago(12), age_secs: 720, link: "https://github.com/heka-vault/ghost/actions" },
+    { key: "change:5f0c9a", source: "gate", title: "Waiting for your yes: On heka-vault/ghost#17: close the issue.", state: "delivered", first_seen: ago(40), changed_at: ago(40), age_secs: 2400, delivered_via: "digest", delivered_at: ago(30) },
   ];
 }
 

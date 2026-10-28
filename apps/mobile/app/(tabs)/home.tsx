@@ -1,16 +1,16 @@
 /**
  * Home: the ghost is the Start control: it floats while Ghost is ready, and a tap opens the
- * mic into a session on the main line. Under it, the other lines (threads, ADR 0014) as a
- * dial pad: three big keys to a row, each a ghost in the line's own colour over its name, so
- * a line is known by colour and a press, not a scroll, calls it directly (the session opens
- * there, greeting as that line). Nothing listens here; the mic opens only after a tap.
+ * mic into a session with Ghost. Under it, the agents (ADR 0014, ADR 0035) as a dial pad:
+ * three big keys to a row, each a ghost in the agent's own colour over its name, so an agent
+ * is known by colour and a press, not a scroll, calls it directly (the session opens there,
+ * greeting as that agent). Nothing listens here; the mic opens only after a tap.
  * Activity has the history. While Ghost is asking, the question is the hero.
  */
 import { errorText, lineHue, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
 import { AudioLines } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { useDesk } from "../../src/desk/context";
 import { update, usePhone } from "../../src/phone/store";
@@ -38,14 +38,10 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const line = status?.conversation && status.conversation !== "ghost" ? `${lineName(status.conversation)} agent` : "Ghost";
-  const lines = conversations.filter((c) => !c.retired_at);
-  // The dial pad groups by department (ADR 0024): Ghost, then a key per department (its own
-  // agent); the agents hired into it sit behind the key, in a sheet, so the pad stays one
-  // screen of big keys.
-  const keys = lines.filter((c) => c.is_default);
-  const topicsOf = (slug: string) => lines.filter((c) => c.department === slug && !c.is_default);
-  const [opened, setOpened] = useState<string | null>(null);
-  const openedLine = opened ? (lines.find((c) => c.slug === opened) ?? null) : null;
+  // The dial pad: Ghost, then every working agent by last use, one key each (ADR 0035: no grouping).
+  const keys = conversations
+    .filter((c) => !c.retired_at)
+    .sort((a, b) => (a.is_ghost ? -1 : b.is_ghost ? 1 : (b.last_active_at ?? "").localeCompare(a.last_active_at ?? "")));
   const colors = useColors();
   // Three keys to a row, like a dial pad: big enough that a thumb never hits the wrong line.
   const { width } = useWindowDimensions();
@@ -226,26 +222,25 @@ export default function Home() {
         </View>
       ) : null}
 
-      {/* The dial pad: Ghost and a key per department. A press calls its default agent; a department with more agents opens them in a sheet first. */}
+      {/* The dial pad: Ghost and a key per agent. A press calls that agent. */}
       {keys.length > 1 && !inSession && link !== "connecting" ? (
         <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
           <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[3], marginLeft: space[1] }}>
-            Lines
+            Agents
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: keyGap, opacity: ready ? 1 : opacityDisabled }}>
             {keys.map((c) => {
               const hue = colors.hue[lineHue(c.slug)];
               const name = lineName(c.slug, c.name);
-              const topics = c.is_ghost ? [] : topicsOf(c.slug);
               return (
                 <Pressable
                   key={c.slug}
                   accessibilityRole="button"
-                  accessibilityLabel={topics.length ? `${name}: ${topics.length === 1 ? "one line" : `${topics.length} agents`}` : `Call ${name}`}
-                  accessibilityHint={topics.length ? "Shows the department and its agents; pick one to call" : "Opens the mic on this phone, with that agent"}
+                  accessibilityLabel={`Call ${name}`}
+                  accessibilityHint="Opens the mic on this phone, with that agent"
                   accessibilityState={{ disabled: !ready }}
                   disabled={!ready}
-                  onPress={() => (topics.length ? setOpened(c.slug) : void start(c.slug))}
+                  onPress={() => void start(c.slug)}
                   style={({ pressed }) => ({
                     width: keySize,
                     height: keySize,
@@ -264,11 +259,6 @@ export default function Home() {
                   <Text size="md" weight="semibold" align="center" numberOfLines={2} style={{ color: colors.text1 }}>
                     {name}
                   </Text>
-                  {topics.length > 0 ? (
-                    <Text size="sm" color="text3" align="center" numberOfLines={1}>
-                      {topics.length === 1 ? "1 agent" : `${topics.length} agents`}
-                    </Text>
-                  ) : null}
                 </Pressable>
               );
             })}
@@ -276,44 +266,6 @@ export default function Home() {
         </View>
       ) : null}
       </ScrollView>
-
-      {/* A department's agents: its default agent first, then the rest; a tap calls it. */}
-      <Modal visible={!!openedLine} transparent animationType="fade" onRequestClose={() => setOpened(null)} statusBarTranslucent>
-        <Pressable accessible={false} onPress={() => setOpened(null)} style={{ flex: 1, backgroundColor: colors.bgOverlay, justifyContent: "flex-end" }}>
-          <Pressable accessible={false} onPress={() => {}} style={{ backgroundColor: colors.bgRaised, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: space[5], paddingBottom: space[8], gap: space[3], borderWidth: 1, borderColor: colors.border }}>
-            {openedLine ? (
-              <>
-                <Text size="xl" weight="semibold" accessibilityRole="header">
-                  {lineName(openedLine.slug, openedLine.name)}
-                </Text>
-                <List>
-                  {[openedLine, ...topicsOf(openedLine.slug)].map((c, i) => {
-                    const name = lineName(c.slug, c.name);
-                    return (
-                      <View key={c.slug}>
-                        {i > 0 && <Divider />}
-                        <Row
-                          leading={<GhostGlyph size={28} color={colors.hue[lineHue(c.slug)].fg} />}
-                          title={name}
-                          support={<Text size="md" color="text2">{i === 0 ? "The department’s own agent" : `An agent in ${lineName(openedLine.slug, openedLine.name)}`}</Text>}
-                          accessibilityLabel={`Call ${name}`}
-                          onPress={() => {
-                            setOpened(null);
-                            void start(c.slug);
-                          }}
-                        />
-                      </View>
-                    );
-                  })}
-                </List>
-                <TouchButton variant="ghost" fullWidth onPress={() => setOpened(null)}>
-                  Cancel
-                </TouchButton>
-              </>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       <Cta>
         {error ? (
@@ -336,7 +288,7 @@ export default function Home() {
 }
 
 /** Where an item came from, in plain words. */
-function waitingSource(item: { source: string; department?: string | null; delivered_via?: string | null }): string {
+function waitingSource(item: { source: string; delivered_via?: string | null }): string {
   const [kind, rest] = item.source.includes(":") ? [item.source.slice(0, item.source.indexOf(":")), item.source.slice(item.source.indexOf(":") + 1)] : [item.source, ""];
   if (kind === "watch") return `Watch ${rest}`;
   if (kind === "hook") return `Webhook ${rest}`;

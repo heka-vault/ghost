@@ -222,37 +222,25 @@ async def test_hang_up_calls_back(wired):
     assert llm.pushed == []  # the model's own goodbye is spoken, not a fixed word
 
 
-def test_prompt_carries_the_department_and_tells_ghost_to_use_its_tools():
+def test_prompt_carries_ghosts_rules_and_tells_ghost_to_use_its_tools():
     plain = build_system_prompt(["F"])
     assert "standing instructions" not in plain and "Use your tools." in plain
+    assert "department" not in plain.lower()  # ADR 0035
     agent = build_system_prompt(
         ["F"],
         name="Brand",
         is_ghost=False,
-        department="Marketing",
         job="brand design",
-        rules="# Marketing\n\nUK dates.",
-        rules_from_root=True,
-        memory="The client is Acme.",
+        rules="# Ghost\n\nUK dates.",
         persona="Warm.",
     )
-    assert (
-        "You are Brand, an agent in the operator's Marketing department, hired for brand design"
-        in agent
-    )
-    assert "Marketing department's standing instructions, read from its project folder" in agent
-    assert "UK dates." in agent and "What the Marketing department knows" in agent
-    assert (
-        "The client is Acme." in agent and "Who you are, in the operator's words:\nWarm." in agent
-    )
-    default = build_system_prompt(
-        ["F"], name="Marketing", is_ghost=False, department="Marketing", is_default=True
-    )
-    assert "You are Marketing, the operator's Marketing department" in default
-    ghost = build_system_prompt(
-        ["F"], roster="- Marketing: the brand. Agents: Brand (brand design)"
-    )
-    assert "The departments, each with its agents" in ghost and "Brand (brand design)" in ghost
+    assert "You are Brand, one of the operator's agents, hired for brand design" in agent
+    assert "The operator's standing instructions, for every agent:\n# Ghost\n\nUK dates." in agent
+    assert "Who you are, in the operator's words:\nWarm." in agent
+    assert "department" not in agent.lower()
+    ghost = build_system_prompt(["F"], rules="UK dates.", roster="- Brand: brand design")
+    assert "The operator's other agents, for transfers:\n- Brand: brand design" in ghost
+    assert "UK dates." in ghost
 
 
 async def test_the_tool_list_never_names_a_tool_twice_or_badly():

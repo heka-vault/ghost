@@ -282,7 +282,7 @@ export function ModelStep({ w }: { w: Wizard }) {
 
 /**
  * GitHub is an app (ADR 0034): it connects from the catalog under Apps, by signing in, and
- * every agent and department reaches it. This step only says whether it is connected and
+ * every agent reaches it. This step only says whether it is connected and
  * takes the operator there; there is no token or repository list here. Keeping Ghost to some
  * repositories is a rule on Permissions.
  */

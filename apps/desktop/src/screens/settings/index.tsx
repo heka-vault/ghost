@@ -917,7 +917,7 @@ export default function SettingsScreen(_: RouteProps) {
               >
                 <Card padding="md">
                   <p className="set-github t-body">
-                    Connect GitHub, Linear, Notion and more under Apps: sign in, paste a key, or run one on this computer. Every agent and department reaches them. What Ghost may not do,
+                    Connect GitHub, Linear, Notion and more under Apps: sign in, paste a key, or run one on this computer. Every agent reaches them. What Ghost may not do,
                     or asks first, is on Permissions.
                   </p>
                   <div className="set-github__links">
@@ -939,8 +939,7 @@ export default function SettingsScreen(_: RouteProps) {
                 className="set-section"
               >
                 <p className="set-note">
-                  Nearest first: a department’s own <span className="t-mono">skills</span> folder (or its root’s), then yours in <span className="t-mono">~/.agents/skills</span>, then Ghost’s own in{" "}
-                  <span className="t-mono">~/.config/ghost/skills</span>. Nothing is copied. What Ghost found, where each came from and what it needs is under{" "}
+                  Ghost’s own in <span className="t-mono">~/.config/ghost/skills</span> first, then yours in <span className="t-mono">~/.agents/skills</span>. Nothing is copied. What Ghost found, where each came from and what it needs is under{" "}
                   <a href={hrefFor("/skills")}>Skills</a>.
                 </p>
               </Section>

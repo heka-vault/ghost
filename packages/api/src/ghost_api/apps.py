@@ -68,7 +68,7 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         return deps.policy_path.parent / APPS_FILE
 
     def policy() -> AutonomyPolicy:
-        return deps.gate.policy_for(None)
+        return deps.gate.autonomy
 
     def kind_of(spec: AppSpec) -> str:
         if spec.command:

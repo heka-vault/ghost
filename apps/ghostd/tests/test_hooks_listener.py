@@ -32,7 +32,7 @@ JOBS = {
 def wired():
     store = Store()
     intake = HookIntake(Items(store), store, environ={"JOB_SECRET": "k"})
-    hook = parse_hook("jobs", JOBS, "ghost", "test")
+    hook = parse_hook("jobs", JOBS, "test")
     intake.hooks[hook.path] = hook
     return intake, hook
 
@@ -52,9 +52,11 @@ async def test_only_post_to_a_declared_hook_reaches_the_intake():
         assert r.status_code == 202 and r.json() == {"ok": True}
         assert [i.title for i in intake._items.open()] == ["backup failed"]
         assert (await c.get(hook.path)).status_code == 405
-        assert (await c.post("/hooks/ghost", content=b"{}")).status_code == 404
+        assert hook.path == "/hooks/jobs"  # ADR 0035: by name alone
+        assert (await c.post("/hooks/nope", content=b"{}")).status_code == 404
         assert (await c.post("/status", content=b"{}")).status_code == 404
-        assert (await c.post("/hooks/ghost/nope", content=b"{}")).status_code == 404
+        assert (await c.post("/hooks/ghost/jobs", content=b"{}")).status_code == 404
+        assert (await c.post("/hooks/", content=b"{}")).status_code == 404
         bad = await c.post(
             hook.path, content=body, headers={**signed(body, "d2"), H_SIG: "sha256=00"}
         )
@@ -85,7 +87,7 @@ async def test_an_unknown_hook_is_not_found_before_its_body_is_read():
     async def send(msg):
         sent.append(msg)
 
-    scope = {"type": "http", "method": "POST", "path": "/hooks/ghost/nope", "headers": []}
+    scope = {"type": "http", "method": "POST", "path": "/hooks/nope", "headers": []}
     await app(scope, receive, send)
     assert sent[0]["status"] == 404
 
@@ -98,13 +100,16 @@ def test_push_with_the_listener_down_says_so_in_one_line(tmp_path, monkeypatch, 
     with socket.socket() as s:  # a port nothing listens on
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    (tmp_path / "department.json").write_text(json.dumps({"hooks": {"jobs": JOBS}}))
+    (tmp_path / "hooks.json").write_text(json.dumps({"jobs": JOBS}))
     monkeypatch.setenv("GHOST_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("GHOST_HOOKS_LISTEN", f"127.0.0.1:{port}")
     monkeypatch.setenv("JOB_SECRET", "k")
-    assert push_cli(["ghost/jobs", "done", '{"job": "backup", "ok": false}']) == 1
+    assert push_cli(["jobs", "done", '{"job": "backup", "ok": false}']) == 1
     err = capsys.readouterr().err.strip()
     assert "\n" not in err and "could not reach" in err
+    # the older <department>/<hook> form is not a hook name
+    assert push_cli(["ghost/jobs", "done"]) == 2
+    assert "usage: ghostd push <hook>" in capsys.readouterr().err
 
 
 def test_the_journal_never_prints_variable_values_in_a_traceback(monkeypatch):

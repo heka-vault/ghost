@@ -1,7 +1,7 @@
 /**
  * Owner: skills. The SKILL.md folders Ghost reads (ADR 0023), as GET /skills reports them:
- * Ghost's own under ~/.config/ghost/skills, the operator's under ~/.agents/skills, and a
- * department's own read in place (ADR 0024). `requires` names apps (ADR 0034); `missing` is worked out
+ * Ghost's own under ~/.config/ghost/skills, then the operator's under ~/.agents/skills, read
+ * in place (ADR 0035). `requires` names apps (ADR 0034); `missing` is worked out
  * here from the apps the mock has connected, so a skill that needs an app no scenario connects
  * (quickbooks) shows as missing everywhere, and one that needs the calendar is ready only in Busy.
  */
@@ -17,13 +17,12 @@ export interface SkillFixture {
 }
 
 export const GHOST_SKILLS_DIR = "~/.config/ghost/skills";
-const HEKA = "~/projects/heka";
-const FLEET = "~/projects/fleet";
+const HOME_SKILLS_DIR = "~/.agents/skills";
 
 interface Seed {
   name: string;
   description: string;
-  /** "ghost", or the project root the skill is read from. */
+  /** "ghost" (Ghost's own) or "home" (the operator's ~/.agents/skills). */
   source: string;
   requires?: string[];
   files?: string[];
@@ -83,7 +82,7 @@ Two sentences: where cash stands and the one thing that moved most. Offer the fu
   triage: {
     name: "triage",
     description: "Sort new heka issues: label, ask for what is missing, hand the clear ones to an agent.",
-    source: HEKA,
+    source: "home",
     requires: ["github"],
     files: ["labels.md"],
     body: `# Triage
@@ -101,7 +100,7 @@ Never rename a label. Never close an issue from here; propose that separately an
   "release-notes": {
     name: "release-notes",
     description: "Write release notes from the merged pull requests since the last tag.",
-    source: HEKA,
+    source: "home",
     requires: ["github"],
     body: `# Release notes
 
@@ -149,7 +148,7 @@ Match each receipt in the month's folder to a category from categories.md, flag 
   "fleet-onboarding": {
     name: "fleet-onboarding",
     description: "Set up a new machine on the fleet: WireGuard peer, vault access, the first deploy.",
-    source: FLEET,
+    source: "home",
     files: ["peer.md", "vault.md"],
     body: `# Fleet onboarding
 
@@ -165,7 +164,7 @@ export function skillInfo(seed: Seed, connected: Set<string>): SkillInfo {
     name: seed.name,
     description: seed.description,
     source: seed.source,
-    path: seed.source === "ghost" ? `${GHOST_SKILLS_DIR}/${seed.name}` : `${seed.source}/.agents/skills/${seed.name}`,
+    path: seed.source === "ghost" ? `${GHOST_SKILLS_DIR}/${seed.name}` : `${HOME_SKILLS_DIR}/${seed.name}`,
     requires,
     missing: missingOf(requires, connected),
     files: [...(seed.files ?? [])],

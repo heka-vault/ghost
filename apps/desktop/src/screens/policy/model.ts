@@ -22,7 +22,7 @@ export const MODES: { value: Mode; label: string; help: string }[] = [
 ];
 
 /** Ghost's own sources: rules name them like apps. */
-export const OWN: Record<string, string> = { conversations: "your agents", departments: "your departments", skills: "your skills", outputs: "what Ghost makes" };
+export const OWN: Record<string, string> = { conversations: "your agents", rules: "Ghost’s rules", skills: "your skills", outputs: "what Ghost makes" };
 
 const RULE = /^\s*([A-Za-z0-9_*?\-/]+)(?:\.([A-Za-z0-9_*?\-.]+))?\s*(?:\(([^()]*)\))?\s*$/;
 

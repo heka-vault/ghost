@@ -1,5 +1,5 @@
-"""Agents: named conversations with their own persona, job, voice and memory, in a
-department (ADR 0014, ADR 0024)."""
+"""Agents: named conversations with their own persona, job, voice and memory (ADR 0014,
+ADR 0035)."""
 
 from ghost_core.conversations.files import ConversationFiles
 from ghost_core.conversations.models import (

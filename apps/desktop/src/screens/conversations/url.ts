@@ -45,10 +45,10 @@ export const focusOnOpen: { slug: string | null } = { slug: null };
 
 /**
  * Hand-offs into the Agents screen from elsewhere, read once on arrival: a retired agent to
- * seed a new one from, "open the New agent dialog" (the sidebar's New agent…, a department's
- * New agent, which also names the department), "open the Retired group".
+ * seed a new one from, "open the New agent dialog" (the sidebar's New agent…), "open the
+ * Retired group".
  */
-export const newAgentSeed: { slug: string | null; open: boolean; retired: boolean; department: string | null } = { slug: null, open: false, retired: false, department: null };
+export const newAgentSeed: { slug: string | null; open: boolean; retired: boolean } = { slug: null, open: false, retired: false };
 
 /**
  * Design mode only (`&fail=agents` or `&fail=agent`): that page's loads fail until Try again

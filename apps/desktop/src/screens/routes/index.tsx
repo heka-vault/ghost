@@ -137,8 +137,8 @@ export default function RoutesScreen(_: RouteProps) {
             </Card>
           </Section>
           <p className="t-small t-3 rt-foot">
-            Say “Ghost, nothing until two” to pause everything but the summary until then. How loud each watch may get is set per watch in its
-            department’s folder, or under <span className="t-mono">[routes.urgency]</span> in the policy file.
+            Say “Ghost, nothing until two” to pause everything but the summary until then. How loud each watch may get is set per watch in
+            watches.json, or under <span className="t-mono">[routes.urgency]</span> in the policy file.
           </p>
         </div>
       ) : null}

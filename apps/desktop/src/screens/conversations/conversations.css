@@ -204,13 +204,8 @@
 .conv-form__group { display: flex; flex-direction: column; gap: var(--space-2); }
 /* A template's missing app, inside the field's help: the one warning in the dialog. */
 .conv-form__warn { color: var(--warn); }
-/* A topic line's department, beside its scope chips on the index (ADR 0023). */
-.conv-row-dept { margin-right: var(--space-2); font-size: var(--text-sm); color: var(--text-3); white-space: nowrap; }
-/* A department's toolkits and a topic line's department on its page. */
-.conv-dept { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-4) var(--space-5); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
-.conv-dept__lead { margin: 0; color: var(--text-1); }
-.conv-dept__lead a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 0.15em; border-radius: var(--radius-xs); }
-.conv-dept__sub { margin: 0; }
+/* An agent's job, beside its name on the index. */
+.conv-row-job { margin-right: var(--space-2); font-size: var(--text-sm); color: var(--text-3); white-space: nowrap; }
 .conv-form__label { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); }
 .conv-form__optional { margin-left: var(--space-1); font-weight: var(--weight-regular); color: var(--text-3); }
 .conv-row-settled { display: inline-flex; align-items: center; gap: var(--space-1_5); }
@@ -219,3 +214,13 @@
 .conv-view { display: flex; flex-direction: column; gap: var(--space-4); }
 .conv-view__bar { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-9); }
 .conv-view__title { font-size: var(--text-lg); font-weight: 600; color: var(--text-1); }
+
+/* What every agent shares, under the list (ADR 0035): Ghost's rules and what it made. */
+.conv-folder { margin-top: var(--space-10); }
+/* AGENTS.md as the operator wrote it, in reading type. */
+.conv-rules { margin: 0; padding: var(--space-4) var(--space-5); font: inherit; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); white-space: pre-wrap; overflow-wrap: anywhere; }
+.conv-rules--empty { color: var(--text-3); }
+.conv-output { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-5); }
+.conv-output__text { flex: 1 1 auto; min-width: 0; font-size: var(--text-md); line-height: var(--leading-md); overflow-wrap: anywhere; }
+.conv-output__text .t-mono { font-variant-ligatures: none; }
+.conv-output__actions { display: inline-flex; flex: none; gap: var(--space-3); }

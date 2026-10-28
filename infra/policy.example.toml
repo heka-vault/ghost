@@ -17,8 +17,7 @@
 #   "conversations.delete"                  one of Ghost's own operations
 # The most careful rule that matches wins: block, then ask, then quiet, then allow.
 #
-# A department can add block, ask and quiet rules for its own agents in its
-# department.json ("permissions"); it can never allow more than this file.
+# These permissions are the same for every agent (ADR 0035).
 #
 # Ghost never writes this file, and nothing an app returns can change it.
 # Every change is logged; to reverse one, ask Ghost for the opposite change.
@@ -47,5 +46,5 @@ allow = []
 # calls_per_day = 6
 # carry = "count"              # what an outside route may say: count, or title
 # greeting = "Got a minute?"   # what desk voice says before anything else
-# [routes.urgency]             # how loud a watch may get: digest, notify (the default), call
-# "eng/ci" = "call"
+# [routes.urgency]             # how loud a watch or hook may get, by its name in
+# "ci" = "call"                # watches.json or hooks.json: digest, notify (the default), call

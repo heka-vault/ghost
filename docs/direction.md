@@ -53,7 +53,7 @@ The line is not "code or not code". It is: a self-contained thing Ghost makes is
 work; sustained engineering inside a project is a harness's.
 
 Two rules carry over unchanged. What Ghost makes is written through the gate, into a
-place the operator chose (a department's folder, an output folder), with an audit row
+place the operator chose (Ghost's `out/` folder), with an audit row
 like any write. And Ghost does not run what it makes: a script it wrote runs only through
 the gated scripts server (`ghost-scripts`), and a page it built is opened by the
 operator.
@@ -90,11 +90,12 @@ model reading the checklist.
 
 ### Two ways in: polled and pushed
 
-A **watch** is something the operator declares in a department folder (ADR 0024), never
+A **watch** is something the operator declares in Ghost's folder (`watches.json`,
+`hooks.json`; ADR 0035), never
 written by the model. It is one of two kinds:
 
-- **Polled.** Ghost asks on an interval. Usually an MCP read the department already
-  declares (ADR 0022) plus a small predicate over the result: "workflow runs on
+- **Polled.** Ghost asks on an interval. Usually one of a connected app's read-only tools
+  (ADR 0034) plus a small predicate over the result: "workflow runs on
   heka-vault/ghost with conclusion `failure`", "pull requests where my review is
   requested". No client code per service: if a system has an MCP server, it can be
   watched.
@@ -132,17 +133,17 @@ the machine, so the watch names which fields go.
 
 ### What Ghost does with an observation
 
-Each watch's **response**, in the same folder, says what its items get. (*Rule* stays
-the word for a line of a department's `AGENTS.md`.) The model never picks the
+Each watch's **response**, in the same file, says what its items get. (*Rule* stays
+the word for a line of `AGENTS.md`.) The model never picks the
 response:
 
 - **Record.** Kept for the digest and for "what happened overnight?" Nothing else.
 - **Tell.** The item goes on the **waiting list**, the list of things that need the
   operator, and Ghost reaches them by the routes below.
-- **Act.** A routine (#10) runs in the department: the model gets the item as data,
-  with the department's servers and skills, and does what the routine says ("read the
+- **Act.** A routine (#10) runs in Ghost or one agent: the model gets the item as data,
+  with the connected apps and the skills, and does what the routine says ("read the
   failed job's log, summarise it, open an issue"). Its writes go through the gate at the
-  department's levels; at `confirm` they wait for the operator, which puts them on the
+  operator's permissions; at `confirm` they wait for the operator, which puts them on the
   waiting list. Tell and act can go together.
 
 So the model is reached at **act**, when a watch declares a model step, or when the
@@ -182,7 +183,7 @@ daemon, on strict terms:
 
 1. **Signature first.** The body is not read until the source's signature, clock window
    and delivery id check out.
-2. **Parsed by declaration, not by a model.** The department declares which events a
+2. **Parsed by declaration, not by a model.** The operator declares which events a
    source sends and which fields to keep, each with a type and a constraint (a pattern,
    an enum). Anything else in the body is dropped at the door; a body that doesn't
    fit is rejected whole.
@@ -353,10 +354,10 @@ differing:
 
 ## What changes in what is built
 
-Nothing already built is thrown away. The gate, MCP declarations, departments, agents, the
-phone app and the tunnel are all what this needs. What moves:
+Nothing already built is thrown away. The gate, the apps, agents, the phone app and the
+tunnel are all what this needs (departments were dropped later, ADR 0035). What moves:
 
-- **GitHub triage becomes one department**, the first and best example of the pattern,
+- **GitHub triage becomes one set of watches**, the first and best example of the pattern,
   not the product.
 - **#11 (status)** becomes the waiting list plus Ghost's own state. It moves up from
   backlog into the next increment.
@@ -372,7 +373,7 @@ phone app and the tunnel are all what this needs. What moves:
 ## Open questions for review
 
 1. **Is observation the core of Ghost?** If yes, "what needs me?" is answered from the
-   waiting list alone, and voice triage of GitHub is one department among many.
+   waiting list alone, and voice triage of GitHub is one use among many.
 2. **The predicate language for polled watches.** Smallest useful: a field, an operator
    (`in`, `exists`, `>`), a "for at least N minutes". Decided 2026-10-27: past that, a
    watch declares a Jev question, then a model, not a script (see "Deciding").
@@ -394,8 +395,8 @@ phone app and the tunnel are all what this needs. What moves:
 8. **Answering another system by voice.** At what level by default: `confirm` for
    everything, or lower for low-risk replies like "go ahead"?
 9. **Where Ghost's work goes.** Decided 2026-10-27 that Ghost makes self-contained
-   things itself, code included, and is not an IDE. Still open: where they land (a
-   department's `docs/`, an `out/` folder), how the operator gets them by voice ("it's
+   things itself, code included, and is not an IDE. Decided 2026-10-27: they land in
+   Ghost's `out/` folder (ADR 0033, ADR 0035). Still open: how the operator gets them by voice ("it's
    on your desktop", a link to the phone), and whether the desktop app previews them.
 
 ## A first increment

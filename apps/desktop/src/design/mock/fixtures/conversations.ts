@@ -1,12 +1,12 @@
 /**
- * Owner: conversations. Agents (ADR 0024) with their persona, job, department, memory,
- * pinned notes, transcript history and compactions; plus the Kokoro voice list. Each
- * department's own agent is named for it; the rest are hired into one. Extend freely.
+ * Owner: conversations. Agents (ADR 0014, ADR 0035) with their persona, job, memory, pinned
+ * notes, transcript history and compactions; plus the Kokoro voice list. Every agent is a
+ * folder under Ghost's agents/; one without its own voice speaks in Ghost's. Extend freely.
  */
 import type { CompactionView, ConversationDetail, TurnView, VoiceInfo } from "@ghost/client-ts";
 
 import { ago, type Scenario, seeded } from "../scenarios";
-import { CONFIG_DIR } from "./departments";
+import { CONFIG_DIR } from "./folder";
 import { SESSION_ID } from "./session";
 
 export interface AgentRecord {
@@ -19,11 +19,9 @@ interface Seed {
   slug: string;
   name: string;
   aliases: string[];
-  /** The department it works in; absent: Ghost. */
-  department?: string;
-  /** What it was hired for, in a line. The department's own agent has none. */
+  /** What it was hired for, in a line. */
   job?: string;
-  /** Its own voice; absent: the department's (ADR 0024). */
+  /** Its own voice; absent: Ghost's (ADR 0035). */
   voice?: string;
   speed?: number;
   persona: string;
@@ -33,7 +31,7 @@ interface Seed {
   lastActiveMin: number | null;
   turns: [TurnView["role"], string][];
   compactions: number;
-  /** Retired this many days ago (ADR 0024): off the roster and voice routing, still readable. */
+  /** Retired this many days ago: off the roster and voice routing, still readable. */
   retiredDaysAgo?: number;
   /**
    * Each version's summary, oldest first, one per compaction; the newest is `memory`.
@@ -42,8 +40,8 @@ interface Seed {
   history?: string[];
 }
 
-/** The voice heard when an agent has none of its own: its department's, else Ghost's default. */
-const DEPARTMENT_VOICE: Record<string, string> = { ghost: "af_heart", accounting: "bm_george", infra: "am_onyx", app: "af_sky", legal: "bf_emma" };
+/** The voice heard when an agent has none of its own: Ghost's. */
+const GHOST_VOICE = "af_heart";
 
 const GHOST: Seed = {
   slug: "ghost",
@@ -75,14 +73,15 @@ const GHOST: Seed = {
   compactions: 6,
 };
 
-/** Accounting's own agent: named for the department, speaks as its rules. */
+/** The books, with its own voice. */
 const ACCOUNTING: Seed = {
   slug: "accounting",
   name: "Accounting",
   aliases: ["billing", "the books"],
-  department: "accounting",
+  job: "the books, invoices and billing bugs",
+  voice: "bm_george",
   speed: 1.05,
-  persona: "",
+  persona: "Numbers first, no small talk. Amounts in full, with the currency. Never post an entry you have not read back.",
   memory:
     "Billing bugs live in ghost-mock/app under the billing label; the ledger export is ghost-mock/infra.\n" +
     "Q3 close finished October 9. Two refunds still open with finance (Northwind, Halcyon).\n" +
@@ -109,12 +108,11 @@ const ACCOUNTING: Seed = {
   compactions: 3,
 };
 
-/** Hired into Accounting for one job, with its own voice (ADR 0024). */
+/** Hired for one job, with its own voice. */
 const Q3_AUDIT: Seed = {
   slug: "q3-audit",
   name: "Q3 audit",
   aliases: ["the audit", "auditors"],
-  department: "accounting",
   job: "the auditors’ questions",
   voice: "bm_lewis",
   speed: 1.0,
@@ -134,12 +132,11 @@ const Q3_AUDIT: Seed = {
   compactions: 1,
 };
 
-/** A retired agent (ADR 0024): the Q3 close is done, so it left the roster; everything stays readable. */
+/** A retired agent: the Q3 close is done, so it left the roster; everything stays readable. */
 const Q3_CLOSE: Seed = {
   slug: "q3-close",
   name: "Q3 close",
   aliases: ["the close", "quarter close"],
-  department: "accounting",
   job: "the Q3 books",
   voice: "bf_alice",
   persona: "The Q3 books. Refunds, the ledger export and anything finance is waiting on. Numbers first.",
@@ -170,8 +167,9 @@ const INFRA: Seed = {
   slug: "infra",
   name: "Infra",
   aliases: ["the infra repo", "ops"],
-  department: "infra",
-  persona: "",
+  job: "deploys, the ledger export, anything paging",
+  voice: "am_onyx",
+  persona: "Say what broke, what changed and who is on it. Never close an infra issue without asking.",
   memory: "Infra 77, the ledger export, times out past 10k rows; Priya is on it and it's labeled blocked.\nThe nightly deploy moved to 02:00 after the October 6 outage.",
   notes: ["Never close an infra issue without asking."],
   createdDaysAgo: 9,
@@ -191,8 +189,9 @@ const APP: Seed = {
   slug: "app",
   name: "App",
   aliases: ["the app repo", "frontend"],
-  department: "app",
-  persona: "",
+  job: "the app repo",
+  voice: "af_sky",
+  persona: "Bugs first, then what is waiting on my sign-off.",
   memory: "App 151 is the Safari login loop; likely a duplicate of 148, whose fix is in review with Dana.\nDecided: duplicates get closed with a link to the older issue, no other comment.",
   notes: [],
   createdDaysAgo: 9,
@@ -208,12 +207,11 @@ const APP: Seed = {
   compactions: 1,
 };
 
-/** Hired into App: one job, the department's voice. */
+/** One job, in Ghost's voice. */
 const RELEASE_NOTES: Seed = {
   slug: "release-notes",
   name: "Release notes",
   aliases: ["the notes"],
-  department: "app",
   job: "release notes for each tag",
   persona: "Turn the commits since the last tag into notes a customer can read. Short, no internal names.",
   memory: "4.12 shipped with the Safari cookie fix and the euro rounding fix. 4.13 is open.",
@@ -228,7 +226,7 @@ const RELEASE_NOTES: Seed = {
   compactions: 0,
 };
 
-/** Hired with Ghost: no department of its own. */
+/** A daily job, with its own voice and pace. */
 const STANDUP: Seed = {
   slug: "standup",
   name: "Standup",
@@ -253,8 +251,9 @@ const LEGAL: Seed = {
   slug: "legal",
   name: "Legal",
   aliases: ["compliance", "counsel"],
-  department: "legal",
-  persona: "",
+  job: "licenses, DPAs, anything that could be a compliance problem",
+  voice: "bf_emma",
+  persona: "Quote exactly; never guess at what a contract says.",
   memory:
     "License audit is tracked in ghost-mock/infra #91. Two AGPL tools in the build image are build-time only.\n" +
     "DPA with Northwind renews in January; counsel is Marco.",
@@ -284,7 +283,6 @@ const LAUNCH: Seed = {
   slug: "launch",
   name: "Launch",
   aliases: ["the launch"],
-  department: "app",
   job: "the September launch",
   voice: "am_adam",
   speed: 1.1,
@@ -312,15 +310,15 @@ const BUSY_ALIASES: Record<string, string[]> = {
   Personal: ["errands"],
 };
 
-const BUSY_EXTRA: [string, string, string, string][] = [
-  ["Hiring", "Short. Candidate pipeline for the platform role; never repeat names out loud.", "af_nicole", "ghost"],
-  ["Infra on-call", "Pager context. What's on fire, what changed, who's on call.", "am_onyx", "infra"],
-  ["Design review", "Read me the open design-review issues and who asked.", "af_sky", "app"],
-  ["Release train", "What's in the next release, what's still open against the milestone.", "bm_daniel", "app"],
-  ["Security", "CVEs, dependabot, anything labeled security. Be blunt.", "am_fenrir", "infra"],
-  ["Customer escalations", "Escalations from support, newest first, with the customer name.", "af_bella", "ghost"],
-  ["Roadmap", "Long-horizon items only. Don't bring up bugs here.", "bf_alice", "ghost"],
-  ["Personal", "Not work. Reminders and errands.", "af_river", "ghost"],
+const BUSY_EXTRA: [string, string, string][] = [
+  ["Hiring", "Short. Candidate pipeline for the platform role; never repeat names out loud.", "af_nicole"],
+  ["Infra on-call", "Pager context. What's on fire, what changed, who's on call.", "am_onyx"],
+  ["Design review", "Read me the open design-review issues and who asked.", "af_sky"],
+  ["Release train", "What's in the next release, what's still open against the milestone.", "bm_daniel"],
+  ["Security", "CVEs, dependabot, anything labeled security. Be blunt.", "am_fenrir"],
+  ["Customer escalations", "Escalations from support, newest first, with the customer name.", "af_bella"],
+  ["Roadmap", "Long-horizon items only. Don't bring up bugs here.", "bf_alice"],
+  ["Personal", "Not work. Reminders and errands.", "af_river"],
 ];
 
 /** Earlier exchanges, already folded into memory. Cycled to give older history its length. */
@@ -386,8 +384,6 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): AgentRe
       through_turn_id: source === "edit" || !old.length ? null : all[Math.min(covered(i), old.length) - 1].id,
     };
   }).reverse();
-  const department = seed.department ?? "ghost";
-  const isDefault = seed.slug === department;
   const own = !!seed.voice;
   return {
     detail: {
@@ -395,9 +391,8 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): AgentRe
       slug: seed.slug,
       name: seed.name,
       aliases: seed.aliases,
-      department,
       job: seed.job ?? "",
-      voice: seed.voice ?? DEPARTMENT_VOICE[department] ?? "af_heart",
+      voice: seed.voice ?? GHOST_VOICE,
       speed: seed.speed ?? 1,
       own_voice: own,
       persona: seed.persona,
@@ -408,10 +403,9 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): AgentRe
       retired_at: seed.retiredDaysAgo != null ? ago(60 * 24 * seed.retiredDaysAgo) : null,
       active: false,
       is_ghost: seed.slug === "ghost",
-      is_default: isDefault,
       turn_count: all.length,
       compactions: seed.compactions,
-      dir: department === "ghost" ? `${CONFIG_DIR}/agents/${seed.slug}` : `${CONFIG_DIR}/departments/${department}/agents/${seed.slug}`,
+      dir: `${CONFIG_DIR}/agents/${seed.slug}`,
     },
     turns: all,
     compactions,
@@ -439,11 +433,10 @@ export default function conversations(s: Scenario): ConversationsFixture {
       APP,
       RELEASE_NOTES,
       LAUNCH,
-      ...BUSY_EXTRA.map(([name, persona, voice, department], i) => ({
+      ...BUSY_EXTRA.map(([name, persona, voice], i) => ({
         slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
         name,
         aliases: BUSY_ALIASES[name] ?? [],
-        department,
         job: persona.split(".")[0].toLowerCase(),
         voice,
         speed: 1,

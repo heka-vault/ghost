@@ -92,11 +92,11 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
                 <span>{part}</span>
               </Fragment>
             ))}
-            {/* Where it was made (ADR 0024): the department, small. */}
-            {e.department && (
+            {/* The agent that made it, small, when it wasn't Ghost (ADR 0035). */}
+            {e.conversation && e.conversation !== "ghost" && (
               <>
                 <span aria-hidden className="audit-row__sep">·</span>
-                <span>in {agentName(e.department)}</span>
+                <span>by {agentName(e.conversation)}</span>
               </>
             )}
           </span>

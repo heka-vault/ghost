@@ -157,7 +157,6 @@ export default function WaitingScreen(_: RouteProps) {
                     description={
                       <span className="wait-meta">
                         <span>{sourceLabel(item)}</span>
-                        {item.department && <span>{item.department}</span>}
                         <span>first seen {relativeTime(item.first_seen)}</span>
                         {item.delivered_via && item.state === "delivered" && <span>sent by {item.delivered_via}</span>}
                         {item.change && <span>until {new Date(item.change.expires_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}

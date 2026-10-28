@@ -2,10 +2,9 @@
 reaches the operator (ADR 0011, ADR 0030, ADR 0031, ADR 0034).
 
 Everything runs unless the operator's permissions say otherwise (``ghost_core.permissions``):
-``[permissions]`` holds the mode and the ``block``, ``ask``, ``quiet`` and ``allow`` lists.
-A department's ``department.json`` may add ``block``, ``ask`` and ``quiet`` rules for its own
-sessions (``with_rules``), never ``allow``. The model cannot read or write any of it, and
-nothing an app returns reaches it.
+``[permissions]`` holds the mode and the ``block``, ``ask``, ``quiet`` and ``allow`` lists,
+one set for every agent (ADR 0035). The model cannot read or write any of it, and nothing an
+app returns reaches it.
 
 The older layout, a table per source with a level per operation (``[conversations]
 delete = "confirm"``, ``[github.targets."acme/app"] close = "deny"``), still reads: each
@@ -150,16 +149,6 @@ class AutonomyPolicy:
         """The level for this change. ``args`` are the call's arguments, for the rules
         with argument patterns; None decides on the name alone."""
         return self.permissions.resolve(source, operation, args)
-
-    def with_rules(self, extra: Permissions, where: str = "") -> AutonomyPolicy:
-        """This policy with a department's rules added (they only ever add care)."""
-        if not any(getattr(extra, k) for k in LISTS):
-            return self
-        return replace(
-            self,
-            permissions=self.permissions.merged(extra),
-            source=f"{self.source} + {where}" if where else self.source,
-        )
 
     def with_permissions(self, permissions: Permissions) -> AutonomyPolicy:
         return replace(self, permissions=permissions, source="<api>")

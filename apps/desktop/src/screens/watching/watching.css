@@ -1,0 +1,25 @@
+/* Owner: watching. Every class is prefixed wat-. Tokens only. */
+
+.wat-notice { margin-bottom: var(--space-6); }
+.wat-notice__lead { margin: 0 0 var(--space-2); }
+.wat-problems { margin: 0; padding-left: var(--space-4); overflow-wrap: anywhere; }
+.wat-skel-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); }
+
+/* A row's leading icon: muted, on the title's first line. */
+.wat-icon { display: inline-flex; color: var(--text-3); }
+.wat-icon > svg { width: var(--icon-md); height: var(--icon-md); }
+.wat-title { display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.wat-title .t-mono { font-size: var(--text-md); font-variant-ligatures: none; }
+
+/* The second and third lines: what it reads and how it decides, then what it does. */
+.wat-desc { display: flex; flex-direction: column; gap: var(--space-0_5); overflow-wrap: anywhere; }
+.wat-desc .t-mono { font-variant-ligatures: none; }
+.wat-error { color: var(--danger); font-family: var(--font-mono); font-size: var(--text-sm); }
+.wat-off { color: var(--text-2); }
+
+/* Counts and the last look, right-aligned on the card's content edge. */
+.wat-end { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-0_5); white-space: nowrap; }
+.wat-end__counts { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
+.wat-end__when { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.wat-files { margin-top: var(--space-10); max-width: 64ch; overflow-wrap: anywhere; }

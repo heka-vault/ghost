@@ -305,7 +305,7 @@ export default function SessionScreen(_: RouteProps) {
               <PendingChange
                 summary={pending.summary}
                 rationale={pending.rationale}
-                operation={[`${pending.source}.${pending.operation}`, status?.department && status.department !== "ghost" ? `in ${lineName(status.department)}` : null].filter(Boolean).join(" · ")}
+                operation={`${pending.source}.${pending.operation}`}
                 expiresAt={pending.expires_at}
                 busy={busy === "confirm" ? "confirm" : busy === "cancel" ? "cancel" : busy !== null}
                 disabled={!online}

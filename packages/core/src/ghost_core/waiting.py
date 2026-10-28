@@ -8,7 +8,7 @@ the operator heard it; only acknowledged (or snoozed) stops the alerting, and an
 changes alerts again.
 
 The **waiting list** is the open items whose response is ``tell``, with Ghost's own: the
-changes waiting for a yes (ADR 0030) and the apps and departments with a problem. It is
+changes waiting for a yes (ADR 0030), the apps with a problem and Ghost's folder's. It is
 a projection over the store; ``WaitingList.refresh`` re-reads Ghost's own each time.
 
 Everything in an item is data: its title and fields come from outside systems and never
@@ -33,7 +33,7 @@ Response = Literal["record", "tell"]
 State = Literal["new", "delivered", "acknowledged", "snoozed"]
 
 GATE = "gate"  # Ghost's own source: changes waiting for a yes
-GHOST = "ghost"  # Ghost's own source: servers and departments with a problem
+GHOST = "ghost"  # Ghost's own source: apps, and Ghost's folder, with a problem
 SOURCE = "waiting"  # the read tool's source name
 SETTINGS = "routes"  # the store's key/value rows the routes keep (ADR 0031)
 TITLE_MAX = 200
@@ -44,7 +44,6 @@ class ItemDraft(BaseModel, frozen=True):
 
     key: str = Field(min_length=1, max_length=300)
     title: str = Field(min_length=1)
-    department: str | None = None
     link: str | None = None
     fields: dict[str, Scalar] = Field(default_factory=dict)
     response: Response = "tell"
@@ -53,7 +52,6 @@ class ItemDraft(BaseModel, frozen=True):
 class Item(BaseModel, frozen=True):
     key: str
     source: str
-    department: str | None
     title: str
     link: str | None
     fields: dict[str, Scalar]
@@ -93,7 +91,6 @@ def _from_row(row: dict[str, Any]) -> Item:
     return Item(
         key=row["key"],
         source=row["source"],
-        department=row["department"],
         title=row["title"],
         link=row["link"],
         fields=row["fields"],
@@ -163,7 +160,6 @@ class Items:
             self._store.upsert_item(
                 key=d.key,
                 source=source,
-                department=d.department,
                 title=title,
                 link=d.link,
                 fields=dict(d.fields),
@@ -189,7 +185,6 @@ class Items:
         self._store.upsert_item(
             key=d.key,
             source=source,
-            department=d.department,
             title=title,
             link=d.link,
             fields=dict(d.fields),
@@ -253,7 +248,6 @@ def change_draft(p: Proposal) -> ItemDraft:
     return ItemDraft(
         key=change_key(p.id),
         title=f"Waiting for your yes: {p.preview}",
-        department=p.department,
         fields={
             "proposal": p.id,
             "source": p.ability,
@@ -264,13 +258,13 @@ def change_draft(p: Proposal) -> ItemDraft:
     )
 
 
-Problems = Callable[[], Sequence[tuple[str, str, str | None]]]  # (key, title, department)
+Problems = Callable[[], Sequence[tuple[str, str]]]  # (key, title)
 
 
 class WaitingList:
     """The waiting list (ADR 0029). ``changes`` returns the changes waiting for a yes (the
-    gate's ``waiting``); ``problems`` returns Ghost's own trouble as (key, title,
-    department): an app not connected, a department folder that doesn't read. ``on_change`` runs
+    gate's ``waiting``); ``problems`` returns Ghost's own trouble as (key, title): an app
+    not connected, a file in Ghost's folder that doesn't read. ``on_change`` runs
     after a refresh that found something new, changed or resolved, and after an
     acknowledge or snooze."""
 
@@ -292,7 +286,7 @@ class WaitingList:
         a = self.items.sync(GATE, [change_draft(p) for p in self._changes()], now)
         b = self.items.sync(
             GHOST,
-            [ItemDraft(key=k, title=t, department=d) for k, t, d in self._problems()],
+            [ItemDraft(key=k, title=t) for k, t in self._problems()],
             now,
         )
         if a.any or b.any:
@@ -325,7 +319,6 @@ def item_fields(i: Item, now: datetime | None = None) -> dict[str, Any]:
     return {
         "key": i.key,
         "source": i.source,
-        "department": i.department,
         "title": i.title,
         "age_minutes": i.age_seconds(now) // 60,
         "state": i.state(now),

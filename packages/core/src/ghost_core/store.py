@@ -55,9 +55,10 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     PRIMARY KEY (session_id, key)
 );
 
--- Agents (ADR 0014, ADR 0024): a mirror of each agent folder plus what only Ghost
+-- Agents (ADR 0014, ADR 0035): a mirror of each agent folder plus what only Ghost
 -- writes (timestamps, retired), the transcript, every compaction version. ``conversation``
--- columns hold the agent's id.
+-- columns hold the agent's id. ``department`` is no longer read (ADR 0035); new rows
+-- say 'ghost'.
 CREATE TABLE IF NOT EXISTS conversations (
     id              TEXT PRIMARY KEY,
     slug            TEXT NOT NULL UNIQUE,
@@ -262,12 +263,10 @@ class Store:
         ability: str | None = None,
         status: str | None = None,
         session_id: str | None = None,
-        department: str | None = None,
         conversation: str | None = None,
         executed_only: bool = False,
     ) -> tuple[list[Proposal], int]:
-        """Newest first, for the audit view and a department's journal. Rows from an
-        older schema are skipped."""
+        """Newest first, for the audit view. Rows from an older schema are skipped."""
         where, args = [], []
         if status:
             raw = [status, *(k for k, v in _LEGACY_STATUS.items() if v.value == status)]
@@ -282,9 +281,6 @@ class Store:
         if ability:
             where.append("json_extract(body, '$.ability') = ?")
             args.append(ability)
-        if department:
-            where.append("json_extract(body, '$.department') = ?")
-            args.append(department)
         if conversation:
             where.append("json_extract(body, '$.conversation') = ?")
             args.append(conversation)
@@ -414,7 +410,6 @@ class Store:
         *,
         key: str,
         source: str,
-        department: str | None,
         title: str,
         link: str | None,
         fields: dict[str, object],
@@ -423,13 +418,14 @@ class Store:
         changed: bool,
     ) -> None:
         """Seen now. A new key, or one resolved before, starts over; ``changed`` moves
-        ``changed_at`` so an item the operator acknowledged alerts again."""
+        ``changed_at`` so an item the operator acknowledged alerts again. The ``department``
+        column is left empty (ADR 0035)."""
         at = now.isoformat()
         self._conn.execute(
-            "INSERT INTO items (key, source, department, title, link, fields, response,"
-            " first_seen, last_seen, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO items (key, source, title, link, fields, response,"
+            " first_seen, last_seen, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(key) DO UPDATE SET source = excluded.source,"
-            " department = excluded.department, title = excluded.title,"
+            " department = NULL, title = excluded.title,"
             " link = excluded.link, fields = excluded.fields, response = excluded.response,"
             " last_seen = excluded.last_seen,"
             " first_seen = CASE WHEN items.resolved_at IS NULL THEN items.first_seen"
@@ -445,7 +441,6 @@ class Store:
             (
                 key,
                 source,
-                department,
                 title,
                 link,
                 json.dumps(fields, sort_keys=True),
@@ -516,15 +511,15 @@ class Store:
         ).fetchone()
         return row[0] if row else None
 
-    # agents (ADR 0014, ADR 0024)
+    # agents (ADR 0014, ADR 0035)
 
     def upsert_conversation(self, p: Profile) -> None:
         self._conn.execute(
             "INSERT INTO conversations (id, slug, department, name, aliases, job, voice, speed,"
             " created_at, updated_at, last_active_at, retired_at, deleted_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " VALUES (?, ?, 'ghost', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET slug = excluded.slug,"
-            " department = excluded.department, name = excluded.name,"
+            " department = 'ghost', name = excluded.name,"
             " aliases = excluded.aliases, job = excluded.job, voice = excluded.voice,"
             " speed = excluded.speed, updated_at = excluded.updated_at,"
             " last_active_at = excluded.last_active_at, retired_at = excluded.retired_at,"
@@ -532,7 +527,6 @@ class Store:
             (
                 p.id,
                 p.slug,
-                p.department,
                 p.name,
                 json.dumps(list(p.aliases)),
                 p.job,
@@ -683,7 +677,7 @@ class Store:
 
 
 _ITEM_COLS = (
-    "key, source, department, title, link, fields, response, first_seen, last_seen,"
+    "key, source, title, link, fields, response, first_seen, last_seen,"
     " changed_at, resolved_at, delivered_at, delivered_via, acknowledged_at, snoozed_until"
 )
 
@@ -691,12 +685,12 @@ _ITEM_COLS = (
 def _item(row) -> dict[str, object]:
     names = [c.strip() for c in _ITEM_COLS.split(",")]
     out = dict(zip(names, row, strict=True))
-    out["fields"] = json.loads(row[5] or "{}")
+    out["fields"] = json.loads(row[4] or "{}")
     return out
 
 
 _PROFILE_COLS = (
-    "id, slug, department, name, aliases, job, voice, speed, created_at, updated_at,"
+    "id, slug, name, aliases, job, voice, speed, created_at, updated_at,"
     " last_active_at, retired_at, deleted_at"
 )
 
@@ -707,17 +701,16 @@ def _profile(row) -> Profile:
     return Profile(
         id=row[0],
         slug=row[1],
-        department=row[2],
-        name=row[3],
-        aliases=tuple(json.loads(row[4] or "[]")),
-        job=row[5] or "",
-        voice=row[6],
-        speed=float(row[7]) if row[7] is not None else None,
-        created_at=datetime.fromisoformat(row[8]),
-        updated_at=datetime.fromisoformat(row[9]),
-        last_active_at=datetime.fromisoformat(row[10]) if row[10] else None,
-        retired_at=datetime.fromisoformat(row[11]) if row[11] else None,
-        deleted_at=datetime.fromisoformat(row[12]) if row[12] else None,
+        name=row[2],
+        aliases=tuple(json.loads(row[3] or "[]")),
+        job=row[4] or "",
+        voice=row[5],
+        speed=float(row[6]) if row[6] is not None else None,
+        created_at=datetime.fromisoformat(row[7]),
+        updated_at=datetime.fromisoformat(row[8]),
+        last_active_at=datetime.fromisoformat(row[9]) if row[9] else None,
+        retired_at=datetime.fromisoformat(row[10]) if row[10] else None,
+        deleted_at=datetime.fromisoformat(row[11]) if row[11] else None,
     )
 
 
