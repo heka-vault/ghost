@@ -1,13 +1,18 @@
-//! `ghostd run`: the daemon. `ghostd status`: a client of its socket.
+//! `ghostd run`: the daemon. `ghostd status`: a client of its socket. `ghostd passwords`:
+//! the vault from the command line. `ghostd version`: what this build is.
 //!
 //! W1 of heka-vault/ghost#39: the daemon starts, opens the control socket and answers
-//! `/status` with `starting`. Everything else arrives package by package.
+//! `/status` with `starting`. W8 adds the foundations in the library (`ghostd::*`); the
+//! rest arrives package by package.
 
 use std::sync::Arc;
 
 use anyhow::Context;
 use ghost_api::server::{default_socket_path, serve};
 use ghost_api::{DaemonState, router};
+use ghostd::GhostdSettings;
+use ghostd::build_info;
+use ghostd::passwords::{Cli, Redacting, operator_keyring, passwords_cli};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::RwLock;
@@ -17,10 +22,13 @@ use tracing_subscriber::EnvFilter;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> anyhow::Result<()> {
+    // No log line carries a password: every line is redacted against the vault's values
+    // before it is written (ADR 0036).
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_env("GHOST_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
         )
+        .with_writer(Redacting(std::io::stderr))
         .with_target(false)
         .init();
 
@@ -28,19 +36,46 @@ fn main() -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         None | Some("run") => run(),
         Some("status") => status(),
+        Some("passwords") => {
+            let cfg = GhostdSettings::load()?;
+            let stdin = std::io::stdin();
+            let mut input = stdin.lock();
+            let mut out = std::io::stdout();
+            let mut err = std::io::stderr();
+            let tty = rustix::termios::isatty(std::io::stdin());
+            let mut cli = Cli {
+                stdin: &mut input,
+                stdout: &mut out,
+                stderr: &mut err,
+                tty,
+            };
+            std::process::exit(passwords_cli(
+                &args[1..],
+                &cfg,
+                operator_keyring(),
+                &mut cli,
+            ))
+        }
         Some("--version" | "version") => {
-            println!("ghostd {VERSION}");
+            let build = build_info::detect(None, None, None);
+            println!("{}", build_info::describe(VERSION, &build));
             Ok(())
         }
-        Some(other) => anyhow::bail!("unknown command {other:?}; commands: run, status, version"),
+        Some(other) => {
+            anyhow::bail!("unknown command {other:?}; commands: run, status, passwords, version")
+        }
     }
 }
 
 #[tokio::main]
 async fn run() -> anyhow::Result<()> {
-    let wake_mode = std::env::var("GHOST_WAKE_MODE").unwrap_or_else(|_| "transcript".into());
-    let state = Arc::new(RwLock::new(DaemonState::new(VERSION, wake_mode)));
-    info!("ghostd {VERSION} starting");
+    let cfg = GhostdSettings::load()?;
+    let build = build_info::detect(None, None, None);
+    let state = Arc::new(RwLock::new(DaemonState::new(
+        VERSION,
+        cfg.wake_mode.clone(),
+    )));
+    info!("{} starting", build_info::describe(VERSION, &build));
     serve(&default_socket_path(), router(state), shutdown_signal()).await?;
     info!("ghostd stopped");
     Ok(())

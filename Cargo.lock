@@ -1659,10 +1659,30 @@ name = "ghostd"
 version = "2026.10.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
  "ghost-api",
+ "ghost-core",
+ "hex",
+ "hmac 0.12.1",
+ "nix",
+ "percent-encoding",
+ "rand 0.9.5",
+ "regex",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.21",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
@@ -2739,6 +2759,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
