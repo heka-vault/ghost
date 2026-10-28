@@ -26,6 +26,12 @@ jobs:
       - run: uv run pytest -q -p no:cacheprovider
       - name: openapi.json is current
         run: uv run python -m ghost_api.export | diff -u packages/api/openapi.json -
+      # The .debs are built only on a release; at least the files they copy must exist.
+      - name: every file the packages copy exists
+        run: |
+          grep -o '"\$ROOT/[^"]*"' packaging/build-debs.sh | tr -d '"' | sed 's#^\$ROOT/##' \
+            | grep -v '^dist/\|^apps/desktop/src-tauri/target/' | sort -u \
+            | while read -r f; do [ -e "$f" ] || { echo "missing: $f"; exit 1; }; done
 
   typescript:
     runs-on: ubuntu-24.04
