@@ -12,6 +12,7 @@ code and the control API keep *conversation* for an agent (`ghost_core.conversat
 ├── watches.json       # what Ghost watches (ADR 0028)
 ├── hooks.json         # the webhooks it takes (ADR 0027); fixtures in hooks/<name>/
 ├── skills/<name>/SKILL.md
+├── skills/.skill-lock.json  # where the skills installed from GitHub came from (skills.md)
 ├── out/               # what Ghost makes (ADR 0033)
 ├── agents/<slug>/     # agent.json, persona.md, memory.md, notes.md (ghost: agent zero)
 └── policy.toml, env, settings.env, apps.env
