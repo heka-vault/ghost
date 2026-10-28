@@ -1,5 +1,5 @@
 /** Owner: settings. Settings and secrets (set / not set only), audio devices, models. */
-import type { DevicesView, ModelsView, PhoneView, SettingsView } from "@ghost/client-ts";
+import type { DevicesView, ModelsView, PhoneAddress, PhoneView, SettingsView } from "@ghost/client-ts";
 
 import { ago, type Scenario } from "../scenarios";
 
@@ -13,15 +13,35 @@ export interface SettingsFixture {
 
 /** The LAN address the phone listener binds in the mock (GHOST_PHONE_LISTEN). */
 export const PHONE_ADDRESS = "192.168.1.20:8765";
+/** The tunnel address, for ?phone=tunnel and tunnel-down (ADR 0020). */
+export const PHONE_TUNNEL_ADDRESS = "10.8.0.4:8765";
 
-/** Off before setup, on with nothing paired when new, a phone paired after months of use. */
+/**
+ * Off before setup, on with nothing paired when new, a phone paired after months of use. The
+ * home address only, unless the state adds the tunnel; with a tunnel that is up, the phone
+ * last came in through it.
+ */
 function phone(s: Scenario): PhoneView {
   const state = s.phone ?? (!s.configured ? "off" : s.data === "busy" ? "paired" : "unpaired");
-  if (state === "off") return { address: null, device: null };
-  if (state === "unpaired") return { address: PHONE_ADDRESS, device: null };
+  if (state === "off") return { address: null, addresses: [], listen: [], device: null };
+  const home: PhoneAddress = { address: PHONE_ADDRESS, network: "home", listening: true };
+  const listen: PhoneAddress[] =
+    state === "tunnel" ? [home, { address: PHONE_TUNNEL_ADDRESS, network: "tunnel", listening: true }]
+    : state === "tunnel-down" ? [home, { address: PHONE_TUNNEL_ADDRESS, network: null, listening: false }]
+    : [home];
+  const view = { address: PHONE_ADDRESS, addresses: listen.map((a) => a.address), listen };
+  if (state === "unpaired") return { ...view, device: null };
+  const away = state === "tunnel";
   return {
-    address: PHONE_ADDRESS,
-    device: { id: "d7f3a91c2e4b", name: "Pixel 9", paired_at: ago(60 * 24 * 12), last_seen: s.origin === "phone" ? ago(0.1) : ago(95) },
+    ...view,
+    device: {
+      id: "d7f3a91c2e4b",
+      name: "Pixel 9",
+      paired_at: ago(60 * 24 * 12),
+      last_seen: s.origin === "phone" ? ago(0.1) : away ? ago(3) : ago(95),
+      last_address: away ? PHONE_TUNNEL_ADDRESS : PHONE_ADDRESS,
+      last_network: away ? "tunnel" : "home",
+    },
   };
 }
 

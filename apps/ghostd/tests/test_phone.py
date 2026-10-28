@@ -526,6 +526,125 @@ async def test_listener_keeps_trying_an_address_whose_interface_is_not_up(tmp_pa
     assert listener._rebind is None and mod.REBIND_SECS > 0
 
 
+# --- how the phone reached Ghost (ADR 0020, #36) -------------------------------------------
+
+
+def test_networks_tell_home_from_tunnel_by_the_interface(tmp_path):
+    from ghostd.phone.networks import Networks, is_tunnel_interface
+
+    clock = Clock()
+    held = {"192.168.1.20": "enp3s0", "10.8.0.4": "wg0", "fd00::4": "wg0"}
+    reads = []
+
+    def addresses():
+        reads.append(clock.t)
+        return dict(held)
+
+    n = Networks(addresses=addresses, is_tunnel=lambda name: name == "wg0", clock=clock)
+    assert n.of("192.168.1.20") == "home"
+    assert n.of("10.8.0.4") == "tunnel"
+    assert n.of("[fd00:0::4]") == "tunnel" and n.of("fd00::4%wg0") == "tunnel"
+    assert n.of("0.0.0.0") is None and n.of("::") is None  # every interface: can't tell
+    assert n.of("192.0.2.1") is None and n.of("desk.local") is None and n.of(None) is None
+    assert len(reads) == 1  # one read serves every lookup until it is stale
+
+    # The tunnel goes down: its address keeps the network it had.
+    del held["10.8.0.4"]
+    clock.t += 31
+    assert n.of("10.8.0.4") == "tunnel" and len(reads) == 2
+
+    # The kernel's word for WireGuard, or any tun device; an ethernet card is neither.
+    for name, uevent, kind in (
+        ("wg0", "INTERFACE=wg0\nDEVTYPE=wireguard\n", "65534"),
+        ("tun0", "INTERFACE=tun0\n", "65534"),
+        ("enp3s0", "INTERFACE=enp3s0\n", "1"),
+        ("br0", "DEVTYPE=bridge\n", "1"),
+    ):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "uevent").write_text(uevent)
+        (tmp_path / name / "type").write_text(kind + "\n")
+    assert is_tunnel_interface("wg0", tmp_path) and is_tunnel_interface("tun0", tmp_path)
+    assert not is_tunnel_interface("enp3s0", tmp_path)
+    assert not is_tunnel_interface("br0", tmp_path)
+    assert not is_tunnel_interface("missing", tmp_path)
+
+
+def test_the_pairing_link_carries_the_code_and_every_address():
+    from urllib.parse import parse_qs, urlsplit
+
+    from ghostd.phone import pair_link
+
+    link = pair_link("482913", ["192.168.1.20:8765", "10.8.0.4:8765", "[fd00::4]:8765"])
+    assert link == (
+        "ghost://pair?code=482913&address=192.168.1.20%3A8765"
+        "&address=10.8.0.4%3A8765&address=%5Bfd00%3A%3A4%5D%3A8765"
+    )
+    parts = urlsplit(link)
+    assert (parts.scheme, parts.netloc) == ("ghost", "pair")
+    assert parse_qs(parts.query) == {
+        "code": ["482913"],
+        "address": ["192.168.1.20:8765", "10.8.0.4:8765", "[fd00::4]:8765"],
+    }
+
+
+async def test_a_pairing_has_the_link_for_its_qr_code(phone):
+    listener, *_ = phone
+    pairing = listener.new_pairing()
+    assert pairing.link == f"ghost://pair?code={pairing.code}&address=127.0.0.1%3A0"
+
+
+async def test_the_desk_records_how_the_phone_last_reached_it(tmp_path):
+    """Each listen address is its own server, so a verified request says which one it came in
+    on; the interface holding it says home or tunnel. GET /phone shows both."""
+    from ghostd.phone import Networks
+
+    networks = Networks(
+        addresses=lambda: {"127.0.0.1": "enp3s0", "127.0.0.2": "wg0"},
+        is_tunnel=lambda name: name == "wg0",
+    )
+    path = tmp_path / "phone.json"
+    listener = PhoneListener(
+        "127.0.0.1:0,127.0.0.2:0,192.0.2.1:0",
+        store=PhoneStore(path),
+        host=FakeHost(),
+        networks=networks,
+    )
+    await listener.start()  # 192.0.2.1 is not on this host: retried, not listening
+    try:
+        view = listener.view()
+        assert [(a.address, a.network, a.listening) for a in view.listen] == [
+            ("127.0.0.1:0", "home", True),
+            ("127.0.0.2:0", "tunnel", True),
+            ("192.0.2.1:0", None, False),
+        ]
+        ports = [s.servers[0].sockets[0].getsockname()[1] for _, s, _ in listener._servers]
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{ports[0]}") as c:
+            pairing = listener.new_pairing()
+            creds = (await c.post("/pair", json={"code": pairing.code, "device_name": "p"})).json()
+            assert listener.view().device.last_seen is None  # /pair is not a reach
+            r, _ = await signed(c, creds, "GET", "/hello")
+            assert r.status_code == 200
+        d = listener.view().device
+        assert (d.last_address, d.last_network) == ("127.0.0.1:0", "home")
+        assert d.last_seen is not None
+
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.2:{ports[1]}") as c:
+            r, _ = await signed(c, creds, "GET", "/hello")
+            assert r.status_code == 200
+            # A refused request reaches nothing.
+            r, _ = await signed(c, {**creds, "secret": "A" * 43}, "GET", "/hello")
+            assert r.status_code == 401
+        d = listener.view().device
+        assert (d.last_address, d.last_network) == ("127.0.0.2:0", "tunnel")
+        # Moving to the tunnel is written at once, not on the minute.
+        saved = json.loads(path.read_text())
+        assert (saved["last_address"], saved["last_network"]) == ("127.0.0.2:0", "tunnel")
+    finally:
+        await listener.stop()
+    again = PhoneStore(path).device
+    assert again is not None and again.last_network == "tunnel"
+
+
 # --- the daemon's side: who may start a session ------------------------------------------
 
 

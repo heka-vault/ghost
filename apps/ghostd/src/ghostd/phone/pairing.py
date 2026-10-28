@@ -24,6 +24,7 @@ from ghostd.phone.signing import new_secret
 CODE_TTL_SECS = 120
 CODE_TRIES = 5
 LAST_SEEN_PERSIST_SECS = 60  # write last_seen to disk at most this often
+NETWORKS = ("home", "tunnel")
 
 
 def _now() -> datetime:
@@ -37,6 +38,9 @@ class Device:
     secret: str
     paired_at: datetime
     last_seen: datetime | None = None
+    # The listen address the last verified request came in on, and its network (ADR 0020).
+    last_address: str | None = None
+    last_network: str | None = None  # "home" | "tunnel" | None
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -52,6 +56,8 @@ class Device:
             secret=str(d["secret"]),
             paired_at=datetime.fromisoformat(d["paired_at"]),
             last_seen=datetime.fromisoformat(d["last_seen"]) if d.get("last_seen") else None,
+            last_address=str(d["last_address"]) if d.get("last_address") else None,
+            last_network=d.get("last_network") if d.get("last_network") in NETWORKS else None,
         )
 
     def __repr__(self) -> str:  # never print the secret
@@ -115,12 +121,19 @@ class PhoneStore:
             logger.info("phone: forgot the paired phone")
         return had
 
-    def seen(self) -> None:
-        """Note a verified request. Kept in memory; written at most once a minute."""
-        if self._device is None:
+    def seen(self, address: str | None = None, network: str | None = None) -> None:
+        """Note a verified request, the listen address it came in on and that address's
+        network. Kept in memory and written at most once a minute, or at once when the
+        phone moved between addresses (home to tunnel, or back)."""
+        d = self._device
+        if d is None:
             return
-        self._device = replace(self._device, last_seen=self._clock())
-        if time.monotonic() - self._persisted_seen >= LAST_SEEN_PERSIST_SECS:
+        network = network if network in NETWORKS else None
+        moved = (address, network) != (d.last_address, d.last_network)
+        self._device = replace(
+            d, last_seen=self._clock(), last_address=address, last_network=network
+        )
+        if moved or time.monotonic() - self._persisted_seen >= LAST_SEEN_PERSIST_SECS:
             self._persisted_seen = time.monotonic()
             self._save()
 

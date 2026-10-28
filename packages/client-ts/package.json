@@ -8,7 +8,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema.d.ts"
+    "./schema": "./src/schema.d.ts",
+    "./pairLink": "./src/pairLink.ts"
   },
   "scripts": {
     "gen": "openapi-typescript ../api/openapi.json -o src/schema.d.ts --alphabetize --root-types",

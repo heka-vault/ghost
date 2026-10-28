@@ -35,11 +35,13 @@ export interface Scenario {
   /** Where the live session started: the desk (default) or the paired phone (ADR 0016). */
   origin?: "desk" | "phone";
   /**
-   * The phone listener: off (GHOST_PHONE_LISTEN unset), on with no phone, or a phone paired.
-   * Without it the settings fixture derives it from `configured` and `data`. Any scenario can
-   * override it with ?phone=off|unpaired|paired|pairs|expires (see mock/index.ts).
+   * The phone listener: off (GHOST_PHONE_LISTEN unset), on with no phone, or a phone paired
+   * (on the home network only); `tunnel` adds a tunnel address the phone last came in on, and
+   * `tunnel-down` one whose interface isn't up yet (ADR 0020). Without it the settings fixture
+   * derives it from `configured` and `data`. Any scenario can override it with
+   * ?phone=off|unpaired|paired|tunnel|tunnel-down|pairs|expires (see mock/index.ts).
    */
-  phone?: "off" | "unpaired" | "paired";
+  phone?: "off" | "unpaired" | "paired" | "tunnel" | "tunnel-down";
 }
 
 export const SCENARIOS: Scenario[] = [

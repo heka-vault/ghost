@@ -1871,11 +1871,72 @@
         "title": "Phase",
         "type": "string"
       },
+      "PhoneAddress": {
+        "description": "One ``GHOST_PHONE_LISTEN`` address and the network it is on.",
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "listening": {
+            "title": "Listening",
+            "type": "boolean"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "tunnel"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network"
+          }
+        },
+        "required": [
+          "address",
+          "network",
+          "listening"
+        ],
+        "title": "PhoneAddress",
+        "type": "object"
+      },
       "PhoneDevice": {
         "properties": {
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "last_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Address"
+          },
+          "last_network": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "tunnel"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Network"
           },
           "last_seen": {
             "anyOf": [
@@ -1930,12 +1991,17 @@
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
+          },
+          "link": {
+            "title": "Link",
+            "type": "string"
           }
         },
         "required": [
           "code",
           "address",
-          "expires_at"
+          "expires_at",
+          "link"
         ],
         "title": "PhonePairing",
         "type": "object"
@@ -1969,6 +2035,13 @@
                 "type": "null"
               }
             ]
+          },
+          "listen": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneAddress"
+            },
+            "title": "Listen",
+            "type": "array"
           }
         },
         "required": [

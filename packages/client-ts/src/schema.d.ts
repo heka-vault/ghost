@@ -1601,10 +1601,26 @@ export interface components {
          * @enum {string}
          */
         Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking";
+        /**
+         * PhoneAddress
+         * @description One ``GHOST_PHONE_LISTEN`` address and the network it is on.
+         */
+        PhoneAddress: {
+            /** Address */
+            address: string;
+            /** Listening */
+            listening: boolean;
+            /** Network */
+            network: ("home" | "tunnel") | null;
+        };
         /** PhoneDevice */
         PhoneDevice: {
             /** Id */
             id: string;
+            /** Last Address */
+            last_address?: string | null;
+            /** Last Network */
+            last_network?: ("home" | "tunnel") | null;
             /** Last Seen */
             last_seen: string | null;
             /** Name */
@@ -1631,6 +1647,8 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+            /** Link */
+            link: string;
         };
         /** PhoneView */
         PhoneView: {
@@ -1639,6 +1657,8 @@ export interface components {
             /** Addresses */
             addresses?: string[];
             device: components["schemas"]["PhoneDevice"] | null;
+            /** Listen */
+            listen?: components["schemas"]["PhoneAddress"][];
         };
         /** PolicyResult */
         PolicyResult: {
@@ -2208,6 +2228,7 @@ export type SchemaPendingProposal = components['schemas']['PendingProposal'];
 export type SchemaPermissionsUpdate = components['schemas']['PermissionsUpdate'];
 export type SchemaPermissionsView = components['schemas']['PermissionsView'];
 export type SchemaPhase = components['schemas']['Phase'];
+export type SchemaPhoneAddress = components['schemas']['PhoneAddress'];
 export type SchemaPhoneDevice = components['schemas']['PhoneDevice'];
 export type SchemaPhonePairing = components['schemas']['PhonePairing'];
 export type SchemaPhoneView = components['schemas']['PhoneView'];

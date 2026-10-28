@@ -35,6 +35,7 @@ import type {
   WaitingItemView,
   WatchingView,
 } from "@ghost/client-ts";
+import { pairLink } from "@ghost/client-ts";
 
 import { DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
@@ -965,14 +966,17 @@ export class MockDaemon {
     if (!this.phone.address) throw new HttpError(409, "the phone listener is off (set GHOST_PHONE_LISTEN)");
     const code = String(Math.floor(rand() * 1_000_000)).padStart(6, "0");
     const ttl = this.phoneOpts.codeTtlSecs ?? 120;
-    const p: PhonePairing = { code, address: this.phone.address, expires_at: new Date(Date.now() + ttl * 1000).toISOString() };
+    const addresses = this.phone.addresses?.length ? this.phone.addresses : [this.phone.address];
+    const p: PhonePairing = { code, address: this.phone.address, addresses, expires_at: new Date(Date.now() + ttl * 1000).toISOString(), link: pairLink(code, addresses) };
     this.pairing = p;
     const after = this.phoneOpts.pairsAfterMs ?? 0;
     if (after > 0) {
       this.later(after, () => {
         if (this.pairing?.code !== code || Date.now() > new Date(p.expires_at).getTime()) return;
         this.pairing = null;
-        this.phone = { ...this.phone, device: { id: hex(12, rand), name: "Pixel 9", paired_at: now(), last_seen: now() } };
+        // The phone's first /hello comes in on the home address, right after it pairs.
+        const device = { id: hex(12, rand), name: "Pixel 9", paired_at: now(), last_seen: now(), last_address: addresses[0], last_network: "home" as const };
+        this.phone = { ...this.phone, device };
       });
     }
     return p;

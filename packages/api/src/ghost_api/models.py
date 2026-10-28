@@ -686,16 +686,38 @@ class PhonePairing(BaseModel):
     address: str  # the first GHOST_PHONE_LISTEN address, host:port; what the operator types
     addresses: list[str] = Field(default_factory=list)  # every address the listener serves
     expires_at: datetime
+    # The QR code's payload: ghost://pair?code=…&address=…, every address in order. The phone
+    # app scans it, or the phone's camera opens the app with it (docs/phone-protocol.md).
+    link: str
+
+
+# The network a phone address is on (ADR 0020): the home network, or the operator's
+# WireGuard tunnel for away from home.
+PhoneNetwork = Literal["home", "tunnel"]
+
+
+class PhoneAddress(BaseModel):
+    """One ``GHOST_PHONE_LISTEN`` address and the network it is on."""
+
+    address: str
+    # From the interface that holds the address: a WireGuard (or other tunnel) interface is
+    # the tunnel, any other the home network. None when Ghost can't tell: the address is on
+    # every interface (0.0.0.0), or on none of this computer's right now.
+    network: PhoneNetwork | None
+    listening: bool  # bound now; a tunnel address whose interface isn't up yet is retried
 
 
 class PhoneDevice(BaseModel):
     id: str
     name: str
     paired_at: datetime
-    last_seen: datetime | None
+    last_seen: datetime | None  # the phone's last verified request
+    last_address: str | None = None  # the listen address that request came in on
+    last_network: PhoneNetwork | None = None  # and the network it came over
 
 
 class PhoneView(BaseModel):
     address: str | None  # None when the listener is off
     addresses: list[str] = Field(default_factory=list)  # LAN first, then the tunnel (ADR 0020)
+    listen: list[PhoneAddress] = Field(default_factory=list)  # the same, with each network
     device: PhoneDevice | None

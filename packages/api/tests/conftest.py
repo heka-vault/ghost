@@ -126,6 +126,7 @@ class FakeControl:
             code="123456",
             address=self.phone_address,
             expires_at=datetime.now(UTC) + timedelta(seconds=120),
+            link=f"ghost://pair?code=123456&address={self.phone_address}",
         )
 
     def phone_view(self):

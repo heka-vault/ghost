@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.5",
     "loguru>=0.7",
     "aiortc>=1.14,<2",
+    "ifaddr>=0.2",  # which interface holds a phone address: home or tunnel (ADR 0020)
 ]
 
 [project.scripts]

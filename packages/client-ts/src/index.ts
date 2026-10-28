@@ -16,6 +16,8 @@ import createClient, { type Client } from "openapi-fetch";
 
 import type { components, paths } from "./schema";
 
+export { PAIR_LINK, type PairLink, pairLink, parsePairLink } from "./pairLink";
+
 export type Schemas = components["schemas"];
 export type Status = Schemas["Status"];
 export type Build = Schemas["Build"];
@@ -60,6 +62,8 @@ export type VoiceInfo = Schemas["VoiceInfo"];
 export type PhoneView = Schemas["PhoneView"];
 export type PhoneDevice = Schemas["PhoneDevice"];
 export type PhonePairing = Schemas["PhonePairing"];
+/** One phone listen address and whether it is on the home network or the tunnel (ADR 0020). */
+export type PhoneAddress = Schemas["PhoneAddress"];
 export type SkillInfo = Schemas["SkillInfo"];
 export type SkillBody = Schemas["SkillBody"];
 export type SkillAdd = Schemas["SkillAdd"];

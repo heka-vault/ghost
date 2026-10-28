@@ -283,16 +283,23 @@ def test_phone_routes(world):
 
     client, state, control, *_ = world
     assert client.post("/phone/pairing").status_code == 409  # listener off
-    assert client.get("/phone").json() == {"address": None, "addresses": [], "device": None}
+    assert client.get("/phone").json() == {
+        "address": None,
+        "addresses": [],
+        "listen": [],
+        "device": None,
+    }
 
     control.phone_address = "192.168.1.20:8765"
     body = client.post("/phone/pairing").json()
     assert body["code"] == "123456" and body["address"] == "192.168.1.20:8765"
+    assert body["link"].startswith("ghost://pair?")
     control.phone_device = PhoneDevice(
         id="d1", name="Pixel 9", paired_at=datetime.now(UTC), last_seen=None
     )
     view = client.get("/phone").json()
     assert view["device"]["name"] == "Pixel 9" and "secret" not in json.dumps(view)
+    assert view["device"]["last_address"] is None and view["device"]["last_network"] is None
     assert client.delete("/phone").json()["ok"] is True
     assert client.delete("/phone").json()["ok"] is False
     assert client.get("/phone").json()["device"] is None

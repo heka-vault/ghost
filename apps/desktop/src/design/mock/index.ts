@@ -9,6 +9,8 @@
  *   ...&connect=600  the event stream's first open takes 600ms: the Connecting state. Past
  *                    the shell's 900ms grace it turns to Offline, then connects.
  *   ...&phone=off|unpaired|paired   the phone listener off, on with no phone, or a phone paired
+ *   ...&phone=tunnel   paired, with a tunnel address too; the phone last came in through it
+ *   ...&phone=tunnel-down   paired, with a tunnel address whose interface isn't up yet
  *   ...&phone=pairs    on with no phone; the phone pairs 5s after you ask for a code
  *   ...&phone=expires  on with no phone; codes last 8s, so the expired code can be seen
  *   ...&catalog=slow     the catalog's first copy takes 4s (first run does this by itself)
@@ -32,7 +34,7 @@ export function createMock(name: string): { transport: Transport; design: Design
   const phone = params.get("phone");
   const base = scenarioByName(name);
   const listener: Scenario["phone"] =
-    phone === "off" || phone === "unpaired" || phone === "paired" ? phone
+    phone === "off" || phone === "unpaired" || phone === "paired" || phone === "tunnel" || phone === "tunnel-down" ? phone
     : phone === "pairs" || phone === "expires" ? "unpaired"
     : base.phone;
   const scenario: Scenario = { ...base, phone: listener };
