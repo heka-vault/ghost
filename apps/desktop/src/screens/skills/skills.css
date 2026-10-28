@@ -137,3 +137,38 @@
 .skl-skeleton-gap { margin: var(--space-8) 0 var(--space-3); }
 .skl-skel-head { display: flex; flex-direction: column; gap: var(--space-2); }
 .skl-skel-body { padding: var(--space-1) 0; }
+
+/* ------------------------------------------------------------- find skills (#35) */
+/* Below the panes, after a clear gap: the list of what Ghost has stays the focal point. */
+.skl-find { margin-top: var(--space-16); max-width: calc(var(--space-20) * 9.5); }
+.skl-find__search { max-width: var(--field-control-width); margin-bottom: var(--space-4); }
+.skl-find__notice { margin-bottom: var(--space-4); }
+.skl-find__hint { margin: 0; max-width: 64ch; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.skl-find__list ul { margin: 0; padding: 0; list-style: none; }
+.skl-find__list.is-stale { opacity: var(--opacity-disabled); }
+.skl-find__own { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: var(--space-3) 0 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+
+/* The look before installing: where it is from, then the scripts, the files and the text. */
+.skl-preview { display: flex; flex-direction: column; min-width: 0; }
+.skl-preview .skl-block + .skl-block { margin-top: var(--space-6); }
+.skl-preview__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1_5);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--text-3);
+}
+.skl-preview__meta .t-mono { overflow-wrap: anywhere; }
+.skl-preview__description { margin: var(--space-2) 0 var(--space-6); max-width: 64ch; color: var(--text-2); }
+.skl-preview__notice { margin-bottom: var(--space-4); }
+form + .skl-preview__notice { margin-top: var(--space-4); }
+.skl-preview__name { margin-bottom: var(--space-6); }
+.skl-preview__loading { display: flex; flex-direction: column; gap: var(--space-3); padding-block: var(--space-2); }
+.skl-preview__loading p { margin: 0; }
+/* SKILL.md scrolls inside its well, so Install stays one look away. */
+.skl-preview__md { max-height: calc(var(--space-20) * 4); overflow: auto; border-radius: var(--radius-sm); }
+.skl-item__size { flex: none; margin-left: auto; font-size: var(--text-sm); color: var(--text-3); }
+.skl-detail__newer { color: var(--text-1); }

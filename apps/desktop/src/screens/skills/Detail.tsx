@@ -3,11 +3,12 @@
  * whether each is connected, the files beside SKILL.md, and the instructions as the model
  * reads them. Skill text is untrusted (ADR 0023): shown as plain text, never acted on.
  */
-import type { SkillBody, SkillInfo } from "@ghost/client-ts";
-import type { ReactNode, Ref } from "react";
+import type { SkillBody, SkillInfo, SkillUpdateView } from "@ghost/client-ts";
+import type { Ref } from "react";
 
-import { Badge, Button, Card, Notice, SkeletonText } from "../../ui";
-import { count, humanize, isGhosts, listWords, rootName, appOf, tildePath } from "./model";
+import { Badge, Button, Card, Notice, SkeletonText, relativeTime } from "../../ui";
+import { Block } from "./Block";
+import { humanize, isGhosts, listWords, rootName, appOf, sentence, shortCommit, tildePath } from "./model";
 
 export interface DetailProps {
   skill: SkillInfo;
@@ -22,9 +23,12 @@ export interface DetailProps {
   onRemove: () => void;
   /** Placed just above the header, offset by the compact page bar; the screen scrolls to it on a new pick. */
   headerAnchor?: Ref<HTMLSpanElement>;
+  /** For one installed from GitHub: whether its source has moved on, once the page has asked. */
+  update?: SkillUpdateView | null;
+  onUpdate?: () => void;
 }
 
-export function Detail({ skill: s, body, bodyError, error, online, removing, onRemove, headerAnchor }: DetailProps) {
+export function Detail({ skill: s, body, bodyError, error, online, removing, onRemove, headerAnchor, update, onUpdate }: DetailProps) {
   const name = humanize(s.name);
   const ghosts = isGhosts(s);
   const missing = new Set(s.missing.map(appOf));
@@ -58,6 +62,11 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
               Ready
             </Badge>
           )}
+          {update?.update && (
+            <Button size="sm" variant="secondary" onClick={onUpdate} disabled={!online}>
+              Update…
+            </Button>
+          )}
           <Button size="sm" variant="danger-ghost" onClick={onRemove} loading={removing} disabled={!ghosts || !online}>
             Remove
           </Button>
@@ -70,6 +79,30 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
       <p className="skl-detail__meta">
         <span className="t-mono">{tildePath(s.path)}</span>
       </p>
+      {s.origin && (
+        <p className="skl-detail__meta">
+          <span>
+            Installed from <span className="t-mono">{s.origin.source}</span> at <span className="t-mono">{shortCommit(s.origin.commit)}</span>
+          </span>
+          {s.origin.installed_at && (
+            <>
+              <span aria-hidden>·</span>
+              <span>{relativeTime(s.origin.installed_at)}</span>
+            </>
+          )}
+          {update?.update ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="skl-detail__newer">a newer version is out</span>
+            </>
+          ) : update?.problem ? (
+            <>
+              <span aria-hidden>·</span>
+              <span data-user-content>{sentence(update.problem)}</span>
+            </>
+          ) : null}
+        </p>
+      )}
       {s.problem && (
         <Notice tone="danger" title="Ghost doesn’t offer this skill" className="skl-detail__notice">
           <p className="skl-notice__p">{s.problem} Fix the folder and Ghost picks it up on its next look.</p>
@@ -169,27 +202,5 @@ export function Detail({ skill: s, body, bodyError, error, online, removing, onR
         </Block>
       </div>
     </article>
-  );
-}
-
-/** A titled block, like Section, with its count beside the heading. */
-function Block({ title, count: n, description, children }: { title: string; count?: number; description?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="skl-block">
-      <header className="skl-block__header">
-        <div className="skl-block__head">
-          <h3 className="skl-block__title">
-            {title}
-            {n !== undefined && (
-              <span className="skl-block__count t-num" aria-label={count(n, "item")}>
-                {n}
-              </span>
-            )}
-          </h3>
-        </div>
-        {description && <p className="skl-block__description">{description}</p>}
-      </header>
-      {children}
-    </section>
   );
 }

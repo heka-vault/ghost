@@ -18,6 +18,7 @@
  *   ...&catalog=empty    the first copy hasn't arrived, and doesn't for 8s
  *   ...&build=dev|dirty|deploy|release|behind   what the daemon says it is (docs/releasing.md);
  *                    behind is last month's deploy, so this window and Ghost differ
+ *   ...&skillsearch=down skills.sh doesn't answer: a skills search says so (#35)
  */
 import type { Transport } from "@ghost/client-ts";
 
@@ -44,6 +45,7 @@ export function createMock(name: string): { transport: Transport; design: Design
     codeTtlSecs: phone === "expires" ? 8 : 120,
     catalog: (["slow", "problem", "empty"] as const).find((c) => c === params.get("catalog")) ?? null,
     build: (["dev", "dirty", "deploy", "release", "behind"] as const).find((b) => b === params.get("build")) ?? null,
+    skillSearch: params.get("skillsearch") === "down" ? "down" : null,
   });
   const latency = Number(params.get("latency") ?? 140);
 

@@ -28,6 +28,9 @@ import type {
   SettingsUpdate,
   SettingsView,
   SkillInfo,
+  SkillPreview,
+  SkillSearchPage,
+  SkillUpdateView,
   SourceInfo,
   Status,
   Turn,
@@ -47,7 +50,7 @@ import { renderPolicy } from "./fixtures/policy";
 import type { SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
-import { GHOST_SKILLS_DIR, type SkillFixture, missingOf } from "./fixtures/skills";
+import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
 import { hex, type Scenario, seeded } from "./scenarios";
 
 export { HttpError };
@@ -124,6 +127,8 @@ export interface MockOptions {
    * hasn't arrived yet and doesn't for 8 seconds. First run is `slow` without asking.
    */
   catalog?: "slow" | "problem" | "empty" | null;
+  /** The skills catalog (?skillsearch=down, #35): skills.sh doesn't answer, so a search says so. */
+  skillSearch?: "down" | null;
   /** The phone pairs this many ms after a code is issued (?phone=pairs). 0: it never does. */
   pairsAfterMs?: number;
   /** How long a pairing code lasts, in seconds (?phone=expires makes it short). The real one: 120. */
@@ -488,6 +493,143 @@ export class MockDaemon {
     this.audited("skills", "add", `skill:${name}`, existing ? `Replaced the ${name} skill from ${folder}.` : `Added the ${name} skill from ${folder}.`, "quiet");
     return this.skillList().find((i) => i.name === name)!;
   }
+  // ------------------------------------------------------------------ the skills catalog (#35)
+  /** Skills staged from "GitHub", waiting for the operator: by token. */
+  private skillPreviews = new Map<string, { preview: SkillPreview; body: string }>();
+
+  /** The installed skill a listing came from, as the daemon matches it: same repository, and its folder or name is the id. */
+  private installedFrom(source: string, skill: string): string | null {
+    const f = this.skills.find((s) => s.info.origin?.source === source && (s.info.origin.skill_path.split("/").slice(-2, -1)[0] === skill || s.info.name === skill));
+    return f?.info.name ?? null;
+  }
+  private async searchSkills(search: string): Promise<SkillSearchPage> {
+    const q = search.trim().replace(/\s+/g, " ").slice(0, 100);
+    if (q.length < 2) return { query: q, skills: [], problem: null, fetched_at: null };
+    await sleep(250); // skills.sh takes a moment
+    if (this.phoneOpts.skillSearch === "down") return { query: q, skills: [], problem: "couldn't reach skills.sh (ConnectTimeout)", fetched_at: null };
+    const words = q.toLowerCase().split(" ");
+    const hits = SKILL_CATALOG.filter((c) => words.every((w) => c.listing.id.toLowerCase().includes(w)));
+    return { query: q, skills: hits.map((c) => ({ ...c.listing, installed: this.installedFrom(c.listing.source, c.listing.skill) })), problem: null, fetched_at: now() };
+  }
+  /** What the operator named, resolved as ghost_core.skill_catalog does, with its sentences. */
+  private catalogSkill(raw: string, skill: string | null): CatalogSkill {
+    const text = raw.trim();
+    if (!text) throw new HttpError(409, "name a repository, like anthropics/skills");
+    let source: string;
+    let id = skill;
+    let folder: string | null = null;
+    if (text.includes("://") || text.startsWith("github.com/")) {
+      const url = new URL(text.includes("://") ? text : `https://${text}`);
+      if (url.protocol !== "https:" || !/^(www\.)?github\.com$/.test(url.hostname)) throw new HttpError(409, "Ghost installs skills from GitHub only: a github.com address");
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (parts.length < 2) throw new HttpError(409, `${text} doesn't name a repository`);
+      source = `${parts[0]}/${parts[1].replace(/\.git$/, "")}`;
+      if (parts.length >= 4 && (parts[2] === "tree" || parts[2] === "blob")) folder = parts.slice(4).filter((x) => x !== "SKILL.md").join("/");
+    } else {
+      const parts = text.replace(/^\/|\/$/g, "").split("/");
+      if (parts.length === 3 && !id) [source, id] = [`${parts[0]}/${parts[1]}`, parts[2]];
+      else if (parts.length === 2) source = text;
+      else throw new HttpError(409, `${JSON.stringify(text)} isn't owner/repo, owner/repo/skill or a github.com address`);
+    }
+    const inRepo = SKILL_CATALOG.filter((c) => c.listing.source.toLowerCase() === source.toLowerCase());
+    if (inRepo.length === 0) throw new HttpError(409, `GitHub has no repository ${source} (or it is private)`);
+    if (folder !== null) {
+      const hit = inRepo.find((c) => c.skillPath === `${folder}/SKILL.md`);
+      if (!hit) throw new HttpError(409, `${source} has no SKILL.md at ${folder || "the top"}`);
+      return hit;
+    }
+    if (id) {
+      const hit = inRepo.find((c) => c.listing.skill === id.toLowerCase());
+      if (!hit) throw new HttpError(409, `${source} has no skill called ${id}`);
+      return hit;
+    }
+    if (inRepo.length === 1) return inRepo[0];
+    const names = inRepo.map((c) => c.listing.skill);
+    throw new HttpError(409, `${source} has ${names.length} skills; name one, like ${source}/${names[0]}: ${names.join(", ")}`);
+  }
+  /** Stage a skill: what the daemon hands back after fetching it, pinned to a commit. */
+  private stageSkill(c: CatalogSkill, commit: string, updateOf: string | null): SkillPreview {
+    const front = /^---\n([\s\S]*?)\n---\n?/.exec(c.skillMd);
+    const description = /^description:\s*(.*)$/m.exec(front?.[1] ?? "")?.[1]?.trim() ?? "";
+    const name = c.listing.skill;
+    const existing = this.skillNamed(updateOf ?? name);
+    const token = hex(16, rand);
+    const preview: SkillPreview = {
+      token,
+      name,
+      description,
+      source: c.listing.source,
+      source_url: `https://github.com/${c.listing.source}`,
+      skill_path: c.skillPath,
+      commit,
+      folder_hash: hex(40, rand),
+      ref: null,
+      skill_md: c.skillMd,
+      files: c.files.map((f) => ({ ...f })),
+      scripts: c.files.filter((f) => f.script).map((f) => f.path),
+      installed: existing ? (existing.info.source === "ghost" ? "ghost" : "home") : null,
+      update_of: updateOf,
+    };
+    this.skillPreviews.set(token, { preview, body: c.skillMd.replace(/^---\n[\s\S]*?\n---\n?/, "").trim() + "\n" });
+    return preview;
+  }
+  private async previewSkill(raw: string, skill: string | null): Promise<SkillPreview> {
+    await sleep(700); // a commit, a tree and the files from GitHub
+    return this.stageSkill(this.catalogSkill(raw, skill), hex(40, rand), null);
+  }
+  private async skillUpdates(): Promise<SkillUpdateView[]> {
+    await sleep(400);
+    return this.skills
+      .filter((f) => f.info.origin)
+      .map((f) => {
+        const o = f.info.origin!;
+        return { name: f.info.name, source: o.source, commit: o.commit, latest_commit: f.latest ?? o.commit, update: !!f.latest && f.latest !== o.commit, problem: null };
+      });
+  }
+  private async previewSkillUpdate(name: string): Promise<SkillPreview> {
+    const f = this.skillNamed(name);
+    if (!f?.info.origin) throw new HttpError(404, `${name} wasn't installed from GitHub`);
+    await sleep(700);
+    const o = f.info.origin;
+    const listed = SKILL_CATALOG.find((c) => c.listing.source === o.source && c.skillPath === o.skill_path);
+    const c: CatalogSkill = listed ?? {
+      listing: { id: `${o.source}/${name}`, source: o.source, skill: name, name, installs: 0 },
+      skillPath: o.skill_path,
+      skillMd: `---\nname: ${name}\ndescription: ${f.info.description}\n---\n\n${f.body}`,
+      files: f.info.files.map((p) => ({ path: p, bytes: 1200, script: /\.(py|sh|js|ts)$/.test(p) })),
+    };
+    return this.stageSkill(c, f.latest ?? o.commit, name);
+  }
+  private installSkill(token: string, wanted: string | null, replace: boolean): SkillInfo {
+    const staged = this.skillPreviews.get(token);
+    if (!staged) throw new HttpError(404, "that preview is gone; look at the skill again");
+    const p = staged.preview;
+    const name = (wanted ?? p.name).trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) throw new HttpError(409, `${JSON.stringify(name)} is not a skill name (letters, digits, dots, dashes)`);
+    const existing = this.skillNamed(name);
+    if (existing && existing.info.source !== "ghost") throw new HttpError(409, `${name} is already one of yours, in ~/.agents/skills; install this one under another name`);
+    if (existing && !replace) throw new HttpError(409, `the ${name} skill is already installed`);
+    const installed: SkillFixture = {
+      info: {
+        name,
+        description: p.description,
+        source: "ghost",
+        path: `${GHOST_SKILLS_DIR}/${name}`,
+        requires: [],
+        missing: [],
+        files: p.files.map((f) => f.path),
+        problem: null,
+        origin: { source: p.source, source_url: p.source_url, skill_path: p.skill_path, commit: p.commit, folder_hash: p.folder_hash, ref: p.ref, installed_at: now() },
+      },
+      body: staged.body,
+    };
+    if (existing) this.skills[this.skills.indexOf(existing)] = installed;
+    else this.skills.push(installed);
+    this.skillPreviews.delete(token);
+    this.audited("skills", "install", `skill:${name}`, `${existing ? "Updated" : "Installed"} the ${name} skill from ${p.source} at ${p.commit.slice(0, 7)}.`, "quiet");
+    return this.skillList().find((i) => i.name === name)!;
+  }
+
   private removeSkill(name: string) {
     const f = this.skillNamed(name);
     if (!f) throw new HttpError(409, `no skill named ${JSON.stringify(name)}`);
@@ -819,6 +961,11 @@ export class MockDaemon {
       return { ok: true, detail: `Spoke a sample in ${decodeURIComponent(r[1])}.` };
     }
 
+    if (method === "GET" && path === "/skill-catalog") return this.searchSkills(query.get("search") ?? "");
+    if (method === "POST" && path === "/skill-catalog/preview") return this.previewSkill(String(b.source ?? ""), typeof b.skill === "string" ? b.skill : null);
+    if (method === "POST" && path === "/skill-catalog/install") return this.installSkill(String(b.token ?? ""), typeof b.name === "string" ? b.name : null, b.replace === true);
+    if (method === "GET" && path === "/skill-catalog/updates") return this.skillUpdates();
+    if (method === "POST" && (r = m(/^\/skill-catalog\/updates\/([^/]+)$/))) return this.previewSkillUpdate(decodeURIComponent(r[1]));
     if (method === "GET" && path === "/skills") return this.skillList();
     if (method === "POST" && path === "/skills") return this.addSkill(String(b.path ?? ""), typeof b.name === "string" ? b.name : null, b.replace === true);
     if ((r = m(/^\/skills\/([^/]+)$/))) {
