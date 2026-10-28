@@ -10,7 +10,9 @@ what it did. What you don't want is a permission: block it, or have Ghost ask fi
 The desktop's **Apps** screen lists the apps you can connect, from Ghost's own copy of the
 public app registry. The first-party ones come first (GitHub, Linear, Notion, Atlassian,
 Sentry, Figma, Stripe, Cloudflare, Supabase, Airtable, Todoist, Zapier); search finds the
-rest. Each app offers one or more ways to connect:
+rest, the product maker's own app first, with other publishers' apps for the same
+product folded under it ([below](#who-publishes-an-app-and-where-it-runs)). Each app
+offers one or more ways to connect:
 
 - **Sign in.** Ghost opens your browser at the app's own sign-in page and keeps what it
   gets back. There is nothing to copy or paste. When the app later wants you to sign in
@@ -34,6 +36,42 @@ The catalog is the registry's text, shown to you as it is. Ghost removes only th
 protocol's name from it. None of it reaches the model, and nothing the registry fixes (a
 header, an argument, an address) can name one of Ghost's passwords: only the settings you
 fill in are.
+
+### Who publishes an app, and where it runs
+
+Anyone can publish to the registry, so a search for "posthog" finds six apps, five of them
+called "Posthog". The description is the publisher's own words: "Official PostHog app"
+in a description proves nothing. What the registry does check is the start of each app's
+registry name, and Ghost reads it (`ghost_core.provenance`, string rules, no model):
+
+- **Who published it.** `io.github.PostHog/mcp` was published by someone signed in to
+  GitHub as PostHog: the card says "by PostHog · verified on GitHub". `com.mcparmory/posthog`
+  was published by whoever proved they own mcparmory.com: "by mcparmory.com · verified
+  domain". That says who published it, not that it is safe or does what it says.
+- **The maker's own.** An app gets "From PostHog" when its publisher's name *is* the
+  product's: the GitHub account PostHog publishing "PostHog", the owner of notion.com
+  publishing "Notion". A GitHub name alone isn't enough; something else must agree: it
+  connects to a host of the same name (`mcp.posthog.com`), its code is in the publisher's
+  repository, or its website is theirs. A proven domain is enough by itself. A short list
+  in the code names makers whose names differ from their product's (`getsentry` makes
+  Sentry, `github` runs `api.githubcopilot.com`). The registry has no "official" flag to
+  read: its own `_meta` carries only an app's status and dates. The app's detail says why
+  Ghost marked it ("Published by the GitHub account PostHog… its code is in PostHog's
+  repository and it connects to mcp.posthog.com"). The maker's own app comes first in a
+  search.
+- **Where it runs.** An app on the internet names the host it talks to, and says so when
+  that host isn't the product maker's: "Runs on gateway.pipeworx.io, pipeworx-io's server,
+  not PostHog's. What you ask of PostHog through this app passes through pipeworx-io." A
+  host anyone can rent a name on (`*.vercel.app`, `*.workers.dev`) is never the maker's. An
+  app that runs on this computer names its registry and package: npm `posthog-mcp`.
+- **The same product, folded.** Other publishers' apps whose title is exactly the
+  product's ("Posthog", "PostHog") fold under the maker's own: "4 more from other
+  publishers". Nothing else folds: an app with another title ("Linear by usefulapi",
+  "Engageable Analytics") stands on its own, and so do look-alikes when the maker has no
+  app of its own in the results.
+
+Before you connect, the app's detail shows all of this with its repository, its website,
+its version and when the registry last saw it change.
 
 ## What Ghost does with a connected app
 
@@ -174,12 +212,18 @@ harness (`make perf`) runs on it.
   you don't use, so they leave the prompt.
 - **A call.** It costs what the app costs. The latency line names it
   (`tools 0.47 (github_list_issues 0.47)`), and `make latency` shows the distribution.
+- **The catalog.** Reading Ghost's copy (about 48,000 apps, 2026-10) takes about 1.3 s,
+  0.45 s of it for who published each app and which are the maker's own. The daemon does
+  it once at start, and after each refresh in a thread so the voice loop isn't held; a
+  search takes about 35 ms. Nothing of it is on a turn.
 
 ## For developers
 
 An app speaks the Model Context Protocol. `ghost_core.apps` is the client (`App`, `Apps`,
 the gate bridge `AppTarget`, `AppChange`, `AppWriter`), `ghost_core.catalog` the registry
-copy, `ghost_core.signin` the OAuth client storage and loopback, and
+copy, `ghost_core.provenance` who publishes a catalog entry, whether it is the maker's own
+and where it runs (`KNOWN_MAKERS` and `SHARED_HOSTS` are the hand-kept lists),
+`ghost_core.signin` the OAuth client storage and loopback, and
 `ghost_core.permissions` the rules. Nothing in the daemon or the pipeline knows an app by
 name: never add a capability by editing them, and never write a bespoke client for a
 service. Connect an app.
