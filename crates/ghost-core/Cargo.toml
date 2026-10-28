@@ -30,6 +30,7 @@ futures.workspace = true
 tokio.workspace = true
 unicode-normalization.workspace = true
 reqwest.workspace = true
+yaml-rust2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

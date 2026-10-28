@@ -23,6 +23,7 @@ pub mod policy;
 pub mod redact;
 pub mod request;
 pub mod rules;
+pub mod skills;
 pub mod source;
 pub mod store;
 pub mod targets;
