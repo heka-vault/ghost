@@ -133,6 +133,90 @@ def test_no_log_line_carries_a_password(tmp_path):
     assert "bad token [password: ANTHROPIC_AUTH_TOKEN]" in out.getvalue()
 
 
+def test_no_exception_in_the_log_carries_a_password(tmp_path):
+    """``logger.exception`` adds the exception's own text, which the message check missed."""
+    vault = Passwords(tmp_path / "passwords.vault", MemoryKeyring())
+    assert vault.open()
+    vault.set("ANTHROPIC_AUTH_TOKEN", TOKEN)
+    out = io.StringIO()
+    logger.configure(patcher=gp.redacting)  # type: ignore[arg-type]
+    sink = logger.add(out, format="{message}", diagnose=False)
+    try:
+        try:
+            try:
+                raise KeyError(f"no such key {TOKEN}")
+            except KeyError as e:
+                raise RuntimeError(f"the endpoint refused {TOKEN}") from e
+        except RuntimeError:
+            logger.exception("the model call failed")
+        try:
+            raise ValueError("nothing secret here")
+        except ValueError:
+            logger.exception("an ordinary failure")
+    finally:
+        logger.remove(sink)
+        logger.configure(patcher=None)  # type: ignore[arg-type]
+    text = out.getvalue()
+    assert TOKEN not in text
+    assert "RuntimeError: the endpoint refused [password: ANTHROPIC_AUTH_TOKEN]" in text
+    assert "no such key [password: ANTHROPIC_AUTH_TOKEN]" in text  # the cause too
+    assert "ValueError: nothing secret here" in text  # loguru's own, untouched
+
+
+async def test_the_vault_opening_is_followed_once(tmp_path, monkeypatch):
+    """The unlock route and the retry loop may both see the vault open: Jev joins once."""
+    from ghost_voice import VoiceSettings
+    from ghostd.config import GhostdSettings
+    from ghostd.main import Daemon
+
+    vault = Passwords(tmp_path / "passwords.vault", MemoryKeyring(), environ={})
+    assert vault.open()
+    d = Daemon(GhostdSettings(data_dir=tmp_path), VoiceSettings.model_construct(), vault)
+    swapped = []
+    d.gate = SimpleNamespace(set_classifier=swapped.append)  # type: ignore[assignment]
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-0123456789abcdef")
+    await d.passwords_opened()
+    await d.passwords_opened()
+    assert len(swapped) == 1 and len(d._jevs) == 1
+    for j in d._jevs:
+        await j.aclose()
+
+
+def test_check_waits_for_a_locked_keyring(tmp_path, capsys):
+    """``make deploy`` over SSH: a locked keyring is a warning, and so is what only needs a
+    password from it. A vault the key doesn't open is still a problem."""
+    from ghostd.config import GhostdSettings
+    from ghostd.main import check_passwords, keyring_waits
+
+    ring = MemoryKeyring()
+    seeded = Passwords(tmp_path / "passwords.vault", ring)
+    assert seeded.open()
+    seeded.set("HF_TOKEN", "hf_0123456789abcdef")
+    ring.locked = True
+    vault = Passwords(tmp_path / "passwords.vault", ring)
+    assert not vault.open()
+    cfg = GhostdSettings(data_dir=tmp_path, config_dir=tmp_path / "config")
+    assert check_passwords(vault, cfg) == []
+    assert "warning: Your keyring is locked" in capsys.readouterr().out
+    problems = [
+        "OPENROUTER_API_KEY is not set",
+        "sign in to OpenRouter (OPENROUTER_API_KEY is not set)",
+        "MY_MODEL is not set",
+        "GHOST_TTS_ENGINE=elevenlabs but ELEVENLABS_API_KEY is not set",
+        "app linear (http): not connected: needs a password",
+        "app notes (stdio): not connected: command not found",
+        "policy: bad rule",
+    ]
+    real, waits = keyring_waits(vault, problems, {"linear"}, {"MY_MODEL"})
+    assert real == ["app notes (stdio): not connected: command not found", "policy: bad rule"]
+    assert len(waits) == 5
+
+    broken = Passwords(tmp_path / "passwords.vault", MemoryKeyring(b"\x01" * 32))
+    assert not broken.open()
+    assert check_passwords(broken, cfg) != []
+    assert keyring_waits(broken, problems, {"linear"}) == (problems, [])
+
+
 def test_in_use_follows_the_model_connection_and_the_voice():
     from ghost_core.connection import ModelConnection
 

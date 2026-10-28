@@ -54,6 +54,58 @@ async def test_stdio_child_gets_only_its_declared_environment(tmp_path: Path):
         os.environ.pop("GHOST_QA_UNRELATED_SECRET", None)
 
 
+LOUD = """
+import os, sys
+from mcp.server.mcpserver import MCPServer
+print("starting with key " + os.environ["LOUD_KEY"], file=sys.stderr, flush=True)
+srv = MCPServer("loud")
+@srv.tool()
+def ping() -> str:
+    "Ping."
+    return "pong"
+srv.run(transport="stdio")
+"""
+
+
+async def test_a_stdio_apps_stderr_is_redacted_before_the_journal(tmp_path: Path, monkeypatch):
+    """The SDK hands the child Ghost's own stderr unless told otherwise (ADR 0036)."""
+    import asyncio
+    import io
+    import sys
+    import time
+
+    from ghost_core import passwords as pw
+
+    def written(text: str) -> bool:  # the relay is a thread; give it a moment
+        deadline = time.monotonic() + 5
+        while text not in out.getvalue() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return text in out.getvalue()
+
+    key = "loud-key-0123456789abcdef"
+    pw.also_redact("test", {"LOUD_KEY": key})
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", out)
+    script = tmp_path / "loud.py"
+    script.write_text(LOUD)
+    try:
+        spec = AppSpec(
+            name="loud",
+            command=os.sys.executable,
+            args=(str(script),),
+            env={"LOUD_KEY": "${LOUD_KEY}"},
+        )
+        servers = Apps({"loud": spec}, environ={"LOUD_KEY": key})
+        await servers.connect()
+        assert "loud" in servers.apps, servers.failed
+        await servers.close()
+        assert await asyncio.to_thread(written, "starting with key")
+    finally:
+        pw.also_redact("test", {})
+    assert "starting with key [password: LOUD_KEY]" in out.getvalue()
+    assert key not in out.getvalue()
+
+
 def test_app_names_are_slugs():
     from ghost_core.apps import parse_apps_json
 

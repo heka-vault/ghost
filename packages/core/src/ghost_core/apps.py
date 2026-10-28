@@ -37,12 +37,13 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO
 
 from loguru import logger
 
@@ -649,6 +650,43 @@ class AppWriter:
 AuthFor = Callable[["AppSpec", bool], Any]  # (spec, interactive) -> httpx.Auth | None
 
 
+class StderrRelay:
+    """A stdio app's stderr, a line at a time, through ``redact_text`` before it reaches
+    Ghost's own stderr, which is the journal (ADR 0036). The child writes into a pipe; a
+    thread reads it until the child and every process it started have closed it."""
+
+    def __init__(self, name: str, out: TextIO | None = None) -> None:
+        read_fd, write_fd = os.pipe()
+        self._out = out
+        self.writer = os.fdopen(write_fd, "w")  # the child's stderr
+        self._thread = threading.Thread(
+            target=self._pump, args=(read_fd,), name=f"app:{name}:stderr", daemon=True
+        )
+        self._thread.start()
+
+    def _pump(self, fd: int) -> None:
+        with os.fdopen(fd, "rb") as f:
+            for raw in f:
+                line = redact_text(raw.decode(errors="replace"))
+                out = self._out or sys.stderr
+                try:
+                    out.write(line)
+                    out.flush()
+                except (OSError, ValueError):
+                    pass
+
+    def spawned(self) -> None:
+        """The child has its copy of the pipe: this one closes, so the pipe ends with it."""
+        if not self.writer.closed:
+            self.writer.close()
+
+    def close(self) -> None:
+        self.spawned()
+
+    def join(self, timeout: float | None = None) -> None:
+        self._thread.join(timeout)
+
+
 class App:
     """A connected app: its session, its tools, and calls with a timeout.
 
@@ -738,7 +776,14 @@ class App:
                         args=_expand_args(spec.args, self.environ),
                         env={**get_default_environment(), **env},
                     )
-                    read, write = await stack.enter_async_context(stdio_client(params))
+                    # Its stderr reaches the journal only through the redactor: an
+                    # app that prints its own key in an error says [password: NAME].
+                    errlog = StderrRelay(spec.name)
+                    stack.callback(errlog.close)
+                    read, write = await stack.enter_async_context(
+                        stdio_client(params, errlog=errlog.writer)
+                    )
+                    errlog.spawned()
                 session = await stack.enter_async_context(
                     ClientSession(read, write, read_timeout_seconds=CALL_TIMEOUT_SECS)
                 )

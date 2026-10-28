@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -53,7 +54,7 @@ from ghost_core.hooks import HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.outputs import Outputs
-from ghost_core.passwords import Passwords
+from ghost_core.passwords import Passwords, is_password_name
 from ghost_core.routes import RouteEngine, RoutePolicy, SpokenDigest
 from ghost_core.rules import SOURCE as RULES
 from ghost_core.rules import Rules, rules_source
@@ -226,6 +227,7 @@ class Daemon:
         self.voice = voice
         self.passwords = passwords  # ADR 0036; opened in cli(), or in run()
         self._jevs: list[JevClient] = []  # closed when the daemon stops
+        self._followed_vault = False  # passwords_opened has run (once is enough)
         self.rt = runtime_dir()
         self._stop = asyncio.Event()
         self.state = DaemonState(
@@ -696,7 +698,10 @@ class Daemon:
         """The vault opened after the keyring was locked: Ghost's own settings are read
         again (the model connection, the voice), Jev joins when it has a key, and the apps
         that waited for a password connect. A watch's model decider follows at the next
-        start."""
+        start. Once: the unlock route and the retry loop may both get here."""
+        if self._followed_vault:
+            return
+        self._followed_vault = True
         logger.info("passwords: the vault is open")
         try:
             self.voice = VoiceSettings()  # type: ignore[call-arg]
@@ -1639,15 +1644,51 @@ def latency_command(args: list[str]) -> int:
 
 def check_passwords(vault: Passwords, cfg: GhostdSettings) -> list[str]:
     """``ghostd check`` for the vault (ADR 0036). Passwords still in plain files are said,
-    not a problem: a build is deployed before its import."""
+    not a problem: a build is deployed before its import. A locked or unreachable keyring
+    is said too, not a problem: the daemon waits for it (``keyring_waits``), and a deploy
+    over SSH has no keyring to unlock. A vault the keyring's key doesn't open is one."""
     print(f"passwords: {len(vault)} in {vault.path} ({vault.state})")
     out = []
-    if not vault.is_open:
+    if vault.state in KEYRING_WAITS:
+        print(
+            f"passwords: warning: {vault.problem}. Ghost starts anyway and waits for it;"
+            " what needs a password is checked when it opens"
+        )
+    elif not vault.is_open:
         out.append(f"passwords: {vault.problem}")
     for key, title in password_problems(vault, cfg):
         if key == "passwords:import":
             print(f"passwords: still in plain files; run `ghostd passwords import` ({title})")
     return out
+
+
+KEYRING_WAITS = ("locked", "unavailable")
+_NOT_SET = re.compile(r"\b([A-Z][A-Z0-9_]*) is not set\b")
+
+
+def keyring_waits(
+    vault: Passwords,
+    problems: list[str],
+    apps_with_passwords: set[str],
+    passwords: set[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """``ghostd check``'s problems, less those that only say a password is missing while
+    the keyring is locked or unreachable: a model or voice key not set, an app that needs
+    one not connected. Those are warnings; the daemon fills them in when the vault opens.
+    ``passwords``: names that are passwords whatever they look like (the model's own)."""
+    if vault.state not in KEYRING_WAITS:
+        return problems, []
+    real, waits = [], []
+    for p in problems:
+        app = re.match(r"\s*app (\S+) \(", p)
+        missing = _NOT_SET.search(p)
+        if (app and app.group(1) in apps_with_passwords) or (
+            missing and is_password_name(missing.group(1), passwords or ())
+        ):
+            waits.append(p)
+        else:
+            real.append(p)
+    return real, waits
 
 
 def build_jev(cfg: GhostdSettings) -> JevClient | None:
@@ -1779,6 +1820,14 @@ def cli(argv: list[str] | None = None) -> None:
             print(f"confirmation: {how}")
         except ValueError as e:
             problems.append(str(e))
+        with_passwords = {n for n, s in apps_file.apps.items() if s.secrets()}
+        try:
+            model_password = {p for p in [voice.llm_connection().password] if p}
+        except Exception:  # noqa: BLE001 - settings that didn't read are a problem above
+            model_password = set()
+        problems, waits = keyring_waits(vault, problems, with_passwords, model_password)
+        for w in waits:
+            print(f"passwords: warning: waits for the keyring: {w.strip()}")
         print("\n".join(problems) if problems else "config ok")
         sys.exit(1 if problems else 0)
     elif cmd == "push":

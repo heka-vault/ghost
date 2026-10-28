@@ -13,6 +13,7 @@ from __future__ import annotations
 import getpass
 import os
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -80,8 +81,18 @@ def in_use(voice: Any) -> list[str]:
 
 
 def redacting(record: dict[str, Any]) -> None:
-    """A loguru patcher: no log line carries a password (ADR 0036)."""
+    """A loguru patcher: no log line carries a password (ADR 0036), in its message or in
+    the exception ``logger.exception`` attaches. An exception whose text holds one is
+    written into the message redacted, and loguru is given none to format."""
     record["message"] = redact_text(record["message"])
+    exc = record.get("exception")
+    if exc is None or exc.value is None:
+        return
+    text = "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+    clean = redact_text(text)
+    if clean != text:
+        record["message"] = f"{record['message']}\n{clean.rstrip()}"
+        record["exception"] = None
 
 
 # --- ghostd passwords ------------------------------------------------------------------
@@ -132,7 +143,7 @@ def _print_list(view: dict[str, Any]) -> None:
     why = f": {vault['problem']}" if vault["problem"] else ""
     print(f"vault: {vault['path']} ({vault['state']}{why})")
     for p in view["passwords"]:
-        mark = "set" if p["set"] else "not set"
+        mark = "unknown" if p["set"] is None else "set" if p["set"] else "not set"
         uses = ", ".join(p["used_by"]) or "nothing names it"
         last = f", last used {p['last_used'][:16]}" if p.get("last_used") else ""
         print(f"  {p['name']}: {mark} ({uses}{last})")
