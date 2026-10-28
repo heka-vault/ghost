@@ -82,7 +82,7 @@ build_daemon() {
   install -m 644 "$ROOT/infra/pipewire/ghost-echo-cancel.service" "$root/usr/share/heka-ghost/pipewire/"
   install -m 644 "$ROOT/infra/policy.example.toml" "$root/usr/share/heka-ghost/policy.example.toml"
   install -m 644 "$ROOT/README.md" "$root/usr/share/doc/heka-ghostd/README.md"
-  install -m 644 "$ROOT/docs/mcp.md" "$root/usr/share/doc/heka-ghostd/mcp.md"
+  install -m 644 "$ROOT/docs/apps.md" "$root/usr/share/doc/heka-ghostd/apps.md"
 
   local size
   size=$(du -sk "$root" --exclude=DEBIAN | cut -f1)
