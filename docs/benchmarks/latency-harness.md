@@ -56,9 +56,11 @@ Scripted conversations through `build_session`, headless:
 - **Out:** an output transport that takes Ghost's audio at sound-card pace and drops it, so
   `BotStarted/StoppedSpeaking` behave as on the desk. It notes when the output turns loud:
   `audible` is the operator's last frame to Ghost's voice at the speaker.
-- **Model:** `--endpoint proxy` or `openrouter`, the same switch as `GHOST_LLM_ENDPOINT`
-  (OpenRouter's Anthropic Messages API with `OPENROUTER_API_KEY`). Keys are read from the
-  environment and never printed.
+- **Model:** `--endpoint current` (the default) is the model connection as configured (ADR
+  0037), on whichever protocol it speaks; a provider id (`anthropic`, `openrouter`,
+  `ollama`, …) is that provider as it comes; `proxy` and `openrouter` are the older
+  `GHOST_LLM_ENDPOINT` switch. `perf llm --endpoint current` times the same connection over
+  the client sessions share. Keys are read from the environment and never printed.
 - **Before and after:** `--ablate` turns the 2026-10-19 changes off one by one, so a change
   can be measured against Ghost without it in the same run: `tts_clauses` (whole sentences
   to Kokoro), `prompt_lines` (no "lead with a

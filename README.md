@@ -13,7 +13,7 @@ Ghost is a personal tool that runs entirely on your own Linux machine:
 - **Wake word** detected locally. Idle audio never leaves the machine.
 - **Speech-to-text and text-to-speech** run locally on CPU (Parakeet and Kokoro).
 - **Conversation** is built on [Pipecat](https://github.com/pipecat-ai/pipecat). No media server and no cloud voice platform.
-- **The LLM** is reached through any Anthropic-compatible endpoint, or OpenRouter's (`GHOST_LLM_ENDPOINT=openrouter`).
+- **The LLM** is one model connection: Anthropic, OpenRouter (sign in), your Claude subscription through CLIProxy, OpenAI, a local Ollama or LM Studio, or any address that speaks Anthropic's or OpenAI's API (ADR 0037).
 - **GitHub** is reached with a fine-grained personal access token scoped to the repositories you choose.
 
 It costs nothing to run beyond the LLM calls.
@@ -63,11 +63,17 @@ sends back with one in it has it replaced before Ghost reads it. Coming from hek
 the old `~/.config/ghost/env` and `apps.env`? `make passwords-import` moves them into the
 vault once and deletes the plain files.
 
-The model is reached through `ANTHROPIC_BASE_URL` with the `ANTHROPIC_AUTH_TOKEN` password
-by default. `GHOST_LLM_ENDPOINT=openrouter` in `settings.env` sends it to OpenRouter's Anthropic API
-instead, with the `OPENROUTER_API_KEY` password and `GHOST_LLM_MODEL` mapped to
-OpenRouter's id (`claude-sonnet-5-5` is `anthropic/claude-sonnet-5.5`). `make check` prints
-which endpoint and model are in use, never a password. `make latency` shows where recent turns
+The model is picked in the desktop app under Settings › Model (ADR 0037): a provider
+(`GHOST_LLM_PROVIDER`: `anthropic`, `openrouter`, `cliproxy`, `openai`, `ollama`, `lmstudio`
+or `custom`), its model from the provider's own list (`GHOST_LLM_MODEL`), and its password,
+kept in the vault like any other and referred to by name (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, and so on, or `GHOST_LLM_PASSWORD`). OpenRouter is a sign-in, with nothing
+to copy. Test connection there times the first token. Every session, compaction and a
+watch's model step use it, over the Anthropic Messages API or an OpenAI-compatible one, and
+a saved change applies from the next session. Older settings still work: without a
+provider, `GHOST_LLM_ENDPOINT=openrouter` is OpenRouter with the `OPENROUTER_API_KEY`
+password, and otherwise `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN`. `make check`
+prints the provider and model in use, never a password. `make latency` shows where recent turns
 spent their time ([docs/benchmarks/latency-harness.md](docs/benchmarks/latency-harness.md)).
 
 The phone app joins over the home LAN only (ADR 0016). Set `GHOST_PHONE_LISTEN` in
