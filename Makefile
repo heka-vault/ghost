@@ -6,6 +6,7 @@
 #   make stop         stop a ghostd started with `make run` or `make start`
 #   make echo-cancel  install the echo-cancelled mic service (ghost.mic)
 #   make android      build the phone app and install it on the USB-connected phone
+#   make deploy       run this checkout's HEAD as the ghostd service (no root, no .deb)
 #
 # Secrets never live in this repo: `make run` sources $(ENV_FILE), which is the
 # rendered file by default, or ./.env if you created one from .env.example.
@@ -22,7 +23,7 @@ define load_env
 set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a;
 endef
 
-.PHONY: help sync test lint fmt check devices env policy run start stop restart wake say status latency perf perf-micro perf-llm api-schema restore-volumes \
+.PHONY: help sync test lint fmt check devices env policy run start stop restart deploy deploy-rollback deploy-off deploy-status wake say status latency perf perf-micro perf-llm api-schema restore-volumes \
         echo-cancel echo-cancel-off service service-logs build-image deb deb-test \
         android android-apk android-install mobile-web
 
@@ -88,6 +89,20 @@ stop: ## stop any ghostd started by make run/start and wait for it (restores duc
 	echo "ghostd did not stop (pid $$(pgrep -f 'bin/ghostd run$$' | tr '\n' ' ')); check it before starting another"; exit 1
 
 restart: stop start ## stop ghostd, wait for it, start it again
+
+# The service runs a fixed build of a commit, not the working tree (scripts/deploy.sh):
+# ~/.local/share/ghost/runtime/<commit>/, checked before the restart, rolled back by a link.
+deploy: ## build HEAD, ghostd check it against ~/.config/ghost, switch the ghostd service to it and restart
+	@scripts/deploy.sh deploy
+
+deploy-rollback: ## switch the ghostd service back to the build that ran before and restart
+	@scripts/deploy.sh rollback
+
+deploy-off: ## stop running deployed builds: the service runs what its unit says (the .deb or the checkout)
+	@scripts/deploy.sh off
+
+deploy-status: ## which build the ghostd service runs
+	@scripts/deploy.sh status
 
 wake: ## simulate the wake word (through the API socket when ghostd is running)
 	@$(UV) run ghostd wake
