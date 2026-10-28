@@ -27,9 +27,8 @@ pub const BRING_UP_TOOL: &str = "bring_up_change";
 pub const HANG_UP_TOOL: &str = "hang_up";
 pub const HOLD_TOOL: &str = "hold";
 
-/// The names of Ghost's own sources (`ghost_core.apps.RESERVED_NAMES`): an app can't take
-/// them, and they come first when a tool name clashes.
-pub const RESERVED_NAMES: [&str; 5] = ["conversations", "outputs", "rules", "skills", "waiting"];
+/// The names of Ghost's own sources: an app can't take one.
+pub use ghost_core::apps::RESERVED_NAMES;
 
 /// What the model API takes as a tool name: `[a-zA-Z0-9_-]{1,64}`.
 pub fn tool_name_ok(name: &str) -> bool {
