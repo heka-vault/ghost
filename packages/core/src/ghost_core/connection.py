@@ -90,7 +90,7 @@ PROVIDERS: dict[str, Provider] = {
         Provider(
             id="anthropic",
             title="Anthropic",
-            blurb="Claude, with an API key from the Anthropic Console.",
+            blurb="Claude, with a password (API key) from the Anthropic Console.",
             protocol="anthropic",
             base_url="https://api.anthropic.com",
             password="ANTHROPIC_API_KEY",
@@ -120,7 +120,7 @@ PROVIDERS: dict[str, Provider] = {
         Provider(
             id="openai",
             title="OpenAI",
-            blurb="GPT models, with an API key from the OpenAI platform.",
+            blurb="GPT models, with a password (API key) from the OpenAI platform.",
             protocol="openai",
             base_url="https://api.openai.com/v1",
             password="OPENAI_API_KEY",
@@ -382,8 +382,10 @@ class ModelConnection:
     def password_set(self, env: Mapping[str, str]) -> bool:
         return bool(self.key(env))
 
-    def problems(self, env: Mapping[str, str]) -> list[str]:
-        """What stops the model from being reachable, in words, without naming a value."""
+    def problems(self, env: Mapping[str, str], *, locked: bool = False) -> list[str]:
+        """What stops the model from being reachable, in words, without naming a value.
+        ``locked``: Ghost's passwords can't be read now (the keyring is locked), so a key
+        missing from ``env`` may well be set; that is said instead of "not set"."""
         out = list(self.problems_in_settings)
         if not self.base_url:
             out.append(f"{self.spec.title} needs an address (GHOST_LLM_BASE_URL)")
@@ -391,7 +393,12 @@ class ModelConnection:
             out.append("no model is chosen (GHOST_LLM_MODEL)")
         needs_key = self.password and not self.spec.password_optional
         if needs_key and not self.password_set(env):
-            if self.legacy:
+            if locked:
+                out.append(
+                    f"your keyring is locked, so Ghost can't read {self.password}."
+                    " Unlock it on Settings › Passwords"
+                )
+            elif self.legacy:
                 out.append(f"{self.legacy} but {self.password} is not set")
             elif self.spec.sign_in:
                 out.append(f"sign in to {self.spec.title} ({self.password} is not set)")

@@ -8,10 +8,10 @@ import { HttpError } from "./errors";
 import type { ModelConnectionView, ModelDraft, ModelListView, ModelProviderView, ModelTestResult, SettingsView } from "@ghost/client-ts";
 
 export const MODEL_PROVIDERS: ModelProviderView[] = [
-  { id: "anthropic", title: "Anthropic", blurb: "Claude, with an API key from the Anthropic Console.", protocol: "anthropic", base_url: "https://api.anthropic.com", password: "ANTHROPIC_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "claude-sonnet-5-5" },
+  { id: "anthropic", title: "Anthropic", blurb: "Claude, with a password (API key) from the Anthropic Console.", protocol: "anthropic", base_url: "https://api.anthropic.com", password: "ANTHROPIC_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "claude-sonnet-5-5" },
   { id: "openrouter", title: "OpenRouter", blurb: "Sign in, and Claude or any other model OpenRouter offers.", protocol: "anthropic", base_url: "https://openrouter.ai/api", password: "OPENROUTER_API_KEY", password_optional: false, sign_in: true, local: false, default_model: "anthropic/claude-sonnet-5.5" },
   { id: "cliproxy", title: "Claude subscription", blurb: "Your Claude plan, through CLIProxy running on your network.", protocol: "anthropic", base_url: "http://localhost:8317", password: "ANTHROPIC_AUTH_TOKEN", password_optional: true, sign_in: false, local: true, default_model: "claude-sonnet-5-5" },
-  { id: "openai", title: "OpenAI", blurb: "GPT models, with an API key from the OpenAI platform.", protocol: "openai", base_url: "https://api.openai.com/v1", password: "OPENAI_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "gpt-5" },
+  { id: "openai", title: "OpenAI", blurb: "GPT models, with a password (API key) from the OpenAI platform.", protocol: "openai", base_url: "https://api.openai.com/v1", password: "OPENAI_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "gpt-5" },
   { id: "ollama", title: "Ollama", blurb: "A model running on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:11434/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
   { id: "lmstudio", title: "LM Studio", blurb: "A model LM Studio serves on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:1234/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
   { id: "custom", title: "Your own address", blurb: "Any address that speaks Anthropic’s or OpenAI’s API.", protocol: "anthropic", base_url: "", password: "LLM_API_KEY", password_optional: true, sign_in: false, local: false, default_model: null },
@@ -86,7 +86,9 @@ export class MockModel {
     if (!base) problems.push(`${spec.title} needs an address (GHOST_LLM_BASE_URL)`);
     if (!wire) problems.push("no model is chosen (GHOST_LLM_MODEL)");
     if (password && !spec.password_optional && !set) {
-      problems.push(legacy ? `${legacy} but ${password} is not set` : spec.sign_in ? `sign in to ${spec.title} (${password} is not set)` : `${password} is not set`);
+      // While the keyring is locked the key can't be read, which isn't "not set" (as the daemon says).
+      if (!this.vaultOpen()) problems.push(`your keyring is locked, so Ghost can't read ${password}. Unlock it on Settings › Passwords`);
+      else problems.push(legacy ? `${legacy} but ${password} is not set` : spec.sign_in ? `sign in to ${spec.title} (${password} is not set)` : `${password} is not set`);
     }
     const explicit: Record<string, string> = { GHOST_LLM_PROVIDER: provider };
     for (const k of KEYS.slice(1)) if (values[k]) explicit[k] = values[k];
@@ -117,7 +119,7 @@ export class MockModel {
     if (c.provider === "lmstudio") return { models: [], default: fallback, error: "couldn’t reach http://localhost:1234 (ConnectError)" };
     if (c.provider === "custom" && !c.base_url) return { models: [], default: fallback, error: "Give it an address first." };
     if (c.password && !c.password_set && c.provider !== "openrouter" && c.provider !== "custom" && c.provider !== "cliproxy")
-      return { models: [], default: fallback, error: "Add the key to see the models it offers." };
+      return { models: [], default: fallback, error: this.vaultOpen() ? "Save its password to see the models it offers." : "Unlock your keyring on Settings › Passwords to see the models it offers." };
     const models = (MODELS[c.provider] ?? []).map((m) => ({ id: m.id, name: m.name ?? null }));
     return { models, default: fallback && models.some((m) => m.id === fallback) ? fallback : models[0]?.id ?? fallback, error: null };
   }

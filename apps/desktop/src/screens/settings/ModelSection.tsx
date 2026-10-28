@@ -28,10 +28,10 @@ import { Row } from "./parts";
 import { PasswordRow, passwordTitle } from "./Passwords";
 
 const CHOICES: { value: ProviderChoice; label: string; description: string }[] = [
-  { value: "anthropic", label: "Anthropic", description: "Claude, with an API key from the Anthropic Console." },
+  { value: "anthropic", label: "Anthropic", description: "Claude, with a password (API key) from the Anthropic Console." },
   { value: "openrouter", label: "OpenRouter", description: "Sign in, then Claude or any other model OpenRouter offers." },
   { value: "cliproxy", label: "Claude subscription", description: "Your Claude plan, through CLIProxy running on your network." },
-  { value: "openai-compatible", label: "OpenAI or a local model", description: "OpenAI with an API key, or Ollama or LM Studio on this computer." },
+  { value: "openai-compatible", label: "OpenAI or a local model", description: "OpenAI with a password (API key), or Ollama or LM Studio on this computer." },
   { value: "custom", label: "Your own address", description: "Any address that speaks Anthropic’s or OpenAI’s API." },
 ];
 const OPENAI_COMPATIBLE_CHOICES = [
@@ -100,6 +100,8 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         last_used: null,
       };
   const vaultClosed = !!vault && vault.vault.state !== "open";
+  // Locked, the vault can't say whether the key is set: never "not signed in" then.
+  const vaultLocked = vault?.vault.state === "locked";
   const keySet = !!row?.set || (password === conn?.password && !!conn?.password_set);
   const keySaved = (v: PasswordsView, restart: boolean, names: string[]) => {
     setVault(v);
@@ -209,7 +211,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         const c = await client.modelConnection();
         if (c.sign_in_pending) continue;
         if (c.sign_in_error) setSignError(c.sign_in_error);
-        else toast({ title: "Signed in to OpenRouter", description: "Ghost keeps the key as a password in its vault. It never comes back to this window.", tone: "ok" });
+        else toast({ title: "Signed in to OpenRouter", description: "Ghost keeps what OpenRouter gave it as a password in its vault. It never comes back to this window.", tone: "ok" });
         readVault();
         onPassword(c.sign_in_error ? [] : ["OPENROUTER_API_KEY"]);
         break;
@@ -290,15 +292,17 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
                       "Waiting for you to sign in in your browser…"
                     )
                   ) : keySet ? (
-                    "Signed in. Ghost keeps the key OpenRouter gave it as a password in its vault."
+                    "Signed in. Ghost keeps what OpenRouter gave it as a password in its vault."
+                  ) : vaultLocked ? (
+                    "Your keyring is locked, so Ghost can’t read its passwords or tell whether you’re signed in. Unlock it on the Passwords page."
                   ) : vaultClosed ? (
-                    "Unlock Ghost’s passwords on the Passwords page first, so it can keep the key."
+                    "Ghost can’t open its passwords. See the Passwords page, so it has somewhere to keep the sign-in."
                   ) : (
-                    "Sign in and Ghost gets its own key. There’s nothing to copy."
+                    "Sign in and Ghost gets its own password from OpenRouter. There’s nothing to copy."
                   )
                 }
                 error={signError ?? undefined}
-                aside={keySet ? <Badge tone="ok" size="sm" dot>Signed in</Badge> : <Badge size="sm">Not signed in</Badge>}
+                aside={keySet ? <Badge tone="ok" size="sm" dot>Signed in</Badge> : vaultLocked ? <Badge tone="warn" size="sm">Keyring locked</Badge> : <Badge size="sm">Not signed in</Badge>}
               >
                 <Button size="sm" variant={keySet ? "ghost" : "secondary"} loading={signing} disabled={!online || vaultClosed} onClick={() => void signIn()}>
                   {keySet ? "Sign in again…" : "Sign in…"}
@@ -383,7 +387,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
                 label="Password name"
                 detail="GHOST_LLM_PASSWORD"
                 optional
-                help={help("GHOST_LLM_PASSWORD", `The password that holds the key. Empty means ${spec?.password || "none"}.`)}
+                help={help("GHOST_LLM_PASSWORD", `The password Ghost uses for this model. Empty means ${spec?.password || "none"}.`)}
                 error={err("GHOST_LLM_PASSWORD")}
               >
                 <Input form={MODEL_FORM_ID} mono value={eff.GHOST_LLM_PASSWORD ?? ""} placeholder={spec?.password || "MY_MODEL_KEY"} spellCheck={false} onChange={(e) => edit({ GHOST_LLM_PASSWORD: e.target.value.toUpperCase() })} />

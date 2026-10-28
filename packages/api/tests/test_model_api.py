@@ -315,4 +315,27 @@ def test_no_list_is_asked_for_without_the_key(world, env):
 
     env.setattr(model_routes, "list_models", never)
     r = client.post("/model/models", json={"values": {"GHOST_LLM_PROVIDER": "anthropic"}})
-    assert r.json()["error"] == "Add the key to see the models it offers."
+    assert r.json()["error"] == "Save its password to see the models it offers."
+
+
+def test_a_locked_keyring_is_said_not_a_missing_key(world, env):
+    """While the vault can't be read the environment has no key; that is not "not set"."""
+    from ghost_core.passwords import MemoryKeyring, Passwords
+
+    client, *_, deps = world
+    env.setenv("GHOST_LLM_PROVIDER", "openrouter")
+    deps.passwords.set("OPENROUTER_API_KEY", OR_KEY)
+    locked = Passwords(deps.passwords.path, MemoryKeyring(locked=True), environ={})
+    locked.open()
+    deps.passwords = locked
+
+    async def never(conn, env):
+        raise AssertionError("asked without a key")
+
+    env.setattr(model_routes, "list_models", never)
+    v = client.get("/model").json()
+    assert v["ready"] is False and v["password_set"] is False
+    assert len(v["problems"]) == 1
+    assert "keyring is locked" in v["problems"][0] and "not set" not in v["problems"][0]
+    r = client.post("/model/models", json={"values": {"GHOST_LLM_PROVIDER": "anthropic"}})
+    assert r.json()["error"].startswith("Unlock your keyring")

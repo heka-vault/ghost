@@ -135,9 +135,14 @@ def providers_view() -> list[ModelProviderView]:
 def add_model_routes(app: FastAPI, deps: Deps) -> None:
     sign_in = _SignIn()
 
+    def locked() -> bool:
+        """Ghost's passwords can't be read now: a key the environment lacks may be set."""
+        vault: Passwords | None = deps.passwords
+        return vault is not None and not vault.is_open
+
     def view(env: Mapping[str, str]) -> ModelConnectionView:
         conn = ModelConnection.from_env(env)
-        problems = conn.problems(env)
+        problems = conn.problems(env, locked=locked())
         return ModelConnectionView(
             provider=conn.provider,
             protocol=conn.protocol,
@@ -180,9 +185,12 @@ def add_model_routes(app: FastAPI, deps: Deps) -> None:
             and not conn.spec.sign_in
             and not conn.password_set(env)
         ):
-            return ModelListView(
-                models=[], default=default, error="Add the key to see the models it offers."
+            error = (
+                "Unlock your keyring on Settings › Passwords to see the models it offers."
+                if locked()
+                else "Save its password to see the models it offers."
             )
+            return ModelListView(models=[], default=default, error=error)
         try:
             found = await list_models(conn, env)
         except ValueError as e:
