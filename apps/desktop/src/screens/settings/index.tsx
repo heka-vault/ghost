@@ -1,7 +1,8 @@
 /**
  * Owner: settings. Five of the settings pages (#/settings/<page>), one screen so that moving
  * between them keeps one draft and one save bar:
- *   general    Finish setup while it is unfinished, Ghost's version, the settings file
+ *   general    Finish setup while it is unfinished, Ghost's version and build and this
+ *              window's (About.tsx), the settings file
  *   model      where Ghost sends a session to think
  *   passwords  the keys Ghost holds (write-only; #31 rebuilds this as a vault)
  *   sound      Ghost's voice, wake and your yes; microphone and speakers; voice models
@@ -47,6 +48,7 @@ import {
 } from "react";
 
 import { hrefFor, navigate } from "../../app/router";
+import { VersionNotice, VersionRows } from "./About";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
 import { type SettingsMark, type SettingsMarks, setSettingsMarks } from "../../app/settingsMarks";
 import { useDesign } from "../../design/context";
@@ -910,8 +912,9 @@ export default function SettingsScreen({ params: route }: RouteProps) {
           <>
             {showSetup && <SetupSection steps={steps} onGo={(id) => go(id)} />}
             <Section id={sectionDomId("about")} title={SECTION_TITLE.about} className="set-section">
+              <VersionNotice status={status} />
               <Card list>
-                <ListRow title="Version" description="The Ghost running on this computer." meta={<span className="set-value is-mono">{status?.version ?? "–"}</span>} />
+                <VersionRows status={status} />
                 <ListRow
                   title="Settings file"
                   description="Where these pages save. Passwords are kept in a file of their own."

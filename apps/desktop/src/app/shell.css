@@ -108,6 +108,7 @@ html[data-capture="full"] .sidebar { position: sticky; top: 0; }
 .sidebar__scenario { padding: 0 var(--space-1); }
 .sidebar__scenario .g-select { width: 100%; }
 .sidebar__version { padding: 0 var(--space-2); }
+.sidebar__version-other { display: block; }
 .sidebar__toggle { flex: none; color: var(--text-3); }
 
 /* The rail (Ctrl+B or the toggle): icons and glyphs only, each name in a tooltip on the right.

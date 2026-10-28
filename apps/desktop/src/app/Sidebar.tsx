@@ -4,11 +4,12 @@ import { ChevronDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { type ReactElement, type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { GhostMark, type GhostPhase, IconButton, LineGlyph, StatusDot, Tooltip, agentName, cx, liveLabel, phaseText, relativeTime, useLive } from "../ui";
+import { GhostMark, type GhostPhase, IconButton, LineGlyph, StatusDot, Tooltip, agentName, cx, liveLabel, phaseText, relativeTime, useLive, versionLine } from "../ui";
 import { isRetired } from "../screens/conversations/threads";
 import { newAgentSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
+import { DESKTOP_VERSION, otherVersion } from "./version";
 
 /** Design-mode chrome, compiled only in development; null in production builds. */
 const MockBadge = import.meta.env.DEV ? lazy(() => import("../design/chrome").then((m) => ({ default: m.MockBadge }))) : null;
@@ -143,8 +144,10 @@ export function Sidebar() {
   // same liveLabel() feeds <LiveStatus /> wherever it is used, so the two never disagree.
   const { dot: cardPhase, title } = liveLabel(state, phase);
   // The footer never moves between states: the last known version, or a reserved empty row.
-  const version = useRef<string | null>(null);
-  if (status?.version) version.current = status.version;
+  // When this window isn't the daemon's version (a checkout's window on the deployed Ghost),
+  // a second quiet line says which this one is (docs/releasing.md).
+  const version = useRef<{ line: string; other: string | null } | null>(null);
+  if (status?.version) version.current = { line: versionLine(status.version, status.build), other: otherVersion(status.version) };
   const sub =
     state === "connecting"
       ? "Looking for Ghost"
@@ -308,8 +311,13 @@ export function Sidebar() {
             <Switcher />
           </Suspense>
         )}
-        {/* Always one row tall, so the footer holds still. Empty until Ghost first answers. */}
-        {!rail && <div className="sidebar__version t-caption t-3 t-num" aria-hidden={version.current ? undefined : true}>{version.current ? `Ghost ${version.current}` : " "}</div>}
+        {/* At least one row tall, so the footer holds still. Empty until Ghost first answers. */}
+        {!rail && (
+          <div className="sidebar__version t-caption t-3 t-num" aria-hidden={version.current ? undefined : true}>
+            {version.current?.line ?? " "}
+            {version.current?.other && <span className="sidebar__version-other">This window is {DESKTOP_VERSION}</span>}
+          </div>
+        )}
       </div>
     </aside>
   );

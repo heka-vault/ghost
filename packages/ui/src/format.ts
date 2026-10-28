@@ -12,19 +12,22 @@ export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
 export type GhostPhase = "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking" | "offline";
 
 /**
- * How the daemon was built, after the version's middle dot: "dev a1b2c3d", "deploy a1b2c3d",
- * or "release". Uncommitted changes aren't in it; say them where there is room.
+ * How the daemon was built (docs/releasing.md): "dev a1b2c3d", "deploy a1b2c3d", "release
+ * a1b2c3d", the kind alone without a commit. Uncommitted changes aren't in it; say them where
+ * there is room. Null for a daemon older than builds (its status has none).
  */
-export function buildText(build: Build): string {
-  return build.commit && build.kind !== "release" ? `${build.kind} ${build.commit.slice(0, 7)}` : build.kind;
+export function buildText(build: Build | null | undefined): string | null {
+  if (!build) return null;
+  return build.commit ? `${build.kind} ${build.commit.slice(0, 7)}` : build.kind;
 }
 
 /**
  * Ghost's version line, as the sidebar says it: "Ghost 2026.10.0 · dev a1b2c3d". A release
- * names no commit; its version is the tag (docs/releasing.md).
+ * names no commit, since its version is the tag, and neither does a daemon older than builds.
  */
-export function versionLine(version: string, build: Build): string {
-  return build.kind === "release" ? `Ghost ${version}` : `Ghost ${version} · ${buildText(build)}`;
+export function versionLine(version: string, build: Build | null | undefined): string {
+  const how = build?.kind === "release" ? null : buildText(build);
+  return how ? `Ghost ${version} · ${how}` : `Ghost ${version}`;
 }
 
 /** The phase to show: offline when the daemon is unreachable, starting until models load. */
