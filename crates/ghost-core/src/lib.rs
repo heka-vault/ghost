@@ -15,6 +15,8 @@ pub mod fakes;
 pub mod gate;
 pub mod levels;
 pub mod models;
+pub mod password_import;
+pub mod passwords;
 pub mod permissions;
 pub mod policy;
 pub mod redact;
@@ -32,6 +34,9 @@ pub use gate::{GateError, Submission, WriteGate};
 pub use levels::{Autonomy, Risk};
 pub use models::{
     Change, ChangeSet, Outcome, OutcomeStatus, Proposal, ProposalStatus, Snapshot, Target,
+};
+pub use passwords::{
+    Keyring, MemoryKeyring, PasswordMeta, Passwords, PasswordsError, SecretServiceKeyring,
 };
 pub use permissions::{Mode, Permissions, Rule};
 pub use policy::{AutonomyPolicy, PolicyError};
