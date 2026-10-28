@@ -56,6 +56,12 @@ rand = "0.9"
 # The phone listener's networks (ADR 0020): which interface holds an address, from getifaddrs.
 nix = { version = "0.31", features = ["net", "hostname"] }
 tower = { version = "0.5", features = ["util"] }
+# The audio engine (crates/ghost-audio): PipeWire through the project's own binding, a
+# realtime-safe ring between its thread and tokio, WAV assets.
+pipewire = { version = "0.10", features = ["v1_2_0"] } # the workstation runs PipeWire 1.6
+libspa = "0.10"
+rtrb = "0.4"
+hound = "3.5"
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location

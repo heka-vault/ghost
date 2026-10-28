@@ -1,0 +1,30 @@
+[package]
+name = "ghost-audio"
+description = "Ghost's audio engine: the echo-cancelled microphone, playback with the thinking sound mixed under speech, music ducking, the chime (ADR 0039)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pipewire.workspace = true
+libspa.workspace = true
+rtrb.workspace = true
+hound.workspace = true
+rustix = { workspace = true, features = ["event"] } # the eventfd behind ghost_audio::wake
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+anyhow.workspace = true
+tracing-subscriber.workspace = true
+
+[[example]]
+name = "audio-probe"
+path = "examples/audio-probe.rs"
