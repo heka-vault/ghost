@@ -1,0 +1,97 @@
+# Versions and releases
+
+Ghost's version is a date: `YYYY.M.N`. N counts that month's releases from 0, so the first
+release of October 2026 is `2026.10.0` and the next is `2026.10.1`. There are no leading
+zeros (`2026.10.0`, never `2026.10.00` or `2026.010.0`), because Cargo, Tauri, npm and Debian
+all need an ordinary three-part version. The tag of a release is `v` and the version:
+`v2026.10.0`.
+
+## One version, many copies
+
+The root `pyproject.toml` is the source. Every other file that carries a version is a copy
+that `scripts/version.py` writes:
+
+- the four member `pyproject.toml` files (`apps/ghostd`, `packages/core`, `packages/voice`,
+  `packages/api`) and their five entries in `uv.lock`
+- the five `package.json` files (the root, `apps/desktop`, `apps/mobile`,
+  `packages/client-ts`, `packages/ui`) and `apps/mobile/app.json`
+- `apps/desktop/src-tauri/Cargo.toml`, its entry in `Cargo.lock`, and `tauri.conf.json`
+
+The script edits only the version line of each file and leaves the rest of the file as it
+was. `apps/ghostd/tests/test_versions.py` reads each copy with its own format's parser and
+fails when one disagrees with the root, so CI's pytest catches a copy edited by hand. It also
+fails when a `package.json`, `pyproject.toml` or `Cargo.toml` is added under `apps/` or
+`packages/` and the script doesn't know about it.
+
+```bash
+make version                   # the version, any copy that disagrees, and the next release's
+make version V=next            # write the next release's version everywhere (fetches tags first)
+make version V=2026.11.0       # or a version you name
+```
+
+The next release's version comes from today's date and the `v*` tags: one more than the
+highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
+
+## Cutting a release
+
+`main` takes changes only through pull requests that pass CI, so a release has two steps.
+
+1. **Bump the version in a PR.** On a branch, run `make version V=next`, commit (for example
+   `chore(release): 2026.10.1`), push and open a PR. CI checks every copy agrees. Merge it
+   like any other PR.
+2. **Tag it.** On `main`, pulled up to date, run `make release`. It checks that:
+   - you are on `main` with no uncommitted changes to tracked files
+   - `HEAD` is the same commit as `origin/main` after a fetch, so the tagged commit is the one
+     CI passed on `main`
+   - every copy agrees with `pyproject.toml`
+   - `pyproject.toml`'s version isn't tagged yet and is this month's next release
+
+   Then it makes an annotated tag `vYYYY.M.N` on `HEAD`. **It pushes nothing.** Push the tag
+   yourself when you mean it:
+
+   ```bash
+   git push origin v2026.10.1
+   ```
+
+   The tag starts `.github/workflows/release.yml`. It checks the tag names the version the
+   files say, builds the .debs, installs the daemon's into a clean Ubuntu 26.04 and runs
+   `ghostd check`, and attaches the packages to a GitHub release.
+
+If the month turns between the merge and the tag, `make release` refuses: the merged
+`2026.10.x` is no longer this month's. Bump again with `make version V=next` in a PR.
+
+Nothing tags or pushes on its own: no workflow bumps a version or makes a tag.
+
+## What each build says it is
+
+The daemon reports its version and its build in the status the control API returns
+(`GET /status`, and the `/events` stream), as `version` and `build: {kind, commit, dirty}`:
+
+| Kind | What it is | Where `build` comes from |
+|---|---|---|
+| `dev` | Ghost from a checkout (`make dev`, `make daemon`, `uv run ghostd`) | The checkout's `HEAD`, and `dirty` when tracked files had uncommitted changes as the daemon started |
+| `deploy` | A `make deploy` runtime in `~/.local/share/ghost/runtime/<commit>/` | `scripts/deploy.sh` writes `venv/ghost-build.json` in the build |
+| `release` | The `heka-ghostd` package | `packaging/build-debs.sh` writes `/opt/ghost/venv/ghost-build.json` |
+
+A recorded build is `ghost-build.json` in the venv's root (Python's `sys.prefix`); a venv
+without one is a checkout's (`ghostd.build`). The daemon reads it once when it starts: a
+file read, or two `git` calls for a checkout, and nothing on a turn. The version is the one
+`ghostd` was installed at, which is the root `pyproject.toml`'s.
+
+It reads the same everywhere:
+
+- `ghostd version`: `Ghost 2026.10.0 · dev a1b2c3d` (with `, uncommitted changes` when dirty).
+  `ghostd check` and the daemon's first log line start with it, and `make deploy` shows it
+  from the build's check.
+- The desktop's sidebar footer: `Ghost 2026.10.0 · dev a1b2c3d`. A release shows the version
+  alone, since its version is its tag.
+- Settings › General: the version, the build in words, and the desktop app's own version.
+
+The desktop app's version is its `package.json`'s, the same as every other copy. When the
+window and the daemon differ, for example a window from a checkout talking to the deployed
+Ghost, the sidebar adds a quiet second line ("This window is 2026.10.1") and General shows a
+neutral notice. A daemon older than this change has no `build` in its status; the app shows
+its version alone.
+
+In the mock (`?mock=passive`), `&build=dev|dirty|deploy|release|behind` sets what the daemon
+says it is; `behind` is last month's deploy, so the notice shows.

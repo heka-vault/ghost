@@ -142,6 +142,11 @@ start and stop it, at login too.
 Changes go to `main` through pull requests; the `ci` workflow (lint, tests, schema and client
 current, typecheck, the desktop build and the Tauri shell) must pass before one merges.
 
+Versions are dates, `YYYY.M.N` (the Nth release of the month, from 0). `make version V=next`
+writes the next one everywhere, in a PR; once it merges, `make release` on `main` tags it.
+The sidebar says which Ghost is running, for example "Ghost 2026.10.0 · dev a1b2c3d", and
+`ghostd version` says the same. See [docs/releasing.md](docs/releasing.md).
+
 ## Docs
 
 | Doc | What |
@@ -149,6 +154,7 @@ current, typecheck, the desktop build and the Tauri shell) must pass before one 
 | [docs/architecture.md](docs/architecture.md) | Current design: components, how a conversation flows, how writes stay safe |
 | [docs/adr/](docs/adr/) | Decisions, one per file |
 | [docs/design-system.md](docs/design-system.md) | The desktop app's design system: tokens, components, page patterns, copy, mock scenarios |
+| [docs/releasing.md](docs/releasing.md) | Version numbers, how a release is cut, and how each build says what it is |
 | [docs/benchmarks/](docs/benchmarks/) | Measured speech-model performance on the target workstation |
 | [docs/original/](docs/original/) | The original VoiceTriage PRD and technical specification, kept unchanged. Where they differ from the ADRs, the ADRs win |
 
