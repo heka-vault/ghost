@@ -8,17 +8,20 @@
 
 pub mod codec;
 pub mod confirmation;
+pub mod connection;
 pub mod conversations;
 pub mod events;
 #[cfg(any(test, feature = "fakes"))]
 pub mod fakes;
 pub mod gate;
 pub mod levels;
+pub mod mock_github;
 pub mod models;
 pub mod permissions;
 pub mod policy;
 pub mod redact;
 pub mod request;
+pub mod scripts_server;
 pub mod source;
 pub mod store;
 pub mod time;

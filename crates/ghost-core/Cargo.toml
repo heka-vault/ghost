@@ -7,6 +7,15 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+# The two MCP servers Ghost ships as apps (ADR 0034): the names apps.json names.
+[[bin]]
+name = "ghost-mock-github"
+path = "src/bin/ghost-mock-github.rs"
+
+[[bin]]
+name = "ghost-scripts"
+path = "src/bin/ghost-scripts.rs"
+
 [features]
 # An issue-like write model for the gate's tests, in this crate and in others.
 fakes = []
@@ -29,6 +38,14 @@ async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
 unicode-normalization.workspace = true
+reqwest.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+base64.workspace = true
+rand.workspace = true
+url.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+wiremock.workspace = true
