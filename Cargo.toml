@@ -50,6 +50,12 @@ rmcp = { version = "3", default-features = false, features = ["server", "macros"
 schemars = "1"
 rand = "0.9"
 url = "2"
+# The audio engine (crates/ghost-audio): PipeWire through the project's own binding, a
+# realtime-safe ring between its thread and tokio, WAV assets.
+pipewire = { version = "0.10", features = ["v1_2_0"] } # the workstation runs PipeWire 1.6
+libspa = "0.10"
+rtrb = "0.4"
+hound = "3.5"
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location
