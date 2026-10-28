@@ -1174,6 +1174,13 @@ pub fn check_value(value: &str) -> Result<(), PasswordsError> {
     Ok(())
 }
 
+impl crate::hooks::Secrets for Passwords {
+    /// A webhook's `${NAME}`: the value, its use noted, for the signature check only.
+    fn secret(&self, name: &str) -> Option<Zeroizing<String>> {
+        self.value(name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! The vault (ADR 0036): sealed on disk, its key in the keyring, values only at the
@@ -1599,12 +1606,5 @@ mod tests {
             unseal(&key, b"nonsense"),
             Err(PasswordsError::VaultBroken(m)) if m == "the vault file is damaged"
         ));
-    }
-}
-
-impl crate::hooks::Secrets for Passwords {
-    /// A webhook's `${NAME}`: the value, its use noted, for the signature check only.
-    fn secret(&self, name: &str) -> Option<Zeroizing<String>> {
-        self.value(name)
     }
 }
