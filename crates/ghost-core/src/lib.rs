@@ -19,6 +19,7 @@ pub mod permissions;
 pub mod policy;
 pub mod redact;
 pub mod request;
+pub mod skill_catalog;
 pub mod source;
 pub mod store;
 pub mod time;
