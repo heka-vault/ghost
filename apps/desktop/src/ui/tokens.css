@@ -58,6 +58,7 @@
   --control-sm: 28px;
   --control-md: 32px;
   --control-lg: 40px;
+  --qr-size: 176px; /* a pairing QR code: a phone reads it from arm's length */
   --icon-xs: 12px;
   --icon-sm: 14px;
   --icon-md: 16px;
@@ -161,6 +162,10 @@
   --text-3: light-dark(#64646d, #8b8b94);       /* tertiary, placeholders, meta: AA on every row tint */
   --text-disabled: light-dark(#a1a1aa, #56565f); /* disabled only; exempt from contrast */
   --text-inverse: light-dark(#ffffff, #09090b);
+
+  /* a QR code: dark on light in both themes, because not every camera reads an inverted one */
+  --qr-light: light-dark(#ffffff, #ededef);
+  --qr-dark: #09090b;
 
   /* the one accent: "ghost iris" */
   --accent: light-dark(#4c57e0, #5560e8);        /* fills: white on it 5.6 / 4.97 at rest, 5.9 / 5.4 on hover */
