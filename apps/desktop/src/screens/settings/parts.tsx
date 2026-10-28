@@ -1,11 +1,11 @@
 /** Owner: settings. Page-local pieces: chips input, secret row, save bar, setup list. */
-import type { Status } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { Check, CircleCheck, Copy, X } from "lucide-react";
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 
 import { Button, Card, IconButton, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
 import { type SectionId, SECTION_TITLE, joinList, listWords, lowerFirst, sectionDomId, splitLines, splitList } from "./model";
+import { RESTART_WORDS, restartCommand } from "./restart";
 
 /* ------------------------------------------------------------------- ChipsInput */
 export interface ChipsInputProps {
@@ -258,18 +258,10 @@ export type BarState =
       live: string[];
     };
 
-export const RESTART_COMMAND = "systemctl --user restart ghostd";
-/** A checkout's daemon (make dev): restarting the service instead would start a second Ghost. */
-export const DEV_RESTART_COMMAND = "make reload";
+export { DEV_RESTART_COMMAND, RESTART_COMMAND, RESTART_WORDS, START_RESTART_COMMAND, restartCommand } from "./restart";
 
-/** How to restart the Ghost this window talks to, by its build (docs/releasing.md): `make reload`
- *  in the checkout for a dev build, the service for a deploy or a release. Unknown: the service. */
-export function restartCommand(build: Status["build"] | null | undefined): string {
-  return build?.kind === "dev" ? DEV_RESTART_COMMAND : RESTART_COMMAND;
-}
-
-/** The restart command for the running Ghost. */
-export function useRestartCommand(): string {
+/** The restart command for the running Ghost, or null when there's no one command (RESTART_WORDS). */
+export function useRestartCommand(): string | null {
   return restartCommand(useGhost().status?.build);
 }
 
@@ -277,13 +269,15 @@ export function useRestartCommand(): string {
  *  pill and by rows that owe a restart. */
 export function CommandCopy({ command, copyRef, className }: { command?: string; copyRef?: Ref<HTMLButtonElement>; className?: string }) {
   const restart = useRestartCommand();
-  command ??= restart;
+  const shown = command ?? restart;
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(false), 1600);
     return () => clearTimeout(t);
   }, [copied]);
+  if (shown == null) return <span className={cx("set-help", className)}>{RESTART_WORDS}</span>;
+  command = shown;
   return (
     <span className={cx("set-command", className)}>
       <code>{command}</code>
@@ -330,8 +324,8 @@ function fewNames(keys: string[]): string {
 export function SaveBar({ state, onSave, onDiscard, onDismiss, onFix, copyRef, saveRef }: SaveBarProps) {
   const restart = useRestartCommand();
   if (state.kind === "restart") {
-    const names = `After the restart: ${lowerFirst(fewNames(state.waiting))}.${state.live.length ? ` Live now: ${lowerFirst(fewNames(state.live))}.` : ""}`;
-    return <SharedSaveBar variant="restart" title="Restart Ghost to apply" description={names} command={restart} copyRef={copyRef} onDismiss={onDismiss} />;
+    const names = `After the restart: ${lowerFirst(fewNames(state.waiting))}.${state.live.length ? ` Live now: ${lowerFirst(fewNames(state.live))}.` : ""}${restart ? "" : ` ${RESTART_WORDS}`}`;
+    return <SharedSaveBar variant="restart" title="Restart Ghost to apply" description={names} command={restart ?? undefined} copyRef={copyRef} onDismiss={onDismiss} />;
   }
 
   const { keys, online, busy, error, invalid, restored } = state;

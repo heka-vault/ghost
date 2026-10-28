@@ -172,7 +172,14 @@ def test_status_says_the_version_and_the_build(world):
     from ghost_api import Build
 
     client, state, *_ = world
-    assert client.get("/status").json()["build"] == {"kind": "dev", "commit": None, "dirty": False}
+    assert client.get("/status").json()["build"] == {
+        "kind": "dev",
+        "commit": None,
+        "dirty": False,
+        "launcher": None,
+    }
+    state.build = Build(kind="dev", launcher="make-dev")
+    assert client.get("/status").json()["build"]["launcher"] == "make-dev"
     state.build = Build(kind="deploy", commit="0123456789abcdef0123456789abcdef01234567")
     s = client.get("/status").json()
     assert s["version"] == "test"
@@ -180,6 +187,7 @@ def test_status_says_the_version_and_the_build(world):
         "kind": "deploy",
         "commit": "0123456789abcdef0123456789abcdef01234567",
         "dirty": False,
+        "launcher": None,
     }
 
 

@@ -17,8 +17,9 @@
  *   ...&catalog=slow     the catalog's first copy takes 4s (first run does this by itself)
  *   ...&catalog=problem  the copy is three days old and the refresh failed
  *   ...&catalog=empty    the first copy hasn't arrived, and doesn't for 8s
- *   ...&build=dev|dirty|deploy|release|behind   what the daemon says it is (docs/releasing.md);
- *                    behind is last month's deploy, so this window and Ghost differ
+ *   ...&build=dev|dirty|start|checkout|deploy|release|behind   what the daemon says it is
+ *                    (docs/releasing.md); start is make start's, checkout one started some
+ *                    other way; behind is last month's deploy, so this window and Ghost differ
  *   ...&skillsearch=down skills.sh doesn't answer: a skills search says so (#35)
  */
 import type { Transport } from "@ghost/client-ts";
@@ -45,7 +46,7 @@ export function createMock(name: string): { transport: Transport; design: Design
     pairsAfterMs: phone === "pairs" ? 5000 : 0,
     codeTtlSecs: phone === "expires" ? 8 : 120,
     catalog: (["slow", "problem", "empty"] as const).find((c) => c === params.get("catalog")) ?? null,
-    build: (["dev", "dirty", "deploy", "release", "behind"] as const).find((b) => b === params.get("build")) ?? null,
+    build: (["dev", "dirty", "start", "checkout", "deploy", "release", "behind"] as const).find((b) => b === params.get("build")) ?? null,
     skillSearch: params.get("skillsearch") === "down" ? "down" : null,
     vault: (["locked", "import", "broken"] as const).find((v) => v === params.get("vault")) ?? null,
   });

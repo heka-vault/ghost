@@ -99,12 +99,16 @@ their commits and the commits differ ("This window is 2026.10.1 · e54c2a5"); un
 changes aren't compared. A daemon older than this change has no `build` in its status; the
 app shows its version alone.
 
-The restart Settings asks for follows the build: `make reload` in the checkout for a `dev`
-daemon (restarting the service would start a second Ghost against the microphone), and
-`systemctl --user restart ghostd` for a deploy or a release.
+The restart Settings asks for follows the build: `systemctl --user restart ghostd` for a
+deploy or a release; for a `dev` daemon, the make target that started it, which it reports as
+`build.launcher` from `GHOST_LAUNCHER` (restarting the service would start a second Ghost
+against the microphone): `make reload` under `make dev` or `make daemon` (`make-dev`), `make
+restart` under `make start` (`make-start`). A checkout started any other way (a unit running
+it, `uv run`) has no launcher, and Settings says to restart Ghost the way it was started.
 
-In the mock (`?mock=passive`), `&build=dev|dirty|deploy|release|behind` sets what the daemon
-says it is: `dev` and `dirty` are at this window's own commit; `deploy` and `release` are
+In the mock (`?mock=passive`), `&build=dev|dirty|start|checkout|deploy|release|behind` sets
+what the daemon says it is: `dev`, `dirty`, `start` and `checkout` are at this window's own
+commit (`start` is `make start`'s, `checkout` has no launcher); `deploy` and `release` are
 this window's version at another commit, so the notice shows the builds differ; `behind` is
 last month's deploy, so the notice shows the versions differ.
 
@@ -119,17 +123,20 @@ its form in `~/.local/share/ghost/runtime/<commit>/dropin-form` (`scripts/deploy
   (ADR 0036). Every build `make deploy` makes from now on.
 - `render`: a build from before the vault. Its own `src/infra/systemd/ghost-render-env.sh`
   runs as `ExecStartPre`, and the daemon reads its passwords from `~/.config/ghost/env`
-  (`EnvironmentFile=%h/.config/ghost/env`).
+  (`EnvironmentFile=-%h/.config/ghost/env`, optional so the renderer runs first when the
+  file is gone).
 
 A build with no record is a `render` build when its tree still has `ghost-render-env.sh`, and a
 `vault` build otherwise.
 
-The vault's import deletes `~/.config/ghost/env`, so a rollback to a pre-vault build after the
-import would start Ghost with no passwords. The rollback refuses, says so, and changes
-nothing; stay on the vault build, or write the passwords back into `~/.config/ghost/env` by
-hand first.
+The vault's import deletes `~/.config/ghost/env`. A pre-vault build's renderer writes it again
+from heka-vault while heka-vault's config (`~/.config/heka-vault/ghost.env`) is on this
+computer, so a rollback then goes ahead. Without either file the build would start with no
+passwords: the rollback refuses, says so, and changes nothing; stay on the vault build, or
+write the passwords back into `~/.config/ghost/env` by hand first.
 
 `scripts/deploy.sh off` removes the drop-in and hands the service back to
 its unit file. A unit installed before the vault runs `infra/systemd/ghost-render-env.sh`,
 which is gone, and reads `~/.config/ghost/env`; `off` refuses that unit and keeps the drop-in.
+A pre-step marked `ExecStartPre=-…` doesn't count: systemd starts the unit when it fails.
 `make service-install` installs the current unit, then `off` works.

@@ -114,7 +114,7 @@ reload: ## restart the daemon that make dev or make daemon runs, after a Python 
 
 start: ## the daemon in the background, logging to /tmp/ghostd.log (for scripts and agents)
 	@scripts/dev.sh preflight
-	@$(load_env) nohup $(UV) run ghostd run > /tmp/ghostd.log 2>&1 & echo "ghostd started, log: /tmp/ghostd.log"
+	@$(load_env) GHOST_LAUNCHER=make-start nohup $(UV) run ghostd run > /tmp/ghostd.log 2>&1 & echo "ghostd started, log: /tmp/ghostd.log"
 
 # Waits until the daemon has exited, so two never share the mic. Ducked volumes are restored on exit.
 stop: ## stop this checkout's daemon (make start, make daemon or make dev) and wait for it

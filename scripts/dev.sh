@@ -52,8 +52,9 @@ preflight() {
 # process group (pnpm, tauri, Vite, the window) gets TERM too.
 DAEMON_PID='' DESKTOP_PID='' STOPPING=0
 
+# GHOST_LAUNCHER tells the daemon it was started here, so the desktop says make reload.
 start_daemon() {
-  setsid bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$ROOT/.venv/bin/ghostd" \
+  setsid env GHOST_LAUNCHER=make-dev bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$ROOT/.venv/bin/ghostd" \
     </dev/null > >(prefix "ghostd " 36) 2>&1 &
   DAEMON_PID=$!
 }

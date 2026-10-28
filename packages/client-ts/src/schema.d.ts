@@ -1318,7 +1318,10 @@ export interface components {
          * @description Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a
          *     checkout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The
          *     commit is the full hash when known; ``dirty`` is a checkout that had uncommitted
-         *     changes when the daemon started.
+         *     changes when the daemon started. ``launcher`` is how a checkout's daemon was started,
+         *     when the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and
+         *     ``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``
+         *     (``make restart``); anything else (a unit running the checkout, ``uv run``) is None.
          */
         Build: {
             /** Commit */
@@ -1334,6 +1337,8 @@ export interface components {
              * @enum {string}
              */
             kind: "dev" | "deploy" | "release";
+            /** Launcher */
+            launcher?: ("make-dev" | "make-start") | null;
         };
         /**
          * CatalogEntryView

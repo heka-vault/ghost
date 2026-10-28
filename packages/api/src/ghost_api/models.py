@@ -40,11 +40,15 @@ class Build(BaseModel):
     """Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a
     checkout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The
     commit is the full hash when known; ``dirty`` is a checkout that had uncommitted
-    changes when the daemon started."""
+    changes when the daemon started. ``launcher`` is how a checkout's daemon was started,
+    when the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and
+    ``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``
+    (``make restart``); anything else (a unit running the checkout, ``uv run``) is None."""
 
     kind: Literal["dev", "deploy", "release"] = "dev"
     commit: Annotated[str, Field(pattern=r"^[0-9a-f]{7,40}$")] | None = None
     dirty: bool = False
+    launcher: Literal["make-dev", "make-start"] | None = None
 
 
 class Status(BaseModel):

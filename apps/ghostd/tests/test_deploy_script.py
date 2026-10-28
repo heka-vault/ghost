@@ -78,7 +78,8 @@ def test_each_build_gets_the_drop_in_it_needs(world):
     assert "EnvironmentFile=-%h/.config/ghost/settings.env" in vault.stdout
     old = run("dropin", OLD).stdout
     assert f"ExecStartPre={runtime}/current/src/infra/systemd/ghost-render-env.sh" in old
-    assert "EnvironmentFile=\nEnvironmentFile=%h/.config/ghost/env\n" in old
+    # Optional: the renderer runs first and writes it, even after the import deleted it.
+    assert "EnvironmentFile=\nEnvironmentFile=-%h/.config/ghost/env\n" in old
     assert f"ExecStart={runtime}/current/venv/bin/ghostd run" in old
     # No record and no renderer in its tree: a vault build.
     assert "ghost-render-env" not in run("dropin", UNRECORDED).stdout
@@ -92,7 +93,7 @@ def test_rollback_to_a_build_from_before_the_vault(world):
     assert _current(runtime) == OLD
     text = dropin.read_text()
     assert f"ExecStartPre={runtime}/current/src/infra/systemd/ghost-render-env.sh" in text
-    assert "EnvironmentFile=%h/.config/ghost/env" in text
+    assert "EnvironmentFile=-%h/.config/ghost/env" in text
     assert "settings.env" not in text
     # And forward again: the vault build's own form.
     r = run("rollback")
@@ -110,6 +111,38 @@ def test_rollback_refuses_a_pre_vault_build_once_env_is_gone(world):
     assert r.returncode == 1
     assert "from before Ghost's vault" in r.stderr and "~/.config/ghost/env" in r.stderr
     assert _current(runtime) == NEW  # nothing moved
+    assert not dropin.exists()
+
+
+def test_rollback_to_a_pre_vault_build_with_heka_vault_still_here(world):
+    """Its renderer writes ~/.config/ghost/env from heka-vault's config again: allowed."""
+    run, home, runtime, dropin = world
+    heka = home / ".config" / "heka-vault" / "ghost.env"
+    heka.parent.mkdir(parents=True)
+    heka.write_text("HEKA_VAULT_URL=http://vault.lan\n")
+    r = run("rollback")
+    assert r.returncode == 0, r.stderr
+    assert _current(runtime) == OLD
+    assert "from heka-vault again" in r.stderr
+    assert f"ExecStartPre={runtime}/current/src/infra/systemd/ghost-render-env.sh" in (
+        dropin.read_text()
+    )
+
+
+def test_off_accepts_a_pre_step_whose_failure_is_ignored(world, tmp_path):
+    """``ExecStartPre=-…``: systemd starts the unit even when it fails, so it isn't fatal."""
+    run, _home, _runtime, dropin = world
+    dropin.parent.mkdir(parents=True)
+    dropin.write_text("[Service]\n")
+    (tmp_path / "ghostd.service").write_text(
+        "[Service]\n"
+        "ExecStartPre=-%h/projects/active/ghost/infra/systemd/gone.sh\n"
+        "ExecStartPre=@-%h/also/gone.sh arg\n"
+        "EnvironmentFile=-%h/.config/ghost/settings.env\n"
+        "ExecStart=/usr/bin/true\n"
+    )
+    r = run("off")
+    assert r.returncode == 0, r.stderr
     assert not dropin.exists()
 
 

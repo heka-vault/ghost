@@ -69,6 +69,21 @@ def test_a_checkout_is_dev_with_its_commit_and_whether_it_is_dirty(tmp_path):
     assert build.detect(prefix=prefix, source=repo) == Build(kind="dev", commit=head, dirty=True)
 
 
+@pytest.mark.parametrize(
+    ("launcher", "want"),
+    [("make-dev", "make-dev"), ("make-start", "make-start"), ("systemd", None), ("", None)],
+)
+def test_a_checkout_says_which_make_target_started_it(tmp_path, launcher, want):
+    env = {"GHOST_LAUNCHER": launcher}
+    assert build.detect(prefix=tmp_path, source=tmp_path, environ=env).launcher == want
+
+
+def test_a_recorded_build_has_no_launcher(tmp_path):
+    (tmp_path / build.BUILD_FILE).write_text(json.dumps({"kind": "deploy", "commit": SHA}))
+    env = {"GHOST_LAUNCHER": "make-dev"}
+    assert build.detect(prefix=tmp_path, source=tmp_path, environ=env).launcher is None
+
+
 def test_outside_a_checkout_it_is_dev_without_a_commit(tmp_path):
     assert build.detect(prefix=tmp_path, source=tmp_path) == Build(kind="dev")
 

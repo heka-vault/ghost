@@ -117,7 +117,11 @@ const CHECKOUT_COMMIT = DESKTOP_BUILD.commit ?? MOCK_COMMIT;
 function mockBuild(kind: MockOptions["build"]): Pick<Status, "version" | "build"> {
   switch (kind) {
     case "dirty":
-      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: true } };
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: true, launcher: "make-dev" } };
+    case "start":
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false, launcher: "make-start" } };
+    case "checkout":
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false, launcher: null } };
     case "deploy":
       return { version: DESKTOP_VERSION, build: { kind: "deploy", commit: MOCK_COMMIT, dirty: false } };
     case "release":
@@ -125,7 +129,7 @@ function mockBuild(kind: MockOptions["build"]): Pick<Status, "version" | "build"
     case "behind":
       return { version: "2026.9.4", build: { kind: "deploy", commit: "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432", dirty: false } };
     default:
-      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false } };
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false, launcher: "make-dev" } };
   }
 }
 
@@ -144,11 +148,12 @@ export interface MockOptions {
   codeTtlSecs?: number;
   /**
    * What the daemon says it is (?build=…, docs/releasing.md): `dev` (default) a checkout at
-   * this window's version, `dirty` the same with uncommitted changes, `deploy` a make deploy
-   * runtime, `release` the .deb, `behind` a deploy of last month's version, so the window and
-   * Ghost differ.
+   * this window's version that make dev started, `dirty` the same with uncommitted changes,
+   * `start` one make start started, `checkout` one started some other way (no launcher),
+   * `deploy` a make deploy runtime, `release` the .deb, `behind` a deploy of last month's
+   * version, so the window and Ghost differ.
    */
-  build?: "dev" | "dirty" | "deploy" | "release" | "behind" | null;
+  build?: "dev" | "dirty" | "start" | "checkout" | "deploy" | "release" | "behind" | null;
   /**
    * Ghost's vault (?vault=…, ADR 0036): `locked`, the keyring is locked (Unlock opens it after a
    * moment); `import`, plaintext files wait to be imported in any scenario; `broken`, the key in the

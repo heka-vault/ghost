@@ -467,7 +467,7 @@
         "type": "object"
       },
       "Build": {
-        "description": "Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a\ncheckout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The\ncommit is the full hash when known; ``dirty`` is a checkout that had uncommitted\nchanges when the daemon started.",
+        "description": "Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a\ncheckout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The\ncommit is the full hash when known; ``dirty`` is a checkout that had uncommitted\nchanges when the daemon started. ``launcher`` is how a checkout's daemon was started,\nwhen the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and\n``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``\n(``make restart``); anything else (a unit running the checkout, ``uv run``) is None.",
         "properties": {
           "commit": {
             "anyOf": [
@@ -495,6 +495,21 @@
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "launcher": {
+            "anyOf": [
+              {
+                "enum": [
+                  "make-dev",
+                  "make-start"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launcher"
           }
         },
         "title": "Build",

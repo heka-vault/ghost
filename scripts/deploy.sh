@@ -28,6 +28,8 @@ UV=${UV:-uv}
 SYSTEMCTL=${GHOST_SYSTEMCTL:-systemctl}  # the tests put a fake here
 JOURNALCTL=${GHOST_JOURNALCTL:-journalctl}
 LEGACY_ENV="$HOME/.config/ghost/env"
+# heka-vault's config: a pre-vault build's renderer writes ~/.config/ghost/env from it.
+HEKA_ENV="$HOME/.config/heka-vault/ghost.env"
 
 say() { echo "deploy: $*" >&2; }
 
@@ -53,10 +55,16 @@ form_of() {
 }
 
 # A pre-vault build reads its passwords from ~/.config/ghost/env, which the vault's import
-# deletes. Refuse instead of starting a Ghost with no passwords.
+# deletes. Its own renderer writes that file again from heka-vault when heka-vault's config is
+# still here; without either, refuse instead of starting a Ghost with no passwords.
 can_run() {
   local dir=$1
   if [[ "$(form_of "$dir")" == render && ! -e "$LEGACY_ENV" ]]; then
+    if [[ -r "$HEKA_ENV" ]]; then
+      say "build $(basename "$dir" | cut -c1-12) is from before Ghost's vault: its renderer writes"
+      say "~/.config/ghost/env from heka-vault again (${HEKA_ENV/#$HOME/\~}) at its start."
+      return 0
+    fi
     say "build $(basename "$dir" | cut -c1-12) is from before Ghost's vault: it reads its passwords from"
     say "~/.config/ghost/env, which the import into the vault deleted. It would start with none."
     say "Stay on this build, or put the passwords back in ~/.config/ghost/env by hand first."
@@ -84,11 +92,12 @@ EOF
     ;;
     render) cat <<EOF
 # A build from before Ghost's vault (ADR 0036): its own renderer writes ~/.config/ghost/env,
-# and the daemon reads its passwords from there.
+# and the daemon reads its passwords from there. Optional (-) so the renderer can run when
+# the import deleted it; systemd reads it again for ExecStart.
 ExecStartPre=
 ExecStartPre=$cur/src/infra/systemd/ghost-render-env.sh
 EnvironmentFile=
-EnvironmentFile=%h/.config/ghost/env
+EnvironmentFile=-%h/.config/ghost/env
 EOF
     ;;
     *) say "unknown drop-in form '$form'"; return 1 ;;
@@ -115,7 +124,7 @@ write_dropin() {
 # infra/systemd/ghost-render-env.sh, which is gone, and needs ~/.config/ghost/env, which the
 # import deleted: it would fail to start. Refuse, and say how to install the current unit.
 unit_ok() {
-  local frag line path bad=()
+  local frag line path prefix bad=()
   frag=$("$SYSTEMCTL" --user show "$UNIT" -p FragmentPath --value 2>/dev/null || true)
   if [[ -z "$frag" || ! -r "$frag" ]]; then
     say "no $UNIT unit file to go back to; \`make service-install\` installs one"
@@ -125,7 +134,9 @@ unit_ok() {
     case "$line" in
       ExecStartPre=?*)
         path=${line#ExecStartPre=}
-        while [[ "$path" == [-@:+!]* ]]; do path=${path:1}; done  # systemd's prefixes
+        prefix=${path%%[^-@:+!]*}  # systemd's prefixes
+        [[ "$prefix" == *-* ]] && continue  # its failure is ignored: the unit still starts
+        path=${path#"$prefix"}
         path=${path%% *}
         path=${path//%h/$HOME}
         [[ -x "$path" ]] || bad+=("runs $path, which isn't there")
