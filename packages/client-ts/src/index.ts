@@ -18,6 +18,7 @@ import type { components, paths } from "./schema";
 
 export type Schemas = components["schemas"];
 export type Status = Schemas["Status"];
+export type Build = Schemas["Build"];
 export type Phase = Schemas["Phase"];
 export type Turn = Schemas["Turn"];
 export type PendingProposal = Schemas["PendingProposal"];

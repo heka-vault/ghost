@@ -36,12 +36,24 @@ class PendingProposal(BaseModel):
     expires_in_secs: float
 
 
+class Build(BaseModel):
+    """Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a
+    checkout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The
+    commit is the full hash when known; ``dirty`` is a checkout that had uncommitted
+    changes when the daemon started."""
+
+    kind: Literal["dev", "deploy", "release"] = "dev"
+    commit: Annotated[str, Field(pattern=r"^[0-9a-f]{7,40}$")] | None = None
+    dirty: bool = False
+
+
 class Status(BaseModel):
     phase: Phase
     session_id: str | None
     models_ready: bool
     uptime_secs: float
-    version: str
+    version: str  # YYYY.M.N, the same in every copy (scripts/version.py)
+    build: Build = Build()
     api_version: str = API_VERSION
     wake_mode: str
     apps: list[str] = []  # the apps connected now (ADR 0034)

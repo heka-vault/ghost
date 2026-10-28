@@ -1045,6 +1045,28 @@ export interface components {
             total: number;
         };
         /**
+         * Build
+         * @description Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a
+         *     checkout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The
+         *     commit is the full hash when known; ``dirty`` is a checkout that had uncommitted
+         *     changes when the daemon started.
+         */
+        Build: {
+            /** Commit */
+            commit?: string | null;
+            /**
+             * Dirty
+             * @default false
+             */
+            dirty: boolean;
+            /**
+             * Kind
+             * @default dev
+             * @enum {string}
+             */
+            kind: "dev" | "deploy" | "release";
+        };
+        /**
          * CatalogEntryView
          * @description An app in the catalog. Its text is the registry's: shown to the operator, never
          *     to the model.
@@ -1883,6 +1905,13 @@ export interface components {
              * @default []
              */
             apps: string[];
+            /**
+             * @default {
+             *       "dirty": false,
+             *       "kind": "dev"
+             *     }
+             */
+            build: components["schemas"]["Build"];
             /** Conversation */
             conversation?: string | null;
             /**
@@ -2152,6 +2181,7 @@ export type SchemaAppView = components['schemas']['AppView'];
 export type SchemaAuditEntry = components['schemas']['AuditEntry'];
 export type SchemaAuditEventView = components['schemas']['AuditEventView'];
 export type SchemaAuditPage = components['schemas']['AuditPage'];
+export type SchemaBuild = components['schemas']['Build'];
 export type SchemaCatalogEntryView = components['schemas']['CatalogEntryView'];
 export type SchemaCatalogOption = components['schemas']['CatalogOption'];
 export type SchemaCatalogPage = components['schemas']['CatalogPage'];

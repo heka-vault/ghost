@@ -230,6 +230,7 @@ def status_snapshot(deps: Deps) -> Status:
         models_ready=st.models_ready,
         uptime_secs=st.uptime_secs,
         version=st.version,
+        build=st.build,
         wake_mode=st.wake_mode,
         apps=sorted(n for n in deps.apps.apps if deps.apps.is_up(n))
         if deps.apps is not None

@@ -2,7 +2,7 @@
  * Plain-word helpers shared by the desktop and phone apps: no React, no DOM, so React Native
  * can import them too.
  */
-import type { Status } from "@ghost/client-ts";
+import type { Build, Status } from "@ghost/client-ts";
 import { phaseLabel } from "./labels";
 
 /** A badge or dot tone. Semantic colors only mean what they say. */
@@ -10,6 +10,22 @@ export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
 
 /** Ghost's phase as the apps show it: the daemon's phases plus offline and starting. */
 export type GhostPhase = "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking" | "offline";
+
+/**
+ * How the daemon was built, after the version's middle dot: "dev a1b2c3d", "deploy a1b2c3d",
+ * or "release". Uncommitted changes aren't in it; say them where there is room.
+ */
+export function buildText(build: Build): string {
+  return build.commit && build.kind !== "release" ? `${build.kind} ${build.commit.slice(0, 7)}` : build.kind;
+}
+
+/**
+ * Ghost's version line, as the sidebar says it: "Ghost 2026.10.0 · dev a1b2c3d". A release
+ * names no commit; its version is the tag (docs/releasing.md).
+ */
+export function versionLine(version: string, build: Build): string {
+  return build.kind === "release" ? `Ghost ${version}` : `Ghost ${version} · ${buildText(build)}`;
+}
 
 /** The phase to show: offline when the daemon is unreachable, starting until models load. */
 export function phaseOf(status: Status | null, connected: boolean): GhostPhase {

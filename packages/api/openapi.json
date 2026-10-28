@@ -466,6 +466,40 @@
         "title": "AuditPage",
         "type": "object"
       },
+      "Build": {
+        "description": "Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a\ncheckout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The\ncommit is the full hash when known; ``dirty`` is a checkout that had uncommitted\nchanges when the daemon started.",
+        "properties": {
+          "commit": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{7,40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "dirty": {
+            "default": false,
+            "title": "Dirty",
+            "type": "boolean"
+          },
+          "kind": {
+            "default": "dev",
+            "enum": [
+              "dev",
+              "deploy",
+              "release"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "Build",
+        "type": "object"
+      },
       "CatalogEntryView": {
         "description": "An app in the catalog. Its text is the registry's: shown to the operator, never\nto the model.",
         "properties": {
@@ -2590,6 +2624,13 @@
             },
             "title": "Apps",
             "type": "array"
+          },
+          "build": {
+            "$ref": "#/components/schemas/Build",
+            "default": {
+              "dirty": false,
+              "kind": "dev"
+            }
           },
           "conversation": {
             "anyOf": [

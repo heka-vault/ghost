@@ -19,6 +19,23 @@ ONLY=${1:-all}   # all | daemon | desktop | meta
 mkdir -p "$OUT"
 echo "== heka-ghost $VERSION ($ARCH)"
 
+# What the daemon reports as its build (ghostd.build, docs/releasing.md): a release of
+# this commit, in the venv's root, where ghostd looks (sys.prefix). In the build image the
+# checkout belongs to the host user, so git is told it is safe; CI also passes GITHUB_SHA.
+record_build() {
+  local commit dirty=false
+  commit=$(git -c safe.directory="$ROOT" -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "${GITHUB_SHA:-}")
+  if [[ -n "$(git -c safe.directory="$ROOT" -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    dirty=true
+    echo "   the tree has uncommitted changes; the package says so" >&2
+  fi
+  if [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+    printf '{"kind": "release", "commit": "%s", "dirty": %s}\n' "$commit" "$dirty" > "$1"
+  else
+    printf '{"kind": "release", "dirty": %s}\n' "$dirty" > "$1"
+  fi
+}
+
 build_daemon() {
   echo "== heka-ghostd: bundling Python $PY_VERSION and the venv under /opt/ghost"
   local root="$STAGE/heka-ghostd"
@@ -73,6 +90,7 @@ build_daemon() {
     echo "staging symlinks still point into $root" >&2; exit 1
   fi
   find "$root/opt/ghost" -name "__pycache__" -type d -prune -exec rm -rf {} +
+  record_build "$root/opt/ghost/venv/ghost-build.json"
 
   install -m 755 "$ROOT/packaging/debian/heka-ghostd/ghostd" "$root/usr/bin/ghostd"
   install -m 644 "$ROOT/packaging/debian/heka-ghostd/ghostd.service" "$root/usr/lib/systemd/user/ghostd.service"

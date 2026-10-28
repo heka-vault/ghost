@@ -165,6 +165,21 @@ def test_setup_endpoints(world, monkeypatch):
     assert m["ready"] is False and m["kokoro_present"] is False and m["stt_model"] == "parakeet"
 
 
+def test_status_says_the_version_and_the_build(world):
+    from ghost_api import Build
+
+    client, state, *_ = world
+    assert client.get("/status").json()["build"] == {"kind": "dev", "commit": None, "dirty": False}
+    state.build = Build(kind="deploy", commit="0123456789abcdef0123456789abcdef01234567")
+    s = client.get("/status").json()
+    assert s["version"] == "test"
+    assert s["build"] == {
+        "kind": "deploy",
+        "commit": "0123456789abcdef0123456789abcdef01234567",
+        "dirty": False,
+    }
+
+
 def test_events_websocket_streams_status_and_turns(world):
     client, state, control, *_ = world
     state.set_phase(Phase.PASSIVE)

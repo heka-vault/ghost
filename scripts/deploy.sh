@@ -78,6 +78,12 @@ prune() {
     | tail -n +$((KEEP - 1)) | while read -r old; do rm -rf "${RUNTIME:?}/$old"; done || true
 }
 
+# What the daemon reports as its build (ghostd.build, docs/releasing.md): a deploy of this
+# commit. In the venv's root, where ghostd looks (sys.prefix).
+record_build() {
+  printf '{"kind": "deploy", "commit": "%s"}\n' "$2" > "$1/venv/ghost-build.json"
+}
+
 build() {
   local sha dir
   sha=$(git -C "$ROOT" rev-parse HEAD)
@@ -87,6 +93,7 @@ build() {
   fi
   if [[ -r "$dir/commit" ]]; then
     say "build $(cut -c1-12 <<<"$sha") exists; reusing it"
+    [[ -e "$dir/venv/ghost-build.json" ]] || record_build "$dir" "$sha"
   else
     say "building $(git -C "$ROOT" log -1 --format='%h %s' "$sha")"
     # Built in place: a venv records its own path. `commit` is written last, so a build
@@ -101,6 +108,7 @@ build() {
     UV_PROJECT_ENVIRONMENT="$dir/venv" \
       "$UV" sync --frozen --no-dev --no-editable --all-packages "${reinstall[@]}" \
         --project "$dir/src" --quiet >&2
+    record_build "$dir" "$sha"
     echo "$sha" > "$dir/commit"
   fi
   echo "$sha"
@@ -118,7 +126,7 @@ check() {
     export GHOST_INFRA_DIR="$dir/src/infra"
     "$dir/venv/bin/ghostd" check
   ) > "$dir/check.log" 2>&1 || { say "ghostd check failed; the service was not touched:"; tail -20 "$dir/check.log"; return 1; }
-  grep -E '^(config ok|apps:|  app |skills:|folder:)' "$dir/check.log" | sed 's/^/  /'
+  grep -E '^(version:|config ok|apps:|  app |skills:|folder:)' "$dir/check.log" | sed 's/^/  /'
   grep -iE 'no longer read|not read' "$dir/check.log" | sed 's/^/  /' || true
 }
 

@@ -75,6 +75,7 @@ from ghost_voice.wakeword import (
 )
 from loguru import logger
 
+from ghostd import build as ghost_build
 from ghostd.audio import Ducker, chime, restore_from_state
 from ghostd.config import GhostdSettings, runtime_dir
 from ghostd.deciders import model_decider
@@ -100,7 +101,6 @@ DEFAULT_WAKE_FUZZY = GhostdSettings.model_fields["wake_fuzzy"].default
 PHONE_STATE = "phone.json"
 WAITING_REFRESH_SECS = 15  # how often Ghost's own items are re-read and the routes tick
 AT_DESK_SECS = 15 * 60  # a desk session this recent means the operator is at the desk
-VERSION = "0.1.0"
 PHONE_PING_GRACE_SECS = 15  # no keepalive from the phone for this long ends its session;
 # long enough for a cellular blip or a tunnel re-handshake away from home (ADR 0020)
 PHONE_WRITE_TIMEOUT_SECS = 0.5  # a write to a gone phone fails after this; the desk is free sooner
@@ -221,7 +221,9 @@ class Daemon:
         self.voice = voice
         self.rt = runtime_dir()
         self._stop = asyncio.Event()
-        self.state = DaemonState(version=VERSION, wake_mode=cfg.wake_mode)
+        self.state = DaemonState(
+            version=ghost_build.version(), wake_mode=cfg.wake_mode, build=ghost_build.detect()
+        )
         self.session: GhostSession | None = None
         self.gate: WriteGate | None = None
         self.waiting: WaitingList | None = None  # ADR 0029; set in run()
@@ -684,6 +686,7 @@ class Daemon:
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._stop.set)
+        logger.info(ghost_build.describe(self.state.version, self.state.build))
 
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         store = Store(self.cfg.db_path)
@@ -1566,9 +1569,12 @@ def cli(argv: list[str] | None = None) -> None:
         import sounddevice as sd
 
         print(sd.query_devices())
+    elif cmd in {"version", "--version"}:
+        print(ghost_build.describe(ghost_build.version(), ghost_build.detect()))
     elif cmd == "check":
         cfg = GhostdSettings()
         problems = []
+        print(f"version: {ghost_build.describe(ghost_build.version(), ghost_build.detect())}")
         try:
             voice = VoiceSettings()  # type: ignore[call-arg]
         except Exception as e:  # noqa: BLE001 - pydantic-settings reports what is wrong
@@ -1639,7 +1645,7 @@ def cli(argv: list[str] | None = None) -> None:
     else:
         print(
             "usage: ghostd [run|wake|say <text>|sleep|status|latency|perf|restore-volumes|"
-            "devices|check|push <hook> <event> [json]]"
+            "devices|check|version|push <hook> <event> [json]]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)

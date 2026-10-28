@@ -17,7 +17,7 @@ jobs:
       - name: build image
         run: docker build -t heka-ghost-build -f packaging/Dockerfile.build .
       - name: build packages
-        run: docker run --rm -v "$PWD":/src -w /src heka-ghost-build packaging/build-debs.sh
+        run: docker run --rm -v "$PWD":/src -w /src -e GITHUB_SHA heka-ghost-build packaging/build-debs.sh
       - name: install test in a clean Ubuntu 26.04
         run: |
           docker run --rm -v "$PWD/dist/deb":/deb:ro ubuntu:26.04 bash -ec '

@@ -36,6 +36,7 @@ import type {
   WatchingView,
 } from "@ghost/client-ts";
 
+import { DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
@@ -97,6 +98,24 @@ function doneSummary(summary: string): string {
 const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 /** Mock-only knobs from the URL (the phone, ADR 0016; the catalog, ADR 0034): see mock/index.ts. */
+const MOCK_COMMIT = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+
+/** The status's version and build for ?build= (MockOptions.build). */
+function mockBuild(kind: MockOptions["build"]): Pick<Status, "version" | "build"> {
+  switch (kind) {
+    case "dirty":
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: MOCK_COMMIT, dirty: true } };
+    case "deploy":
+      return { version: DESKTOP_VERSION, build: { kind: "deploy", commit: MOCK_COMMIT, dirty: false } };
+    case "release":
+      return { version: DESKTOP_VERSION, build: { kind: "release", commit: MOCK_COMMIT, dirty: false } };
+    case "behind":
+      return { version: "2026.9.4", build: { kind: "deploy", commit: "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432", dirty: false } };
+    default:
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: MOCK_COMMIT, dirty: false } };
+  }
+}
+
 export interface MockOptions {
   /**
    * The catalog (?catalog=…): `slow`, the first copy takes 4 seconds (as on a first run);
@@ -108,6 +127,13 @@ export interface MockOptions {
   pairsAfterMs?: number;
   /** How long a pairing code lasts, in seconds (?phone=expires makes it short). The real one: 120. */
   codeTtlSecs?: number;
+  /**
+   * What the daemon says it is (?build=…, docs/releasing.md): `dev` (default) a checkout at
+   * this window's version, `dirty` the same with uncommitted changes, `deploy` a make deploy
+   * runtime, `release` the .deb, `behind` a deploy of last month's version, so the window and
+   * Ghost differ.
+   */
+  build?: "dev" | "dirty" | "deploy" | "release" | "behind" | null;
 }
 
 export class MockDaemon {
@@ -170,7 +196,7 @@ export class MockDaemon {
       session_id: f.session.sessionId,
       models_ready: scenario.modelsReady,
       uptime_secs: 0,
-      version: "0.1.0",
+      ...mockBuild(phoneOpts.build ?? null),
       api_version: "1",
       wake_mode: "transcript",
       apps: f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name),
