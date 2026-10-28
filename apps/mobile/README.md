@@ -76,8 +76,13 @@ operator's own WireGuard network (ADR 0020): the desk and the phone are peers of
 desk also listens on its tunnel address (`GHOST_PHONE_LISTEN=<LAN IP>:8765,<tunnel IP>:8765`),
 and the phone keeps both addresses and uses the first that answers. On the phone the tunnel
 is the WireGuard app's, set up once, carrying only this app, left on. In the desktop app
-choose Pair a phone, then on the phone tap Enter the address and type the address and the
-six-digit code. Scanning a QR code isn't built yet; the app doesn't ask for the camera.
+choose Pair a phone (Settings, then Phone), and point the phone at the QR code it shows: the
+app asks for the camera the first time, and uses it only on that screen. The code carries every
+address and the six-digit code (`ghost://pair?...`, docs/phone-protocol.md), so the phone knows
+the tunnel address from the start. Enter the address is the fallback: type the address and the
+code. The phone's own camera app can open the same link; then the app shows the address and
+pairs only after a tap. The desk pairs with one phone; pairing this one replaces any other.
+Settings shows the address the phone is using now.
 
 Only one session runs at a time. Start is refused while Ghost is in a session at the desk,
 and while the phone is in one the desk's wake phrase does nothing. In a phone session the
