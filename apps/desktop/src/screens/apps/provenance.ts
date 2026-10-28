@@ -67,7 +67,7 @@ export interface Place {
   /** “mcp.posthog.com”, “npm posthog-mcp”. */
   where: string;
   local: boolean;
-  /** Said after the place when the host isn’t the product maker’s: “not PostHog’s servers”. */
+  /** Said after the place when the host isn’t the product maker’s: “not PostHog’s”. */
   caution: string | null;
   /** The longer sentence for the detail. */
   sentence: string;
@@ -79,13 +79,13 @@ export function placeOf(o: CatalogOption, e: CatalogEntryView): Place {
     const product = e.product;
     const publisher = o.host_owner === "publisher" ? (e.publisher?.name ?? null) : null;
     let sentence: string;
-    if (o.host_owner === "maker") sentence = `Runs on ${host}, ${product ?? "the maker"}’s own server.`;
+    if (o.host_owner === "maker") sentence = `Runs on ${host}, ${product ?? "the maker"}’s own.`;
     else if (product)
       sentence = publisher
-        ? `Runs on ${host}, ${publisher}’s server, not ${product}’s. What you ask of ${product} through this app passes through ${publisher}.`
-        : `Runs on ${host}, not ${product}’s servers. What you ask of ${product} through this app passes through whoever runs it.`;
-    else sentence = publisher ? `Runs on ${host}, the publisher’s own server.` : `Runs on ${host}.`;
-    return { where: host, local: false, caution: o.host_owner !== "maker" && product ? `not ${product}’s servers` : null, sentence };
+        ? `Runs on ${host}, ${publisher}’s, not ${product}’s. What you ask of ${product} through this app passes through ${publisher}.`
+        : `Runs on ${host}, not ${product}’s. What you ask of ${product} through this app passes through whoever runs it.`;
+    else sentence = publisher ? `Runs on ${host}, the publisher’s own.` : `Runs on ${host}.`;
+    return { where: host, local: false, caution: o.host_owner !== "maker" && product ? `not ${product}’s` : null, sentence };
   }
   const reg = o.registry ? REGISTRY[o.registry] : null;
   const where = reg && o.package ? `${o.registry === "oci" ? "container" : reg} ${o.package}` : "this computer";

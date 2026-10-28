@@ -444,7 +444,7 @@ function CatalogGroup({ entry: e, onPick }: { entry: CatalogEntryView; onPick: (
 function CatalogCard({ entry: e, onPick }: { entry: CatalogEntryView; onPick: () => void }) {
   const kinds = [...new Set(e.options.map((o) => o.kind))];
   // The first place it runs; a remote's ways in before its host, then "or runs here" when it has a package too.
-  const remoteHow = kinds.filter((k) => k !== "local").map((k) => ({ sign_in: "Sign in", key: "API key" })[k as "sign_in" | "key"]);
+  const remoteHow = kinds.filter((k) => k !== "local").map((k) => ({ sign_in: "Sign in", key: "Password" })[k as "sign_in" | "key"]);
   const runsHere = kinds.includes("local");
   const place = placesOf(e)[0];
   const pub = e.publisher ? publisherParts(e.publisher) : null;
