@@ -4,6 +4,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Button, EmptyState, LiveContext, type LiveState, PageChromeContext, Progress, Skeleton, Spinner, ToastProvider } from "../ui";
 import { useDesign } from "../design/context";
 import { useConnection } from "./connection";
+import { DaemonNotices } from "./daemon";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Offline } from "./Offline";
 import { hrefFor, navigate, usePath } from "./router";
@@ -122,6 +123,7 @@ export function App() {
   return (
     <LiveContext.Provider value={live}>
     <ToastProvider>
+      <DaemonNotices />
       {/* A button, not href="#main": under hash routing that hash is a route. */}
       <button type="button" className="shell-skip" onClick={skipToContent}>
         Skip to content

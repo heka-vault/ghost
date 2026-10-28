@@ -64,9 +64,42 @@ export async function makeTransport(): Promise<Transport> {
   };
 }
 
-/** Enable and start the per-user ghostd service (Tauri only). Resolves to systemctl's output. */
+/**
+ * What the app's own supervisor last said about the daemon it runs (ADR 0038): adopted
+ * one already on the socket, waiting for make dev's, started its own, restarting it after
+ * an exit, or stopping on Quit. `restarts` counts the starts after the first.
+ */
+export type DaemonEvent =
+  | { state: "adopted" }
+  | { state: "waiting" }
+  | { state: "started"; pid: number; restarts: number }
+  | { state: "restarting"; in_secs: number; restarts: number; exit: string }
+  | { state: "failed"; error: string; in_secs: number }
+  | { state: "stopping" }
+  | { state: "stopped" };
+
+/** The supervisor's last word, for a window that opened after it; null outside Tauri or before it spoke. */
+export async function daemonState(): Promise<DaemonEvent | null> {
+  if (!inTauri) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<DaemonEvent | null>("daemon_state");
+}
+
+/** Every change of the daemon's state from now on; returns the unsubscribe. No-op outside Tauri. */
+export async function onDaemon(cb: (e: DaemonEvent) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<DaemonEvent>("ghost://daemon", (e) => cb(e.payload));
+}
+
+/**
+ * Start Ghost now (Tauri only): the app runs the daemon itself and starts it again on its
+ * own after an exit; this skips the rest of that delay. Under make dev the daemon is the
+ * checkout's to start, and this says so.
+ */
 export async function startDaemon(): Promise<string> {
   if (!inTauri) throw new Error("Run `systemctl --user enable --now ghostd` in a terminal.");
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<string>("start_daemon");
+  await invoke("daemon_start");
+  return "Starting Ghost";
 }
