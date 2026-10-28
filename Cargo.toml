@@ -53,6 +53,9 @@ rustix = { version = "1", features = ["fs"] }
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
 schemars = "1"
 rand = "0.9"
+# The phone listener's networks (ADR 0020): which interface holds an address, from getifaddrs.
+nix = { version = "0.31", features = ["net", "hostname"] }
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location
