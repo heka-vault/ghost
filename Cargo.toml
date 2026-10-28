@@ -36,6 +36,7 @@ futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 wiremock = "0.6"
 unicode-normalization = "0.1"
+yaml-rust2 = { version = "0.13", default-features = false }
 tempfile = "3"
 
 [profile.release]
