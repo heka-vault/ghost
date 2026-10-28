@@ -1613,6 +1613,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghost-llm"
+version = "2026.10.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "ghost-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "wiremock",
+ "zeroize",
+]
+
+[[package]]
 name = "ghostd"
 version = "2026.10.0"
 dependencies = [

@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl-6","object":"chat.completion.chunk","created":1761600000,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"Fifty-four open issues. The first"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-6","object":"chat.completion.chunk","created":1761600000,"model":"test-model","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"length"}]}
+
+data: [DONE]
+

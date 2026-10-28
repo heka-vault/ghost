@@ -1,0 +1,25 @@
+[package]
+name = "ghost-llm"
+description = "Ghost's model client: one connection over the Messages API or Chat Completions, the context and the tools both ways, every tool call of a reply, and the output cap (ADR 0037, ADR 0018)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ghost-core.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+futures.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+wiremock.workspace = true
