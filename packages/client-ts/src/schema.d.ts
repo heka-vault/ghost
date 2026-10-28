@@ -349,6 +349,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Model
+         * @description The model connection now, with every provider the page offers.
+         */
+        get: operations["get_model_model_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Model List
+         * @description The models a provider offers, for the saved connection or the one being edited.
+         *     A provider that can't be read says why; that is not an HTTP error.
+         */
+        post: operations["model_list_model_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Model Sign In
+         * @description Sign in to OpenRouter (OAuth with PKCE). The desktop opens the address; the
+         *     browser comes back to Ghost's loopback, and the key OpenRouter gives is kept as
+         *     the OPENROUTER_API_KEY password in Ghost's vault (ADR 0036). Nothing to copy.
+         */
+        post: operations["model_sign_in_model_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Model Test
+         * @description Send one tiny request through the connection being edited and time its first
+         *     token, the way ``make perf-llm`` does.
+         */
+        post: operations["model_test_model_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/outputs": {
         parameters: {
             query?: never;
@@ -1678,6 +1762,143 @@ export interface components {
              */
             type: "log";
         };
+        /**
+         * ModelConnectionView
+         * @description The model connection now. No key is in it: only whether its Password is set.
+         */
+        ModelConnectionView: {
+            /** Base Url */
+            base_url: string;
+            /** Base Url Override */
+            base_url_override?: string | null;
+            /**
+             * Headers
+             * @default {}
+             */
+            headers: {
+                [key: string]: string;
+            };
+            /** Legacy */
+            legacy?: string | null;
+            /** Model */
+            model: string;
+            /** Password */
+            password?: string | null;
+            /** Password Set */
+            password_set: boolean;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "anthropic" | "openai";
+            /** Provider */
+            provider: string;
+            /**
+             * Providers
+             * @default []
+             */
+            providers: components["schemas"]["ModelProviderView"][];
+            /** Ready */
+            ready: boolean;
+            /** Sign In Error */
+            sign_in_error?: string | null;
+            /**
+             * Sign In Pending
+             * @default false
+             */
+            sign_in_pending: boolean;
+            /** Timeout Secs */
+            timeout_secs?: number | null;
+            /**
+             * Values
+             * @default {}
+             */
+            values: {
+                [key: string]: string;
+            };
+            /** Wire Model */
+            wire_model: string;
+        };
+        /**
+         * ModelDraft
+         * @description A connection being edited: GHOST_LLM_* values over the saved ones (None removes
+         *     one), and a key typed but not saved yet, used for this one request and dropped.
+         */
+        ModelDraft: {
+            /** Password Value */
+            password_value?: string | null;
+            /**
+             * Values
+             * @default {}
+             */
+            values: {
+                [key: string]: string | null;
+            };
+        };
+        /** ModelListView */
+        ModelListView: {
+            /** Default */
+            default?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Models */
+            models: components["schemas"]["ModelOptionView"][];
+        };
+        /** ModelOptionView */
+        ModelOptionView: {
+            /** Id */
+            id: string;
+            /** Name */
+            name?: string | null;
+        };
+        /**
+         * ModelProviderView
+         * @description One way to reach a model, as the Model page offers it.
+         */
+        ModelProviderView: {
+            /** Base Url */
+            base_url: string;
+            /** Blurb */
+            blurb: string;
+            /** Default Model */
+            default_model?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Local
+             * @default false
+             */
+            local: boolean;
+            /** Password */
+            password?: string | null;
+            /**
+             * Password Optional
+             * @default false
+             */
+            password_optional: boolean;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "anthropic" | "openai";
+            /**
+             * Sign In
+             * @default false
+             */
+            sign_in: boolean;
+            /** Title */
+            title: string;
+        };
+        /** ModelSignInResult */
+        ModelSignInResult: {
+            /** Url */
+            url: string;
+        };
         /** ModelsView */
         ModelsView: {
             /** Cache Dir */
@@ -1688,6 +1909,28 @@ export interface components {
             ready: boolean;
             /** Stt Model */
             stt_model: string;
+        };
+        /**
+         * ModelTestResult
+         * @description One tiny request, timed like ``make perf-llm``: request to first token.
+         */
+        ModelTestResult: {
+            /** Answered By */
+            answered_by?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Model */
+            model: string;
+            /** Ok */
+            ok: boolean;
+            /** Reply */
+            reply?: string | null;
+            /** Total Ms */
+            total_ms?: number | null;
+            /** Ttft Ms */
+            ttft_ms?: number | null;
+            /** Where */
+            where: string;
         };
         /** OperationInfo */
         OperationInfo: {
@@ -2711,7 +2954,14 @@ export type SchemaHttpValidationError = components['schemas']['HTTPValidationErr
 export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
+export type SchemaModelConnectionView = components['schemas']['ModelConnectionView'];
+export type SchemaModelDraft = components['schemas']['ModelDraft'];
+export type SchemaModelListView = components['schemas']['ModelListView'];
+export type SchemaModelOptionView = components['schemas']['ModelOptionView'];
+export type SchemaModelProviderView = components['schemas']['ModelProviderView'];
+export type SchemaModelSignInResult = components['schemas']['ModelSignInResult'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
+export type SchemaModelTestResult = components['schemas']['ModelTestResult'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
@@ -3471,6 +3721,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"];
+                };
+            };
+        };
+    };
+    get_model_model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelConnectionView"];
+                };
+            };
+        };
+    };
+    model_list_model_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelListView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    model_sign_in_model_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSignInResult"];
+                };
+            };
+        };
+    };
+    model_test_model_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelTestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

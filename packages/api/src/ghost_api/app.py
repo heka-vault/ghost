@@ -135,8 +135,11 @@ class Deps:
         hooks: Any = None,  # ghost_core.hooks.HookIntake
         hooks_listening: Sequence[str] = (),  # the webhook listener's addresses, when on
         passwords: Any = None,  # ghost_core.passwords.Passwords (ADR 0036)
+        # Test connection (ADR 0037): async (env, prompt, max_tokens) -> ghost_voice.llm.Probe
+        model_probe: Any = None,
     ) -> None:
         self.passwords = passwords
+        self.model_probe = model_probe
         self.waiting = waiting
         self.watches = watches
         self.hooks = hooks
@@ -323,11 +326,13 @@ def create_app(deps: Deps) -> FastAPI:
 
         add_conversation_routes(app, deps)
     from ghost_api.apps import add_app_routes
+    from ghost_api.model import add_model_routes
     from ghost_api.passwords import add_password_routes
     from ghost_api.skill_catalog import add_skill_catalog_routes, skill_view
 
     add_app_routes(app, deps)
     add_password_routes(app, deps)
+    add_model_routes(app, deps)
     add_skill_catalog_routes(app, deps)
 
     # --- status + control -------------------------------------------------------
@@ -801,9 +806,10 @@ def create_app(deps: Deps) -> FastAPI:
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
         pending_values = [k for k in (update.values or {}) if k not in applied]
+        pending_secrets = [k for k in (update.secrets or {}) if k not in applied]
         return SettingsResult(
             settings=settings_view(),
-            restart_required=bool(pending_values) or bool(update.secrets),
+            restart_required=bool(pending_values) or bool(pending_secrets),
             applied=applied,
         )
 

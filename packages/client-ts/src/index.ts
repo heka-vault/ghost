@@ -56,6 +56,13 @@ export type PasswordInfo = Schemas["PasswordInfo"];
 export type PasswordResult = Schemas["PasswordResult"];
 export type PasswordImportResult = Schemas["PasswordImportResult"];
 export type VaultView = Schemas["VaultView"];
+/** The model connection (ADR 0037): a provider, its model, the Password's name. */
+export type ModelConnectionView = Schemas["ModelConnectionView"];
+export type ModelProviderView = Schemas["ModelProviderView"];
+export type ModelDraft = Schemas["ModelDraft"];
+export type ModelListView = Schemas["ModelListView"];
+export type ModelTestResult = Schemas["ModelTestResult"];
+export type ModelSignInResult = Schemas["ModelSignInResult"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
 export type Ack = Schemas["Ack"];
@@ -269,6 +276,25 @@ export class GhostClient {
   }
   models() {
     return unwrap(this.api.GET("/setup/models"));
+  }
+
+  // --- the model connection (ADR 0037) -------------------------------------------------------
+  /** The connection now, every provider offered, and whether its Password is set (never the key).
+   *  It is saved like any setting, through `updateSettings`. */
+  modelConnection() {
+    return unwrap(this.api.GET("/model"));
+  }
+  /** The provider's models, for the saved connection or a draft of it. */
+  modelList(draft: ModelDraft = { values: {} }) {
+    return unwrap(this.api.POST("/model/models", { body: draft }));
+  }
+  /** One tiny request through a draft connection: time to first token, as `make perf-llm` times it. */
+  testModel(draft: ModelDraft = { values: {} }) {
+    return unwrap(this.api.POST("/model/test", { body: draft }));
+  }
+  /** Sign in to OpenRouter: open `url`; the key comes back to Ghost, never to the app. */
+  modelSignIn() {
+    return unwrap(this.api.POST("/model/sign-in"));
   }
 
   // --- agents (ADR 0014, ADR 0035) ---------------------------------------------------------

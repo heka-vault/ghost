@@ -133,14 +133,21 @@ def test_no_log_line_carries_a_password(tmp_path):
     assert "bad token [password: ANTHROPIC_AUTH_TOKEN]" in out.getvalue()
 
 
-def test_in_use_follows_the_endpoint_and_the_voice():
-    assert gp.in_use(SimpleNamespace(llm_endpoint="proxy", tts_engine="kokoro")) == [
-        "ANTHROPIC_AUTH_TOKEN"
-    ]
-    assert gp.in_use(SimpleNamespace(llm_endpoint="openrouter", tts_engine="elevenlabs")) == [
+def test_in_use_follows_the_model_connection_and_the_voice():
+    from ghost_core.connection import ModelConnection
+
+    def voice(tts: str, **env: str) -> SimpleNamespace:
+        conn = ModelConnection.from_env(env)
+        return SimpleNamespace(llm_connection=lambda: conn, tts_engine=tts)
+
+    proxy = voice("kokoro", ANTHROPIC_BASE_URL="http://x:8317", ANTHROPIC_AUTH_TOKEN="t")
+    assert gp.in_use(proxy) == ["ANTHROPIC_AUTH_TOKEN"]
+    assert gp.in_use(voice("elevenlabs", GHOST_LLM_ENDPOINT="openrouter")) == [
         "OPENROUTER_API_KEY",
         "ELEVENLABS_API_KEY",
     ]
+    assert gp.in_use(voice("kokoro", GHOST_LLM_PROVIDER="openai")) == ["OPENAI_API_KEY"]
+    assert gp.in_use(voice("kokoro", GHOST_LLM_PROVIDER="ollama")) == []  # no key at all
 
 
 def test_ghostd_passwords_without_a_daemon(tmp_path, monkeypatch, capsys):

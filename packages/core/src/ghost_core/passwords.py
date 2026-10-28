@@ -56,8 +56,13 @@ State = Literal["open", "locked", "unavailable", "broken"]
 # an app's (``${NAME}`` in apps.json) or a webhook's (``hooks.json``), or one the operator
 # added by hand.
 GHOST_USES: dict[str, str] = {
+    # The model connection's keys, one per provider (ADR 0037); GHOST_LLM_PASSWORD may
+    # name another, which the Passwords page shows as the model's too.
     "ANTHROPIC_AUTH_TOKEN": "The model connection",
-    "OPENROUTER_API_KEY": "Jev, and the model when the endpoint is OpenRouter",
+    "ANTHROPIC_API_KEY": "The model connection",
+    "OPENAI_API_KEY": "The model connection",
+    "LLM_API_KEY": "The model connection",
+    "OPENROUTER_API_KEY": "Jev, and the model when it goes through OpenRouter",
     "TYPESAFE_API_KEY": "Jev",
     "ELEVENLABS_API_KEY": "The ElevenLabs voice",
     "HF_TOKEN": "Voice model downloads",

@@ -71,11 +71,9 @@ def problems(vault: Passwords | None, cfg: Any) -> list[tuple[str, str]]:
 
 def in_use(voice: Any) -> list[str]:
     """Ghost's own passwords a session fills in, for "last used"."""
-    names = [
-        "OPENROUTER_API_KEY"
-        if getattr(voice, "llm_endpoint", "proxy") == "openrouter"
-        else "ANTHROPIC_AUTH_TOKEN"
-    ]
+    # The model connection's password (ADR 0037), whichever provider it names.
+    conn = voice.llm_connection() if hasattr(voice, "llm_connection") else None
+    names = [conn.password] if conn is not None and conn.password else []
     if getattr(voice, "tts_engine", "kokoro") == "elevenlabs":
         names.append("ELEVENLABS_API_KEY")
     return names

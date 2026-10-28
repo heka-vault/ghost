@@ -10,11 +10,13 @@ value, and none is logged. The model has no route here.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from ghost_core.connection import PASSWORD_NAMES, ModelConnection
 from ghost_core.envfile import read_env
 from ghost_core.password_import import import_passwords, sources
 from ghost_core.passwords import GHOST_USES, Passwords, VaultClosed, check_name, check_value
@@ -29,6 +31,10 @@ from ghost_api.models import (
     PasswordsView,
     VaultView,
 )
+
+MODEL_USE = "The model connection"  # GHOST_USES's word for a key only the model reads
+# Keys only one model provider uses: not listed until set, unless that provider is chosen.
+PROVIDER_ONLY = frozenset({"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"})
 
 
 def tilde(p: Path | str) -> str:
@@ -58,9 +64,29 @@ def used_by(deps: Any) -> dict[str, list[str]]:
     folder = getattr(deps, "folder", None)
     for hook in getattr(folder, "hooks", {}).values() if folder is not None else ():
         out.setdefault(hook.secret_name(), []).append(f"Webhook {hook.name}")
-    for name in listed_names(read_env(deps.settings_path)):
+    settings = read_env(deps.settings_path)
+    for name in listed_names(settings):
         out.setdefault(name, [])
+    # A model connection may name a password of its own (ADR 0037).
+    named = model_password(settings)
+    if named and named not in GHOST_USES:
+        out.setdefault(named, []).append(MODEL_USE)
     return out
+
+
+def model_password(settings: dict[str, str]) -> str:
+    """The password the model connection reads, as settings.env names it."""
+    return ModelConnection.from_env({**os.environ, **settings}).password
+
+
+def model_only(settings: dict[str, str]) -> set[str]:
+    """Passwords nothing but the model connection reads: the next session reads them by
+    name from the daemon's environment, which the vault updates, so no restart."""
+    names = {n for n in PASSWORD_NAMES if GHOST_USES.get(n, MODEL_USE) == MODEL_USE}
+    named = model_password(settings)
+    if named and named not in GHOST_USES:
+        names.add(named)
+    return names
 
 
 def referenced(deps: Any) -> set[str]:
@@ -74,7 +100,11 @@ def passwords_view(deps: Any) -> PasswordsView:
         raise HTTPException(503, "the vault is not available")
     uses = used_by(deps)
     meta = {m.name: m for m in vault.info()} if vault.is_open else {}
-    names = [*GHOST_USES, *sorted((set(uses) | set(meta)) - set(GHOST_USES))]
+    # The keys of model providers not in use are listed once they're set (ADR 0037).
+    settings = read_env(deps.settings_path)
+    idle = (PROVIDER_ONLY - {model_password(settings)}) - set(meta)
+    names = [n for n in GHOST_USES if n not in idle]
+    names += sorted((set(uses) | set(meta)) - set(GHOST_USES) - idle)
     rows = []
     for name in names:
         m = meta.get(name)
@@ -122,7 +152,8 @@ async def revive_apps_using(deps: Any, names: Iterable[str]) -> None:
 
 def save_passwords(deps: Any, values: dict[str, str | None]) -> bool:
     """Into the vault (None forgets one). True when one of them is Ghost's own, which it
-    picks up at its next start."""
+    picks up at its next start; the model connection's own keys are used from the next
+    session (ADR 0037)."""
     vault: Passwords | None = deps.passwords
     if vault is None:
         raise HTTPException(503, "the vault is not available")
@@ -141,7 +172,8 @@ def save_passwords(deps: Any, values: dict[str, str | None]) -> bool:
     except VaultClosed as e:
         raise HTTPException(423, f"{e}. Unlock it, then try again.") from None
     logger.info(f"passwords: saved {sorted(put)}, forgot {sorted(gone)}")
-    return any(k in GHOST_USES and k != "GITHUB_TOKEN" for k in values)
+    live = model_only(read_env(deps.settings_path))
+    return any(k in GHOST_USES and k != "GITHUB_TOKEN" and k not in live for k in values)
 
 
 def add_password_routes(app: FastAPI, deps: Any) -> None:

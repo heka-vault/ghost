@@ -25,7 +25,8 @@ def test_the_list_names_ghosts_own_and_never_a_value(world):
     r = client.put("/passwords/ANTHROPIC_AUTH_TOKEN", json={"value": TOKEN})
     assert r.status_code == 200 and TOKEN not in r.text
     out = r.json()
-    assert out["restart_required"] is True
+    # The model connection reads its key by name at each session (ADR 0037): no restart.
+    assert out["restart_required"] is False
     row = rows(out["passwords"])["ANTHROPIC_AUTH_TOKEN"]
     assert row["set"] is True and row["updated"] and row["last_used"] is None
     assert TOKEN not in client.get("/passwords").text

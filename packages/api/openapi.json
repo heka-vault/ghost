@@ -1627,6 +1627,409 @@
         "title": "LogEvent",
         "type": "object"
       },
+      "ModelConnectionView": {
+        "description": "The model connection now. No key is in it: only whether its Password is set.",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "base_url_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url Override"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Headers",
+            "type": "object"
+          },
+          "legacy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "password_set": {
+            "title": "Password Set",
+            "type": "boolean"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "protocol": {
+            "enum": [
+              "anthropic",
+              "openai"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "providers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelProviderView"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "sign_in_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sign In Error"
+          },
+          "sign_in_pending": {
+            "default": false,
+            "title": "Sign In Pending",
+            "type": "boolean"
+          },
+          "timeout_secs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Secs"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Values",
+            "type": "object"
+          },
+          "wire_model": {
+            "title": "Wire Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "protocol",
+          "base_url",
+          "model",
+          "wire_model",
+          "password_set",
+          "ready"
+        ],
+        "title": "ModelConnectionView",
+        "type": "object"
+      },
+      "ModelDraft": {
+        "description": "A connection being edited: GHOST_LLM_* values over the saved ones (None removes\none), and a key typed but not saved yet, used for this one request and dropped.",
+        "properties": {
+          "password_value": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Value"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "default": {},
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "title": "ModelDraft",
+        "type": "object"
+      },
+      "ModelListView": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelOptionView"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "ModelListView",
+        "type": "object"
+      },
+      "ModelOptionView": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelOptionView",
+        "type": "object"
+      },
+      "ModelProviderView": {
+        "description": "One way to reach a model, as the Model page offers it.",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "blurb": {
+            "title": "Blurb",
+            "type": "string"
+          },
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "local": {
+            "default": false,
+            "title": "Local",
+            "type": "boolean"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "password_optional": {
+            "default": false,
+            "title": "Password Optional",
+            "type": "boolean"
+          },
+          "protocol": {
+            "enum": [
+              "anthropic",
+              "openai"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "sign_in": {
+            "default": false,
+            "title": "Sign In",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "blurb",
+          "protocol",
+          "base_url"
+        ],
+        "title": "ModelProviderView",
+        "type": "object"
+      },
+      "ModelSignInResult": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "ModelSignInResult",
+        "type": "object"
+      },
+      "ModelTestResult": {
+        "description": "One tiny request, timed like ``make perf-llm``: request to first token.",
+        "properties": {
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
+          },
+          "total_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Ms"
+          },
+          "ttft_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttft Ms"
+          },
+          "where": {
+            "title": "Where",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "model",
+          "where"
+        ],
+        "title": "ModelTestResult",
+        "type": "object"
+      },
       "ModelsView": {
         "properties": {
           "cache_dir": {
@@ -5192,6 +5595,134 @@
         "summary": "Events Schema",
         "tags": [
           "events"
+        ]
+      }
+    },
+    "/model": {
+      "get": {
+        "description": "The model connection now, with every provider the page offers.",
+        "operationId": "get_model_model_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Model",
+        "tags": [
+          "model"
+        ]
+      }
+    },
+    "/model/models": {
+      "post": {
+        "description": "The models a provider offers, for the saved connection or the one being edited.\nA provider that can't be read says why; that is not an HTTP error.",
+        "operationId": "model_list_model_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDraft"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Model List",
+        "tags": [
+          "model"
+        ]
+      }
+    },
+    "/model/sign-in": {
+      "post": {
+        "description": "Sign in to OpenRouter (OAuth with PKCE). The desktop opens the address; the\nbrowser comes back to Ghost's loopback, and the key OpenRouter gives is kept as\nthe OPENROUTER_API_KEY password in Ghost's vault (ADR 0036). Nothing to copy.",
+        "operationId": "model_sign_in_model_sign_in_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSignInResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Model Sign In",
+        "tags": [
+          "model"
+        ]
+      }
+    },
+    "/model/test": {
+      "post": {
+        "description": "Send one tiny request through the connection being edited and time its first\ntoken, the way ``make perf-llm`` does.",
+        "operationId": "model_test_model_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDraft"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Model Test",
+        "tags": [
+          "model"
         ]
       }
     },

@@ -34,6 +34,8 @@ SETTINGS_ENV = "settings.env"
 HEKA_KEYS = (
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",  # the model connection's own keys (ADR 0037)
+    "OPENAI_API_KEY",
     "CLIPROXY_BASE_URL",
     "GITHUB_TOKEN",
     "HF_TOKEN",

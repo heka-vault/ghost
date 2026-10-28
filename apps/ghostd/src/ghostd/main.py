@@ -8,7 +8,7 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -45,6 +45,7 @@ from ghost_core import (
 )
 from ghost_core.apps import APPS_FILE, Apps, load_apps
 from ghost_core.catalog import Catalog
+from ghost_core.connection import ModelConnection
 from ghost_core.conversations import GHOST, Conversations, Profile, conversations_source
 from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.folder import GhostFolder
@@ -65,6 +66,7 @@ from ghost_core.watches import WatchRunner
 from ghost_voice import GhostSession, VoiceSettings, build_session, debug
 from ghost_voice.config import LLM_FIELDS
 from ghost_voice.elevenlabs import describe_tts, tts_problems
+from ghost_voice.llm import Probe, model_client
 from ghost_voice.pipeline import TTS_SAMPLE_RATE, Models
 from ghost_voice.wake import WakeListener, build_wake_listener, parse_phrases
 from ghost_voice.wakeword import (
@@ -477,6 +479,21 @@ class Daemon:
         if wake:
             self._rearm.set()
         return applied + wake
+
+    async def _probe_model(self, env: Mapping[str, str], prompt: str, max_tokens: int) -> Probe:
+        """Test connection (ADR 0037): one tiny streamed request through the connection
+        the desktop is editing, timed like ``make perf-llm``. The saved connection goes
+        over the client sessions share (warm, as a session finds it); another is tried
+        on a client of its own that isn't kept."""
+        target = ModelConnection.from_env(env).target(env)
+        share = target.fingerprint() == self.voice.llm_target().fingerprint()
+        client = model_client(target, share=share)
+        thinking = (
+            self.voice.llm_thinking
+            if target.protocol == "anthropic" and "haiku" not in target.model
+            else None
+        )
+        return await client.probe(prompt=prompt, max_tokens=max_tokens, thinking=thinking)
 
     def _apply_model(self, values: dict[str, str | None]) -> list[str]:
         """The model connection's keys, live: the environment the next session reads, and
@@ -1139,6 +1156,7 @@ class Daemon:
             stt_model=self.voice.stt_model,
             conversations=self.conversations,
             passwords=self.passwords,
+            model_probe=self._probe_model,
         )
         self._deps = deps
         server = ApiServer(create_app(deps), socket_path)

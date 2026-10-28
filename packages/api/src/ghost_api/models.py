@@ -894,3 +894,80 @@ class PhoneView(BaseModel):
     addresses: list[str] = Field(default_factory=list)  # LAN first, then the tunnel (ADR 0020)
     listen: list[PhoneAddress] = Field(default_factory=list)  # the same, with each network
     device: PhoneDevice | None
+
+
+# --- the model connection (ADR 0037) --------------------------------------------------
+
+
+class ModelProviderView(BaseModel):
+    """One way to reach a model, as the Model page offers it."""
+
+    id: str
+    title: str
+    blurb: str
+    protocol: Literal["anthropic", "openai"]
+    base_url: str  # "" for a URL of the operator's own
+    password: str | None = None  # the Password's name it uses by default
+    password_optional: bool = False
+    sign_in: bool = False  # OpenRouter: signing in gives the key
+    local: bool = False
+    default_model: str | None = None  # None: the first the provider lists
+
+
+class ModelConnectionView(BaseModel):
+    """The model connection now. No key is in it: only whether its Password is set."""
+
+    provider: str
+    protocol: Literal["anthropic", "openai"]
+    base_url: str  # where calls go
+    base_url_override: str | None = None  # set when it isn't the provider's own
+    model: str  # as saved; "" means the provider's default
+    wire_model: str  # what is sent
+    password: str | None = None  # the name
+    password_set: bool
+    headers: dict[str, str] = {}
+    timeout_secs: float | None = None
+    legacy: str | None = None  # the older setting it comes from ("GHOST_LLM_ENDPOINT=openrouter")
+    problems: list[str] = []
+    ready: bool
+    # The GHOST_LLM_* values that say this connection explicitly (for a page that saves it).
+    values: dict[str, str] = {}
+    providers: list[ModelProviderView] = []
+    sign_in_pending: bool = False  # OpenRouter is waiting for the browser
+    sign_in_error: str | None = None  # the last sign-in didn't go through
+
+
+class ModelDraft(BaseModel):
+    """A connection being edited: GHOST_LLM_* values over the saved ones (None removes
+    one), and a key typed but not saved yet, used for this one request and dropped."""
+
+    values: dict[str, str | None] = {}
+    password_value: str | None = Field(default=None, max_length=4096)
+
+
+class ModelOptionView(BaseModel):
+    id: str
+    name: str | None = None
+
+
+class ModelListView(BaseModel):
+    models: list[ModelOptionView]
+    default: str | None = None  # the provider's default, when it lists it
+    error: str | None = None  # why the list couldn't be read; models is empty then
+
+
+class ModelTestResult(BaseModel):
+    """One tiny request, timed like ``make perf-llm``: request to first token."""
+
+    ok: bool
+    ttft_ms: int | None = None
+    total_ms: int | None = None
+    model: str  # what was asked for
+    answered_by: str | None = None  # what the provider said answered, when it says
+    reply: str | None = None  # the first words, shortened
+    error: str | None = None
+    where: str  # provider, protocol and host; never a key
+
+
+class ModelSignInResult(BaseModel):
+    url: str  # the desktop opens it; the loopback takes the browser's way back
