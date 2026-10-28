@@ -13,6 +13,7 @@ rust-version = "1.98"
 
 [workspace.dependencies]
 ghost-api = { path = "crates/ghost-api" }
+ghost-core = { path = "crates/ghost-core" }
 
 anyhow = "1"
 thiserror = "2"
@@ -22,6 +23,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+regex = "1"
+sha2 = "0.10"
+unicode-normalization = "0.1"
+tempfile = "3"
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location

@@ -1,0 +1,30 @@
+[package]
+name = "ghost-core"
+description = "Ghost's core: the write gate, the permissions, the audit, the agents and the apps (ADR 0007, 0011, 0034, 0035)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+# An issue-like write model for the gate's tests, in this crate and in others.
+fakes = []
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+rusqlite.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+regex.workspace = true
+sha2.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
