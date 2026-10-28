@@ -29,6 +29,8 @@ async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
 unicode-normalization.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+wiremock.workspace = true

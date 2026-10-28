@@ -13,6 +13,7 @@ pub mod events;
 #[cfg(any(test, feature = "fakes"))]
 pub mod fakes;
 pub mod gate;
+pub mod jev;
 pub mod levels;
 pub mod models;
 pub mod permissions;
@@ -29,6 +30,9 @@ pub use confirmation::{
 };
 pub use events::Events;
 pub use gate::{GateError, Submission, WriteGate};
+pub use jev::{
+    Jev, JevAnswer, JevClassifier, JevClient, JevError, JevOptions, WatchDecider, watch_decider,
+};
 pub use levels::{Autonomy, Risk};
 pub use models::{
     Change, ChangeSet, Outcome, OutcomeStatus, Proposal, ProposalStatus, Snapshot, Target,
