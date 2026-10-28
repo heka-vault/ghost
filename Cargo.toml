@@ -33,7 +33,11 @@ sha2 = "0.10"
 toml = { version = "0.8", features = ["preserve_order"] }
 async-trait = "0.1"
 futures = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+# The MCP client (ADR 0034): an app speaks the protocol; the product says app.
+rmcp = { version = "3.8", default-features = false }
+indexmap = { version = "2", features = ["serde"] }
+url = "2"
 wiremock = "0.6"
 unicode-normalization = "0.1"
 tempfile = "3"

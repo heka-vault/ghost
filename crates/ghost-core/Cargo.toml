@@ -29,6 +29,14 @@ async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
 unicode-normalization.workspace = true
+indexmap.workspace = true
+reqwest.workspace = true
+url.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest", "auth"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+wiremock.workspace = true
+axum.workspace = true
+# A fake app in process for the tests: rmcp's server side over a duplex pipe and over HTTP.
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
