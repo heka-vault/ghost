@@ -132,6 +132,9 @@ packaged or not. In development, `?mock=<scenario>` (for example `?mock=pending`
 component in every state. The design rules are in
 [docs/design-system.md](docs/design-system.md). `make deb` builds the installable packages.
 
+Changes go to `main` through pull requests; the `ci` workflow (lint, tests, schema and client
+current, typecheck, the desktop build and the Tauri shell) must pass before one merges.
+
 ## Docs
 
 | Doc | What |
