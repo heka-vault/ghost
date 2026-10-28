@@ -10,6 +10,7 @@ pub mod codec;
 pub mod confirmation;
 pub mod connection;
 pub mod conversations;
+pub mod envfile;
 pub mod events;
 #[cfg(any(test, feature = "fakes"))]
 pub mod fakes;
