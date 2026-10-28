@@ -6,6 +6,7 @@
 //! either the change happens now (`announce`/`quiet`) or it waits for a spoken yes
 //! observed in the pipeline's own transcript (`confirm`) -> the steps, the audit log.
 
+pub mod apps;
 pub mod codec;
 pub mod confirmation;
 pub mod connection;
@@ -31,6 +32,7 @@ pub mod request;
 pub mod routes;
 pub mod rules;
 pub mod scripts_server;
+pub mod signin;
 pub mod skill_catalog;
 pub mod skills;
 pub mod source;
@@ -40,6 +42,7 @@ pub mod time;
 pub mod waiting;
 pub mod watches;
 
+pub use apps::{App, AppError, AppSpec, Apps, AppsFile, ToolInfo};
 pub use confirmation::{
     ConfirmationClassifier, ConfirmationContext, RegexClassifier, Verdict, classify_confirmation,
     has_negation,

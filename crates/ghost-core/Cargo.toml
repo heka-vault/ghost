@@ -49,12 +49,16 @@ base64.workspace = true
 rustix.workspace = true
 secret-service.workspace = true
 tempfile.workspace = true
-rmcp.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest", "auth", "server", "macros", "transport-io"] }
 schemars.workspace = true
 rand.workspace = true
 url.workspace = true
 tracing-subscriber.workspace = true
 
+indexmap.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 wiremock.workspace = true
+axum.workspace = true
+# A fake app in process for the tests: rmcp's server side over a duplex pipe and over HTTP.
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
