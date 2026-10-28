@@ -1683,6 +1683,7 @@ dependencies = [
  "chrono",
  "ghost-api",
  "ghost-core",
+ "ghost-llm",
  "hex",
  "hmac 0.12.1",
  "nix",

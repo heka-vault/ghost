@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 ghost-api.workspace = true
 ghost-core.workspace = true
+ghost-llm.workspace = true
 
 anyhow.workspace = true
 thiserror.workspace = true

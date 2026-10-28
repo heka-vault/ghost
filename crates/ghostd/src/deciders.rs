@@ -111,6 +111,21 @@ impl Decider for ModelDecider {
     }
 }
 
+/// The model client is the completer: the same connection as the voice (ADR 0037).
+#[async_trait]
+impl Completer for ghost_llm::model::Model {
+    async fn complete(
+        &self,
+        system: &str,
+        user: &str,
+        max_tokens: u32,
+    ) -> Result<String, CompleteError> {
+        ghost_llm::model::Model::complete(self, system, user, max_tokens)
+            .await
+            .map_err(|e| CompleteError(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! No Python test covered `ghostd.deciders`; these pin what the daemon relied on.
