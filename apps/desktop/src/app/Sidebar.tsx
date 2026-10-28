@@ -1,10 +1,10 @@
 import type { ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { ChevronDown } from "lucide-react";
-import { type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { type ReactElement, type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { GhostMark, type GhostPhase, LineGlyph, StatusDot, agentName, cx, liveLabel, phaseText, relativeTime, useLive } from "../ui";
+import { GhostMark, type GhostPhase, IconButton, LineGlyph, StatusDot, Tooltip, agentName, cx, liveLabel, phaseText, relativeTime, useLive } from "../ui";
 import { isRetired } from "../screens/conversations/threads";
 import { newAgentSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
@@ -18,15 +18,44 @@ const Switcher = import.meta.env.DEV ? lazy(() => import("../design/chrome").the
 const SHORT_WINDOW = 840;
 const PROTOS_KEY = "ghost.sidebar.prototypes";
 const SETTINGS_KEY = "ghost.sidebar.settings";
+/** Collapsed to the icon rail: kept across restarts, unlike the folds above. */
+const COLLAPSED_KEY = "ghost.sidebar.collapsed";
+const TOGGLE_SHORTCUT = "mod+b";
+
+/** In the rail every row is an icon, so its name moves into a tooltip on the right. */
+function RailTip({ rail, content, children }: { rail: boolean; content: ReactNode; children: ReactElement }) {
+  return rail ? (
+    <Tooltip content={content} side="right" delay={150} asChild>
+      {children}
+    </Tooltip>
+  ) : (
+    children
+  );
+}
 
 /** The mark and the name. Pointing at it plays the mascot; its state stays here, not in Sidebar. */
-function Brand({ children }: { children?: ReactNode }) {
+function Brand({ rail, onToggle, children }: { rail: boolean; onToggle: () => void; children?: ReactNode }) {
   const [hovered, setHovered] = useState(false);
+  const toggle = (
+    <Tooltip content={rail ? "Show the sidebar" : "Hide the sidebar"} shortcut={TOGGLE_SHORTCUT} side={rail ? "right" : "bottom"}>
+      <IconButton
+        className="sidebar__toggle"
+        label={rail ? "Show the sidebar" : "Hide the sidebar"}
+        icon={rail ? <PanelLeftOpen /> : <PanelLeftClose />}
+        tooltip={false}
+        aria-expanded={!rail}
+        onClick={onToggle}
+      />
+    </Tooltip>
+  );
+  // The rail keeps only the way back out; the mark and the name return with the sidebar.
+  if (rail) return <div className="sidebar__brand">{toggle}</div>;
   return (
     <div className="sidebar__brand" onPointerEnter={(e) => e.pointerType === "mouse" && setHovered(true)} onPointerLeave={() => setHovered(false)}>
       <GhostMark size={28} hovered={hovered} />
       <span className="sidebar__brand-name">Ghost</span>
       {children}
+      {toggle}
     </div>
   );
 }
@@ -39,6 +68,23 @@ export function Sidebar() {
   const { connection: state, phase } = useLive();
   const [agents, setAgents] = useState<ConversationView[]>([]);
   const scroller = useRef<HTMLDivElement>(null);
+  const [rail, setRail] = useState<boolean>(() => localStorage.getItem(COLLAPSED_KEY) === "1");
+  const toggleRail = useCallback(() => {
+    setRail((was) => {
+      localStorage.setItem(COLLAPSED_KEY, was ? "0" : "1");
+      return !was;
+    });
+  }, []);
+  // Ctrl+B anywhere, as in editors. Nothing in Ghost formats text, so the key is free.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "b") return;
+      e.preventDefault();
+      toggleRail();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleRail]);
   // The Prototypes group: open by default on a tall window, collapsed on a short one (under
   // 840px) so Settings never pins over it; the operator's last choice wins for the session.
   const [protosOpen, setProtosOpen] = useState<boolean>(() => {
@@ -136,8 +182,8 @@ export function Sidebar() {
   const agentIsCurrent = shownAgents.some((l) => path === `/agents/${l.slug}`);
 
   return (
-    <aside className="sidebar">
-      <Brand>
+    <aside className={cx("sidebar", rail && "is-rail")}>
+      <Brand rail={rail} onToggle={toggleRail}>
         {design && MockBadge && (
           <Suspense fallback={null}>
             <MockBadge />
@@ -145,7 +191,7 @@ export function Sidebar() {
         )}
       </Brand>
 
-      <StatusCard phase={cardPhase} title={title} sub={sub} />
+      <StatusCard phase={cardPhase} title={title} sub={sub} rail={rail} />
 
       <nav className="sidebar__nav" aria-label="Main">
       <div className="sidebar__scroll" ref={scroller} onScroll={measure}>
@@ -155,6 +201,7 @@ export function Sidebar() {
               <NavItem
                 key={r.id}
                 route={r}
+                rail={rail}
                 current={current === r.id && !(agentIsCurrent && r.id === "conversations")}
                 section={agentIsCurrent && r.id === "conversations"}
                 badge={r.id === "waiting" && connected && status?.waiting ? status.waiting : undefined}
@@ -182,17 +229,20 @@ export function Sidebar() {
                     : l.last_active_at
                       ? relativeTime(l.last_active_at)
                       : "Not used yet";
+                const name = l.is_ghost ? "Ghost" : l.name;
                 return (
                   <li key={l.slug}>
+                    <RailTip rail={rail} content={`${name} · ${sub}`}>
                     <a
                       className={cx("sidebar__item sidebar__item--line", path === to && "is-current")}
                       href={hrefFor(to)}
                       aria-current={path === to ? "page" : undefined}
-                      title={l.job || undefined}
+                      aria-label={rail ? `${name}, ${sub}` : undefined}
+                      title={rail ? undefined : l.job || undefined}
                     >
                       <LineGlyph slug={l.slug} name={l.name} size="sm" />
                       <span className="sidebar__line-text">
-                        <span className="sidebar__line-name">{l.is_ghost ? "Ghost" : l.name}</span>
+                        <span className="sidebar__line-name">{name}</span>
                         <span className={cx("sidebar__line-sub", live && "is-live", waiting && "is-waiting")}>{sub}</span>
                       </span>
                       {/* The status card owns the phase dot; "Live · listening" already says it here.
@@ -203,9 +253,11 @@ export function Sidebar() {
                         </span>
                       )}
                     </a>
+                    </RailTip>
                   </li>
                 );
               })}
+              {!rail && (
               <li>
                 <a
                   className="sidebar__item sidebar__item--more"
@@ -217,7 +269,8 @@ export function Sidebar() {
                   <span className="sidebar__item-label">New agent…</span>
                 </a>
               </li>
-              {retiredCount > 0 && (
+              )}
+              {!rail && retiredCount > 0 && (
                 <li>
                   <a
                     className="sidebar__item sidebar__item--more"
@@ -244,7 +297,7 @@ export function Sidebar() {
             {protosOpen && (
               <ul className="sidebar__group" role="list" id="sidebar-protos-list" aria-labelledby="sidebar-protos">
                 {protos.map((r) => (
-                  <NavItem key={r.id} route={r} current={current === r.id} />
+                  <NavItem key={r.id} route={r} rail={rail} current={current === r.id} />
                 ))}
               </ul>
             )}
@@ -260,37 +313,39 @@ export function Sidebar() {
               <NavItem
                 key={r.id}
                 route={r}
+                rail={rail}
                 current={current === r.id}
                 section={inSettings && current !== r.id}
                 // A waiting okay stays visible while the Session row is folded away.
                 badge={!settingsOpen && pending && connected ? 1 : undefined}
                 fold={
-                  under.length
+                  under.length && !rail
                     ? { open: settingsOpen, onToggle: toggleSettings, controls: "sidebar-settings-list", label: settingsOpen ? "Hide the settings screens" : "Show the settings screens" }
                     : undefined
                 }
               />
             ))}
             {settingsOpen &&
-              under.map((r) => <NavItem key={r.id} route={r} current={current === r.id} sub badge={r.id === "session" && pending && connected ? 1 : undefined} />)}
+              under.map((r) => <NavItem key={r.id} route={r} rail={rail} current={current === r.id} sub badge={r.id === "session" && pending && connected ? 1 : undefined} />)}
           </ul>
         </nav>
-        {design && Switcher && (
+        {design && Switcher && !rail && (
           <Suspense fallback={null}>
             <Switcher />
           </Suspense>
         )}
         {/* Always one row tall, so the footer holds still. Empty until Ghost first answers. */}
-        <div className="sidebar__version t-caption t-3 t-num" aria-hidden={version.current ? undefined : true}>{version.current ? `Ghost ${version.current}` : " "}</div>
+        {!rail && <div className="sidebar__version t-caption t-3 t-num" aria-hidden={version.current ? undefined : true}>{version.current ? `Ghost ${version.current}` : " "}</div>}
       </div>
     </aside>
   );
 }
 
 /** The sidebar's status card: the one place the voice loop's phase dot lives. Exported for the gallery. */
-export function StatusCard({ phase, title, sub }: { phase: GhostPhase; title: string; sub: string }) {
+export function StatusCard({ phase, title, sub, rail = false }: { phase: GhostPhase; title: string; sub: string; rail?: boolean }) {
   return (
-    <a className={cx("sidebar__status", `is-${phase}`)} href={hrefFor("/")}>
+    <RailTip rail={rail} content={`${title} · ${sub}`}>
+    <a className={cx("sidebar__status", `is-${phase}`)} href={hrefFor("/")} aria-label={rail ? `${title}, ${sub}` : undefined}>
       <span className="sidebar__status-dot">
         <StatusDot phase={phase} />
       </span>
@@ -299,6 +354,7 @@ export function StatusCard({ phase, title, sub }: { phase: GhostPhase; title: st
         <span className="sidebar__status-sub">{sub}</span>
       </span>
     </a>
+    </RailTip>
   );
 }
 
@@ -310,19 +366,27 @@ interface Fold {
   label: string;
 }
 
-function NavItem({ route, current, section, badge, sub, fold }: { route: RouteDef; current: boolean; section?: boolean; badge?: number; sub?: boolean; fold?: Fold }) {
+function NavItem({ route, current, section, badge, sub, fold, rail = false }: { route: RouteDef; current: boolean; section?: boolean; badge?: number; sub?: boolean; fold?: Fold; rail?: boolean }) {
   const Icon = route.nav!.icon;
+  const label = route.nav!.label;
   return (
     <li className={cx(fold && "sidebar__head")}>
-      <a className={cx("sidebar__item", sub && "sidebar__item--sub", current && "is-current", section && "is-section")} href={hrefFor(route.path)} aria-current={current ? "page" : undefined}>
+      <RailTip rail={rail} content={badge != null ? `${label} · ${badge} waiting` : label}>
+      <a
+        className={cx("sidebar__item", sub && "sidebar__item--sub", current && "is-current", section && "is-section")}
+        href={hrefFor(route.path)}
+        aria-current={current ? "page" : undefined}
+        aria-label={rail ? (badge != null ? `${label}, ${badge} waiting` : label) : undefined}
+      >
         <Icon size={16} aria-hidden />
-        <span className="sidebar__item-label">{route.nav!.label}</span>
+        <span className="sidebar__item-label">{label}</span>
         {badge != null && (
           <span className="sidebar__count" aria-label={`${badge} waiting`}>
             {badge}
           </span>
         )}
       </a>
+      </RailTip>
       {fold && (
         <button type="button" className={cx("sidebar__fold", fold.open && "is-open")} aria-expanded={fold.open} aria-controls={fold.controls} aria-label={fold.label} onClick={fold.onToggle}>
           <ChevronDown size={14} aria-hidden />

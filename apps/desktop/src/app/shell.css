@@ -1,7 +1,9 @@
 /* The app shell: sidebar on the window ground, the page in an inset canvas panel. The
    window never scrolls; the panel does, so its inset, border and radius stay put (Linear). */
 
-.shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); height: 100vh; min-width: 1024px; overflow: hidden; background: var(--bg-app); }
+/* The column follows the sidebar; --sidebar-width stays the full width other screens measure from. */
+.shell:has(.sidebar.is-rail) { --shell-sidebar: var(--sidebar-rail-width); }
+.shell { display: grid; grid-template-columns: var(--shell-sidebar, var(--sidebar-width)) minmax(0, 1fr); height: 100vh; min-width: 1024px; overflow: hidden; background: var(--bg-app); }
 .shell__main {
   position: relative; display: flex; flex-direction: column; min-width: 0;
   height: calc(100vh - var(--panel-inset) * 2);
@@ -119,6 +121,22 @@ html[data-capture="full"] .sidebar { position: sticky; top: 0; }
 .sidebar__scenario { padding: 0 var(--space-1); }
 .sidebar__scenario .g-select { width: 100%; }
 .sidebar__version { padding: 0 var(--space-2); }
+.sidebar__toggle { flex: none; color: var(--text-3); }
+
+/* The rail (Ctrl+B or the toggle): icons and glyphs only, each name in a tooltip on the right.
+   Rows keep their place in the column, so the eye finds the same row at the same height. */
+.sidebar.is-rail { padding-inline: var(--space-2); }
+.sidebar.is-rail .sidebar__brand { justify-content: center; padding: 0; }
+.sidebar.is-rail .sidebar__status { justify-content: center; padding-inline: 0; }
+.sidebar.is-rail :is(.sidebar__status-text, .sidebar__item-label, .sidebar__line-text, .sidebar__label) { display: none; }
+.sidebar.is-rail .sidebar__section { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.sidebar.is-rail .sidebar__item,
+.sidebar.is-rail .sidebar__head .sidebar__item,
+.sidebar.is-rail .sidebar__item--sub { position: relative; justify-content: center; padding: 0; }
+.sidebar.is-rail .sidebar__item--line { height: var(--control-md); }
+/* A count or a pending okay sits on the icon's corner instead of the row's end. */
+.sidebar.is-rail .sidebar__count { position: absolute; top: calc(var(--space-px) * -1); right: var(--space-0_5); min-width: var(--space-4); height: var(--space-4); padding: 0 var(--space-1); font-size: var(--text-xs); }
+.sidebar.is-rail .sidebar__live { position: absolute; top: var(--space-1); right: var(--space-1); width: auto; }
 
 /* ------------------------------------------------------------------ sticky top region */
 /* Banners stack in flow; the slot under them is zero-height and holds the compact page bar
