@@ -10,6 +10,7 @@ import httpx
 import pytest
 from ghost_core.connection import (
     PROVIDERS,
+    REASONING_HEADROOM,
     ModelConnection,
     format_headers,
     list_models,
@@ -18,6 +19,7 @@ from ghost_core.connection import (
     openrouter_exchange,
     openrouter_model,
     parse_headers,
+    reasoning,
 )
 
 OR_KEY = "sk-or-v1-fedcba9876543210"
@@ -102,6 +104,77 @@ def test_openai_uses_its_own_cap_field():
     assert ModelConnection.from_env(env).target(env).cap_param == "max_completion_tokens"
     env = {"GHOST_LLM_PROVIDER": "lmstudio", "GHOST_LLM_MODEL": "m"}
     assert ModelConnection.from_env(env).target(env).cap_param == "max_tokens"
+
+
+@pytest.mark.parametrize(
+    ("model", "reasons", "effort"),
+    [
+        # From 5.1 on, and GPT-6: no reasoning, the only effort 5.4+ takes with tools.
+        ("gpt-5.1", True, "none"),
+        ("gpt-5.5", True, "none"),
+        ("gpt-5.6-terra", True, "none"),
+        ("gpt-6-sol", True, "none"),
+        ("gpt-6.1-terra", True, "none"),
+        ("openai/gpt-5.4-mini", True, "none"),
+        # No "none" on these: low.
+        ("gpt-6-astra", True, "low"),
+        ("gpt-6.1-sol", True, "low"),
+        # The first GPT-5s: low, since minimal turns off parallel tool calls.
+        ("gpt-5", True, "low"),
+        ("gpt-5-mini", True, "low"),
+        ("gpt-5-nano-2025-08-07", True, "low"),
+        ("o3", True, "low"),
+        ("o4-mini", True, "low"),
+        ("o1-mini", True, ""),
+        # Reason, but take no lower effort than their own.
+        ("gpt-5-pro", True, ""),
+        ("gpt-5.1-chat-latest", True, ""),
+        # Not reasoning models.
+        ("gpt-4.1", False, ""),
+        ("gpt-4o-mini", False, ""),
+        ("claude-sonnet-5-5", False, ""),
+        ("qwen3:8b", False, ""),
+        ("llama3.1", False, ""),
+    ],
+)
+def test_reasoning_is_a_property_of_the_model(model, reasons, effort):
+    assert reasoning(model).reasons is reasons
+    assert reasoning(model).effort == effort
+
+
+def test_a_reasoning_model_gets_its_lowest_effort_and_room_to_reason():
+    env = {"GHOST_LLM_PROVIDER": "openai", "GHOST_LLM_MODEL": "gpt-5.5", "OPENAI_API_KEY": "k"}
+    t = ModelConnection.from_env(env).target(env)
+    assert t.chat_params(2000) == {
+        "max_completion_tokens": 2000 + REASONING_HEADROOM,
+        "reasoning_effort": "none",
+    }
+    # The model decides, not the provider: a gpt-5 behind your own address too ...
+    env = {
+        "GHOST_LLM_PROVIDER": "custom",
+        "GHOST_LLM_PROTOCOL": "openai",
+        "GHOST_LLM_BASE_URL": "http://localhost:4000/v1",
+        "GHOST_LLM_MODEL": "gpt-5",
+    }
+    t = ModelConnection.from_env(env).target(env)
+    assert t.chat_params(2000) == {
+        "max_completion_tokens": 2000 + REASONING_HEADROOM,
+        "reasoning_effort": "low",
+    }
+    # ... and a model that doesn't reason, even at OpenAI, keeps the plain cap.
+    env = {"GHOST_LLM_PROVIDER": "openai", "GHOST_LLM_MODEL": "gpt-4.1", "OPENAI_API_KEY": "k"}
+    assert ModelConnection.from_env(env).target(env).chat_params(2000) == {
+        "max_completion_tokens": 2000
+    }
+    env = {"GHOST_LLM_PROVIDER": "ollama", "GHOST_LLM_MODEL": "qwen3:8b"}
+    assert ModelConnection.from_env(env).target(env).chat_params(2000) == {"max_tokens": 2000}
+
+
+def test_the_messages_api_never_gets_a_reasoning_effort():
+    # An OpenAI id named on an Anthropic-protocol provider (OpenRouter's Messages API).
+    env = {"GHOST_LLM_PROVIDER": "openrouter", "GHOST_LLM_MODEL": "openai/gpt-5.5"}
+    t = ModelConnection.from_env(env).target(env)
+    assert not t.reasoning.reasons and t.output_cap(2000) == 2000
 
 
 def test_a_custom_url_picks_its_protocol_and_password_by_name():

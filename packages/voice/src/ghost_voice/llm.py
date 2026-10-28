@@ -547,6 +547,7 @@ class OpenAIClient(ModelClient):
 
     def service(self, *, system_instruction: str, max_tokens: int, thinking: str) -> LLMService:
         t = self.target
+        extra = {k: v for k, v in t.chat_params(max_tokens).items() if k != t.cap_param}
         return GhostOpenAILLMService(
             api_key=t.api_key or NO_KEY,
             base_url=t.base_url,
@@ -554,7 +555,9 @@ class OpenAIClient(ModelClient):
             settings=OpenAILLMService.Settings(
                 model=t.model,
                 system_instruction=system_instruction,
-                **{t.cap_param: max_tokens},
+                # A reasoning model's lowest effort rides in Pipecat's extra fields.
+                **{t.cap_param: t.output_cap(max_tokens)},
+                extra=extra,
             ),
         )
 
@@ -562,7 +565,7 @@ class OpenAIClient(ModelClient):
         r = await self.client.chat.completions.create(
             model=self.target.model,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            **{self.target.cap_param: max_tokens},
+            **self.target.chat_params(max_tokens),
         )
         return (r.choices[0].message.content or "") if r.choices else ""
 
@@ -575,7 +578,7 @@ class OpenAIClient(ModelClient):
                 model=self.target.model,
                 messages=[{"role": "user", "content": prompt}],
                 stream=True,
-                **{self.target.cap_param: max_tokens},
+                **self.target.chat_params(max_tokens),
             )
             async for chunk in stream:
                 if getattr(chunk, "model", None):

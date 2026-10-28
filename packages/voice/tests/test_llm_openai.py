@@ -9,7 +9,7 @@ import json
 from typing import Any
 
 import pytest
-from ghost_core.connection import ModelConnection
+from ghost_core.connection import REASONING_HEADROOM, ModelConnection
 from ghost_voice import llm as llm_module
 from ghost_voice.llm import (
     GhostOpenAILLMService,
@@ -330,10 +330,42 @@ def test_the_protocol_picks_the_client():
 
 
 def test_openai_itself_gets_its_cap_field():
-    env = {"GHOST_LLM_PROVIDER": "openai", "OPENAI_API_KEY": "sk-1"}
+    env = {"GHOST_LLM_PROVIDER": "openai", "GHOST_LLM_MODEL": "gpt-4.1", "OPENAI_API_KEY": "s"}
     c = model_client(ModelConnection.from_env(env).target(env))
     svc = c.service(system_instruction="x", max_tokens=2000, thinking="between_tools")
     assert svc._settings.max_completion_tokens == 2000  # noqa: SLF001
+
+
+async def test_a_reasoning_model_is_asked_for_its_lowest_effort_with_room_to_reason(monkeypatch):
+    # The request as Pipecat sends it, for a session on gpt-5.5 at OpenAI. Untested live.
+    env = {"GHOST_LLM_PROVIDER": "openai", "GHOST_LLM_MODEL": "gpt-5.5", "OPENAI_API_KEY": "k"}
+    c = model_client(ModelConnection.from_env(env).target(env))
+    c.client = FakeClient([chunk(content="Hi."), chunk(finish="stop")])
+    svc = c.service(system_instruction="x", max_tokens=2000, thinking="between_tools")
+    await run(monkeypatch, svc)
+    req = c.client.requests[0]
+    assert req["reasoning_effort"] == "none"
+    assert req["max_completion_tokens"] == 2000 + REASONING_HEADROOM
+    assert "max_tokens" not in req or not isinstance(req["max_tokens"], int)
+
+
+async def test_a_one_shot_and_a_probe_carry_the_effort_too():
+    env = {"GHOST_LLM_PROVIDER": "openai", "GHOST_LLM_MODEL": "o4-mini", "OPENAI_API_KEY": "k"}
+    c = model_client(ModelConnection.from_env(env).target(env))
+    c.client = FakeClient([chunk(content="Hi."), chunk(finish="stop")])
+    await c.probe(prompt="Say hi.", max_tokens=16, thinking=None)
+    req = c.client.requests[0]
+    assert req["reasoning_effort"] == "low"
+    assert req["max_completion_tokens"] == 16 + REASONING_HEADROOM
+
+
+async def test_a_model_that_doesnt_reason_gets_no_effort(monkeypatch):
+    env = {"GHOST_LLM_PROVIDER": "ollama", "GHOST_LLM_MODEL": "qwen3:8b"}
+    c = model_client(ModelConnection.from_env(env).target(env))
+    c.client = FakeClient([chunk(content="Hi."), chunk(finish="stop")])
+    await run(monkeypatch, c.service(system_instruction="x", max_tokens=2000, thinking="x"))
+    req = c.client.requests[0]
+    assert "reasoning_effort" not in req and req["max_tokens"] == 2000
 
 
 async def test_the_probe_times_the_first_token():

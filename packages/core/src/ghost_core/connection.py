@@ -217,6 +217,62 @@ def format_headers(headers: Mapping[str, str]) -> str:
     return text
 
 
+# --- models that reason ---------------------------------------------------------------
+
+# Room for a reasoning model's hidden tokens on top of the reply's own cap. OpenAI counts
+# reasoning against max_completion_tokens, so without it a tool-heavy turn could end at
+# finish_reason=length before a word or a call came out. A cap only bounds a reply: an
+# answer that needs less costs nothing more.
+REASONING_HEADROOM = 6000
+
+_OPENAI_O = re.compile(r"^o(\d+)(-[a-z0-9.-]+)?$")
+_OPENAI_GPT = re.compile(r"^gpt-(\d+)(?:\.(\d+))?(-[a-z0-9.-]+)?$")
+
+
+@dataclass(frozen=True)
+class Reasoning:
+    """What a model does before it answers, as far as Ghost's request needs to know."""
+
+    reasons: bool = False  # spends output tokens on reasoning before the reply
+    effort: str = ""  # the reasoning_effort to send; "" sends none
+
+
+def reasoning(model: str) -> Reasoning:
+    """OpenAI's reasoning models, by id (``openai/`` prefix allowed), and the lowest
+    reasoning effort each takes on Chat Completions with tools, since Ghost answers by
+    voice and every token of thought is a pause (OpenAI's model docs, 2026-10):
+
+    - GPT-5.1 and later, and GPT-6: ``none``, which is also the only effort GPT-5.4 and
+      later combine with function tools on Chat Completions. GPT-6 Astra and GPT-6.1 Sol
+      don't take ``none``: ``low``.
+    - The first GPT-5 models (gpt-5, -mini, -nano): ``low``. Their ``minimal`` exists but
+      turns off parallel tool calls, and Ghost runs every call of a reply together.
+    - o-series: ``low``. o1-mini and o1-preview take no effort at all.
+    - A ``-pro`` model only reasons at ``high`` and a ``-chat`` one is tuned for chat:
+      neither gets an effort, both get the headroom.
+
+    Anything else (Claude, a local model, an id this doesn't know) is not a reasoning model
+    here, and its request is as before."""
+    mid = model.strip().lower().removeprefix("openai/")
+    if _OPENAI_O.match(mid):
+        if mid.startswith(("o1-mini", "o1-preview")):
+            return Reasoning(reasons=True)
+        return Reasoning(reasons=True, effort="low")
+    m = _OPENAI_GPT.match(mid)
+    if not m or int(m.group(1)) < 5:
+        return Reasoning()
+    major, minor, rest = int(m.group(1)), m.group(2), m.group(3) or ""
+    if "-chat" in rest or "-pro" in rest:
+        return Reasoning(reasons=True)
+    if major == 5 and minor is None:
+        return Reasoning(reasons=True, effort="low")
+    if (major, minor) == (6, None) and rest.startswith("-astra"):
+        return Reasoning(reasons=True, effort="low")
+    if (major, minor) == (6, "1") and rest.startswith("-sol"):
+        return Reasoning(reasons=True, effort="low")
+    return Reasoning(reasons=True, effort="none")
+
+
 def _host(url: str) -> str:
     u = urlparse(url)
     return f"{u.scheme}://{u.hostname}" + (f":{u.port}" if u.port else "") if u.hostname else ""
@@ -235,10 +291,23 @@ class Target:
     headers: Mapping[str, str] = field(default_factory=dict, repr=False)
     timeout_secs: float | None = None
     cap_param: str = "max_tokens"
+    reasoning: Reasoning = field(default_factory=Reasoning)  # Chat Completions only
 
     @property
     def endpoint(self) -> str:  # the older name, for logs and reports
         return self.provider
+
+    def output_cap(self, max_tokens: int) -> int:
+        """The cap to send for a reply of up to ``max_tokens`` visible tokens: more for a
+        model that spends some of it reasoning first."""
+        return max_tokens + REASONING_HEADROOM if self.reasoning.reasons else max_tokens
+
+    def chat_params(self, max_tokens: int) -> dict[str, Any]:
+        """The Chat Completions fields for the cap and the reasoning effort."""
+        out: dict[str, Any] = {self.cap_param: self.output_cap(max_tokens)}
+        if self.reasoning.effort:
+            out["reasoning_effort"] = self.reasoning.effort
+        return out
 
     def describe(self) -> str:
         where = _host(self.base_url) or "no address"
@@ -291,15 +360,23 @@ class ModelConnection:
         return env.get(self.password, "") if self.password else ""
 
     def target(self, env: Mapping[str, str]) -> Target:
+        model = self.wire_model
+        cap_param, thinks = "max_tokens", Reasoning()
+        if self.protocol == "openai":
+            # A reasoning model is one wherever it is served, and OpenAI's take only
+            # max_completion_tokens, so the model decides both, not the provider.
+            thinks = reasoning(model)
+            cap_param = "max_completion_tokens" if thinks.reasons else self.spec.cap_param
         return Target(
             provider=self.provider,
             protocol=self.protocol,
             base_url=self.base_url,
-            model=self.wire_model,
+            model=model,
             api_key=self.key(env),
             headers=dict(self.headers),
             timeout_secs=self.timeout_secs,
-            cap_param=self.spec.cap_param if self.protocol == "openai" else "max_tokens",
+            cap_param=cap_param,
+            reasoning=thinks,
         )
 
     def password_set(self, env: Mapping[str, str]) -> bool:

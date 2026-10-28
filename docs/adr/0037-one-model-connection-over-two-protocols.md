@@ -74,6 +74,12 @@ setup as the provider it resolves to and writes it out as that provider on its f
   the SDK client is shared per connection, and the watcher that keeps every tool call reads
   chunks already in hand. `make perf-llm` before and after on OpenRouter: hello TTFB p50 1.27 s
   and 1.11 s, within run-to-run noise.
+- An OpenAI reasoning model (`gpt-5*`, GPT-6, the o-series) counts its reasoning against
+  the cap. Over Chat Completions it is sent the lowest `reasoning_effort` it takes with
+  tools (`none` from GPT-5.1 on; `low` for the o-series and the first GPT-5s, whose
+  `minimal` turns off parallel tool calls) and 6000 tokens of room on top of the 2000. It
+  is a property of the model id wherever it is served (`ghost_core.connection.reasoning`),
+  and has not been tried live yet.
 - A model reached over Chat Completions gets no Anthropic cache markers; a Claude model is
   better reached through a provider on the Messages API.
 - `ghostd perf run` and `perf llm` take `--endpoint current` (the default) or a provider id.
