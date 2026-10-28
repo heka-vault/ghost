@@ -1,7 +1,7 @@
 # Ghost's entry points. `make` alone lists them, grouped by what you are doing.
 #
 # Working on Ghost:
-#   make setup     once per machine: dependencies, secrets from the store, the echo-cancelled mic
+#   make setup     once per machine: dependencies, Ghost's folder, the echo-cancelled mic
 #   make dev       the daemon and the desktop app from this checkout, both logging to this
 #                  terminal; the UI reloads on save, and Ctrl+C stops both
 #   make reload    in another terminal after a Python change: restarts the daemon, not the app
@@ -11,13 +11,15 @@
 # `make deploy` made. Only one Ghost may have the microphone, so `make dev` stops the service
 # and `make service-on` starts it again.
 #
-# Secrets never live in this repo. The daemon reads $(ENV_FILE), which `make env` renders
-# from the secrets store; a ./.env you made from .env.example is used instead if it exists.
+# Passwords never live in this repo or in a plain file: they are in Ghost's own vault, its key
+# in your keyring, and the daemon opens it itself (ADR 0036; `make passwords`). The environment
+# the targets load is $(ENV_FILE), non-secret settings only: settings.env, or a ./.env you made
+# from .env.example.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-ENV_FILE ?= $(if $(wildcard .env),.env,$(HOME)/.config/ghost/env)
+ENV_FILE ?= $(if $(wildcard .env),.env,$(HOME)/.config/ghost/settings.env)
 SETTINGS := $(HOME)/.config/ghost/settings.env
 POLICY := $(HOME)/.config/ghost/policy.toml
 UV ?= uv
@@ -35,7 +37,7 @@ if pgrep -f '$(DEV_GHOSTD)' >/dev/null; then \
   echo "This checkout's ghostd is running; stop it first (Ctrl+C in make dev, or make stop)."; exit 1; fi;
 endef
 
-.PHONY: help setup sync env echo-cancel echo-cancel-off \
+.PHONY: help setup sync env passwords passwords-import echo-cancel echo-cancel-off \
         dev daemon desktop desktop-web reload start stop restart \
         wake say status check devices latency restore-volumes \
         lint fmt test typecheck ci api-schema version release \
@@ -63,7 +65,7 @@ setup: ## sync, pnpm install, env, echo-cancel and check, then says what is left
 sync: ## install or refresh the Python workspace (make dev does this on every start)
 	$(UV) sync --all-packages
 
-env: ## render ~/.config/ghost/env from the secrets store; seeds settings.env, policy.toml and Ghost's folder on first run
+env: ## seed settings.env, policy.toml and Ghost's folder on first run (passwords: make passwords)
 	@if [[ ! -e "$(SETTINGS)" ]]; then \
 	  mkdir -p "$(dir $(SETTINGS))"; \
 	  printf 'GHOST_INPUT_DEVICE=ghost.mic\n' > "$(SETTINGS)"; \
@@ -80,7 +82,12 @@ env: ## render ~/.config/ghost/env from the secrets store; seeds settings.env, p
 	  fi; \
 	done
 	@mkdir -p "$(dir $(POLICY))agents"
-	infra/systemd/ghost-render-env.sh
+
+passwords: ## what is in Ghost's vault, by name; set one with: uv run ghostd passwords set NAME
+	@$(UV) run ghostd passwords list
+
+passwords-import: ## once: heka-vault, ~/.config/ghost/env and apps.env into the vault, then the plain files deleted
+	@$(UV) run ghostd passwords import
 
 echo-cancel: ## install and start the echo-cancelled mic "ghost.mic" (a user service); without it Ghost hears itself
 	infra/pipewire/install.sh

@@ -94,7 +94,6 @@ build_daemon() {
 
   install -m 755 "$ROOT/packaging/debian/heka-ghostd/ghostd" "$root/usr/bin/ghostd"
   install -m 644 "$ROOT/packaging/debian/heka-ghostd/ghostd.service" "$root/usr/lib/systemd/user/ghostd.service"
-  install -m 755 "$ROOT/infra/systemd/ghost-render-env.sh" "$root/usr/share/heka-ghost/ghost-render-env.sh"
   install -m 755 "$ROOT/infra/pipewire/install.sh" "$root/usr/share/heka-ghost/pipewire/install.sh"
   install -m 644 "$ROOT/infra/pipewire/ghost-echo-cancel.conf.in" "$root/usr/share/heka-ghost/pipewire/"
   install -m 644 "$ROOT/infra/pipewire/ghost-echo-cancel.service" "$root/usr/share/heka-ghost/pipewire/"

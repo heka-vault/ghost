@@ -1,8 +1,9 @@
 # Ghost desktop daemon (ADR 0009). Install:
 #   mkdir -p ~/.config/systemd/user && cp infra/systemd/ghostd.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload && systemctl --user enable --now ghostd
-# Secrets are rendered into ~/.config/ghost/env by ghost-render-env.sh at every start;
-# nothing is baked into this file.
+# The environment is settings.env, which holds no secret. Passwords are in Ghost's own vault,
+# which the daemon opens itself; its key is in your keyring (ADR 0036). Nothing secret is
+# baked into this file or rendered beside it.
 [Unit]
 Description=Ghost voice assistant daemon
 After=pipewire.service pipewire-pulse.service network-online.target
@@ -11,8 +12,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/projects/active/ghost
-ExecStartPre=%h/projects/active/ghost/infra/systemd/ghost-render-env.sh
-EnvironmentFile=%h/.config/ghost/env
+EnvironmentFile=-%h/.config/ghost/settings.env
 Environment=PYTHONUNBUFFERED=1
 Environment=HF_HUB_DISABLE_TELEMETRY=1
 ExecStart=%h/.local/bin/uv run --frozen --package ghostd ghostd run

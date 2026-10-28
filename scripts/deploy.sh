@@ -39,8 +39,11 @@ write_dropin() {
 # \`scripts/deploy.sh off\` removes this file.
 [Service]
 WorkingDirectory=%h
+# ADR 0036: no render step, and no secret in the environment: settings.env only. The
+# daemon opens Ghost's vault itself.
 ExecStartPre=
-ExecStartPre=$cur/src/infra/systemd/ghost-render-env.sh
+EnvironmentFile=
+EnvironmentFile=-%h/.config/ghost/settings.env
 Environment=GHOST_INFRA_DIR=$cur/src/infra
 ExecStart=
 ExecStart=$cur/venv/bin/ghostd run
@@ -121,12 +124,12 @@ check() {
   say "checking the build against ~/.config/ghost"
   (
     set -a
-    [[ -r "$HOME/.config/ghost/env" ]] && . "$HOME/.config/ghost/env"
+    [[ -r "$HOME/.config/ghost/settings.env" ]] && . "$HOME/.config/ghost/settings.env"
     set +a
     export GHOST_INFRA_DIR="$dir/src/infra"
     "$dir/venv/bin/ghostd" check
   ) > "$dir/check.log" 2>&1 || { say "ghostd check failed; the service was not touched:"; tail -20 "$dir/check.log"; return 1; }
-  grep -E '^(version:|config ok|apps:|  app |skills:|folder:)' "$dir/check.log" | sed 's/^/  /'
+  grep -E '^(version:|config ok|apps:|  app |skills:|folder:|passwords:)' "$dir/check.log" | sed 's/^/  /'
   grep -iE 'no longer read|not read' "$dir/check.log" | sed 's/^/  /' || true
 }
 

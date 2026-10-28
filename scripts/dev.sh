@@ -19,7 +19,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 UV="${UV:-uv}"
-ENV_FILE="${ENV_FILE:-$HOME/.config/ghost/env}"
+# Settings only: passwords are in Ghost's vault, which the daemon opens itself (ADR 0036).
+ENV_FILE="${ENV_FILE:-$HOME/.config/ghost/settings.env}"
 RUN_DIR="${XDG_RUNTIME_DIR:-/tmp}/ghost"
 RELOAD="$RUN_DIR/dev-reload"
 MINE="$ROOT/.venv/bin/ghostd run$"  # this checkout's daemon, and no other
@@ -46,21 +47,13 @@ preflight() {
   fi
 }
 
-render_env() {
-  [[ "$ENV_FILE" == "$HOME/.config/ghost/env" ]] || return 0  # a hand-written .env
-  if ! infra/systemd/ghost-render-env.sh; then
-    [[ -r "$ENV_FILE" ]] || { say "no $ENV_FILE; run make env"; return 1; }
-    say "could not refresh the secrets; using $ENV_FILE as it is"
-  fi
-}
-
 # Each process gets its own session (setsid), so Ctrl+C reaches only this script, which
 # then stops them in order: the daemon gets TERM like systemd sends, the desktop's whole
 # process group (pnpm, tauri, Vite, the window) gets TERM too.
 DAEMON_PID='' DESKTOP_PID='' STOPPING=0
 
 start_daemon() {
-  setsid bash -c 'set -a; . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$ROOT/.venv/bin/ghostd" \
+  setsid bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$ROOT/.venv/bin/ghostd" \
     </dev/null > >(prefix "ghostd " 36) 2>&1 &
   DAEMON_PID=$!
 }
@@ -126,7 +119,6 @@ case "$mode" in
     ;;
   daemon | all)
     preflight || exit 1
-    render_env || exit 1
     trap 'stop_all' INT TERM
     [[ "$mode" == all ]] && start_desktop
     daemon_loop

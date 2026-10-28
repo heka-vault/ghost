@@ -8,10 +8,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Renders secrets from the operator's vault when ~/.config/heka-vault/ghost.env exists;
-# otherwise a no-op and the daemon reads ~/.config/ghost/env written by the app.
-ExecStartPre=-/usr/share/heka-ghost/ghost-render-env.sh
-EnvironmentFile=-%h/.config/ghost/env
+# settings.env holds no secret. Passwords are in Ghost's own vault, which the daemon opens
+# itself, its key in the user's keyring (ADR 0036).
+EnvironmentFile=-%h/.config/ghost/settings.env
 Environment=PYTHONUNBUFFERED=1
 Environment=HF_HUB_DISABLE_TELEMETRY=1
 Environment=GHOST_INFRA_DIR=/usr/share/heka-ghost
