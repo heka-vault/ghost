@@ -142,6 +142,56 @@ def test_a_write_from_another_process_is_not_lost(tmp_path):
     assert daemon.names() == ["GITHUB_TOKEN", "HF_TOKEN", "OPENROUTER_API_KEY"]
 
 
+def test_two_processes_never_write_over_each_others_changes(tmp_path):
+    """The daemon and a ``ghostd check`` or ``ghostd passwords`` each have the vault open.
+    A deleted password stays deleted and a new one stays, whichever writes last."""
+    ring = MemoryKeyring()
+    env: dict[str, str] = {}
+    daemon = vault(tmp_path, ring, environ=env)
+    daemon.set_many({"GITHUB_TOKEN": TOKEN, "HF_TOKEN": "hf_abcdefghijklmnop"})
+    other = vault(tmp_path, ring)
+    assert other.names() == ["GITHUB_TOKEN", "HF_TOKEN"]
+
+    other.delete("HF_TOKEN")
+    other.set("OPENROUTER_API_KEY", OTHER)
+    # The daemon fills in GITHUB_TOKEN: "last used" is written back over the file as it is
+    # now, not over the daemon's stale copy.
+    assert daemon.value("GITHUB_TOKEN") == TOKEN
+    fresh = vault(tmp_path, ring)
+    assert fresh.names() == ["GITHUB_TOKEN", "OPENROUTER_API_KEY"]
+    assert fresh.info()[0].last_used is not None
+    assert daemon.names() == ["GITHUB_TOKEN", "OPENROUTER_API_KEY"]
+    assert "HF_TOKEN" not in env  # forgotten here too
+
+    # A change made by the daemon keeps the other's, and the other way round.
+    daemon.set("ELEVENLABS_API_KEY", "el-0123456789abcdef")
+    other.delete("GITHUB_TOKEN")
+    assert vault(tmp_path, ring).names() == ["ELEVENLABS_API_KEY", "OPENROUTER_API_KEY"]
+
+
+def test_changes_from_many_threads_and_two_instances_all_land(tmp_path):
+    import threading
+
+    ring = MemoryKeyring()
+    a, b = vault(tmp_path, ring), vault(tmp_path, ring)
+    a.set("SEED_TOKEN", TOKEN)
+
+    def work(v: Passwords, prefix: str) -> None:
+        for i in range(15):
+            v.set(f"{prefix}_{i}_TOKEN", f"value-{prefix}-{i}-0123456789")
+            v.note_used("SEED_TOKEN")
+
+    threads = [threading.Thread(target=work, args=(v, p)) for v, p in ((a, "A"), (b, "B"))]
+    threads += [threading.Thread(target=work, args=(a, "C"))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    names = vault(tmp_path, ring).names()
+    assert len(names) == 46 and "SEED_TOKEN" in names
+    assert (tmp_path / "passwords.vault.lock").exists()
+
+
 def test_use_is_noted_through_the_environ_mapping(tmp_path):
     v = vault(tmp_path)
     v.set("GITHUB_TOKEN", TOKEN)

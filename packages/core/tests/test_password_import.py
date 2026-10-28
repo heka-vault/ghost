@@ -139,3 +139,38 @@ def test_legacy_values_read_both_files(tmp_path):
     values = legacy_values(config)
     assert values["MCP_PROXY_KEY"] == "proxy-key-0123456789"
     assert values["GHOST_APP_MOBBIN_KEY"] == "Bearer mob-0123456789"
+
+
+@pytest.mark.parametrize("bad", ["x" * 16_001, "nul\x00inside-0123456"])
+def test_a_value_that_cant_be_imported_keeps_the_files(tmp_path, bad):
+    """A value the vault refuses may be the only copy: the files holding it stay."""
+    config, vault = world(tmp_path)
+    (config / "apps.env").write_text(
+        'GHOST_APP_MOBBIN_KEY="Bearer mob-0123456789"\n' + f"GHOST_APP_HUGE_KEY={bad}\n"
+    )
+    report = import_passwords(vault, config)
+    assert report.skipped == ["GHOST_APP_HUGE_KEY"]
+    assert "GHOST_APP_MOBBIN_KEY" in report.imported
+    assert report.removed == []
+    assert (config / "env").exists() and (config / "apps.env").exists()
+    assert any("were kept" in n and "GHOST_APP_HUGE_KEY" in n for n in report.notes)
+    assert bad not in repr(report)
+
+    # Added by hand, the next import keeps the vault's copy and removes the files.
+    vault.set("GHOST_APP_HUGE_KEY", "a-good-value-by-hand")
+    again = import_passwords(vault, config)
+    assert again.skipped == [] and "GHOST_APP_HUGE_KEY" in again.kept
+    assert not (config / "env").exists() and not (config / "apps.env").exists()
+
+
+def test_the_read_back_compares_values_not_names(tmp_path, monkeypatch):
+    config, vault = world(tmp_path)
+    real = Passwords.holds
+
+    def wrong(self, name, value):  # the vault came back with another value
+        return False if name == "MCP_PROXY_KEY" else real(self, name, value)
+
+    monkeypatch.setattr(Passwords, "holds", wrong)
+    report = import_passwords(vault, config)
+    assert any("didn't read back" in n for n in report.notes)
+    assert report.removed == [] and (config / "env").exists()

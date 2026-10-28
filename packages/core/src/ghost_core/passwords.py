@@ -26,11 +26,14 @@ A locked keyring is not a failure: ``open`` says ``locked``, and the daemon keep
 from __future__ import annotations
 
 import base64
+import fcntl
 import json
 import os
 import re
 import tempfile
+import threading
 from collections.abc import Iterable, Iterator, Mapping, MutableMapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -286,7 +289,13 @@ class Passwords:
 
     ``environ``: an environment kept in step with the vault (the daemon passes
     ``os.environ``, so Ghost's own settings read the values); None for a tool that only
-    edits the file."""
+    edits the file.
+
+    More than one process may have the vault open (the daemon, ``ghostd check`` during a
+    deploy, ``ghostd passwords``, ``ghostd perf``), and the daemon changes it from more than
+    one thread (the import runs off the event loop). Every change holds the object's lock
+    and an ``flock`` on ``passwords.vault.lock`` beside the file, reads the file again, then
+    changes and saves, so no process writes over what another saved."""
 
     def __init__(
         self,
@@ -300,9 +309,9 @@ class Passwords:
         self._environ = environ
         self._entries: dict[str, _Entry] = {}
         self._key: bytes | None = None
-        self._stamp: tuple[int, int] | None = None
         self.state: State = "locked"
         self.problem: str | None = "not opened yet"
+        self._lock = threading.RLock()
 
     def __repr__(self) -> str:
         return f"Passwords({self.path}, {self.state}, {len(self._entries)} kept)"
@@ -321,22 +330,23 @@ class Passwords:
         """Read the vault. True when it is open; a vault that doesn't exist yet is open and
         empty, and needs the keyring only when the first password is saved. On False,
         ``state`` and ``problem`` say why; nothing was read and nothing is written."""
-        if not self.path.exists():
-            self._entries, self._stamp = {}, None
+        with self._lock:
+            if not self.path.exists():
+                self._entries = {}
+                return self._opened()
+            try:
+                key = self._keyring.load_key()
+                if key is None:
+                    raise VaultBroken("your keyring has no key for this vault")
+                self._entries = self._read(key)
+            except KeyringLocked:
+                return self._closed("locked", "Your keyring is locked")
+            except KeyringUnavailable as e:
+                return self._closed("unavailable", f"Ghost can't reach your keyring: {e}")
+            except VaultBroken as e:
+                return self._closed("broken", str(e))
+            self._key = key
             return self._opened()
-        try:
-            key = self._keyring.load_key()
-            if key is None:
-                raise VaultBroken("your keyring has no key for this vault")
-            self._entries = self._read(key)
-        except KeyringLocked:
-            return self._closed("locked", "Your keyring is locked")
-        except KeyringUnavailable as e:
-            return self._closed("unavailable", f"Ghost can't reach your keyring: {e}")
-        except VaultBroken as e:
-            return self._closed("broken", str(e))
-        self._key = key
-        return self._opened()
 
     def unlock(self) -> bool:
         """Ask the keyring to unlock, then open. True when the vault is open."""
@@ -359,15 +369,7 @@ class Passwords:
         self.state, self.problem = state, problem
         return False
 
-    def _file_stamp(self) -> tuple[int, int] | None:
-        try:
-            st = self.path.stat()
-        except FileNotFoundError:
-            return None
-        return (st.st_mtime_ns, st.st_size)
-
     def _read(self, key: bytes) -> dict[str, _Entry]:
-        stamp = self._file_stamp()
         payload = unseal(key, self.path.read_bytes())
         out: dict[str, _Entry] = {}
         for name, raw in (payload.get("passwords") or {}).items():
@@ -382,7 +384,6 @@ class Passwords:
                 last_used=used,
                 saved_use=used,
             )
-        self._stamp = stamp
         return out
 
     # --- reading -----------------------------------------------------------------------
@@ -394,13 +395,24 @@ class Passwords:
         return len(self._entries)
 
     def names(self) -> list[str]:
-        return sorted(self._entries)
+        with self._lock:
+            return sorted(self._entries)
 
     def info(self) -> list[PasswordMeta]:
-        return [
-            PasswordMeta(n, e.added, e.updated, e.last_used)
-            for n, e in sorted(self._entries.items())
-        ]
+        with self._lock:
+            return [
+                PasswordMeta(n, e.added, e.updated, e.last_used)
+                for n, e in sorted(self._entries.items())
+            ]
+
+    def holds(self, name: str, value: str) -> bool:
+        """Whether the vault holds exactly ``value`` under ``name``: a check (the import's
+        read-back), not a use, and never the value itself."""
+        import hmac
+
+        with self._lock:
+            e = self._entries.get(name)
+        return e is not None and hmac.compare_digest(e.value.encode(), value.encode())
 
     def value(self, name: str) -> str | None:
         """The value, at its point of use: an app's header or environment, a webhook's
@@ -412,19 +424,24 @@ class Passwords:
         return e.value
 
     def note_used(self, *names: str) -> None:
-        """Ghost filled these in just now. Kept for "last used"; written back now and then."""
+        """Ghost filled these in just now. Kept for "last used"; written back now and then,
+        over the file as it is now (another process may have changed it)."""
         now = _now()
         due = False
-        for name in names:
-            e = self._entries.get(name)
-            if e is None:
-                continue
-            e.last_used = now
-            if e.saved_use is None or now - e.saved_use >= LAST_USED_EVERY:
-                due = True
-        if due and self.is_open and self._key is not None:
+        with self._lock:
+            for name in names:
+                e = self._entries.get(name)
+                if e is None:
+                    continue
+                e.last_used = now
+                if e.saved_use is None or now - e.saved_use >= LAST_USED_EVERY:
+                    due = True
+            if not (due and self.is_open and self._key is not None):
+                return
             try:
-                self._save()
+                with self._file_lock():
+                    self._refresh()
+                    self._save()
             except Exception as e:  # noqa: BLE001 - "last used" is never worth a failure
                 logger.debug(f"passwords: last used not saved ({type(e).__name__})")
 
@@ -443,43 +460,60 @@ class Passwords:
         for name, value in values.items():
             check_name(name)
             check_value(value)
-        self._require_open()
-        self._refresh()
-        now = _now()
-        for name, value in values.items():
-            e = self._entries.get(name)
-            if e is None:
-                self._entries[name] = _Entry(value=value, added=now, updated=now)
-            elif e.value != value:
-                e.value, e.updated = value, now
-        self._save()
-        if self._environ is not None:
-            self._environ.update(values)
+        with self._lock:
+            self._require_open()
+            with self._file_lock():
+                self._refresh()
+                now = _now()
+                for name, value in values.items():
+                    e = self._entries.get(name)
+                    if e is None:
+                        self._entries[name] = _Entry(value=value, added=now, updated=now)
+                    elif e.value != value:
+                        e.value, e.updated = value, now
+                self._save()
+            if self._environ is not None:
+                self._environ.update(values)
 
     def delete(self, *names: str) -> list[str]:
         """Forget passwords. Returns the names that were there."""
-        self._require_open()
-        self._refresh()
-        gone = [n for n in names if n in self._entries]
-        if not gone:
-            return []
-        for n in gone:
-            del self._entries[n]
-        self._save()
-        if self._environ is not None:
-            for n in gone:
-                self._environ.pop(n, None)
-        return gone
+        with self._lock:
+            self._require_open()
+            with self._file_lock():
+                self._refresh()
+                gone = [n for n in names if n in self._entries]
+                if not gone:
+                    return []
+                for n in gone:
+                    del self._entries[n]
+                self._save()
+            if self._environ is not None:
+                for n in gone:
+                    self._environ.pop(n, None)
+            return gone
 
     def _require_open(self) -> None:
         if not self.is_open:
             raise VaultClosed(self.problem or "the vault isn't open")
 
+    @contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        """An exclusive ``flock`` on ``<vault>.lock``, held across a read, a change and a
+        save, so two processes' changes don't write over each other."""
+        lock = self.path.with_name(self.path.name + ".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)  # closing releases the lock
+
     def _refresh(self) -> None:
-        """Another process (``ghostd passwords`` while the daemon runs) may have written the
-        file since it was read: read it again, keeping the uses noted here."""
-        stamp = self._file_stamp()
-        if stamp is None or stamp == self._stamp:
+        """Read the file again before a change (under ``_file_lock``): another process may
+        have written it since it was read here. The uses noted here are kept; a password
+        another process forgot is forgotten here too."""
+        if not self.path.exists():
             return
         try:
             key = self._key or self._keyring.load_key()
@@ -499,6 +533,9 @@ class Passwords:
                 and (e.last_used is None or mine.last_used > e.last_used)
             ):
                 e.last_used = mine.last_used
+        if self._environ is not None:
+            for name in set(self._entries) - set(fresh):
+                self._environ.pop(name, None)
         self._entries = fresh
 
     def _key_for_write(self) -> bytes:
@@ -540,7 +577,6 @@ class Passwords:
             raise
         for e in self._entries.values():
             e.saved_use = e.last_used
-        self._stamp = self._file_stamp()
         self._publish()
 
     # --- what the rest of the process knows --------------------------------------------
