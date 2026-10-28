@@ -6,6 +6,7 @@
 //! either the change happens now (`announce`/`quiet`) or it waits for a spoken yes
 //! observed in the pipeline's own transcript (`confirm`) -> the steps, the audit log.
 
+pub mod catalog;
 pub mod codec;
 pub mod confirmation;
 pub mod conversations;
@@ -17,6 +18,7 @@ pub mod levels;
 pub mod models;
 pub mod permissions;
 pub mod policy;
+pub mod provenance;
 pub mod redact;
 pub mod request;
 pub mod source;
