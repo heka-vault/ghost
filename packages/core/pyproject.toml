@@ -1,6 +1,6 @@
 [project]
 name = "ghost-core"
-version = "0.1.0"
+version = "2026.10.0"
 description = "Ghost core: the write gate, policy, audit, lines and MCP servers"
 requires-python = ">=3.12,<3.13"
 dependencies = [

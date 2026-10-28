@@ -1,6 +1,6 @@
 [project]
 name = "ghost-api"
-version = "0.1.0"
+version = "2026.10.0"
 description = "Ghost control API: FastAPI on a Unix socket, the contract the desktop and mobile apps use"
 requires-python = ">=3.12,<3.13"
 dependencies = [

@@ -38,7 +38,7 @@ endef
 .PHONY: help setup sync env echo-cancel echo-cancel-off \
         dev daemon desktop desktop-web reload start stop restart \
         wake say status check devices latency restore-volumes \
-        lint fmt test typecheck ci api-schema \
+        lint fmt test typecheck ci api-schema version release \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
         perf perf-micro perf-llm record wake-eval record-takes wake-takes-eval \
         android android-apk android-install mobile-web \
@@ -162,6 +162,16 @@ typecheck: ## the TypeScript apps and packages
 
 api-schema: ## regenerate packages/api/openapi.json from the pydantic models (then pnpm gen for the TS client)
 	$(UV) run python -m ghost_api.export > packages/api/openapi.json
+
+##@ Versions and releases (docs/releasing.md; a version is YYYY.M.N and its bump is a PR)
+
+version: ## the version and the next release's; V=2026.10.1 (or V=next) writes it to every copy
+	@if [[ -z "$(V)" ]]; then python3 scripts/version.py; exit; fi; \
+	if [[ "$(V)" == next ]]; then git fetch --quiet --tags origin || echo "couldn't fetch tags; counting the local ones"; fi; \
+	python3 scripts/version.py set "$(V)"
+
+release: ## on main once the version PR has merged: tag HEAD vYYYY.M.N after checks; pushes nothing
+	@python3 scripts/version.py release
 
 ##@ The always-on Ghost (the ghostd user service)
 

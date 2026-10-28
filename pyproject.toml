@@ -1,6 +1,6 @@
 [project]
 name = "ghost"
-version = "0.1.0"
+version = "2026.10.0"
 description = "Ghost: a voice-first assistant that triages GitHub issues on one Linux workstation"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

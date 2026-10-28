@@ -1,6 +1,6 @@
 {
   "name": "@ghost/client-ts",
-  "version": "0.1.0",
+  "version": "2026.10.0",
   "private": true,
   "description": "Typed client for the Ghost control API, generated from packages/api/openapi.json",
   "type": "module",

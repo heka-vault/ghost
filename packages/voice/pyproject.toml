@@ -1,6 +1,6 @@
 [project]
 name = "ghost-voice"
-version = "0.1.0"
+version = "2026.10.0"
 description = "Pipecat pipeline factory: VAD, turn detection, Parakeet STT, Claude, Kokoro TTS"
 requires-python = ">=3.12,<3.13"
 dependencies = [

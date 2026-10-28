@@ -1,6 +1,6 @@
 [package]
 name = "heka-ghost-desktop"
-version = "0.1.0"
+version = "2026.10.0"
 description = "Ghost desktop: tray, status, chat, policy, audit"
 authors = ["Eric Polerecky"]
 license = "MIT"

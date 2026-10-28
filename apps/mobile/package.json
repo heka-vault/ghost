@@ -1,6 +1,6 @@
 {
   "name": "@ghost/mobile",
-  "version": "0.1.0",
+  "version": "2026.10.0",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {

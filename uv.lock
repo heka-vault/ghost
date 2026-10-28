@@ -497,7 +497,7 @@ wheels = [
 
 [[package]]
 name = "ghost"
-version = "0.1.0"
+version = "2026.10.0"
 source = { virtual = "." }
 dependencies = [
     { name = "ghost-api" },
@@ -534,7 +534,7 @@ dev = [
 
 [[package]]
 name = "ghost-api"
-version = "0.1.0"
+version = "2026.10.0"
 source = { editable = "packages/api" }
 dependencies = [
     { name = "fastapi" },
@@ -559,7 +559,7 @@ requires-dist = [
 
 [[package]]
 name = "ghost-core"
-version = "0.1.0"
+version = "2026.10.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "httpx" },
@@ -582,7 +582,7 @@ requires-dist = [
 
 [[package]]
 name = "ghost-voice"
-version = "0.1.0"
+version = "2026.10.0"
 source = { editable = "packages/voice" }
 dependencies = [
     { name = "ghost-core" },
@@ -613,7 +613,7 @@ requires-dist = [
 
 [[package]]
 name = "ghostd"
-version = "0.1.0"
+version = "2026.10.0"
 source = { editable = "apps/ghostd" }
 dependencies = [
     { name = "aiortc" },
