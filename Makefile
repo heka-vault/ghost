@@ -7,9 +7,11 @@
 #   make reload    in another terminal after a Python change: restarts the daemon, not the app
 #   make say TEXT="what needs me?"   types a turn to it; or say "Hey Ghost"
 #
-# Your always-on Ghost is the ghostd user service, running a fixed build of a commit that
-# `make deploy` made. Only one Ghost may have the microphone, so `make dev` stops the service
-# and `make service-on` starts it again.
+# Ghost ships as one desktop bundle with the daemon inside (ADR 0038): `make bundle` makes
+# the .deb and the AppImage, and the installed app runs ghostd while you are logged in. The
+# ghostd user service is the headless mode, running a fixed build of a commit that `make
+# deploy` made. Only one Ghost may have the microphone, so `make dev` stops the service and
+# `make service-on` starts it again; the app adopts a daemon already on the socket.
 #
 # Passwords never live in this repo or in a plain file: they are in Ghost's own vault, its key
 # in your keyring, and the daemon opens it itself (ADR 0036; `make passwords`). The environment
@@ -25,8 +27,9 @@ POLICY := $(HOME)/.config/ghost/policy.toml
 UV ?= uv
 export ENV_FILE UV
 
-# This checkout's daemon and no other: the service's ghostd runs from a build elsewhere.
-DEV_GHOSTD := $(CURDIR)/.venv/bin/ghostd run$$
+# This checkout's daemon and no other (Python in .venv, or the Rust one in target/debug):
+# the service's ghostd runs from a build elsewhere.
+DEV_GHOSTD := $(CURDIR)/(.venv/bin|target/debug)/ghostd run$$
 
 define load_env
 set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a;
@@ -38,13 +41,13 @@ if pgrep -f '$(DEV_GHOSTD)' >/dev/null; then \
 endef
 
 .PHONY: help setup sync env passwords passwords-import echo-cancel echo-cancel-off \
-        dev daemon desktop desktop-web reload start stop restart \
+        dev dev-rust daemon desktop desktop-web reload start stop restart \
         wake say status check devices latency restore-volumes \
         lint fmt test typecheck ci api-schema version release \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
         perf perf-micro perf-llm record wake-eval record-takes wake-takes-eval \
         android android-apk android-install mobile-web \
-        build-image deb deb-test
+        bundle sidecars build-image deb deb-test
 
 help: ## list the targets
 	@awk 'BEGIN {FS = ":.*## "} /^##@ / {printf "\n%s\n", substr($$0, 5)} /^[a-z][a-z-]*:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -99,6 +102,9 @@ echo-cancel-off: ## stop and remove the echo-cancel service
 
 dev: ## the daemon and the desktop app, logs here; stops the service first; Ctrl+C stops both
 	@scripts/dev.sh
+
+dev-rust: ## the same with the Rust daemon (cargo build -p ghostd, target/debug/ghostd) on the same socket
+	@GHOST_DAEMON_IMPL=rust scripts/dev.sh
 
 daemon: ## the daemon only, logs here (GHOST_DEBUG_AUDIO=1 make daemon to hear what it hears); Ctrl+C stops it
 	@scripts/dev.sh daemon
@@ -184,8 +190,9 @@ release: ## on main once the version PR has merged: tag HEAD vYYYY.M.N after che
 
 # The service runs a fixed build of a commit, never the working tree (scripts/deploy.sh):
 # ~/.local/share/ghost/runtime/<commit>/, checked before the restart, rolled back by a link.
-deploy: ## build HEAD, check it against ~/.config/ghost, switch the service to it and restart it
-	@$(no_dev_daemon) scripts/deploy.sh deploy
+# A build carries both daemons until W10 of #39 removes the Python one; IMPL picks.
+deploy: ## build HEAD (Python and Rust), check it, switch the service to it and restart: make deploy [IMPL=rust|python]
+	@$(no_dev_daemon) GHOST_DAEMON_IMPL=$(IMPL) scripts/deploy.sh deploy
 
 deploy-rollback: ## switch the service back to the build that ran before and restart it
 	@$(no_dev_daemon) scripts/deploy.sh rollback
@@ -272,7 +279,15 @@ android-install: android-apk ## build the standalone APK and install it on the U
 mobile-web: ## the phone app in a browser (Expo web), for layout work without a phone
 	@cd $(MOBILE) && npx expo start --web
 
-##@ Packages (.deb, for other machines; this workstation runs the checkout)
+##@ The bundle (ADR 0038: one .deb and one AppImage, the desktop app with ghostd inside)
+
+bundle: ## tauri build: the Rust daemon and the two app binaries in release, then the .deb and the AppImage under target/release/bundle/
+	@pnpm tauri build
+
+sidecars: ## only the bundle's binaries, into apps/desktop/src-tauri/binaries/ (tauri build does this itself)
+	@scripts/sidecars.sh
+
+##@ Packages of the Python daemon (heka-ghostd; gone with W10 of #39, the bundle replaces them)
 
 build-image: ## build the Docker image that produces the .debs (Tauri, Rust, uv)
 	docker build -t heka-ghost-build -f packaging/Dockerfile.build .

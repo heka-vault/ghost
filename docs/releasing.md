@@ -56,13 +56,49 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
    ```
 
    The tag starts `.github/workflows/release.yml`. It checks the tag names the version the
-   files say, builds the .debs, installs the daemon's into a clean Ubuntu 26.04 and runs
-   `ghostd check`, and attaches the packages to a GitHub release.
+   files say, builds the bundle (below), installs the .deb into a clean Ubuntu 26.04 and
+   runs `ghostd version`, and attaches the .deb and the AppImage to a GitHub release.
 
 If the month turns between the merge and the tag, `make release` refuses: the merged
 `2026.10.x` is no longer this month's. Bump again with `make version V=next` in a PR.
 
 Nothing tags or pushes on its own: no workflow bumps a version or makes a tag.
+
+## The bundle
+
+Ghost ships as one desktop bundle with the daemon inside (ADR 0038): `tauri build` makes a
+.deb and an AppImage that carry the app and `ghostd`, built from the same Cargo workspace
+(ADR 0039). `make bundle` is `pnpm tauri build`; CI builds it on every push and the release
+workflow attaches it.
+
+What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
+
+1. `scripts/sidecars.sh`: `cargo build --release -p ghostd -p ghost-core --bins`, then the
+   three binaries the bundle carries, `ghostd`, `ghost-mock-github` and `ghost-scripts`
+   (the two apps `apps.json` names), copied to `apps/desktop/src-tauri/binaries/<name>-<target
+   triple>`, where Tauri's bundler looks for `bundle.externalBin`. The folder is not committed.
+2. The frontend (`pnpm --filter @ghost/desktop build`).
+3. The shell (`cargo build --release` of `heka-ghost-desktop`), then the bundles under
+   `target/release/bundle/deb/` and `target/release/bundle/appimage/`. The .deb installs
+   the four binaries in `/usr/bin`; the AppImage carries them in its `usr/bin`.
+
+The shell's build script hides `externalBin` from `tauri-build` (the sidecars are the
+workspace's own binaries, which `tauri-build` would otherwise copy over cargo's fresh output
+in `target/` and demand at every `cargo build`), so a plain `cargo build`, `clippy` or
+`nextest` never needs `binaries/`; only the bundler reads it.
+
+The installed app supervises the daemon (ADR 0038): at launch it adopts a daemon already
+answering on the control socket, else runs `ghostd restore-volumes` and starts `ghostd run`
+in its own process group with `~/.config/ghost/settings.env` (non-secret settings only; a
+name in it that looks like a password is left out and named in the app's log), its output
+through `systemd-cat -t ghostd` (so `journalctl --user -t ghostd` keeps working) or, with
+no journal, `~/.local/state/ghost/ghostd.log` turned over at 10 MB. It starts the daemon
+again with backoff (5 s doubling to 60 s) when it exits and says "Ghost restarted". Quit in
+the tray sends TERM to the group, waits up to 20 s, then KILL, then `restore-volumes`; the
+daemon also stops on its own when the app is gone (`GHOST_PARENT_PID`). The app starts at
+login, in the tray with its window hidden (`--hidden`), off from the tray's "Start at login"
+(`~/.local/state/ghost/autostart`), and a second launch opens the first one's window. Under `make dev` the app only adopts (`GHOST_SHELL_ADOPT_ONLY=1`), since
+`scripts/dev.sh` runs the daemon; `make dev-rust` runs the Rust one the same way.
 
 ## What each build says it is
 
@@ -73,7 +109,7 @@ The daemon reports its version and its build in the status the control API retur
 |---|---|---|
 | `dev` | Ghost from a checkout (`make dev`, `make daemon`, `uv run ghostd`) | The checkout's `HEAD`, and `dirty` when tracked files had uncommitted changes as the daemon started |
 | `deploy` | A `make deploy` runtime in `~/.local/share/ghost/runtime/<commit>/` | `scripts/deploy.sh` writes `venv/ghost-build.json` in the build |
-| `release` | The `heka-ghostd` package | `packaging/build-debs.sh` writes `/opt/ghost/venv/ghost-build.json` |
+| `release` | The bundle (the .deb or the AppImage) | the Rust daemon, once it reports its build (#39) |
 
 A recorded build is `ghost-build.json` in the venv's root (Python's `sys.prefix`); a venv
 without one is a checkout's (`ghostd.build`). The daemon reads it once when it starts: a
@@ -103,14 +139,28 @@ The restart Settings asks for follows the build: `systemctl --user restart ghost
 deploy or a release; for a `dev` daemon, the make target that started it, which it reports as
 `build.launcher` from `GHOST_LAUNCHER` (restarting the service would start a second Ghost
 against the microphone): `make reload` under `make dev` or `make daemon` (`make-dev`), `make
-restart` under `make start` (`make-start`). A checkout started any other way (a unit running
-it, `uv run`) has no launcher, and Settings says to restart Ghost the way it was started.
+restart` under `make start` (`make-start`). The desktop app sets `GHOST_LAUNCHER=desktop` on
+the daemon it runs (ADR 0038): that daemon restarts with the app, Quit and open. A checkout
+started any other way (a unit running it, `uv run`) has no launcher, and Settings says to
+restart Ghost the way it was started.
 
 In the mock (`?mock=passive`), `&build=dev|dirty|start|checkout|deploy|release|behind` sets
 what the daemon says it is: `dev`, `dirty`, `start` and `checkout` are at this window's own
 commit (`start` is `make start`'s, `checkout` has no launcher); `deploy` and `release` are
 this window's version at another commit, so the notice shows the builds differ; `behind` is
 last month's deploy, so the notice shows the versions differ.
+
+## Which daemon `make deploy` runs
+
+Until W10 of #39 removes the Python daemon, a `make deploy` build carries both: the venv
+(`venv/bin/ghostd`) and the Rust daemon (`cargo build --release -p ghostd` from the archived
+tree, as `bin/ghostd`; the target dir `~/.local/share/ghost/runtime/.cargo-target` is shared
+across builds so a deploy only compiles what changed). `make deploy IMPL=rust` or
+`IMPL=python` says which one the service runs; a build records the choice in `daemon-impl`
+(python when it never said), and the drop-in carries it as `Environment=GHOST_DAEMON_IMPL=`
+with the matching `ExecStart` and `ExecStopPost`. A rollback runs what the earlier build
+recorded. `ghostd check` is the Python daemon's until the Rust one has it; a Rust deploy
+prints the daemon's version from the build instead.
 
 ## Rolling back across the vault
 
