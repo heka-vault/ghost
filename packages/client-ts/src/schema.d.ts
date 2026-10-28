@@ -1271,6 +1271,7 @@ export interface components {
             featured: boolean;
             /** Icon */
             icon?: string | null;
+            maker?: components["schemas"]["CatalogMaker"] | null;
             /** Name */
             name: string;
             /**
@@ -1278,22 +1279,51 @@ export interface components {
              * @default []
              */
             options: components["schemas"]["CatalogOption"][];
+            /**
+             * Others
+             * @default []
+             */
+            others: components["schemas"]["CatalogEntryView"][];
+            /** Product */
+            product?: string | null;
+            /** Product Maker */
+            product_maker?: string | null;
+            publisher?: components["schemas"]["CatalogPublisher"] | null;
             /** Repository */
             repository?: string | null;
             /** Suggested Name */
             suggested_name: string;
             /** Title */
             title: string;
+            /** Updated At */
+            updated_at?: string | null;
             /** Version */
             version: string;
             /** Website */
             website?: string | null;
         };
         /**
+         * CatalogMaker
+         * @description The entry is the product maker's own, and what agreed: the publisher's name is the
+         *     product's (``publisher``) or Ghost's own list says so (``listed``); it connects to the
+         *     maker's host (``remote``); its repository is theirs; its website is theirs.
+         */
+        CatalogMaker: {
+            /** Evidence */
+            evidence: ("publisher" | "listed" | "remote" | "repository" | "website")[];
+            /** Product */
+            product: string;
+        };
+        /**
          * CatalogOption
-         * @description One way to connect: sign in, an API key, or run on this computer.
+         * @description One way to connect: sign in, an API key, or run on this computer. Where it runs:
+         *     a remote's ``host``, and whose host that is; a package's ``registry`` and name.
          */
         CatalogOption: {
+            /** Host */
+            host?: string | null;
+            /** Host Owner */
+            host_owner?: ("maker" | "publisher" | "other") | null;
             /** Id */
             id: string;
             /**
@@ -1303,6 +1333,10 @@ export interface components {
             kind: "sign_in" | "key" | "local";
             /** Label */
             label: string;
+            /** Package */
+            package?: string | null;
+            /** Registry */
+            registry?: ("npm" | "pypi" | "oci") | null;
             /**
              * Settings
              * @default []
@@ -1324,6 +1358,21 @@ export interface components {
             refreshing: boolean;
             /** Total */
             total: number;
+        };
+        /**
+         * CatalogPublisher
+         * @description Who published an entry, as the registry checked it: the GitHub account it signed in
+         *     with (``io.github.PostHog/…``), or the domain it proved it owns (``com.mcparmory/…``).
+         *     Who published it, not whether it is safe.
+         */
+        CatalogPublisher: {
+            /** Name */
+            name: string;
+            /**
+             * Verified
+             * @enum {string}
+             */
+            verified: "github" | "domain";
         };
         /** CatalogSetting */
         CatalogSetting: {
@@ -2644,8 +2693,10 @@ export type SchemaAuditEventView = components['schemas']['AuditEventView'];
 export type SchemaAuditPage = components['schemas']['AuditPage'];
 export type SchemaBuild = components['schemas']['Build'];
 export type SchemaCatalogEntryView = components['schemas']['CatalogEntryView'];
+export type SchemaCatalogMaker = components['schemas']['CatalogMaker'];
 export type SchemaCatalogOption = components['schemas']['CatalogOption'];
 export type SchemaCatalogPage = components['schemas']['CatalogPage'];
+export type SchemaCatalogPublisher = components['schemas']['CatalogPublisher'];
 export type SchemaCatalogSetting = components['schemas']['CatalogSetting'];
 export type SchemaCompactionView = components['schemas']['CompactionView'];
 export type SchemaConversationCreate = components['schemas']['ConversationCreate'];

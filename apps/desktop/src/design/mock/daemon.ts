@@ -720,6 +720,7 @@ export class MockDaemon {
       repository: e.repository ?? null,
       suggested_name: this.freeName(app),
       connected: this.apps.filter((a) => a.view.catalog === e.name).map((a) => a.view.name),
+      others: [],
     };
   }
   private async catalogPage(search: string, offset: number, limit: number): Promise<CatalogPage> {
@@ -728,11 +729,20 @@ export class MockDaemon {
     if (opt === "slow") await sleep(Math.max(0, this.bootedAt + 4000 - Date.now()));
     if (opt === "empty" && Date.now() - this.bootedAt < 8000) return { entries: [], total: 0, fetched_at: null, refreshing: true, problem: null };
     const q = search.trim().toLowerCase();
-    const all = q
-      ? this.catalog.filter((c) => [c.title, c.description, c.name].some((x) => x.toLowerCase().includes(q)))
+    // As the daemon ranks (#37): the maker's own app whose title matches first, then first-party
+    // ones; "io.github." in a name doesn't count. Another publisher's app for a product whose
+    // maker's own is among the results folds under it.
+    const first = (c: CatalogSeed) => (c.maker && c.title.toLowerCase().includes(q) ? 0 : 1);
+    const ranked = q
+      ? this.catalog
+          .filter((c) => [c.title, c.description, c.name.replace(/^io\.github\./i, "")].some((x) => x.toLowerCase().includes(q)))
+          .sort((a, b) => first(a) - first(b) || Number(b.featured) - Number(a.featured))
       : [...this.catalog].sort((a, b) => Number(b.featured) - Number(a.featured));
+    const leads = new Set(ranked.filter((c) => c.maker).map((c) => c.name));
+    const folded = ranked.filter((c) => !c.maker && c.product_maker && leads.has(c.product_maker));
+    const all = ranked.filter((c) => !folded.includes(c));
     return {
-      entries: all.slice(offset, offset + limit).map((e) => this.entryView(e)),
+      entries: all.slice(offset, offset + limit).map((e) => ({ ...this.entryView(e), others: folded.filter((f) => f.product_maker === e.name).map((f) => this.entryView(f)) })),
       total: all.length,
       fetched_at: new Date(Date.now() - (opt === "problem" ? 3 * 86400000 : 20 * 60000)).toISOString(),
       refreshing: false,

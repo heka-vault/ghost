@@ -5,8 +5,8 @@
  */
 import type { AppView, CatalogEntryView, CatalogPage } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { Blocks, CloudOff, ExternalLink, MoreHorizontal, Plus, RotateCw, Search, SearchX, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { BadgeCheck, Blocks, ChevronDown, CloudOff, ExternalLink, MoreHorizontal, Plus, RotateCw, Search, SearchX, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { hrefFor } from "../../app/router";
 import { useDesign } from "../../design/context";
@@ -16,6 +16,7 @@ import { AddOwnDialog } from "./AddOwnDialog";
 import { AppIcon } from "./AppIcon";
 import { ConnectDialog } from "./ConnectDialog";
 import { sentence, summaryWords } from "./model";
+import { moreWords, placesOf, publisherParts } from "./provenance";
 
 const PAGE = 12;
 
@@ -50,6 +51,15 @@ export function AppsIndex() {
   }, [load, appsVersion]);
 
   const actions = useAppActions({ onChanged: () => void load() });
+
+  /** From another publisher's app to the maker's own (#37): the dialog shows that one instead. */
+  const openEntry = async (name: string) => {
+    try {
+      setConnecting(await client.catalogEntry(name));
+    } catch {
+      /* the dialog stays on the app it shows */
+    }
+  };
 
   const afterConnect = () => {
     void load();
@@ -110,7 +120,7 @@ export function AppsIndex() {
 
       <Catalog key={catalogVersion} fail={fail} onPick={setConnecting} onAddOwn={() => setAddingOwn(true)} />
 
-      {connecting && <ConnectDialog entry={connecting} onClose={() => setConnecting(null)} onConnected={afterConnect} />}
+      {connecting && <ConnectDialog key={connecting.name} entry={connecting} onClose={() => setConnecting(null)} onConnected={afterConnect} onOpen={(name) => void openEntry(name)} />}
       <AddOwnDialog open={addingOwn} onClose={() => setAddingOwn(false)} onConnected={afterConnect} />
       {actions.dialog}
     </Page>
@@ -349,9 +359,7 @@ function Catalog({ fail, onPick, onAddOwn }: { fail: string | null; onPick: (e: 
         <>
           <ul className={loading ? "apps-grid is-stale" : "apps-grid"} aria-label={search ? `Apps matching ${search}` : "Apps to connect"}>
             {entries.map((e) => (
-              <li key={e.name}>
-                <CatalogCard entry={e} onPick={() => onPick(e)} />
-              </li>
+              <CatalogGroup key={e.name} entry={e} onPick={onPick} />
             ))}
           </ul>
           {page && entries.length < page.total && (
@@ -379,27 +387,119 @@ function Catalog({ fail, onPick, onAddOwn }: { fail: string | null; onPick: (e: 
   );
 }
 
-/** One app in the catalog. Its title and description are the registry's text: plain text, never markup. */
+/**
+ * A result: the app, and when it is the maker's own, other publishers' apps for the same
+ * product folded beneath it (#37). Opened, they take the next row whole, so the order on screen
+ * is the order Tab follows.
+ */
+function CatalogGroup({ entry: e, onPick }: { entry: CatalogEntryView; onPick: (e: CatalogEntryView) => void }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  if (!e.others.length) {
+    return (
+      <li>
+        <CatalogCard entry={e} onPick={() => onPick(e)} />
+      </li>
+    );
+  }
+  const product = e.maker?.product ?? e.title;
+  return (
+    <>
+      <li className="apps-group">
+        <CatalogCard entry={e} onPick={() => onPick(e)} />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="apps-group__more"
+          aria-expanded={open}
+          aria-controls={listId}
+          trailingIcon={<ChevronDown className={open ? "apps-chevron is-open" : "apps-chevron"} />}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {moreWords(e.others.length)}
+        </Button>
+      </li>
+      {open && (
+        <li className="apps-group__others" id={listId}>
+          <p className="apps-group__head t-small t-2">
+            <span data-user-content>{product}</span> apps from other publishers. None of them is {product}’s own: each card says who published it and where it runs.
+          </p>
+          <ul className="apps-grid apps-grid--nested" aria-label={`${product} apps from other publishers`}>
+            {e.others.map((o) => (
+              <li key={o.name}>
+                <CatalogCard entry={o} onPick={() => onPick(o)} />
+              </li>
+            ))}
+          </ul>
+        </li>
+      )}
+    </>
+  );
+}
+
+/**
+ * One app in the catalog: who published it, whether it is the product maker's own, and where it
+ * runs (#37). Its title, description and names are the registry's text: plain text, never markup.
+ */
 function CatalogCard({ entry: e, onPick }: { entry: CatalogEntryView; onPick: () => void }) {
   const kinds = [...new Set(e.options.map((o) => o.kind))];
-  const how = kinds.map((k) => ({ sign_in: "Sign in", key: "API key", local: "Runs here" })[k]).join(" · ");
+  // The first place it runs; a remote's ways in before its host, then "or runs here" when it has a package too.
+  const remoteHow = kinds.filter((k) => k !== "local").map((k) => ({ sign_in: "Sign in", key: "API key" })[k as "sign_in" | "key"]);
+  const runsHere = kinds.includes("local");
+  const place = placesOf(e)[0];
+  const pub = e.publisher ? publisherParts(e.publisher) : null;
+  const label = [
+    e.title,
+    e.maker ? `from ${e.maker.product}` : "",
+    pub ? `by ${pub.name}, ${pub.proof}` : "",
+    e.connected.length ? "connected" : "",
+    place ? (place.local ? `runs on this computer, ${place.where}` : `runs on ${place.where}${place.caution ? `, ${place.caution}` : ""}`) : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
-    <button type="button" className="apps-card" onClick={onPick} aria-label={`${e.title}${e.connected.length ? ", connected" : ""}. ${e.description}`}>
+    <button type="button" className="apps-card" onClick={onPick} aria-label={`${label}. ${e.description}`}>
       <span className="apps-card__head">
         <AppIcon title={e.title} icon={e.icon} />
-        {e.connected.length > 0 && (
-          <Badge size="sm" tone="ok" dot>
-            Connected
-          </Badge>
-        )}
+        <span className="apps-card__badges">
+          {e.maker && (
+            <Badge size="sm" tone="info" icon={<BadgeCheck aria-hidden />}>
+              {/* One text node: the badge spaces its children apart. */}
+              <span data-user-content>{`From ${e.maker.product}`}</span>
+            </Badge>
+          )}
+          {e.connected.length > 0 && (
+            <Badge size="sm" tone="ok" dot>
+              Connected
+            </Badge>
+          )}
+        </span>
       </span>
       <span className="apps-card__title" data-user-content>
         {e.title}
       </span>
+      {pub && (
+        <span className="apps-card__by">
+          by <span data-user-content>{pub.name}</span> · {pub.proof}
+        </span>
+      )}
       <span className="apps-card__desc" data-user-content>
         {e.description}
       </span>
-      <span className="apps-card__meta">{how}</span>
+      <span className="apps-card__meta">
+        {place?.local ? (
+          <>
+            {[...remoteHow, "Runs here"].join(" · ")} · <span data-user-content>{place.where}</span>
+          </>
+        ) : place ? (
+          <>
+            {remoteHow.map((h) => `${h} · `).join("")}
+            <span data-user-content>{place.where}</span>
+            {place.caution && <span className="apps-card__caution">, {place.caution}</span>}
+            {runsHere && " · or runs here"}
+          </>
+        ) : null}
+      </span>
     </button>
   );
 }

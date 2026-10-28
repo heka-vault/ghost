@@ -42,6 +42,7 @@ from ghost_core.apps import (
     app_name_problem,
     secret_name,
 )
+from ghost_core.provenance import Maker, Publisher, key, maker_of, publisher_of, url_host
 
 REGISTRY = "https://registry.modelcontextprotocol.io"
 MAX_AGE_SECS = 3600.0  # the registry's advice: copy about once an hour
@@ -104,6 +105,13 @@ class ConnectOption:
     package: str | None = None  # the identifier with its version
     runtime_args: tuple[str, ...] = ()  # templates for the runner, before the package
     package_args: tuple[str, ...] = ()  # templates for the package, after it
+    registry: Literal["npm", "pypi", "oci"] | None = None  # where the package comes from
+    identifier: str | None = None  # the package's name there: "posthog-mcp"
+
+    @property
+    def host(self) -> str | None:
+        """The host a remote connects to: where what Ghost sends it goes."""
+        return url_host(self.url)
 
 
 @dataclass(frozen=True)
@@ -117,6 +125,15 @@ class CatalogEntry:
     icon: str | None = None
     options: tuple[ConnectOption, ...] = ()
     featured: bool = False
+    updated: str | None = None  # RFC 3339, when the registry last saw this version change
+    publisher: Publisher | None = None  # from the name's namespace, as the registry checked it
+    maker: Maker | None = None  # set when it is the product maker's own (ghost_core.provenance)
+
+    @property
+    def product_key(self) -> str:
+        """What the title says the product is, for finding its maker: "Posthog" is
+        ``posthog``."""
+        return key(self.title)
 
     @property
     def app_name(self) -> str:
@@ -281,6 +298,8 @@ def parse_entry(raw: Mapping[str, Any]) -> CatalogEntry | None:
                 package=package,
                 runtime_args=tuple(run_args),
                 package_args=tuple(pkg_args),
+                registry=_str(p.get("registryType")),  # type: ignore[arg-type]
+                identifier=ident,
             )
         )
     if not options:
@@ -297,16 +316,26 @@ def parse_entry(raw: Mapping[str, Any]) -> CatalogEntry | None:
     )
     repo = server.get("repository")
     name = str(server["name"])
+    title = _plain(_str(server.get("title"))) or _title_of(name)
+    website = _str(server.get("websiteUrl")) or None
+    repository = (_str(repo.get("url")) or None) if isinstance(repo, Mapping) else None
+    hosts = tuple(h for o in options if (h := o.host))
+    publisher = publisher_of(name)
     return CatalogEntry(
         name=name,
-        title=_plain(_str(server.get("title"))) or _title_of(name),
+        title=title,
         description=_plain(_str(server.get("description")), title=False)[:400],
         version=_str(server.get("version")),
-        website=_str(server.get("websiteUrl")) or None,
-        repository=_str(repo.get("url")) if isinstance(repo, Mapping) else None,
+        website=website,
+        repository=repository,
         icon=icon,
         options=tuple(options),
         featured=name in FEATURED,
+        updated=_str(status.get("updatedAt")) or _str(status.get("publishedAt")) or None,
+        publisher=publisher,
+        maker=maker_of(
+            name, title, hosts=hosts, repository=repository, website=website, publisher=publisher
+        ),
     )
 
 
@@ -359,6 +388,39 @@ def suggest_name(entry: CatalogEntry) -> str:
     if base in RESERVED_NAMES:
         return f"{base}-app"  # an entry called "Skills" is not Ghost's own skills
     return base if APP_NAME_RE.match(base) else "app"
+
+
+def _featured_rank(e: CatalogEntry) -> int:
+    return FEATURED.index(e.name) if e.featured else len(FEATURED)
+
+
+@dataclass(frozen=True)
+class Found:
+    """One search result: an entry, and other publishers' entries for the same product
+    folded under it when it is the maker's own."""
+
+    entry: CatalogEntry
+    others: tuple[CatalogEntry, ...] = ()
+
+
+def group(ranked: list[CatalogEntry]) -> list[Found]:
+    """Fold ``ranked`` (best first) by product: an entry that isn't the maker's own, whose
+    title is exactly a product whose maker's own entry is also in ``ranked`` ("Posthog",
+    with PostHog's own), goes under that entry. Nothing else is grouped: two entries with
+    the same title and no maker among them stay apart. Order is kept otherwise."""
+    lead: dict[str, str] = {}  # a product's key -> the name of the maker's entry it folds under
+    for e in ranked:
+        if e.maker is not None:
+            for k in e.maker.keys:
+                lead.setdefault(k, e.name)
+    others: dict[str, list[CatalogEntry]] = {}
+    folded: set[str] = set()
+    for e in ranked:
+        to = lead.get(e.product_key) if e.maker is None else None
+        if to is not None:
+            others.setdefault(to, []).append(e)
+            folded.add(e.name)
+    return [Found(e, tuple(others.get(e.name, ()))) for e in ranked if e.name not in folded]
 
 
 # --- connecting -----------------------------------------------------------------------
@@ -477,6 +539,7 @@ class Catalog:
         self.max_age = max_age
         self._copy = self._load()
         self._entries: dict[str, CatalogEntry] = {}
+        self._makers: dict[str, CatalogEntry] = {}  # a product's key -> its maker's own entry
         self._index()
         self._refreshing: asyncio.Task[None] | None = None
         self.problem: str | None = None
@@ -511,12 +574,25 @@ class Catalog:
         tmp.replace(self.path)
 
     def _index(self) -> None:
+        """Parse every record and find each product's maker. About 1.3 s for the whole
+        registry (2026-10, ~48,000 apps), so a refresh runs it in a thread, off the event
+        loop the voice shares; the dicts are swapped in whole at the end."""
         entries: dict[str, CatalogEntry] = {}
         for raw in self._copy.records.values():
             e = parse_entry(raw)
             if e is not None:
                 entries[e.name] = e
+        # Where two makers' own entries go by the same name, a first-party one wins, then the
+        # one with the most evidence, then the name: the same answer every time.
+        makers: dict[str, CatalogEntry] = {}
+        for e in sorted(
+            (e for e in entries.values() if e.maker is not None),
+            key=lambda e: (_featured_rank(e), -len(e.maker.evidence), e.name),  # type: ignore[union-attr]
+        ):
+            for k in e.maker.keys:  # type: ignore[union-attr]
+                makers.setdefault(k, e)
         self._entries = entries
+        self._makers = makers
 
     @property
     def fetched_at(self) -> float:
@@ -564,7 +640,7 @@ class Catalog:
         if first and not self._copy.started:
             self._copy.started = now
             fetched += await self._featured()
-            self._index()
+            await asyncio.to_thread(self._index)
             self._save()
         cursor = self._copy.cursor if first else ""
         for page_no in range(MAX_PAGES):
@@ -580,7 +656,7 @@ class Catalog:
             if first:
                 self._copy.cursor = cursor or ""
                 if page_no % SAVE_EVERY == SAVE_EVERY - 1:
-                    self._index()
+                    await asyncio.to_thread(self._index)
                     self._save()
             if not cursor:
                 break
@@ -589,7 +665,7 @@ class Catalog:
         self._copy.cursor = ""
         self._copy.started = ""
         self.problem = None
-        self._index()
+        await asyncio.to_thread(self._index)
         self._save()
         logger.info(
             f"catalog: {fetched} record(s) fetched in {time.perf_counter() - began:.1f}s, "
@@ -623,23 +699,34 @@ class Catalog:
     def get(self, name: str) -> CatalogEntry | None:
         return self._entries.get(name)
 
+    def product_maker(self, entry: CatalogEntry) -> CatalogEntry | None:
+        """The maker's own entry for the product ``entry`` is about: itself when it is the
+        maker's own; the entry whose product its title names exactly otherwise ("Posthog"
+        by pipeworx-io is PostHog's product); None when Ghost knows no maker for it."""
+        if entry.maker is not None:
+            return entry
+        return self._makers.get(entry.product_key)
+
     def search(
         self, query: str = "", *, limit: int = 40, offset: int = 0
-    ) -> tuple[list[CatalogEntry], int]:
+    ) -> tuple[list[Found], int]:
         """Entries matching every word of ``query`` in the title, the name or the
-        description: first-party ones first, then an exact title, a title that starts
-        with it, one that holds it, then the rest. Returns a page and the total."""
+        description. The maker's own app whose title matches comes first, then the
+        first-party ones, then an exact title, a title that starts with it, one that holds
+        it, then the rest. Another publisher's entry for a product whose maker's own app is
+        among the results folds under it (``Found.others``). Returns a page of results and
+        how many there are."""
         q = query.strip().lower()
         words = [w for w in re.findall(r"[a-z0-9]+", q) if w]
-        hits: list[tuple[tuple[int, int, int, str], CatalogEntry]] = []
+        hits: list[tuple[tuple[int, int, int, int, int, str, str], CatalogEntry]] = []
         for e in self._entries.values():
             title = e.title.lower()
-            hay = f"{title} {e.name.lower()} {e.description.lower()}"
+            # "io.github." is in half the names: searching "github" shouldn't find them all.
+            hay = f"{title} {e.name.lower().removeprefix('io.github.')} {e.description.lower()}"
             if words and not all(w in hay for w in words):
                 continue
             if not words and not e.featured:
                 continue
-            featured = FEATURED.index(e.name) if e.featured else len(FEATURED)
             if title == q:
                 closeness = 0
             elif title.startswith(q):
@@ -648,7 +735,21 @@ class Catalog:
                 closeness = 2
             else:
                 closeness = 3
-            hits.append(((featured, closeness, len(title), title), e))
+            maker = e.maker is not None
+            hits.append(
+                (
+                    (
+                        0 if maker and closeness <= 2 else 1,
+                        _featured_rank(e),
+                        closeness,
+                        0 if maker else 1,
+                        len(title),
+                        title,
+                        e.name,
+                    ),
+                    e,
+                )
+            )
         hits.sort(key=lambda h: h[0])
-        entries = [e for _, e in hits]
-        return entries[offset : offset + limit], len(entries)
+        found = group([e for _, e in hits])
+        return found[offset : offset + limit], len(found)

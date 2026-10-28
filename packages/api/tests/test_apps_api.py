@@ -4,6 +4,7 @@ connecting and disconnecting, and the permissions. No network: connecting is stu
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from ghost_core.apps import App, Apps, AppSpec, ToolInfo, load_apps
 from ghost_core.catalog import Catalog
@@ -362,3 +363,45 @@ def test_a_key_waits_for_a_locked_keyring_and_nothing_changes(world, tmp_path, m
     assert r.status_code == 423 and "keyring" in r.json()["detail"]
     assert "example" not in load_apps(deps.policy_path.parent / "apps.json").apps
     assert started == []
+
+
+POSTHOG_SIX = Path(__file__).parents[2] / "core" / "tests" / "fixtures" / "catalog_posthog.json"
+
+
+def test_the_catalog_says_who_publishes_each_app_and_where_it_runs(world, tmp_path, monkeypatch):
+    """#37: the six "posthog" results fold under PostHog's own; each says its publisher,
+    and the gateway that isn't PostHog's says whose it is."""
+    six = json.loads(POSTHOG_SIX.read_text())
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+
+    async def fetch(url):
+        return {"servers": [] if "updated_since" in url else six, "metadata": {}}
+
+    deps.catalog = Catalog(tmp_path / "catalog3.json", fetch=fetch)
+    client.get("/catalog")
+    page = client.get("/catalog", params={"search": "posthog"}).json()
+    assert page["total"] == 2 and len(page["entries"]) == 2
+    own, engageable = page["entries"]
+    assert own["name"] == "io.github.PostHog/mcp"
+    assert own["publisher"] == {"name": "PostHog", "verified": "github"}
+    assert own["maker"] == {"product": "PostHog", "evidence": ["publisher", "remote", "repository"]}
+    assert own["product"] == "PostHog" and own["product_maker"] is None
+    assert own["updated_at"].startswith("2026-01-07T16:34:40")
+    assert own["options"][0]["host"] == "mcp.posthog.com"
+    assert own["options"][0]["host_owner"] == "maker"
+    others = {o["name"]: o for o in own["others"]}
+    assert len(others) == 4 and all(o["others"] == [] for o in others.values())
+    gateway = others["io.github.pipeworx-io/posthog"]
+    assert gateway["maker"] is None and gateway["product"] == "PostHog"
+    assert gateway["product_maker"] == "io.github.PostHog/mcp"
+    assert gateway["options"][0]["host"] == "gateway.pipeworx.io"
+    assert gateway["options"][0]["host_owner"] == "publisher"
+    armory = others["com.mcparmory/posthog"]
+    assert armory["publisher"] == {"name": "mcparmory.com", "verified": "domain"}
+    assert [(o["registry"], o["package"], o["host"]) for o in armory["options"]] == [
+        ("pypi", "mcparmory-posthog", None),
+        ("oci", "ghcr.io/mcparmory/posthog:1.0.5", None),
+    ]
+    assert engageable["product"] is None and engageable["others"] == []
+    one = client.get("/catalog/io.github.pipeworx-io/posthog").json()
+    assert one["product"] == "PostHog" and one["others"] == []

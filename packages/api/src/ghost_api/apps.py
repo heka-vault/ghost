@@ -32,6 +32,7 @@ from ghost_core.catalog import CatalogEntry, CatalogError, connect
 from ghost_core.levels import Autonomy
 from ghost_core.permissions import Mode, Rule, parse_rules
 from ghost_core.policy import AutonomyPolicy, write_permissions
+from ghost_core.provenance import host_owner
 
 from ghost_api.app import Deps, permissions_view
 from ghost_api.models import (
@@ -41,8 +42,10 @@ from ghost_api.models import (
     AppConnectResult,
     AppView,
     CatalogEntryView,
+    CatalogMaker,
     CatalogOption,
     CatalogPage,
+    CatalogPublisher,
     CatalogSetting,
     PermissionsUpdate,
     PermissionsView,
@@ -57,6 +60,14 @@ _LEVEL = {
     Autonomy.QUIET: "quiet",
     Autonomy.ANNOUNCE: "allow",
 }
+
+
+def _when(rfc3339: str | None) -> datetime | None:
+    """The registry's timestamp, or None when it isn't one."""
+    try:
+        return datetime.fromisoformat(rfc3339) if rfc3339 else None
+    except ValueError:
+        return None
 
 
 def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route table
@@ -140,12 +151,16 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
 
     # --- the catalog ---------------------------------------------------------------------
 
-    def entry_view(e: CatalogEntry) -> CatalogEntryView:
+    def entry_view(e: CatalogEntry, others: tuple[CatalogEntry, ...] = ()) -> CatalogEntryView:
         connected = (
             [n for n, s in deps.apps.specs.items() if s.catalog == e.name]
             if deps.apps is not None
             else []
         )
+        # The product's maker (#37): this entry when it is the maker's own, else the maker's
+        # entry its title names. Who runs each remote is judged against it.
+        own = deps.catalog.product_maker(e) if deps.catalog is not None else None
+        maker = own.maker if own is not None else None
         return CatalogEntryView(
             name=e.name,
             title=e.title,
@@ -160,6 +175,12 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
                     id=o.id,
                     kind=o.kind,
                     label=o.label,
+                    host=o.host,
+                    host_owner=(
+                        host_owner(o.host, maker=maker, publisher=e.publisher) if o.host else None
+                    ),
+                    registry=o.registry,
+                    package=o.identifier,
                     settings=[
                         CatalogSetting(
                             key=s.key,
@@ -176,6 +197,20 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
             ],
             suggested_name=free_name(e.app_name),
             connected=connected,
+            updated_at=_when(e.updated),
+            publisher=(
+                CatalogPublisher(name=e.publisher.name, verified=e.publisher.verified)
+                if e.publisher is not None
+                else None
+            ),
+            maker=(
+                CatalogMaker(product=e.maker.product, evidence=list(e.maker.evidence))
+                if e.maker is not None
+                else None
+            ),
+            product=maker.product if maker is not None else None,
+            product_maker=own.name if own is not None and own is not e else None,
+            others=[entry_view(o) for o in others],
         )
 
     def free_name(base: str) -> str:
@@ -203,9 +238,9 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         cat.refresh_soon()
         if not cat.fetched_at:
             await cat.wait(FIRST_COPY_WAIT_SECS)
-        entries, total = cat.search(search, limit=limit, offset=offset)
+        found, total = cat.search(search, limit=limit, offset=offset)
         return CatalogPage(
-            entries=[entry_view(e) for e in entries],
+            entries=[entry_view(f.entry, f.others) for f in found],
             total=total,
             fetched_at=datetime.fromtimestamp(cat.fetched_at, UTC) if cat.fetched_at else None,
             refreshing=cat.refreshing,

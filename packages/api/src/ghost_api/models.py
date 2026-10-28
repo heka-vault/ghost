@@ -304,12 +304,37 @@ class CatalogSetting(BaseModel):
 
 
 class CatalogOption(BaseModel):
-    """One way to connect: sign in, an API key, or run on this computer."""
+    """One way to connect: sign in, an API key, or run on this computer. Where it runs:
+    a remote's ``host``, and whose host that is; a package's ``registry`` and name."""
 
     id: str
     kind: Literal["sign_in", "key", "local"]
     label: str
     settings: list[CatalogSetting] = []
+    host: str | None = None  # a remote's host: what Ghost sends the app goes there
+    # The product maker's host, the publisher's own, or someone else's (a gateway, a
+    # shared host). "maker" only when Ghost knows the product's maker.
+    host_owner: Literal["maker", "publisher", "other"] | None = None
+    registry: Literal["npm", "pypi", "oci"] | None = None  # a package's registry
+    package: str | None = None  # its name there: "posthog-mcp"
+
+
+class CatalogPublisher(BaseModel):
+    """Who published an entry, as the registry checked it: the GitHub account it signed in
+    with (``io.github.PostHog/…``), or the domain it proved it owns (``com.mcparmory/…``).
+    Who published it, not whether it is safe."""
+
+    name: str  # "PostHog", "mcparmory.com"
+    verified: Literal["github", "domain"]
+
+
+class CatalogMaker(BaseModel):
+    """The entry is the product maker's own, and what agreed: the publisher's name is the
+    product's (``publisher``) or Ghost's own list says so (``listed``); it connects to the
+    maker's host (``remote``); its repository is theirs; its website is theirs."""
+
+    product: str  # "PostHog"
+    evidence: list[Literal["publisher", "listed", "remote", "repository", "website"]]
 
 
 class CatalogEntryView(BaseModel):
@@ -327,11 +352,21 @@ class CatalogEntryView(BaseModel):
     options: list[CatalogOption] = []
     suggested_name: str  # the short name it would be connected under
     connected: list[str] = []  # the names it is connected under already
+    updated_at: datetime | None = None  # when the registry last saw this version change
+    publisher: CatalogPublisher | None = None
+    maker: CatalogMaker | None = None  # set when it is the product maker's own
+    # The product it is for, as its maker names it, when Ghost knows the maker ("PostHog"
+    # for pipeworx-io's "Posthog"); and that maker's own entry, when it isn't this one.
+    product: str | None = None
+    product_maker: str | None = None
+    # In search results: other publishers' entries for the same product, folded under the
+    # maker's own. Always empty on GET /catalog/{name}.
+    others: list[CatalogEntryView] = []
 
 
 class CatalogPage(BaseModel):
-    entries: list[CatalogEntryView]
-    total: int
+    entries: list[CatalogEntryView]  # results; another publisher's for a product may fold
+    total: int  # results, counting a maker's own with what folds under it as one
     fetched_at: datetime | None = None  # when Ghost's copy was last refreshed
     refreshing: bool = False
     problem: str | None = None

@@ -38,6 +38,8 @@ export type AppConnectResult = Schemas["AppConnectResult"];
 export type CatalogPage = Schemas["CatalogPage"];
 export type CatalogEntryView = Schemas["CatalogEntryView"];
 export type CatalogOption = Schemas["CatalogOption"];
+export type CatalogPublisher = Schemas["CatalogPublisher"];
+export type CatalogMaker = Schemas["CatalogMaker"];
 export type CatalogSetting = Schemas["CatalogSetting"];
 /** `[permissions]` in policy.toml: everything runs unless a rule blocks it or asks first. */
 export type PermissionsView = Schemas["PermissionsView"];

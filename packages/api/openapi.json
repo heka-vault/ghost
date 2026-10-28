@@ -531,6 +531,16 @@
             ],
             "title": "Icon"
           },
+          "maker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogMaker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -542,6 +552,46 @@
             },
             "title": "Options",
             "type": "array"
+          },
+          "others": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntryView"
+            },
+            "title": "Others",
+            "type": "array"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product"
+          },
+          "product_maker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Maker"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogPublisher"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "repository": {
             "anyOf": [
@@ -561,6 +611,18 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "version": {
             "title": "Version",
@@ -588,9 +650,65 @@
         "title": "CatalogEntryView",
         "type": "object"
       },
-      "CatalogOption": {
-        "description": "One way to connect: sign in, an API key, or run on this computer.",
+      "CatalogMaker": {
+        "description": "The entry is the product maker's own, and what agreed: the publisher's name is the\nproduct's (``publisher``) or Ghost's own list says so (``listed``); it connects to the\nmaker's host (``remote``); its repository is theirs; its website is theirs.",
         "properties": {
+          "evidence": {
+            "items": {
+              "enum": [
+                "publisher",
+                "listed",
+                "remote",
+                "repository",
+                "website"
+              ],
+              "type": "string"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "product": {
+            "title": "Product",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product",
+          "evidence"
+        ],
+        "title": "CatalogMaker",
+        "type": "object"
+      },
+      "CatalogOption": {
+        "description": "One way to connect: sign in, an API key, or run on this computer. Where it runs:\na remote's ``host``, and whose host that is; a package's ``registry`` and name.",
+        "properties": {
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "host_owner": {
+            "anyOf": [
+              {
+                "enum": [
+                  "maker",
+                  "publisher",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Owner"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -607,6 +725,33 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "package": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package"
+          },
+          "registry": {
+            "anyOf": [
+              {
+                "enum": [
+                  "npm",
+                  "pypi",
+                  "oci"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry"
           },
           "settings": {
             "default": [],
@@ -672,6 +817,29 @@
           "total"
         ],
         "title": "CatalogPage",
+        "type": "object"
+      },
+      "CatalogPublisher": {
+        "description": "Who published an entry, as the registry checked it: the GitHub account it signed in\nwith (``io.github.PostHog/\u2026``), or the domain it proved it owns (``com.mcparmory/\u2026``).\nWho published it, not whether it is safe.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "verified": {
+            "enum": [
+              "github",
+              "domain"
+            ],
+            "title": "Verified",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "verified"
+        ],
+        "title": "CatalogPublisher",
         "type": "object"
       },
       "CatalogSetting": {

@@ -85,7 +85,29 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.apps-card__meta { margin-top: auto; padding-top: var(--space-2); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.apps-card__meta { margin-top: auto; padding-top: var(--space-2); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); overflow-wrap: anywhere; }
+.apps-card__badges { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); min-width: 0; }
+/* Who published it (#37): under the title, quieter than the description. */
+.apps-card__by { margin-bottom: var(--space-1); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); overflow-wrap: anywhere; }
+/* "not PostHog's servers": a caution, said in words first. */
+.apps-card__caution { color: var(--warn); }
+
+/* A maker's own app with other publishers' apps for the same product folded under it. */
+.apps-grid > li.apps-group { flex-direction: column; gap: var(--space-1); }
+.apps-group > .apps-card { flex: 1 1 auto; }
+.apps-group__more { align-self: flex-start; }
+.apps-chevron { transition: transform var(--duration-fast) var(--ease-out); }
+.apps-chevron.is-open { transform: rotate(180deg); }
+.apps-grid > li.apps-group__others {
+  grid-column: 1 / -1;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+}
+.apps-group__head { margin: 0; max-width: 72ch; }
+.apps-grid--nested { margin: 0; padding: var(--space-1); }
 
 .apps-more { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .apps-own { display: flex; align-items: center; gap: var(--space-1); margin: var(--space-4) 0 0; }
@@ -98,6 +120,20 @@
 .apps-form__how { margin: 0; }
 .apps-form__notice { margin: 0; }
 .apps-signin-url { margin: 0; overflow-wrap: anywhere; }
+
+/* About this app, before connecting (#37): a two-column list, terms left. */
+.apps-about__list { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; }
+.apps-about__row { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); column-gap: var(--space-4); }
+.apps-about__row dt { font-size: var(--text-sm); line-height: var(--leading-md); color: var(--text-3); }
+.apps-about__row dd { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-0_5); margin: 0; min-width: 0; }
+.apps-about__value { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); overflow-wrap: anywhere; }
+.apps-about__value.is-caution { color: var(--warn); }
+.apps-about__maker { display: inline-flex; align-items: center; gap: var(--space-1_5); }
+.apps-about__maker svg { flex: none; color: var(--info); }
+.apps-about__help { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); max-width: 60ch; overflow-wrap: anywhere; }
+.apps-about__inline { vertical-align: baseline; }
+.apps-about__link { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-md); line-height: var(--leading-md); overflow-wrap: anywhere; }
+.apps-about__link svg { flex: none; color: var(--text-3); }
 
 /* --------------------------------------------------------------- one app */
 .apps-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
