@@ -66,7 +66,6 @@ static VAR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap());
 const REMOTE_TYPES: [&str; 2] = ["streamable-http", "http"];
 
-pub(crate) use crate::apps::SECRET;
 pub use crate::apps::{
     APP_NAME_RE, AppSpec, RESERVED_NAMES, app_name_problem, secret_name, secret_names,
 };
@@ -1501,6 +1500,8 @@ mod tests {
     //! and an entry's ways to connect turned into an app and its secrets.
 
     use std::collections::HashMap;
+
+    use crate::apps::spec::SECRET;
     use std::sync::{Arc, Mutex};
 
     use serde_json::{Value, json};
@@ -1701,7 +1702,7 @@ mod tests {
         );
         assert_eq!(
             secrets,
-            map(&[("GHOST_APP_GITHUB_AUTHORIZATION", "Bearer ghp_abc")])
+            bmap(&[("GHOST_APP_GITHUB_AUTHORIZATION", "Bearer ghp_abc")])
         );
         assert!(spec.catalog.as_deref() == Some(gh.name.as_str()) && spec.title == "GitHub");
         let why = invalid(connect(&gh, "remote-0", "github", &vals(&[])).unwrap_err());
@@ -1725,7 +1726,7 @@ mod tests {
                 "ghcr.io/github/github-mcp-server:2.0.3",
             ]
         );
-        assert_eq!(secrets, map(&[("GHOST_APP_GITHUB_TOKEN", "ghp_x")]));
+        assert_eq!(secrets, bmap(&[("GHOST_APP_GITHUB_TOKEN", "ghp_x")]));
         let notes = parse_entry(&notes()).unwrap();
         let (spec, _) = connect(
             &notes,
