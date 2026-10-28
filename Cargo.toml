@@ -33,11 +33,15 @@ sha2 = "0.10"
 toml = { version = "0.8", features = ["preserve_order"] }
 async-trait = "0.1"
 futures = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
 wiremock = "0.6"
 unicode-normalization = "0.1"
 yaml-rust2 = { version = "0.13", default-features = false }
 tempfile = "3"
+aes-gcm = "0.11"
+base64 = "0.22"
+rustix = { version = "1", features = ["fs"] }
+secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location

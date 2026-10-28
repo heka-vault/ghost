@@ -30,6 +30,7 @@ allow = [
   "0BSD",
   "OpenSSL",
   "CDLA-Permissive-2.0", # webpki-roots: the Mozilla root store reqwest verifies TLS against
+  "CDLA-Permissive-2.0", # webpki-roots, the CA bundle behind reqwest's rustls-tls
 ]
 confidence-threshold = 0.8
 
