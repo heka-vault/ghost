@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -264,7 +265,8 @@ def discover(places: Places) -> dict[str, Skill]:
     for where, source in places:
         if not where.is_dir():
             continue
-        for folder in sorted(p for p in where.iterdir() if p.is_dir()):
+        # A hidden folder is not a skill: Ghost's own copy in progress is one (``_install``).
+        for folder in sorted(p for p in where.iterdir() if p.is_dir() and p.name[0] != "."):
             skill = load_skill(folder, source)
             if skill is None:
                 continue
@@ -423,10 +425,11 @@ class SkillWriter:
         return self._snapshot(self._folder(target))
 
     def _install(self, folder: Path, source: Path, replace: bool, spoken: str) -> None:
-        if folder.exists():
-            if not replace:
-                raise ValueError(f"{spoken} is already installed")
-            shutil.rmtree(folder)
+        """Copy ``source`` in as ``folder``, never half there: the copy is made in a hidden
+        folder beside it and swapped in by renaming, so a copy that fails leaves the old
+        skill as it was (edits and all) and nothing else."""
+        if folder.exists() and not replace:
+            raise ValueError(f"{spoken} is already installed")
         self._dir.mkdir(parents=True, exist_ok=True)
 
         def skip(dirpath: str, names: list[str]) -> set[str]:
@@ -434,8 +437,26 @@ class SkillWriter:
             links = {n for n in names if (Path(dirpath) / n).is_symlink()}
             return links | {n for n in names if n in (".git", "__pycache__", "node_modules")}
 
-        shutil.copytree(source, folder, symlinks=False, ignore=skip)
-        _name_front_matter(folder / SKILL_FILE, folder.name)
+        tag = secrets.token_hex(4)
+        new = self._dir / f".{folder.name}.new-{tag}"
+        old = self._dir / f".{folder.name}.old-{tag}"
+        swapped = False
+        try:
+            shutil.copytree(source, new, symlinks=False, ignore=skip)
+            _name_front_matter(new / SKILL_FILE, folder.name)
+            if folder.exists():
+                folder.rename(old)
+            try:
+                new.rename(folder)
+                swapped = True
+            except BaseException:
+                if old.exists() and not folder.exists():
+                    old.rename(folder)  # put the old one back
+                raise
+        finally:
+            shutil.rmtree(new, ignore_errors=True)
+            if swapped:  # only then is the old copy no one's; otherwise it is kept
+                shutil.rmtree(old, ignore_errors=True)
 
     def _uninstall(self, folder: Path) -> None:
         if folder.is_dir():

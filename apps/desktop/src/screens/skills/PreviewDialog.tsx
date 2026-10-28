@@ -225,6 +225,11 @@ export function PreviewDialog({ start, onClose, onInstalled }: PreviewDialogProp
               <p className="skl-notice__p">Installing replaces it, and the copy Ghost has is deleted. To keep both, install this one under another name.</p>
             </Notice>
           )}
+          {update && (
+            <Notice tone="warn" title="Your changes to it are replaced" className="skl-preview__notice">
+              <p className="skl-notice__p">Updating replaces Ghost’s copy of {humanize(update.name)} with this one, whole. If you edited its files, those edits are gone. If the update fails, the copy you have stays as it is.</p>
+            </Notice>
+          )}
           {(theirs || (preview.installed === "ghost" && !update)) && (
             <div className="skl-preview__name">
               <Field label="Install as" help="Letters, digits, dots and dashes." error={nameTaken ? "That’s your skill’s name. Pick another." : undefined}>

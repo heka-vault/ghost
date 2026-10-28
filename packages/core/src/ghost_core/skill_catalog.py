@@ -18,9 +18,11 @@ Three sources, each read by deterministic, tested code and nothing else:
   size limits, with every path checked to stay inside. The operator reads the SKILL.md
   and the list of scripts there; install copies that very folder.
 
-Nothing here runs anything, nothing here is reachable from a session (the model never
-sees catalog text and no turn queries it), and everything a source sends is untrusted
-text: shown to the operator, never to the model.
+Nothing here runs anything and nothing here is reachable from a session: no turn queries
+the catalog or GitHub, and the search, the look and the update check are shown to the
+operator, never to the model. Everything a source sends is untrusted text. Once installed,
+a skill is like any other: the model reads its SKILL.md on demand (``read_skill``), as
+untrusted text that shapes what it does, never what it may do.
 """
 
 from __future__ import annotations
@@ -65,7 +67,9 @@ PREVIEW_KEEP = 8
 CHECK_TTL_SECS = 600.0  # an update check's answer per repository
 MAX_FILES = 200
 MAX_TREE_BYTES = 12_000_000  # GitHub truncates a tree past ~7 MB anyway
-MAX_SKILL_MD_CHARS = 60_000
+# The operator reads the whole SKILL.md before installing it, so one longer than the preview
+# shows is refused, never cut: what is installed is what was read.
+MAX_SKILL_MD_BYTES = 60_000
 MAX_NAME_LOOKUPS = 30  # SKILL.md files read to match a skill by its front-matter name
 MAX_DEPTH = 6  # a SKILL.md deeper than this in a repository is not looked for
 FETCH_TIMEOUT_SECS = 15.0
@@ -96,6 +100,13 @@ Get = Callable[[str, Mapping[str, str], int], Awaitable[Reply]]  # url, headers,
 
 class TooBig(Exception):
     pass
+
+
+def _too_long(size: int) -> str:
+    return (
+        f"its SKILL.md is {size // 1000:,} KB; Ghost shows you the whole file before "
+        f"installing, up to {MAX_SKILL_MD_BYTES // 1000:,} KB"
+    )
 
 
 # --- skills.sh ------------------------------------------------------------------------
@@ -271,6 +282,20 @@ def skill_folders(entries: Iterable[Entry]) -> list[str]:
             continue
         found.append("/".join(parts))
     return sorted(found, key=lambda f: (f.count("/") + bool(f), f))
+
+
+def _folders_said(folders: list[str], most: int = 12) -> str:
+    """Each folder by its path in the repository, never by its last part alone: two skills
+    can share that (``skills/here-now`` and ``.claude/skills/here-now``)."""
+    said = [f or "the top folder" for f in folders[:most]]
+    more = len(folders) - most
+    return ", ".join(said) + (f" and {more} more" if more > 0 else "")
+
+
+def _folder_link(src: SourceRef, folder: str) -> str:
+    """The github.com address of a folder at the branch the operator named (the default
+    one otherwise), which names exactly one skill."""
+    return f"https://github.com/{src.source}/tree/{src.ref or 'HEAD'}/{folder}".rstrip("/")
 
 
 def _git_mode(entry: Entry) -> str:
@@ -549,6 +574,9 @@ class SkillCatalog:
             wanted.append((rel, e))
         if len(wanted) > MAX_FILES:
             raise SkillCatalogError(f"the skill has {len(wanted)} files; Ghost takes {MAX_FILES}")
+        md = next((e for rel, e in wanted if rel == SKILL_FILE), None)
+        if md is not None and md.size > MAX_SKILL_MD_BYTES:
+            raise SkillCatalogError(_too_long(md.size))
         if total > MAX_SKILL_BYTES:
             raise SkillCatalogError(
                 f"the skill is {total // 1000:,} KB; Ghost takes {MAX_SKILL_BYTES // 1000:,} KB"
@@ -584,6 +612,8 @@ class SkillCatalog:
         skill_md = dict(zip((rel for rel, _ in wanted), blobs, strict=True)).get(SKILL_FILE)
         if skill_md is None:
             raise SkillCatalogError(f"there is no {SKILL_FILE} in {folder or 'the repository'}")
+        if len(skill_md) > MAX_SKILL_MD_BYTES:  # the tree said less; the file decides
+            raise SkillCatalogError(_too_long(len(skill_md)))
         text = skill_md.decode(errors="replace")
         try:
             meta, _ = parse_front_matter(text)
@@ -623,7 +653,7 @@ class SkillCatalog:
                 folder_hash=folder_hash(entries, folder),
                 ref=src.ref,
             ),
-            skill_md=text[:MAX_SKILL_MD_CHARS],
+            skill_md=text,  # whole: a longer one was refused above
             files=tuple(sorted(files, key=lambda f: f.path)),
             created=time.time(),
         )
@@ -646,30 +676,49 @@ class SkillCatalog:
         if src.skill:
             want = slug(src.skill)
             by_folder = [f for f in folders if f and slug(f.rsplit("/", 1)[-1]) == want]
-            if by_folder:
+            if not by_folder:
+                by_folder = [f async for f in self._named(src, commit, entries, folders, want)]
+            if len(by_folder) == 1:
                 return by_folder[0]
-            for f in folders[:MAX_NAME_LOOKUPS]:
-                e = next(x for x in entries if x.path == (f"{f}/{SKILL_FILE}" if f else SKILL_FILE))
-                if e.size > 200_000:
-                    continue
-                try:
-                    meta, _ = parse_front_matter(
-                        (await self._raw(src.source, commit, e.path, e.size)).decode(
-                            errors="replace"
-                        )
-                    )
-                except (ValueError, SkillCatalogError):
-                    continue
-                if slug(str(meta.get("name") or "")) == want:
-                    return f
+            if by_folder:
+                # Never pick one of two skills with the same name: ask for its folder.
+                raise SkillCatalogError(
+                    f"{src.source} has {len(by_folder)} skills called {src.skill}, in "
+                    f"{_folders_said(by_folder)}; give the address of the one you mean, like "
+                    f"{_folder_link(src, by_folder[0])}"
+                )
             raise SkillCatalogError(f"{src.source} has no skill called {src.skill}")
         if "" in folders or len(folders) == 1:
             return folders[0]
         names = [f.rsplit("/", 1)[-1] for f in folders]
-        shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
-        raise SkillCatalogError(
-            f"{src.source} has {len(names)} skills; name one, like {src.source}/{names[0]}: {shown}"
+        first = folders[0]
+        like = (
+            f"{src.source}/{names[0]}"
+            if names.count(names[0]) == 1
+            else _folder_link(src, first)  # its name is two skills' here: only its folder says
         )
+        raise SkillCatalogError(
+            f"{src.source} has {len(folders)} skills; name one, like {like}. "
+            f"Its skills' folders: {_folders_said(folders)}"
+        )
+
+    async def _named(
+        self, src: SourceRef, commit: str, entries: list[Entry], folders: list[str], want: str
+    ):
+        """The folders whose SKILL.md gives itself the name ``want``, from the first
+        ``MAX_NAME_LOOKUPS``."""
+        for f in folders[:MAX_NAME_LOOKUPS]:
+            e = next(x for x in entries if x.path == (f"{f}/{SKILL_FILE}" if f else SKILL_FILE))
+            if e.size > 200_000:
+                continue
+            try:
+                meta, _ = parse_front_matter(
+                    (await self._raw(src.source, commit, e.path, e.size)).decode(errors="replace")
+                )
+            except (ValueError, SkillCatalogError):
+                continue
+            if slug(str(meta.get("name") or "")) == want:
+                yield f
 
     def staged(self, token: str) -> Preview:
         self._expire()
