@@ -95,3 +95,29 @@ its version alone.
 
 In the mock (`?mock=passive`), `&build=dev|dirty|deploy|release|behind` sets what the daemon
 says it is; `behind` is last month's deploy, so the notice shows.
+
+## Rolling back across the vault
+
+`make deploy-rollback` switches the service back to the build that ran before, and writes the
+systemd drop-in that build needs, not the one the current checkout writes. Each build records
+its form in `~/.local/share/ghost/runtime/<commit>/dropin-form` (`scripts/deploy.sh dropin
+[commit]` prints the drop-in a build runs with):
+
+- `vault`: the environment is `settings.env` only and the daemon opens Ghost's vault itself
+  (ADR 0036). Every build `make deploy` makes from now on.
+- `render`: a build from before the vault. Its own `src/infra/systemd/ghost-render-env.sh`
+  runs as `ExecStartPre`, and the daemon reads its passwords from `~/.config/ghost/env`
+  (`EnvironmentFile=%h/.config/ghost/env`).
+
+A build with no record is a `render` build when its tree still has `ghost-render-env.sh`, and a
+`vault` build otherwise.
+
+The vault's import deletes `~/.config/ghost/env`, so a rollback to a pre-vault build after the
+import would start Ghost with no passwords. The rollback refuses, says so, and changes
+nothing; stay on the vault build, or write the passwords back into `~/.config/ghost/env` by
+hand first.
+
+`scripts/deploy.sh off` removes the drop-in and hands the service back to
+its unit file. A unit installed before the vault runs `infra/systemd/ghost-render-env.sh`,
+which is gone, and reads `~/.config/ghost/env`; `off` refuses that unit and keeps the drop-in.
+`make service-install` installs the current unit, then `off` works.
