@@ -35,7 +35,11 @@ struct ApiResponse {
 
 /// One HTTP request to the daemon over the socket. Errors are strings for the frontend.
 #[tauri::command]
-async fn api_request(method: String, path: String, body: Option<String>) -> Result<ApiResponse, String> {
+async fn api_request(
+    method: String,
+    path: String,
+    body: Option<String>,
+) -> Result<ApiResponse, String> {
     let client: Client<UnixConnector, Full<Bytes>> = Client::unix();
     let uri: hyper::Uri = Uri::new(socket_path(), &path).into();
     let mut req = hyper::Request::builder()
@@ -53,8 +57,16 @@ async fn api_request(method: String, path: String, body: Option<String>) -> Resu
         format!("ghostd not reachable: {e}")
     })?;
     let status = res.status().as_u16();
-    let bytes = res.into_body().collect().await.map_err(|e| e.to_string())?.to_bytes();
-    Ok(ApiResponse { status, body: String::from_utf8_lossy(&bytes).into_owned() })
+    let bytes = res
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| e.to_string())?
+        .to_bytes();
+    Ok(ApiResponse {
+        status,
+        body: String::from_utf8_lossy(&bytes).into_owned(),
+    })
 }
 
 /// First run: enable and start the per-user service. Returns systemctl's combined output.
@@ -98,7 +110,10 @@ async fn events_start(app: AppHandle, running: State<'_, EventsRunning>) -> Resu
                         .header("Connection", "Upgrade")
                         .header("Upgrade", "websocket")
                         .header("Sec-WebSocket-Version", "13")
-                        .header("Sec-WebSocket-Key", tokio_tungstenite::tungstenite::handshake::client::generate_key())
+                        .header(
+                            "Sec-WebSocket-Key",
+                            tokio_tungstenite::tungstenite::handshake::client::generate_key(),
+                        )
                         .body(())
                         .unwrap();
                     match tokio_tungstenite::client_async(req, stream).await {
@@ -153,7 +168,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(EventsRunning(Arc::new(AtomicBool::new(false))))
-        .invoke_handler(tauri::generate_handler![api_request, events_start, start_daemon])
+        .invoke_handler(tauri::generate_handler![
+            api_request,
+            events_start,
+            start_daemon
+        ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Open Ghost", true, None::<&str>)?;
             let wake = MenuItem::with_id(app, "wake", "Wake", true, None::<&str>)?;
