@@ -10,7 +10,7 @@ import enum
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 API_VERSION = "1"
 
@@ -36,12 +36,28 @@ class PendingProposal(BaseModel):
     expires_in_secs: float
 
 
+class Build(BaseModel):
+    """Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a
+    checkout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The
+    commit is the full hash when known; ``dirty`` is a checkout that had uncommitted
+    changes when the daemon started. ``launcher`` is how a checkout's daemon was started,
+    when the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and
+    ``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``
+    (``make restart``); anything else (a unit running the checkout, ``uv run``) is None."""
+
+    kind: Literal["dev", "deploy", "release"] = "dev"
+    commit: Annotated[str, Field(pattern=r"^[0-9a-f]{7,40}$")] | None = None
+    dirty: bool = False
+    launcher: Literal["make-dev", "make-start"] | None = None
+
+
 class Status(BaseModel):
     phase: Phase
     session_id: str | None
     models_ready: bool
     uptime_secs: float
-    version: str
+    version: str  # YYYY.M.N, the same in every copy (scripts/version.py)
+    build: Build = Build()
     api_version: str = API_VERSION
     wake_mode: str
     apps: list[str] = []  # the apps connected now (ADR 0034)
@@ -292,12 +308,37 @@ class CatalogSetting(BaseModel):
 
 
 class CatalogOption(BaseModel):
-    """One way to connect: sign in, an API key, or run on this computer."""
+    """One way to connect: sign in, an API key, or run on this computer. Where it runs:
+    a remote's ``host``, and whose host that is; a package's ``registry`` and name."""
 
     id: str
     kind: Literal["sign_in", "key", "local"]
     label: str
     settings: list[CatalogSetting] = []
+    host: str | None = None  # a remote's host: what Ghost sends the app goes there
+    # The product maker's host, the publisher's own, or someone else's (a gateway, a
+    # shared host). "maker" only when Ghost knows the product's maker.
+    host_owner: Literal["maker", "publisher", "other"] | None = None
+    registry: Literal["npm", "pypi", "oci"] | None = None  # a package's registry
+    package: str | None = None  # its name there: "posthog-mcp"
+
+
+class CatalogPublisher(BaseModel):
+    """Who published an entry, as the registry checked it: the GitHub account it signed in
+    with (``io.github.PostHog/…``), or the domain it proved it owns (``com.mcparmory/…``).
+    Who published it, not whether it is safe."""
+
+    name: str  # "PostHog", "mcparmory.com"
+    verified: Literal["github", "domain"]
+
+
+class CatalogMaker(BaseModel):
+    """The entry is the product maker's own, and what agreed: the publisher's name is the
+    product's (``publisher``) or Ghost's own list says so (``listed``); it connects to the
+    maker's host (``remote``); its repository is theirs; its website is theirs."""
+
+    product: str  # "PostHog"
+    evidence: list[Literal["publisher", "listed", "remote", "repository", "website"]]
 
 
 class CatalogEntryView(BaseModel):
@@ -315,11 +356,21 @@ class CatalogEntryView(BaseModel):
     options: list[CatalogOption] = []
     suggested_name: str  # the short name it would be connected under
     connected: list[str] = []  # the names it is connected under already
+    updated_at: datetime | None = None  # when the registry last saw this version change
+    publisher: CatalogPublisher | None = None
+    maker: CatalogMaker | None = None  # set when it is the product maker's own
+    # The product it is for, as its maker names it, when Ghost knows the maker ("PostHog"
+    # for pipeworx-io's "Posthog"); and that maker's own entry, when it isn't this one.
+    product: str | None = None
+    product_maker: str | None = None
+    # In search results: other publishers' entries for the same product, folded under the
+    # maker's own. Always empty on GET /catalog/{name}.
+    others: list[CatalogEntryView] = []
 
 
 class CatalogPage(BaseModel):
-    entries: list[CatalogEntryView]
-    total: int
+    entries: list[CatalogEntryView]  # results; another publisher's for a product may fold
+    total: int  # results, counting a maker's own with what folds under it as one
     fetched_at: datetime | None = None  # when Ghost's copy was last refreshed
     refreshing: bool = False
     problem: str | None = None
@@ -375,6 +426,18 @@ class PermissionsUpdate(BaseModel):
     set: RuleSet | None = None
 
 
+class SkillOriginView(BaseModel):
+    """Where one of Ghost's skills was installed from (#35), as its lock file records it."""
+
+    source: str  # "anthropics/skills", a GitHub repository
+    source_url: str
+    skill_path: str  # its SKILL.md in the repository
+    commit: str  # the commit it was installed at
+    folder_hash: str  # the folder's git tree hash at that commit
+    ref: str | None = None  # the branch or tag it follows; None: the default branch
+    installed_at: str | None = None
+
+
 class SkillInfo(BaseModel):
     """A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's."""
 
@@ -386,6 +449,78 @@ class SkillInfo(BaseModel):
     missing: list[str] = []  # the ones that are not connected
     files: list[str] = []  # the files beside SKILL.md
     problem: str | None = None  # why it is not offered to the model (ADR 0024), if it is not
+    origin: SkillOriginView | None = None  # installed from GitHub through the catalog
+
+
+class SkillListing(BaseModel):
+    """A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,
+    never to the model."""
+
+    id: str  # "anthropics/skills/pdf"
+    source: str  # "anthropics/skills"
+    skill: str  # "pdf"
+    name: str
+    installs: int
+    installed: str | None = None  # the name of Ghost's skill installed from it, if one is
+
+
+class SkillSearchPage(BaseModel):
+    query: str
+    skills: list[SkillListing] = []
+    problem: str | None = None  # skills.sh failed or answered in a shape Ghost doesn't know
+    fetched_at: datetime | None = None
+
+
+class SkillPreviewRequest(BaseModel):
+    source: str = Field(
+        min_length=1,
+        max_length=300,
+        description="owner/repo, owner/repo/skill, or a github.com address of a skill's folder.",
+    )
+    skill: str | None = Field(default=None, max_length=128, description="The skill's id in it.")
+
+
+class SkillFileView(BaseModel):
+    path: str
+    bytes: int
+    script: bool  # a file an interpreter runs, or one that was executable upstream
+
+
+class SkillPreview(BaseModel):
+    """A skill fetched from GitHub and staged, for the operator to read before installing.
+    Everything in it but the hashes is the source's text: untrusted."""
+
+    token: str  # what install takes; good for 30 minutes
+    name: str
+    description: str
+    source: str
+    source_url: str
+    skill_path: str
+    commit: str
+    folder_hash: str
+    ref: str | None = None
+    skill_md: str  # the whole SKILL.md, front matter included
+    files: list[SkillFileView] = []  # the files beside SKILL.md
+    scripts: list[str] = []  # the ones ghost-scripts could run, through the gate
+    installed: Literal["ghost", "home"] | None = None  # a skill of that name already
+    update_of: str | None = None  # the installed skill this is a newer version of
+
+
+class SkillInstall(BaseModel):
+    token: str = Field(min_length=1, max_length=64)
+    name: str | None = None
+    replace: bool = False
+
+
+class SkillUpdateView(BaseModel):
+    """Whether an installed skill's source has moved on, checked when the page asks."""
+
+    name: str
+    source: str
+    commit: str  # installed
+    latest_commit: str | None = None
+    update: bool = False  # the skill's folder changed upstream
+    problem: str | None = None  # the check failed, or the source no longer has it
 
 
 class SkillBody(BaseModel):
@@ -534,21 +669,75 @@ class SecretState(BaseModel):
 
 class SettingsView(BaseModel):
     settings_path: str
-    env_path: str
     values: dict[str, str]  # non-secret settings, as written in settings.env
+    # Ghost's own passwords and the apps', set or not (ADR 0036); /passwords has the rest
     secrets: list[SecretState]
-    vault_managed: bool  # the operator's secrets store renders env at every start
 
 
 class SettingsUpdate(BaseModel):
     values: dict[str, str | None] | None = None  # None value deletes the key
-    secrets: dict[str, str | None] | None = None  # write-only; None deletes
+    # write-only, into the vault (ADR 0036); None deletes. PUT /passwords/{name} is the
+    # Passwords page's own way.
+    secrets: dict[str, str | None] | None = None
 
 
 class SettingsResult(BaseModel):
     settings: SettingsView
     applied: list[str] = []  # keys the daemon picked up without a restart
     restart_required: bool = False  # a pending value or a secret: the service must restart
+
+
+# --- passwords (ADR 0036) -------------------------------------------------------
+# A password goes in and never comes back out: these say what it is called, what uses it
+# and when it was last used. No route returns a value.
+
+
+class VaultView(BaseModel):
+    """Ghost's vault: one encrypted file, its key in the operator's keyring."""
+
+    state: Literal["open", "locked", "unavailable", "broken"]
+    problem: str | None = None  # why it isn't open, in the operator's words
+    path: str
+
+
+class PasswordInfo(BaseModel):
+    name: str  # what config files call it: ${NAME}
+    set: bool | None  # in the vault; None while the vault is closed (locked): unknown
+    used_by: list[str] = []  # "The model connection", "GitHub" (an app), "Webhook ci"
+    ghost: bool = False  # one Ghost itself reads; a new value applies at its next start
+    added: datetime | None = None
+    updated: datetime | None = None
+    last_used: datetime | None = None  # the last time Ghost filled it in
+
+
+class ImportSourceView(BaseModel):
+    kind: Literal["heka_vault", "file"]  # heka-vault's config, or a plaintext file
+    path: str
+
+
+class PasswordsView(BaseModel):
+    vault: VaultView
+    passwords: list[PasswordInfo]
+    importable: list[ImportSourceView] = []  # what an import would take; empty after one
+
+
+class PasswordSet(BaseModel):
+    value: SecretStr  # write-only; never echoed, not even in a validation error
+
+
+class PasswordResult(BaseModel):
+    passwords: PasswordsView
+    restart_required: bool = False  # Ghost's own: the service must restart to use it
+
+
+class PasswordImportResult(BaseModel):
+    imported: list[str] = []  # names now in the vault
+    kept: list[str] = []  # already in the vault; left as they were
+    settings: list[str] = []  # non-secret settings moved to settings.env
+    removed: list[str] = []  # plaintext files deleted
+    notes: list[str] = []
+    passwords: PasswordsView
+    restart_required: bool = False
 
 
 # --- devices + setup ------------------------------------------------------------
@@ -674,16 +863,116 @@ class PhonePairing(BaseModel):
     address: str  # the first GHOST_PHONE_LISTEN address, host:port; what the operator types
     addresses: list[str] = Field(default_factory=list)  # every address the listener serves
     expires_at: datetime
+    # The QR code's payload: ghost://pair?code=…&address=…, every address in order. The phone
+    # app scans it, or the phone's camera opens the app with it (docs/phone-protocol.md).
+    link: str
+
+
+# The network a phone address is on (ADR 0020): the home network, or the operator's
+# WireGuard tunnel for away from home.
+PhoneNetwork = Literal["home", "tunnel"]
+
+
+class PhoneAddress(BaseModel):
+    """One ``GHOST_PHONE_LISTEN`` address and the network it is on."""
+
+    address: str
+    # From the interface that holds the address: a WireGuard (or other tunnel) interface is
+    # the tunnel, any other the home network. None when Ghost can't tell: the address is on
+    # every interface (0.0.0.0), or on none of this computer's right now.
+    network: PhoneNetwork | None
+    listening: bool  # bound now; a tunnel address whose interface isn't up yet is retried
 
 
 class PhoneDevice(BaseModel):
     id: str
     name: str
     paired_at: datetime
-    last_seen: datetime | None
+    last_seen: datetime | None  # the phone's last verified request
+    last_address: str | None = None  # the listen address that request came in on
+    last_network: PhoneNetwork | None = None  # and the network it came over
 
 
 class PhoneView(BaseModel):
     address: str | None  # None when the listener is off
     addresses: list[str] = Field(default_factory=list)  # LAN first, then the tunnel (ADR 0020)
+    listen: list[PhoneAddress] = Field(default_factory=list)  # the same, with each network
     device: PhoneDevice | None
+
+
+# --- the model connection (ADR 0037) --------------------------------------------------
+
+
+class ModelProviderView(BaseModel):
+    """One way to reach a model, as the Model page offers it."""
+
+    id: str
+    title: str
+    blurb: str
+    protocol: Literal["anthropic", "openai"]
+    base_url: str  # "" for a URL of the operator's own
+    password: str | None = None  # the Password's name it uses by default
+    password_optional: bool = False
+    sign_in: bool = False  # OpenRouter: signing in gives the key
+    local: bool = False
+    default_model: str | None = None  # None: the first the provider lists
+
+
+class ModelConnectionView(BaseModel):
+    """The model connection now. No key is in it: only whether its Password is set."""
+
+    provider: str
+    protocol: Literal["anthropic", "openai"]
+    base_url: str  # where calls go
+    base_url_override: str | None = None  # set when it isn't the provider's own
+    model: str  # as saved; "" means the provider's default
+    wire_model: str  # what is sent
+    password: str | None = None  # the name
+    password_set: bool
+    headers: dict[str, str] = {}
+    timeout_secs: float | None = None
+    legacy: str | None = None  # the older setting it comes from ("GHOST_LLM_ENDPOINT=openrouter")
+    problems: list[str] = []
+    ready: bool
+    # The GHOST_LLM_* values that say this connection explicitly (for a page that saves it).
+    values: dict[str, str] = {}
+    providers: list[ModelProviderView] = []
+    sign_in_pending: bool = False  # OpenRouter is waiting for the browser
+    sign_in_error: str | None = None  # the last sign-in didn't go through
+
+
+class ModelDraft(BaseModel):
+    """A connection being edited: GHOST_LLM_* values over the saved ones (None removes
+    one), and a key typed but not saved yet, used for this one request and dropped."""
+
+    values: dict[str, str | None] = {}
+    # write-only, like PasswordSet.value: never echoed, not even in a validation error
+    password_value: SecretStr | None = Field(default=None, max_length=4096)
+
+
+class ModelOptionView(BaseModel):
+    id: str
+    name: str | None = None
+
+
+class ModelListView(BaseModel):
+    models: list[ModelOptionView]
+    default: str | None = None  # the provider's default, when it lists it
+    error: str | None = None  # why the list couldn't be read; models is empty then
+
+
+class ModelTestResult(BaseModel):
+    """One tiny request, timed like ``make perf-llm``: request to first token."""
+
+    ok: bool
+    ttft_ms: int | None = None
+    total_ms: int | None = None
+    model: str  # what was asked for
+    answered_by: str | None = None  # what the provider said answered, when it says
+    reply: str | None = None  # the first words, shortened
+    error: str | None = None
+    where: str  # provider, protocol and host; never a key
+
+
+class ModelSignInResult(BaseModel):
+    url: str  # the desktop opens it; the loopback takes the browser's way back

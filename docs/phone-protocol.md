@@ -7,13 +7,38 @@ first, then the operator's tunnel address for use away from home (ADR 0020), for
 
 ## Pairing
 
+Ghost pairs with one phone, the operator's own. `phone.json` holds at most one device, and
+pairing again replaces it: the old phone's signatures stop working at once.
+
 The desktop app calls the control API (Unix socket, ADR 0013):
 
 | Route | Result |
 |---|---|
-| `POST /phone/pairing` | `{code: "482913", address: "192.168.1.20:8765", addresses: [...], expires_at}`. `address` is the first listen address, the one the operator types; `addresses` is every one. A new code replaces the last one. 409 if the listener is off. |
-| `GET /phone` | `{address: string\|null, addresses: string[], device: {id, name, paired_at, last_seen\|null}\|null}` |
+| `POST /phone/pairing` | `{code: "482913", address: "192.168.1.20:8765", addresses: [...], expires_at, link}`. `address` is the first listen address, the one the operator types; `addresses` is every one; `link` is the QR code's payload (below). A new code replaces the last one. 409 if the listener is off. |
+| `GET /phone` | `{address: string\|null, addresses: string[], listen: [{address, network, listening}], device: {id, name, paired_at, last_seen\|null, last_address\|null, last_network\|null}\|null}`. See [Reachability](#reachability). |
 | `DELETE /phone` | `{ok, detail}`. Forget the paired phone. Its signatures stop working at once, and a phone session that is running ends. |
+
+### The QR code
+
+The desktop shows the pairing as a QR code beside the address and the code. Its payload is a link in
+the phone app's own scheme (`scheme` in `apps/mobile/app.json`), so the phone's system camera can open
+the app with it too:
+
+```
+ghost://pair?code=482913&address=192.168.1.20%3A8765&address=10.8.0.4%3A8765
+```
+
+`code` is the six digits. `address` repeats once per listen address, in the configured order (home
+first, then the tunnel); each is `host:port`, form-encoded, an IPv6 host in brackets. The daemon builds
+it (`ghostd.phone.pair_link`), and `@ghost/client-ts/pairLink` builds and parses the same string. The
+phone accepts only exactly this shape: scheme `ghost`, host `pair`, one six-digit `code`, one to eight
+addresses; it ignores other keys, which are left for later versions. The link carries what typing
+would and nothing more: no secret, and the code is still single use, 120 s and five tries.
+
+Scanning in the app pairs at once, trying each address in order and moving on only when one doesn't
+answer (a wrong code stops, since the desk counts every try). A link the system camera opened shows
+the addresses and pairs only after a tap, since a link can come from anywhere. Typing the address and
+the code stays the fallback.
 
 The phone sends `POST /pair` to the listener, unsigned:
 
@@ -27,6 +52,24 @@ order; the phone keeps the list and, whenever it has no address in use, asks all
 first in the list that answers (home before tunnel). The phone stores the secret in secure storage, and the desk keeps it
 in `~/.local/share/ghost/phone.json` (mode 0600). A code is single use and valid for 120 s. After five
 wrong tries the code is spent. A wrong or spent code returns `403 {error: "bad_code"}`.
+
+### Reachability
+
+Each listen address is served by its own server, so the desk knows which one a request came in on.
+Every signed request that verifies (not `/pair`, not a refused one) records the time, that listen
+address, and its network in `phone.json`: written at most once a minute, or at once when the address
+or network changed. `GET /phone` returns them as `last_seen`, `last_address` and `last_network`.
+
+The network is `home` or `tunnel`, from the interface that holds the local IP the connection landed on
+(`ghostd.phone.networks`): an interface the kernel calls WireGuard (`DEVTYPE=wireguard` in
+`/sys/class/net/<name>/uevent`) or any other tun device is the tunnel, any other interface is the home
+network. Nothing is configured and nothing is read from the order of `GHOST_PHONE_LISTEN`. `listen`
+gives each configured address the same way, with `listening` false while its interface isn't up (it is
+retried). `network` is `null` when Ghost can't tell: a wildcard address (`0.0.0.0:8765`), or one no
+interface of this computer has held since the daemon started. An address that was up and went down
+keeps the network it had. The desktop says "Reached Ghost 3 min ago over your home network" or
+"through your tunnel", and when every address is on the home network it shows a short guide to
+reaching Ghost away from home (ADR 0020).
 
 ## Signing
 

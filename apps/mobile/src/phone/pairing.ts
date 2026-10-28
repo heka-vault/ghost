@@ -1,10 +1,13 @@
 /**
- * Pairing with the desk's phone listener (ADR 0016): the operator types the address and the
- * six-digit code the desktop app shows, the desk answers with a device id and a secret, and
- * the phone keeps both in secure storage. Every later request is signed with that secret.
+ * Pairing with the desk's phone listener (ADR 0016): the phone scans the QR code the desktop
+ * app shows (a `ghost://pair` link with the code and every address), or the operator types the
+ * address and the six-digit code; the desk answers with a device id and a secret, and the
+ * phone keeps both in secure storage. Every later request is signed with that secret. The desk
+ * pairs with one phone: pairing this one replaces any other.
  *
  * The web export and `EXPO_PUBLIC_GHOST_DESK=mock` builds pair with the mock desk instead.
  */
+import { parsePairLink } from "@ghost/client-ts/pairLink";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
@@ -86,41 +89,73 @@ export function normalizeAddress(raw: string): string {
   return /:\d+$/.test(a) ? a : `${a}:8765`;
 }
 
+/** Pair with the address and code the operator typed. */
 export async function pairByCode(rawAddress: string, code: string): Promise<PairResult> {
-  const address = normalizeAddress(rawAddress);
-  const digits = code.replace(/\D/g, "");
-  if (MOCK_DESK) return pairMock(address, digits);
+  return pairAt([normalizeAddress(rawAddress)], code.replace(/\D/g, ""));
+}
 
+/**
+ * Pair from the desk's QR code, or a `ghost://pair` link the phone's own camera opened
+ * (docs/phone-protocol.md). Null when the text isn't a pairing link.
+ */
+export async function pairByLink(text: string): Promise<PairResult | null> {
+  const link = parsePairLink(text);
+  return link ? pairAt(link.addresses, link.code, "scan") : null;
+}
+
+/**
+ * Spend the code at the first address that answers, in the desk's order (home before the
+ * tunnel). Only an address that doesn't answer moves on to the next; a wrong code stops,
+ * since the desk counts every try.
+ */
+async function pairAt(addresses: string[], digits: string, how: "type" | "scan" = "type"): Promise<PairResult> {
+  if (MOCK_DESK) return pairMock(addresses[0], digits, how);
+  const shown = addresses.join(" or ");
   const unreachable: PairResult = {
     ok: false,
     field: "address",
-    message: `Nothing answered at ${address}. Check that Ghost is running with the phone listener on, and that this phone is on the same Wi-Fi.`,
+    message:
+      how === "scan"
+        ? `Nothing answered at ${shown}. Check that Ghost is running, and that this phone is on your home Wi-Fi or your tunnel is on.`
+        : `Nothing answered at ${shown}. Check that Ghost is running with the phone listener on, and that this phone is on the same Wi-Fi.`,
   };
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), PAIR_MS);
-  let res: Response;
-  try {
-    res = await fetch(`http://${address}/pair`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: digits, device_name: deviceName() }),
-      signal: abort.signal,
-    });
-  } catch (e) {
-    console.warn(`pair: no answer from ${address}: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
-    return unreachable;
-  } finally {
-    clearTimeout(timer);
+  const per = addresses.length > 1 ? PAIR_MS / 2 : PAIR_MS;
+  for (const address of addresses) {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), per);
+    let res: Response;
+    try {
+      res = await fetch(`http://${address}/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: digits, device_name: deviceName() }),
+        signal: abort.signal,
+      });
+    } catch (e) {
+      console.warn(`pair: no answer from ${address}: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status === 403) {
+      return {
+        ok: false,
+        field: "code",
+        message: how === "scan" ? "That code ran out or was already used. Show a new code on your desk and scan it again." : "That code didn’t match, or it ran out. Show a new code on your desk and type it again.",
+      };
+    }
+    if (!res.ok) {
+      console.warn(`pair: ${address} answered ${res.status}`);
+      continue;
+    }
+    return save(address, (await res.json()) as PairBody);
   }
-  if (res.status === 403) {
-    return { ok: false, field: "code", message: "That code didn’t match, or it ran out. Show a new code on your desk and type it again." };
-  }
-  if (!res.ok) {
-    console.warn(`pair: ${address} answered ${res.status}`);
-    return unreachable;
-  }
+  return unreachable;
+}
 
-  const body = (await res.json()) as { device_id: string; secret: string; workstation: string; addresses?: string[] };
+type PairBody = { device_id: string; secret: string; workstation: string; addresses?: string[] };
+
+async function save(address: string, body: PairBody): Promise<PairResult> {
   // The desk lists every address it serves (home first, then the tunnel); an older desk lists none.
   const addresses = body.addresses?.length ? body.addresses : [address];
   const pairing: Pairing = { deviceId: body.device_id, workstation: body.workstation, addresses, pairedAt: new Date().toISOString() };
@@ -131,13 +166,13 @@ export async function pairByCode(rawAddress: string, code: string): Promise<Pair
 }
 
 /** Mock rules: 000000 is a wrong code, an address starting 10.0.0. doesn't answer, anything else pairs. */
-async function pairMock(address: string, digits: string): Promise<PairResult> {
+async function pairMock(address: string, digits: string, how: "type" | "scan"): Promise<PairResult> {
   await new Promise((r) => setTimeout(r, 1100));
   if (address.startsWith("10.0.0.")) {
     return { ok: false, field: "address", message: `Nothing answered at ${address}. Check that Ghost is running and that this phone is on the same Wi-Fi.` };
   }
   if (digits === "000000") {
-    return { ok: false, field: "code", message: "That code didn’t match. Show a new code on your desk and type it again." };
+    return { ok: false, field: "code", message: `That code didn’t match. Show a new code on your desk and ${how === "scan" ? "scan" : "type"} it again.` };
   }
   pairWithMock(address);
   return { ok: true };

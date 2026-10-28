@@ -5,13 +5,18 @@ streams (cache markers on the last two user messages, as its Anthropic adapter d
 
 - ``plain``: a hello, no tool. TTFB, total, and the stream span (first byte to last;
   near zero with many output tokens means the endpoint buffered the reply).
-- ``tool``: "what needs my sign-off": the call to list_awaiting_signoff, then the answer
+- ``tool``: "what needs my sign-off": the call to a GitHub read, then the answer
   after a canned tool result. Time to the complete tool call, then the answer's TTFB.
 - caching: every repeat after the first should read the prefix from the cache.
 
-Endpoints: ``proxy`` is ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN (Ghost's own),
-``openrouter`` is OpenRouter's Anthropic Messages API with OPENROUTER_API_KEY. Non-
-Anthropic models go through OpenRouter's OpenAI-compatible API. Keys are never printed.
+Endpoints: ``current`` is the model connection as configured (ADR 0037), through the
+same client a session uses, on whichever protocol it speaks. Any other endpoint is built
+from its own provider, whatever the configured one is, and reached over that provider's
+protocol: ``proxy`` is CLIProxy (ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN),
+``openrouter`` is OpenRouter's Anthropic Messages API with OPENROUTER_API_KEY, and a
+provider id (``anthropic``, ``openai``, ``ollama``, ...) is that provider as it comes.
+``--openrouter-models`` go through OpenRouter's OpenAI-compatible API. Keys are never
+printed.
 Spend is small: a few thousand input tokens per call, mostly cached.
 """
 
@@ -22,15 +27,17 @@ import os
 import statistics
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from ghost_core import AutonomyPolicy, Store, WriteGate
 from ghost_core.apps import APPS_FILE, Apps, load_apps
+from ghost_core.connection import PROVIDERS, ModelConnection
 from ghost_voice import VoiceSettings
-from ghost_voice.config import LLM_MAX_TOKENS, openrouter_model
-from ghost_voice.config import OPENROUTER_ANTHROPIC_URL as OPENROUTER_ANTHROPIC
+from ghost_voice.config import LLM_MAX_TOKENS, LLMTarget
+from ghost_voice.llm import shared_client
 from ghost_voice.prompt import build_system_prompt
 from ghost_voice.tools import register_tools
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -209,7 +216,7 @@ async def _anthropic_call(
 
 
 async def _openai_call(
-    client, model: str, system: str, tools, messages
+    client, model: str, system: str, tools, messages, cap: dict[str, Any] | None = None
 ) -> tuple[Sample, dict[str, Any] | None]:
     s = Sample()
     began = time.perf_counter()
@@ -221,9 +228,9 @@ async def _openai_call(
             model=model,
             messages=[{"role": "system", "content": system}, *messages],
             tools=tools,
-            max_tokens=LLM_MAX_TOKENS,
             stream=True,
             stream_options={"include_usage": True},
+            **(cap or {"max_tokens": LLM_MAX_TOKENS}),
         )
         async for chunk in stream:
             now = time.perf_counter()
@@ -280,6 +287,101 @@ def _f(x: float | None) -> str:
     return "-" if x is None else f"{x:.2f}"
 
 
+CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-haiku-5-5")
+NAMED = ("proxy", "openrouter")  # the older endpoints, with or without +sysbp
+
+
+def endpoint_connection(ep: str, voice: VoiceSettings) -> ModelConnection:
+    """The connection a named endpoint stands for, built from its own provider so nothing
+    of the configured connection (provider, address, protocol, password) leaks into it.
+
+    ``proxy`` is CLIProxy: ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN (CLIPROXY_BASE_URL,
+    then CLIProxy's own address, when it isn't set). ``openrouter`` is OpenRouter's
+    Anthropic API with OPENROUTER_API_KEY. A provider id is that provider as it comes."""
+    name = ep.removesuffix("+sysbp")
+    if name == "proxy":
+        env = {
+            "GHOST_LLM_PROVIDER": "cliproxy",
+            "GHOST_LLM_BASE_URL": voice.anthropic_base_url,
+            "CLIPROXY_BASE_URL": voice.cliproxy_base_url,
+        }
+    elif name in PROVIDERS:
+        env = {"GHOST_LLM_PROVIDER": name}
+    else:
+        known = ", ".join(["current", *NAMED, *PROVIDERS])
+        raise SystemExit(f"unknown endpoint {ep!r} ({known}; a provider takes +sysbp)")
+    return ModelConnection.from_env(env)
+
+
+def _target_row(ep: str, target: LLMTarget, thinking: str, *, sysbp: bool) -> dict[str, Any]:
+    """One row of the run: the target's own client for its protocol, and what its
+    requests carry (thinking on the Messages API, the cap and reasoning effort on Chat
+    Completions)."""
+    row: dict[str, Any] = {
+        "ep": ep,
+        "label": target.model,
+        "wire": target.model,
+        "client": shared_client(target),
+        "kind": target.protocol,
+        "target": target,
+    }
+    if target.protocol == "anthropic":
+        haiku = "haiku" in target.model
+        row.update(thinking=thinking_for(target.model, None if haiku else thinking), sysbp=sysbp)
+    return row
+
+
+def build_targets(
+    *,
+    endpoints: list[str],
+    models: list[str],
+    openrouter_models: list[str],
+    thinking: str,
+    voice: VoiceSettings,
+    env: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Every (endpoint, model) the run measures. ``current`` is the connection as
+    configured, with its own model; a named endpoint runs each of ``models``, or, when none
+    are given, the Claude defaults on Anthropic's API and the provider's default model on
+    an OpenAI-compatible one. An endpoint whose key is missing is skipped, saying why."""
+    targets: list[dict[str, Any]] = []
+    for ep in endpoints:
+        if ep == "current":
+            # What a session sends now: the connection's protocol, model and shared client.
+            targets.append(_target_row("current", voice.llm_target(env), thinking, sysbp=True))
+            continue
+        conn = endpoint_connection(ep, voice)
+        problems = conn.problems(env)
+        if problems:
+            print(f"  skipping {ep}: {'; '.join(problems)}")
+            continue
+        if models:
+            wanted = models
+        elif conn.protocol == "anthropic":
+            wanted = list(CLAUDE_MODELS)
+        else:
+            wanted = [""]  # the provider's default
+        for m in wanted:
+            target = replace(conn, model=m).target(env)
+            row = _target_row(ep, target, thinking, sysbp=ep.endswith("+sysbp"))
+            row["label"] = m or target.model
+            targets.append(row)
+    or_key = env.get("OPENROUTER_API_KEY", "")
+    if openrouter_models and or_key:
+        for m in openrouter_models:
+            target = ModelConnection.from_env(
+                {
+                    "GHOST_LLM_PROVIDER": "custom",
+                    "GHOST_LLM_PROTOCOL": "openai",
+                    "GHOST_LLM_BASE_URL": OPENROUTER_OPENAI,
+                    "GHOST_LLM_PASSWORD": "OPENROUTER_API_KEY",
+                    "GHOST_LLM_MODEL": m,
+                }
+            ).target(env)
+            targets.append(_target_row("openrouter-openai", target, thinking, sysbp=False))
+    return targets
+
+
 async def run_llm(
     *,
     models: list[str],
@@ -289,54 +391,23 @@ async def run_llm(
     n: int,
     out: Path,
 ) -> int:
-    from anthropic import AsyncAnthropic
-    from openai import AsyncOpenAI
-
     system, schemas = await ghost_prompt_and_tools()
     tools_schema = ToolsSchema(standard_tools=schemas)
     a_tools = AnthropicLLMAdapter().to_provider_tools_format(tools_schema)
     o_tools = OpenAILLMAdapter().to_provider_tools_format(tools_schema)
     voice = VoiceSettings()  # type: ignore[call-arg]
-    or_key = os.environ.get("OPENROUTER_API_KEY", "")
 
     # Every target runs once per round, so a slow minute on one endpoint hits all of them.
     # Each round's lines differ, like a new session's first words: only a prefix up to the
     # system prompt and tools can come from the cache, and only if something marks it.
-    targets: list[dict[str, Any]] = []
-    for ep in endpoints:
-        if ep in ("proxy", "proxy+sysbp"):
-            proxy = voice.model_copy(update={"llm_endpoint": "proxy"}).llm_target()
-            client = AsyncAnthropic(api_key=proxy.api_key, base_url=proxy.base_url)
-            targets += [
-                {
-                    "ep": ep,
-                    "label": m,
-                    "wire": m,
-                    "client": client,
-                    "kind": "anthropic",
-                    "thinking": thinking_for(m, None if "haiku" in m else thinking),
-                }
-                for m in models
-            ]
-        elif ep in ("openrouter", "openrouter+sysbp") and or_key:
-            client = AsyncAnthropic(api_key=or_key, base_url=OPENROUTER_ANTHROPIC)
-            targets += [
-                {
-                    "ep": ep,
-                    "label": m,
-                    "wire": openrouter_model(m),
-                    "client": client,
-                    "kind": "anthropic",
-                    "thinking": thinking_for(m, None if "haiku" in m else thinking),
-                }
-                for m in models
-            ]
-    if openrouter_models and or_key:
-        oclient = AsyncOpenAI(api_key=or_key, base_url=OPENROUTER_OPENAI)
-        targets += [
-            {"ep": "openrouter-openai", "label": m, "wire": m, "client": oclient, "kind": "openai"}
-            for m in openrouter_models
-        ]
+    targets = build_targets(
+        endpoints=endpoints,
+        models=models,
+        openrouter_models=openrouter_models,
+        thinking=thinking,
+        voice=voice,
+        env=os.environ,
+    )
     samples: dict[int, tuple[list[Sample], list[Sample], list[Sample]]] = {
         i: ([], [], []) for i in range(len(targets))
     }
@@ -345,7 +416,7 @@ async def run_llm(
         for i, t in enumerate(targets):
             plain, tool1, tool2 = samples[i]
             if t["kind"] == "anthropic":
-                sysbp = t["ep"].endswith("+sysbp")
+                sysbp = t.get("sysbp", False)
                 s0, _ = await _anthropic_call(
                     t["client"],
                     t["wire"],
@@ -394,12 +465,18 @@ async def run_llm(
                 )
                 tool2.append(s2)
             else:
+                cap = t["target"].chat_params(LLM_MAX_TOKENS)
                 s0, _ = await _openai_call(
-                    t["client"], t["wire"], system, o_tools, [{"role": "user", "content": hello}]
+                    t["client"],
+                    t["wire"],
+                    system,
+                    o_tools,
+                    [{"role": "user", "content": hello}],
+                    cap,
                 )
                 plain.append(s0)
                 s1, call = await _openai_call(
-                    t["client"], t["wire"], system, o_tools, [{"role": "user", "content": ask}]
+                    t["client"], t["wire"], system, o_tools, [{"role": "user", "content": ask}], cap
                 )
                 tool1.append(s1)
                 if call is None:
@@ -426,7 +503,7 @@ async def run_llm(
                         "content": json.dumps(TOOL_RESULT),
                     },
                 ]
-                s2, _ = await _openai_call(t["client"], t["wire"], system, o_tools, msgs)
+                s2, _ = await _openai_call(t["client"], t["wire"], system, o_tools, msgs, cap)
                 tool2.append(s2)
         print(f"  round {rnd + 1}/{n} done")
     rows: list[dict[str, Any]] = []
@@ -482,7 +559,7 @@ def _row(
         "answer_out": int(statistics.median(answer_outs)) if answer_outs else None,
         "cold_ttfb": plain[0].ttfb if plain else None,
         "warm_ttfb": _p50(later_ttfb),
-        "tool_ok": f"{sum(1 for s in tool1 if s.tool == 'list_awaiting_signoff')}/{len(tool1)}",
+        "tool_ok": f"{sum(1 for s in tool1 if (s.tool or '').startswith('github_'))}/{len(tool1)}",
         "words": _p50([float(s.words) for s in tool2 if s.words is not None]),
         "cache": f"{int(statistics.median(reads)) if reads else '-'}/"
         f"{int(statistics.median(writes)) if writes else '-'}",

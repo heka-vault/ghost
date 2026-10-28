@@ -4,6 +4,7 @@ connecting and disconnecting, and the permissions. No network: connecting is stu
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from ghost_core.apps import App, Apps, AppSpec, ToolInfo, load_apps
 from ghost_core.catalog import Catalog
@@ -135,9 +136,10 @@ def test_connecting_keeps_the_key_out_of_the_file_and_never_shows_it(world, tmp_
     assert app["settings"] == ["GHOST_APP_WORK_GITHUB_AUTHORIZATION"]
     saved = load_apps(deps.policy_path.parent / "apps.json").apps["work-github"]
     assert saved.headers == {"Authorization": "${GHOST_APP_WORK_GITHUB_AUTHORIZATION}"}
-    apps_env = deps.env_path.parent / "apps.env"
-    assert "Bearer ghp_secret_value" in apps_env.read_text()
-    assert not deps.env_path.exists() or "ghp_secret" not in deps.env_path.read_text()
+    # Into the vault (ADR 0036), sealed; no plaintext file holds it.
+    assert deps.passwords.value("GHOST_APP_WORK_GITHUB_AUTHORIZATION") == "Bearer ghp_secret_value"
+    assert b"ghp_secret" not in deps.passwords.path.read_bytes()
+    assert not (deps.env_path.parent / "apps.env").exists() and not deps.env_path.exists()
     assert [s.name for s in started] == ["work-github"]
     again = client.post(
         "/apps",
@@ -186,10 +188,9 @@ def test_disconnecting_takes_it_out_of_the_file_and_the_tools(world, tmp_path, m
         "/apps",
         json={"url": "https://mcp.example.com/mcp", "name": "example", "values": {"key": "k1"}},
     )
-    apps_env = deps.env_path.parent / "apps.env"
-    assert "GHOST_APP_EXAMPLE_KEY" in apps_env.read_text()
+    assert "GHOST_APP_EXAMPLE_KEY" in deps.passwords
     assert client.delete("/apps/example").json()["ok"] is True
-    assert "GHOST_APP_EXAMPLE_KEY" not in apps_env.read_text()  # its keys go with it
+    assert "GHOST_APP_EXAMPLE_KEY" not in deps.passwords  # its keys go with it
     assert client.delete("/apps/notion").json()["ok"] is True
     assert "notion" not in load_apps(deps.policy_path.parent / "apps.json").apps
     assert "notion" not in deps.apps.specs
@@ -251,13 +252,35 @@ def test_disconnecting_forgets_only_that_apps_own_keys(world, tmp_path, monkeypa
             json={"url": "https://mcp.example.com/mcp", "name": name, "values": {"key": key}},
         )
         assert r.status_code == 200, r.text
-    apps_env = deps.env_path.parent / "apps.env"
-    apps_env.write_text(apps_env.read_text() + "GHOST_APP_WORK_MINE=kept\n")
+    deps.passwords.set("GHOST_APP_WORK_MINE", "kept-by-the-operator")
     assert client.delete("/apps/work").status_code == 200
-    left = apps_env.read_text()
-    assert "GHOST_APP_WORK_KEY=" not in left
-    assert "GHOST_APP_WORK_2_KEY=" in left  # another app's
-    assert "GHOST_APP_WORK_MINE=kept" in left  # the entry never named it
+    left = deps.passwords.names()
+    assert "GHOST_APP_WORK_KEY" not in left
+    assert "GHOST_APP_WORK_2_KEY" in left  # another app's
+    assert "GHOST_APP_WORK_MINE" in left  # the entry never named it
+
+
+def test_disconnecting_while_the_keyring_is_locked_changes_nothing(world, tmp_path, monkeypatch):
+    """Its passwords would stay behind in a vault Ghost can't open: refused, said why."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    r = client.post(
+        "/apps",
+        json={"url": "https://mcp.example.com/mcp", "name": "work", "values": {"key": "k1"}},
+    )
+    assert r.status_code == 200, r.text
+    deps.passwords.keyring.locked = True
+    assert not deps.passwords.open()
+    r = client.delete("/apps/work")
+    assert r.status_code == 423 and "locked" in r.json()["detail"]
+    assert "work" in deps.apps.specs
+    deps.passwords.keyring.locked = False
+    assert deps.passwords.open()
+    assert client.delete("/apps/work").status_code == 200
+    assert "GHOST_APP_WORK_KEY" not in deps.passwords.names()
+    # An app with no passwords of Ghost's disconnects whatever the keyring says.
+    deps.passwords.keyring.locked = True
+    assert not deps.passwords.open()
+    assert client.delete("/apps/github").status_code == 200
 
 
 def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
@@ -268,7 +291,7 @@ def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
     assert first.status_code == 200
     again = client.post("/apps", json={"url": url, "name": "my_app", "values": {"key": "k2"}})
     assert again.status_code == 409 and "my-app" in again.json()["detail"]
-    assert "k1" in (deps.env_path.parent / "apps.env").read_text()
+    assert deps.passwords.value("GHOST_APP_MY_APP_KEY") == "Bearer k1"
     assert "my_app" not in deps.apps.specs
 
 
@@ -347,8 +370,76 @@ def test_a_key_in_a_pasted_configs_arguments_or_address_is_moved_too(world, tmp_
     saved = load_apps(path).apps
     assert saved["brave"].args[-1] == "${GHOST_APP_BRAVE_API_KEY}"
     assert saved["maps"].url == "https://maps.example/mcp?key=${GHOST_APP_MAPS_KEY}&lang=en"
-    apps_env = (deps.env_path.parent / "apps.env").read_text()
-    assert "GHOST_APP_BRAVE_API_KEY=BSAx1" in apps_env
-    assert "GHOST_APP_MAPS_KEY=AIzaSy123" in apps_env
+    assert deps.passwords.value("GHOST_APP_BRAVE_API_KEY") == "BSAx1"
+    assert deps.passwords.value("GHOST_APP_MAPS_KEY") == "AIzaSy123"
     view = client.get("/apps/maps").json()
     assert view["settings"] == ["GHOST_APP_MAPS_KEY"] and view["kind"] == "key"
+
+
+def test_a_key_waits_for_a_locked_keyring_and_nothing_changes(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    deps.passwords.state = "locked"
+    r = client.post(
+        "/apps",
+        json={"url": "https://mcp.example.com/mcp", "name": "example", "values": {"key": "k1"}},
+    )
+    assert r.status_code == 423 and "keyring" in r.json()["detail"]
+    assert "example" not in load_apps(deps.policy_path.parent / "apps.json").apps
+    assert started == []
+
+
+def test_a_refused_key_leaves_nothing_half_connected(world, tmp_path, monkeypatch):
+    """The vault's checks run before apps.json changes: a key it won't take refuses the
+    whole connection, and never echoes the value."""
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    for bad in ("k" * 16_001, "two\nlines-0123456789"):
+        r = client.post(
+            "/apps",
+            json={"url": "https://mcp.example.com/mcp", "name": "example", "values": {"key": bad}},
+        )
+        assert r.status_code == 422 and bad not in r.text
+        assert "example" not in load_apps(deps.policy_path.parent / "apps.json").apps
+        assert deps.passwords.names() == []
+    assert started == []
+
+
+POSTHOG_SIX = Path(__file__).parents[2] / "core" / "tests" / "fixtures" / "catalog_posthog.json"
+
+
+def test_the_catalog_says_who_publishes_each_app_and_where_it_runs(world, tmp_path, monkeypatch):
+    """#37: the six "posthog" results fold under PostHog's own; each says its publisher,
+    and the gateway that isn't PostHog's says whose it is."""
+    six = json.loads(POSTHOG_SIX.read_text())
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+
+    async def fetch(url):
+        return {"servers": [] if "updated_since" in url else six, "metadata": {}}
+
+    deps.catalog = Catalog(tmp_path / "catalog3.json", fetch=fetch)
+    client.get("/catalog")
+    page = client.get("/catalog", params={"search": "posthog"}).json()
+    assert page["total"] == 2 and len(page["entries"]) == 2
+    own, engageable = page["entries"]
+    assert own["name"] == "io.github.PostHog/mcp"
+    assert own["publisher"] == {"name": "PostHog", "verified": "github"}
+    assert own["maker"] == {"product": "PostHog", "evidence": ["publisher", "remote"]}
+    assert own["product"] == "PostHog" and own["product_maker"] is None
+    assert own["updated_at"].startswith("2026-01-07T16:34:40")
+    assert own["options"][0]["host"] == "mcp.posthog.com"
+    assert own["options"][0]["host_owner"] == "maker"
+    others = {o["name"]: o for o in own["others"]}
+    assert len(others) == 4 and all(o["others"] == [] for o in others.values())
+    gateway = others["io.github.pipeworx-io/posthog"]
+    assert gateway["maker"] is None and gateway["product"] == "PostHog"
+    assert gateway["product_maker"] == "io.github.PostHog/mcp"
+    assert gateway["options"][0]["host"] == "gateway.pipeworx.io"
+    assert gateway["options"][0]["host_owner"] == "publisher"
+    armory = others["com.mcparmory/posthog"]
+    assert armory["publisher"] == {"name": "mcparmory.com", "verified": "domain"}
+    assert [(o["registry"], o["package"], o["host"]) for o in armory["options"]] == [
+        ("pypi", "mcparmory-posthog", None),
+        ("oci", "ghcr.io/mcparmory/posthog:1.0.5", None),
+    ]
+    assert engageable["product"] is None and engageable["others"] == []
+    one = client.get("/catalog/io.github.pipeworx-io/posthog").json()
+    assert one["product"] == "PostHog" and one["others"] == []

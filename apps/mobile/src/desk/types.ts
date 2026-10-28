@@ -43,6 +43,8 @@ export interface DeskState {
   link: Link;
   /** Which address is in use; null until one answers. */
   via: Via | null;
+  /** That address itself (host:port), shown in Settings; null until one answers. */
+  address: string | null;
   /** The last call this phone made, if any. */
   lastCall: CallStats | null;
   /** The call's audio route; speaker by default, a car or headset when one is connected. */

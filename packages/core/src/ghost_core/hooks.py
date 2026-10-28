@@ -443,7 +443,7 @@ class HookIntake:
         for h in hooks:
             why = None
             if not self._environ.get(h.secret_name()):
-                why = f"secret {h.secret_name()} is not set"
+                why = f"its password {h.secret_name()} is not set"
             else:
                 failures = run_fixtures(h)
                 if failures:

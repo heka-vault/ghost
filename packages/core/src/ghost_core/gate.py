@@ -132,6 +132,10 @@ class WriteGate:
         self._autonomy = policy
         self._log(f"gate: autonomy policy reloaded from {policy.source}")
 
+    def set_classifier(self, classifier: ConfirmationClassifier) -> None:
+        """Swap how a yes is heard (Jev, once a locked vault opens and has its key)."""
+        self._classifier = classifier
+
     @property
     def pending_ttl(self) -> timedelta:
         """How long a change at ``confirm`` waits (ADR 0030), from the policy file."""

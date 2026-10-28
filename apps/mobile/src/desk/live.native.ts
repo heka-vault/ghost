@@ -82,7 +82,7 @@ const MESSAGES: Record<string, string> = {
 };
 
 export class LiveDesk implements Desk {
-  private state: DeskState = { link: "connecting", via: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
+  private state: DeskState = { link: "connecting", via: null, address: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
   /** The address in use; null until one answers, and again once it stops answering. */
   private address: string | null = null;
   private listeners = new Set<() => void>();
@@ -215,7 +215,7 @@ export class LiveDesk implements Desk {
       return null;
     }
     this.address = first.a;
-    this.set({ via: this.viaOf(first.a) });
+    this.set({ via: this.viaOf(first.a), address: first.a });
     return first.hello;
   }
 
@@ -257,7 +257,7 @@ export class LiveDesk implements Desk {
         // three-second pick that lands on the same address.
         if (!this.pc) {
           this.address = null;
-          this.set({ via: null });
+          this.set({ via: null, address: null });
         }
       }
     }

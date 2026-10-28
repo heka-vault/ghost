@@ -3,14 +3,19 @@
  * lives on the page, whether the daemon picks it up live, and how to check it. Pure data and
  * functions; no React.
  */
-import type { DevicesView, SettingsView } from "@ghost/client-ts";
+import type { DevicesView, ModelConnectionView, SettingsView } from "@ghost/client-ts";
 
-/** Page sections, in order. The id is also the `?section=` deep link. */
-export type SectionId = "setup" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
+/**
+ * Sections, in page order. The id is also the `?section=` deep link, which lands on the
+ * section's page. `apps` and `skills` were sections of the one long page; they are pages of
+ * their own now, and their old links land there.
+ */
+export type SectionId = "setup" | "about" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
-  secrets: "Secrets",
+  about: "About Ghost",
+  secrets: "Passwords",
   model: "Model",
   apps: "Apps",
   skills: "Skills",
@@ -22,12 +27,40 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   sounds: "Sounds",
 };
 
+/** The pages this screen draws (SETTINGS_SCREEN_PAGES in app/routes.tsx). */
+export type PageId = "general" | "model" | "passwords" | "sound" | "phone";
+
+/** The settings page each section is on (#/settings/<page>). */
+export const SECTION_PAGE: Record<SectionId, string> = {
+  setup: "general",
+  about: "general",
+  privacy: "general",
+  model: "model",
+  secrets: "passwords",
+  apps: "apps",
+  skills: "skills",
+  voice: "sound",
+  audio: "sound",
+  models: "sound",
+  sounds: "sound",
+  phone: "phone",
+};
+export const isSectionId = (v: string | null): v is SectionId => !!v && v in SECTION_PAGE;
+
+/** Ghost's voice, edited on Sound with the rest: it lives on Ghost's agent, not in settings.env. */
+export const GHOST_VOICE = "ghost:voice";
+
 export const sectionDomId = (id: SectionId) => `set-${id}`;
 
 /** Every non-secret key the screen edits. Order matters only for the dirty summary. */
 export const VALUE_KEYS = [
-  "ANTHROPIC_BASE_URL",
+  "GHOST_LLM_PROVIDER",
   "GHOST_LLM_MODEL",
+  "GHOST_LLM_PROTOCOL",
+  "GHOST_LLM_BASE_URL",
+  "GHOST_LLM_PASSWORD",
+  "GHOST_LLM_HEADERS",
+  "GHOST_LLM_TIMEOUT_SECS",
   "GHOST_INPUT_DEVICE",
   "GHOST_WAKE_PHRASES",
   "GHOST_WAKE_FUZZY",
@@ -35,42 +68,66 @@ export const VALUE_KEYS = [
 ] as const;
 export type ValueKey = (typeof VALUE_KEYS)[number];
 
+/** The model connection's settings (ADR 0037), saved with the rest and live from the next session. */
+export const CONNECTION_KEYS = [
+  "GHOST_LLM_PROVIDER",
+  "GHOST_LLM_MODEL",
+  "GHOST_LLM_PROTOCOL",
+  "GHOST_LLM_BASE_URL",
+  "GHOST_LLM_PASSWORD",
+  "GHOST_LLM_HEADERS",
+  "GHOST_LLM_TIMEOUT_SECS",
+] as const;
+
 export const KEY_LABEL: Record<string, string> = {
-  ANTHROPIC_BASE_URL: "Model endpoint",
+  GHOST_LLM_PROVIDER: "Model provider",
   GHOST_LLM_MODEL: "Model",
+  GHOST_LLM_PROTOCOL: "Model protocol",
+  GHOST_LLM_BASE_URL: "Model address",
+  GHOST_LLM_PASSWORD: "Model password name",
+  GHOST_LLM_HEADERS: "Extra headers",
+  GHOST_LLM_TIMEOUT_SECS: "Model timeout",
+  ANTHROPIC_API_KEY: "Anthropic password",
+  OPENAI_API_KEY: "OpenAI password",
+  LLM_API_KEY: "Password for your own address",
   GHOST_INPUT_DEVICE: "Microphone",
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
   GHOST_JEV: "How Ghost hears your yes",
-  ANTHROPIC_AUTH_TOKEN: "Anthropic token",
-  GITHUB_TOKEN: "GitHub token",
-  HF_TOKEN: "Hugging Face token",
-  OPENROUTER_API_KEY: "OpenRouter key",
-  TYPESAFE_API_KEY: "TypeSafe key",
-  ELEVENLABS_API_KEY: "ElevenLabs key",
+  [GHOST_VOICE]: "Ghost’s voice",
+  // ADR 0036: the operator's word is password, whatever the service calls it.
+  ANTHROPIC_AUTH_TOKEN: "Anthropic password",
+  GITHUB_TOKEN: "GitHub password",
+  HF_TOKEN: "Hugging Face password",
+  OPENROUTER_API_KEY: "OpenRouter password",
+  TYPESAFE_API_KEY: "TypeSafe password",
+  ELEVENLABS_API_KEY: "ElevenLabs password",
 };
 
 export const KEY_SECTION: Record<string, SectionId> = {
-  ANTHROPIC_BASE_URL: "model",
-  GHOST_LLM_MODEL: "model",
+  ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, "model" as SectionId])),
   GHOST_INPUT_DEVICE: "audio",
   GHOST_WAKE_PHRASES: "voice",
   GHOST_WAKE_FUZZY: "voice",
   GHOST_JEV: "voice",
+  [GHOST_VOICE]: "voice",
 };
 
 /** Keys the daemon applies without a restart (ghostd `apply_settings`). Everything else waits. */
-export const LIVE_KEYS = new Set(["GHOST_WAKE_PHRASES", "GHOST_WAKE_FUZZY"]);
+export const LIVE_KEYS = new Set<string>(["GHOST_WAKE_PHRASES", "GHOST_WAKE_FUZZY", ...CONNECTION_KEYS]);
 
-/** Secrets, in the order the page shows them: what Ghost needs first, then the optional ones. */
+/** Ghost's own passwords, in the order the page shows them: what Ghost needs first, then the optional ones. */
 export const SECRET_ORDER = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "HF_TOKEN", "ELEVENLABS_API_KEY"];
 export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
-  ANTHROPIC_AUTH_TOKEN: { help: "Lets Ghost think and talk. Not needed if your own endpoint takes no key.", placeholder: "sk-ant-…" },
-  GITHUB_TOKEN: { help: "For a GitHub app you added by hand whose config names ${GITHUB_TOKEN}. Apps you connect under Apps keep their own key.", optional: true, placeholder: "github_pat_…" },
-  TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev keys are set.", optional: true, placeholder: "ts_…" },
-  OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when the endpoint setting is openrouter.", optional: true, placeholder: "sk-or-…" },
+  ANTHROPIC_AUTH_TOKEN: { help: "For CLIProxy or another Anthropic-compatible address, when it takes one.", optional: true, placeholder: "sk-ant-…" },
+  ANTHROPIC_API_KEY: { help: "Lets Ghost think and talk through Anthropic.", optional: true, placeholder: "sk-ant-api…" },
+  OPENAI_API_KEY: { help: "Lets Ghost think and talk through OpenAI.", optional: true, placeholder: "sk-…" },
+  LLM_API_KEY: { help: "For your own address, when it takes one.", optional: true, placeholder: "Paste the value" },
+  GITHUB_TOKEN: { help: "For a GitHub app you added by hand whose config names ${GITHUB_TOKEN}. Apps you connect under Apps keep their own password.", optional: true, placeholder: "github_pat_…" },
+  TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev passwords are set.", optional: true, placeholder: "ts_…" },
+  OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when it goes through OpenRouter. Signing in under Model sets it.", optional: true, placeholder: "sk-or-…" },
   HF_TOKEN: { help: "Speeds up the first download of the voice models.", optional: true, placeholder: "hf_…" },
   ELEVENLABS_API_KEY: { help: "Ghost speaks with an ElevenLabs voice when the voice engine is elevenlabs. Only what Ghost says is sent.", optional: true, placeholder: "sk_…" },
 };
@@ -78,7 +135,7 @@ export const SECRET_INFO: Record<string, { help: string; optional?: boolean; pla
 /** A key Ghost keeps for an app it connected (ADR 0034): GHOST_APP_<APP>_<KEY>. */
 export const isAppSecret = (name: string) => name.startsWith("GHOST_APP_");
 
-/** "GHOST_APP_MOBBIN_KEY" → "Mobbin key": an app's key in words; the name stays as detail. */
+/** "GHOST_APP_MOBBIN_KEY" → "Mobbin key": an app's password in words; the name stays as detail. */
 export function secretLabel(name: string): string {
   if (KEY_LABEL[name]) return KEY_LABEL[name];
   if (!isAppSecret(name)) return name;
@@ -87,9 +144,8 @@ export function secretLabel(name: string): string {
   return words[0][0].toUpperCase() + words[0].slice(1) + (words.length > 1 ? ` ${words.slice(1).join(" ")}` : "");
 }
 
-export const APP_SECRET_INFO = { help: "Set when you connected the app. Replace it if the app asks for a new one.", placeholder: "Paste the new key" };
+export const APP_SECRET_INFO = { help: "Set when you connected the app. Replace it if the app asks for a new one.", placeholder: "Paste the new password" };
 
-export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const DEFAULT_FUZZY = 0.9;
 
 export const truthy = (v: string | undefined) => ["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase());
@@ -136,13 +192,13 @@ export type Values = Record<string, string>;
 
 export interface Draft {
   values: Values;
-  /** Secret name -> the new value typed this session. Never read back from the daemon. */
+  /** Password name -> a value typed this session (the onboarding flow). Never read back from the daemon. */
   secrets: Record<string, string>;
 }
 
 const isSet = (s: SettingsView | null, name: string) => !!s?.secrets.find((x) => x.name === name)?.set;
 
-export const JEV_NEEDS_KEY = "Jev needs a TypeSafe or OpenRouter key. Add one under Secrets, or choose Automatic.";
+export const JEV_NEEDS_KEY = "Jev needs a TypeSafe or OpenRouter password. Add one under Passwords, or choose Automatic.";
 
 /** Which Jev path is live (or would be after a restart) for these values and secrets. */
 export function jevNow(mode: string, s: SettingsView | null, draftSecrets: Record<string, string>): { label: string; ok: boolean } {
@@ -152,14 +208,13 @@ export function jevNow(mode: string, s: SettingsView | null, draftSecrets: Recor
   if (m === "off") return { label: "The word list hears your yes.", ok: true };
   if (key) return { label: `Jev hears your yes, through ${key}.`, ok: true };
   if (m === "on") return { label: JEV_NEEDS_KEY, ok: false };
-  return { label: "No Jev key yet, so the word list hears your yes.", ok: true };
+  return { label: "No Jev password yet, so the word list hears your yes.", ok: true };
 }
 
 /** Field errors for the current draft, by key. Empty when it can be saved. */
 export function validate(d: Draft, s: SettingsView | null): Record<string, string> {
   const e: Record<string, string> = {};
-  const url = (d.values.ANTHROPIC_BASE_URL ?? "").trim();
-  if (url && !/^https?:\/\/\S+$/.test(url)) e.ANTHROPIC_BASE_URL = "Use a full URL, like https://api.anthropic.com or http://localhost:8080.";
+  Object.assign(e, validateConnection(d.values));
   if ((d.values.GHOST_JEV || "auto") === "on" && !jevNow("on", s, d.secrets).ok) e.GHOST_JEV = jevNow("on", s, d.secrets).label;
   if (d.values.GHOST_WAKE_PHRASES != null && d.values.GHOST_WAKE_PHRASES !== "" && splitList(d.values.GHOST_WAKE_PHRASES).length === 0)
     e.GHOST_WAKE_PHRASES = "Add at least one phrase.";
@@ -183,7 +238,7 @@ export function changedKeys(d: Draft, s: SettingsView | null): string[] {
   return out;
 }
 
-const PROPER = new Set(["Anthropic", "Hugging", "Jev"]);
+const PROPER = new Set(["Anthropic", "Hugging", "Jev", "Ghost’s"]);
 
 /** "Wake phrases, model and GitHub token" */
 export function listWords(keys: string[]): string {
@@ -198,14 +253,52 @@ export function listWords(keys: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** Lowercase the first letter unless the first word is a name (GitHub, Anthropic, Hugging Face). */
+/** Lowercase the first letter unless the first word is a name (GitHub, Anthropic, Hugging Face, Ghost’s). */
 export function lowerFirst(s: string) {
   const first = s.split(" ")[0];
   return /[A-Z]/.test(first.slice(1)) || PROPER.has(first) ? s : s.charAt(0).toLowerCase() + s.slice(1);
 }
 
-/** Ghost can answer: an Anthropic token or a model endpoint. Same test as the shell's banner. */
-export const modelReady = (s: SettingsView | null, v: Values) => isSet(s, "ANTHROPIC_AUTH_TOKEN") || !!(v.ANTHROPIC_BASE_URL ?? "").trim();
+/** Ghost can answer: the model connection has nothing missing (`GET /model`). Same test as the shell's banner. */
+export const modelReady = (conn: ModelConnectionView | null) => !!conn?.ready;
+
+/* ------------------------------------------------------------- the model connection */
+const HEADER_NAME = /^[A-Za-z0-9!#%&'*+.^_`|~-]+$/;
+
+/** The connection's own field errors, as ghost_core.connection checks them. */
+export function validateConnection(v: Values): Record<string, string> {
+  const e: Record<string, string> = {};
+  const base = (v.GHOST_LLM_BASE_URL ?? "").trim();
+  if (base && !/^https?:\/\/\S+$/.test(base)) e.GHOST_LLM_BASE_URL = "Use a full URL, like http://localhost:8080/v1.";
+  else if (v.GHOST_LLM_PROVIDER === "custom" && !base) e.GHOST_LLM_BASE_URL = "Give the address your model answers on.";
+  const t = (v.GHOST_LLM_TIMEOUT_SECS ?? "").trim();
+  if (t && !(Number(t) > 0)) e.GHOST_LLM_TIMEOUT_SECS = "Use a number of seconds, like 60.";
+  const pw = (v.GHOST_LLM_PASSWORD ?? "").trim();
+  if (pw && !/^[A-Z][A-Z0-9_]{1,63}$/.test(pw)) e.GHOST_LLM_PASSWORD = "Use capitals, digits and underscores, like MY_MODEL_KEY.";
+  for (const part of (v.GHOST_LLM_HEADERS ?? "").split(";")) {
+    if (!part.trim()) continue;
+    const i = part.indexOf(":");
+    const name = i < 0 ? "" : part.slice(0, i).trim();
+    if (i < 0 || !HEADER_NAME.test(name)) {
+      e.GHOST_LLM_HEADERS = "Write each as Name: value, separated by semicolons.";
+      break;
+    }
+    if (/["\\$\n\r]/.test(part.slice(i + 1))) {
+      e.GHOST_LLM_HEADERS = `${name}’s value can’t hold quotes, backslashes or $. A password goes on its own row, never in a header.`;
+      break;
+    }
+  }
+  return e;
+}
+
+/** The five ways in, as the page offers them. OpenAI, Ollama and LM Studio share one. */
+export type ProviderChoice = "anthropic" | "openrouter" | "cliproxy" | "openai-compatible" | "custom";
+export const OPENAI_COMPATIBLE = ["openai", "ollama", "lmstudio"] as const;
+export const choiceOf = (provider: string): ProviderChoice =>
+  (OPENAI_COMPATIBLE as readonly string[]).includes(provider) ? "openai-compatible" : (provider as ProviderChoice);
+
+/** "412 ms", "1.24 s": a time to first token, the way the perf report reads. */
+export const msWords = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`);
 export const echoReady = (d: DevicesView | null) => !!d?.echo_cancel_active;
 export { isSet };
 

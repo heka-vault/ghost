@@ -387,7 +387,7 @@ def main() -> None:
     from loguru import logger
 
     logger.remove()
-    logger.add(sys.stderr, level="WARNING")
+    logger.add(sys.stderr, level="WARNING", diagnose=False)
     from livekit.wakeword import WakeWordModel
 
     print(f"{len(takes)} takes in {session}; model {model_path}")

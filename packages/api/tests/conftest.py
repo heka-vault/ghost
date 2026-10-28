@@ -20,6 +20,7 @@ from ghost_core.conversations import SOURCE as CONVERSATIONS
 from ghost_core.conversations import Conversations
 from ghost_core.folder import GhostFolder
 from ghost_core.outputs import Outputs
+from ghost_core.passwords import MemoryKeyring, Passwords
 from ghost_core.rules import SOURCE as RULES
 from ghost_core.rules import Rules
 from ghost_core.waiting import Items, WaitingList
@@ -126,6 +127,7 @@ class FakeControl:
             code="123456",
             address=self.phone_address,
             expires_at=datetime.now(UTC) + timedelta(seconds=120),
+            link=f"ghost://pair?code=123456&address={self.phone_address}",
         )
 
     def phone_view(self):
@@ -138,6 +140,22 @@ class FakeControl:
         had = self.phone_device is not None
         self.phone_device = None
         return had
+
+    # the vault (ADR 0036)
+    async def passwords_opened(self):
+        self.calls.append(("passwords_opened",))
+
+
+@pytest.fixture(autouse=True)
+def _forget_passwords():
+    """The redactor is the process's; each test starts and ends with none held."""
+    from ghost_core import passwords as pw
+
+    pw._REDACTOR._sets.clear()
+    pw._REDACTOR._pairs = ()
+    yield
+    pw._REDACTOR._sets.clear()
+    pw._REDACTOR._pairs = ()
 
 
 def make_source(writer) -> ToolSource:
@@ -205,6 +223,9 @@ def world(tmp_path: Path):
     infra.mkdir(parents=True)
     (infra / "install.sh").write_text("#!/bin/sh\necho installed $1\n")
     (infra / "install.sh").chmod(0o755)
+    # A fake keyring, and an environment of its own: never the operator's (ADR 0036).
+    vault = Passwords(tmp_path / "data" / "passwords.vault", MemoryKeyring(), environ={})
+    assert vault.open()
     deps = Deps(
         state=state,
         control=control,
@@ -225,6 +246,7 @@ def world(tmp_path: Path):
         rules=rules,
         outputs=outputs,
         waiting=WaitingList(Items(store), changes=gate.waiting),
+        passwords=vault,
     )
     app = create_app(deps)
     client = TestClient(app)

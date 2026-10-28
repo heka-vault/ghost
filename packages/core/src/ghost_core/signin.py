@@ -176,16 +176,36 @@ class SignIns:
             callback_handler=callback,
         )
 
+    @property
+    def localhost_redirect_uri(self) -> str:
+        """The same loopback, by name: OpenRouter takes ``localhost`` callbacks only."""
+        return f"http://localhost:{self.port}/callback"
+
+    async def browser_return(self, name: str, url: str, wait_secs: float) -> dict[str, str]:
+        """A sign-in that isn't an app's (the model connection's OpenRouter key, ADR 0036):
+        listen for the browser's way back from ``url`` and return its query. It replaces
+        any sign-in still open, as an app's does; NeedsSignIn if it was refused or
+        replaced, TimeoutError if nobody came back."""
+        await self._start_flow(name, url, announce=False)
+        flow = self._flow
+        assert flow is not None and flow.code is not None
+        try:
+            return await asyncio.wait_for(asyncio.shield(flow.code), wait_secs)
+        finally:
+            if not flow.code.done():
+                flow.code.cancel()
+            await self._end_flow(flow)
+
     # --- the browser's way back ----------------------------------------------------------
 
-    async def _start_flow(self, app: str, url: str) -> None:
+    async def _start_flow(self, app: str, url: str, *, announce: bool = True) -> None:
         self._cancel_flow()
         loop = asyncio.get_running_loop()
         self._flow = _Flow(app=app, url=url, code=loop.create_future())
         if self._server is None:
             self._server = await asyncio.start_server(self._handle, "127.0.0.1", self.port)
         logger.info(f"sign-in: {app} is waiting for the browser")
-        if self.on_url is not None:
+        if announce and self.on_url is not None:
             self.on_url(app, url)
 
     def _cancel_flow(self) -> None:

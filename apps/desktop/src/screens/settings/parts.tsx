@@ -1,9 +1,11 @@
-/** Owner: settings. Page-local pieces: chips input, secret row, save bar, section rail, setup list. */
-import { Check, CircleCheck, Copy, KeyRound, RotateCw, X } from "lucide-react";
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
+/** Owner: settings. Page-local pieces: chips input, secret row, save bar, setup list. */
+import { useGhost } from "@ghost/ui";
+import { Check, CircleCheck, Copy, X } from "lucide-react";
+import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 
-import { Badge, Button, Card, IconButton, Input, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
-import { APP_SECRET_INFO, SECRET_INFO, type SectionId, SECTION_TITLE, isAppSecret, joinList, listWords, lowerFirst, sectionDomId, secretLabel, splitLines, splitList } from "./model";
+import { Button, Card, IconButton, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
+import { type SectionId, SECTION_TITLE, joinList, listWords, lowerFirst, sectionDomId, splitLines, splitList } from "./model";
+import { RESTART_WORDS, restartCommand } from "./restart";
 
 /* ------------------------------------------------------------------- ChipsInput */
 export interface ChipsInputProps {
@@ -230,119 +232,10 @@ export function LinesInput({ value, onChange, placeholder, rows = 3, disabled, .
   );
 }
 
-/* -------------------------------------------------------------------- SecretRow */
-export interface SecretRowProps {
-  name: string;
-  set: boolean;
-  value: string | undefined;
-  open: boolean;
-  onOpen: () => void;
-  onChange: (v: string) => void;
-  onCancel: () => void;
-  onSubmit: (e: FormEvent) => void;
-  disabled?: boolean;
-  /** Saved, but Ghost reads it only at its next start. */
-  waiting?: boolean;
-}
-
-/** The Replace…/Add… button's id, so the page can return focus to it after a save closes the row. */
+/* --------------------------------------------------------------- password rows */
+/** A password row's Add…/Replace… button id (Passwords.tsx), so the page can return focus to it
+ *  and a link elsewhere ("Add one under Passwords") can land on it. */
 export const secretActionId = (name: string) => `set-secret-${name}-action`;
-
-/**
- * One secret: its name, what it is for, and Set or Not set. Never a value, never a mask.
- * "Replace…" opens a password field in place; the value goes out with Save and is forgotten.
- * The badge keeps saying Set or Not set while a value is typed (that is the fact the operator
- * is deciding on); the help line says what Save will do with the typed one.
- * Closing the field (Cancel, Escape) puts focus back on the button that opened it.
- */
-export function SecretRow({ name, set, value, open, onOpen, onChange, onCancel, onSubmit, disabled, waiting }: SecretRowProps) {
-  const info = SECRET_INFO[name] ?? (isAppSecret(name) ? APP_SECRET_INFO : { help: "", placeholder: "Paste the value" });
-  const label = secretLabel(name);
-  const typed = !!value;
-  const inputId = `set-secret-${name}`;
-  const helpId = `${inputId}-help`;
-  const action = useRef<HTMLButtonElement>(null);
-  const cancel = () => {
-    onCancel();
-    requestAnimationFrame(() => action.current?.focus({ preventScroll: true }));
-  };
-  // Required and missing is the one secret that asks for attention; everything else stays quiet.
-  const variant = !set && !info.optional ? "secondary" : "ghost";
-  return (
-    <form className={cx("set-secret", open && "is-open")} onSubmit={onSubmit} autoComplete="off" aria-label={label}>
-      <div className="set-secret__main">
-        <div className="set-secret__text">
-          <p className="set-secret__label">
-            {open ? <label htmlFor={inputId}>{label}</label> : <span>{label}</span>}
-            <span className="set-detail">{name}</span>
-          </p>
-          <p className="set-help" id={helpId}>
-            {typed ? (
-              <span className="set-help-strong">{set ? "Replaces the saved value on Save. " : "Saved with your other changes. "}</span>
-            ) : (
-              waiting && <span className="set-waits">Waits for a restart. </span>
-            )}
-            {info.help}
-          </p>
-        </div>
-        <div className="set-secret__state">
-          {set ? (
-            <Badge tone="ok" size="sm" dot>Set</Badge>
-          ) : (
-            <Badge size="sm">Not set</Badge>
-          )}
-          <span className="set-secret__action">
-            {open ? (
-              <Button key="cancel" size="sm" variant="ghost" className="set-secret__btn" onClick={cancel} aria-label={`Cancel ${label}`}>
-                Cancel
-              </Button>
-            ) : (
-              <Button
-                key="open"
-                ref={action}
-                id={secretActionId(name)}
-                size="sm"
-                variant={variant}
-                className="set-secret__btn"
-                onClick={onOpen}
-                disabled={disabled}
-                aria-label={`${set ? "Replace" : "Add"} ${label}`}
-              >
-                {set ? "Replace…" : "Add…"}
-              </Button>
-            )}
-          </span>
-        </div>
-      </div>
-      {open && (
-        <div className="set-secret__edit">
-          <div className="set-secret__field">
-            <Input
-              id={inputId}
-              type="password"
-              autoComplete="off"
-              autoFocus
-              spellCheck={false}
-              mono
-              leading={<KeyRound size={14} aria-hidden />}
-              placeholder={info.placeholder}
-              aria-describedby={helpId}
-              value={value ?? ""}
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  cancel();
-                }
-              }}
-            />
-          </div>
-        </div>
-      )}
-    </form>
-  );
-}
 
 /* ---------------------------------------------------------------------- SaveBar */
 export type BarState =
@@ -365,16 +258,26 @@ export type BarState =
       live: string[];
     };
 
-export const RESTART_COMMAND = "systemctl --user restart ghostd";
+export { DEV_RESTART_COMMAND, RESTART_COMMAND, RESTART_WORDS, START_RESTART_COMMAND, restartCommand } from "./restart";
 
-/** The restart command as plain mono text with Copy beside it. Used by the pill and by rows that owe a restart. */
-export function CommandCopy({ command = RESTART_COMMAND, copyRef, className }: { command?: string; copyRef?: Ref<HTMLButtonElement>; className?: string }) {
+/** The restart command for the running Ghost, or null when there's no one command (RESTART_WORDS). */
+export function useRestartCommand(): string | null {
+  return restartCommand(useGhost().status?.build);
+}
+
+/** A command as plain mono text with Copy beside it; the restart command by default. Used by the
+ *  pill and by rows that owe a restart. */
+export function CommandCopy({ command, copyRef, className }: { command?: string; copyRef?: Ref<HTMLButtonElement>; className?: string }) {
+  const restart = useRestartCommand();
+  const shown = command ?? restart;
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(false), 1600);
     return () => clearTimeout(t);
   }, [copied]);
+  if (shown == null) return <span className={cx("set-help", className)}>{RESTART_WORDS}</span>;
+  command = shown;
   return (
     <span className={cx("set-command", className)}>
       <code>{command}</code>
@@ -419,9 +322,10 @@ function fewNames(keys: string[]): string {
  * same second line: one surface, one edge.
  */
 export function SaveBar({ state, onSave, onDiscard, onDismiss, onFix, copyRef, saveRef }: SaveBarProps) {
+  const restart = useRestartCommand();
   if (state.kind === "restart") {
-    const names = `After the restart: ${lowerFirst(fewNames(state.waiting))}.${state.live.length ? ` Live now: ${lowerFirst(fewNames(state.live))}.` : ""}`;
-    return <SharedSaveBar variant="restart" title="Restart Ghost to apply" description={names} command={RESTART_COMMAND} copyRef={copyRef} onDismiss={onDismiss} />;
+    const names = `After the restart: ${lowerFirst(fewNames(state.waiting))}.${state.live.length ? ` Live now: ${lowerFirst(fewNames(state.live))}.` : ""}${restart ? "" : ` ${RESTART_WORDS}`}`;
+    return <SharedSaveBar variant="restart" title="Restart Ghost to apply" description={names} command={restart ?? undefined} copyRef={copyRef} onDismiss={onDismiss} />;
   }
 
   const { keys, online, busy, error, invalid, restored } = state;
@@ -453,71 +357,6 @@ export function SaveBar({ state, onSave, onDiscard, onDismiss, onFix, copyRef, s
   );
 }
 
-/* ---------------------------------------------------------------------- PageNav */
-export interface NavItem {
-  id: SectionId;
-  label: string;
-  /** A small mark after the label: unsaved changes, or a restart still owed. */
-  mark?: "dirty" | "restart" | "error";
-  prototype?: boolean;
-}
-
-const MARK_LABEL = { dirty: "unsaved changes", restart: "restart to apply", error: "needs a fix" };
-
-/**
- * The "on this page" rail to the right of the column (Neon). Tracks the section in view. One
- * Tab stop (the current section, like Tabs and SegmentedControl): ArrowUp/Down and Home/End
- * move between sections, Enter or Space goes there.
- */
-export function PageNav({ items, active, onGo }: { items: NavItem[]; active: SectionId | null; onGo: (id: SectionId) => void }) {
-  const list = useRef<HTMLUListElement>(null);
-  const stop = items.some((it) => it.id === active) ? active : items[0]?.id;
-  const buttons = () => Array.from(list.current?.querySelectorAll<HTMLButtonElement>(".set-nav__item") ?? []);
-  const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    const all = buttons();
-    const to =
-      e.key === "ArrowDown" ? Math.min(i + 1, all.length - 1)
-      : e.key === "ArrowUp" ? Math.max(i - 1, 0)
-      : e.key === "Home" ? 0
-      : e.key === "End" ? all.length - 1
-      : -1;
-    if (to < 0) return;
-    e.preventDefault();
-    all[to]?.focus();
-  };
-  return (
-    <nav className="set-nav" aria-label="Settings sections">
-      <ul ref={list} className="set-nav__list">
-        {items.map((it, i) => (
-          <li key={it.id} className={cx(it.prototype && !items[i - 1]?.prototype && "set-nav__group")}>
-            {it.prototype && !items[i - 1]?.prototype && <span className="set-nav__heading">Prototype</span>}
-            <button
-              type="button"
-              className={cx("set-nav__item", active === it.id && "is-current", it.prototype && "is-prototype")}
-              aria-current={active === it.id ? "location" : undefined}
-              tabIndex={it.id === stop ? 0 : -1}
-              onKeyDown={(e) => onKey(e, i)}
-              onClick={() => onGo(it.id)}
-            >
-              <span className="set-nav__label">{it.label}</span>
-              {it.mark === "restart" ? (
-                <span className="set-nav__restart">
-                  <RotateCw aria-hidden />
-                  <span className="sr-only">, {MARK_LABEL.restart}</span>
-                </span>
-              ) : it.mark ? (
-                <span className={cx("set-nav__mark", `is-${it.mark}`)}>
-                  <span className="sr-only">, {MARK_LABEL[it.mark]}</span>
-                </span>
-              ) : null}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}
-
 /* ----------------------------------------------------------------- SetupSection */
 export interface SetupStep {
   id: string;
@@ -528,7 +367,7 @@ export interface SetupStep {
   target: SectionId;
 }
 
-/** First run: the three things between a fresh install and “Hey Ghost”. The page's focal point. */
+/** First run: the things between a fresh install and “Hey Ghost”, leading General. Each step goes to its page. */
 export function SetupSection({ steps, onGo }: { steps: SetupStep[]; onGo: (id: SectionId) => void }) {
   const done = steps.filter((s) => s.done).length;
   return (

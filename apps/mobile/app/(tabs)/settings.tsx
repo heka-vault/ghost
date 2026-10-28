@@ -17,15 +17,16 @@ import { space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
 import { ConfirmDialog, Divider, LargeHead, LinkDot, linkLabel, List, Row, Screen, SwitchRow, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
+import { version as packageVersion } from "../../package.json";
 
 export default function Settings() {
   const c = useColors();
   const router = useRouter();
-  const { link, via, lastCall } = useDesk();
+  const { link, via, address, lastCall } = useDesk();
   const { pairing, prefs } = usePhone();
   const { tone, title } = linkLabel(link);
   const [asking, setAsking] = useState(false);
-  const version = Constants.expoConfig?.version ?? "0.1.0";
+  const version = Constants.expoConfig?.version ?? packageVersion;
 
   const unpair = () => {
     setAsking(false);
@@ -56,8 +57,13 @@ export default function Settings() {
                       {i === 0 ? " · home Wi-Fi" : " · away, through your tunnel"}
                     </Text>
                   ))}
-                  {via ? <Text size="md" color="text2">Reaching it over {viaLabel(via)} now</Text> : null}
-                  <Text size="md" color="text2">Paired {relativeTime(pairing.pairedAt)}</Text>
+                  {via ? (
+                    <Text size="md" color="text2">
+                      Reaching it over {viaLabel(via)} now{address ? ", at " : ""}
+                      {address ? <Text size="md" color="text2" mono>{address}</Text> : null}
+                    </Text>
+                  ) : null}
+                  <Text size="md" color="text2">Paired {relativeTime(pairing.pairedAt)} · the one phone your desk pairs with</Text>
                   {lastCall ? (
                     <Text size="md" color="text3">
                       Last call {relativeTime(lastCall.endedAt)}, {viaLabel(lastCall.via)}, {Math.round(lastCall.seconds)} s

@@ -13,7 +13,9 @@ from ghost_api.app import (
 from ghost_api.client import GhostClient
 from ghost_api.models import (
     AuditPage,
+    Build,
     Phase,
+    PhoneAddress,
     PhoneDevice,
     PhonePairing,
     PhoneView,
@@ -26,11 +28,13 @@ from ghost_api.state import DaemonState
 __all__ = [
     "ApiServer",
     "AuditPage",
+    "Build",
     "Controller",
     "DaemonState",
     "Deps",
     "GhostClient",
     "Phase",
+    "PhoneAddress",
     "PhoneDevice",
     "PhonePairing",
     "PhoneView",

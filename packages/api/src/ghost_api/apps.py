@@ -2,17 +2,15 @@
 sign-in, and the permissions.
 
 Connecting is the operator's own action, from the desktop: it writes ``apps.json`` and puts
-any secret into ``apps.env`` (0600, beside ``env``, which the vault renderer rewrites whole;
-ghostd loads it at start) and into the running daemon's environment, so the app connects
-at once. A secret value goes in and never comes back out; ``apps.json`` holds
-only ``${NAME}``. The model has no route here.
+any password into Ghost's vault (ADR 0036), where the app finds it when it connects, at
+once. A password goes in and never comes back out; ``apps.json`` holds only ``${NAME}``.
+The model has no route here.
 """
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
-import os
 import re
 import time
 from datetime import UTC, datetime
@@ -34,9 +32,9 @@ from ghost_core.catalog import CatalogEntry, CatalogError, connect
 from ghost_core.levels import Autonomy
 from ghost_core.permissions import Mode, Rule, parse_rules
 from ghost_core.policy import AutonomyPolicy, write_permissions
+from ghost_core.provenance import host_owner
 
-from ghost_api.app import Deps, apps_env_path, permissions_view
-from ghost_api.files import read_env, update_env
+from ghost_api.app import Deps, permissions_view
 from ghost_api.models import (
     Ack,
     AppAction,
@@ -44,12 +42,15 @@ from ghost_api.models import (
     AppConnectResult,
     AppView,
     CatalogEntryView,
+    CatalogMaker,
     CatalogOption,
     CatalogPage,
+    CatalogPublisher,
     CatalogSetting,
     PermissionsUpdate,
     PermissionsView,
 )
+from ghost_api.passwords import check_passwords, save_passwords
 
 CONNECT_WAIT_SECS = 10.0  # how long POST /apps waits for a connection or a sign-in address
 FIRST_COPY_WAIT_SECS = 15.0  # the catalog's first copy, so the screen has something to show
@@ -59,6 +60,14 @@ _LEVEL = {
     Autonomy.QUIET: "quiet",
     Autonomy.ANNOUNCE: "allow",
 }
+
+
+def _when(rfc3339: str | None) -> datetime | None:
+    """The registry's timestamp, or None when it isn't one."""
+    try:
+        return datetime.fromisoformat(rfc3339) if rfc3339 else None
+    except ValueError:
+        return None
 
 
 def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route table
@@ -142,12 +151,16 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
 
     # --- the catalog ---------------------------------------------------------------------
 
-    def entry_view(e: CatalogEntry) -> CatalogEntryView:
+    def entry_view(e: CatalogEntry, others: tuple[CatalogEntry, ...] = ()) -> CatalogEntryView:
         connected = (
             [n for n, s in deps.apps.specs.items() if s.catalog == e.name]
             if deps.apps is not None
             else []
         )
+        # The product's maker (#37): this entry when it is the maker's own, else the maker's
+        # entry its title names. Who runs each remote is judged against it.
+        own = deps.catalog.product_maker(e) if deps.catalog is not None else None
+        maker = own.maker if own is not None else None
         return CatalogEntryView(
             name=e.name,
             title=e.title,
@@ -162,6 +175,12 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
                     id=o.id,
                     kind=o.kind,
                     label=o.label,
+                    host=o.host,
+                    host_owner=(
+                        host_owner(o.host, maker=maker, publisher=e.publisher) if o.host else None
+                    ),
+                    registry=o.registry,
+                    package=o.identifier,
                     settings=[
                         CatalogSetting(
                             key=s.key,
@@ -178,6 +197,20 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
             ],
             suggested_name=free_name(e.app_name),
             connected=connected,
+            updated_at=_when(e.updated),
+            publisher=(
+                CatalogPublisher(name=e.publisher.name, verified=e.publisher.verified)
+                if e.publisher is not None
+                else None
+            ),
+            maker=(
+                CatalogMaker(product=e.maker.product, evidence=list(e.maker.evidence))
+                if e.maker is not None
+                else None
+            ),
+            product=maker.product if maker is not None else None,
+            product_maker=own.name if own is not None and own is not e else None,
+            others=[entry_view(o) for o in others],
         )
 
     def free_name(base: str) -> str:
@@ -205,9 +238,9 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         cat.refresh_soon()
         if not cat.fetched_at:
             await cat.wait(FIRST_COPY_WAIT_SECS)
-        entries, total = cat.search(search, limit=limit, offset=offset)
+        found, total = cat.search(search, limit=limit, offset=offset)
         return CatalogPage(
-            entries=[entry_view(e) for e in entries],
+            entries=[entry_view(f.entry, f.others) for f in found],
             total=total,
             fetched_at=datetime.fromtimestamp(cat.fetched_at, UTC) if cat.fetched_at else None,
             refreshing=cat.refreshing,
@@ -224,25 +257,25 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
     # --- connecting ----------------------------------------------------------------------
 
     def keep_secrets(secrets: dict[str, str]) -> None:
-        """Into apps.env and the running daemon's environment; never logged."""
-        if not secrets:
-            return
-        update_env(apps_env_path(deps), dict(secrets), mode=0o600)
-        os.environ.update(secrets)
+        """Into the vault (ADR 0036); never logged. A locked vault refuses the connection
+        before ``apps.json`` changes."""
+        if secrets:
+            save_passwords(deps, dict(secrets))
+
+    def own_secrets(spec: AppSpec) -> list[str]:
+        """The passwords Ghost kept for this app: the ``GHOST_APP_`` names its own entry
+        refers to and no other app's does. A name the operator chose themselves stays, and
+        so does every other app's (``github-2``'s are not ``github``'s)."""
+        others = {n for s in deps.apps.specs.values() if s.name != spec.name for n in s.secrets()}
+        return [k for k in spec.secrets() if k.startswith("GHOST_APP_") and k not in others]
 
     def forget_secrets(spec: AppSpec) -> None:
-        """The keys Ghost kept for this app: the ``GHOST_APP_`` names its own entry refers
-        to and no other app's does. A name the operator chose themselves stays, and so
-        does every other app's key (``github-2``'s are not ``github``'s)."""
-        others = {n for s in deps.apps.specs.values() if s.name != spec.name for n in s.secrets()}
-        path = apps_env_path(deps)
-        kept = read_env(path)
-        gone = [k for k in spec.secrets() if k.startswith("GHOST_APP_") and k not in others]
-        gone = [k for k in gone if k in kept]
+        vault = deps.passwords
+        if vault is None:
+            return
+        gone = [k for k in own_secrets(spec) if k in vault]
         if gone:
-            update_env(path, dict.fromkeys(gone), mode=0o600)
-            for k in gone:
-                os.environ.pop(k, None)
+            save_passwords(deps, dict.fromkeys(gone))
 
     def clash(spec: AppSpec, secrets: dict[str, str]) -> str | None:
         """Another app whose keys this one's would overwrite: ``my-app`` and ``my_app``
@@ -354,6 +387,9 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
                 raise HTTPException(
                     409, f"{spec.name} would share its keys with {other}; give it another name"
                 )
+        if secrets and (deps.passwords is None or not deps.passwords.is_open):
+            raise HTTPException(423, "Your keyring is locked. Unlock it, then connect again.")
+        check_passwords(dict(secrets))  # a refused password changes nothing either
         save(specs)  # first: a file that won't take the entry changes nothing
         keep_secrets(secrets)
         url = await start(specs)
@@ -381,6 +417,15 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         spec = deps.apps.specs.get(name)
         if spec is None:
             raise HTTPException(404, f"no app called {name!r}")
+        vault = deps.passwords
+        if vault is not None and not vault.is_open and own_secrets(spec):
+            # Its passwords would stay behind in a vault Ghost can't open now: nothing
+            # changes until it can.
+            raise HTTPException(
+                423,
+                "Your keyring is locked, so Ghost can't forget this app's passwords."
+                " Unlock it on Settings › Passwords, then disconnect again.",
+            )
         save([], remove=name)  # first: a file that won't take the change leaves it connected
         await deps.apps.remove(name)
         if deps.signins is not None:

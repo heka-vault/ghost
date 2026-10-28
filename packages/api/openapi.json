@@ -466,6 +466,55 @@
         "title": "AuditPage",
         "type": "object"
       },
+      "Build": {
+        "description": "Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a\ncheckout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The\ncommit is the full hash when known; ``dirty`` is a checkout that had uncommitted\nchanges when the daemon started. ``launcher`` is how a checkout's daemon was started,\nwhen the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and\n``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``\n(``make restart``); anything else (a unit running the checkout, ``uv run``) is None.",
+        "properties": {
+          "commit": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{7,40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "dirty": {
+            "default": false,
+            "title": "Dirty",
+            "type": "boolean"
+          },
+          "kind": {
+            "default": "dev",
+            "enum": [
+              "dev",
+              "deploy",
+              "release"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "launcher": {
+            "anyOf": [
+              {
+                "enum": [
+                  "make-dev",
+                  "make-start"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launcher"
+          }
+        },
+        "title": "Build",
+        "type": "object"
+      },
       "CatalogEntryView": {
         "description": "An app in the catalog. Its text is the registry's: shown to the operator, never\nto the model.",
         "properties": {
@@ -497,6 +546,16 @@
             ],
             "title": "Icon"
           },
+          "maker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogMaker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -508,6 +567,46 @@
             },
             "title": "Options",
             "type": "array"
+          },
+          "others": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntryView"
+            },
+            "title": "Others",
+            "type": "array"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product"
+          },
+          "product_maker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Maker"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogPublisher"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "repository": {
             "anyOf": [
@@ -527,6 +626,18 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "version": {
             "title": "Version",
@@ -554,9 +665,65 @@
         "title": "CatalogEntryView",
         "type": "object"
       },
-      "CatalogOption": {
-        "description": "One way to connect: sign in, an API key, or run on this computer.",
+      "CatalogMaker": {
+        "description": "The entry is the product maker's own, and what agreed: the publisher's name is the\nproduct's (``publisher``) or Ghost's own list says so (``listed``); it connects to the\nmaker's host (``remote``); its repository is theirs; its website is theirs.",
         "properties": {
+          "evidence": {
+            "items": {
+              "enum": [
+                "publisher",
+                "listed",
+                "remote",
+                "repository",
+                "website"
+              ],
+              "type": "string"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "product": {
+            "title": "Product",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product",
+          "evidence"
+        ],
+        "title": "CatalogMaker",
+        "type": "object"
+      },
+      "CatalogOption": {
+        "description": "One way to connect: sign in, an API key, or run on this computer. Where it runs:\na remote's ``host``, and whose host that is; a package's ``registry`` and name.",
+        "properties": {
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "host_owner": {
+            "anyOf": [
+              {
+                "enum": [
+                  "maker",
+                  "publisher",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Owner"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -573,6 +740,33 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "package": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package"
+          },
+          "registry": {
+            "anyOf": [
+              {
+                "enum": [
+                  "npm",
+                  "pypi",
+                  "oci"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry"
           },
           "settings": {
             "default": [],
@@ -638,6 +832,29 @@
           "total"
         ],
         "title": "CatalogPage",
+        "type": "object"
+      },
+      "CatalogPublisher": {
+        "description": "Who published an entry, as the registry checked it: the GitHub account it signed in\nwith (``io.github.PostHog/\u2026``), or the domain it proved it owns (``com.mcparmory/\u2026``).\nWho published it, not whether it is safe.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "verified": {
+            "enum": [
+              "github",
+              "domain"
+            ],
+            "title": "Verified",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "verified"
+        ],
+        "title": "CatalogPublisher",
         "type": "object"
       },
       "CatalogSetting": {
@@ -1360,6 +1577,28 @@
         "title": "HookInfo",
         "type": "object"
       },
+      "ImportSourceView": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "heka_vault",
+              "file"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "path"
+        ],
+        "title": "ImportSourceView",
+        "type": "object"
+      },
       "ItemKey": {
         "properties": {
           "key": {
@@ -1401,6 +1640,411 @@
           "at"
         ],
         "title": "LogEvent",
+        "type": "object"
+      },
+      "ModelConnectionView": {
+        "description": "The model connection now. No key is in it: only whether its Password is set.",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "base_url_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url Override"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Headers",
+            "type": "object"
+          },
+          "legacy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "password_set": {
+            "title": "Password Set",
+            "type": "boolean"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "protocol": {
+            "enum": [
+              "anthropic",
+              "openai"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "providers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelProviderView"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "sign_in_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sign In Error"
+          },
+          "sign_in_pending": {
+            "default": false,
+            "title": "Sign In Pending",
+            "type": "boolean"
+          },
+          "timeout_secs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Secs"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Values",
+            "type": "object"
+          },
+          "wire_model": {
+            "title": "Wire Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "protocol",
+          "base_url",
+          "model",
+          "wire_model",
+          "password_set",
+          "ready"
+        ],
+        "title": "ModelConnectionView",
+        "type": "object"
+      },
+      "ModelDraft": {
+        "description": "A connection being edited: GHOST_LLM_* values over the saved ones (None removes\none), and a key typed but not saved yet, used for this one request and dropped.",
+        "properties": {
+          "password_value": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 4096,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Value"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "default": {},
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "title": "ModelDraft",
+        "type": "object"
+      },
+      "ModelListView": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelOptionView"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "ModelListView",
+        "type": "object"
+      },
+      "ModelOptionView": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelOptionView",
+        "type": "object"
+      },
+      "ModelProviderView": {
+        "description": "One way to reach a model, as the Model page offers it.",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "blurb": {
+            "title": "Blurb",
+            "type": "string"
+          },
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "local": {
+            "default": false,
+            "title": "Local",
+            "type": "boolean"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "password_optional": {
+            "default": false,
+            "title": "Password Optional",
+            "type": "boolean"
+          },
+          "protocol": {
+            "enum": [
+              "anthropic",
+              "openai"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "sign_in": {
+            "default": false,
+            "title": "Sign In",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "blurb",
+          "protocol",
+          "base_url"
+        ],
+        "title": "ModelProviderView",
+        "type": "object"
+      },
+      "ModelSignInResult": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "ModelSignInResult",
+        "type": "object"
+      },
+      "ModelTestResult": {
+        "description": "One tiny request, timed like ``make perf-llm``: request to first token.",
+        "properties": {
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
+          },
+          "total_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Ms"
+          },
+          "ttft_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttft Ms"
+          },
+          "where": {
+            "title": "Where",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "model",
+          "where"
+        ],
+        "title": "ModelTestResult",
         "type": "object"
       },
       "ModelsView": {
@@ -1603,6 +2247,197 @@
           "modified"
         ],
         "title": "OutputInfo",
+        "type": "object"
+      },
+      "PasswordImportResult": {
+        "properties": {
+          "imported": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Imported",
+            "type": "array"
+          },
+          "kept": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
+          "notes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "passwords": {
+            "$ref": "#/components/schemas/PasswordsView"
+          },
+          "removed": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "restart_required": {
+            "default": false,
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "settings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Settings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "passwords"
+        ],
+        "title": "PasswordImportResult",
+        "type": "object"
+      },
+      "PasswordInfo": {
+        "properties": {
+          "added": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added"
+          },
+          "ghost": {
+            "default": false,
+            "title": "Ghost",
+            "type": "boolean"
+          },
+          "last_used": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "set": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "used_by": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Used By",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "set"
+        ],
+        "title": "PasswordInfo",
+        "type": "object"
+      },
+      "PasswordResult": {
+        "properties": {
+          "passwords": {
+            "$ref": "#/components/schemas/PasswordsView"
+          },
+          "restart_required": {
+            "default": false,
+            "title": "Restart Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "passwords"
+        ],
+        "title": "PasswordResult",
+        "type": "object"
+      },
+      "PasswordSet": {
+        "properties": {
+          "value": {
+            "format": "password",
+            "title": "Value",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "PasswordSet",
+        "type": "object"
+      },
+      "PasswordsView": {
+        "properties": {
+          "importable": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ImportSourceView"
+            },
+            "title": "Importable",
+            "type": "array"
+          },
+          "passwords": {
+            "items": {
+              "$ref": "#/components/schemas/PasswordInfo"
+            },
+            "title": "Passwords",
+            "type": "array"
+          },
+          "vault": {
+            "$ref": "#/components/schemas/VaultView"
+          }
+        },
+        "required": [
+          "vault",
+          "passwords"
+        ],
+        "title": "PasswordsView",
         "type": "object"
       },
       "PendingEvent": {
@@ -1837,11 +2672,72 @@
         "title": "Phase",
         "type": "string"
       },
+      "PhoneAddress": {
+        "description": "One ``GHOST_PHONE_LISTEN`` address and the network it is on.",
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "listening": {
+            "title": "Listening",
+            "type": "boolean"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "tunnel"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network"
+          }
+        },
+        "required": [
+          "address",
+          "network",
+          "listening"
+        ],
+        "title": "PhoneAddress",
+        "type": "object"
+      },
       "PhoneDevice": {
         "properties": {
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "last_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Address"
+          },
+          "last_network": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "tunnel"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Network"
           },
           "last_seen": {
             "anyOf": [
@@ -1896,12 +2792,17 @@
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
+          },
+          "link": {
+            "title": "Link",
+            "type": "string"
           }
         },
         "required": [
           "code",
           "address",
-          "expires_at"
+          "expires_at",
+          "link"
         ],
         "title": "PhonePairing",
         "type": "object"
@@ -1935,6 +2836,13 @@
                 "type": "null"
               }
             ]
+          },
+          "listen": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneAddress"
+            },
+            "title": "Listen",
+            "type": "array"
           }
         },
         "required": [
@@ -2358,10 +3266,6 @@
       },
       "SettingsView": {
         "properties": {
-          "env_path": {
-            "title": "Env Path",
-            "type": "string"
-          },
           "secrets": {
             "items": {
               "$ref": "#/components/schemas/SecretState"
@@ -2379,18 +3283,12 @@
             },
             "title": "Values",
             "type": "object"
-          },
-          "vault_managed": {
-            "title": "Vault Managed",
-            "type": "boolean"
           }
         },
         "required": [
           "settings_path",
-          "env_path",
           "values",
-          "secrets",
-          "vault_managed"
+          "secrets"
         ],
         "title": "SettingsView",
         "type": "object"
@@ -2452,6 +3350,29 @@
         "title": "SkillBody",
         "type": "object"
       },
+      "SkillFileView": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "script": {
+            "title": "Script",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "bytes",
+          "script"
+        ],
+        "title": "SkillFileView",
+        "type": "object"
+      },
       "SkillInfo": {
         "description": "A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.",
         "properties": {
@@ -2478,6 +3399,16 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillOriginView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "path": {
             "title": "Path",
@@ -2514,6 +3445,369 @@
           "path"
         ],
         "title": "SkillInfo",
+        "type": "object"
+      },
+      "SkillInstall": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "replace": {
+            "default": false,
+            "title": "Replace",
+            "type": "boolean"
+          },
+          "token": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "SkillInstall",
+        "type": "object"
+      },
+      "SkillListing": {
+        "description": "A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,\nnever to the model.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed"
+          },
+          "installs": {
+            "title": "Installs",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skill": {
+            "title": "Skill",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "skill",
+          "name",
+          "installs"
+        ],
+        "title": "SkillListing",
+        "type": "object"
+      },
+      "SkillOriginView": {
+        "description": "Where one of Ghost's skills was installed from (#35), as its lock file records it.",
+        "properties": {
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "folder_hash": {
+            "title": "Folder Hash",
+            "type": "string"
+          },
+          "installed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed At"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "skill_path": {
+            "title": "Skill Path",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "source_url",
+          "skill_path",
+          "commit",
+          "folder_hash"
+        ],
+        "title": "SkillOriginView",
+        "type": "object"
+      },
+      "SkillPreview": {
+        "description": "A skill fetched from GitHub and staged, for the operator to read before installing.\nEverything in it but the hashes is the source's text: untrusted.",
+        "properties": {
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SkillFileView"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "folder_hash": {
+            "title": "Folder Hash",
+            "type": "string"
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ghost",
+                  "home"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "scripts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scripts",
+            "type": "array"
+          },
+          "skill_md": {
+            "title": "Skill Md",
+            "type": "string"
+          },
+          "skill_path": {
+            "title": "Skill Path",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "update_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Of"
+          }
+        },
+        "required": [
+          "token",
+          "name",
+          "description",
+          "source",
+          "source_url",
+          "skill_path",
+          "commit",
+          "folder_hash",
+          "skill_md"
+        ],
+        "title": "SkillPreview",
+        "type": "object"
+      },
+      "SkillPreviewRequest": {
+        "properties": {
+          "skill": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The skill's id in it.",
+            "title": "Skill"
+          },
+          "source": {
+            "description": "owner/repo, owner/repo/skill, or a github.com address of a skill's folder.",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "SkillPreviewRequest",
+        "type": "object"
+      },
+      "SkillSearchPage": {
+        "properties": {
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SkillListing"
+            },
+            "title": "Skills",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SkillSearchPage",
+        "type": "object"
+      },
+      "SkillUpdateView": {
+        "description": "Whether an installed skill's source has moved on, checked when the page asks.",
+        "properties": {
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "latest_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Commit"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "update": {
+            "default": false,
+            "title": "Update",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "commit"
+        ],
+        "title": "SkillUpdateView",
         "type": "object"
       },
       "SnoozeRequest": {
@@ -2590,6 +3884,13 @@
             },
             "title": "Apps",
             "type": "array"
+          },
+          "build": {
+            "$ref": "#/components/schemas/Build",
+            "default": {
+              "dirty": false,
+              "kind": "dev"
+            }
           },
           "conversation": {
             "anyOf": [
@@ -2843,6 +4144,42 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VaultView": {
+        "description": "Ghost's vault: one encrypted file, its key in the operator's keyring.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "locked",
+              "unavailable",
+              "broken"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "path"
+        ],
+        "title": "VaultView",
         "type": "object"
       },
       "VoiceInfo": {
@@ -4285,6 +5622,134 @@
         ]
       }
     },
+    "/model": {
+      "get": {
+        "description": "The model connection now, with every provider the page offers.",
+        "operationId": "get_model_model_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Model",
+        "tags": [
+          "model"
+        ]
+      }
+    },
+    "/model/models": {
+      "post": {
+        "description": "The models a provider offers, for the saved connection or the one being edited.\nA provider that can't be read says why; that is not an HTTP error.",
+        "operationId": "model_list_model_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDraft"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Model List",
+        "tags": [
+          "model"
+        ]
+      }
+    },
+    "/model/sign-in": {
+      "post": {
+        "description": "Sign in to OpenRouter (OAuth with PKCE). The desktop opens the address; the\nbrowser comes back to Ghost's loopback, and the key OpenRouter gives is kept as\nthe OPENROUTER_API_KEY password in Ghost's vault (ADR 0036). Nothing to copy.",
+        "operationId": "model_sign_in_model_sign_in_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSignInResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Model Sign In",
+        "tags": [
+          "model"
+        ]
+      }
+    },
+    "/model/test": {
+      "post": {
+        "description": "Send one tiny request through the connection being edited and time its first\ntoken, the way ``make perf-llm`` does.",
+        "operationId": "model_test_model_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDraft"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Model Test",
+        "tags": [
+          "model"
+        ]
+      }
+    },
     "/outputs": {
       "get": {
         "description": "The files Ghost made in its out/ folder (ADR 0033), by name.",
@@ -4308,6 +5773,164 @@
         "summary": "Outputs",
         "tags": [
           "outputs"
+        ]
+      }
+    },
+    "/passwords": {
+      "get": {
+        "operationId": "get_passwords_passwords_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Passwords",
+        "tags": [
+          "passwords"
+        ]
+      }
+    },
+    "/passwords/import": {
+      "post": {
+        "description": "Once: heka-vault and the plaintext env files into the vault, then the plaintext\ncopies removed. A password already in the vault is kept.",
+        "operationId": "import_all_passwords_import_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Import All",
+        "tags": [
+          "passwords"
+        ]
+      }
+    },
+    "/passwords/unlock": {
+      "post": {
+        "description": "Ask the keyring to unlock (it shows its own prompt on the desktop), then open\nthe vault. The daemon follows: Ghost's own settings and the apps that waited.",
+        "operationId": "unlock_passwords_unlock_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Unlock",
+        "tags": [
+          "passwords"
+        ]
+      }
+    },
+    "/passwords/{name}": {
+      "delete": {
+        "operationId": "delete_password_passwords__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Password",
+        "tags": [
+          "passwords"
+        ]
+      },
+      "put": {
+        "description": "Save or replace one. The value is never returned, here or anywhere.",
+        "operationId": "put_password_passwords__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Password",
+        "tags": [
+          "passwords"
         ]
       }
     },
@@ -4898,6 +6521,204 @@
         "summary": "Models",
         "tags": [
           "setup"
+        ]
+      }
+    },
+    "/skill-catalog": {
+      "get": {
+        "description": "Skills on skills.sh for a search of two letters or more, from Ghost's cache when\nrecent. A failure is ``problem``, with the last results for the search if any.",
+        "operationId": "search_skills_skill_catalog_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Search",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSearchPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Skills",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/install": {
+      "post": {
+        "description": "Copy a staged skill into Ghost's skills through the gate (``skills.install``),\naudited, with where it came from.",
+        "operationId": "install_skill_skill_catalog_install_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillInstall"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/preview": {
+      "post": {
+        "description": "Fetch a skill's folder from GitHub at the commit its branch is on, and stage it:\nits SKILL.md and its files, for the operator to read before installing.",
+        "operationId": "preview_skill_skill_catalog_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/updates": {
+      "get": {
+        "description": "For each skill Ghost installed from GitHub, whether its folder has changed at\nthe source since. Asks GitHub now (a recent answer per repository is reused).",
+        "operationId": "skill_updates_skill_catalog_updates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillUpdateView"
+                  },
+                  "title": "Response Skill Updates Skill Catalog Updates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Skill Updates",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/updates/{name}": {
+      "post": {
+        "description": "The newer version of an installed skill, staged like any preview; installing it\nwith ``replace`` and this name updates the skill.",
+        "operationId": "preview_update_skill_catalog_updates__name__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Update",
+        "tags": [
+          "skills"
         ]
       }
     },

@@ -16,8 +16,11 @@ import createClient, { type Client } from "openapi-fetch";
 
 import type { components, paths } from "./schema";
 
+export { PAIR_LINK, type PairLink, pairLink, parsePairLink } from "./pairLink";
+
 export type Schemas = components["schemas"];
 export type Status = Schemas["Status"];
+export type Build = Schemas["Build"];
 export type Phase = Schemas["Phase"];
 export type Turn = Schemas["Turn"];
 export type PendingProposal = Schemas["PendingProposal"];
@@ -35,6 +38,8 @@ export type AppConnectResult = Schemas["AppConnectResult"];
 export type CatalogPage = Schemas["CatalogPage"];
 export type CatalogEntryView = Schemas["CatalogEntryView"];
 export type CatalogOption = Schemas["CatalogOption"];
+export type CatalogPublisher = Schemas["CatalogPublisher"];
+export type CatalogMaker = Schemas["CatalogMaker"];
 export type CatalogSetting = Schemas["CatalogSetting"];
 /** `[permissions]` in policy.toml: everything runs unless a rule blocks it or asks first. */
 export type PermissionsView = Schemas["PermissionsView"];
@@ -45,6 +50,19 @@ export type PolicyUpdate = Schemas["PolicyUpdate"];
 export type PolicyResult = Schemas["PolicyResult"];
 export type SettingsView = Schemas["SettingsView"];
 export type SettingsUpdate = Schemas["SettingsUpdate"];
+/** Ghost's vault (ADR 0036): names and metadata only; a value never comes back. */
+export type PasswordsView = Schemas["PasswordsView"];
+export type PasswordInfo = Schemas["PasswordInfo"];
+export type PasswordResult = Schemas["PasswordResult"];
+export type PasswordImportResult = Schemas["PasswordImportResult"];
+export type VaultView = Schemas["VaultView"];
+/** The model connection (ADR 0037): a provider, its model, the Password's name. */
+export type ModelConnectionView = Schemas["ModelConnectionView"];
+export type ModelProviderView = Schemas["ModelProviderView"];
+export type ModelDraft = Schemas["ModelDraft"];
+export type ModelListView = Schemas["ModelListView"];
+export type ModelTestResult = Schemas["ModelTestResult"];
+export type ModelSignInResult = Schemas["ModelSignInResult"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
 export type Ack = Schemas["Ack"];
@@ -59,9 +77,18 @@ export type VoiceInfo = Schemas["VoiceInfo"];
 export type PhoneView = Schemas["PhoneView"];
 export type PhoneDevice = Schemas["PhoneDevice"];
 export type PhonePairing = Schemas["PhonePairing"];
+/** One phone listen address and whether it is on the home network or the tunnel (ADR 0020). */
+export type PhoneAddress = Schemas["PhoneAddress"];
 export type SkillInfo = Schemas["SkillInfo"];
 export type SkillBody = Schemas["SkillBody"];
 export type SkillAdd = Schemas["SkillAdd"];
+/** The skills catalog (#35): skills.sh results, a skill staged from GitHub, an update check. */
+export type SkillOriginView = Schemas["SkillOriginView"];
+export type SkillListing = Schemas["SkillListing"];
+export type SkillSearchPage = Schemas["SkillSearchPage"];
+export type SkillPreview = Schemas["SkillPreview"];
+export type SkillFileView = Schemas["SkillFileView"];
+export type SkillUpdateView = Schemas["SkillUpdateView"];
 /** Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt. */
 export type RulesView = Schemas["RulesView"];
 export type RuleAdd = Schemas["RuleAdd"];
@@ -221,6 +248,26 @@ export class GhostClient {
   updateSettings(update: SettingsUpdate) {
     return unwrap(this.api.PUT("/settings", { body: update }));
   }
+  // --- passwords (ADR 0036): a value goes in and never comes back out ----------------------
+  /** Every password Ghost knows of: set or not, what uses it, when it was last used. Never a value. */
+  passwords() {
+    return unwrap(this.api.GET("/passwords"));
+  }
+  /** Save or replace one, into Ghost's vault. */
+  setPassword(name: string, value: string) {
+    return unwrap(this.api.PUT("/passwords/{name}", { params: { path: { name } }, body: { value } }));
+  }
+  deletePassword(name: string) {
+    return unwrap(this.api.DELETE("/passwords/{name}", { params: { path: { name } } }));
+  }
+  /** Once: heka-vault and the plaintext env files into the vault, then the files removed. */
+  importPasswords() {
+    return unwrap(this.api.POST("/passwords/import"));
+  }
+  /** Ask the keyring to unlock (it shows its own prompt), then open the vault. */
+  unlockPasswords() {
+    return unwrap(this.api.POST("/passwords/unlock"));
+  }
   devices() {
     return unwrap(this.api.GET("/devices"));
   }
@@ -229,6 +276,25 @@ export class GhostClient {
   }
   models() {
     return unwrap(this.api.GET("/setup/models"));
+  }
+
+  // --- the model connection (ADR 0037) -------------------------------------------------------
+  /** The connection now, every provider offered, and whether its Password is set (never the key).
+   *  It is saved like any setting, through `updateSettings`. */
+  modelConnection() {
+    return unwrap(this.api.GET("/model"));
+  }
+  /** The provider's models, for the saved connection or a draft of it. */
+  modelList(draft: ModelDraft = { values: {} }) {
+    return unwrap(this.api.POST("/model/models", { body: draft }));
+  }
+  /** One tiny request through a draft connection: time to first token, as `make perf-llm` times it. */
+  testModel(draft: ModelDraft = { values: {} }) {
+    return unwrap(this.api.POST("/model/test", { body: draft }));
+  }
+  /** Sign in to OpenRouter: open `url`; the key comes back to Ghost, never to the app. */
+  modelSignIn() {
+    return unwrap(this.api.POST("/model/sign-in"));
   }
 
   // --- agents (ADR 0014, ADR 0035) ---------------------------------------------------------
@@ -348,6 +414,28 @@ export class GhostClient {
   /** Delete one of Ghost's own skills. 409 for one read in place from elsewhere. */
   removeSkill(name: string) {
     return unwrap(this.api.DELETE("/skills/{name}", { params: { path: { name } } }));
+  }
+  /** Skills on skills.sh for a search of two letters or more, cached an hour by the daemon.
+   *  `problem` says when skills.sh failed or changed shape. */
+  searchSkills(search: string) {
+    return unwrap(this.api.GET("/skill-catalog", { params: { query: { search } } }));
+  }
+  /** Fetch a skill from GitHub, pinned to a commit, and stage it for the operator to read:
+   *  owner/repo/skill, owner/repo with `skill`, or a github.com address. 409 with a sentence. */
+  previewSkill(source: string, skill?: string | null) {
+    return unwrap(this.api.POST("/skill-catalog/preview", { body: { source, skill: skill ?? null } }));
+  }
+  /** Install a staged preview into Ghost's skills, through the gate. */
+  installSkill({ token, name, replace }: { token: string; name?: string | null; replace?: boolean }) {
+    return unwrap(this.api.POST("/skill-catalog/install", { body: { token, name: name ?? null, replace: replace ?? false } }));
+  }
+  /** Whether each skill Ghost installed from GitHub has changed at its source. Asks GitHub. */
+  skillUpdates() {
+    return unwrap(this.api.GET("/skill-catalog/updates"));
+  }
+  /** Stage the newer version of an installed skill; install it with `replace` to update. */
+  previewSkillUpdate(name: string) {
+    return unwrap(this.api.POST("/skill-catalog/updates/{name}", { params: { path: { name } } }));
   }
 }
 

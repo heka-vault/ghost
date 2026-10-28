@@ -21,7 +21,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, LiveStatus, Notice, Page, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Notice, Page, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
 import { type OwnSettle, useDecisions, useLastSession, useLines, useObservedSwitches } from "./hooks";
 import { Transcript } from "./Transcript";
@@ -50,7 +50,7 @@ const FAILED: Record<Action, string> = {
 export default function SessionScreen(_: RouteProps) {
   const { client, status, turns, pending } = useGhost();
   // The shell's state: the same words as the sidebar card, and `online` gates every write.
-  const { phase, online, loadingModels: loading, setupNeeded, setupHref } = useLive();
+  const { phase, online, loadingModels: loading, setupNeeded, setupLocked = false, setupHref } = useLive();
   const design = useDesign();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<Action | null>(null);
@@ -270,7 +270,7 @@ export default function SessionScreen(_: RouteProps) {
       </Notice>
     ));
 
-  const start = startCopy({ online, loading, needsSetup, inSession, onPhone });
+  const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone });
   const showLast = startOnly && online && !loading && !needsSetup && lastSession;
   const newest = turns[turns.length - 1];
 
@@ -280,15 +280,7 @@ export default function SessionScreen(_: RouteProps) {
       bare={startOnly}
       title={inSession ? lineLabel : "Ghost"}
       leading={<LineGlyph slug={line} name={lineLabel} size="lg" />}
-      status={
-        onPhone ? (
-          <>
-            <LiveStatus /> · on your phone
-          </>
-        ) : (
-          <LiveStatus />
-        )
-      }
+      status={onPhone ? "On your phone" : undefined}
       dock={
         showDock ? (
           <div className="session-dock" ref={dock}>
@@ -335,7 +327,7 @@ export default function SessionScreen(_: RouteProps) {
             {needsSetup ? (
               <div className="session-start__actions">
                 <Button variant="primary" href={setupHref}>
-                  Finish setup
+                  {setupLocked ? "Unlock…" : "Finish setup"}
                 </Button>
                 {/* Wake drops to secondary: Ghost can listen, but can't answer yet. */}
                 {wakeButton}
@@ -374,12 +366,14 @@ export default function SessionScreen(_: RouteProps) {
 }
 
 /** The start state before the first turn: one presence, one line, one hint. Never promises what can’t happen yet. */
-function startCopy({ online, loading, needsSetup, inSession, onPhone }: { online: boolean; loading: boolean; needsSetup: boolean; inSession: boolean; onPhone: boolean }): { title: string; text?: string } {
+function startCopy({ online, loading, needsSetup, locked, inSession, onPhone }: { online: boolean; loading: boolean; needsSetup: boolean; locked: boolean; inSession: boolean; onPhone: boolean }): { title: string; text?: string } {
   if (!online) return { title: "Reconnecting", text: "This picks up again as soon as Ghost is back." };
   // The shell's banner and the status card already say the models are loading; this says
   // the next thing instead of repeating it.
   if (loading) return { title: "Almost ready", text: `Say ${quoted("Hey Ghost")} once the models finish` };
-  if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model key before it can answer." };
+  // A locked keyring (ADR 0036): the password is there, Ghost just can't read it yet.
+  if (needsSetup && locked) return { title: "Unlock your keyring", text: "Ghost can’t read its passwords, the model’s included, until it’s unlocked." };
+  if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model password before it can answer." };
   // The header already says “Listening”; this says what to do with it.
   if (onPhone) return { title: "On your phone", text: "Ghost hears you through your phone. You can end the session here." };
   if (inSession) return { title: "Go ahead", text: "Ask what’s waiting on you." };

@@ -349,6 +349,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Model
+         * @description The model connection now, with every provider the page offers.
+         */
+        get: operations["get_model_model_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Model List
+         * @description The models a provider offers, for the saved connection or the one being edited.
+         *     A provider that can't be read says why; that is not an HTTP error.
+         */
+        post: operations["model_list_model_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Model Sign In
+         * @description Sign in to OpenRouter (OAuth with PKCE). The desktop opens the address; the
+         *     browser comes back to Ghost's loopback, and the key OpenRouter gives is kept as
+         *     the OPENROUTER_API_KEY password in Ghost's vault (ADR 0036). Nothing to copy.
+         */
+        post: operations["model_sign_in_model_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Model Test
+         * @description Send one tiny request through the connection being edited and time its first
+         *     token, the way ``make perf-llm`` does.
+         */
+        post: operations["model_test_model_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/outputs": {
         parameters: {
             query?: never;
@@ -363,6 +447,86 @@ export interface paths {
         get: operations["outputs_outputs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passwords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Passwords */
+        get: operations["get_passwords_passwords_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passwords/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Password
+         * @description Save or replace one. The value is never returned, here or anywhere.
+         */
+        put: operations["put_password_passwords__name__put"];
+        post?: never;
+        /** Delete Password */
+        delete: operations["delete_password_passwords__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passwords/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import All
+         * @description Once: heka-vault and the plaintext env files into the vault, then the plaintext
+         *     copies removed. A password already in the vault is kept.
+         */
+        post: operations["import_all_passwords_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passwords/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unlock
+         * @description Ask the keyring to unlock (it shows its own prompt on the desktop), then open
+         *     the vault. The daemon follows: Ghost's own settings and the apps that waited.
+         */
+        post: operations["unlock_passwords_unlock_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -644,6 +808,111 @@ export interface paths {
         get: operations["models_setup_models_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Skills
+         * @description Skills on skills.sh for a search of two letters or more, from Ghost's cache when
+         *     recent. A failure is ``problem``, with the last results for the search if any.
+         */
+        get: operations["search_skills_skill_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Skill
+         * @description Copy a staged skill into Ghost's skills through the gate (``skills.install``),
+         *     audited, with where it came from.
+         */
+        post: operations["install_skill_skill_catalog_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Skill
+         * @description Fetch a skill's folder from GitHub at the commit its branch is on, and stage it:
+         *     its SKILL.md and its files, for the operator to read before installing.
+         */
+        post: operations["preview_skill_skill_catalog_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Skill Updates
+         * @description For each skill Ghost installed from GitHub, whether its folder has changed at
+         *     the source since. Asks GitHub now (a recent answer per repository is reused).
+         */
+        get: operations["skill_updates_skill_catalog_updates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/updates/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Update
+         * @description The newer version of an installed skill, staged like any preview; installing it
+         *     with ``replace`` and this name updates the skill.
+         */
+        post: operations["preview_update_skill_catalog_updates__name__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1045,6 +1314,33 @@ export interface components {
             total: number;
         };
         /**
+         * Build
+         * @description Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a
+         *     checkout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The
+         *     commit is the full hash when known; ``dirty`` is a checkout that had uncommitted
+         *     changes when the daemon started. ``launcher`` is how a checkout's daemon was started,
+         *     when the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and
+         *     ``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``
+         *     (``make restart``); anything else (a unit running the checkout, ``uv run``) is None.
+         */
+        Build: {
+            /** Commit */
+            commit?: string | null;
+            /**
+             * Dirty
+             * @default false
+             */
+            dirty: boolean;
+            /**
+             * Kind
+             * @default dev
+             * @enum {string}
+             */
+            kind: "dev" | "deploy" | "release";
+            /** Launcher */
+            launcher?: ("make-dev" | "make-start") | null;
+        };
+        /**
          * CatalogEntryView
          * @description An app in the catalog. Its text is the registry's: shown to the operator, never
          *     to the model.
@@ -1064,6 +1360,7 @@ export interface components {
             featured: boolean;
             /** Icon */
             icon?: string | null;
+            maker?: components["schemas"]["CatalogMaker"] | null;
             /** Name */
             name: string;
             /**
@@ -1071,22 +1368,51 @@ export interface components {
              * @default []
              */
             options: components["schemas"]["CatalogOption"][];
+            /**
+             * Others
+             * @default []
+             */
+            others: components["schemas"]["CatalogEntryView"][];
+            /** Product */
+            product?: string | null;
+            /** Product Maker */
+            product_maker?: string | null;
+            publisher?: components["schemas"]["CatalogPublisher"] | null;
             /** Repository */
             repository?: string | null;
             /** Suggested Name */
             suggested_name: string;
             /** Title */
             title: string;
+            /** Updated At */
+            updated_at?: string | null;
             /** Version */
             version: string;
             /** Website */
             website?: string | null;
         };
         /**
+         * CatalogMaker
+         * @description The entry is the product maker's own, and what agreed: the publisher's name is the
+         *     product's (``publisher``) or Ghost's own list says so (``listed``); it connects to the
+         *     maker's host (``remote``); its repository is theirs; its website is theirs.
+         */
+        CatalogMaker: {
+            /** Evidence */
+            evidence: ("publisher" | "listed" | "remote" | "repository" | "website")[];
+            /** Product */
+            product: string;
+        };
+        /**
          * CatalogOption
-         * @description One way to connect: sign in, an API key, or run on this computer.
+         * @description One way to connect: sign in, an API key, or run on this computer. Where it runs:
+         *     a remote's ``host``, and whose host that is; a package's ``registry`` and name.
          */
         CatalogOption: {
+            /** Host */
+            host?: string | null;
+            /** Host Owner */
+            host_owner?: ("maker" | "publisher" | "other") | null;
             /** Id */
             id: string;
             /**
@@ -1096,6 +1422,10 @@ export interface components {
             kind: "sign_in" | "key" | "local";
             /** Label */
             label: string;
+            /** Package */
+            package?: string | null;
+            /** Registry */
+            registry?: ("npm" | "pypi" | "oci") | null;
             /**
              * Settings
              * @default []
@@ -1117,6 +1447,21 @@ export interface components {
             refreshing: boolean;
             /** Total */
             total: number;
+        };
+        /**
+         * CatalogPublisher
+         * @description Who published an entry, as the registry checked it: the GitHub account it signed in
+         *     with (``io.github.PostHog/…``), or the domain it proved it owns (``com.mcparmory/…``).
+         *     Who published it, not whether it is safe.
+         */
+        CatalogPublisher: {
+            /** Name */
+            name: string;
+            /**
+             * Verified
+             * @enum {string}
+             */
+            verified: "github" | "domain";
         };
         /** CatalogSetting */
         CatalogSetting: {
@@ -1390,6 +1735,16 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImportSourceView */
+        ImportSourceView: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "heka_vault" | "file";
+            /** Path */
+            path: string;
+        };
         /** ItemKey */
         ItemKey: {
             /** Key */
@@ -1412,6 +1767,143 @@ export interface components {
              */
             type: "log";
         };
+        /**
+         * ModelConnectionView
+         * @description The model connection now. No key is in it: only whether its Password is set.
+         */
+        ModelConnectionView: {
+            /** Base Url */
+            base_url: string;
+            /** Base Url Override */
+            base_url_override?: string | null;
+            /**
+             * Headers
+             * @default {}
+             */
+            headers: {
+                [key: string]: string;
+            };
+            /** Legacy */
+            legacy?: string | null;
+            /** Model */
+            model: string;
+            /** Password */
+            password?: string | null;
+            /** Password Set */
+            password_set: boolean;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "anthropic" | "openai";
+            /** Provider */
+            provider: string;
+            /**
+             * Providers
+             * @default []
+             */
+            providers: components["schemas"]["ModelProviderView"][];
+            /** Ready */
+            ready: boolean;
+            /** Sign In Error */
+            sign_in_error?: string | null;
+            /**
+             * Sign In Pending
+             * @default false
+             */
+            sign_in_pending: boolean;
+            /** Timeout Secs */
+            timeout_secs?: number | null;
+            /**
+             * Values
+             * @default {}
+             */
+            values: {
+                [key: string]: string;
+            };
+            /** Wire Model */
+            wire_model: string;
+        };
+        /**
+         * ModelDraft
+         * @description A connection being edited: GHOST_LLM_* values over the saved ones (None removes
+         *     one), and a key typed but not saved yet, used for this one request and dropped.
+         */
+        ModelDraft: {
+            /** Password Value */
+            password_value?: string | null;
+            /**
+             * Values
+             * @default {}
+             */
+            values: {
+                [key: string]: string | null;
+            };
+        };
+        /** ModelListView */
+        ModelListView: {
+            /** Default */
+            default?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Models */
+            models: components["schemas"]["ModelOptionView"][];
+        };
+        /** ModelOptionView */
+        ModelOptionView: {
+            /** Id */
+            id: string;
+            /** Name */
+            name?: string | null;
+        };
+        /**
+         * ModelProviderView
+         * @description One way to reach a model, as the Model page offers it.
+         */
+        ModelProviderView: {
+            /** Base Url */
+            base_url: string;
+            /** Blurb */
+            blurb: string;
+            /** Default Model */
+            default_model?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Local
+             * @default false
+             */
+            local: boolean;
+            /** Password */
+            password?: string | null;
+            /**
+             * Password Optional
+             * @default false
+             */
+            password_optional: boolean;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "anthropic" | "openai";
+            /**
+             * Sign In
+             * @default false
+             */
+            sign_in: boolean;
+            /** Title */
+            title: string;
+        };
+        /** ModelSignInResult */
+        ModelSignInResult: {
+            /** Url */
+            url: string;
+        };
         /** ModelsView */
         ModelsView: {
             /** Cache Dir */
@@ -1422,6 +1914,28 @@ export interface components {
             ready: boolean;
             /** Stt Model */
             stt_model: string;
+        };
+        /**
+         * ModelTestResult
+         * @description One tiny request, timed like ``make perf-llm``: request to first token.
+         */
+        ModelTestResult: {
+            /** Answered By */
+            answered_by?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Model */
+            model: string;
+            /** Ok */
+            ok: boolean;
+            /** Reply */
+            reply?: string | null;
+            /** Total Ms */
+            total_ms?: number | null;
+            /** Ttft Ms */
+            ttft_ms?: number | null;
+            /** Where */
+            where: string;
         };
         /** OperationInfo */
         OperationInfo: {
@@ -1492,6 +2006,91 @@ export interface components {
             name: string;
             /** Path */
             path: string;
+        };
+        /** PasswordImportResult */
+        PasswordImportResult: {
+            /**
+             * Imported
+             * @default []
+             */
+            imported: string[];
+            /**
+             * Kept
+             * @default []
+             */
+            kept: string[];
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            passwords: components["schemas"]["PasswordsView"];
+            /**
+             * Removed
+             * @default []
+             */
+            removed: string[];
+            /**
+             * Restart Required
+             * @default false
+             */
+            restart_required: boolean;
+            /**
+             * Settings
+             * @default []
+             */
+            settings: string[];
+        };
+        /** PasswordInfo */
+        PasswordInfo: {
+            /** Added */
+            added?: string | null;
+            /**
+             * Ghost
+             * @default false
+             */
+            ghost: boolean;
+            /** Last Used */
+            last_used?: string | null;
+            /** Name */
+            name: string;
+            /** Set */
+            set: boolean | null;
+            /** Updated */
+            updated?: string | null;
+            /**
+             * Used By
+             * @default []
+             */
+            used_by: string[];
+        };
+        /** PasswordResult */
+        PasswordResult: {
+            passwords: components["schemas"]["PasswordsView"];
+            /**
+             * Restart Required
+             * @default false
+             */
+            restart_required: boolean;
+        };
+        /** PasswordSet */
+        PasswordSet: {
+            /**
+             * Value
+             * Format: password
+             */
+            value: string;
+        };
+        /** PasswordsView */
+        PasswordsView: {
+            /**
+             * Importable
+             * @default []
+             */
+            importable: components["schemas"]["ImportSourceView"][];
+            /** Passwords */
+            passwords: components["schemas"]["PasswordInfo"][];
+            vault: components["schemas"]["VaultView"];
         };
         /** PendingEvent */
         PendingEvent: {
@@ -1579,10 +2178,26 @@ export interface components {
          * @enum {string}
          */
         Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking";
+        /**
+         * PhoneAddress
+         * @description One ``GHOST_PHONE_LISTEN`` address and the network it is on.
+         */
+        PhoneAddress: {
+            /** Address */
+            address: string;
+            /** Listening */
+            listening: boolean;
+            /** Network */
+            network: ("home" | "tunnel") | null;
+        };
         /** PhoneDevice */
         PhoneDevice: {
             /** Id */
             id: string;
+            /** Last Address */
+            last_address?: string | null;
+            /** Last Network */
+            last_network?: ("home" | "tunnel") | null;
             /** Last Seen */
             last_seen: string | null;
             /** Name */
@@ -1609,6 +2224,8 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+            /** Link */
+            link: string;
         };
         /** PhoneView */
         PhoneView: {
@@ -1617,6 +2234,8 @@ export interface components {
             /** Addresses */
             addresses?: string[];
             device: components["schemas"]["PhoneDevice"] | null;
+            /** Listen */
+            listen?: components["schemas"]["PhoneAddress"][];
         };
         /** PolicyResult */
         PolicyResult: {
@@ -1771,8 +2390,6 @@ export interface components {
         };
         /** SettingsView */
         SettingsView: {
-            /** Env Path */
-            env_path: string;
             /** Secrets */
             secrets: components["schemas"]["SecretState"][];
             /** Settings Path */
@@ -1781,8 +2398,6 @@ export interface components {
             values: {
                 [key: string]: string;
             };
-            /** Vault Managed */
-            vault_managed: boolean;
         };
         /** SkillAdd */
         SkillAdd: {
@@ -1811,6 +2426,15 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** SkillFileView */
+        SkillFileView: {
+            /** Bytes */
+            bytes: number;
+            /** Path */
+            path: string;
+            /** Script */
+            script: boolean;
+        };
         /**
          * SkillInfo
          * @description A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.
@@ -1830,6 +2454,7 @@ export interface components {
             missing: string[];
             /** Name */
             name: string;
+            origin?: components["schemas"]["SkillOriginView"] | null;
             /** Path */
             path: string;
             /** Problem */
@@ -1841,6 +2466,146 @@ export interface components {
             requires: string[];
             /** Source */
             source: string;
+        };
+        /** SkillInstall */
+        SkillInstall: {
+            /** Name */
+            name?: string | null;
+            /**
+             * Replace
+             * @default false
+             */
+            replace: boolean;
+            /** Token */
+            token: string;
+        };
+        /**
+         * SkillListing
+         * @description A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,
+         *     never to the model.
+         */
+        SkillListing: {
+            /** Id */
+            id: string;
+            /** Installed */
+            installed?: string | null;
+            /** Installs */
+            installs: number;
+            /** Name */
+            name: string;
+            /** Skill */
+            skill: string;
+            /** Source */
+            source: string;
+        };
+        /**
+         * SkillOriginView
+         * @description Where one of Ghost's skills was installed from (#35), as its lock file records it.
+         */
+        SkillOriginView: {
+            /** Commit */
+            commit: string;
+            /** Folder Hash */
+            folder_hash: string;
+            /** Installed At */
+            installed_at?: string | null;
+            /** Ref */
+            ref?: string | null;
+            /** Skill Path */
+            skill_path: string;
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /**
+         * SkillPreview
+         * @description A skill fetched from GitHub and staged, for the operator to read before installing.
+         *     Everything in it but the hashes is the source's text: untrusted.
+         */
+        SkillPreview: {
+            /** Commit */
+            commit: string;
+            /** Description */
+            description: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["SkillFileView"][];
+            /** Folder Hash */
+            folder_hash: string;
+            /** Installed */
+            installed?: ("ghost" | "home") | null;
+            /** Name */
+            name: string;
+            /** Ref */
+            ref?: string | null;
+            /**
+             * Scripts
+             * @default []
+             */
+            scripts: string[];
+            /** Skill Md */
+            skill_md: string;
+            /** Skill Path */
+            skill_path: string;
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+            /** Token */
+            token: string;
+            /** Update Of */
+            update_of?: string | null;
+        };
+        /** SkillPreviewRequest */
+        SkillPreviewRequest: {
+            /**
+             * Skill
+             * @description The skill's id in it.
+             */
+            skill?: string | null;
+            /**
+             * Source
+             * @description owner/repo, owner/repo/skill, or a github.com address of a skill's folder.
+             */
+            source: string;
+        };
+        /** SkillSearchPage */
+        SkillSearchPage: {
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Problem */
+            problem?: string | null;
+            /** Query */
+            query: string;
+            /**
+             * Skills
+             * @default []
+             */
+            skills: components["schemas"]["SkillListing"][];
+        };
+        /**
+         * SkillUpdateView
+         * @description Whether an installed skill's source has moved on, checked when the page asks.
+         */
+        SkillUpdateView: {
+            /** Commit */
+            commit: string;
+            /** Latest Commit */
+            latest_commit?: string | null;
+            /** Name */
+            name: string;
+            /** Problem */
+            problem?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * Update
+             * @default false
+             */
+            update: boolean;
         };
         /** SnoozeRequest */
         SnoozeRequest: {
@@ -1883,6 +2648,13 @@ export interface components {
              * @default []
              */
             apps: string[];
+            /**
+             * @default {
+             *       "dirty": false,
+             *       "kind": "dev"
+             *     }
+             */
+            build: components["schemas"]["Build"];
             /** Conversation */
             conversation?: string | null;
             /**
@@ -1984,6 +2756,21 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * VaultView
+         * @description Ghost's vault: one encrypted file, its key in the operator's keyring.
+         */
+        VaultView: {
+            /** Path */
+            path: string;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "locked" | "unavailable" | "broken";
         };
         /** VoiceInfo */
         VoiceInfo: {
@@ -2152,9 +2939,12 @@ export type SchemaAppView = components['schemas']['AppView'];
 export type SchemaAuditEntry = components['schemas']['AuditEntry'];
 export type SchemaAuditEventView = components['schemas']['AuditEventView'];
 export type SchemaAuditPage = components['schemas']['AuditPage'];
+export type SchemaBuild = components['schemas']['Build'];
 export type SchemaCatalogEntryView = components['schemas']['CatalogEntryView'];
+export type SchemaCatalogMaker = components['schemas']['CatalogMaker'];
 export type SchemaCatalogOption = components['schemas']['CatalogOption'];
 export type SchemaCatalogPage = components['schemas']['CatalogPage'];
+export type SchemaCatalogPublisher = components['schemas']['CatalogPublisher'];
 export type SchemaCatalogSetting = components['schemas']['CatalogSetting'];
 export type SchemaCompactionView = components['schemas']['CompactionView'];
 export type SchemaConversationCreate = components['schemas']['ConversationCreate'];
@@ -2166,18 +2956,32 @@ export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
+export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
+export type SchemaModelConnectionView = components['schemas']['ModelConnectionView'];
+export type SchemaModelDraft = components['schemas']['ModelDraft'];
+export type SchemaModelListView = components['schemas']['ModelListView'];
+export type SchemaModelOptionView = components['schemas']['ModelOptionView'];
+export type SchemaModelProviderView = components['schemas']['ModelProviderView'];
+export type SchemaModelSignInResult = components['schemas']['ModelSignInResult'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
+export type SchemaModelTestResult = components['schemas']['ModelTestResult'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
 export type SchemaOutputInfo = components['schemas']['OutputInfo'];
+export type SchemaPasswordImportResult = components['schemas']['PasswordImportResult'];
+export type SchemaPasswordInfo = components['schemas']['PasswordInfo'];
+export type SchemaPasswordResult = components['schemas']['PasswordResult'];
+export type SchemaPasswordSet = components['schemas']['PasswordSet'];
+export type SchemaPasswordsView = components['schemas']['PasswordsView'];
 export type SchemaPendingEvent = components['schemas']['PendingEvent'];
 export type SchemaPendingProposal = components['schemas']['PendingProposal'];
 export type SchemaPermissionsUpdate = components['schemas']['PermissionsUpdate'];
 export type SchemaPermissionsView = components['schemas']['PermissionsView'];
 export type SchemaPhase = components['schemas']['Phase'];
+export type SchemaPhoneAddress = components['schemas']['PhoneAddress'];
 export type SchemaPhoneDevice = components['schemas']['PhoneDevice'];
 export type SchemaPhonePairing = components['schemas']['PhonePairing'];
 export type SchemaPhoneView = components['schemas']['PhoneView'];
@@ -2197,7 +3001,15 @@ export type SchemaSettingsUpdate = components['schemas']['SettingsUpdate'];
 export type SchemaSettingsView = components['schemas']['SettingsView'];
 export type SchemaSkillAdd = components['schemas']['SkillAdd'];
 export type SchemaSkillBody = components['schemas']['SkillBody'];
+export type SchemaSkillFileView = components['schemas']['SkillFileView'];
 export type SchemaSkillInfo = components['schemas']['SkillInfo'];
+export type SchemaSkillInstall = components['schemas']['SkillInstall'];
+export type SchemaSkillListing = components['schemas']['SkillListing'];
+export type SchemaSkillOriginView = components['schemas']['SkillOriginView'];
+export type SchemaSkillPreview = components['schemas']['SkillPreview'];
+export type SchemaSkillPreviewRequest = components['schemas']['SkillPreviewRequest'];
+export type SchemaSkillSearchPage = components['schemas']['SkillSearchPage'];
+export type SchemaSkillUpdateView = components['schemas']['SkillUpdateView'];
 export type SchemaSnoozeRequest = components['schemas']['SnoozeRequest'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
@@ -2206,6 +3018,7 @@ export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
+export type SchemaVaultView = components['schemas']['VaultView'];
 export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
 export type SchemaWaitingEvent = components['schemas']['WaitingEvent'];
 export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
@@ -2917,6 +3730,112 @@ export interface operations {
             };
         };
     };
+    get_model_model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelConnectionView"];
+                };
+            };
+        };
+    };
+    model_list_model_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelListView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    model_sign_in_model_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSignInResult"];
+                };
+            };
+        };
+    };
+    model_test_model_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelTestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     outputs_outputs_get: {
         parameters: {
             query?: never;
@@ -2933,6 +3852,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutputInfo"][];
+                };
+            };
+        };
+    };
+    get_passwords_passwords_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordsView"];
+                };
+            };
+        };
+    };
+    put_password_passwords__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_password_passwords__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_all_passwords_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordImportResult"];
+                };
+            };
+        };
+    };
+    unlock_passwords_unlock_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordsView"];
                 };
             };
         };
@@ -3431,6 +4476,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelsView"];
+                };
+            };
+        };
+    };
+    search_skills_skill_catalog_get: {
+        parameters: {
+            query?: {
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillSearchPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    install_skill_skill_catalog_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillInstall"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_skill_skill_catalog_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skill_updates_skill_catalog_updates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillUpdateView"][];
+                };
+            };
+        };
+    };
+    preview_update_skill_catalog_updates__name__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -43,5 +43,27 @@ export const needsWords = (missing: string[]) => `needs ${listWords(missing.map(
 
 export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** The daemon's words as a sentence: a capital first, a period last. One that starts with a
+ *  name ("anthropics/skills has 20 skills", "skills.sh answered 502") keeps the name as written. */
+export function sentence(s: string): string {
+  const t = s.trim();
+  if (!t) return t;
+  const named = /^[\w-]+[./][\w-]/.test(t);
+  return (named ? t : t[0].toUpperCase() + t.slice(1)) + (/[.!?]$/.test(t) ? "" : ".");
+}
+
+/** A commit as people write it: the first seven characters. */
+export const shortCommit = (sha: string) => sha.slice(0, 7);
+
+/** "812 bytes", "11.9 KB", "1.2 MB". */
+export function sizeWords(bytes: number): string {
+  if (bytes < 1000) return `${bytes} bytes`;
+  if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(1)} KB`;
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/** "218,410 installs". */
+export const installsWords = (n: number) => (n > 0 ? `${n.toLocaleString("en-US")} ${n === 1 ? "install" : "installs"}` : "new");
+
 /** Whether a refusal means the name is already installed, so adding again with `replace` would go through. */
 export const saysInstalled = (message: string) => /already installed/i.test(message);

@@ -13,7 +13,7 @@ import { BellOff, Check, ExternalLink, Eye, GitPullRequestArrow, Inbox, ShieldAl
 import { useCallback, useEffect, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
-import { Badge, Button, Card, EmptyState, IconButton, ListRow, LiveStatus, Menu, Notice, Page, Skeleton, errorText, relativeTime, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, IconButton, ListRow, Menu, Notice, Page, Skeleton, errorText, relativeTime, useToast } from "../../ui";
 import "./waiting.css";
 
 const STATE: Record<WaitingItemView["state"], { label: string; tone: "warn" | "info" | "neutral" }> = {
@@ -102,7 +102,6 @@ export default function WaitingScreen(_: RouteProps) {
   return (
     <Page
       title="What needs you"
-      status={<LiveStatus />}
       description="Everything Ghost is keeping track of for you: what your watches and webhooks found, and changes waiting for your yes. “Got it” stops the reminders until something changes; nothing here writes anywhere."
     >
       {error && (

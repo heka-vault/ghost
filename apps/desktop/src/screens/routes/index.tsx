@@ -1,5 +1,6 @@
 /**
- * Owner: routes. How Ghost reaches the operator about what needs them (ADR 0031): which
+ * Owner: routes. Notifications (#/settings/notifications, once “How Ghost reaches you”): how
+ * Ghost reaches the operator about what needs them (ADR 0031): which
  * routes are on, how long a delivery waits to be heard before the next one, quiet hours,
  * and what desk voice says first. It edits `[routes]` in the policy file, the operator's
  * own file; the model never sets any of it.
@@ -9,7 +10,7 @@ import { useGhost } from "@ghost/ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
-import { Card, Field, Input, LiveStatus, Notice, Page, SaveBar, Section, Select, Skeleton, Switch, errorText, useToast } from "../../ui";
+import { Card, Field, Input, Notice, Page, SaveBar, Section, Select, Skeleton, Switch, errorText, useToast } from "../../ui";
 import "./routes.css";
 
 type Name = RoutesView["enabled"][number];
@@ -75,9 +76,8 @@ export default function RoutesScreen(_: RouteProps) {
 
   return (
     <Page
-      title="How Ghost reaches you"
-      status={<LiveStatus />}
-      description="When something needs you, Ghost starts with the quietest way you’ve turned on and moves up only if you haven’t heard it. Saved in your policy file under [routes]."
+      title="Notifications"
+      description="How Ghost reaches you when something needs you: the quietest way you’ve turned on first, moving up only if you haven’t heard it. Saved in your policy file under [routes]."
       dock={
         dirty && (
           <SaveBar

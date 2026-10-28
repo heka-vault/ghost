@@ -37,16 +37,18 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO
 
 from loguru import logger
 
 from ghost_core.models import Change, ChangeSet, Snapshot, Target
+from ghost_core.passwords import redact, redact_text
 from ghost_core.request import number_mentions, words
 
 if TYPE_CHECKING:  # source imports policy; keep the runtime edge lazy
@@ -450,7 +452,10 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
     text. ``_trim`` sizes it for the model."""
     if getattr(result, "is_error", False):
         texts = [getattr(c, "text", "") for c in getattr(result, "content", []) or []]
-        raise ToolError(" ".join(t for t in texts if t) or "the tool reported an error")
+        # An app's error is its text too: a password in it is replaced (ADR 0036).
+        raise ToolError(
+            redact_text(" ".join(t for t in texts if t)) or "the tool reported an error"
+        )
     structured = getattr(result, "structured_content", None)
     if structured:
         return dict(structured) if isinstance(structured, Mapping) else {"result": structured}
@@ -645,6 +650,43 @@ class AppWriter:
 AuthFor = Callable[["AppSpec", bool], Any]  # (spec, interactive) -> httpx.Auth | None
 
 
+class StderrRelay:
+    """A stdio app's stderr, a line at a time, through ``redact_text`` before it reaches
+    Ghost's own stderr, which is the journal (ADR 0036). The child writes into a pipe; a
+    thread reads it until the child and every process it started have closed it."""
+
+    def __init__(self, name: str, out: TextIO | None = None) -> None:
+        read_fd, write_fd = os.pipe()
+        self._out = out
+        self.writer = os.fdopen(write_fd, "w")  # the child's stderr
+        self._thread = threading.Thread(
+            target=self._pump, args=(read_fd,), name=f"app:{name}:stderr", daemon=True
+        )
+        self._thread.start()
+
+    def _pump(self, fd: int) -> None:
+        with os.fdopen(fd, "rb") as f:
+            for raw in f:
+                line = redact_text(raw.decode(errors="replace"))
+                out = self._out or sys.stderr
+                try:
+                    out.write(line)
+                    out.flush()
+                except (OSError, ValueError):
+                    pass
+
+    def spawned(self) -> None:
+        """The child has its copy of the pipe: this one closes, so the pipe ends with it."""
+        if not self.writer.closed:
+            self.writer.close()
+
+    def close(self) -> None:
+        self.spawned()
+
+    def join(self, timeout: float | None = None) -> None:
+        self._thread.join(timeout)
+
+
 class App:
     """A connected app: its session, its tools, and calls with a timeout.
 
@@ -734,7 +776,14 @@ class App:
                         args=_expand_args(spec.args, self.environ),
                         env={**get_default_environment(), **env},
                     )
-                    read, write = await stack.enter_async_context(stdio_client(params))
+                    # Its stderr reaches the journal only through the redactor: an
+                    # app that prints its own key in an error says [password: NAME].
+                    errlog = StderrRelay(spec.name)
+                    stack.callback(errlog.close)
+                    read, write = await stack.enter_async_context(
+                        stdio_client(params, errlog=errlog.writer)
+                    )
+                    errlog.spawned()
                 session = await stack.enter_async_context(
                     ClientSession(read, write, read_timeout_seconds=CALL_TIMEOUT_SECS)
                 )
@@ -783,7 +832,7 @@ class App:
         self.tools = [
             ToolInfo(
                 name=t.name,
-                description=t.description or t.name,
+                description=redact_text(t.description or t.name),
                 schema=dict(t.input_schema or {}),
                 read_only=bool(getattr(t.annotations, "read_only_hint", False))
                 if t.annotations
@@ -825,7 +874,9 @@ class App:
             raise ToolError(f"{name} failed: {type(e).__name__}") from None
         finally:
             logger.debug(f"app {self.spec.name}: {name} {time.perf_counter() - began:.2f}s")
-        data = _result_to_dict(result)
+        # Every password Ghost holds is replaced before anything reads the result: the
+        # model, the audit, a watch (ADR 0036).
+        data = redact(_result_to_dict(result))
         return _trim(data) if trim else data
 
     # --- what the model gets -----------------------------------------------------------

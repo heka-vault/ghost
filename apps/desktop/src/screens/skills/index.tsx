@@ -6,21 +6,28 @@
  * of task; it never changes what Ghost may do, so there are no levels on this page. Adding
  * and removing go through the gate as skills.add and skills.remove, audited like any write.
  *
+ * Find skills (#35) searches skills.sh through Ghost; a result, or a GitHub address, opens a
+ * look at the skill (its SKILL.md and its scripts) before skills.install copies it in. A skill
+ * installed that way says where it came from, and the page asks Ghost once per visit whether
+ * its source has moved on, offering Update when it has.
+ *
  * URL states (query before the hash):
  *   show=<name>    the selected skill (kept in sync as you pick one: reload and links keep it)
  *   fail=skills    mock only: GET /skills fails
  */
-import type { SkillBody, SkillInfo } from "@ghost/client-ts";
+import type { SkillBody, SkillInfo, SkillUpdateView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { BookOpen, FolderDown, FolderPlus } from "lucide-react";
+import { BookOpen, FolderDown, FolderPlus, Search } from "lucide-react";
 import { type DragEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
 import { inTauri } from "../../transport";
-import { Button, Card, EmptyState, ListRow, LiveStatus, Notice, Page, Skeleton, SkeletonText, cx, errorText, scrollIntoPanel, useConfirm, useLive, useToast } from "../../ui";
+import { Button, Card, EmptyState, ListRow, Notice, Page, Skeleton, SkeletonText, cx, errorText, scrollIntoPanel, useConfirm, useLive, useToast } from "../../ui";
 import { AddDialog } from "./AddDialog";
 import { Detail } from "./Detail";
+import { FindSkills } from "./Find";
+import { PreviewDialog, type PreviewStart } from "./PreviewDialog";
 import { GHOST_SKILLS_DIR, humanize, needsWords, saysInstalled, sourceWord, tildePath } from "./model";
 import "./skills.css";
 
@@ -74,6 +81,12 @@ export default function SkillsScreen(_: RouteProps) {
   const [removeError, setRemoveError] = useState<string | null>(null);
   /** A folder is being dragged over the window: the list shows where it will land. */
   const [over, setOver] = useState(false);
+  /** The look at a skill before installing it: from a search result, an address, or an update. */
+  const [look, setLook] = useState<PreviewStart | null>(null);
+  /** Whether each skill installed from GitHub has a newer version, asked once per visit. */
+  const [updates, setUpdates] = useState<Record<string, SkillUpdateView>>({});
+  const askedUpdates = useRef(false);
+  const [findVersion, setFindVersion] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -92,6 +105,17 @@ export default function SkillsScreen(_: RouteProps) {
   }, [load, connectedKey]);
 
   const current = skills?.find((s) => s.name === selected) ?? skills?.[0] ?? null;
+
+  // Ask once per visit whether the skills Ghost installed from GitHub have moved on: Ghost asks
+  // GitHub now, never in the background or on a turn. A failure just leaves Update off.
+  useEffect(() => {
+    if (askedUpdates.current || !skills?.some((s) => s.origin)) return;
+    askedUpdates.current = true;
+    client
+      .skillUpdates()
+      .then((list) => setUpdates(Object.fromEntries(list.map((u) => [u.name, u]))))
+      .catch(() => {});
+  }, [client, skills]);
 
   // The selected skill's SKILL.md, read once per visit.
   useEffect(() => {
@@ -245,18 +269,40 @@ export default function SkillsScreen(_: RouteProps) {
     }
   };
 
+  /** A skill came in from GitHub: select it, re-read the list, and mark its update done. */
+  const installed = async (info: SkillInfo, updated: boolean) => {
+    bodies.current.delete(info.name);
+    setSelected(info.name);
+    if (updated) setUpdates(({ [info.name]: _, ...rest }) => rest);
+    setFindVersion((v) => v + 1);
+    await load();
+    toast({ title: updated ? "Updated" : "Installed", description: `Ghost reads ${humanize(info.name)} from its next session.`, tone: "ok" });
+  };
+
+  /** Find skills sits under the panes, past a long SKILL.md: the header's button brings it up and puts the cursor in it. */
+  const findSkills = () => {
+    const input = document.getElementById("skl-find-search");
+    if (!input) return;
+    scrollIntoPanel(document.getElementById("skl-find"), { block: "start" });
+    input.focus({ preventScroll: true });
+  };
+
   /* ------------------------------------------------------------------ render */
-  const installed = !!refusal && saysInstalled(refusal.message);
+  const refusedInstalled = !!refusal && saysInstalled(refusal.message);
   return (
     <Page
       width="wide"
       title="Skills"
-      status={<LiveStatus />}
       description="Folders with a SKILL.md that tell Ghost how to do a kind of task; it reads one when a request calls for it. A skill shapes what Ghost does, never what it may do."
       actions={
-        <Button variant="secondary" leadingIcon={<FolderPlus />} onClick={() => setAddOpen(true)} disabled={!online}>
-          Add from folder…
-        </Button>
+        <>
+          <Button variant="secondary" leadingIcon={<Search />} onClick={findSkills} disabled={!skills}>
+            Find skills
+          </Button>
+          <Button variant="secondary" leadingIcon={<FolderPlus />} onClick={() => setAddOpen(true)} disabled={!online}>
+            Add from folder…
+          </Button>
+        </>
       }
     >
       {loadError && (
@@ -280,11 +326,11 @@ export default function SkillsScreen(_: RouteProps) {
       {refusal && (
         <Notice
           tone="danger"
-          title={installed ? "Already installed" : "Couldn’t add that folder"}
+          title={refusedInstalled ? "Already installed" : "Couldn’t add that folder"}
           className="skl-notice"
           onDismiss={() => setRefusal(null)}
           action={
-            installed ? (
+            refusedInstalled ? (
               <Button size="sm" loading={adding} disabled={!online} onClick={() => void addDropped([refusal.path], true)}>
                 Replace
               </Button>
@@ -294,7 +340,7 @@ export default function SkillsScreen(_: RouteProps) {
           <p className="skl-notice__p" data-user-content>
             {refusal.message}
           </p>
-          <p className="skl-notice__p">{installed ? "Replace it to use this folder’s copy instead; the one Ghost has is deleted." : "Drop the folder that holds SKILL.md, not a file or a folder of folders."}</p>
+          <p className="skl-notice__p">{refusedInstalled ? "Replace it to use this folder’s copy instead; the one Ghost has is deleted." : "Drop the folder that holds SKILL.md, not a file or a folder of folders."}</p>
         </Notice>
       )}
 
@@ -309,7 +355,7 @@ export default function SkillsScreen(_: RouteProps) {
               description={
                 <>
                   Put a folder with a <span className="t-mono">SKILL.md</span> at <span className="t-mono">{GHOST_SKILLS_DIR}/&lt;name&gt;/</span>,{" "}
-                  {inTauri ? "drop one here, or use Add from folder… to copy one in." : "or use Add from folder… to copy one in."} Yours in{" "}
+                  {inTauri ? "drop one here, use Add from folder…, or find one below." : "use Add from folder…, or find one below."} Yours in{" "}
                   <span className="t-mono">~/.agents/skills</span> are read in place.
                 </>
               }
@@ -320,7 +366,7 @@ export default function SkillsScreen(_: RouteProps) {
         <div className="skl-panes">
           <div className="skl-list">
             <DropZone over={over} {...browserDrag}>
-              <SkillList skills={skills} current={current?.name ?? null} onSelect={setSelected} />
+              <SkillList skills={skills} current={current?.name ?? null} onSelect={setSelected} updates={updates} />
             </DropZone>
             <p className="skl-hint">{inTauri ? "Drop a skill’s folder on the list to add it." : "Add from folder… copies a folder on this machine into Ghost’s skills."}</p>
           </div>
@@ -335,6 +381,8 @@ export default function SkillsScreen(_: RouteProps) {
                 online={online}
                 removing={removing}
                 onRemove={() => void remove(current)}
+                update={updates[current.name] ?? null}
+                onUpdate={() => current.origin && setLook({ mode: "update", name: current.name, from: current.origin.commit })}
                 headerAnchor={headerAnchor}
               />
             )}
@@ -342,7 +390,10 @@ export default function SkillsScreen(_: RouteProps) {
         </div>
       ) : null}
 
+      {skills && <FindSkills version={findVersion} onPick={(listing) => setLook({ mode: "listing", listing })} onAddress={() => setLook({ mode: "address" })} />}
+
       <AddDialog open={addOpen} busy={adding} onClose={() => setAddOpen(false)} onAdd={add} />
+      <PreviewDialog start={look} onClose={() => setLook(null)} onInstalled={(info, updated) => void installed(info, updated)} />
       {confirmDialog}
     </Page>
   );
@@ -370,7 +421,7 @@ function DropZone({ over, children, ...drag }: { over: boolean; children: ReactN
  * and select. A row says what the skill is for, where it comes from, and the one thing it is
  * missing.
  */
-function SkillList({ skills, current, onSelect }: { skills: SkillInfo[]; current: string | null; onSelect: (name: string) => void }) {
+function SkillList({ skills, current, onSelect, updates }: { skills: SkillInfo[]; current: string | null; onSelect: (name: string) => void; updates: Record<string, SkillUpdateView> }) {
   const ref = useRef<HTMLDivElement>(null);
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
@@ -403,6 +454,7 @@ function SkillList({ skills, current, onSelect }: { skills: SkillInfo[]; current
                   </span>
                   <span className="skl-list__from">
                     {sourceWord(s)}
+                    {updates[s.name]?.update && " · update available"}
                     {s.problem ? (
                       <>
                         {" · "}

@@ -14,7 +14,7 @@ Ghost is moving from transcript wake to a trained "hey ghost" detector, with Par
 1. A quiet-ish room: no TV, and nobody else talking. Block E adds music on purpose.
 2. The mic array plugged in.
 3. `ghost-echo-cancel` running (`systemctl --user is-active ghost-echo-cancel` says `active`). Without it there is no `ghost.mic`, and the script stops.
-4. Ghost stopped. If `ghostd` is running as a service, the script offers to stop it and starts it again when you finish, Ctrl+C included. If you started it with `make run` or `make start`, run `make stop` first.
+4. Ghost stopped. If `ghostd` is running as a service, the script offers to stop it and starts it again when you finish, Ctrl+C included. If you started it with `make dev`, `make daemon` or `make start`, run `make stop` first.
 
 ## Recording
 

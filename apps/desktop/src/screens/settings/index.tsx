@@ -1,27 +1,39 @@
 /**
- * Owner: settings. How Ghost connects, listens and speaks: secrets (write-only), the model,
- * GitHub, voice and wake, microphone and speakers, voice models. Edits collect into one draft;
- * a save bar in the Page dock appears once something changed (Klaviyo), and says afterwards
- * what applied now and what waits for a restart. An "on this page" rail sits to the right of
- * the column (Neon). Non-secret edits survive leaving the page (sessionStorage); secrets never do.
- * Discard is one click and reversible from its toast (values only; a typed secret is gone).
+ * Owner: settings. Five of the settings pages (#/settings/<page>), one screen so that moving
+ * between them keeps one draft and one save bar:
+ *   general    Finish setup while it is unfinished, Ghost's version and build and this
+ *              window's (About.tsx), the settings file
+ *   model      where Ghost sends a session to think
+ *   passwords  Ghost's vault (ADR 0036): every password, each saved on its own row (Passwords.tsx)
+ *   sound      Ghost's voice, wake and your yes; microphone and speakers; voice models
+ *   phone      the one phone Ghost pairs with
+ * Apps, Skills, Permissions, Notifications and the Audit log are their owners' screens; the
+ * shell's settings nav (app/SettingsFrame.tsx) lists them all and marks a page here with
+ * unsaved changes, a field to fix or a restart owed.
+ *
+ * Edits collect into one draft across the pages; a save bar in the Page dock appears once
+ * something changed (Klaviyo), and says afterwards what applied now and what waits for a
+ * restart. Ghost's voice is in the same draft, though it is saved to Ghost's agent. Edits
+ * survive leaving Settings (sessionStorage). Discard is one click and reversible from its toast.
+ * A password is not in the draft: it saves on its own row, and one Ghost reads joins the
+ * restart pill.
  *
  * Focus never falls to <body>: closing a secret returns to its Replace… button, Save or Discard
  * return to the field you were in (or to the restart pill's Copy button), and echo Install or
  * Remove hand over to whatever replaced them once the device list has reloaded.
  *
- * The rail, the ?section= landing and keyboard focus all clear the whole sticky stack above
- * the content (any shell banner plus the compact page bar), measured live into
- * --set-sticky-offset, so nothing lands under a Starting or Reconnecting banner.
+ * The ?section= landing and keyboard focus clear the whole sticky stack above the content (any
+ * shell banner plus the compact page bar), measured live into --set-sticky-offset, so nothing
+ * lands under a Starting or Reconnecting banner.
  *
- * States by URL (mock): any scenario, plus `?section=<id>` to land on a section, and in mock
- * mode only `?settings=dirty|invalid|error|restart|secret|loading|loaderror|nodevices|echoidle|pairing` to
- * hold a state for review (`pairing` opens the Pair a phone dialog; the phone's own states are
- * `?phone=off|unpaired|paired|pairs|expires`, see Phone.tsx).
+ * States by URL (mock): any scenario, plus `?section=<id>` to land on a section (on its own
+ * page), and in mock mode only `?settings=dirty|invalid|error|restart|loading|loaderror|nodevices|echoidle|pairing` to
+ * hold a state for review (`pairing` opens the Pair a phone dialog on Phone; the phone's own
+ * states are `?phone=off|unpaired|paired|pairs|expires`, see Phone.tsx).
  */
-import type { DevicesView, ModelsView, SettingsView } from "@ghost/client-ts";
+import type { DevicesView, ModelConnectionView, ModelsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { ArrowRight, MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
+import { MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
 import {
   type FocusEvent,
   type FormEvent,
@@ -36,8 +48,10 @@ import {
   useState,
 } from "react";
 
-import { hrefFor, navigate } from "../../app/router";
-import type { RouteProps } from "../../app/routes";
+import { navigate } from "../../app/router";
+import { VersionNotice, VersionRows } from "./About";
+import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
+import { type SettingsMark, type SettingsMarks, setSettingsMarks } from "../../app/settingsMarks";
 import { useDesign } from "../../design/context";
 import {
   Badge,
@@ -50,7 +64,6 @@ import {
   Input,
   ListRow,
   Menu,
-  LiveStatus,
   Notice,
   Page,
   Progress,
@@ -67,12 +80,14 @@ import {
   useToast,
 } from "../../ui";
 import {
-  DEFAULT_MODEL,
   type Draft,
+  GHOST_VOICE,
   JEV_NEEDS_KEY,
   JEV_OPTIONS,
   KEY_SECTION,
+  type PageId,
   SECRET_ORDER,
+  SECTION_PAGE,
   SECTION_TITLE,
   type SectionId,
   VALUE_KEYS,
@@ -80,7 +95,7 @@ import {
   echoReady,
   fuzzyWords,
   isAppSecret,
-  isOptionalSecret,
+  isSectionId,
   isSet,
   jevNow,
   joinList,
@@ -103,16 +118,22 @@ import {
   validate,
   valueChanged,
 } from "./model";
-import { type BarState, ChipsInput, CommandCopy, LinesInput, type NavItem, PageNav, Row, SaveBar, SecretRow, SetupSection, type SetupStep, secretActionId } from "./parts";
+import { GhostVoice } from "./GhostVoice";
+import { MODEL_FORM_ID, ModelSection } from "./ModelSection";
+import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
+import { PasswordsSection } from "./Passwords";
 import { PhoneSection } from "./Phone";
+import { WakePhrasesField, wakeHelp } from "./WakePhrases";
 import "./settings.css";
 
 // Charter sections with no API yet. Compiled only in development; rendered only under the mock layer.
 const Prototype = import.meta.env.DEV ? lazy(() => import("./prototype")) : null;
 
-const FORCED = new Set(["dirty", "invalid", "error", "restart", "secret", "loading", "loaderror", "nodevices", "echoidle", "pairing"]);
+const FORCED = new Set(["dirty", "invalid", "error", "restart", "loading", "loaderror", "nodevices", "echoidle", "pairing"]);
 
 const FUZZY = "GHOST_WAKE_FUZZY";
+/** Every section on a page, for its mark in the settings nav. */
+const sectionsOf = (page: string) => (Object.keys(SECTION_PAGE) as SectionId[]).filter((id) => SECTION_PAGE[id] === page);
 const fieldId = (k: string) => `set-f-${k}`;
 
 /** Focus an element without scrolling; for a control that can't take focus itself, its checked radio or first control. */
@@ -140,8 +161,9 @@ function stickyBottom(): number {
 /** Breathing room between the sticky stack and a section title that was scrolled to (24px). */
 const LAND_GAP = 24;
 
-export default function SettingsScreen(_: RouteProps) {
-  const { client, status } = useGhost();
+export default function SettingsScreen({ params: route }: RouteProps) {
+  const page = route.page as PageId;
+  const { client, status, conversationsVersion } = useGhost();
   const { online, connection } = useLive();
   const design = useDesign();
   const toast = useToast();
@@ -155,10 +177,11 @@ export default function SettingsScreen(_: RouteProps) {
   const [devices, setDevices] = useState<DevicesView | null>(null);
   const [devicesError, setDevicesError] = useState<string | null>(null);
   const [models, setModels] = useState<ModelsView | null>(null);
+  // The model connection as Ghost resolves it (ADR 0037): provider, readiness, the providers offered.
+  const [conn, setConn] = useState<ModelConnectionView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({ values: {}, secrets: {} });
   const [restored, setRestored] = useState(false);
-  const [openSecrets, setOpenSecrets] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [restartKeys, setRestartKeys] = useState<string[]>([]);
@@ -168,9 +191,10 @@ export default function SettingsScreen(_: RouteProps) {
   const [restartDismissed, setRestartDismissed] = useState(false);
   const [echoBusy, setEchoBusy] = useState<"install" | "remove" | null>(null);
   const [echoMsg, setEchoMsg] = useState<{ tone: "ok" | "danger"; title: string; text: string; offer?: "ghost.mic" | "default" } | null>(null);
-  const [active, setActive] = useState<SectionId | null>(null);
-  // The optional keys' disclosure remounts open when something sends the operator to it.
-  const [optionalOpen, setOptionalOpen] = useState(0);
+  // Ghost's voice: kept on Ghost's agent; the draft is null until Ghost has said which it is.
+  const [ghost, setGhost] = useState<{ voice: string; speed: number } | null>(null);
+  const [voiceDraft, setVoiceDraft] = useState<string | null>(null);
+  const ghostVoiceRef = useRef<string | null>(null);
   const sRef = useRef<SettingsView | null>(null);
   sRef.current = s;
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -181,7 +205,8 @@ export default function SettingsScreen(_: RouteProps) {
   const forcedRetried = useRef({ settings: false, devices: false });
 
   const [entryErrors, setEntryErrors] = useState<Record<string, string | null>>({});
-  const dirtyKeys = useMemo(() => changedKeys(draft, s), [draft, s]);
+  const voiceDirty = !!ghost && voiceDraft !== null && voiceDraft !== ghost.voice;
+  const dirtyKeys = useMemo(() => [...changedKeys(draft, s), ...(voiceDirty ? [GHOST_VOICE] : [])], [draft, s, voiceDirty]);
   const dirty = dirtyKeys.length > 0;
   const errors = useMemo(() => validate(draft, s), [draft, s]);
   // A chips entry that couldn't be added (typed, not yet a chip) blocks Save like any other error.
@@ -203,6 +228,7 @@ export default function SettingsScreen(_: RouteProps) {
         },
       ),
       client.models().catch(() => null),
+      client.modelConnection().then(setConn, () => null),
     ]);
     // echoidle: installed but not running yet, the state Reinstall repairs.
     if (dv) setDevices(forced === "echoidle" ? { ...dv, echo_cancel_active: false, echo_cancel_source_present: true } : dv);
@@ -245,6 +271,25 @@ export default function SettingsScreen(_: RouteProps) {
     if (s) void loadAux();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.models_ready]);
+
+  // Ghost's voice, again whenever an agent changes (its own page may have changed it). A draft
+  // the operator hasn't touched follows the new voice.
+  useEffect(() => {
+    let live = true;
+    client
+      .conversation("ghost")
+      .then((d) => {
+        if (!live) return;
+        const was = ghostVoiceRef.current;
+        ghostVoiceRef.current = d.voice;
+        setGhost({ voice: d.voice, speed: d.speed });
+        setVoiceDraft((v) => (v === null || v === was ? d.voice : v));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [client, conversationsVersion]);
 
   // Ghost came back after being away (a restart): whatever waited for it has applied.
   const prevConnection = useRef(connection);
@@ -292,30 +337,27 @@ export default function SettingsScreen(_: RouteProps) {
     if (forced === "dirty" || forced === "error") {
       setDraft({
         values: { ...v, GHOST_WAKE_PHRASES: joinList([...splitList(v.GHOST_WAKE_PHRASES), "ghost wake up"]), GHOST_LLM_MODEL: "claude-opus-5-5" },
-        secrets: { GITHUB_TOKEN: "github_pat_example_value" },
+        secrets: {},
       });
-      setOpenSecrets(new Set(["GITHUB_TOKEN"]));
       if (forced === "error") setSaveError("Ghost couldn’t write ~/.config/ghost/settings.env: permission denied. Check who owns the file, then save again.");
     } else if (forced === "invalid") {
-      setDraft({ values: { ...v, ANTHROPIC_BASE_URL: "api.example.com" }, secrets: {} });
+      setDraft({ values: { ...v, GHOST_LLM_PROVIDER: "custom", GHOST_LLM_BASE_URL: "api.example.com" }, secrets: {} });
     } else if (forced === "restart") {
-      setRestartKeys(["ANTHROPIC_BASE_URL", "GITHUB_TOKEN"]);
+      setRestartKeys(["GHOST_INPUT_DEVICE", "OPENROUTER_API_KEY"]);
       setLastApplied(["GHOST_WAKE_PHRASES"]);
       setLiveMarks(["GHOST_WAKE_PHRASES"]);
-    } else if (forced === "secret") {
-      setOpenSecrets(new Set(["GITHUB_TOKEN"]));
     }
   }, [forced, s]);
 
   /* ------------------------------------------------------------- navigation */
-  const go = useCallback((id: SectionId, opts: { smooth?: boolean; focus?: boolean } = {}) => {
+  /** Scroll a section of this page under the sticky stack, and put focus on its title. */
+  const scrollToSection = useCallback((id: SectionId, opts: { smooth?: boolean; focus?: boolean } = {}) => {
     const el = document.getElementById(sectionDomId(id));
     const main = document.getElementById("main");
     if (!el || !main) return;
     const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - stickyBottom() - LAND_GAP;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     main.scrollTo({ top: Math.max(0, top), behavior: opts.smooth !== false && !reduce ? "smooth" : "auto" });
-    setActive(id);
     if (opts.focus !== false) {
       const h = document.getElementById(`${sectionDomId(id)}-title`);
       if (h) {
@@ -325,35 +367,75 @@ export default function SettingsScreen(_: RouteProps) {
     }
   }, []);
 
+  // A section on another page: go to the page, then land once it has rendered (after the
+  // shell's own scroll to the top of a new route).
+  const landNext = useRef<{ id: SectionId; focus: boolean; then?: () => void } | null>(null);
+  const go = useCallback(
+    (id: SectionId, opts: { smooth?: boolean; focus?: boolean; then?: () => void } = {}) => {
+      const target = SECTION_PAGE[id];
+      if (target !== page) {
+        landNext.current = { id, focus: opts.focus !== false, then: opts.then };
+        navigate(`/settings/${target}`);
+        return;
+      }
+      scrollToSection(id, opts);
+      opts.then?.();
+    },
+    [page, scrollToSection],
+  );
+  useEffect(() => {
+    const l = landNext.current;
+    if (!l || SECTION_PAGE[l.id] !== page || !s) return;
+    landNext.current = null;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        scrollToSection(l.id, { smooth: false, focus: l.focus });
+        l.then?.();
+      }),
+    );
+  }, [page, s, scrollToSection]);
+
   const focusKey = useCallback(
     (key: string) => {
-      const section = KEY_SECTION[key];
-      if (section) go(section, { focus: false });
-      requestAnimationFrame(() => focusInto(document.getElementById(fieldId(key))));
+      const section = KEY_SECTION[key] ?? (SECRET_ORDER.includes(key) || isAppSecret(key) ? "secrets" : null);
+      const field = () => requestAnimationFrame(() => focusInto(document.getElementById(fieldId(key)) ?? document.getElementById(secretActionId(key))));
+      if (section) go(section, { focus: false, then: field });
+      else field();
     },
     [go],
   );
 
-  /** Secrets, then the TypeSafe key: where "Add one under Secrets" leads. */
+  /** Passwords, then the TypeSafe key: where "Add one under Passwords" leads. */
   const goToJevKey = useCallback(() => {
-    setOptionalOpen((n) => n + 1);
-    go("secrets", { focus: false });
-    pendingFocus.current = () => requestAnimationFrame(() => focusInto(document.getElementById(secretActionId(isSet(sRef.current, "TYPESAFE_API_KEY") ? "OPENROUTER_API_KEY" : "TYPESAFE_API_KEY"))));
+    go("secrets", {
+      focus: false,
+      then: () => requestAnimationFrame(() => focusInto(document.getElementById(secretActionId(isSet(sRef.current, "TYPESAFE_API_KEY") ? "OPENROUTER_API_KEY" : "TYPESAFE_API_KEY")))),
+    });
   }, [go]);
 
-  // ?section=voice lands on that section once the page has its data, then keeps landing while
-  // the column is still changing size (the device list, a late Notice, the lazy prototypes), until
-  // the operator scrolls or presses a key themselves, or two seconds pass. The watch survives
-  // re-runs of the effect (StrictMode, a reload) until one of those ends it.
+  // ?section=voice lands on that section's page, then on the section once the page has its
+  // data, and keeps landing while the column is still changing size (the device list, a late
+  // Notice, the lazy prototypes), until the operator scrolls or presses a key themselves, or
+  // two seconds pass. The watch survives re-runs of the effect (StrictMode, a reload) until
+  // one of those ends it. An old link to the Apps or Skills section lands on that page.
+  // `?settings=pairing` opens on Phone. Each happens once: the query stays, the operator moves on.
+  const target = params.get("section");
+  const sentOnce = useRef(false);
+  useEffect(() => {
+    if (sentOnce.current) return;
+    sentOnce.current = true;
+    const to = forced === "pairing" ? "phone" : isSectionId(target) ? SECTION_PAGE[target] : null;
+    if (to && to !== page) navigate(`/settings/${to}`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const landed = useRef(false);
   const landingUntil = useRef(0);
   useEffect(() => {
-    const target = params.get("section") as SectionId | null;
     const main = document.getElementById("main");
     const layout = layoutRef.current;
     // Wait for the devices request to settle either way: the setup list and the audio card depend on it.
-    if (!s || (!devices && !devicesError) || !target || !main || !layout) return;
-    const land = () => go(target, { smooth: false, focus: false });
+    if (!s || (!devices && !devicesError) || !isSectionId(target) || SECTION_PAGE[target] !== page || !main || !layout) return;
+    const land = () => scrollToSection(target, { smooth: false, focus: false });
     if (!landed.current) {
       landed.current = true;
       landingUntil.current = Date.now() + 2000;
@@ -376,50 +458,18 @@ export default function SettingsScreen(_: RouteProps) {
       ro.disconnect();
       for (const ev of events) main.removeEventListener(ev, stop);
     };
-  }, [s, devices, devicesError, params, go]);
-
-  // Scroll spy: the last section whose top has passed under the compact bar. Re-runs whenever
-  // the column changes size too, so a section that mounts late (setup, prototypes) is counted.
-  useEffect(() => {
-    const main = document.getElementById("main");
-    const layout = layoutRef.current;
-    if (!main || !s || !layout) return;
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      const sections = Array.from(layout.querySelectorAll<HTMLElement>("section.set-section"));
-      if (!sections.length) return;
-      const idOf = (el: HTMLElement) => el.id.replace(/^set-/, "") as SectionId;
-      const top = main.getBoundingClientRect().top + stickyBottom() + LAND_GAP * 2;
-      let current = idOf(sections[0]);
-      for (const el of sections) if (el.getBoundingClientRect().top <= top) current = idOf(el);
-      if (main.scrollTop > 0 && main.scrollTop + main.clientHeight >= main.scrollHeight - 2) current = idOf(sections[sections.length - 1]);
-      setActive(current);
-    };
-    const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(update);
-    };
-    update();
-    main.addEventListener("scroll", schedule, { passive: true });
-    const ro = new ResizeObserver(schedule);
-    ro.observe(layout);
-    return () => {
-      main.removeEventListener("scroll", schedule);
-      ro.disconnect();
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [s, design]);
+  }, [s, devices, devicesError, target, page, scrollToSection]);
 
   /* ------------------------------------------------------------------ focus */
   // The last field the operator was in, so Save and Discard can put them back there.
   const onFocusIn = (e: FocusEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement;
-    if (t.id && !t.closest(".set-nav")) lastFocus.current = t;
+    if (t.id) lastFocus.current = t;
   };
   /** Where focus should go back to after the bar's action: the field in use, else the last one. */
   const returnTarget = (): HTMLElement | null => {
     const a = document.activeElement as HTMLElement | null;
-    if (a && layoutRef.current?.contains(a) && !a.closest(".set-nav")) return a;
+    if (a && layoutRef.current?.contains(a)) return a;
     return lastFocus.current ?? (dirtyKeys[0] ? document.getElementById(fieldId(dirtyKeys[0])) ?? document.getElementById(secretActionId(dirtyKeys[0])) : null);
   };
   /** Back to `el`; a secret's field that has closed hands over to its Replace… button. */
@@ -438,29 +488,19 @@ export default function SettingsScreen(_: RouteProps) {
     setSaveError(null);
     setDraft((d) => ({ ...d, values: { ...d.values, [k]: v } }));
   };
-  const setSecret = (k: string, v: string) => {
+  const setValues = (patch: Record<string, string>) => {
     setSaveError(null);
-    setDraft((d) => ({ ...d, secrets: { ...d.secrets, [k]: v } }));
-  };
-  const closeSecret = (k: string) => {
-    setOpenSecrets((o) => {
-      const n = new Set(o);
-      n.delete(k);
-      return n;
-    });
-    setDraft((d) => {
-      const { [k]: _, ...rest } = d.secrets;
-      return { ...d, secrets: rest };
-    });
+    setDraft((d) => ({ ...d, values: { ...d.values, ...patch } }));
   };
   const discard = () => {
     if (!s) return;
     const back = returnTarget();
     const before = draft.values;
-    const valueKeys = dirtyKeys.filter((k) => !(k in draft.secrets));
-    const typed = dirtyKeys.length - valueKeys.length;
+    const valueKeys = dirtyKeys.filter((k) => !(k in draft.secrets) && k !== GHOST_VOICE);
+    const typed = dirtyKeys.filter((k) => k in draft.secrets).length;
+    const voiceBefore = voiceDirty ? voiceDraft : null;
     setDraft({ values: { ...s.values }, secrets: {} });
-    setOpenSecrets(new Set());
+    if (ghost) setVoiceDraft(ghost.voice);
     setEntryErrors({});
     setSaveError(null);
     storeDraft(null);
@@ -468,16 +508,18 @@ export default function SettingsScreen(_: RouteProps) {
     const n = dirtyKeys.length;
     toast({
       title: `Discarded ${n} change${n === 1 ? "" : "s"}`,
-      description: typed ? `A typed secret isn’t kept; the other${valueKeys.length === 1 ? "" : "s"} can come back.` : undefined,
-      action: valueKeys.length
-        ? {
-            label: "Undo",
-            onClick: () => {
-              setDraft((d) => ({ ...d, values: { ...d.values, ...Object.fromEntries(valueKeys.map((k) => [k, before[k] ?? ""])) } }));
-              pendingFocus.current = () => requestAnimationFrame(() => focusInto(document.getElementById(fieldId(valueKeys[0]))));
-            },
-          }
-        : undefined,
+      description: typed ? `A typed password isn’t kept; the other${valueKeys.length === 1 ? "" : "s"} can come back.` : undefined,
+      action:
+        valueKeys.length || voiceBefore
+          ? {
+              label: "Undo",
+              onClick: () => {
+                setDraft((d) => ({ ...d, values: { ...d.values, ...Object.fromEntries(valueKeys.map((k) => [k, before[k] ?? ""])) } }));
+                if (voiceBefore) setVoiceDraft(voiceBefore);
+                if (valueKeys.length) pendingFocus.current = () => requestAnimationFrame(() => focusInto(document.getElementById(fieldId(valueKeys[0]))));
+              },
+            }
+          : undefined,
     });
   };
 
@@ -492,26 +534,39 @@ export default function SettingsScreen(_: RouteProps) {
     }
     const changedSecrets: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(draft.secrets)) if (v) changedSecrets[k] = v;
-    if (!Object.keys(changedValues).length && !Object.keys(changedSecrets).length) return;
+    const settingsChanged = Object.keys(changedValues).length > 0 || Object.keys(changedSecrets).length > 0;
+    if (!settingsChanged && !voiceDirty) return;
     const keys = [...Object.keys(changedValues), ...Object.keys(changedSecrets)];
     const fromBar = !!(document.activeElement as HTMLElement | null)?.closest(".g-savebar");
     const back = returnTarget();
     setBusy(true);
     setSaveError(null);
     try {
-      const r = await client.updateSettings({
-        values: Object.keys(changedValues).length ? changedValues : null,
-        secrets: Object.keys(changedSecrets).length ? changedSecrets : null,
-      });
-      setS(r.settings);
-      setDraft({ values: { ...r.settings.values }, secrets: {} });
-      setOpenSecrets(new Set());
-      storeDraft(null);
-      const applied = r.applied ?? [];
+      // Ghost's voice first: it goes to Ghost's agent, and a failure there leaves everything unsaved.
+      if (voiceDirty && voiceDraft) {
+        const d = await client.updateConversation("ghost", { voice: voiceDraft });
+        ghostVoiceRef.current = d.voice;
+        setGhost({ voice: d.voice, speed: d.speed });
+        setVoiceDraft(d.voice);
+      }
+      const r = settingsChanged
+        ? await client.updateSettings({
+            values: Object.keys(changedValues).length ? changedValues : null,
+            secrets: Object.keys(changedSecrets).length ? changedSecrets : null,
+          })
+        : null;
+      if (r) {
+        void client.modelConnection().then(setConn, () => null);
+        setS(r.settings);
+        setDraft({ values: { ...r.settings.values }, secrets: {} });
+        storeDraft(null);
+      }
+      // Ghost speaks in a new voice from its next line.
+      const applied = [...(voiceDirty ? [GHOST_VOICE] : []), ...(r?.applied ?? [])];
       const waiting = keys.filter((k) => !applied.includes(k));
       setLastApplied(applied);
       setLiveMarks(applied);
-      if (r.restart_required) {
+      if (r?.restart_required) {
         setRestartKeys((prev) => Array.from(new Set([...prev, ...waiting])));
         setRestartDismissed(false);
       } else {
@@ -522,14 +577,14 @@ export default function SettingsScreen(_: RouteProps) {
         });
       }
       // From the bar, the restart bar's Copy is the next thing to do; from a field, stay there.
-      pendingFocus.current = r.restart_required && fromBar ? () => requestAnimationFrame(() => copyRef.current?.focus({ preventScroll: true })) : () => focusBack(back);
+      pendingFocus.current = r?.restart_required && fromBar ? () => requestAnimationFrame(() => copyRef.current?.focus({ preventScroll: true })) : () => focusBack(back);
     } catch (e) {
       setSaveError(errorText(e));
     } finally {
       setBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s, busy, online, invalidKeys.join(), focusKey, draft, client, toast]);
+  }, [s, busy, online, invalidKeys.join(), focusKey, draft, client, toast, voiceDirty, voiceDraft]);
 
   // Enter in any field saves, the same as Save.
   const submit = (e: FormEvent) => {
@@ -563,13 +618,15 @@ export default function SettingsScreen(_: RouteProps) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = (e.target as Element | null)?.closest?.("a[href^='#/']");
       const to = a?.getAttribute("href")?.slice(1);
-      if (!a || !to || to === "/settings" || layoutRef.current?.contains(a)) return;
+      // The other pages this screen draws keep the draft, a typed secret included.
+      const stays = SETTINGS_SCREEN_PAGES.some((p) => to === `/settings/${p}`) || to === "/settings";
+      if (!a || !to || stays || layoutRef.current?.contains(a)) return;
       e.preventDefault();
       e.stopPropagation();
-      const what = names.length === 1 ? `the ${lowerFirst(listWords(names))}` : `${names.length} secrets`;
+      const what = names.length === 1 ? `the ${lowerFirst(listWords(names))}` : `${names.length} passwords`;
       void confirm({
         title: `Leave without saving ${what}?`,
-        description: "Ghost never keeps a secret you haven’t saved, so you’d paste it again. Your other changes stay here until you come back.",
+        description: "Ghost never keeps a password you haven’t saved, so you’d paste it again. Your other changes stay here until you come back.",
         confirmLabel: "Leave without saving",
         cancelLabel: "Stay",
         tone: "danger",
@@ -649,36 +706,41 @@ export default function SettingsScreen(_: RouteProps) {
   /* ---------------------------------------------------------------- derived */
   const v = draft.values;
   const mock = !!design;
-  const ready = !!s && modelReady(s, v);
   // Until both basics are done, the page leads with them.
-  const showSetup = !!s && !!devices && !(modelReady(s, s.values) && echoReady(devices));
+  const showSetup = !!s && !!devices && !!conn && !(modelReady(conn) && echoReady(devices));
   const restartSet = new Set(restartKeys);
 
-  const sectionMark = (id: SectionId): NavItem["mark"] => {
-    const keys = Object.entries(KEY_SECTION).filter(([, sec]) => sec === id).map(([k]) => k);
-    const secretKeys = id === "secrets" ? SECRET_ORDER : [];
+  const secretNamesAll = [...SECRET_ORDER, ...(s?.secrets.map((x) => x.name) ?? [])];
+  // A page's mark in the settings nav: a field to fix, then unsaved changes, then a restart owed.
+  const pageMark = (pg: string, onlyKept = false): SettingsMark | undefined => {
+    const ids = sectionsOf(pg);
+    const keys = Object.entries(KEY_SECTION).filter(([, sec]) => ids.includes(sec)).map(([k]) => k);
+    const secretKeys = ids.includes("secrets") ? secretNamesAll : [];
     const all = [...keys, ...secretKeys];
-    if (all.some((k) => errors[k] && dirtyKeys.includes(k))) return "error";
+    // Leaving Settings keeps only what survives it: values, not a typed secret or a pending restart.
+    if (onlyKept) return keys.some((k) => k !== GHOST_VOICE && dirtyKeys.includes(k)) ? "dirty" : undefined;
+    if (all.some((k) => (errors[k] && dirtyKeys.includes(k)) || entryErrors[k])) return "error";
     if (all.some((k) => dirtyKeys.includes(k))) return "dirty";
     if (all.some((k) => restartSet.has(k))) return "restart";
-    if (id === "audio" && micDiffers(devices, s?.values.GHOST_INPUT_DEVICE)) return "restart";
+    if (ids.includes("audio") && micDiffers(devices, s?.values.GHOST_INPUT_DEVICE)) return "restart";
     return undefined;
   };
-  const navItems: NavItem[] = [
-    ...(showSetup ? [{ id: "setup" as const, label: SECTION_TITLE.setup }] : []),
-    ...(["secrets", "model", "apps", "skills", "voice", "audio", "models", "phone"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], mark: sectionMark(id) })),
-    ...(mock && Prototype ? (["privacy", "sounds"] as SectionId[]).map((id) => ({ id, label: SECTION_TITLE[id], prototype: true })) : []),
-  ];
+  const marks: SettingsMarks = Object.fromEntries(SETTINGS_SCREEN_PAGES.map((pg) => [pg, pageMark(pg)]));
+  const keptMarks: SettingsMarks = Object.fromEntries(SETTINGS_SCREEN_PAGES.map((pg) => [pg, pageMark(pg, true)]));
+  const keptRef = useRef(keptMarks);
+  keptRef.current = keptMarks;
+  useEffect(() => setSettingsMarks(marks));
+  useEffect(() => () => setSettingsMarks(keptRef.current), []);
 
   const steps: SetupStep[] = s
     ? [
         {
           id: "model",
           title: "Give Ghost a model",
-          done: modelReady(s, s.values),
-          doneText: isSet(s, "ANTHROPIC_AUTH_TOKEN") ? "Anthropic token set." : "Using your own model endpoint.",
-          todoText: "Add an Anthropic token, or point Ghost at your own endpoint.",
-          target: isSet(s, "ANTHROPIC_AUTH_TOKEN") || !s.values.ANTHROPIC_BASE_URL ? "secrets" : "model",
+          done: modelReady(conn),
+          doneText: conn ? `${conn.wire_model}, through ${conn.providers.find((p) => p.id === conn.provider)?.title ?? conn.provider}.` : "",
+          todoText: "Pick a provider and give it its password, or sign in to OpenRouter.",
+          target: "model",
         },
         {
           id: "echo",
@@ -690,6 +752,7 @@ export default function SettingsScreen(_: RouteProps) {
         },
       ]
     : [];
+  const pageInfo = SETTINGS_PAGES.find((p) => p.id === page);
 
   // The microphone saved before this visit but not yet opened by Ghost owes a restart too; the
   // pill carries the command even when nothing was saved on this page.
@@ -728,9 +791,9 @@ export default function SettingsScreen(_: RouteProps) {
   const jevWords = (text: string | undefined): ReactNode =>
     text === JEV_NEEDS_KEY ? (
       <>
-        Jev needs a TypeSafe or OpenRouter key.{" "}
+        Jev needs a TypeSafe or OpenRouter password.{" "}
         <button type="button" className="set-link" onClick={goToJevKey}>
-          Add one under Secrets
+          Add one under Passwords
         </button>
         , or choose Automatic.
       </>
@@ -749,43 +812,40 @@ export default function SettingsScreen(_: RouteProps) {
   const jev = v.GHOST_JEV || "auto";
   const jevStatus = jevNow(jev, s, draft.secrets);
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
-  const secretNames = s
-    ? SECRET_ORDER.filter((n) => s.secrets.some((x) => x.name === n)).concat(s.secrets.map((x) => x.name).filter((n) => !SECRET_ORDER.includes(n)))
-    : [];
-  const requiredSecrets = secretNames.filter((n) => !isOptionalSecret(n) && !isAppSecret(n));
-  const optionalSecrets = secretNames.filter((n) => isOptionalSecret(n) && !isAppSecret(n));
-  /** Keys Ghost keeps for the apps it connected (ADR 0034): set from Apps, replaceable here. */
-  const appSecrets = secretNames.filter(isAppSecret);
-  const appSecretsSet = appSecrets.filter((n) => isSet(s, n)).length;
-  const appSecretsBusy = appSecrets.some((n) => openSecrets.has(n) || restartSet.has(n));
-  const optionalSet = optionalSecrets.filter((n) => isSet(s, n)).length;
-  const optionalBusy = optionalSecrets.some((n) => openSecrets.has(n) || restartSet.has(n));
-  const secretRow = (name: string) => (
-    <SecretRow
-      key={name}
-      name={name}
-      set={isSet(s, name)}
-      value={draft.secrets[name]}
-      open={openSecrets.has(name)}
-      onOpen={() => setOpenSecrets((o) => new Set(o).add(name))}
-      onChange={(val) => setSecret(name, val)}
-      onCancel={() => closeSecret(name)}
-      onSubmit={submit}
-      disabled={!online}
-      waiting={restartSet.has(name)}
-    />
-  );
+  // A password saved on its own row (Passwords.tsx): one Ghost reads joins the restart pill, and
+  // the setup list and the model page read set-or-not again.
+  const passwordRestart = (names: string[]) => {
+    setRestartKeys((prev) => Array.from(new Set([...prev, ...names])));
+    setRestartDismissed(false);
+  };
+  const passwordChanged = () => {
+    client
+      .settings()
+      .then((sv) => setS(sv))
+      .catch(() => {});
+    client.modelConnection().then(setConn, () => {});
+  };
+
+  const description: ReactNode =
+    page === "general" ? (
+      "What Ghost is running, and where it keeps its settings."
+    ) : page === "model" ? (
+      "Where Ghost thinks: every session, its tool calls and its summaries go to this model."
+    ) : page === "passwords" ? (
+      "Every password Ghost holds for you, in its own vault, locked with your keyring."
+    ) : page === "sound" ? (
+      "What Ghost hears with, how it wakes, and how it sounds."
+    ) : (
+      <>
+        Talk to Ghost from your phone, at home or away through your own tunnel, with nothing of anyone else’s in between.
+      </>
+    );
 
   return (
     <Page
       width="narrow"
-      title="Settings"
-      status={<LiveStatus />}
-      description={
-        <>
-          How Ghost connects, listens and speaks. Saved to <span className="set-path">{tildePath(s?.settings_path) || "~/.config/ghost/settings.env"}</span>.
-        </>
-      }
+      title={pageInfo?.label ?? "Settings"}
+      description={description}
       dock={
         barState ? (
           <SaveBar state={barState} copyRef={copyRef} onSave={() => void save()} onDiscard={discard} onDismiss={dismissRestart} onFix={focusKey} />
@@ -817,398 +877,324 @@ export default function SettingsScreen(_: RouteProps) {
         )}
         {!s && !loadError && <SettingsSkeleton />}
 
-        {s && (
+        {s && page === "general" && (
           <>
             {showSetup && <SetupSection steps={steps} onGo={(id) => go(id)} />}
-
-            {/* --------------------------------------------------------- Secrets */}
-            <Section
-              id={sectionDomId("secrets")}
-              title={SECTION_TITLE.secrets}
-              description={
-                <>
-                  Kept in <span className="set-path">{tildePath(s.env_path)}</span>. Never shown again once saved.
-                </>
-              }
-              className="set-section"
-            >
-              {/* Plain help, not a Notice: the section already shows a tinted block when setup is unfinished or a restart is owed. */}
-              {s.vault_managed && <p className="set-help is-readable set-vault-note">Filled from your vault each time Ghost starts. A value you save here lasts until the next start.</p>}
+            <Section id={sectionDomId("about")} title={SECTION_TITLE.about} className="set-section">
+              <VersionNotice status={status} />
               <Card list>
-                {requiredSecrets.map(secretRow)}
-                {optionalSecrets.length > 0 && (
-                  <div className="set-optional-keys">
-                    <Disclosure
-                      key={optionalOpen}
-                      defaultOpen={optionalOpen > 0 || optionalBusy}
-                      summary={
-                        <span className="set-optional-keys__summary">
-                          Optional keys
-                          <span className="set-count t-num">
-                            {optionalSet} of {optionalSecrets.length} set
-                          </span>
-                        </span>
-                      }
-                    >
-                      <p className="set-help set-optional-keys__lead">Jev hears your yes with TypeSafe or OpenRouter. Hugging Face speeds up the first model download.</p>
-                      <div className="set-optional-keys__list">{optionalSecrets.map(secretRow)}</div>
-                    </Disclosure>
-                  </div>
-                )}
-                {appSecrets.length > 0 && (
-                  <div className="set-optional-keys">
-                    <Disclosure
-                      defaultOpen={appSecretsBusy}
-                      summary={
-                        <span className="set-optional-keys__summary">
-                          Keys for your apps
-                          <span className="set-count t-num">
-                            {appSecretsSet} of {appSecrets.length} set
-                          </span>
-                        </span>
-                      }
-                    >
-                      <p className="set-help set-optional-keys__lead">
-                        Set when you connected each app under <a href={hrefFor("/apps")}>Apps</a>. Disconnecting an app clears the key Ghost saved for it; a key you named yourself stays here until you clear it.
-                      </p>
-                      <div className="set-optional-keys__list">{appSecrets.map(secretRow)}</div>
-                    </Disclosure>
-                  </div>
-                )}
+                <VersionRows status={status} />
+                <ListRow
+                  title="Settings file"
+                  description="Where these pages save. Passwords are in Ghost’s vault, never in this file."
+                  meta={<span className="set-value is-mono">{tildePath(s.settings_path) || "~/.config/ghost/settings.env"}</span>}
+                />
               </Card>
             </Section>
+            {mock && Prototype && (
+              <Suspense fallback={null}>
+                <Prototype only="privacy" />
+              </Suspense>
+            )}
+          </>
+        )}
 
-            <form onSubmit={submit} autoComplete="off" className="set-form">
-              {/* ----------------------------------------------------------- Model */}
-              <Section
-                id={sectionDomId("model")}
-                title={SECTION_TITLE.model}
-                description="Where Ghost sends a session to think. Leave both empty to use Anthropic’s defaults."
-                className="set-section"
-              >
-                <Card list>
-                  <Row>
-                    <Field layout="inline" id={fieldId("ANTHROPIC_BASE_URL")} label="Model endpoint" detail="ANTHROPIC_BASE_URL" help={help("ANTHROPIC_BASE_URL", "Any Anthropic-compatible URL.")} error={err("ANTHROPIC_BASE_URL")}>
-                      <Input value={v.ANTHROPIC_BASE_URL ?? ""} placeholder="https://api.anthropic.com" inputMode="url" spellCheck={false} onChange={(e) => setValue("ANTHROPIC_BASE_URL", e.target.value)} />
-                    </Field>
-                  </Row>
-                  <Row>
-                    <Field layout="inline" id={fieldId("GHOST_LLM_MODEL")} label="Model" detail="GHOST_LLM_MODEL" help={help("GHOST_LLM_MODEL", `Empty means ${DEFAULT_MODEL}.`)}>
-                      <Input mono value={v.GHOST_LLM_MODEL ?? ""} placeholder={DEFAULT_MODEL} spellCheck={false} onChange={(e) => setValue("GHOST_LLM_MODEL", e.target.value)} />
-                    </Field>
-                  </Row>
-                </Card>
-                {!ready && (
-                  <p className="set-note">
-                    Ghost can’t answer until it has an Anthropic token or an endpoint.{" "}
-                    <button type="button" className="set-link" onClick={() => go("secrets")}>
-                      Add a token
-                    </button>
-                  </p>
-                )}
-              </Section>
+        {s && page === "passwords" && (
+          <Section id={sectionDomId("secrets")} className="set-section">
+            <PasswordsSection onRestart={passwordRestart} waiting={restartSet} onChanged={passwordChanged} />
+          </Section>
+        )}
 
-              {/* ------------------------------------------------------------ Apps */}
-              <Section
-                id={sectionDomId("apps")}
-                title={SECTION_TITLE.apps}
-                description="Everything Ghost reads, watches or changes outside itself is an app you connect, not a setting here."
-                className="set-section"
-              >
-                <Card padding="md">
-                  <p className="set-github t-body">
-                    Connect GitHub, Linear, Notion and more under Apps: sign in, paste a key, or run one on this computer. Every agent reaches them. What Ghost may not do,
-                    or asks first, is on Permissions.
-                  </p>
-                  <div className="set-github__links">
-                    <Button size="sm" variant="secondary" href={hrefFor("/apps")} trailingIcon={<ArrowRight />}>
-                      Open Apps
-                    </Button>
-                    <Button size="sm" variant="ghost" href={hrefFor("/permissions")}>
-                      Open Permissions
-                    </Button>
-                  </div>
-                </Card>
-              </Section>
+        {s && page === "model" && (
+          <>
+          {/* The page's fields name this form (`form=`), since the key's row is a form of its
+              own and forms can't nest: Enter in any of them saves, as on the other pages. */}
+          <form id={MODEL_FORM_ID} onSubmit={submit} autoComplete="off" className="sr-only">
+            <button type="submit" tabIndex={-1} aria-hidden />
+          </form>
+          <ModelSection
+            s={s}
+            conn={conn}
+            values={v}
+            online={online}
+            mock={mock}
+            setValues={setValues}
+            help={help}
+            err={err}
+            fieldId={fieldId}
+            waiting={restartSet}
+            onPassword={(restart) => {
+              if (restart.length) passwordRestart(restart);
+              passwordChanged();
+            }}
+          />
+          </>
+        )}
 
-              {/* ----------------------------------------------------------- Skills */}
-              <Section
-                id={sectionDomId("skills")}
-                title={SECTION_TITLE.skills}
-                description="Where Ghost finds skills: the SKILL.md folders that tell it how to do a kind of task."
-                className="set-section"
-              >
-                <p className="set-note">
-                  Ghost’s own in <span className="t-mono">~/.config/ghost/skills</span> first, then yours in <span className="t-mono">~/.agents/skills</span>. Nothing is copied. What Ghost found, where each came from and what it needs is under{" "}
-                  <a href={hrefFor("/skills")}>Skills</a>.
-                </p>
-              </Section>
-
-              {/* -------------------------------------------------- Voice and wake */}
-              <Section
-                id={sectionDomId("voice")}
-                title={SECTION_TITLE.voice}
-                description="What wakes Ghost and how it hears your yes."
-                className="set-section"
-              >
-                <Card list>
-                  <Row>
-                    <Field
-                      id={fieldId("GHOST_WAKE_PHRASES")}
-                      label="Wake phrases"
-                      detail="GHOST_WAKE_PHRASES"
-                      help={help("GHOST_WAKE_PHRASES", phrases.length ? "Any of these starts a session. Two or three words work best." : "Empty means “hey ghost”.")}
-                      error={err("GHOST_WAKE_PHRASES")}
-                    >
-                      <ChipsInput
-                        kind="phrase"
-                        noun="phrase"
-                        items={phrases}
-                        placeholder="hey ghost"
-                        check={(e) => (e.split(/\s+/).length > 5 ? "Keep a wake phrase to five words or fewer." : null)}
+        {s && page === "sound" && (
+          <form onSubmit={submit} autoComplete="off" className="set-form">
+              <>
+                {/* -------------------------------------------------- Voice and wake */}
+                <Section
+                  id={sectionDomId("voice")}
+                  title={SECTION_TITLE.voice}
+                  description="How Ghost sounds, what wakes it, and how it hears your yes."
+                  className="set-section"
+                >
+                  <Card list>
+                    {ghost && voiceDraft && <GhostVoice value={voiceDraft} speed={ghost.speed} onChange={setVoiceDraft} />}
+                    <Row>
+                      <WakePhrasesField
+                        id={fieldId("GHOST_WAKE_PHRASES")}
+                        phrases={phrases}
+                        help={help("GHOST_WAKE_PHRASES", wakeHelp(phrases.length))}
+                        error={err("GHOST_WAKE_PHRASES")}
                         onEntryError={(m) => setEntryErrors((x) => ({ ...x, GHOST_WAKE_PHRASES: m }))}
                         onChange={(items) => setValue("GHOST_WAKE_PHRASES", joinList(items))}
                       />
-                    </Field>
-                  </Row>
-                  <Row>
-                    <Field
-                      layout="inline"
-                      id={fieldId(FUZZY)}
-                      label="Wake sensitivity"
-                      detail={FUZZY}
-                      help={help(FUZZY, exact ? "Ghost wakes only on the exact words." : "Forgiving catches a mumble; strict wakes less by accident.")}
-                    >
-                      <WakeSensitivity
-                        step={step}
-                        exact={exact}
-                        onStep={(n) => setFuzzy(stepToFuzzy(n))}
-                        onExact={(on) => {
-                          if (on) setValue(FUZZY, parseFuzzy(storedFuzzy) === 0 && storedFuzzy.trim() !== "" ? storedFuzzy : "0");
-                          else setValue(FUZZY, storedFuzzy.trim() === "" || parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : DEFAULT_FUZZY.toFixed(2));
-                        }}
-                      />
-                    </Field>
-                  </Row>
-                  <Row>
-                    <Field
-                      layout="inline"
-                      id={fieldId("GHOST_JEV")}
-                      label="How Ghost hears your yes"
-                      detail="GHOST_JEV"
-                      help={help("GHOST_JEV", jevWords(jevStatus.label))}
-                      error={jevWords(err("GHOST_JEV") ?? undefined) || undefined}
-                    >
-                      <JevControl value={jev} onChange={(val) => setValue("GHOST_JEV", val === "auto" && !s.values.GHOST_JEV ? "" : val)} />
-                    </Field>
-                  </Row>
-                </Card>
-                <p className="set-promise-line">
-                  <ShieldCheck size={14} aria-hidden />
-                  Until you say a wake phrase, nothing you say leaves this computer.
-                </p>
-              </Section>
-
-              {/* ------------------------------------------- Microphone and speakers */}
-              <Section
-                id={sectionDomId("audio")}
-                title={SECTION_TITLE.audio}
-                description="What Ghost hears with and speaks through."
-                className="set-section"
-              >
-                {echoMsg && (
-                  <div id={ECHO_IDS.msg}>
-                  <Notice
-                    tone={echoMsg.tone}
-                    title={echoMsg.title}
-                    onDismiss={() => setEchoMsg(null)}
-                    action={
-                      echoMsg.offer === "ghost.mic" && v.GHOST_INPUT_DEVICE !== "ghost.mic" ? (
-                        <Button size="sm" id={ECHO_IDS.offer} onClick={() => pickMic("ghost.mic")}>
-                          Use ghost.mic
-                        </Button>
-                      ) : echoMsg.offer === "default" && v.GHOST_INPUT_DEVICE === "ghost.mic" ? (
-                        <Button size="sm" id={ECHO_IDS.offer} onClick={() => pickMic("")}>
-                          Use system default
-                        </Button>
-                      ) : undefined
-                    }
-                  >
-                    {echoMsg.offer === "default" && v.GHOST_INPUT_DEVICE === "ghost.mic" ? "Ghost is still set to ghost.mic, which is gone now. Pick another microphone, save, and restart Ghost." : echoMsg.text}
-                  </Notice>
-                  </div>
-                )}
-                {devicesError && !devices && (
-                  <Notice
-                    tone="danger"
-                    title="Couldn’t list audio devices"
-                    action={
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          forcedRetried.current.devices = true;
-                          void loadAux();
-                        }}
+                    </Row>
+                    <Row>
+                      <Field
+                        layout="inline"
+                        id={fieldId(FUZZY)}
+                        label="Wake sensitivity"
+                        detail={FUZZY}
+                        help={help(FUZZY, exact ? "Ghost wakes only on the exact words." : "Forgiving catches a mumble; strict wakes less by accident.")}
                       >
-                        Try again
-                      </Button>
-                    }
-                  >
-                    {devicesError}
-                  </Notice>
-                )}
-                <Card list>
-                  <Row>
-                    <Field
-                      layout="inline"
-                      id={fieldId("GHOST_INPUT_DEVICE")}
-                      label="Microphone"
-                      detail="GHOST_INPUT_DEVICE"
-                      help={
-                        devices ? (
-                          <>
-                            {(micWaits || (restartSet.has("GHOST_INPUT_DEVICE") && !dirtyKeys.includes("GHOST_INPUT_DEVICE"))) && (
-                              <span className="set-waits">Waits for a restart. </span>
-                            )}
-                            In use now: {micInUse(devices)}.
-                            {devices.echo_cancel_source_present && v.GHOST_INPUT_DEVICE !== "ghost.mic" ? " Pick ghost.mic so Ghost doesn’t hear itself." : ""}
-                          </>
-                        ) : (
-                          "Type a device name, like ghost.mic."
-                        )
+                        <WakeSensitivity
+                          step={step}
+                          exact={exact}
+                          onStep={(n) => setFuzzy(stepToFuzzy(n))}
+                          onExact={(on) => {
+                            if (on) setValue(FUZZY, parseFuzzy(storedFuzzy) === 0 && storedFuzzy.trim() !== "" ? storedFuzzy : "0");
+                            else setValue(FUZZY, storedFuzzy.trim() === "" || parseFuzzy(storedFuzzy) > 0 ? storedFuzzy : DEFAULT_FUZZY.toFixed(2));
+                          }}
+                        />
+                      </Field>
+                    </Row>
+                    <Row>
+                      <Field
+                        layout="inline"
+                        id={fieldId("GHOST_JEV")}
+                        label="How Ghost hears your yes"
+                        detail="GHOST_JEV"
+                        help={help("GHOST_JEV", jevWords(jevStatus.label))}
+                        error={jevWords(err("GHOST_JEV") ?? undefined) || undefined}
+                      >
+                        <JevControl value={jev} onChange={(val) => setValue("GHOST_JEV", val === "auto" && !s.values.GHOST_JEV ? "" : val)} />
+                      </Field>
+                    </Row>
+                  </Card>
+                  <p className="set-promise-line">
+                    <ShieldCheck size={14} aria-hidden />
+                    Until you say a wake phrase, nothing you say leaves this computer.
+                  </p>
+                </Section>
+
+                {/* ------------------------------------------- Microphone and speakers */}
+                <Section
+                  id={sectionDomId("audio")}
+                  title={SECTION_TITLE.audio}
+                  description="What Ghost hears with and speaks through."
+                  className="set-section"
+                >
+                  {echoMsg && (
+                    <div id={ECHO_IDS.msg}>
+                    <Notice
+                      tone={echoMsg.tone}
+                      title={echoMsg.title}
+                      onDismiss={() => setEchoMsg(null)}
+                      action={
+                        echoMsg.offer === "ghost.mic" && v.GHOST_INPUT_DEVICE !== "ghost.mic" ? (
+                          <Button size="sm" id={ECHO_IDS.offer} onClick={() => pickMic("ghost.mic")}>
+                            Use ghost.mic
+                          </Button>
+                        ) : echoMsg.offer === "default" && v.GHOST_INPUT_DEVICE === "ghost.mic" ? (
+                          <Button size="sm" id={ECHO_IDS.offer} onClick={() => pickMic("")}>
+                            Use system default
+                          </Button>
+                        ) : undefined
                       }
                     >
-                      {devices ? (
-                        <Select value={v.GHOST_INPUT_DEVICE ?? ""} onChange={(e) => setValue("GHOST_INPUT_DEVICE", e.target.value)} options={mics} />
-                      ) : (
-                        <Input value={v.GHOST_INPUT_DEVICE ?? ""} placeholder="ghost.mic" spellCheck={false} onChange={(e) => setValue("GHOST_INPUT_DEVICE", e.target.value)} />
-                      )}
-                    </Field>
-                  </Row>
-                  <ListRow
-                    title="Speakers"
-                    description="Ghost uses the system output. Change it in your sound settings."
-                    meta={<span className="set-value">{devices?.output_device ?? "System default"}</span>}
-                  />
-                  <ListRow
-                    title="Echo cancellation"
-                    description={
-                      echoBusy
-                        ? echoBusy === "remove"
-                          ? "Removing echo cancellation…"
-                          : "Installing echo cancellation…"
-                        : !devices
-                        ? "Checked once the device list loads."
-                        : devices.echo_cancel_active
-                          ? "Running. Ghost hears you, not its own voice."
-                          : devices.echo_cancel_source_present
-                            ? (
-                              <>
-                                Installed, not running yet. Restart Ghost to start it, or reinstall it.
-                                <CommandCopy className="set-row-command" />
-                              </>
-                            )
-                            : "Not installed. Without it, Ghost can hear itself through your speakers."
-                    }
-                    meta={
-                      echoBusy ? undefined : devices ? (
-                        devices.echo_cancel_active ? (
-                          <Badge tone="ok" size="sm" dot>Running</Badge>
-                        ) : (
-                          <Badge size="sm">{devices.echo_cancel_source_present ? "Installed" : "Off"}</Badge>
-                        )
-                      ) : undefined
-                    }
-                    trailing={
-                      devices?.echo_cancel_active || devices?.echo_cancel_source_present ? (
-                        <span className="set-echo-actions">
-                          {!devices.echo_cancel_active && (
-                            <Button
-                              id={ECHO_IDS.reinstall}
-                              size="sm"
-                              variant="secondary"
-                              loading={echoBusy === "install"}
-                              disabled={!online || (!!echoBusy && echoBusy !== "install")}
-                              onClick={() => echo(false)}
-                            >
-                              Reinstall
-                            </Button>
-                          )}
-                          {/* Remove is rare and destructive: behind More, red only inside the menu, confirmed in a dialog. */}
-                          <Menu
-                            align="end"
-                            trigger={
-                              <IconButton
-                                id={ECHO_IDS.more}
-                                size="sm"
-                                variant="ghost"
-                                label="More for echo cancellation"
-                                icon={<MoreHorizontal />}
-                                disabled={!online || !!echoBusy}
-                              />
-                            }
-                            items={[{ label: "Remove echo cancellation…", icon: <Trash2 />, danger: true, onSelect: () => void echo(true) }]}
-                          />
-                        </span>
-                      ) : (
+                      {echoMsg.offer === "default" && v.GHOST_INPUT_DEVICE === "ghost.mic" ? "Ghost is still set to ghost.mic, which is gone now. Pick another microphone, save, and restart Ghost." : echoMsg.text}
+                    </Notice>
+                    </div>
+                  )}
+                  {devicesError && !devices && (
+                    <Notice
+                      tone="danger"
+                      title="Couldn’t list audio devices"
+                      action={
                         <Button
-                          id={ECHO_IDS.install}
                           size="sm"
-                          variant="secondary"
-                          loading={echoBusy === "install"}
-                          disabled={!online || !devices || (!!echoBusy && echoBusy !== "install")}
-                          onClick={() => echo(false)}
+                          onClick={() => {
+                            forcedRetried.current.devices = true;
+                            void loadAux();
+                          }}
                         >
-                          Install
+                          Try again
                         </Button>
-                      )
-                    }
-                  />
-                  {devices && (
-                  <div className="set-devices">
-                      <Disclosure
-                        summary={
-                          <span className="set-devices__summary">
-                            Detected devices <span className="set-count t-num">{devices?.devices.length ?? 0}</span>
-                          </span>
+                      }
+                    >
+                      {devicesError}
+                    </Notice>
+                  )}
+                  <Card list>
+                    <Row>
+                      <Field
+                        layout="inline"
+                        id={fieldId("GHOST_INPUT_DEVICE")}
+                        label="Microphone"
+                        detail="GHOST_INPUT_DEVICE"
+                        help={
+                          devices ? (
+                            <>
+                              {(micWaits || (restartSet.has("GHOST_INPUT_DEVICE") && !dirtyKeys.includes("GHOST_INPUT_DEVICE"))) && (
+                                <span className="set-waits">Waits for a restart. </span>
+                              )}
+                              In use now: {micInUse(devices)}.
+                              {devices.echo_cancel_source_present && v.GHOST_INPUT_DEVICE !== "ghost.mic" ? " Pick ghost.mic so Ghost doesn’t hear itself." : ""}
+                            </>
+                          ) : (
+                            "Type a device name, like ghost.mic."
+                          )
                         }
                       >
-                        <Table density="compact" className="set-device-table">
-                          <thead>
-                            <tr>
-                              <th>Device</th>
-                              <th className="is-num">In</th>
-                              <th className="is-num">Out</th>
-                              <th className="is-num">Rate</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {devices?.devices.map((d) => (
-                              <tr key={d.index}>
-                                <td className="is-mono">
-                                  {d.name}
-                                  {(d.is_default_input || d.is_default_output) && (
-                                    <span className="set-device-default">
-                                      {d.is_default_input && d.is_default_output ? "default in and out" : d.is_default_input ? "default in" : "default out"}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="is-num is-muted">{d.max_input_channels || "–"}</td>
-                                <td className="is-num is-muted">{d.max_output_channels || "–"}</td>
-                                <td className="is-num is-muted is-nowrap">{(d.default_samplerate / 1000).toFixed(1)} kHz</td>
+                        {devices ? (
+                          <Select value={v.GHOST_INPUT_DEVICE ?? ""} onChange={(e) => setValue("GHOST_INPUT_DEVICE", e.target.value)} options={mics} />
+                        ) : (
+                          <Input value={v.GHOST_INPUT_DEVICE ?? ""} placeholder="ghost.mic" spellCheck={false} onChange={(e) => setValue("GHOST_INPUT_DEVICE", e.target.value)} />
+                        )}
+                      </Field>
+                    </Row>
+                    <ListRow
+                      title="Speakers"
+                      description="Ghost uses the system output. Change it in your sound settings."
+                      meta={<span className="set-value">{devices?.output_device ?? "System default"}</span>}
+                    />
+                    <ListRow
+                      title="Echo cancellation"
+                      description={
+                        echoBusy
+                          ? echoBusy === "remove"
+                            ? "Removing echo cancellation…"
+                            : "Installing echo cancellation…"
+                          : !devices
+                          ? "Checked once the device list loads."
+                          : devices.echo_cancel_active
+                            ? "Running. Ghost hears you, not its own voice."
+                            : devices.echo_cancel_source_present
+                              ? (
+                                <>
+                                  Installed, not running yet. Restart Ghost to start it, or reinstall it.
+                                  <CommandCopy className="set-row-command" />
+                                </>
+                              )
+                              : "Not installed. Without it, Ghost can hear itself through your speakers."
+                      }
+                      meta={
+                        echoBusy ? undefined : devices ? (
+                          devices.echo_cancel_active ? (
+                            <Badge tone="ok" size="sm" dot>Running</Badge>
+                          ) : (
+                            <Badge size="sm">{devices.echo_cancel_source_present ? "Installed" : "Off"}</Badge>
+                          )
+                        ) : undefined
+                      }
+                      trailing={
+                        devices?.echo_cancel_active || devices?.echo_cancel_source_present ? (
+                          <span className="set-echo-actions">
+                            {!devices.echo_cancel_active && (
+                              <Button
+                                id={ECHO_IDS.reinstall}
+                                size="sm"
+                                variant="secondary"
+                                loading={echoBusy === "install"}
+                                disabled={!online || (!!echoBusy && echoBusy !== "install")}
+                                onClick={() => echo(false)}
+                              >
+                                Reinstall
+                              </Button>
+                            )}
+                            {/* Remove is rare and destructive: behind More, red only inside the menu, confirmed in a dialog. */}
+                            <Menu
+                              align="end"
+                              trigger={
+                                <IconButton
+                                  id={ECHO_IDS.more}
+                                  size="sm"
+                                  variant="ghost"
+                                  label="More for echo cancellation"
+                                  icon={<MoreHorizontal />}
+                                  disabled={!online || !!echoBusy}
+                                />
+                              }
+                              items={[{ label: "Remove echo cancellation…", icon: <Trash2 />, danger: true, onSelect: () => void echo(true) }]}
+                            />
+                          </span>
+                        ) : (
+                          <Button
+                            id={ECHO_IDS.install}
+                            size="sm"
+                            variant="secondary"
+                            loading={echoBusy === "install"}
+                            disabled={!online || !devices || (!!echoBusy && echoBusy !== "install")}
+                            onClick={() => echo(false)}
+                          >
+                            Install
+                          </Button>
+                        )
+                      }
+                    />
+                    {devices && (
+                    <div className="set-devices">
+                        <Disclosure
+                          summary={
+                            <span className="set-devices__summary">
+                              Detected devices <span className="set-count t-num">{devices?.devices.length ?? 0}</span>
+                            </span>
+                          }
+                        >
+                          <Table density="compact" className="set-device-table">
+                            <thead>
+                              <tr>
+                                <th>Device</th>
+                                <th className="is-num">In</th>
+                                <th className="is-num">Out</th>
+                                <th className="is-num">Rate</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </Table>
-                      </Disclosure>
-                  </div>
-                  )}
-                </Card>
-              </Section>
-              {/* Lets Enter in any field submit; the visible Save lives in the dock. */}
-              <button type="submit" className="sr-only" tabIndex={-1} aria-hidden />
-            </form>
+                            </thead>
+                            <tbody>
+                              {devices?.devices.map((d) => (
+                                <tr key={d.index}>
+                                  <td className="is-mono">
+                                    {d.name}
+                                    {(d.is_default_input || d.is_default_output) && (
+                                      <span className="set-device-default">
+                                        {d.is_default_input && d.is_default_output ? "default in and out" : d.is_default_input ? "default in" : "default out"}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="is-num is-muted">{d.max_input_channels || "–"}</td>
+                                  <td className="is-num is-muted">{d.max_output_channels || "–"}</td>
+                                  <td className="is-num is-muted is-nowrap">{(d.default_samplerate / 1000).toFixed(1)} kHz</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        </Disclosure>
+                    </div>
+                    )}
+                  </Card>
+                </Section>
+              </>
+            {/* Lets Enter in any field submit; the visible Save lives in the dock. */}
+            <button type="submit" className="sr-only" tabIndex={-1} aria-hidden />
+          </form>
+        )}
 
+        {s && page === "sound" && (
+          <>
             {/* ------------------------------------------------------ Voice models */}
             <Section
               id={sectionDomId("models")}
@@ -1241,19 +1227,15 @@ export default function SettingsScreen(_: RouteProps) {
                 <ListRow title="Model cache" description="Delete this folder to download the models again." meta={<span className="set-value is-mono">{models ? tildePath(models.cache_dir) : "–"}</span>} />
               </Card>
             </Section>
-
-            {/* ------------------------------------------------------------ Phone */}
-            <PhoneSection settingsPath={s.settings_path} openOnLoad={forced === "pairing"} />
-
             {mock && Prototype && (
               <Suspense fallback={null}>
-                <Prototype />
+                <Prototype only="sounds" />
               </Suspense>
             )}
           </>
         )}
-        {/* After the content in the DOM, so Tab reaches the fields first; it sits to their right. */}
-        {s && <PageNav items={navItems} active={active} onGo={(id) => go(id)} />}
+
+        {s && page === "phone" && <PhoneSection settingsPath={s.settings_path} openOnLoad={forced === "pairing"} />}
       </div>
     </Page>
   );

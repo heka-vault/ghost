@@ -133,7 +133,6 @@ def test_settings_write_only_secrets(world):
     client, *_, deps = world
     v = client.get("/settings").json()
     assert v["values"] == {} and all(s["set"] is False for s in v["secrets"])
-    assert v["vault_managed"] is False
     r = client.put(
         "/settings",
         json={
@@ -146,8 +145,12 @@ def test_settings_write_only_secrets(world):
     assert s["values"] == {"GHOST_REPOS": "acme/app"}
     assert {x["name"]: x["set"] for x in s["secrets"]}["GITHUB_TOKEN"] is True
     assert "ghp_secret" not in json.dumps(s)
-    assert stat.S_IMODE(os.stat(deps.env_path).st_mode) == 0o600
-    assert read_env(deps.env_path) == {"GHOST_REPOS": "acme/app", "GITHUB_TOKEN": "ghp_secret"}
+    assert stat.S_IMODE(os.stat(deps.settings_path).st_mode) == 0o600
+    # The value is in the vault (ADR 0036), sealed; no plaintext file holds it.
+    assert read_env(deps.settings_path) == {"GHOST_REPOS": "acme/app"}
+    assert not deps.env_path.exists()
+    assert deps.passwords.names() == ["GITHUB_TOKEN"]
+    assert b"ghp_secret" not in deps.passwords.path.read_bytes()
     assert client.put("/settings", json={"values": {"GITHUB_TOKEN": "x"}}).status_code == 422
     assert client.put("/settings", json={"secrets": {"NOPE": "x"}}).status_code == 422
     assert client.put("/settings", json={"values": {"bad-name": "x"}}).status_code == 422
@@ -163,6 +166,29 @@ def test_setup_endpoints(world, monkeypatch):
     assert "--uninstall" in out["detail"]
     m = client.get("/setup/models").json()
     assert m["ready"] is False and m["kokoro_present"] is False and m["stt_model"] == "parakeet"
+
+
+def test_status_says_the_version_and_the_build(world):
+    from ghost_api import Build
+
+    client, state, *_ = world
+    assert client.get("/status").json()["build"] == {
+        "kind": "dev",
+        "commit": None,
+        "dirty": False,
+        "launcher": None,
+    }
+    state.build = Build(kind="dev", launcher="make-dev")
+    assert client.get("/status").json()["build"]["launcher"] == "make-dev"
+    state.build = Build(kind="deploy", commit="0123456789abcdef0123456789abcdef01234567")
+    s = client.get("/status").json()
+    assert s["version"] == "test"
+    assert s["build"] == {
+        "kind": "deploy",
+        "commit": "0123456789abcdef0123456789abcdef01234567",
+        "dirty": False,
+        "launcher": None,
+    }
 
 
 def test_events_websocket_streams_status_and_turns(world):
@@ -268,16 +294,23 @@ def test_phone_routes(world):
 
     client, state, control, *_ = world
     assert client.post("/phone/pairing").status_code == 409  # listener off
-    assert client.get("/phone").json() == {"address": None, "addresses": [], "device": None}
+    assert client.get("/phone").json() == {
+        "address": None,
+        "addresses": [],
+        "listen": [],
+        "device": None,
+    }
 
     control.phone_address = "192.168.1.20:8765"
     body = client.post("/phone/pairing").json()
     assert body["code"] == "123456" and body["address"] == "192.168.1.20:8765"
+    assert body["link"].startswith("ghost://pair?")
     control.phone_device = PhoneDevice(
         id="d1", name="Pixel 9", paired_at=datetime.now(UTC), last_seen=None
     )
     view = client.get("/phone").json()
     assert view["device"]["name"] == "Pixel 9" and "secret" not in json.dumps(view)
+    assert view["device"]["last_address"] is None and view["device"]["last_network"] is None
     assert client.delete("/phone").json()["ok"] is True
     assert client.delete("/phone").json()["ok"] is False
     assert client.get("/phone").json()["device"] is None

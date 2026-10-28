@@ -2,108 +2,90 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
+import os
+from collections.abc import Mapping
 from pathlib import Path
-from urllib.parse import urlparse
 
+from ghost_core.connection import LEGACY_ENDPOINTS as LLM_ENDPOINTS
+from ghost_core.connection import OPENROUTER_ANTHROPIC_URL, ModelConnection, openrouter_model
+from ghost_core.connection import Target as LLMTarget
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLM_ENDPOINTS = ("proxy", "openrouter")
 TTS_ENGINES = ("kokoro", "elevenlabs")
-OPENROUTER_ANTHROPIC_URL = "https://openrouter.ai/api"  # OpenRouter's Anthropic Messages API
 # Output cap per reply, tool calls included: four comments asked for together are about
 # 600 tokens, and the scaffold's 400 cut them off (ghost_voice.llm redoes a cut reply).
 LLM_MAX_TOKENS = 2000
-_CLAUDE_ID = re.compile(r"^(claude-[a-z]+)-(\d+)(?:-(\d{1,2}))?$")
 
+__all__ = [
+    "LLM_ENDPOINTS",
+    "LLM_FIELDS",
+    "LLM_MAX_TOKENS",
+    "OPENROUTER_ANTHROPIC_URL",
+    "LLMTarget",
+    "ModelConnection",
+    "VoiceSettings",
+    "openrouter_model",
+]
 
-def openrouter_model(model: str) -> str:
-    """Ghost's model id as OpenRouter names it: ``claude-sonnet-5-5`` is
-    ``anthropic/claude-sonnet-5.5``. An id that already has a vendor prefix is kept."""
-    if "/" in model:
-        return model
-    m = _CLAUDE_ID.match(model)
-    if not m:
-        return f"anthropic/{model}"
-    name, major, minor = m.groups()
-    return f"anthropic/{name}-{major}" + (f".{minor}" if minor else "")
-
-
-@dataclass(frozen=True)
-class LLMTarget:
-    """Where model calls go. ``api_key`` is never in the repr; describe() leaves it out."""
-
-    endpoint: str
-    base_url: str | None
-    model: str  # as the endpoint names it
-    api_key: str = field(repr=False, default="")
-
-    def describe(self) -> str:
-        if self.base_url:
-            u = urlparse(self.base_url)
-            where = f"{u.scheme}://{u.hostname}" + (f":{u.port}" if u.port else "")
-        else:
-            where = "the SDK default"
-        return f"{self.model} via {self.endpoint} ({where})"
+# The VoiceSettings fields that make up the model connection, and the variables they
+# mirror (ghost_core.connection). ghostd refreshes them when the desktop saves.
+LLM_FIELDS = {
+    "llm_provider": "GHOST_LLM_PROVIDER",
+    "llm_endpoint": "GHOST_LLM_ENDPOINT",
+    "llm_model": "GHOST_LLM_MODEL",
+    "llm_protocol": "GHOST_LLM_PROTOCOL",
+    "llm_base_url": "GHOST_LLM_BASE_URL",
+    "llm_password": "GHOST_LLM_PASSWORD",
+    "llm_headers": "GHOST_LLM_HEADERS",
+    "llm_timeout_secs": "GHOST_LLM_TIMEOUT_SECS",
+    "anthropic_base_url": "ANTHROPIC_BASE_URL",
+    "cliproxy_base_url": "CLIPROXY_BASE_URL",
+}
 
 
 class VoiceSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GHOST_", extra="ignore")
 
-    # LLM. GHOST_LLM_ENDPOINT picks the path:
-    #   proxy       any Anthropic-compatible endpoint: ANTHROPIC_BASE_URL with
-    #               ANTHROPIC_AUTH_TOKEN, read from the standard variables so one env file
-    #               serves every tool (the default, as before)
-    #   openrouter  OpenRouter's Anthropic Messages API with OPENROUTER_API_KEY (the key
-    #               Jev can use too); GHOST_LLM_MODEL maps to OpenRouter's id
-    # Keys come from the environment only and are never in a repr or a log line.
-    llm_endpoint: str = "proxy"
-    anthropic_base_url: str | None = Field(default=None, alias="ANTHROPIC_BASE_URL")
-    anthropic_auth_token: str = Field(default="", alias="ANTHROPIC_AUTH_TOKEN", repr=False)
-    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY", repr=False)
-    llm_model: str = "claude-sonnet-5-5"
-    llm_thinking: str = "between_tools"  # Sonnet 5.5's thinking-off setting
+    # The model connection (ADR 0037, ghost_core.connection): a provider, its model, and
+    # the name of the Password that holds its key. Without GHOST_LLM_PROVIDER the older
+    # GHOST_LLM_ENDPOINT still decides (proxy: ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN;
+    # openrouter: OpenRouter with OPENROUTER_API_KEY). Keys are read by name from the
+    # environment when a target is built; no key is a field here, so none is in a repr.
+    llm_provider: str = ""
+    llm_endpoint: str = ""
+    llm_model: str = ""
+    llm_protocol: str = ""
+    llm_base_url: str = ""
+    llm_password: str = ""
+    llm_headers: str = ""
+    llm_timeout_secs: str = ""
+    anthropic_base_url: str = Field(default="", alias="ANTHROPIC_BASE_URL")
+    cliproxy_base_url: str = Field(default="", alias="CLIPROXY_BASE_URL")
+    llm_thinking: str = "between_tools"  # Sonnet 5.5's thinking-off setting (Anthropic only)
     llm_max_tokens: int = LLM_MAX_TOKENS
 
     @field_validator("llm_endpoint")
     @classmethod
     def _known_endpoint(cls, v: str) -> str:
         v = v.strip().lower()
-        if v not in LLM_ENDPOINTS:
+        if v and v not in LLM_ENDPOINTS:
             raise ValueError(f"GHOST_LLM_ENDPOINT must be one of {', '.join(LLM_ENDPOINTS)}")
         return v
 
-    def llm_target(self) -> LLMTarget:
-        if self.llm_endpoint == "openrouter":
-            return LLMTarget(
-                endpoint="openrouter",
-                base_url=OPENROUTER_ANTHROPIC_URL,
-                model=openrouter_model(self.llm_model),
-                api_key=self.openrouter_api_key,
-            )
-        return LLMTarget(
-            endpoint="proxy",
-            base_url=self.anthropic_base_url,
-            model=self.llm_model,
-            api_key=self.anthropic_auth_token,
+    def llm_connection(self) -> ModelConnection:
+        return ModelConnection.from_env(
+            {env: str(getattr(self, f) or "") for f, env in LLM_FIELDS.items()}
         )
 
-    def llm_problems(self) -> list[str]:
+    def llm_target(self, env: Mapping[str, str] | None = None) -> LLMTarget:
+        """Where model calls go now, the key read by name from ``env`` (the process
+        environment by default, where the operator's Passwords are)."""
+        return self.llm_connection().target(os.environ if env is None else env)
+
+    def llm_problems(self, env: Mapping[str, str] | None = None) -> list[str]:
         """What stops the model from being reachable, without naming any value."""
-        if self.llm_endpoint == "openrouter":
-            return (
-                []
-                if self.openrouter_api_key
-                else ["GHOST_LLM_ENDPOINT=openrouter but OPENROUTER_API_KEY is not set"]
-            )
-        problems = []
-        if not self.anthropic_base_url:
-            problems.append("ANTHROPIC_BASE_URL is not set")
-        if not self.anthropic_auth_token:
-            problems.append("ANTHROPIC_AUTH_TOKEN is not set")
-        return problems
+        return self.llm_connection().problems(os.environ if env is None else env)
 
     # STT
     stt_model: str = "nemo-parakeet-tdt-0.6b-v3"

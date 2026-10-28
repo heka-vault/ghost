@@ -35,7 +35,7 @@ export default function PairCode() {
       <KeyboardAvoidingView behavior="height" style={{ flex: 1 }}>
         <TopBar title="Enter the address" />
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space[5], paddingBottom: space[6], gap: space[5] }}>
-          <Text size="lg" color="text2">Both are under Settings, Pair a phone on your workstation. Works on the same Wi-Fi.</Text>
+          <Text size="lg" color="text2">Both are in Ghost on your workstation, under Settings, then Phone, then Pair a phone. Works on the same Wi-Fi. Your desk pairs with one phone, this one.</Text>
           {netError && <Notice tone="danger" title="Couldn’t reach your desk">{netError}</Notice>}
           <Field label="Workstation address">
             <Input value={address} onChangeText={setAddress} placeholder={MOCK_ADDRESS} keyboardType="url" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />

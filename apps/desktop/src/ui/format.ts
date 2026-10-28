@@ -1,5 +1,5 @@
 /** Desktop-only formatting; everything shared with the phone lives in @ghost/ui. */
-export { phaseOf, phaseText, agentName, lineName, relativeTime, formatTime, formatDateTime, errorText, quoted, statusLabel, statusTone } from "@ghost/ui";
+export { phaseOf, phaseText, agentName, lineName, relativeTime, formatTime, formatDateTime, errorText, quoted, statusLabel, statusTone, buildText, versionLine } from "@ghost/ui";
 
 const KEY_NAMES: Record<string, string> = {
   mod: "Ctrl", ctrl: "Ctrl", control: "Ctrl", cmd: "Super", meta: "Super", super: "Super", win: "Super",

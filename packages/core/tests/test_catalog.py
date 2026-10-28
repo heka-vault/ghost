@@ -261,11 +261,11 @@ async def test_the_copy_is_fetched_whole_then_only_what_changed(tmp_path):
     pages = [u for u in urls if "limit=" in u]
     assert "version=latest" in pages[0] and "cursor=c1" in pages[1]
     featured, total = cat.search("")
-    assert [e.title for e in featured] == ["GitHub", "Linear"] and total == 2
+    assert [f.entry.title for f in featured] == ["GitHub", "Linear"] and total == 2
     hits, _ = cat.search("notes")
-    assert [e.name for e in hits] == ["io.github.someone/notes-mcp"]
+    assert [f.entry.name for f in hits] == ["io.github.someone/notes-mcp"]
     # the description counts too; first-party ones first, in their order
-    assert [e.title for e in cat.search("issues")[0]] == ["GitHub", "Linear"]
+    assert [f.entry.title for f in cat.search("issues")[0]] == ["GitHub", "Linear"]
     await cat.refresh()
     assert "updated_since=" in urls[-1]
     again = Catalog(tmp_path / "catalog.json", fetch=registry(PAGES, urls))  # on disk

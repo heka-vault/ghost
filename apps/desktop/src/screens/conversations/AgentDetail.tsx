@@ -5,7 +5,8 @@
  * if it had been said. Pinning a note, compacting, switching, retiring, reset and delete
  * happen at once. Call opens a session with this agent and Hang up ends it; the composer in
  * the dock types to the agent, opening the session when there is none. Open folder reveals
- * the agent's files (ADR 0035).
+ * the agent's files (ADR 0035). Ghost's own page also has its wake phrases, the same setting
+ * as on Settings › Sound (one store, two ways in), saved with the rest of the draft.
  */
 import { type CompactionView, type ConversationDetail, type ConversationView, type TurnView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
@@ -23,7 +24,6 @@ import {
   Input,
   SaveBar,
   LineGlyph,
-  LiveStatus,
   Menu,
   type MenuItem,
   Notice,
@@ -41,7 +41,7 @@ import {
   useLive,
   useToast,
 } from "../../ui";
-import { type Draft, type DraftKey, dirtyKeys, drafts, fromDetail, listWords, rebase, updateBody } from "./draft";
+import { type Draft, type DraftKey, FIELD_WORDS, dirtyKeys, drafts, fromDetail, rebase, updateBody } from "./draft";
 import { useAutoRows } from "./autosize";
 import { aliasExample, MEMORY_EXAMPLE, PERSONA_EXAMPLE } from "./examples";
 import { LineStateText, lineState } from "./lineState";
@@ -57,6 +57,8 @@ import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newAgen
 import { PlayingBars, VoicePicker, voiceTitle } from "./VoicePicker";
 import { type Voice, parseVoice, voiceKind } from "./voices";
 import { revealFolder } from "../watching/model";
+import { joinList, splitList } from "../settings/model";
+import { WAKE_KEY, WakePhrasesField, wakeHelp } from "../settings/WakePhrases";
 
 type TabId = "persona" | "memory" | "transcript" | "history";
 const TABS: TabId[] = ["persona", "memory", "transcript", "history"];
@@ -67,6 +69,13 @@ const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
+
+/** "persona, voice and wake phrases" */
+const sayList = (w: string[]) => (w.length <= 1 ? w.join("") : `${w.slice(0, -1).join(", ")} and ${w[w.length - 1]}`);
+
+/** Ghost's wake phrases as edited here and not saved yet, for the app's life, like the agents' drafts. */
+let keptWake: { base: string; draft: string } | null = null;
+const sameWake = (a: string, b: string) => joinList(splitList(a)) === joinList(splitList(b));
 
 export function AgentDetail({ slug }: { slug: string }) {
   const { client, status, conversationsVersion, turns: sessionTurns, pending } = useGhost();
@@ -98,6 +107,9 @@ export function AgentDetail({ slug }: { slug: string }) {
   const [acting, setActing] = useState<"switch" | "compact" | "retire" | "rehire" | "call" | "hangup" | "send" | null>(null);
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Ghost's wake phrases (GHOST_WAKE_PHRASES), on Ghost's page only.
+  const [wake, setWakeState] = useState<{ base: string; draft: string } | null>(null);
+  const [wakeError, setWakeError] = useState<string | null>(null);
 
   const inSession = !!status?.session_id;
   const liveSlug = inSession ? (status?.conversation ?? "ghost") : null;
@@ -196,6 +208,31 @@ export function AgentDetail({ slug }: { slug: string }) {
   }, [load, conversationsVersion, liveTurns]);
 
   useEffect(() => {
+    if (slug !== "ghost") return;
+    let on = true;
+    client
+      .settings()
+      .then((st) => {
+        if (!on) return;
+        const base = st.values[WAKE_KEY] ?? "";
+        // Unsaved phrases left here earlier come back; saved ones follow the file.
+        const draft = keptWake && !sameWake(keptWake.draft, keptWake.base) ? keptWake.draft : base;
+        setWakeState({ base, draft });
+      })
+      .catch(() => {});
+    return () => {
+      on = false;
+    };
+  }, [client, slug, conversationsVersion]);
+  const setWake = (items: string[]) =>
+    setWakeState((w) => {
+      if (!w) return w;
+      const next = { ...w, draft: joinList(items) };
+      keptWake = sameWake(next.draft, next.base) ? null : next;
+      return next;
+    });
+
+  useEffect(() => {
     client
       .voices()
       .then((v) => setVoices(v.map(parseVoice)))
@@ -215,6 +252,9 @@ export function AgentDetail({ slug }: { slug: string }) {
 
   // ---------------------------------------------------------------- derived
   const dirty = useMemo(() => (draft && base && detail ? dirtyKeys(draft, base, detail.is_ghost) : []), [draft, base, detail]);
+  const wakeDirty = isGhost && !!wake && !sameWake(wake.draft, wake.base);
+  const dirtyCount = dirty.length + (wakeDirty ? 1 : 0);
+  const dirtyWords = sayList([...new Set(dirty.map((k) => FIELD_WORDS[k])), ...(wakeDirty ? ["wake phrases"] : [])]);
   // The voice heard: the agent's own when it has one, else Ghost's (the detail reports the one in force).
   const heardId = draft?.voice || detail?.voice || "af_heart";
   const voice = draft ? (voices.find((v) => v.id === heardId) ?? parseVoice(heardId)) : null;
@@ -226,15 +266,30 @@ export function AgentDetail({ slug }: { slug: string }) {
   const fail = (title: string, e: unknown) => setNotice({ title, text: errorText(e) });
 
   const save = async () => {
-    if (!draft || !dirty.length || saving || !online || readOnly) return;
+    if (!draft || !dirtyCount || saving || !online || readOnly) return;
     setSaving(true);
     setNotice(null);
-    const words = listWords(dirty);
+    const words = sayList([...new Set(dirty.map((k) => FIELD_WORDS[k]))]);
     try {
-      const d = await client.updateConversation(slug, updateBody(draft, dirty));
-      drafts.delete(slug);
-      apply(d, false);
-      toast({ title: "Saved", description: `${name}’s ${words} ${dirty.length === 1 && !["notes", "aliases"].includes(dirty[0]) ? "is" : "are"} updated. Each change is in the audit log.`, tone: "ok" });
+      if (dirty.length) {
+        const d = await client.updateConversation(slug, updateBody(draft, dirty));
+        drafts.delete(slug);
+        apply(d, false);
+      }
+      // The wake phrases are Ghost's settings, not its agent: the same save Sound makes. Live at once.
+      if (wakeDirty && wake) {
+        const r = await client.updateSettings({ values: { [WAKE_KEY]: wake.draft.trim() || null } });
+        const saved = r.settings.values[WAKE_KEY] ?? "";
+        keptWake = null;
+        setWakeState({ base: saved, draft: saved });
+      }
+      toast({
+        title: "Saved",
+        description: dirty.length
+          ? `${name}’s ${words} ${dirty.length === 1 && !["notes", "aliases"].includes(dirty[0]) ? "is" : "are"} updated. Each change is in the audit log.${wakeDirty ? " Live now: wake phrases." : ""}`
+          : "Live now: wake phrases.",
+        tone: "ok",
+      });
     } catch (e) {
       fail("Couldn’t save", e);
       void load();
@@ -248,6 +303,9 @@ export function AgentDetail({ slug }: { slug: string }) {
     drafts.delete(slug);
     draftRef.current = base;
     setDraftState(base);
+    keptWake = null;
+    setWakeState((w) => (w ? { ...w, draft: w.base } : w));
+    setWakeError(null);
   };
 
   // One sample at a time. A voice asked for while another plays waits its turn; only the
@@ -527,7 +585,8 @@ export function AgentDetail({ slug }: { slug: string }) {
   // when the header scrolls away. The description keeps the agent's facts.
   const state = lineState({ live, pending: !!pending, connection, phase, lastActive: detail?.last_active_at ?? null });
   const waiting = state.tone === "waiting";
-  const pageStatus = live ? <LineStateText state={state} connection={connection} phase={phase} /> : <LiveStatus />;
+  // Only this agent's own live state; Ghost's overall state is in the sidebar.
+  const pageStatus = live ? <LineStateText state={state} connection={connection} phase={phase} /> : undefined;
   const description = detail ? (
     <span className="conv-meta">{meta.map((m, i) => (i === 0 ? m[0].toUpperCase() + m.slice(1) : m)).join(" · ")}</span>
   ) : loadError ? undefined : (
@@ -539,7 +598,9 @@ export function AgentDetail({ slug }: { slug: string }) {
   // Reset and delete need the session elsewhere. On the live agent the menu says so and offers
   // the way out (back to Ghost). Every agent keeps them behind the same More menu; Ghost
   // has no Retire or Delete, and while it is live its Reset is disabled with the reason.
-  const mark = (keys: DraftKey[]) => (dirty.some((k) => keys.includes(k)) ? " (unsaved)" : "");
+  // The wake phrases sit with the persona and voice, under How you reach it.
+  const tabDirty = (keys: DraftKey[]) => dirty.some((k) => keys.includes(k)) || (wakeDirty && keys === PERSONA_KEYS);
+  const mark = (keys: DraftKey[]) => (tabDirty(keys) ? " (unsaved)" : "");
   const settingsItems: MenuItem[] = [
     { heading: "Settings" },
     { label: `Voice and persona${mark(PERSONA_KEYS)}`, icon: <SlidersHorizontal />, onSelect: () => setTab("persona") },
@@ -585,14 +646,14 @@ export function AgentDetail({ slug }: { slug: string }) {
     <>
       {/* While a change waits, reviewing it is the one thing to do here; the save bar's Save keeps the primary when there are edits too. */}
       {waiting && (
-        <Button variant={dirty.length ? "secondary" : "primary"} href={hrefFor("/")}>
+        <Button variant={dirtyCount ? "secondary" : "primary"} href={hrefFor("/")}>
           Review the change
         </Button>
       )}
       {/* Nothing live: Call opens a session here. Live here: Hang up. Live elsewhere: transfer it. */}
       {!inSession && !readOnly && (
         <Button
-          variant={waiting || dirty.length ? "secondary" : "primary"}
+          variant={waiting || dirtyCount ? "secondary" : "primary"}
           leadingIcon={<Phone />}
           loading={acting === "call"}
           disabled={!online || !modelsReady || (acting !== null && acting !== "call")}
@@ -628,7 +689,7 @@ export function AgentDetail({ slug }: { slug: string }) {
   );
 
   const unsaved = (keys: DraftKey[]) =>
-    dirty.some((k) => keys.includes(k)) ? (
+    tabDirty(keys) ? (
       <>
         <span className="conv-tab-dot" aria-hidden />
         <span className="sr-only">, unsaved</span>
@@ -655,11 +716,11 @@ export function AgentDetail({ slug }: { slug: string }) {
     </div>
   );
   const dock =
-    dirty.length > 0 ? (
+    dirtyCount > 0 ? (
       <SaveBar
         variant={!online ? "offline" : "dirty"}
-        title={`${dirty.length} unsaved change${dirty.length === 1 ? "" : "s"}`}
-        detail={!online ? "they wait here until Ghost is back" : listWords(dirty)}
+        title={`${dirtyCount} unsaved change${dirtyCount === 1 ? "" : "s"}`}
+        detail={!online ? "they wait here until Ghost is back" : dirtyWords}
         busy={saving}
         onDiscard={discard}
         onSave={() => void save()}
@@ -788,7 +849,7 @@ export function AgentDetail({ slug }: { slug: string }) {
                     </Button>
                   )}
                   <Button variant="secondary" disabled={readOnly} onClick={() => setPicker(true)}>
-                    {draft.voice ? "Change voice" : "Give it a voice"}
+                    {draft.voice || isGhost ? "Change voice" : "Give it a voice"}
                   </Button>
                 </div>
                 <Field layout="inline" label="Speed" help="1.00× is the voice’s natural pace." className="conv-cell">
@@ -798,7 +859,17 @@ export function AgentDetail({ slug }: { slug: string }) {
               {hearBlocked && <p className="t-small t-3">{hearBlocked}</p>}
             </Section>
 
-            <Section id="conv-name" title="How you reach it" description={<>What you say in a session: {quoted(`transfer me to ${(draft.name.trim() || name).toLowerCase()}`)}.</>}>
+            <Section
+              id="conv-name"
+              title="How you reach it"
+              description={
+                isGhost ? (
+                  <>A wake phrase starts a session with Ghost, and {quoted("back to Ghost")} returns here from another agent. Ghost keeps its name.</>
+                ) : (
+                  <>What you say in a session: {quoted(`transfer me to ${(draft.name.trim() || name).toLowerCase()}`)}.</>
+                )
+              }
+            >
               <Card list>
                 {!isGhost && (
                   <Field layout="inline" label="Name" className="conv-cell" error={draft.name.trim() ? undefined : "An agent needs a name."}>
@@ -817,7 +888,22 @@ export function AgentDetail({ slug }: { slug: string }) {
                 )}
                 {isGhost && (
                   <div className="conv-cell">
-                    <p className="t-small t-2">Ghost keeps its name.</p>
+                    {wake ? (
+                      <WakePhrasesField
+                        phrases={splitList(wake.draft)}
+                        onChange={setWake}
+                        onEntryError={setWakeError}
+                        error={wakeError ?? undefined}
+                        disabled={readOnly}
+                        help={
+                          <>
+                            {wakeHelp(splitList(wake.draft).length)} Wake sensitivity, your microphone and the rest are on <Link to="/settings/sound">Sound</Link>.
+                          </>
+                        }
+                      />
+                    ) : (
+                      <Skeleton width="60%" height={14} />
+                    )}
                   </div>
                 )}
               </Card>

@@ -8,6 +8,8 @@ import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn, WaitingIte
 
 import type { ConversationView } from "@ghost/client-ts";
 
+import { MOCK_ADDRESS } from "../phone/pairing";
+import { stateOf } from "../phone/store";
 import type { Desk, DeskState, Link, Route } from "./types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -80,7 +82,7 @@ export class MockDesk implements Desk {
   private muted = false;
 
   constructor() {
-    this.state = { link: "connecting", via: "Wi-Fi", lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, conversations: MOCK_LINES, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
+    this.state = { link: "connecting", via: "Wi-Fi", address: stateOf().pairing?.addresses[0] ?? MOCK_ADDRESS, lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, conversations: MOCK_LINES, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
     const audit = seedAudit();
     setTimeout(() => this.set({ link: "online", status: this.status({ waiting: 2 }), audit, auditTotal: audit.length, waiting: seedWaiting() }), 700);
   }
@@ -112,7 +114,8 @@ export class MockDesk implements Desk {
       ending: false,
       waiting: 0,
       uptime_secs: 0,
-      version: "0.1.0",
+      version: "2026.10.0",
+      build: { kind: "dev", commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", dirty: false },
       wake_mode: "transcript",
       ...this.state?.status,
       ...patch,

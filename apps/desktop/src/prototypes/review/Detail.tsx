@@ -100,7 +100,7 @@ export const Detail = forwardRef<HTMLDivElement, DetailProps>(function Detail(
             <p className="rev-decision__q">{settled.text}</p>
             <p className="t-body t-2">
               {VIA_DONE[settled.via]} {when(settled.at)}, on the {settled.line} line.{" "}
-              It’s in the <Link to="/audit">audit log</Link>. To change it, ask Ghost.
+              It’s in the <Link to="/settings/audit">audit log</Link>. To change it, ask Ghost.
             </p>
             {!offline && talk.can && inSession && (
               <div className="rev-decision__act">{voice(["next"].map((p) => spoken(p, inSession)))}</div>
@@ -246,7 +246,7 @@ export const Detail = forwardRef<HTMLDivElement, DetailProps>(function Detail(
       <section className="rev-detail__block" aria-labelledby={`${headingId}-decisions`}>
         <header className="rev-block__head">
           <h3 id={`${headingId}-decisions`} className="t-subheading">Decisions</h3>
-          <Link className="t-small rev-audit-link" to="/audit">Audit log</Link>
+          <Link className="t-small rev-audit-link" to="/settings/audit">Audit log</Link>
         </header>
         {issue.decisions.length ? (
           <ol className="rev-decisions">

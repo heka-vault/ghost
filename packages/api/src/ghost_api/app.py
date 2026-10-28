@@ -2,13 +2,12 @@
 implements ``Controller``; this module only translates HTTP into calls on it.
 
 What never passes through here: passive audio or passive transcripts (the idle-audio
-rule), secret values (write-only), or a way for the model to reach any of it.
+rule), a password's value (write-only, ADR 0036), or a way for the model to reach it.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 from collections.abc import Sequence
 from datetime import datetime, timedelta
@@ -26,8 +25,8 @@ from ghost_core import (
     WriteGate,
 )
 from ghost_core.outputs import list_outputs
+from ghost_core.passwords import child_env
 from ghost_core.policy import PolicyError, write_routes
-from loguru import logger
 
 from ghost_api.files import read_env, update_env
 from ghost_api.models import (
@@ -74,6 +73,13 @@ from ghost_api.models import (
     WatchInfo,
     WatchingView,
 )
+from ghost_api.passwords import (
+    password_check,
+    referenced,
+    revive_apps_using,
+    save_passwords,
+    secret_states,
+)
 from ghost_api.state import DaemonState, now
 
 
@@ -99,6 +105,8 @@ class Controller(Protocol):
     def phone_pairing(self) -> PhonePairing | None: ...  # None when the listener is off
     def phone_view(self) -> PhoneView: ...
     async def forget_phone(self) -> bool: ...  # True if a phone was paired
+    # the vault opened after it was locked (ADR 0036): Ghost's settings and the apps follow
+    async def passwords_opened(self) -> None: ...
 
 
 class Deps:
@@ -124,6 +132,7 @@ class Deps:
         catalog: Any = None,  # ghost_core.catalog.Catalog
         signins: Any = None,  # ghost_core.signin.SignIns
         skills: Any = None,  # ghost_core.skills.Skills
+        skill_catalog: Any = None,  # ghost_core.skill_catalog.SkillCatalog (#35)
         folder: Any = None,  # ghost_core.folder.GhostFolder (ADR 0035)
         rules: Any = None,  # ghost_core.rules.Rules
         outputs: Any = None,  # ghost_core.outputs.Outputs
@@ -131,7 +140,12 @@ class Deps:
         watches: Any = None,  # ghost_core.watches.WatchRunner
         hooks: Any = None,  # ghost_core.hooks.HookIntake
         hooks_listening: Sequence[str] = (),  # the webhook listener's addresses, when on
+        passwords: Any = None,  # ghost_core.passwords.Passwords (ADR 0036)
+        # Test connection (ADR 0037): async (env, prompt, max_tokens) -> ghost_voice.llm.Probe
+        model_probe: Any = None,
     ) -> None:
+        self.passwords = passwords
+        self.model_probe = model_probe
         self.waiting = waiting
         self.watches = watches
         self.hooks = hooks
@@ -141,6 +155,7 @@ class Deps:
         self.catalog = catalog
         self.signins = signins
         self.skills = skills
+        self.skill_catalog = skill_catalog
         self.folder = folder
         self.rules = rules
         self.outputs = outputs
@@ -158,26 +173,6 @@ class Deps:
         self.input_device = input_device
         self.output_device = output_device
         self.stt_model = stt_model
-
-
-APPS_ENV = "apps.env"  # app secrets, beside env: the vault renderer rewrites env whole
-
-
-def apps_env_path(deps: Deps) -> Path:
-    """Where the apps' secrets are kept (ADR 0034): 0600, never in the vault's rendering."""
-    return deps.env_path.parent / APPS_ENV
-
-
-def app_secret_names(values: dict[str, str], apps: Any = None) -> set[str]:
-    """The secret names the connected apps refer to (``${NAME}`` in apps.json, ADR 0034),
-    and any the operator listed in GHOST_APP_SECRETS (a comma list; GHOST_MCP_SECRETS is
-    its older name): settable from the desktop like the built-in ones, never readable."""
-    raw = (values.get("GHOST_APP_SECRETS") or "") + "," + (values.get("GHOST_MCP_SECRETS") or "")
-    names = {n.strip() for n in raw.split(",") if n.strip() and n.strip().isupper()}
-    if apps is not None:
-        for spec in apps.specs.values():
-            names.update(spec.secrets())
-    return names
 
 
 def permissions_view(p: AutonomyPolicy, path: Path) -> PermissionsView:
@@ -230,6 +225,7 @@ def status_snapshot(deps: Deps) -> Status:
         models_ready=st.models_ready,
         uptime_secs=st.uptime_secs,
         version=st.version,
+        build=st.build,
         wake_mode=st.wake_mode,
         apps=sorted(n for n in deps.apps.apps if deps.apps.is_up(n))
         if deps.apps is not None
@@ -326,6 +322,7 @@ def create_app(deps: Deps) -> FastAPI:
         ),
     )
     st = deps.state
+    _no_input_in_validation_errors(app)
 
     def status() -> Status:
         return status_snapshot(deps)
@@ -336,8 +333,14 @@ def create_app(deps: Deps) -> FastAPI:
 
         add_conversation_routes(app, deps)
     from ghost_api.apps import add_app_routes
+    from ghost_api.model import add_model_routes
+    from ghost_api.passwords import add_password_routes
+    from ghost_api.skill_catalog import add_skill_catalog_routes, skill_view
 
     add_app_routes(app, deps)
+    add_password_routes(app, deps)
+    add_model_routes(app, deps)
+    add_skill_catalog_routes(app, deps)
 
     # --- status + control -------------------------------------------------------
 
@@ -552,26 +555,15 @@ def create_app(deps: Deps) -> FastAPI:
     # --- skills (ADR 0023) ------------------------------------------------------------
 
     def skill_info(skill) -> SkillInfo:
-        servers = (
-            {n for n in deps.apps.apps if deps.apps.is_up(n)} if deps.apps is not None else set()
-        )
-        return SkillInfo(
-            name=skill.name,
-            description=skill.description,
-            source=skill.source,
-            path=str(skill.path),
-            requires=skill.apps(),
-            missing=skill.missing(servers),
-            files=skill.files(),
-            problem=skill.problem,
-        )
+        return skill_view(deps, skill)
 
     @app.get("/skills", response_model=list[SkillInfo], tags=["skills"])
     async def skills() -> list[SkillInfo]:
         if deps.skills is None:
             return []
         deps.skills.refresh()
-        return [skill_info(s) for s in deps.skills.all()]
+        origins = deps.skills.origins()
+        return [skill_view(deps, s, origins) for s in deps.skills.all()]
 
     @app.get("/skills/{name}", response_model=SkillBody, tags=["skills"])
     async def skill_body(name: str) -> SkillBody:
@@ -787,22 +779,16 @@ def create_app(deps: Deps) -> FastAPI:
 
     def settings_view() -> SettingsView:
         # ``values`` is whatever non-secret keys settings.env holds; the desktop app owns
-        # the list it offers.
-        env = read_env(deps.env_path)
-        values = {k: v for k, v in read_env(deps.settings_path).items() if k not in SECRET_KEYS_SET}
-        env = {**read_env(apps_env_path(deps)), **env}
+        # the list it offers. The passwords are the vault's (ADR 0036): set or not, never
+        # a value. A password written into settings.env by hand is never shown; the
+        # waiting list asks for its import.
+        is_password = password_check(deps)
+        values = {k: v for k, v in read_env(deps.settings_path).items() if not is_password(k)}
+        names = [*SECRET_KEYS, *sorted(referenced(deps) - SECRET_KEYS_SET)]
         return SettingsView(
             settings_path=str(deps.settings_path),
-            env_path=str(deps.env_path),
             values=values,
-            secrets=[
-                SecretState(name=k, set=bool(env.get(k)))
-                for k in [
-                    *SECRET_KEYS,
-                    *sorted(app_secret_names(values, deps.apps) - SECRET_KEYS_SET),
-                ]
-            ],
-            vault_managed=deps.vault_env_path.exists(),
+            secrets=[SecretState(name=k, set=on) for k, on in secret_states(deps, names)],
         )
 
     @app.get("/settings", response_model=SettingsView, tags=["settings"])
@@ -814,35 +800,34 @@ def create_app(deps: Deps) -> FastAPI:
         applied: list[str] = []
         try:
             if update.values:
-                bad = [k for k in update.values if k in SECRET_KEYS_SET]
+                # settings.env is plain text: a password never goes there (ADR 0036). One
+                # written there by hand may be taken out (None).
+                is_password = password_check(deps, update.values)
+                bad = sorted(
+                    k for k, v in update.values.items() if v is not None and is_password(k)
+                )
                 if bad:
-                    raise HTTPException(422, f"{bad} are secrets; send them under 'secrets'")
+                    raise HTTPException(
+                        422,
+                        f"{', '.join(bad)} {'are passwords' if len(bad) > 1 else 'is a password'};"
+                        " save it on Settings › Passwords",
+                    )
                 update_env(deps.settings_path, update.values, mode=0o600)
-                # settings.env is folded into env by the renderer; mirror it now so a
-                # restart without the renderer still sees the new values.
-                update_env(deps.env_path, update.values, mode=0o600)
                 applied = deps.control.apply_settings(update.values)
             if update.secrets:
-                allowed = SECRET_KEYS_SET | app_secret_names(
-                    read_env(deps.settings_path), deps.apps
-                )
+                allowed = SECRET_KEYS_SET | referenced(deps)
                 bad = [k for k in update.secrets if k not in allowed]
                 if bad:
                     raise HTTPException(422, f"unknown secrets {bad}")
-                own = {k: v for k, v in update.secrets.items() if k in SECRET_KEYS_SET}
-                apps = {k: v for k, v in update.secrets.items() if k not in SECRET_KEYS_SET}
-                if own:
-                    update_env(deps.env_path, own, mode=0o600)
-                if apps:  # kept out of env, which the vault renderer rewrites
-                    update_env(apps_env_path(deps), apps, mode=0o600)
-                    os.environ.update({k: v for k, v in apps.items() if v})
-                logger.info(f"settings: secrets updated: {sorted(update.secrets)}")
+                save_passwords(deps, dict(update.secrets))  # the vault (ADR 0036)
+                await revive_apps_using(deps, [k for k, v in update.secrets.items() if v])
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
         pending_values = [k for k in (update.values or {}) if k not in applied]
+        pending_secrets = [k for k in (update.secrets or {}) if k not in applied]
         return SettingsResult(
             settings=settings_view(),
-            restart_required=bool(pending_values) or bool(update.secrets),
+            restart_required=bool(pending_values) or bool(pending_secrets),
             applied=applied,
         )
 
@@ -884,7 +869,10 @@ def create_app(deps: Deps) -> FastAPI:
             raise HTTPException(500, f"installer not found at {script}")
         args = [str(script)] + (["--uninstall"] if uninstall else [])
         proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=child_env(),  # never a password (ADR 0036)
         )
         out, _ = await proc.communicate()
         detail = out.decode(errors="replace")[-2000:]
@@ -922,6 +910,20 @@ def create_app(deps: Deps) -> FastAPI:
     return app
 
 
+def _no_input_in_validation_errors(app: FastAPI) -> None:
+    """A 422 from a request body says where and why, never what was sent: FastAPI's own
+    answer carries each error's ``input``, which may be a password (ADR 0036)."""
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+    from starlette.requests import Request
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = [{k: e[k] for k in ("type", "loc", "msg") if k in e} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
+
 SECRET_KEYS_SET = frozenset(
     (
         "ANTHROPIC_AUTH_TOKEN",
@@ -938,7 +940,11 @@ SECRET_KEYS = tuple(sorted(SECRET_KEYS_SET))
 def _unit_active(unit: str) -> bool:
     try:
         r = subprocess.run(
-            ["systemctl", "--user", "is-active", unit], capture_output=True, text=True, timeout=3
+            ["systemctl", "--user", "is-active", unit],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            env=child_env(),
         )
         return r.stdout.strip() == "active"
     except (OSError, subprocess.TimeoutExpired):

@@ -1,5 +1,25 @@
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+
+/**
+ * The commit this window is built from, so the version notice can tell a `make dev` window
+ * from the deployed Ghost of the same version (src/app/version.ts, docs/releasing.md). Read
+ * once, when Vite builds or the dev server starts, the way ghostd.build reads a checkout:
+ * HEAD, and dirty when tracked files have uncommitted changes. Outside git: no commit.
+ */
+function windowBuild(): { commit: string | null; dirty: boolean } {
+  const cwd = fileURLToPath(new URL(".", import.meta.url));
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim();
+  try {
+    return { commit: git("rev-parse", "HEAD") || null, dirty: git("status", "--porcelain", "--untracked-files=no") !== "" };
+  } catch {
+    return { commit: null, dirty: false };
+  }
+}
 
 // In development the page runs in a plain browser and the daemon listens on a Unix socket,
 // which a browser cannot reach. Vite proxies /api to the socket so `httpTransport("/api")`
@@ -10,6 +30,7 @@ const socket =
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  define: { __GHOST_WINDOW_BUILD__: JSON.stringify(windowBuild()) },
   server: {
     port: 1420,
     strictPort: true,

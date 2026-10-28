@@ -6,6 +6,7 @@
  */
 import type { AuditEntry, Turn } from "@ghost/client-ts";
 
+import { DESKTOP_VERSION } from "../../../app/version";
 import { ago, type Scenario } from "../scenarios";
 
 export type MobileScreenId =
@@ -198,6 +199,6 @@ export default function mobile(s: Scenario): MobileFixture {
         t("assistant", "Talk soon.", 0.5),
       ],
     },
-    appVersion: "0.1.0",
+    appVersion: DESKTOP_VERSION, // every copy is the one version (docs/releasing.md)
   };
 }

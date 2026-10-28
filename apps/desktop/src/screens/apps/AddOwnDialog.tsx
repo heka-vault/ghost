@@ -1,7 +1,7 @@
 /**
  * Owner: apps. Add an app that isn't in the catalog (ADR 0034): by its address, with an
  * optional key (without one Ghost signs in through the browser), or by pasting another
- * app's config, whose keys Ghost moves into its private settings. Behind a quiet link, with
+ * app's config, whose passwords Ghost moves into its vault (ADR 0036). Behind a quiet link, with
  * one line of caution: Ghost uses every tool an app offers.
  */
 import { ApiError } from "@ghost/client-ts";
@@ -183,7 +183,7 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
                 }}
               />
             </Field>
-            <Field label="API key" optional help="Leave it empty to sign in through your browser instead. A key is kept in Ghost’s private settings and isn’t shown again.">
+            <Field label="Password" optional help="The password the app gives you. Leave it empty to sign in through your browser instead. A password is kept in Ghost’s vault and isn’t shown again.">
               <Input type="password" autoComplete="off" placeholder="Paste it here" value={key} onChange={(e) => setKey(e.target.value)} />
             </Field>
             <Disclosure summary="Advanced" defaultOpen={!!error?.taken}>
@@ -195,7 +195,7 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
         ) : (
           <Field
             label="Config"
-            help="From Claude, Cursor or another app: the whole file or one entry. Keys in it are moved into Ghost’s private settings."
+            help="From Claude, Cursor or another app: the whole file or one entry. Passwords in it are moved into Ghost’s vault."
             error={blank ? "Paste the config to add." : undefined}
           >
             <Textarea

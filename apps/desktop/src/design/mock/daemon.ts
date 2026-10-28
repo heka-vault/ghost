@@ -4,6 +4,7 @@
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
 import type {
+  Ack,
   AppConnect,
   AppConnectResult,
   AppView,
@@ -14,6 +15,7 @@ import type {
   ConversationView,
   DevicesView,
   GhostEvent,
+  ModelDraft,
   ModelsView,
   OutcomeView,
   OutputInfo,
@@ -27,7 +29,13 @@ import type {
   RulesView,
   SettingsUpdate,
   SettingsView,
+  PasswordImportResult,
+  PasswordResult,
+  PasswordsView,
   SkillInfo,
+  SkillPreview,
+  SkillSearchPage,
+  SkillUpdateView,
   SourceInfo,
   Status,
   Turn,
@@ -35,17 +43,21 @@ import type {
   WaitingItemView,
   WatchingView,
 } from "@ghost/client-ts";
+import { pairLink } from "@ghost/client-ts";
 
+import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
+import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
 import type { Fixtures } from "./fixtures";
 import { renderPolicy } from "./fixtures/policy";
+import { PROVIDER_ONLY } from "./fixtures/settings";
 import type { SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
-import { GHOST_SKILLS_DIR, type SkillFixture, missingOf } from "./fixtures/skills";
+import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
 import { hex, type Scenario, seeded } from "./scenarios";
 
 export { HttpError };
@@ -96,7 +108,32 @@ function doneSummary(summary: string): string {
 
 const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-/** Mock-only knobs from the URL (the phone, ADR 0016; the catalog, ADR 0034): see mock/index.ts. */
+/** Another commit than this window's: what a make deploy or the package was built from. */
+const MOCK_COMMIT = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+/** A dev daemon runs from the same checkout as this window, so at its commit (vite.config.ts). */
+const CHECKOUT_COMMIT = DESKTOP_BUILD.commit ?? MOCK_COMMIT;
+
+/** The status's version and build for ?build= (MockOptions.build). `deploy` and `release` are
+ *  this window's version at another commit, so General's notice says the builds differ. */
+function mockBuild(kind: MockOptions["build"]): Pick<Status, "version" | "build"> {
+  switch (kind) {
+    case "dirty":
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: true, launcher: "make-dev" } };
+    case "start":
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false, launcher: "make-start" } };
+    case "checkout":
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false, launcher: null } };
+    case "deploy":
+      return { version: DESKTOP_VERSION, build: { kind: "deploy", commit: MOCK_COMMIT, dirty: false } };
+    case "release":
+      return { version: DESKTOP_VERSION, build: { kind: "release", commit: MOCK_COMMIT, dirty: false } };
+    case "behind":
+      return { version: "2026.9.4", build: { kind: "deploy", commit: "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432", dirty: false } };
+    default:
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false, launcher: "make-dev" } };
+  }
+}
+
 export interface MockOptions {
   /**
    * The catalog (?catalog=…): `slow`, the first copy takes 4 seconds (as on a first run);
@@ -104,10 +141,26 @@ export interface MockOptions {
    * hasn't arrived yet and doesn't for 8 seconds. First run is `slow` without asking.
    */
   catalog?: "slow" | "problem" | "empty" | null;
+  /** The skills catalog (?skillsearch=down, #35): skills.sh doesn't answer, so a search says so. */
+  skillSearch?: "down" | null;
   /** The phone pairs this many ms after a code is issued (?phone=pairs). 0: it never does. */
   pairsAfterMs?: number;
   /** How long a pairing code lasts, in seconds (?phone=expires makes it short). The real one: 120. */
   codeTtlSecs?: number;
+  /**
+   * What the daemon says it is (?build=…, docs/releasing.md): `dev` (default) a checkout at
+   * this window's version that make dev started, `dirty` the same with uncommitted changes,
+   * `start` one make start started, `checkout` one started some other way (no launcher),
+   * `deploy` a make deploy runtime, `release` the .deb, `behind` a deploy of last month's
+   * version, so the window and Ghost differ.
+   */
+  build?: "dev" | "dirty" | "start" | "checkout" | "deploy" | "release" | "behind" | null;
+  /**
+   * Ghost's vault (?vault=…, ADR 0036): `locked`, the keyring is locked (Unlock opens it after a
+   * moment); `import`, plaintext files wait to be imported in any scenario; `broken`, the key in the
+   * keyring doesn't open the vault.
+   */
+  vault?: "locked" | "import" | "broken" | null;
 }
 
 export class MockDaemon {
@@ -130,12 +183,22 @@ export class MockDaemon {
   private policy: PolicyView;
   private audit: AuditEntry[];
   private settings: SettingsView;
+  /** Ghost's vault (ADR 0036): names and metadata; the mock never keeps a value either. */
+  private passwords: PasswordsView;
+  /** The model connection (ADR 0037), resolved from the settings above. */
+  private model = new MockModel(
+    () => this.settings,
+    // Its password is the vault's, like every other (ADR 0036).
+    (name) => this.passwords.vault.state === "open" && !!this.passwords.passwords.find((x) => x.name === name)?.set,
+    (name) => this.keepPasswords([name], "Jev, and the model when it goes through OpenRouter"),
+    () => this.passwords.vault.state === "open",
+  );
   private devices: DevicesView;
   private models: ModelsView;
   private voices: VoiceInfo[];
   private phone: PhoneView;
   private pairing: PhonePairing | null = null;
-  private phoneOpts: MockOptions;
+  private options: MockOptions;
   /** The SKILL.md folders Ghost reads (ADR 0023): Ghost's own and the operator's. */
   private skills: SkillFixture[];
   private script: SessionFixture;
@@ -143,10 +206,10 @@ export class MockDaemon {
   private waitingItems: WaitingItemView[];
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
-  constructor(scenario: Scenario, f: Fixtures, phoneOpts: MockOptions = {}) {
+  constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
     this.phone = f.settings.phone;
-    this.phoneOpts = phoneOpts;
+    this.options = options;
     this.script = f.session;
     this.turns = f.session.turns;
     this.pending = f.session.pending;
@@ -161,16 +224,33 @@ export class MockDaemon {
     this.policy = f.policy;
     this.audit = f.audit;
     this.settings = f.settings.settings;
+    this.passwords = structuredClone(f.settings.passwords);
+    if (options.vault === "locked") this.passwords.vault = { ...this.passwords.vault, state: "locked", problem: "Your keyring is locked" };
+    if (options.vault === "broken")
+      this.passwords.vault = { ...this.passwords.vault, state: "broken", problem: "the key in your keyring doesn’t open this vault" };
+    if (options.vault === "import" && !this.passwords.importable?.length)
+      this.passwords.importable = [
+        { kind: "file", path: "~/.config/ghost/env" },
+        { kind: "file", path: "~/.config/ghost/apps.env" },
+      ];
     this.devices = f.settings.devices;
     this.models = f.settings.models;
     this.skills = f.skills;
     this.waitingItems = f.waiting;
+    // The daemon's own item while the keyring is locked (ghostd.passwords.problems).
+    if (options.vault === "locked") {
+      const at = new Date().toISOString();
+      this.waitingItems = [
+        { key: "passwords:locked", source: "ghost", title: "Unlock your keyring so Ghost can read its passwords", state: "new", first_seen: at, changed_at: at, age_secs: 0 },
+        ...this.waitingItems,
+      ];
+    }
     this.status = {
       phase: scenario.phase,
       session_id: f.session.sessionId,
       models_ready: scenario.modelsReady,
       uptime_secs: 0,
-      version: "0.1.0",
+      ...mockBuild(options.build ?? null),
       api_version: "1",
       wake_mode: "transcript",
       apps: f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name),
@@ -178,7 +258,7 @@ export class MockDaemon {
       conversation: scenario.session,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
-      waiting: f.waiting.filter((i) => i.state === "new" || i.state === "delivered").length,
+      waiting: this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length,
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;
@@ -461,6 +541,144 @@ export class MockDaemon {
     this.audited("skills", "add", `skill:${name}`, existing ? `Replaced the ${name} skill from ${folder}.` : `Added the ${name} skill from ${folder}.`, "quiet");
     return this.skillList().find((i) => i.name === name)!;
   }
+  // ------------------------------------------------------------------ the skills catalog (#35)
+  /** Skills staged from "GitHub", waiting for the operator: by token. */
+  private skillPreviews = new Map<string, { preview: SkillPreview; body: string }>();
+
+  /** The installed skill a listing came from, as the daemon matches it: same repository, and its folder or name is the id. */
+  private installedFrom(source: string, skill: string): string | null {
+    const f = this.skills.find((s) => s.info.origin?.source === source && (s.info.origin.skill_path.split("/").slice(-2, -1)[0] === skill || s.info.name === skill));
+    return f?.info.name ?? null;
+  }
+  private async searchSkills(search: string): Promise<SkillSearchPage> {
+    const q = search.trim().replace(/\s+/g, " ").slice(0, 100);
+    if (q.length < 2) return { query: q, skills: [], problem: null, fetched_at: null };
+    await sleep(250); // skills.sh takes a moment
+    if (this.options.skillSearch === "down") return { query: q, skills: [], problem: "couldn't reach skills.sh (ConnectTimeout)", fetched_at: null };
+    const words = q.toLowerCase().split(" ");
+    const hits = SKILL_CATALOG.filter((c) => words.every((w) => c.listing.id.toLowerCase().includes(w)));
+    return { query: q, skills: hits.map((c) => ({ ...c.listing, installed: this.installedFrom(c.listing.source, c.listing.skill) })), problem: null, fetched_at: now() };
+  }
+  /** What the operator named, resolved as ghost_core.skill_catalog does, with its sentences. */
+  private catalogSkill(raw: string, skill: string | null): CatalogSkill {
+    const text = raw.trim();
+    if (!text) throw new HttpError(409, "name a repository, like anthropics/skills");
+    let source: string;
+    let id = skill;
+    let folder: string | null = null;
+    if (text.includes("://") || text.startsWith("github.com/")) {
+      const url = new URL(text.includes("://") ? text : `https://${text}`);
+      if (url.protocol !== "https:" || !/^(www\.)?github\.com$/.test(url.hostname)) throw new HttpError(409, "Ghost installs skills from GitHub only: a github.com address");
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (parts.length < 2) throw new HttpError(409, `${text} doesn't name a repository`);
+      source = `${parts[0]}/${parts[1].replace(/\.git$/, "")}`;
+      if (parts.length >= 4 && (parts[2] === "tree" || parts[2] === "blob")) folder = parts.slice(4).filter((x) => x !== "SKILL.md").join("/");
+    } else {
+      const parts = text.replace(/^\/|\/$/g, "").split("/");
+      if (parts.length === 3 && !id) [source, id] = [`${parts[0]}/${parts[1]}`, parts[2]];
+      else if (parts.length === 2) source = text;
+      else throw new HttpError(409, `${JSON.stringify(text)} isn't owner/repo, owner/repo/skill or a github.com address`);
+    }
+    const inRepo = SKILL_CATALOG.filter((c) => c.listing.source.toLowerCase() === source.toLowerCase());
+    if (inRepo.length === 0) throw new HttpError(409, `GitHub has no repository ${source} (or it is private)`);
+    if (folder !== null) {
+      const hit = inRepo.find((c) => c.skillPath === `${folder}/SKILL.md`);
+      if (!hit) throw new HttpError(409, `${source} has no SKILL.md at ${folder || "the top"}`);
+      return hit;
+    }
+    if (id) {
+      const hit = inRepo.find((c) => c.listing.skill === id.toLowerCase());
+      if (!hit) throw new HttpError(409, `${source} has no skill called ${id}`);
+      return hit;
+    }
+    if (inRepo.length === 1) return inRepo[0];
+    // As the daemon says it: each skill by its folder's path, never by a name two can share.
+    const folders = inRepo.map((c) => c.skillPath.replace(/\/?SKILL\.md$/, "") || "the top folder");
+    throw new HttpError(409, `${source} has ${folders.length} skills; name one, like ${source}/${inRepo[0].listing.skill}. Its skills' folders: ${folders.join(", ")}`);
+  }
+  /** Stage a skill: what the daemon hands back after fetching it, pinned to a commit. */
+  private stageSkill(c: CatalogSkill, commit: string, updateOf: string | null): SkillPreview {
+    const front = /^---\n([\s\S]*?)\n---\n?/.exec(c.skillMd);
+    const description = /^description:\s*(.*)$/m.exec(front?.[1] ?? "")?.[1]?.trim() ?? "";
+    const name = c.listing.skill;
+    const existing = this.skillNamed(updateOf ?? name);
+    const token = hex(16, rand);
+    const preview: SkillPreview = {
+      token,
+      name,
+      description,
+      source: c.listing.source,
+      source_url: `https://github.com/${c.listing.source}`,
+      skill_path: c.skillPath,
+      commit,
+      folder_hash: hex(40, rand),
+      ref: null,
+      skill_md: c.skillMd,
+      files: c.files.map((f) => ({ ...f })),
+      scripts: c.files.filter((f) => f.script).map((f) => f.path),
+      installed: existing ? (existing.info.source === "ghost" ? "ghost" : "home") : null,
+      update_of: updateOf,
+    };
+    this.skillPreviews.set(token, { preview, body: c.skillMd.replace(/^---\n[\s\S]*?\n---\n?/, "").trim() + "\n" });
+    return preview;
+  }
+  private async previewSkill(raw: string, skill: string | null): Promise<SkillPreview> {
+    await sleep(700); // a commit, a tree and the files from GitHub
+    return this.stageSkill(this.catalogSkill(raw, skill), hex(40, rand), null);
+  }
+  private async skillUpdates(): Promise<SkillUpdateView[]> {
+    await sleep(400);
+    return this.skills
+      .filter((f) => f.info.origin)
+      .map((f) => {
+        const o = f.info.origin!;
+        return { name: f.info.name, source: o.source, commit: o.commit, latest_commit: f.latest ?? o.commit, update: !!f.latest && f.latest !== o.commit, problem: null };
+      });
+  }
+  private async previewSkillUpdate(name: string): Promise<SkillPreview> {
+    const f = this.skillNamed(name);
+    if (!f?.info.origin) throw new HttpError(404, `${name} wasn't installed from GitHub`);
+    await sleep(700);
+    const o = f.info.origin;
+    const listed = SKILL_CATALOG.find((c) => c.listing.source === o.source && c.skillPath === o.skill_path);
+    const c: CatalogSkill = listed ?? {
+      listing: { id: `${o.source}/${name}`, source: o.source, skill: name, name, installs: 0 },
+      skillPath: o.skill_path,
+      skillMd: `---\nname: ${name}\ndescription: ${f.info.description}\n---\n\n${f.body}`,
+      files: f.info.files.map((p) => ({ path: p, bytes: 1200, script: /\.(py|sh|js|ts)$/.test(p) })),
+    };
+    return this.stageSkill(c, f.latest ?? o.commit, name);
+  }
+  private installSkill(token: string, wanted: string | null, replace: boolean): SkillInfo {
+    const staged = this.skillPreviews.get(token);
+    if (!staged) throw new HttpError(404, "that preview is gone; look at the skill again");
+    const p = staged.preview;
+    const name = (wanted ?? p.name).trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) throw new HttpError(409, `${JSON.stringify(name)} is not a skill name (letters, digits, dots, dashes)`);
+    const existing = this.skillNamed(name);
+    if (existing && existing.info.source !== "ghost") throw new HttpError(409, `${name} is already one of yours, in ~/.agents/skills; install this one under another name`);
+    if (existing && !replace) throw new HttpError(409, `the ${name} skill is already installed`);
+    const installed: SkillFixture = {
+      info: {
+        name,
+        description: p.description,
+        source: "ghost",
+        path: `${GHOST_SKILLS_DIR}/${name}`,
+        requires: [],
+        missing: [],
+        files: p.files.map((f) => f.path),
+        problem: null,
+        origin: { source: p.source, source_url: p.source_url, skill_path: p.skill_path, commit: p.commit, folder_hash: p.folder_hash, ref: p.ref, installed_at: now() },
+      },
+      body: staged.body,
+    };
+    if (existing) this.skills[this.skills.indexOf(existing)] = installed;
+    else this.skills.push(installed);
+    this.skillPreviews.delete(token);
+    this.audited("skills", "install", `skill:${name}`, `${existing ? "Updated" : "Installed"} the ${name} skill from ${p.source} at ${p.commit.slice(0, 7)}.`, "quiet");
+    return this.skillList().find((i) => i.name === name)!;
+  }
+
   private removeSkill(name: string) {
     const f = this.skillNamed(name);
     if (!f) throw new HttpError(409, `no skill named ${JSON.stringify(name)}`);
@@ -531,19 +749,29 @@ export class MockDaemon {
       repository: e.repository ?? null,
       suggested_name: this.freeName(app),
       connected: this.apps.filter((a) => a.view.catalog === e.name).map((a) => a.view.name),
+      others: [],
     };
   }
   private async catalogPage(search: string, offset: number, limit: number): Promise<CatalogPage> {
-    const opt = this.phoneOpts.catalog ?? (this.scenario.configured ? null : "slow");
+    const opt = this.options.catalog ?? (this.scenario.configured ? null : "slow");
     // The first copy arrives 4 seconds after Ghost starts; every request before then waits for it.
     if (opt === "slow") await sleep(Math.max(0, this.bootedAt + 4000 - Date.now()));
     if (opt === "empty" && Date.now() - this.bootedAt < 8000) return { entries: [], total: 0, fetched_at: null, refreshing: true, problem: null };
     const q = search.trim().toLowerCase();
-    const all = q
-      ? this.catalog.filter((c) => [c.title, c.description, c.name].some((x) => x.toLowerCase().includes(q)))
+    // As the daemon ranks (#37): the maker's own app whose title matches first, then first-party
+    // ones; "io.github." in a name doesn't count. Another publisher's app for a product whose
+    // maker's own is among the results folds under it.
+    const first = (c: CatalogSeed) => (c.maker && c.title.toLowerCase().includes(q) ? 0 : 1);
+    const ranked = q
+      ? this.catalog
+          .filter((c) => [c.title, c.description, c.name.replace(/^io\.github\./i, "")].some((x) => x.toLowerCase().includes(q)))
+          .sort((a, b) => first(a) - first(b) || Number(b.featured) - Number(a.featured))
       : [...this.catalog].sort((a, b) => Number(b.featured) - Number(a.featured));
+    const leads = new Set(ranked.filter((c) => c.maker).map((c) => c.name));
+    const folded = ranked.filter((c) => !c.maker && c.product_maker && leads.has(c.product_maker));
+    const all = ranked.filter((c) => !folded.includes(c));
     return {
-      entries: all.slice(offset, offset + limit).map((e) => this.entryView(e)),
+      entries: all.slice(offset, offset + limit).map((e) => ({ ...this.entryView(e), others: folded.filter((f) => f.product_maker === e.name).map((f) => this.entryView(f)) })),
       total: all.length,
       fetched_at: new Date(Date.now() - (opt === "problem" ? 3 * 86400000 : 20 * 60000)).toISOString(),
       refreshing: false,
@@ -621,6 +849,14 @@ export class MockDaemon {
       if (!/^[a-z][a-z-]*$/.test(f.view.name)) throw new HttpError(422, `'${f.view.name}': a name is lower-case letters and -`);
       if (this.apps.some((a) => a.view.name === f.view.name) && !b.replace) throw new HttpError(409, `an app is already connected as ${f.view.name}`);
     }
+    // A key goes into the vault before apps.json changes, and a locked vault refuses it (423); so
+    // does one the vault won't take (422), checked first so a refusal changes nothing.
+    if (made.some((f) => f.view.kind !== "sign_in" && f.view.settings?.length)) this.requireVault();
+    for (const v of Object.values(values)) {
+      if (v != null && v.length > 16_000) throw new HttpError(422, "a password is at most 16000 characters");
+      if (v != null && /[\n\0]/.test(v)) throw new HttpError(422, "a password is one line");
+    }
+    for (const f of made) if (f.view.kind !== "sign_in") this.keepPasswords(f.view.settings ?? [], f.view.title);
     let url: string | null = null;
     for (const f of made) {
       this.apps = [...this.apps.filter((a) => a.view.name !== f.view.name), f];
@@ -631,6 +867,110 @@ export class MockDaemon {
     }
     this.appsChanged(made[0]?.view.name ?? null, url);
     return { apps: made.map((f) => this.appView(f)), sign_in_url: url, problems: [] };
+  }
+  /** DELETE /apps/{name}, as the daemon does it: the passwords Ghost kept for the app (its own
+   *  GHOST_APP_ names no other app refers to) are forgotten with it, so while the keyring is
+   *  locked nothing changes (423). */
+  private disconnect(f: AppFixture): Ack {
+    const others = new Set(this.apps.filter((a) => a !== f).flatMap((a) => a.view.settings ?? []));
+    const own = (f.view.settings ?? []).filter((n) => n.startsWith("GHOST_APP_") && !others.has(n));
+    if (own.length && this.passwords.vault.state !== "open")
+      throw new HttpError(423, "Your keyring is locked, so Ghost can’t forget this app’s passwords. Unlock it on Settings › Passwords, then disconnect again.");
+    this.apps = this.apps.filter((a) => a !== f);
+    if (own.length) {
+      this.passwords.passwords = this.passwords.passwords.filter((x) => !own.includes(x.name));
+      this.settings = { ...this.settings, secrets: this.settings.secrets.filter((x) => !own.includes(x.name)) };
+      this.syncSecrets();
+    }
+    this.appsChanged(f.view.name);
+    return { ok: true, detail: null };
+  }
+  /* ------------------------------------------------------------- passwords (ADR 0036) */
+  /** While the keyring is locked nothing is readable, not even which are set (`set: null`). */
+  private passwordsView(): PasswordsView {
+    const p = this.passwords;
+    const closed = p.vault.state !== "open";
+    // A provider's own key is listed once it is set, or while its provider is in use (ADR 0037).
+    const inUse = this.model.view().password;
+    const listed = p.passwords.filter((x) => !PROVIDER_ONLY.includes(x.name) || (x.set && !closed) || x.name === inUse);
+    return {
+      ...p,
+      passwords: listed.map((x) => (closed ? { ...x, set: null, added: null, updated: null, last_used: null } : { ...x })),
+      importable: [...(p.importable ?? [])],
+    };
+  }
+  private requireVault() {
+    const v = this.passwords.vault;
+    if (v.state !== "open") throw new HttpError(423, `${v.problem ?? "The vault isn’t open"}. Unlock it, then try again.`);
+  }
+  /** Ghost's own: Set or not on the Settings view too, which the setup checks read. */
+  private syncSecrets() {
+    const set = new Set(this.passwords.passwords.filter((x) => x.set).map((x) => x.name));
+    this.settings = { ...this.settings, secrets: this.settings.secrets.map((x) => ({ ...x, set: set.has(x.name) })) };
+  }
+  /** Keys a connection saves (POST /apps), into the vault like the daemon's. */
+  private keepPasswords(names: string[], usedBy: string) {
+    if (!names.length) return;
+    this.requireVault();
+    for (const name of names) {
+      const at = new Date().toISOString();
+      const row = this.passwords.passwords.find((x) => x.name === name);
+      if (row) Object.assign(row, { set: true, updated: at, used_by: row.used_by.length ? row.used_by : [usedBy] });
+      else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [usedBy], added: at, updated: at, last_used: null });
+      if (!this.settings.secrets.some((x) => x.name === name)) this.settings.secrets.push({ name, set: true });
+    }
+    this.syncSecrets();
+  }
+  private setPassword(name: string, value: string): PasswordResult {
+    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) throw new HttpError(422, "a password’s name is capital letters, digits and _, starting with a letter");
+    if (!value.trim()) throw new HttpError(422, "a password can’t be empty");
+    if (/\n/.test(value)) throw new HttpError(422, "a password is one line");
+    this.requireVault();
+    const at = new Date().toISOString();
+    const row = this.passwords.passwords.find((x) => x.name === name);
+    if (row) Object.assign(row, { set: true, updated: at, added: row.added ?? at });
+    else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [], added: at, updated: at, last_used: null });
+    this.syncSecrets();
+    // The model connection reads its own by name at each session (ADR 0037): no restart.
+    return { passwords: this.passwordsView(), restart_required: !!row?.ghost && !isModelOnly(name) };
+  }
+  private deletePassword(name: string): PasswordResult {
+    this.requireVault();
+    const row = this.passwords.passwords.find((x) => x.name === name);
+    if (!row?.set) throw new HttpError(404, `no password called ${name}`);
+    // A name nothing refers to leaves the list; one Ghost or an app names stays, not set.
+    if (row.ghost || row.used_by.length) Object.assign(row, { set: false, added: null, updated: null, last_used: null });
+    else this.passwords.passwords = this.passwords.passwords.filter((x) => x !== row);
+    this.syncSecrets();
+    return { passwords: this.passwordsView(), restart_required: row.ghost };
+  }
+  private async importPasswords(): Promise<PasswordImportResult> {
+    this.requireVault();
+    await sleep(800);
+    const files = this.passwords.importable ?? [];
+    const heka = files.some((f) => f.kind === "heka_vault");
+    const kept = this.passwords.passwords.filter((x) => x.set).map((x) => x.name);
+    const imported = files.length ? ["GITHUB_TOKEN", "HF_TOKEN"].filter((n) => !kept.includes(n)) : [];
+    for (const n of imported) {
+      const row = this.passwords.passwords.find((x) => x.name === n);
+      const at = new Date().toISOString();
+      if (row) Object.assign(row, { set: true, added: at, updated: at });
+    }
+    this.passwords.importable = [];
+    this.syncSecrets();
+    return {
+      imported,
+      kept: files.length ? kept : [],
+      settings: files.length ? ["ANTHROPIC_BASE_URL"] : [],
+      removed: files.filter((f) => f.kind === "file").map((f) => f.path),
+      notes: heka
+        ? ["~/.config/heka-vault/ghost.env still holds the password Ghost read heka-vault with. Ghost doesn’t read it any more; delete it when nothing else needs it."]
+        : files.length
+          ? []
+          : ["There was nothing to import."],
+      passwords: this.passwordsView(),
+      restart_required: imported.length > 0,
+    };
   }
   /** POST /apps/{name}/sign-in: sign in again, or reconnect an app that isn't connected. */
   private signIn(f: AppFixture): AppConnectResult {
@@ -728,11 +1068,7 @@ export class MockDaemon {
       if (!f) throw new HttpError(404, `no app called '${name}'`);
       if (method === "GET" && !r[2]) return this.appView(f);
       if (method === "POST" && r[2]) return this.signIn(f);
-      if (method === "DELETE" && !r[2]) {
-        this.apps = this.apps.filter((a) => a !== f);
-        this.appsChanged(name);
-        return { ok: true, detail: null };
-      }
+      if (method === "DELETE" && !r[2]) return this.disconnect(f);
     }
     if (method === "GET" && path === "/catalog") return this.catalogPage(query.get("search") ?? "", Number(query.get("offset") ?? 0), Number(query.get("limit") ?? 40));
     if (method === "GET" && (r = m(/^\/catalog\/(.+)$/))) {
@@ -766,7 +1102,7 @@ export class MockDaemon {
       for (const [k, v] of Object.entries(u.values ?? {})) {
         if (v == null) delete this.settings.values[k];
         else this.settings.values[k] = v;
-        if (k.startsWith("GHOST_WAKE")) applied.push(k);
+        if (k.startsWith("GHOST_WAKE") || isConnectionKey(k)) applied.push(k);
         else restart = true;
       }
       for (const [k, v] of Object.entries(u.secrets ?? {})) {
@@ -777,6 +1113,22 @@ export class MockDaemon {
       this.settings = { ...this.settings, values: { ...this.settings.values }, secrets: [...this.settings.secrets] };
       return { applied, restart_required: restart, settings: this.settings };
     }
+    if (method === "GET" && path === "/passwords") return this.passwordsView();
+    if (method === "PUT" && (r = m(/^\/passwords\/([^/]+)$/))) return this.setPassword(decodeURIComponent(r[1]), (b as { value?: string })?.value ?? "");
+    if (method === "DELETE" && (r = m(/^\/passwords\/([^/]+)$/))) return this.deletePassword(decodeURIComponent(r[1]));
+    if (method === "POST" && path === "/passwords/unlock") {
+      await sleep(900); // the keyring's own prompt, answered
+      if (this.passwords.vault.state === "locked") {
+        this.passwords.vault = { ...this.passwords.vault, state: "open", problem: null };
+        this.dropWaiting("passwords:locked");
+      }
+      return this.passwordsView();
+    }
+    if (method === "POST" && path === "/passwords/import") return this.importPasswords();
+    if (method === "GET" && path === "/model") return this.model.view();
+    if (method === "POST" && path === "/model/models") return await sleep(300), this.model.list(b as ModelDraft);
+    if (method === "POST" && path === "/model/test") return await sleep(900), this.model.test(b as ModelDraft);
+    if (method === "POST" && path === "/model/sign-in") return this.model.startSignIn();
     if (method === "GET" && path === "/devices") return this.devices;
     if (method === "POST" && path === "/setup/echo-cancel") {
       await sleep(700);
@@ -792,6 +1144,11 @@ export class MockDaemon {
       return { ok: true, detail: `Spoke a sample in ${decodeURIComponent(r[1])}.` };
     }
 
+    if (method === "GET" && path === "/skill-catalog") return this.searchSkills(query.get("search") ?? "");
+    if (method === "POST" && path === "/skill-catalog/preview") return this.previewSkill(String(b.source ?? ""), typeof b.skill === "string" ? b.skill : null);
+    if (method === "POST" && path === "/skill-catalog/install") return this.installSkill(String(b.token ?? ""), typeof b.name === "string" ? b.name : null, b.replace === true);
+    if (method === "GET" && path === "/skill-catalog/updates") return this.skillUpdates();
+    if (method === "POST" && (r = m(/^\/skill-catalog\/updates\/([^/]+)$/))) return this.previewSkillUpdate(decodeURIComponent(r[1]));
     if (method === "GET" && path === "/skills") return this.skillList();
     if (method === "POST" && path === "/skills") return this.addSkill(String(b.path ?? ""), typeof b.name === "string" ? b.name : null, b.replace === true);
     if ((r = m(/^\/skills\/([^/]+)$/))) {
@@ -938,15 +1295,18 @@ export class MockDaemon {
   private newPairing(): PhonePairing {
     if (!this.phone.address) throw new HttpError(409, "the phone listener is off (set GHOST_PHONE_LISTEN)");
     const code = String(Math.floor(rand() * 1_000_000)).padStart(6, "0");
-    const ttl = this.phoneOpts.codeTtlSecs ?? 120;
-    const p: PhonePairing = { code, address: this.phone.address, expires_at: new Date(Date.now() + ttl * 1000).toISOString() };
+    const ttl = this.options.codeTtlSecs ?? 120;
+    const addresses = this.phone.addresses?.length ? this.phone.addresses : [this.phone.address];
+    const p: PhonePairing = { code, address: this.phone.address, addresses, expires_at: new Date(Date.now() + ttl * 1000).toISOString(), link: pairLink(code, addresses) };
     this.pairing = p;
-    const after = this.phoneOpts.pairsAfterMs ?? 0;
+    const after = this.options.pairsAfterMs ?? 0;
     if (after > 0) {
       this.later(after, () => {
         if (this.pairing?.code !== code || Date.now() > new Date(p.expires_at).getTime()) return;
         this.pairing = null;
-        this.phone = { ...this.phone, device: { id: hex(12, rand), name: "Pixel 9", paired_at: now(), last_seen: now() } };
+        // The phone's first /hello comes in on the home address, right after it pairs.
+        const device = { id: hex(12, rand), name: "Pixel 9", paired_at: now(), last_seen: now(), last_address: addresses[0], last_network: "home" as const };
+        this.phone = { ...this.phone, device };
       });
     }
     return p;

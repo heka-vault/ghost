@@ -13,6 +13,7 @@ from pydantic import TypeAdapter
 
 from ghost_api.models import (
     AppsEvent,
+    Build,
     ConversationEvent,
     Event,
     LogEvent,
@@ -66,8 +67,9 @@ class EventBus:
 
 
 class DaemonState:
-    def __init__(self, *, version: str, wake_mode: str) -> None:
+    def __init__(self, *, version: str, wake_mode: str, build: Build | None = None) -> None:
         self.version = version
+        self.build = build or Build()
         self.wake_mode = wake_mode
         self.phase = Phase.STARTING
         self.session_id: str | None = None

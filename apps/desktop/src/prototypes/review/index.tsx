@@ -30,7 +30,6 @@ import {
   EmptyState,
   IconButton,
   LineGlyph,
-  LiveStatus,
   Notice,
   Page,
   PendingChange,
@@ -394,7 +393,7 @@ export default function ReviewPrototype(_: RouteProps) {
         size="page"
         icon={<Inbox />}
         title="Ghost builds this queue once it’s set up"
-        description="Ghost needs a model key before it can read your repositories and rank what’s waiting on you."
+        description="Ghost needs a model password before it can read your repositories and rank what’s waiting on you."
         actions={<Button variant="primary" href={live.setupHref}>Finish setup</Button>}
       />
     );
@@ -508,7 +507,6 @@ export default function ReviewPrototype(_: RouteProps) {
       width="wide"
       title="Review queue"
       description={q.view === "week" ? "What you decided this week and what it freed up." : "Issues waiting on your yes or no, ranked by what a decision unblocks."}
-      status={<LiveStatus />}
       actions={viewSwitch}
       dock={dock}
     >

@@ -9,11 +9,18 @@
  *   ...&connect=600  the event stream's first open takes 600ms: the Connecting state. Past
  *                    the shell's 900ms grace it turns to Offline, then connects.
  *   ...&phone=off|unpaired|paired   the phone listener off, on with no phone, or a phone paired
+ *   ...&phone=tunnel   paired, with a tunnel address too; the phone last came in through it
+ *   ...&phone=tunnel-down   paired, with a tunnel address whose interface isn't up yet
  *   ...&phone=pairs    on with no phone; the phone pairs 5s after you ask for a code
  *   ...&phone=expires  on with no phone; codes last 8s, so the expired code can be seen
+ *   ...&vault=locked|import|broken   Ghost's vault: the keyring locked, plaintext files to import, or a key that doesn't open it
  *   ...&catalog=slow     the catalog's first copy takes 4s (first run does this by itself)
  *   ...&catalog=problem  the copy is three days old and the refresh failed
  *   ...&catalog=empty    the first copy hasn't arrived, and doesn't for 8s
+ *   ...&build=dev|dirty|start|checkout|deploy|release|behind   what the daemon says it is
+ *                    (docs/releasing.md); start is make start's, checkout one started some
+ *                    other way; behind is last month's deploy, so this window and Ghost differ
+ *   ...&skillsearch=down skills.sh doesn't answer: a skills search says so (#35)
  */
 import type { Transport } from "@ghost/client-ts";
 
@@ -30,7 +37,7 @@ export function createMock(name: string): { transport: Transport; design: Design
   const phone = params.get("phone");
   const base = scenarioByName(name);
   const listener: Scenario["phone"] =
-    phone === "off" || phone === "unpaired" || phone === "paired" ? phone
+    phone === "off" || phone === "unpaired" || phone === "paired" || phone === "tunnel" || phone === "tunnel-down" ? phone
     : phone === "pairs" || phone === "expires" ? "unpaired"
     : base.phone;
   const scenario: Scenario = { ...base, phone: listener };
@@ -39,6 +46,9 @@ export function createMock(name: string): { transport: Transport; design: Design
     pairsAfterMs: phone === "pairs" ? 5000 : 0,
     codeTtlSecs: phone === "expires" ? 8 : 120,
     catalog: (["slow", "problem", "empty"] as const).find((c) => c === params.get("catalog")) ?? null,
+    build: (["dev", "dirty", "start", "checkout", "deploy", "release", "behind"] as const).find((b) => b === params.get("build")) ?? null,
+    skillSearch: params.get("skillsearch") === "down" ? "down" : null,
+    vault: (["locked", "import", "broken"] as const).find((v) => v === params.get("vault")) ?? null,
   });
   const latency = Number(params.get("latency") ?? 140);
 

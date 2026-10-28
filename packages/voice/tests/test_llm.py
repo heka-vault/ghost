@@ -9,7 +9,12 @@ from types import SimpleNamespace
 
 import pytest
 from ghost_voice import llm as llm_module
-from ghost_voice.config import OPENROUTER_ANTHROPIC_URL, VoiceSettings, openrouter_model
+from ghost_voice.config import (
+    LLM_FIELDS,
+    OPENROUTER_ANTHROPIC_URL,
+    VoiceSettings,
+    openrouter_model,
+)
 from ghost_voice.llm import (
     GhostAnthropicLLMService,
     LLMReplyCutFrame,
@@ -35,7 +40,7 @@ OR_KEY = "sk-or-v1-fedcba9876543210"
 
 @pytest.fixture
 def env(monkeypatch):
-    for k in ("GHOST_LLM_ENDPOINT", "GHOST_LLM_MODEL"):
+    for k in (*LLM_FIELDS.values(), "CLIPROXY_BASE_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://192.168.1.5:8317")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", PROXY_TOKEN)
@@ -45,8 +50,8 @@ def env(monkeypatch):
 
 def test_default_is_the_proxy_as_before(env):
     t = VoiceSettings().llm_target()
-    assert (t.endpoint, t.base_url, t.model) == (
-        "proxy",
+    assert (t.protocol, t.base_url, t.model) == (
+        "anthropic",
         "http://192.168.1.5:8317",
         "claude-sonnet-5-5",
     )
@@ -58,6 +63,23 @@ def test_openrouter_uses_its_url_key_and_model_id(env):
     t = VoiceSettings().llm_target()
     assert t.endpoint == "openrouter" and t.base_url == OPENROUTER_ANTHROPIC_URL
     assert t.model == "anthropic/claude-sonnet-5.5" and t.api_key == OR_KEY
+
+
+def test_a_provider_and_password_by_name(env):
+    env.setenv("GHOST_LLM_PROVIDER", "openai")
+    env.setenv("GHOST_LLM_MODEL", "gpt-5-mini")
+    env.setenv("OPENAI_API_KEY", "sk-openai-1")
+    t = VoiceSettings().llm_target()
+    assert (t.provider, t.protocol, t.model, t.api_key) == (
+        "openai",
+        "openai",
+        "gpt-5-mini",
+        "sk-openai-1",
+    )
+    # The key is read when the target is built: a password saved since is used next time.
+    s = VoiceSettings()
+    env.setenv("OPENAI_API_KEY", "sk-openai-2")
+    assert s.llm_target().api_key == "sk-openai-2"
 
 
 def test_openrouter_model_ids():
@@ -74,7 +96,7 @@ def test_keys_never_show(env):
         t = s.llm_target()
         shown = " ".join([repr(s), str(s), repr(t), t.describe(), *s.llm_problems()])
         assert PROXY_TOKEN not in shown and OR_KEY not in shown
-        assert "via " + endpoint in t.describe()
+    assert "via openrouter" in t.describe()
 
 
 def test_problems_name_the_missing_variable_not_a_value(env):
@@ -83,15 +105,22 @@ def test_problems_name_the_missing_variable_not_a_value(env):
     assert VoiceSettings().llm_problems() == [
         "GHOST_LLM_ENDPOINT=openrouter but OPENROUTER_API_KEY is not set"
     ]
-    env.setenv("GHOST_LLM_ENDPOINT", "proxy")
-    env.delenv("ANTHROPIC_AUTH_TOKEN")
-    assert VoiceSettings().llm_problems() == ["ANTHROPIC_AUTH_TOKEN is not set"]
+    env.setenv("GHOST_LLM_PROVIDER", "anthropic")
+    assert VoiceSettings().llm_problems() == ["ANTHROPIC_API_KEY is not set"]
 
 
 def test_an_unknown_endpoint_is_refused(env):
     env.setenv("GHOST_LLM_ENDPOINT", "direct")
     with pytest.raises(ValueError, match="proxy, openrouter"):
         VoiceSettings()
+
+
+def test_the_anthropic_client_never_falls_back_to_the_environment(env):
+    # ANTHROPIC_BASE_URL points at a proxy in an older setup; Anthropic itself is asked for.
+    env.setenv("GHOST_LLM_PROVIDER", "anthropic")
+    env.setenv("ANTHROPIC_API_KEY", "sk-ant-1")
+    client = shared_client(VoiceSettings().llm_target())
+    assert str(client.base_url).startswith("https://api.anthropic.com")
 
 
 def service(cache_system: bool = True) -> GhostAnthropicLLMService:

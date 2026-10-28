@@ -61,14 +61,14 @@ export function stateWords(a: AppView): { label: string; tone: Tone } {
 
 /** How an app is reached, as the operator set it up. */
 export function kindWords(kind: AppView["kind"]): string {
-  return { sign_in: "Signed in with your account", key: "Uses an API key", local: "Runs on this computer", custom: "Added by hand" }[kind] ?? kind;
+  return { sign_in: "Signed in with your account", key: "Uses a password", local: "Runs on this computer", custom: "Added by hand" }[kind] ?? kind;
 }
 
 /** What each way to connect means, under its label in the connect dialog. */
 export function optionHelp(kind: "sign_in" | "key" | "local"): string {
   return {
     sign_in: "Ghost opens your browser to sign in. Nothing to paste.",
-    key: "Paste a key from the app’s settings. Ghost keeps it in its private settings and never shows it again.",
+    key: "Paste the password the app gives you. Ghost keeps it in its vault and never shows it again.",
     local: "Ghost starts it on this computer when it starts, with your user’s access to your files.",
   }[kind];
 }

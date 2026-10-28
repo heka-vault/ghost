@@ -32,7 +32,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -49,7 +48,7 @@ from ghost_voice.intents import QuickIntents
 from ghost_voice.intercept import InterceptorProcessor
 from ghost_voice.kokoro import KokoroTTS
 from ghost_voice.latency import LatencyObserver
-from ghost_voice.llm import GhostAnthropicLLMService, shared_client
+from ghost_voice.llm import model_client
 from ghost_voice.narration import NarrationCut
 from ghost_voice.parakeet import ParakeetSTTService
 from ghost_voice.prompt import build_system_prompt
@@ -279,7 +278,8 @@ def build_session(
     ``context_note`` goes into the model's context before the greeting without running
     it: why Ghost started this session itself (ADR 0032), for the operator's reply."""
     session_id = uuid.uuid4().hex
-    target = settings.llm_target()  # GHOST_LLM_ENDPOINT: the proxy or OpenRouter
+    target = settings.llm_target()  # the model connection (ADR 0037)
+    client = model_client(target)  # the protocol's client, shared across sessions
     latency = (
         LatencyObserver(
             session_id=session_id,
@@ -309,7 +309,7 @@ def build_session(
             session_id=session_id,
             fragments=fragments,
             tts_settings=models.tts.Settings,
-            llm_settings=AnthropicLLMService.Settings,
+            llm_settings=client.settings_type,
             sample_rate=TTS_SAMPLE_RATE,
             keep_messages=settings.compact_keep_messages,
             start=start_in,
@@ -339,18 +339,10 @@ def build_session(
         )
     )
 
-    llm = GhostAnthropicLLMService(
-        api_key=target.api_key,
-        client=shared_client(target),
-        settings=AnthropicLLMService.Settings(
-            model=target.model,
-            system_instruction=(
-                runtime.system_prompt() if runtime else build_system_prompt(fragments)
-            ),
-            max_tokens=settings.llm_max_tokens,
-            enable_prompt_caching=True,
-            thinking=AnthropicLLMService.ThinkingConfig(type=settings.llm_thinking),
-        ),
+    llm = client.service(
+        system_instruction=runtime.system_prompt() if runtime else build_system_prompt(fragments),
+        max_tokens=settings.llm_max_tokens,
+        thinking=settings.llm_thinking,
     )
 
     session: GhostSession | None = None

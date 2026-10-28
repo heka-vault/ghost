@@ -1,5 +1,5 @@
 /**
- * Owner: apps. #/apps/:name: one app (ADR 0034). Whether Ghost is connected to it, and each
+ * Owner: apps. #/settings/apps/:name: one app (ADR 0034). Whether Ghost is connected to it, and each
  * of its tools with what Ghost may do: a change is Allow (it runs and Ghost says so), Ask
  * first or Block, with Quiet in the row's menu; a read is Allow or Block. A choice moves the
  * tool's own rule in the operator's permissions (`PUT /permissions`, `set`); choosing what
@@ -12,7 +12,7 @@ import { ChevronLeft, ExternalLink, Megaphone, MoreHorizontal, RotateCw, SearchX
 import { useCallback, useEffect, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
-import { Badge, Button, Card, EmptyState, Field, IconButton, LiveStatus, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, errorText, quoted, useLive, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, Field, IconButton, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, errorText, quoted, useLive, useToast } from "../../ui";
 import { useAppActions } from "./actions";
 import { AppIcon } from "./AppIcon";
 import { type Level, appConditionalRules, choose, conditionalRules, coversWholeApp, decidingRule, kindWords, listOf, listVerb, sentence, stateWords, toolLabel } from "./model";
@@ -47,7 +47,7 @@ export function AppDetail({ name }: { name: string }) {
     void load();
   }, [load, appsVersion]);
 
-  const actions = useAppActions({ onChanged: () => void load(), onDisconnected: () => navigate("/apps") });
+  const actions = useAppActions({ onChanged: () => void load(), onDisconnected: () => navigate("/settings/apps") });
 
   /** Move one rule, then read the app back: its levels are the gate's, not this screen's guess. */
   const setRule = async (rule: string, level: Level | null, opts: { what: string; undo?: Level | null }) => {
@@ -87,7 +87,7 @@ export function AppDetail({ name }: { name: string }) {
           icon={<SearchX />}
           title={`There’s no app called ${quoted(name)}`}
           description="It may have been disconnected, or the link has a typo."
-          actions={<Button href={hrefFor("/apps")}>See all apps</Button>}
+          actions={<Button href={hrefFor("/settings/apps")}>See all apps</Button>}
         />
       </Page>
     );
@@ -107,12 +107,11 @@ export function AppDetail({ name }: { name: string }) {
       title={title}
       leading={<AppIcon title={title} icon={app?.icon} size="lg" />}
       crumb={
-        <Link to="/apps">
+        <Link to="/settings/apps">
           <ChevronLeft size={14} aria-hidden />
           Apps
         </Link>
       }
-      status={<LiveStatus />}
       description={
         app && state ? (
           <span className="apps-meta">
@@ -178,7 +177,7 @@ export function AppDetail({ name }: { name: string }) {
           <StateNotice app={app} onReopen={() => void actions.reopen(app)} />
 
           {perms.mode !== "open" && (
-            <Notice tone="info" title={`Permissions are set to ${MODE_WORDS[perms.mode].toLowerCase()}`} className="apps-notice" action={<Button size="sm" variant="ghost" href={hrefFor("/permissions")}>Permissions</Button>}>
+            <Notice tone="info" title={`Permissions are set to ${MODE_WORDS[perms.mode].toLowerCase()}`} className="apps-notice" action={<Button size="sm" variant="ghost" href={hrefFor("/settings/permissions")}>Permissions</Button>}>
               {perms.mode === "ask" ? "Every change asks first unless you allow it here." : "Every change is blocked unless you allow it here. Reads still run."}
             </Notice>
           )}
@@ -206,7 +205,7 @@ export function AppDetail({ name }: { name: string }) {
                     <span className="t-mono apps-code">{c.rule}</span> {listVerb[c.list]}
                   </span>
                 ))}
-                . Change {appConds.length === 1 ? "it" : "them"} on <Link to="/permissions">Permissions</Link>.
+                . Change {appConds.length === 1 ? "it" : "them"} on <Link to="/settings/permissions">Permissions</Link>.
               </p>
             )}
           </Card>
@@ -259,7 +258,8 @@ export function AppDetail({ name }: { name: string }) {
             Rules call it <span className="t-mono">{name}</span>, and a tool <span className="t-mono">{name}.&lt;tool&gt;</span>.{" "}
             {app.settings.length > 0 && (
               <>
-                Its {app.settings.length === 1 ? "key is" : "keys are"} in Ghost’s private settings as <span className="t-mono">{app.settings.join(", ")}</span>.{" "}
+                Its {app.settings.length === 1 ? "password is" : "passwords are"} in Ghost’s vault as <span className="t-mono">{app.settings.join(", ")}</span>, on{" "}
+                <a href={hrefFor("/settings/passwords")}>Passwords</a>.{" "}
               </>
             )}
             Descriptions are {title}’s own words; Ghost never follows instructions in them.

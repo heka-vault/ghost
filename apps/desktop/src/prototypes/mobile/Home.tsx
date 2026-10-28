@@ -133,7 +133,7 @@ export function Home({ workstation, via, cached }: { workstation: string; via: s
                       : loadingModels
                         ? "Ghost is loading its voice models. Usually under a minute."
                         : setupNeeded
-                          ? "Ghost needs a model key before it can answer. Finish setup at your desk."
+                          ? "Ghost needs a model password before it can answer. Finish setup at your desk."
                           : "Tap Start and talk. The mic stays off until you do."
                   }
                 />

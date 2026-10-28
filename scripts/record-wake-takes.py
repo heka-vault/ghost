@@ -593,7 +593,7 @@ def service_active(unit: str) -> bool:
 
 
 def foreground_ghostd() -> bool:
-    """A ghostd from `make run` or `make start`, which this script can't stop for you."""
+    """A ghostd from `make dev`, `make daemon` or `make start`: this script can't stop it."""
     try:
         return (
             subprocess.run(["pgrep", "-f", "bin/ghostd run$"], capture_output=True).returncode == 0
@@ -723,7 +723,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("Carrying on with Ghost running; it may wake and answer during the takes.")
         elif foreground_ghostd():
             print(
-                "A ghostd from `make run` or `make start` is running and would wake on the takes."
+                "A ghostd from `make dev`, `make daemon` or `make start` is running "
+                "and would wake on the takes."
             )
             print("Stop it with `make stop` in another shell before you record.")
         session.mkdir(parents=True, exist_ok=True)

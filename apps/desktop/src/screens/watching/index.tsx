@@ -14,7 +14,7 @@ import { Fragment, useEffect, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
 import { navigate, usePath } from "../../app/router";
-import { Badge, Button, Card, EmptyState, ListRow, LiveStatus, Notice, Page, Section, Skeleton, errorText, relativeTime, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, ListRow, Notice, Page, Section, Skeleton, errorText, relativeTime, useToast } from "../../ui";
 import { CONFIG_DIR, RESPONSE, URGENCY, VERIFY, count, everyWords, folderOf, listWords, reasonWords, revealFolder, stepWords, sumOf } from "./model";
 import "./watching.css";
 
@@ -60,7 +60,6 @@ export default function WatchingScreen(_: RouteProps) {
     <Page
       width="default"
       title="Watching"
-      status={<LiveStatus />}
       description={<>What Ghost keeps an eye on and the webhooks it takes, from watches.json and hooks.json in its folder. Each look is a plain read and a check; a watch asks Jev or the model only where it says so.</>}
       actions={
         // With nothing watched yet the empty state carries Open folder; one place for it.

@@ -220,7 +220,7 @@ async def main() -> None:
     args = ap.parse_args()
     logger.remove()
     # Pipecat reports the closed LLM port and the cut-off TTS context; neither matters here.
-    logger.add(lambda m: print(m, end=""), level="CRITICAL")
+    logger.add(lambda m: print(m, end=""), level="CRITICAL", diagnose=False)
 
     models = Models.load(VoiceSettings())  # type: ignore[call-arg]
     voice = Voice(models.tts.kokoro, args.cache)

@@ -43,3 +43,22 @@ class GhostClient:
         r = self._http.post("/proposals/pending/confirm")
         r.raise_for_status()
         return r.json()
+
+    # passwords (ADR 0036): a value goes in; nothing here reads one back
+
+    def passwords(self) -> dict[str, Any]:
+        r = self._http.get("/passwords")
+        r.raise_for_status()
+        return r.json()
+
+    def set_password(self, name: str, value: str) -> httpx.Response:
+        return self._http.put(f"/passwords/{name}", json={"value": value})
+
+    def delete_password(self, name: str) -> httpx.Response:
+        return self._http.delete(f"/passwords/{name}")
+
+    def import_passwords(self) -> httpx.Response:
+        return self._http.post("/passwords/import", timeout=120.0)
+
+    def unlock_passwords(self) -> httpx.Response:
+        return self._http.post("/passwords/unlock", timeout=120.0)

@@ -35,11 +35,13 @@ export interface Scenario {
   /** Where the live session started: the desk (default) or the paired phone (ADR 0016). */
   origin?: "desk" | "phone";
   /**
-   * The phone listener: off (GHOST_PHONE_LISTEN unset), on with no phone, or a phone paired.
-   * Without it the settings fixture derives it from `configured` and `data`. Any scenario can
-   * override it with ?phone=off|unpaired|paired|pairs|expires (see mock/index.ts).
+   * The phone listener: off (GHOST_PHONE_LISTEN unset), on with no phone, or a phone paired
+   * (on the home network only); `tunnel` adds a tunnel address the phone last came in on, and
+   * `tunnel-down` one whose interface isn't up yet (ADR 0020). Without it the settings fixture
+   * derives it from `configured` and `data`. Any scenario can override it with
+   * ?phone=off|unpaired|paired|tunnel|tunnel-down|pairs|expires (see mock/index.ts).
    */
-  phone?: "off" | "unpaired" | "paired";
+  phone?: "off" | "unpaired" | "paired" | "tunnel" | "tunnel-down";
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -50,7 +52,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "thinking", label: "Thinking", description: "Mid-session, the model is working on a reply.", daemon: true, phase: "thinking", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal" },
   { name: "starting", label: "Starting", description: "The daemon is up and loading its voice models.", daemon: true, phase: "starting", modelsReady: false, session: null, pending: false, configured: true, data: "normal" },
   { name: "disconnected", label: "Not running", description: "ghostd is not running.", daemon: false, phase: "passive", modelsReady: false, session: null, pending: false, configured: true, data: "normal" },
-  { name: "firstrun", label: "First run", description: "Installed, no secrets or endpoint set yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty" },
+  { name: "firstrun", label: "First run", description: "Installed, no passwords or model set yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty" },
   { name: "empty", label: "Empty", description: "Configured, but nothing has happened yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "empty" },
   { name: "expiring", label: "Okay running out", description: "A confirm-level change that expires 8 seconds after load.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal", pendingExpiresIn: 8 },
   { name: "reconnecting", label: "Reconnecting", description: "A live session; the daemon drops 1.5 seconds after load and stays away.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal", dropAfterMs: 1500 },

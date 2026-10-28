@@ -14,6 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from ghost_core.confirmation import normalize
+from ghost_core.passwords import child_env
 from ghost_core.routes import Delivery, RoutePolicy
 from ghost_core.waiting import Item
 
@@ -149,6 +150,7 @@ class DesktopRoute:
                 body,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                env=child_env(),  # never a password (ADR 0036)
             )
         except OSError:
             return "unavailable"
@@ -186,6 +188,7 @@ def _open_desktop() -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            env=child_env(),  # never a password (ADR 0036)
         )
 
 

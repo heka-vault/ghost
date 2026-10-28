@@ -106,7 +106,7 @@ const STRIPE: HookInfo = {
   verify: "hmac",
   events: ["refund_failed"],
   on: false,
-  off_reason: "secret STRIPE_HOOK_SECRET is not set",
+  off_reason: "its password STRIPE_HOOK_SECRET is not set",
   accepted: {},
   rejected: {},
   last: null,

@@ -63,7 +63,7 @@ export function useAppActions({ onChanged, onDisconnected }: { onChanged: () => 
       title: `Disconnect ${a.title}?`,
       description:
         a.settings.length > 0
-          ? `Ghost stops using ${a.title} at once and forgets its sign-in. Its key stays in Ghost’s private settings until you clear it in Settings. To use it again, connect it again.`
+          ? `Ghost stops using ${a.title} at once and forgets its sign-in and the passwords it saved for it. A password you named yourself stays on Passwords. To use it again, connect it again.`
           : `Ghost stops using ${a.title} at once and forgets its sign-in. To use it again, connect it again.`,
       confirmLabel: `Disconnect ${a.title}`,
       tone: "danger",

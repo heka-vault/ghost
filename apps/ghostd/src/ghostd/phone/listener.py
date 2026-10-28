@@ -10,6 +10,10 @@ ways by ``SigningMiddleware``; the wire format is docs/phone-protocol.md.
 address and the operator's tunnel address (ADR 0020). The first must bind at start; a later
 one whose interface is not up yet is retried until it is.
 
+Each verified request notes which listen address it came in on and whether that is the
+home network or the tunnel (``networks.py``); ``GET /phone`` on the control API shows it, so
+the desktop can say how the phone last reached Ghost.
+
 The daemon is reached through ``PhoneHost``: it owns sessions, so it decides whether a
 phone may start one and runs it on the connection the listener negotiated.
 """
@@ -23,18 +27,20 @@ import socket
 import time
 from collections.abc import Callable, Iterator
 from typing import Any, Literal, Protocol
+from urllib.parse import urlencode
 
 import uvicorn
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from ghost_api import AuditPage, PhoneDevice, PhonePairing, PhoneView, Status
+from ghost_api import AuditPage, PhoneAddress, PhoneDevice, PhonePairing, PhoneView, Status
 from ghost_api.models import ConversationView, WaitingView
 from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ghostd.phone.networks import Networks
 from ghostd.phone.pairing import PairingCodes, PhoneStore
 from ghostd.phone.signing import H_DEVICE, H_NONCE, H_SIGNATURE, H_TIME, Verifier, sign_response
 
@@ -42,6 +48,8 @@ Refusal = Literal["busy", "not_ready", "no_such_line"]
 _REFUSAL_STATUS: dict[str, int] = {"busy": 409, "not_ready": 503, "no_such_line": 404}
 REBIND_SECS = 5.0  # how often a listen address whose interface isn't up yet is tried again
 UNSIGNED_PATHS = frozenset({"/pair"})
+LISTEN_SCOPE_KEY = "ghost.listen"  # the listen address a request came in on, set per server
+PAIR_LINK = "ghost://pair"  # the phone app's own scheme (apps/mobile/app.json)
 _STATUS_CODES = {
     400: "bad_request",
     401: "unauthorized",
@@ -99,6 +107,12 @@ def parse_listen_list(value: str) -> list[str]:
     return addresses
 
 
+def pair_link(code: str, addresses: list[str]) -> str:
+    """The QR code's payload: ``ghost://pair?code=482913&address=…&address=…``, every
+    listen address in order (docs/phone-protocol.md). It carries what typing would."""
+    return f"{PAIR_LINK}?" + urlencode([("code", code), *(("address", a) for a in addresses)])
+
+
 def _json(status: int, body: Any, headers: dict[str, str] | None = None) -> JSONResponse:
     return JSONResponse(body, status_code=status, headers=headers)
 
@@ -143,7 +157,7 @@ class SigningMiddleware:
     errors included. A pure ASGI middleware so it sees the exact body bytes both ways."""
 
     def __init__(
-        self, app: ASGIApp, *, verifier: Verifier, on_verified: Callable[[], None]
+        self, app: ASGIApp, *, verifier: Verifier, on_verified: Callable[[Scope], None]
     ) -> None:
         self.app = app
         self.verifier = verifier
@@ -200,7 +214,7 @@ class SigningMiddleware:
             payload = json.dumps({"error": "unauthorized"}).encode()
             await _send_plain(send, 401, payload, response_headers(401, payload))
             return
-        self.on_verified()
+        self.on_verified(scope)
 
         replayed = False
 
@@ -283,6 +297,7 @@ class PhoneListener:
         verifier: Verifier | None = None,
         connection_factory: Callable[[], Any] = _default_connection,
         workstation: str | None = None,
+        networks: Networks | None = None,
     ) -> None:
         self.addresses = parse_listen_list(address)
         self.address = self.addresses[0]  # the one the desktop shows for pairing
@@ -291,6 +306,7 @@ class PhoneListener:
         self.codes = codes or PairingCodes()
         self.verifier = verifier or Verifier(store.secret_for)
         self.workstation = workstation or socket.gethostname()
+        self.networks = networks or Networks()
         self._connection_factory = connection_factory
         self._conn: Any = None  # the live phone peer connection, if any
         self._servers: list[tuple[str, uvicorn.Server, asyncio.Task[None]]] = []
@@ -303,17 +319,51 @@ class PhoneListener:
         code, expires_at = self.codes.mint()
         logger.info("phone: pairing code issued (valid 2 minutes)")  # never the code
         return PhonePairing(
-            code=code, address=self.address, addresses=self.addresses, expires_at=expires_at
+            code=code,
+            address=self.address,
+            addresses=self.addresses,
+            expires_at=expires_at,
+            link=pair_link(code, self.addresses),
         )
 
     def view(self) -> PhoneView:
         d = self.store.device
         device = (
-            PhoneDevice(id=d.id, name=d.name, paired_at=d.paired_at, last_seen=d.last_seen)
+            PhoneDevice(
+                id=d.id,
+                name=d.name,
+                paired_at=d.paired_at,
+                last_seen=d.last_seen,
+                last_address=d.last_address,
+                last_network=d.last_network,
+            )
             if d
             else None
         )
-        return PhoneView(address=self.address, addresses=self.addresses, device=device)
+        bound = self.bound
+        listen = [
+            PhoneAddress(
+                address=a,
+                network=self.networks.of(parse_listen(a)[0]),
+                listening=a in bound,
+            )
+            for a in self.addresses
+        ]
+        return PhoneView(
+            address=self.address, addresses=self.addresses, listen=listen, device=device
+        )
+
+    def _seen(self, scope: Scope) -> None:
+        """A verified request: note the listen address it came in on and its network. The
+        network is the local IP the connection landed on, so a wildcard address
+        (``0.0.0.0:8765``) still tells home from tunnel."""
+        address = scope.get(LISTEN_SCOPE_KEY)
+        server = scope.get("server")
+        local = server[0] if server else None
+        network = self.networks.of(local)
+        if network is None and address:
+            network = self.networks.of(parse_listen(address)[0])
+        self.store.seen(address, network)
 
     async def forget(self) -> bool:
         had = self.store.forget()
@@ -463,7 +513,7 @@ class PhoneListener:
             await self.host.end_phone()
             return _json(200, {"ok": True})
 
-        app.add_middleware(SigningMiddleware, verifier=self.verifier, on_verified=self.store.seen)
+        app.add_middleware(SigningMiddleware, verifier=self.verifier, on_verified=self._seen)
         return app
 
     # --- serving ---------------------------------------------------------------------------
@@ -496,7 +546,7 @@ class PhoneListener:
             raise
         sock.set_inheritable(True)
         config = uvicorn.Config(
-            self.app,
+            self._app_for(address),
             log_level="warning",
             access_log=False,  # paths and devices stay out of the journal
             lifespan="off",
@@ -514,6 +564,17 @@ class PhoneListener:
             raise RuntimeError(f"phone listener did not start on {address}")
         self._servers.append((address, server, task))
         logger.info(f"phone: listening on {address}")
+
+    def _app_for(self, address: str) -> ASGIApp:
+        """The one app, telling each request which listen address it came in on."""
+        app = self.app
+
+        async def tagged(scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "http":
+                scope = {**scope, LISTEN_SCOPE_KEY: address}
+            await app(scope, receive, send)
+
+        return tagged
 
     async def _rebind_loop(self, late: list[str]) -> None:
         while late:
@@ -564,4 +625,11 @@ class PhoneListener:
         self.store.flush()
 
 
-__all__ = ["PhoneHost", "PhoneListener", "Refusal", "parse_listen", "parse_listen_list"]
+__all__ = [
+    "PhoneHost",
+    "PhoneListener",
+    "Refusal",
+    "pair_link",
+    "parse_listen",
+    "parse_listen_list",
+]

@@ -84,6 +84,7 @@ import {
   useToast,
 } from "../../ui";
 import { StatusCard } from "../../app/Sidebar";
+import { DESKTOP_VERSION } from "../../app/version";
 import "./gallery.css";
 
 const SCENARIO_FALLBACK = ["passive", "session", "pending", "speaking", "thinking", "starting", "disconnected", "firstrun", "empty", "expiring", "reconnecting", "busy"];
@@ -312,7 +313,7 @@ function WidthCheck() {
   const pairs: { name: string; el: (loading: boolean) => ReactNode }[] = [
     { name: "Primary md", el: (l) => <Button variant="primary" loading={l}>Confirm</Button> },
     { name: "Ghost md", el: (l) => <Button variant="ghost" loading={l}>Cancel</Button> },
-    { name: "Secondary sm, icon", el: (l) => <Button size="sm" loading={l} leadingIcon={<Plus />}>New line</Button> },
+    { name: "Secondary sm, icon", el: (l) => <Button size="sm" loading={l} leadingIcon={<Plus />}>New agent</Button> },
     { name: "Danger lg", el: (l) => <Button size="lg" variant="danger" loading={l} trailingIcon={<Trash2 />}>Delete Accounting</Button> },
   ];
   const ok = rows.length > 0 && rows.every((r) => Math.abs(r.rest - r.loading) <= 0.5);
@@ -597,7 +598,7 @@ function SaveBarSpecimens() {
         <SaveBar variant="restart" title="Restart Ghost to apply" detail="2 changes wait for it" command="systemctl --user restart ghostd" onDismiss={noop} />
       </Spec>
       <p className="t-small t-3">
-        One silhouette on every screen that commits a change (Permissions, Settings, a line). It lives in the Page dock, at least 480 wide, growing with its words to the page width. After a save the toast is titled “Saved”, its body says when the change takes effect, with Undo where possible; the restart bar is the only exception and toasts nothing.
+        One silhouette on every screen that commits a change (Permissions, Settings, an agent). It lives in the Page dock, at least 480 wide, growing with its words to the page width. After a save the toast is titled “Saved”, its body says when the change takes effect, with Undo where possible; the restart bar is the only exception and toasts nothing.
       </p>
     </>
   );
@@ -752,13 +753,13 @@ function Specimens({ theme }: { theme: string }) {
           <Button size="lg">Large</Button>
         </Spec>
         <Spec label="With icons">
-          <Button leadingIcon={<Plus />}>New line</Button>
+          <Button leadingIcon={<Plus />}>New agent</Button>
           <Button variant="ghost" leadingIcon={<Pin />}>Pin a note</Button>
           <Button trailingIcon={<ArrowUpRight />}>Open on GitHub</Button>
         </Spec>
         <Spec label="Link form">
           <Button href="https://github.com/ghost-mock/app/issues/151" target="_blank" trailingIcon={<ArrowUpRight />}>Open on GitHub</Button>
-          <Button variant="ghost" href="#/audit">See the audit log</Button>
+          <Button variant="ghost" href="#/settings/audit">See the audit log</Button>
           <IconButton href="https://github.com/ghost-mock/app" target="_blank" label="Open the repository" icon={<ArrowUpRight />} />
         </Spec>
         <Spec label="Live">
@@ -811,7 +812,7 @@ function Specimens({ theme }: { theme: string }) {
           </Field>
           {/* Secrets live in a form, so Enter saves and Chrome has nothing to warn about. */}
           <form onSubmit={(e) => e.preventDefault()} autoComplete="off">
-            <Field label="GitHub token" error="That doesn’t look like a GitHub token. They start with ghp_ or github_pat_.">
+            <Field label="GitHub password" error="That doesn’t look like a GitHub password. They start with ghp_ or github_pat_.">
               <Input type="password" autoComplete="off" defaultValue="hunter2" />
             </Field>
           </form>
@@ -855,7 +856,7 @@ function Specimens({ theme }: { theme: string }) {
                   </Field>
                 </div>
                 <div className="gal-row-pad">
-                  <Field layout="inline" label="How Ghost hears your yes" help="Jev when its key is set, else the word list." detail="GHOST_JEV">
+                  <Field layout="inline" label="How Ghost hears your yes" help="Jev when its password is set, else the word list." detail="GHOST_JEV">
                     <Select value={classifier} onChange={(e) => setClassifier(e.target.value)} options={[{ value: "auto", label: "Automatic" }, { value: "on", label: "Always Jev" }, { value: "off", label: "Word list only" }]} />
                   </Field>
                 </div>
@@ -894,7 +895,7 @@ function Specimens({ theme }: { theme: string }) {
           <div className="gal-indent stack gap-3">
             <Checkbox checked={checks.app} onChange={(v) => setChecks((c) => ({ ...c, app: v }))} label="ghost-mock/app" description="214 open issues. Ghost reads and writes here." />
             <Checkbox checked={checks.infra} onChange={(v) => setChecks((c) => ({ ...c, infra: v }))} label="ghost-mock/infra" description="38 open issues." />
-            <Checkbox checked={false} onChange={noop} disabled label="ghost-mock/website" description="Your token can’t see this repository." />
+            <Checkbox checked={false} onChange={noop} disabled label="ghost-mock/website" description="Your GitHub password can’t see this repository." />
           </div>
         </Spec>
         <Spec label="Radio, list">
@@ -903,7 +904,7 @@ function Specimens({ theme }: { theme: string }) {
             value={classifier}
             onChange={setClassifier}
             options={[
-              { value: "auto", label: "Automatic", description: "Jev when its key is set, otherwise the word list." },
+              { value: "auto", label: "Automatic", description: "Jev when its password is set, otherwise the word list." },
               { value: "on", label: "Always Jev" },
               { value: "off", label: "Word list only" },
               { value: "x", label: "Local model", description: "Not installed.", disabled: true },
@@ -966,7 +967,7 @@ function Specimens({ theme }: { theme: string }) {
           </div>
         </Spec>
         <Tabs
-          aria-label="Accounting line"
+          aria-label="Accounting agent"
           value={tab}
           onChange={setTab}
           items={[
@@ -1053,7 +1054,7 @@ function Specimens({ theme }: { theme: string }) {
           <Badge variant="outline">Optional</Badge>
           <Badge variant="outline" tone="warn">Medium risk</Badge>
           <Badge variant="outline" tone="danger">High risk</Badge>
-          <Badge size="sm" mono>v0.1.0</Badge>
+          <Badge size="sm" mono>v{DESKTOP_VERSION}</Badge>
         </Spec>
         <Spec label="Progress">
           <div className="gal-progress">
@@ -1139,7 +1140,7 @@ function Specimens({ theme }: { theme: string }) {
             <p className="t-2">Reconnecting: the same words as the sidebar card, the dot still under the moving banner, writes off.</p>
           </div>
           <p className="t-small t-3">
-            Automatic for every Page with a header. The actions are the header’s own, moved into the bar, not a copy: one instance, one tab stop. Scroll <a href={scenarioHref("busy", "/audit")}>the audit log in Busy</a> to see it live.
+            Automatic for every Page with a header. The actions are the header’s own, moved into the bar, not a copy: one instance, one tab stop. Scroll <a href={scenarioHref("busy", "/settings/audit")}>the audit log in Busy</a> to see it live.
           </p>
         </Spec>
       </Block>
@@ -1220,7 +1221,7 @@ function Specimens({ theme }: { theme: string }) {
         <div className="gal-static-dialog">
           <div className="g-dialog__panel">
             <header className="g-dialog__header"><h2 className="g-dialog__title">Delete Legal?</h2></header>
-            <p className="g-dialog__description">The line, its persona, memory and notes are removed.</p>
+            <p className="g-dialog__description">The agent, its persona, memory and notes are removed.</p>
             <footer className="g-dialog__footer"><Button variant="ghost" className="is-focus">Cancel</Button><Button variant="danger">Delete Legal</Button></footer>
           </div>
         </div>
@@ -1228,7 +1229,7 @@ function Specimens({ theme }: { theme: string }) {
         <Dialog open={dialog} onClose={() => setDialog(false)} title="Pin a note to Accounting" description="Pinned notes are never summarized away." footer={<><Button variant="ghost" onClick={() => setDialog(false)}>Cancel</Button><Button variant="primary" onClick={() => setDialog(false)}>Pin note</Button></>}>
           <Field label="Note"><Input autoFocus placeholder="Stripe renewal is due November 3" /></Field>
         </Dialog>
-        <ConfirmDialog open={confirmOpen} title="Delete Accounting?" description="The line, its persona, memory and notes are removed." confirmLabel="Delete Accounting" tone="danger" onCancel={() => setConfirmOpen(false)} onConfirm={() => new Promise((r) => setTimeout(r, 800)).then(() => setConfirmOpen(false))} />
+        <ConfirmDialog open={confirmOpen} title="Delete Accounting?" description="The agent, its persona, memory and notes are removed." confirmLabel="Delete Accounting" tone="danger" onCancel={() => setConfirmOpen(false)} onConfirm={() => new Promise((r) => setTimeout(r, 800)).then(() => setConfirmOpen(false))} />
       </Block>
 
       <Block id={id("brand")} title="Brand">

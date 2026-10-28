@@ -23,7 +23,7 @@ flowchart LR
     DOM --> SK
     DOM --> DB[(SQLite WAL)]
   end
-  LLM <-->|HTTPS| PROXY[Anthropic-compatible endpoint<br/>Claude]
+  LLM <-->|HTTPS| PROXY[The model connection<br/>Anthropic or OpenAI-compatible API]
   SK -->|signed in, or a key| EXT[GitHub, Linear, ...]
 ```
 
@@ -34,16 +34,15 @@ The phone app (`apps/mobile`, Expo, Android) is a second transport into the same
 The operator connects an app to Ghost once and every agent reaches it (ADR 0034).
 `~/.config/ghost/apps.json` lists them: a URL Ghost signs in to (OAuth, `ghost_core.signin`,
 tokens in a 0600 file per app, the browser back on a loopback address only while a sign-in
-is open) or sends a key to, or a command it runs on this computer; secrets are `${NAME}`
-from the environment, and the keys the desktop keeps for apps are in `apps.env` beside
-`env`. The desktop's Apps screen connects them from Ghost's own copy of the public app
+is open) or sends a password to, or a command it runs on this computer; passwords are
+`${NAME}`, filled from Ghost's vault when the app connects (ADR 0036). The desktop's Apps page (Settings › Apps) connects them from Ghost's own copy of the public app
 registry (`ghost_core.catalog`: the first-party apps first, then the rest in the
 background, refreshed at most hourly), by address, or from another tool's pasted config.
 `ghostd` connects them at start (`ghost_core.apps.Apps`) and one connected later joins
 the gate at once and the tools from the next session. Every tool is offered under the
 app's name: one the app marks read-only is a read, called directly; every other tool is a
 change, which goes to the gate. An app that fails to connect, or wants a new sign-in, is on
-the waiting list and the Apps screen and is skipped. Everything an app sends is data: the
+the waiting list and the Apps page and is skipped. Everything an app sends is data: the
 model sees the first sentence of each description, results are trimmed, and nothing in
 them changes a permission. See [apps.md](apps.md).
 
@@ -56,7 +55,7 @@ tool's arguments (`github.issue_write(state=closed)`, `github.*(repo!=site)`), a
 There is one set: nothing narrows it per agent (ADR 0035, `WriteGate.policy_for`). A tool an
 unconditional `block` names is not offered; a rule with argument patterns refuses the
 calls it matches. Ghost's own operations (`conversations.*`, `skills.*`, `rules.add`,
-`outputs.*`) take the same rules. The desktop edits them on the Permissions screen and per
+`outputs.*`) take the same rules. The desktop edits them on Settings › Permissions and per
 tool on an app's page; only the `[permissions]` table of the file is rewritten
 (`ghost_core.policy.write_permissions`).
 
@@ -81,9 +80,9 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 | Component | Responsibility |
 |---|---|
 | `ghostd` | Long-running desktop daemon. Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010), and on wake builds a Pipecat pipeline with a local audio transport. Ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021) |
-| `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004) |
-| `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending change with Confirm and Cancel, audit, the apps (connect, disconnect, sign in) and the catalog, the permissions and the policy file, write-only secrets, devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
-| `core` | The write gate and what feeds it (ADR 0007, 0011, 0034, 0035): tool sources (`ghost_core.source.ToolSource`), the apps (`ghost_core.apps`), their catalog and sign-in (`ghost_core.catalog`, `ghost_core.signin`), Ghost's folder and its rules (`ghost_core.folder`, `ghost_core.rules`), the operator's permissions (`ghost_core.permissions`, `ghost_core.policy`), proposals over typed targets and change sets, the confirmation classifier, the audit store, and the agents (ADR 0014). Imports nothing from the other packages. |
+| `voice` | Builds the pipeline: VAD and turn detection, STT, the LLM service, and TTS behind one config, so models can be swapped (ADR 0004). `ghost_voice.llm` is the one model client (ADR 0037): the session's service, a one-shot completion and a first-token probe, for the Anthropic Messages API and for OpenAI-compatible Chat Completions |
+| `api` | The control API (ADR 0013): FastAPI on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending change with Confirm and Cancel, audit, the apps (connect, disconnect, sign in) and the catalog, the permissions and the policy file, the passwords (names and metadata out, values only in, ADR 0036), the model connection (`/model`: its view, the provider's models, Test connection, OpenRouter's sign-in; ADR 0037), devices and setup. `packages/api/openapi.json` is generated from it and `packages/client-ts` from that. Nothing passive crosses it |
+| `core` | The write gate and what feeds it (ADR 0007, 0011, 0034, 0035): tool sources (`ghost_core.source.ToolSource`), the apps (`ghost_core.apps`), their catalog and sign-in (`ghost_core.catalog`, `ghost_core.signin`), the model connection (`ghost_core.connection`: the providers, which password holds the key, the settings from before it, ADR 0037), Ghost's folder and its rules (`ghost_core.folder`, `ghost_core.rules`), the operator's permissions (`ghost_core.permissions`, `ghost_core.policy`), proposals over typed targets and change sets, the confirmation classifier, the audit store, and the agents (ADR 0014). Imports nothing from the other packages. |
 | `core/conversations` | The agents (ADR 0014, ADR 0035): the registry mirrored from the folders, the transcript, every compaction version, and the files per agent under `~/.config/ghost/agents/<slug>/` (`agent.json`, `persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
 
@@ -91,7 +90,7 @@ The data channel carries RTVI through `ghost_voice.rtvi.GhostRTVIProcessor`, whi
 
 1. **Passive.** `ghostd` runs a short local pipeline: VAD, Parakeet, phrase matcher. A transcript without a wake phrase is dropped where it is produced. Nothing is stored or sent.
 2. **Wake.** "Hey Ghost", "Ghost, you there?" or another configured phrase (`GHOST_WAKE_PHRASES`) matches. With `GHOST_WAKE_MODE=onnx` the trained detectors listen instead (ADR 0025, `ghost_voice.wakeword`): "hey ghost", and, when its model is installed, Ghost addressed by name with a request ("Ghost, what is the status of …"). A model fires as its phrase ends, Parakeet checks the hit (`GHOST_WAKE_VERIFY`), and the chime plays then, while the rest of the sentence is still being heard. `ghostd` plays a chime, ducks the configured music streams, and starts the pipeline. Words spoken after the phrase in the same breath become the first turn, so "hey ghost, what needs me?" skips the greeting. `make wake` still triggers it by hand.
-3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking; Ghost waits a short grace in case you go on, and the model starts answering during it, its answer held until the turn is confirmed and dropped if you keep talking (`GHOST_TURN_SPECULATE`; a held answer that reaches a tool call is withdrawn and the confirmed turn makes the call). Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks a clause at a time, so the voice starts after the first few words (`GHOST_TTS_CLAUSES`). Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off. While Ghost speaks, Parakeet re-reads your unfinished speech every 0.3 s (`GHOST_BARGE_IN_INTERIM_SECS`), so you needn't pause first; those interim words only ever decide barge-in, and the turn, the transcript and the model get the final transcript. Every tool call in a reply runs, not only the last (Pipecat's Anthropic service keeps one); and the model's output cap (`GHOST_LLM_MAX_TOKENS`, 2000 tokens) counts tool calls too, so a reply that hits it is redone in smaller steps rather than losing them (`ghost_voice.llm`).
+3. **Dialogue.** Silero VAD and Smart Turn decide when you have finished speaking; Ghost waits a short grace in case you go on, and the model starts answering during it, its answer held until the turn is confirmed and dropped if you keep talking (`GHOST_TURN_SPECULATE`; a held answer that reaches a tool call is withdrawn and the confirmed turn makes the call). Parakeet transcribes, the LLM answers or calls skill tools, and Kokoro speaks a clause at a time, so the voice starts after the first few words (`GHOST_TTS_CLAUSES`). Barge-in stops playback once the STT has heard at least two words from you (`GHOST_BARGE_IN_MIN_WORDS`); VAD alone never interrupts, so a leak of Ghost's own voice past the echo canceller cannot cut it off. While Ghost speaks, Parakeet re-reads your unfinished speech every 0.3 s (`GHOST_BARGE_IN_INTERIM_SECS`), so you needn't pause first; those interim words only ever decide barge-in, and the turn, the transcript and the model get the final transcript. Every tool call in a reply runs, not only the last (Pipecat's Anthropic service keeps one, its OpenAI service the first of each chunk); and the model's output cap (`GHOST_LLM_MAX_TOKENS`, 2000 tokens) counts tool calls too, so a reply that hits it is redone in smaller steps rather than losing them (`ghost_voice.llm`).
    A typed turn from the desktop app (`POST /session/say`) enters the same pipeline after
    the STT stage, so it meets the same tools and the same gate as speech.
 4. **Transfer.** Every session opens in `ghost`. "Transfer me to Ledger" (an agent's name) is an LLM tool: Ghost's voice announces it, a short tone plays, the TTS voice and the system prompt change (the rules in `AGENTS.md`, the agent's persona and memory), and the context is replaced with that agent's rolling summary, pinned notes and recent turns; the agent greets with a one-line recap. "Back to Ghost" returns. "Save this as accounting" hires the agent and carries this session's turns into it. A transfer cancels any change waiting for a yes.
@@ -183,7 +182,7 @@ asking is the operator's call (ADR 0011, ADR 0034); by default, everything:
 ghost/
 ├── apps/
 │   ├── ghostd/          # Python daemon: wake, sessions, apps, control API server, phone listener
-│   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, apps, permissions, audit, settings
+│   ├── desktop/         # Tauri 2 + React: tray, chat, confirmation card, settings (apps, permissions, audit and the rest)
 │   └── mobile/          # Expo + React Native, Android: Home, session, activity
 ├── packages/
 │   ├── core/            # Python: tool sources, apps, catalog, sign-in, Ghost's folder, gate, permissions, confirmation, audit, conversations
@@ -246,7 +245,7 @@ into the user's config at install time and never committed.
 - Wake word: the transcript matcher costs continuous local STT while passive. Measure its CPU and false wakes against music; if either is a problem, train "Hey Ghost" with `livekit-wakeword` for the `OnnxWakeDetector` (ADR 0005, ADR 0010).
 - Real-voice benchmark on the workstation mic, with music playing ([benchmarks](benchmarks/2026-10-16-speech-cpu.md) used synthetic clips).
 - LLM default: `claude-sonnet-5-5` with `thinking: {"type": "between_tools"}` (0.77 s to first token; see the [benchmark](benchmarks/2026-10-16-speech-cpu.md#llm-time-to-first-token)). Where a turn's time goes, measured: [2026-10-19](benchmarks/2026-10-19-latency.md).
-- A dedicated LLM API key for Ghost, so it can be revoked on its own. `GHOST_LLM_ENDPOINT=openrouter` (OpenRouter's Anthropic API, `OPENROUTER_API_KEY`) is one; the default, `proxy`, is whatever `ANTHROPIC_BASE_URL` points at.
+- A dedicated LLM API key for Ghost, so it can be revoked on its own: signing in to OpenRouter under Settings › Model gives Ghost a key of its own (ADR 0037). The connection is one provider for everything; a cheaper model for compaction or a watch's step would be a second one, not yet asked for.
 
 ## Shipping
 
@@ -255,6 +254,23 @@ Tauri libraries: `heka-ghostd` (a bundled Python 3.12 and venv under `/opt/ghost
 `ghostd` shim, a per-user systemd unit, the PipeWire templates), `heka-ghost-desktop`
 (the Tauri app, from `tauri build --bundles deb`), and the `heka-ghost` meta-package.
 `make build-image`, `make deb`, `make deb-test`. Speech models are not in the package;
-they download on first run. Secrets are never in the package: the desktop app writes
-`~/.config/ghost/env` (0600), or the operator's vault renders it when present. Target
-is Ubuntu 26.04 amd64.
+they download on first run. Passwords are never in the package or in a plain file: they
+are in Ghost's vault, its key in the keyring (below). Target is Ubuntu 26.04 amd64.
+
+## Passwords (ADR 0036)
+
+Every API key, token and account password is a *password*, kept in one file,
+`~/.local/share/ghost/passwords.vault` (0600, AES-256-GCM; `ghost_core.passwords`). Its key
+is one item in the operator's login keyring through Secret Service. `ghostd` opens the vault
+at start (`ghostd.passwords.open_passwords`; so do `check`, `perf` and `push`); a locked
+keyring is retried every 10 s with "Unlock your keyring" on the waiting list, and when it
+opens the voice settings, Jev and the apps that waited follow. The values are served from
+memory: through a mapping that notes each use where an app connects or a webhook is checked,
+and in the daemon's own environment for Ghost's settings. A stdio app gets the ones its `env`
+names; `child_env()` keeps them from everything else Ghost starts. Every value of 8
+characters or more is replaced with `[password: NAME]` in app results, errors and tool
+descriptions, in what the store writes, and in every log line. The control API's
+`/passwords` lists names, what uses each and when it was last used, and takes values that
+never come back. `env` and `apps.env` from before are read until the one-time import
+(`ghostd passwords import`, the Passwords page) moves them and heka-vault's values into the
+vault and deletes them; the service and the dev scripts load `settings.env` only.

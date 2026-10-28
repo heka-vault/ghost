@@ -11,6 +11,7 @@ import { type FormEvent, useId, useState } from "react";
 
 import { useDesign } from "../../design/context";
 import { Button, Dialog, Disclosure, Field, Input, Notice, RadioGroup, Select, errorText, useLive, useToast } from "../../ui";
+import { AboutApp } from "./AboutApp";
 import { AppIcon } from "./AppIcon";
 import { optionHelp, sentence } from "./model";
 import { expectSignIn, openSignIn } from "./signin";
@@ -28,7 +29,7 @@ export function connectOutcome(apps: AppView[]): { failed: AppView | null; conne
 /** The dialog's notice text for an app that was saved and then didn't connect. */
 export const failedText = (a: AppView) => `${a.problem ? sentence(a.problem) : "It didn’t answer."} Check the settings and try again.`;
 
-export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: CatalogEntryView; onClose: () => void; onConnected: () => void }) {
+export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entry: CatalogEntryView; onClose: () => void; onConnected: () => void; onOpen?: (name: string) => void }) {
   const { client } = useGhost();
   const { online } = useLive();
   const toast = useToast();
@@ -153,6 +154,8 @@ export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: Catal
           </span>
         </div>
 
+        <AboutApp entry={e} onOpen={onOpen} />
+
         {e.connected.length > 0 && !error && (
           <Notice tone="info" className="apps-form__notice">
             Already connected as <span className="t-mono">{e.connected.join(", ")}</span>. Connecting again adds a second one, with a name of its own.
@@ -183,7 +186,7 @@ export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: Catal
             label={<span data-user-content>{s.label}</span>}
             detail={s.key}
             optional={!s.required}
-            help={s.secret ? "Kept in Ghost’s private settings. It isn’t shown again." : undefined}
+            help={s.secret ? "A password: kept in Ghost’s vault, and never shown again." : undefined}
             error={missing.has(s.key) ? `${s.label} is needed to connect.` : undefined}
           >
             {s.choices.length > 0 ? (
