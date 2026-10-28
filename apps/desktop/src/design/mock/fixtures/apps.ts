@@ -240,7 +240,7 @@ export const CATALOG: CatalogSeed[] = [
     website: "https://github.com",
     repository: "https://github.com/github/github-mcp-server",
     publisher: onGitHub("github"),
-    ...own("GitHub", "listed", "remote", "repository"),
+    ...own("GitHub", "listed", "remote"),
     options: [
       signIn("api.githubcopilot.com"),
       apiKey("api.githubcopilot.com", "Personal access token"),
@@ -356,7 +356,6 @@ export const CATALOG: CatalogSeed[] = [
     icon: null,
     featured: false,
     publisher: domain("brave.com"),
-    ...own("Brave Search", "publisher"),
     options: [pkg("npm", "@brave/brave-search-mcp-server", [secret("BRAVE_API_KEY", "API key")])],
   },
   {
@@ -398,7 +397,7 @@ export const CATALOG: CatalogSeed[] = [
     updated_at: "2026-01-07T16:34:40Z",
     repository: "https://github.com/PostHog/posthog",
     publisher: onGitHub("PostHog"),
-    ...own("PostHog", "publisher", "remote", "repository"),
+    ...own("PostHog", "publisher", "remote"),
     options: [apiKey("mcp.posthog.com", "Your PostHog personal API key")],
   },
   {

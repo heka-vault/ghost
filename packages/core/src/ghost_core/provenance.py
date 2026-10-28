@@ -10,12 +10,15 @@ That says who published it, not that it is safe. Ghost builds on it:
 
 - **The maker's own.** An entry is the product maker's own app when the publisher's name
   *is* the product's (``io.github.PostHog`` publishing "PostHog", ``com.notion`` publishing
-  "Notion") and, for a GitHub account, something else agrees: it connects to a host of the
-  same name (``mcp.posthog.com``), its repository is the publisher's, or its website is
-  theirs. A domain is proof on its own. ``KNOWN_MAKERS`` is the short hand-kept list for
-  makers whose names differ from their product's (``getsentry`` makes Sentry). The registry's
-  ``_meta`` carries no maker flag (2026-10: only status and dates), so nothing is read from
-  it here.
+  "Notion") and it connects to the maker's own host: for a domain, a host under that exact
+  domain (``com.notion`` and ``mcp.notion.com``; ``ai.posthog`` is not ``posthog.com``); for
+  a GitHub account, a host registered under the account's name (``mcp.posthog.com`` for
+  ``PostHog``). The name alone is never enough, and neither is a repository or a website:
+  every GitHub account owns repositories under its own name, and anyone can write any
+  website. ``KNOWN_MAKERS`` is the short hand-kept list for makers whose names differ from
+  their product's (``getsentry`` makes Sentry), or whose own app has no remote. The
+  registry's ``_meta`` carries no maker flag (2026-10: only status and dates), so nothing is
+  read from it here.
 - **Where it runs.** A remote's host, and whether that host is the maker's, the
   publisher's, or someone else's; a package's registry and identifier.
 - **The same product.** Entries whose titles normalize to the maker's own product name
@@ -34,8 +37,9 @@ from typing import Literal
 
 Verified = Literal["github", "domain"]
 # What agrees that an entry is the maker's own: the publisher's name is the product's;
-# Ghost's own list says so; it connects to the maker's host; its repository is theirs; its
-# website is theirs.
+# Ghost's own list says so; it connects to the maker's host. Only "listed" or "remote" is
+# proof; a domain publisher's repository under its name and a website on the maker's host
+# are said beside it, never instead of it.
 Evidence = Literal["publisher", "listed", "remote", "repository", "website"]
 HostOwner = Literal["maker", "publisher", "other"]
 
@@ -45,15 +49,66 @@ _GITHUB_NS = "io.github."
 @dataclass(frozen=True)
 class KnownMaker:
     product: str  # the product's name as its maker writes it
-    brands: frozenset[str]  # the names on the maker's own hosts: "sentry" for mcp.sentry.dev
+    brands: frozenset[str]  # the names its entries go by: "sentry", "getsentry"
+    domains: frozenset[str]  # the maker's own registered domains: "sentry.dev"
+
+
+def _k(*brands: str) -> frozenset[str]:
+    return frozenset(brands)
 
 
 # Makers whose evidence is unusual: a GitHub account or a host not named like the product.
 # Keyed by the registry namespace. Keep it short; every entry is a judgment someone checked.
 KNOWN_MAKERS: dict[str, KnownMaker] = {
-    "io.github.github": KnownMaker("GitHub", frozenset({"github", "githubcopilot"})),
-    "io.github.getsentry": KnownMaker("Sentry", frozenset({"sentry", "getsentry"})),
-    "io.github.makenotion": KnownMaker("Notion", frozenset({"notion", "makenotion"})),
+    # GitHub's own account; its app runs on api.githubcopilot.com.
+    "io.github.github": KnownMaker(
+        "GitHub",
+        frozenset({"github", "githubcopilot"}),
+        frozenset({"github.com", "githubcopilot.com"}),
+    ),
+    # Sentry's account is getsentry; its app runs on mcp.sentry.dev.
+    "io.github.getsentry": KnownMaker(
+        "Sentry", frozenset({"sentry", "getsentry"}), frozenset({"sentry.dev", "sentry.io"})
+    ),
+    # Notion's account is makenotion (``io.github.notion`` is not Notion).
+    "io.github.makenotion": KnownMaker(
+        "Notion", frozenset({"notion", "makenotion"}), frozenset({"notion.com", "notion.so"})
+    ),
+    # Neon proved neon.com; its app runs on mcp.neon.tech, Neon's other domain.
+    "com.neon": KnownMaker("Neon", _k("neon"), frozenset({"neon.com", "neon.tech"})),
+    # The makers below publish a package run on this computer, so no host of theirs can
+    # agree. Each namespace was checked by hand on 2026-10-28 as the company's own account
+    # or domain, and was among the real makers the stricter rule above unmarked.
+    "com.auth0": KnownMaker("Auth0", _k("auth0"), frozenset({"auth0.com"})),
+    "io.github.ChromeDevTools": KnownMaker(
+        "Chrome DevTools", _k("chromedevtools"), frozenset({"chrome.com"})
+    ),
+    "io.github.ClickHouse": KnownMaker(
+        "ClickHouse", _k("clickhouse"), frozenset({"clickhouse.com", "clickhouse.cloud"})
+    ),
+    "io.github.PagerDuty": KnownMaker("PagerDuty", _k("pagerduty"), frozenset({"pagerduty.com"})),
+    "io.github.browserbase": KnownMaker(
+        "Browserbase", _k("browserbase"), frozenset({"browserbase.com"})
+    ),
+    "io.github.buildkite": KnownMaker("Buildkite", _k("buildkite"), frozenset({"buildkite.com"})),
+    "io.github.couchbase": KnownMaker("Couchbase", _k("couchbase"), frozenset({"couchbase.com"})),
+    "io.github.firebase": KnownMaker("Firebase", _k("firebase"), frozenset({"firebase.com"})),
+    "io.github.jfrog": KnownMaker("JFrog", _k("jfrog"), frozenset({"jfrog.com", "jfrog.io"})),
+    "io.github.localstack": KnownMaker(
+        "LocalStack", _k("localstack"), frozenset({"localstack.cloud"})
+    ),
+    "io.github.metabase": KnownMaker("Metabase", _k("metabase"), frozenset({"metabase.com"})),
+    "io.github.paypal": KnownMaker("PayPal", _k("paypal"), frozenset({"paypal.com"})),
+    "io.github.planetscale": KnownMaker(
+        "PlanetScale", _k("planetscale"), frozenset({"planetscale.com", "pscale.dev"})
+    ),
+    "io.github.questdb": KnownMaker(
+        "QuestDB", _k("questdb"), frozenset({"questdb.com", "questdb.io"})
+    ),
+    "io.github.upstash": KnownMaker(
+        "Upstash", _k("upstash"), frozenset({"upstash.com", "upstash.io"})
+    ),
+    "io.github.zscaler": KnownMaker("Zscaler", _k("zscaler"), frozenset({"zscaler.com"})),
 }
 
 # Hosts where anyone can run something under a name of their own: ``x.vercel.app`` is not
@@ -124,9 +179,9 @@ def key(text: str) -> str:
 
 
 @lru_cache(maxsize=8192)  # the index asks about ~50,000 hosts, many of them the same
-def host_brand(host: str) -> str | None:
-    """The name a host is registered under, as a key: ``mcp.posthog.com`` is ``posthog``,
-    ``foo.co.uk`` is ``foo``. None for an address, a bare name, or a shared host
+def registered_domain(host: str) -> str | None:
+    """The domain a host is registered under: ``mcp.posthog.com`` is ``posthog.com``,
+    ``api.foo.co.uk`` is ``foo.co.uk``. None for an address, a bare name, or a shared host
     (``x.vercel.app``), where the name isn't the owner's."""
     host = host.lower().strip(".").split(":")[0]
     if not host or _ADDRESS.fullmatch(host) or "." not in host:
@@ -134,10 +189,19 @@ def host_brand(host: str) -> str | None:
     labels = host.split(".")
     if any(".".join(labels[i:]) in _SHARED for i in range(len(labels) - 1)):
         return None
-    labels.pop()  # the top-level domain
-    if len(labels) >= 2 and labels[-1] in _SECOND_LEVEL and len(host.rsplit(".", 1)[-1]) == 2:
-        labels.pop()
-    return key(labels[-1]) or None
+    keep = 2
+    if len(labels) >= 3 and labels[-2] in _SECOND_LEVEL and len(labels[-1]) == 2:
+        keep = 3
+    if not all(labels[-keep:]):
+        return None
+    return ".".join(labels[-keep:])
+
+
+def host_brand(host: str) -> str | None:
+    """The name a host is registered under, as a key: ``mcp.posthog.com`` is ``posthog``,
+    ``foo.co.uk`` is ``foo``. None where ``registered_domain`` is."""
+    domain = registered_domain(host)
+    return (key(domain.split(".", 1)[0]) or None) if domain else None
 
 
 # scheme://[user@]host[:port][/path]: the host, and the path's first part. A regex, not
@@ -224,7 +288,7 @@ class Maker:
 
     product: str  # "PostHog"
     evidence: tuple[Evidence, ...]
-    brands: frozenset[str]  # the names on the maker's own hosts
+    domains: frozenset[str]  # the maker's own registered domains: "posthog.com"
     keys: frozenset[str]  # what other entries for the same product are titled, as keys
 
 
@@ -238,52 +302,82 @@ def maker_of(
     publisher: Publisher | None = None,
 ) -> Maker | None:
     """Whether an entry is its product maker's own. The publisher's name must be the
-    product's (or the entry's namespace is in ``KNOWN_MAKERS``); a GitHub account then
-    needs one more thing to agree: a host, the repository, or the website."""
+    product's, and the entry must connect to the maker's own host (a domain publisher's
+    host under that exact domain; a GitHub account's host registered under its name), or
+    its namespace is in ``KNOWN_MAKERS``. A repository or a website is said, never proof."""
     pub = publisher or publisher_of(name)
     if pub is None:
         return None
     keys = product_keys(name, title)
     listed = KNOWN_MAKERS.get(pub.namespace)
+    domains: set[str] = set()
     if listed is not None:
         brands = listed.brands
         if not keys & (brands | {key(listed.product)}):
             return None  # the maker's, but about something else: no mark
         product = listed.product
-    else:
+        domains |= listed.domains
+
+        def own(host: str) -> bool:
+            return registered_domain(host) in listed.domains
+    elif pub.verified == "github":
         # Only the exact name: ``posthog-hq`` is not PostHog.
-        brands = frozenset({key(pub.name)} if pub.verified == "github" else pub.brands)
+        brands = frozenset({key(pub.name)})
         if not keys & brands:
             return None
         product = title
+
+        def own(host: str) -> bool:
+            return host_brand(host) in brands
+    else:
+        # A domain proves its owner, and only that domain: ``ai.posthog`` publishing
+        # "PostHog" owns posthog.ai, which says nothing about posthog.com.
+        brands = pub.brands
+        if not keys & brands:
+            return None
+        product = title
+        proven = registered_domain(pub.name)
+        if proven is None:
+            return None
+        domains.add(proven)
+
+        def own(host: str) -> bool:
+            return registered_domain(host) == proven
+
     evidence: list[Evidence] = ["listed" if listed else "publisher"]
-    if any(host_brand(h) in brands for h in hosts):
+    mine = [d for h in hosts if own(h) and (d := registered_domain(h))]
+    if mine:
         evidence.append("remote")
+        domains.update(mine)
+    elif listed is None:
+        return None  # the publisher's name alone is not enough
+    # Said beside the proof, never instead of it. A GitHub account's repository is always
+    # its own, so for one it says nothing.
     owner = repository_owner(repository)
-    if owner and (
-        key(owner) in brands or (pub.verified == "github" and owner.lower() == pub.name.lower())
-    ):
+    if owner and pub.verified == "domain" and key(owner) in brands:
         evidence.append("repository")
     site = url_host(website)
-    if site and host_brand(site) in brands:
+    if site and own(site):
         evidence.append("website")
-    if pub.verified == "github" and not listed and len(evidence) == 1:
-        return None  # a GitHub name alone is not enough
     # Others fold under it by its title, its product's name, or the maker's own name in the
     # registry name ("atlassian" for "Atlassian Rovo"); never by another product the
     # registry name happens to mention (``com.foo/posthog`` titled "Foo" is not PostHog's).
     group = {key(title), key(product)} | (keys & brands)
-    return Maker(product, tuple(evidence), brands, frozenset(k for k in group if k))
+    return Maker(product, tuple(evidence), frozenset(domains), frozenset(k for k in group if k))
 
 
 def host_owner(host: str, *, maker: Maker | None, publisher: Publisher | None) -> HostOwner:
-    """Whose host an entry connects to: the product maker's, the publisher's, or someone
-    else's (a gateway, a shared host)."""
-    brand = host_brand(host)
-    if brand is None:
+    """Whose host an entry connects to: the product maker's (one of its own registered
+    domains, exactly: ``posthog.ai`` is not PostHog's ``posthog.com``), the publisher's,
+    or someone else's (a gateway, a shared host)."""
+    domain = registered_domain(host)
+    if domain is None:
         return "other"
-    if maker is not None and brand in maker.brands:
+    if maker is not None and domain in maker.domains:
         return "maker"
-    if publisher is not None and brand in publisher.brands:
-        return "publisher"
-    return "other"
+    if publisher is None:
+        return "other"
+    if publisher.verified == "domain":
+        # The domain the registry checked, and nothing else under the same name.
+        return "publisher" if domain == registered_domain(publisher.name) else "other"
+    return "publisher" if host_brand(host) in publisher.brands else "other"

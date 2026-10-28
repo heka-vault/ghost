@@ -384,7 +384,7 @@ def test_the_catalog_says_who_publishes_each_app_and_where_it_runs(world, tmp_pa
     own, engageable = page["entries"]
     assert own["name"] == "io.github.PostHog/mcp"
     assert own["publisher"] == {"name": "PostHog", "verified": "github"}
-    assert own["maker"] == {"product": "PostHog", "evidence": ["publisher", "remote", "repository"]}
+    assert own["maker"] == {"product": "PostHog", "evidence": ["publisher", "remote"]}
     assert own["product"] == "PostHog" and own["product_maker"] is None
     assert own["updated_at"].startswith("2026-01-07T16:34:40")
     assert own["options"][0]["host"] == "mcp.posthog.com"

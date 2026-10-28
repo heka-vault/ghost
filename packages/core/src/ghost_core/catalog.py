@@ -403,20 +403,20 @@ class Found:
     others: tuple[CatalogEntry, ...] = ()
 
 
-def group(ranked: list[CatalogEntry]) -> list[Found]:
+def group(ranked: list[CatalogEntry], makers: Mapping[str, CatalogEntry]) -> list[Found]:
     """Fold ``ranked`` (best first) by product: an entry that isn't the maker's own, whose
     title is exactly a product whose maker's own entry is also in ``ranked`` ("Posthog",
-    with PostHog's own), goes under that entry. Nothing else is grouped: two entries with
-    the same title and no maker among them stay apart. Order is kept otherwise."""
-    lead: dict[str, str] = {}  # a product's key -> the name of the maker's entry it folds under
-    for e in ranked:
-        if e.maker is not None:
-            for k in e.maker.keys:
-                lead.setdefault(k, e.name)
+    with PostHog's own), goes under that entry. The lead is the one ``makers`` (a product's
+    key -> its maker's own entry, ``Catalog._makers``) names, the same one the detail calls
+    the product's maker, whatever the search ranked first. Nothing else is grouped: two
+    entries with the same title and no maker among them stay apart. Order is kept
+    otherwise."""
+    shown = {e.name for e in ranked}
     others: dict[str, list[CatalogEntry]] = {}
     folded: set[str] = set()
     for e in ranked:
-        to = lead.get(e.product_key) if e.maker is None else None
+        lead = makers.get(e.product_key) if e.maker is None else None
+        to = lead.name if lead is not None and lead.name in shown else None
         if to is not None:
             others.setdefault(to, []).append(e)
             folded.add(e.name)
@@ -751,5 +751,5 @@ class Catalog:
                 )
             )
         hits.sort(key=lambda h: h[0])
-        found = group([e for _, e in hits])
+        found = group([e for _, e in hits], self._makers)
         return found[offset : offset + limit], len(found)

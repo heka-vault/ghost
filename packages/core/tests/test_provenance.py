@@ -15,6 +15,7 @@ from ghost_core.provenance import (
     host_owner,
     maker_of,
     publisher_of,
+    registered_domain,
     repository_owner,
     url_host,
 )
@@ -113,7 +114,7 @@ def test_of_the_six_posthog_results_only_posthogs_own_is_the_makers():
     assert len(entries) == 6
     own = entries["io.github.PostHog/mcp"]
     assert own.maker is not None and own.maker.product == "PostHog"
-    assert own.maker.evidence == ("publisher", "remote", "repository")
+    assert own.maker.evidence == ("publisher", "remote")
     for name, e in entries.items():
         if name != own.name:
             assert e.maker is None, name
@@ -175,6 +176,48 @@ def test_the_six_fold_under_posthogs_own_and_it_comes_first(tmp_path):
     assert cat.product_maker(cat.get("tech.engageable/analytics")) is None
 
 
+def test_a_look_alike_domain_with_no_remote_neither_leads_nor_folds_the_real_one(tmp_path):
+    """``ai.posthog/mcp`` titled "PostHog", with no remote and no repository, beside
+    PostHog's own: it isn't the maker's, it folds under PostHog's own like any other
+    publisher's, and PostHog's own leads."""
+    fake = record({"name": "ai.posthog/mcp", "title": "PostHog", "packages": npm("ph-mcp")})
+    cat = catalog(tmp_path, [*POSTHOG_SIX, fake])
+    assert cat.get("ai.posthog/mcp").maker is None
+    found, total = cat.search("posthog")
+    assert total == 2
+    lead = found[0]
+    assert lead.entry.name == "io.github.PostHog/mcp"
+    assert "ai.posthog/mcp" in {o.name for o in lead.others}
+    assert cat.product_maker(cat.get("ai.posthog/mcp")) is lead.entry
+
+
+def test_the_fold_leads_with_the_maker_the_detail_names(tmp_path):
+    """Two makers' own entries for one product: the search may rank either first, but the
+    others fold under the one ``product_maker`` names, so the list and the detail agree."""
+    gh = record(
+        {
+            "name": "io.github.PostHog/mcp",
+            "title": "PostHog",
+            "remotes": remote("https://mcp.posthog.com/mcp"),
+            "websiteUrl": "https://posthog.com",
+        }
+    )
+    dom = record(
+        {"name": "com.posthog/x", "title": "PostHog", "remotes": remote("https://x.posthog.com")}
+    )
+    wrapper = record({"name": "io.github.someone/posthog", "packages": npm("ph")})
+    cat = catalog(tmp_path, [gh, dom, wrapper])
+    found, _ = cat.search("posthog")
+    assert found[0].entry.name == "com.posthog/x"  # ranked first by name
+    chosen = cat.product_maker(cat.get("io.github.someone/posthog"))
+    assert chosen is not None and chosen.name == "io.github.PostHog/mcp"  # most evidence
+    folds = {f.entry.name: [o.name for o in f.others] for f in found}
+    assert folds == {
+        "com.posthog/x": [],
+        "io.github.PostHog/mcp": ["io.github.someone/posthog"],
+    }
+
+
 def test_without_the_makers_own_nothing_folds(tmp_path):
     cat = catalog(
         tmp_path, [r for r in POSTHOG_SIX if r["server"]["name"] != "io.github.PostHog/mcp"]
@@ -187,17 +230,77 @@ def test_without_the_makers_own_nothing_folds(tmp_path):
 
 
 def test_a_github_name_alone_is_not_enough():
-    """``io.github.PostHog`` publishing a package with no repository, host or website:
-    nothing agrees with the name, so no mark."""
+    """``io.github.PostHog`` publishing a package with no host of PostHog's: nothing but the
+    name agrees, so no mark. Its repository and website say nothing: every GitHub account
+    owns repositories under its own name, and anyone can write any website."""
     assert maker_of("io.github.PostHog/tool", "PostHog") is None
-    assert maker_of("io.github.PostHog/tool", "PostHog", repository="https://github.com/PostHog/x")
+    assert (
+        maker_of(
+            "io.github.PostHog/tool",
+            "PostHog",
+            repository="https://github.com/PostHog/x",
+            website="https://posthog.com",
+        )
+        is None
+    )
+    m = maker_of("io.github.PostHog/tool", "PostHog", hosts=("mcp.posthog.com",))
+    assert m is not None and m.evidence == ("publisher", "remote")
+    assert m.domains == {"posthog.com"}
 
 
-def test_a_proven_domain_is_enough():
-    m = maker_of("com.notion/mcp", "Notion")
-    assert m is not None and m.evidence == ("publisher",)
+def test_a_look_alike_github_account_with_its_own_repository_is_not_the_maker():
+    """``io.github.notion`` is a GitHub account named notion; Notion's is makenotion. Its
+    repository is its own, as every account's is: no mark."""
+    assert (
+        maker_of(
+            "io.github.notion/notion",
+            "Notion",
+            repository="https://github.com/notion/notion-mcp",
+            website="https://notion.so",
+        )
+        is None
+    )
+    real = maker_of(
+        "io.github.makenotion/notion-mcp-server",
+        "Notion",
+        repository="https://github.com/makenotion/notion-mcp-server",
+    )
+    assert real is not None and real.evidence == ("listed",)
+
+
+def test_a_proven_domain_needs_a_host_under_it():
+    assert maker_of("com.notion/mcp", "Notion") is None  # the name alone
     m = maker_of("com.notion/mcp", "Notion", hosts=("mcp.notion.com",))
     assert m is not None and m.evidence == ("publisher", "remote")
+    # The proven domain, under any subdomain: com.figma.mcp proved mcp.figma.com.
+    assert maker_of("com.figma.mcp/mcp", "Figma", hosts=("mcp.figma.com",)) is not None
+    assert maker_of("com.example/mcp", "Example", hosts=("api.example.co.uk",)) is None
+
+
+def test_the_brand_under_another_domain_ending_is_not_the_maker():
+    """``ai.posthog`` owns posthog.ai, not posthog.com. Titled "PostHog" with no remote, or
+    pointing at PostHog's own host, or at a host of its own: never the maker's own."""
+    assert maker_of("ai.posthog/mcp", "PostHog") is None
+    assert (
+        maker_of(
+            "ai.posthog/mcp",
+            "PostHog",
+            repository="https://github.com/posthog/mcp",
+            website="https://posthog.ai",
+        )
+        is None
+    )
+    assert maker_of("ai.posthog/mcp", "PostHog", hosts=("mcp.posthog.com",)) is None
+    own = maker_of("ai.posthog/mcp", "PostHog", hosts=("mcp.posthog.ai",))
+    assert own is not None and own.domains == {"posthog.ai"}  # the domain it proved
+    # Judged against PostHog's own, posthog.ai is someone else's.
+    real = maker_of("io.github.PostHog/mcp", "PostHog", hosts=("mcp.posthog.com",))
+    pub = publisher_of("ai.posthog/mcp")
+    assert host_owner("mcp.posthog.ai", maker=real, publisher=pub) == "publisher"
+    assert host_owner("mcp.posthog.com", maker=real, publisher=pub) == "maker"
+    assert host_owner("posthog.ai", maker=real, publisher=publisher_of("com.x/y")) == "other"
+    # A domain publisher's own host is the domain it proved, not another with its name.
+    assert host_owner("posthog.com", maker=None, publisher=pub) == "other"
 
 
 def test_the_publishers_name_must_be_the_products():
@@ -211,25 +314,30 @@ def test_the_publishers_name_must_be_the_products():
     )
     assert look_alike is None
     # The title or the product the name names: "Atlassian Rovo" by atlassian.com.
-    m = maker_of("com.atlassian/atlassian-mcp-server", "Atlassian Rovo")
+    m = maker_of(
+        "com.atlassian/atlassian-mcp-server", "Atlassian Rovo", hosts=("mcp.atlassian.com",)
+    )
     assert m is not None and m.product == "Atlassian Rovo" and "atlassian" in m.keys
     # The maker's own app named for another product claims nothing of that product.
     foo = maker_of("com.foo/posthog", "Foo", hosts=("mcp.foo.com",))
     assert foo is not None and foo.keys == {"foo"}
 
 
-def test_the_makers_own_on_someone_elses_host():
-    """PostHog's own entry served from a gateway: still PostHog's (its repository agrees),
-    but the host is not PostHog's."""
-    m = maker_of(
-        "io.github.PostHog/mcp",
-        "PostHog",
-        hosts=("gateway.pipeworx.io",),
-        repository="https://github.com/PostHog/posthog",
+def test_the_makers_own_name_on_someone_elses_host():
+    """PostHog's account with an entry served from a gateway: no host of PostHog's agrees,
+    so no mark; judged against PostHog's own, the gateway is not PostHog's."""
+    assert (
+        maker_of(
+            "io.github.PostHog/mcp",
+            "PostHog",
+            hosts=("gateway.pipeworx.io",),
+            repository="https://github.com/PostHog/posthog",
+        )
+        is None
     )
-    assert m is not None and m.evidence == ("publisher", "repository")
+    real = maker_of("io.github.PostHog/mcp", "PostHog", hosts=("mcp.posthog.com",))
     pub = publisher_of("io.github.PostHog/mcp")
-    assert host_owner("gateway.pipeworx.io", maker=m, publisher=pub) == "other"
+    assert host_owner("gateway.pipeworx.io", maker=real, publisher=pub) == "other"
 
 
 def test_a_shared_host_is_nobodys_brand():
@@ -247,13 +355,33 @@ def test_ghosts_own_list_names_makers_with_unusual_names():
         repository="https://github.com/getsentry/sentry-mcp",
     )
     assert sentry is not None and sentry.product == "Sentry"
-    assert sentry.evidence == ("listed", "remote", "repository")
+    assert sentry.evidence == ("listed", "remote")
     github = maker_of(
         "io.github.github/github-mcp-server", "GitHub", hosts=("api.githubcopilot.com",)
     )
     assert github is not None and github.evidence == ("listed", "remote")
     # The maker's, but about another product: no mark.
     assert maker_of("io.github.github/spaces", "Copilot Spaces") is None
+    # A maker whose own app is a package: the list is the evidence.
+    paypal = maker_of("io.github.paypal/paypal-mcp-server", "Paypal")
+    assert paypal is not None and paypal.product == "PayPal" and paypal.evidence == ("listed",)
+    # Neon proved neon.com and runs on neon.tech; both are its own.
+    neon = maker_of("com.neon/mcp", "Neon", hosts=("mcp.neon.tech",))
+    assert neon is not None and neon.evidence == ("listed", "remote")
+
+
+@pytest.mark.parametrize(
+    ("host", "domain"),
+    [
+        ("mcp.posthog.com", "posthog.com"),
+        ("api.example.co.uk", "example.co.uk"),
+        ("co.uk", "co.uk"),
+        ("x.vercel.app", None),
+        ("10.0.0.1", None),
+    ],
+)
+def test_the_registered_domain(host, domain):
+    assert registered_domain(host) == domain
 
 
 # --- grouping -------------------------------------------------------------------------

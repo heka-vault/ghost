@@ -49,26 +49,33 @@ registry name, and Ghost reads it (`ghost_core.provenance`, string rules, no mod
   was published by whoever proved they own mcparmory.com: "by mcparmory.com · verified
   domain". That says who published it, not that it is safe or does what it says.
 - **The maker's own.** An app gets "From PostHog" when its publisher's name *is* the
-  product's: the GitHub account PostHog publishing "PostHog", the owner of notion.com
-  publishing "Notion". A GitHub name alone isn't enough; something else must agree: it
-  connects to a host of the same name (`mcp.posthog.com`), its code is in the publisher's
-  repository, or its website is theirs. A proven domain is enough by itself. A short list
-  in the code names makers whose names differ from their product's (`getsentry` makes
-  Sentry, `github` runs `api.githubcopilot.com`). The registry has no "official" flag to
-  read: its own `_meta` carries only an app's status and dates. The app's detail says why
-  Ghost marked it ("Published by the GitHub account PostHog… its code is in PostHog's
-  repository and it connects to mcp.posthog.com"). The maker's own app comes first in a
-  search.
+  product's *and* it connects to the maker's own host. For a domain, that is a host under
+  the very domain the registry checked: the owner of notion.com publishing "Notion" on
+  `mcp.notion.com`. The owner of posthog.ai publishing "PostHog" is not PostHog, whose
+  domain is posthog.com. For a GitHub account, it is a host registered under the account's
+  name: the account PostHog on `mcp.posthog.com`. The publisher's name alone is never
+  enough, and neither is a repository or a website: every GitHub account owns repositories
+  under its own name, and anyone can write any website. A short list in the code names
+  makers whose names differ from their product's (`getsentry` makes Sentry, `github` runs
+  `api.githubcopilot.com`, `makenotion` is Notion), and makers checked by hand whose own app
+  is a package with no host to agree (`paypal`, `buildkite`). The registry has no
+  "official" flag to read: its own `_meta` carries only an app's status and dates. The
+  app's detail says why Ghost marked it ("Published by the GitHub account PostHog… it
+  connects to mcp.posthog.com"). The maker's own app comes first in a search.
 - **Where it runs.** An app on the internet names the host it talks to, and says so when
-  that host isn't the product maker's: "Runs on gateway.pipeworx.io, pipeworx-io's server,
+  that host isn't the product maker's: "Runs on gateway.pipeworx.io, pipeworx-io's,
   not PostHog's. What you ask of PostHog through this app passes through pipeworx-io." A
-  host anyone can rent a name on (`*.vercel.app`, `*.workers.dev`) is never the maker's. An
-  app that runs on this computer names its registry and package: npm `posthog-mcp`.
+  host is the maker's only under one of the maker's own domains, exactly (`posthog.ai` is
+  not PostHog's `posthog.com`), and a host anyone can rent a name on (`*.vercel.app`,
+  `*.workers.dev`) is never the maker's. An app that runs on this computer names its
+  registry and package: npm `posthog-mcp`.
 - **The same product, folded.** Other publishers' apps whose title is exactly the
   product's ("Posthog", "PostHog") fold under the maker's own: "4 more from other
   publishers". Nothing else folds: an app with another title ("Linear by usefulapi",
   "Engageable Analytics") stands on its own, and so do look-alikes when the maker has no
-  app of its own in the results.
+  app of its own in the results. When a product has more than one app of its maker's own,
+  the others fold under the one the app's detail names as the maker's, whichever the
+  search ranks first.
 
 Before you connect, the app's detail shows all of this with its repository, its website,
 its version and when the registry last saw it change.
