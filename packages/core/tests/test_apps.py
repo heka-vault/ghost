@@ -572,3 +572,35 @@ async def test_add_and_remove_tell_their_listeners():
     assert seen == ["changed"] and apps.state("x") == "failed"
     await apps.remove("x")
     assert seen == ["changed", "changed"] and "x" not in apps.specs
+
+
+# --- passwords (ADR 0036) --------------------------------------------------------------
+
+
+async def test_a_password_an_app_echoes_is_replaced_before_anything_reads_it(tmp_path):
+    from ghost_core import passwords as pw
+    from ghost_core.passwords import MemoryKeyring, Passwords
+
+    token = "ghp_echoedBackByTheApp0123"
+    vault = Passwords(tmp_path / "passwords.vault", MemoryKeyring())
+    assert vault.open()
+    vault.set("GITHUB_TOKEN", token)
+    try:
+        world = World()
+        world.issues[("acme", "app", 42)]["title"] = f"Leaked {token} in the logs"
+        async with connected(world) as (app, _):
+            read = next(t for t in app.read_tools() if t.name == "github_issue_read")
+            out = await read.handler({"owner": "acme", "repo": "app", "issue_number": 42})
+            assert out["title"] == "Leaked [password: GITHUB_TOKEN] in the logs"
+            args = {"owner": "acme", "repo": "app", "issue_number": 42}
+            assert token not in str(await app.watch_read("issue_read", args))
+
+            gate = gate_for(app)
+            sub = await change(gate, app, "add_issue_comment", {**args, "body": f"key {token}"})
+            assert sub.outcome.status == "success"
+            stored = gate._store.get_proposal(sub.proposal.id)  # noqa: SLF001
+            assert token not in stored.model_dump_json()
+            assert "[password: GITHUB_TOKEN]" in stored.model_dump_json()
+    finally:
+        pw._REDACTOR._sets.clear()
+        pw._REDACTOR._pairs = ()

@@ -10,6 +10,8 @@ dependencies = [
     "loguru>=0.7",
     "mcp>=1.2",
     "pyyaml>=6",
+    "cryptography>=44",
+    "secretstorage>=3.3",
 ]
 
 [project.scripts]

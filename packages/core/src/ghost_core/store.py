@@ -15,6 +15,7 @@ from loguru import logger
 
 from ghost_core.codec import dump_proposal, load_proposal
 from ghost_core.models import Proposal, ProposalStatus, utcnow
+from ghost_core.passwords import redact, redact_text
 
 if TYPE_CHECKING:
     from ghost_core.conversations.models import Compaction, Profile, TurnRecord
@@ -199,7 +200,7 @@ class Store:
                 p.status.value,
                 p.created_at.isoformat(),
                 p.expires_at.isoformat(),
-                dump_proposal(p),
+                _sealed(dump_proposal(p)),
             ),
         )
 
@@ -378,7 +379,12 @@ class Store:
     def event(self, proposal_id: str, event: str, detail: dict[str, object] | None = None) -> None:
         self._conn.execute(
             "INSERT INTO operation_events (proposal_id, at, event, detail) VALUES (?, ?, ?, ?)",
-            (proposal_id, utcnow().isoformat(), event, json.dumps(detail) if detail else None),
+            (
+                proposal_id,
+                utcnow().isoformat(),
+                event,
+                json.dumps(redact(detail)) if detail else None,
+            ),
         )
 
     def events(self, proposal_id: str) -> list[tuple[str, str, dict[str, object] | None]]:
@@ -441,9 +447,9 @@ class Store:
             (
                 key,
                 source,
-                title,
+                redact_text(title),
                 link,
-                json.dumps(fields, sort_keys=True),
+                json.dumps(redact(fields), sort_keys=True),
                 response,
                 at,
                 at,
@@ -582,7 +588,7 @@ class Store:
     def add_turn(self, conversation: str, session_id: str, role: str, text: str) -> int:
         cur = self._conn.execute(
             "INSERT INTO turns (conversation, session_id, role, text, at) VALUES (?, ?, ?, ?, ?)",
-            (conversation, session_id, role, text, utcnow().isoformat()),
+            (conversation, session_id, role, redact_text(text), utcnow().isoformat()),
         )
         return int(cur.lastrowid or 0)
 
@@ -652,7 +658,14 @@ class Store:
         self._conn.execute(
             "INSERT INTO compactions (id, conversation, summary, through_turn_id, at, source)"
             " VALUES (?, ?, ?, ?, ?, ?)",
-            (c.id, c.conversation, c.summary, c.through_turn_id, c.at.isoformat(), c.source),
+            (
+                c.id,
+                c.conversation,
+                redact_text(c.summary),
+                c.through_turn_id,
+                c.at.isoformat(),
+                c.source,
+            ),
         )
 
     def compactions(self, conversation: str, *, limit: int = 50) -> list[Compaction]:
@@ -680,6 +693,12 @@ _ITEM_COLS = (
     "key, source, title, link, fields, response, first_seen, last_seen,"
     " changed_at, resolved_at, delivered_at, delivered_via, acknowledged_at, snoozed_until"
 )
+
+
+def _sealed(body: str) -> str:
+    """A proposal's stored body with every password replaced (ADR 0036): the audit never
+    holds one, even where the operator dictated it into a change."""
+    return json.dumps(redact(json.loads(body)))
 
 
 def _item(row) -> dict[str, object]:

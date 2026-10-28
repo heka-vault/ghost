@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from ghost_core.models import Change, ChangeSet, Snapshot, Target
+from ghost_core.passwords import redact, redact_text
 from ghost_core.request import number_mentions, words
 
 if TYPE_CHECKING:  # source imports policy; keep the runtime edge lazy
@@ -450,7 +451,10 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
     text. ``_trim`` sizes it for the model."""
     if getattr(result, "is_error", False):
         texts = [getattr(c, "text", "") for c in getattr(result, "content", []) or []]
-        raise ToolError(" ".join(t for t in texts if t) or "the tool reported an error")
+        # An app's error is its text too: a password in it is replaced (ADR 0036).
+        raise ToolError(
+            redact_text(" ".join(t for t in texts if t)) or "the tool reported an error"
+        )
     structured = getattr(result, "structured_content", None)
     if structured:
         return dict(structured) if isinstance(structured, Mapping) else {"result": structured}
@@ -783,7 +787,7 @@ class App:
         self.tools = [
             ToolInfo(
                 name=t.name,
-                description=t.description or t.name,
+                description=redact_text(t.description or t.name),
                 schema=dict(t.input_schema or {}),
                 read_only=bool(getattr(t.annotations, "read_only_hint", False))
                 if t.annotations
@@ -825,7 +829,9 @@ class App:
             raise ToolError(f"{name} failed: {type(e).__name__}") from None
         finally:
             logger.debug(f"app {self.spec.name}: {name} {time.perf_counter() - began:.2f}s")
-        data = _result_to_dict(result)
+        # Every password Ghost holds is replaced before anything reads the result: the
+        # model, the audit, a watch (ADR 0036).
+        data = redact(_result_to_dict(result))
         return _trim(data) if trim else data
 
     # --- what the model gets -----------------------------------------------------------
