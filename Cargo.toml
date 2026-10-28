@@ -52,6 +52,18 @@ rustix = { version = "1", features = ["fs"] }
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
 schemars = "1"
 rand = "0.9"
+# The control API's OpenAPI document (ADR 0013), generated from the Rust types; the TS client
+# is generated from that.
+utoipa = { version = "6", features = ["axum_extras", "chrono"] }
+utoipa-axum = "0.3"
+# A client of the socket (`ghostd status|wake|say|sleep`), the way the Tauri shell reaches it.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+hyperlocal = "0.9"
+serde_path_to_error = "0.1"
+tower = { version = "0.5", features = ["util"] }
+tokio-tungstenite = "0.29"
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location

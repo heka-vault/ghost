@@ -1,16 +1,16 @@
-//! `ghostd run`: the daemon. `ghostd status`: a client of its socket.
+//! `ghostd run`: the daemon. `ghostd status|wake|say|sleep`: clients of its socket.
 //!
 //! W1 of heka-vault/ghost#39: the daemon starts, opens the control socket and answers
-//! `/status` with `starting`. Everything else arrives package by package.
+//! `/status` with `starting`. W3 gave it the whole control API over a `Deps` with nothing
+//! behind it yet; the pipeline, the apps and the folder arrive package by package.
 
 use std::sync::Arc;
 
 use anyhow::Context;
 use ghost_api::server::{default_socket_path, serve};
-use ghost_api::{DaemonState, router};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
-use tokio::sync::RwLock;
+use ghost_api::{DaemonState, Deps, GhostClient, Unavailable, router};
+use ghost_core::gate::WriteGate;
+use ghost_core::store::Store;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -27,21 +27,34 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None | Some("run") => run(),
-        Some("status") => status(),
+        Some("status") => client("status", &args[1..]),
+        Some("wake") => client("wake", &args[1..]),
+        Some("say") => client("say", &args[1..]),
+        Some("sleep") => client("sleep", &args[1..]),
+        Some("api-schema") => {
+            let doc = ghost_api::openapi::document();
+            println!("{}", serde_json::to_string_pretty(&doc)?);
+            Ok(())
+        }
         Some("--version" | "version") => {
             println!("ghostd {VERSION}");
             Ok(())
         }
-        Some(other) => anyhow::bail!("unknown command {other:?}; commands: run, status, version"),
+        Some(other) => anyhow::bail!(
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, api-schema, version"
+        ),
     }
 }
 
 #[tokio::main]
 async fn run() -> anyhow::Result<()> {
     let wake_mode = std::env::var("GHOST_WAKE_MODE").unwrap_or_else(|_| "transcript".into());
-    let state = Arc::new(RwLock::new(DaemonState::new(VERSION, wake_mode)));
+    let state = Arc::new(DaemonState::new(VERSION, wake_mode));
+    let store = Arc::new(Store::in_memory().context("opening the store")?);
+    let gate = Arc::new(WriteGate::new(store.clone()));
+    let deps = Arc::new(Deps::minimal(state, Arc::new(Unavailable), store, gate));
     info!("ghostd {VERSION} starting");
-    serve(&default_socket_path(), router(state), shutdown_signal()).await?;
+    serve(&default_socket_path(), router(deps), shutdown_signal()).await?;
     info!("ghostd stopped");
     Ok(())
 }
@@ -57,22 +70,28 @@ async fn shutdown_signal() {
     }
 }
 
-/// One GET over the socket, the body printed as the daemon sent it.
+/// One call over the socket, the body printed as the daemon sent it.
 #[tokio::main]
-async fn status() -> anyhow::Result<()> {
+async fn client(cmd: &str, args: &[String]) -> anyhow::Result<()> {
     let path = default_socket_path();
-    let mut stream = UnixStream::connect(&path)
-        .await
-        .with_context(|| format!("ghostd not reachable on {}", path.display()))?;
-    stream
-        .write_all(b"GET /status HTTP/1.1\r\nHost: ghost\r\nConnection: close\r\n\r\n")
-        .await?;
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await?;
-    let text = String::from_utf8_lossy(&raw);
-    let body = text
-        .split_once("\r\n\r\n")
-        .map_or(text.as_ref(), |(_, b)| b);
-    println!("{body}");
+    let client = GhostClient::new(&path);
+    let text = args.join(" ");
+    let out = match cmd {
+        "status" => client.status().await,
+        "wake" => {
+            client
+                .wake((!text.is_empty()).then_some(text.as_str()))
+                .await
+        }
+        "say" => {
+            if text.is_empty() {
+                anyhow::bail!("say what? ghostd say <words>");
+            }
+            client.say(&text).await
+        }
+        _ => client.sleep().await,
+    }
+    .with_context(|| format!("ghostd {cmd} on {}", path.display()))?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())
 }

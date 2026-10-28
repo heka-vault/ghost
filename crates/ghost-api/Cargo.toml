@@ -7,15 +7,39 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "ghost-api-export"
+path = "src/bin/ghost-api-export.rs"
+
 [dependencies]
+ghost-core.workspace = true
+
 anyhow.workspace = true
+thiserror.workspace = true
 axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_path_to_error.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 zeroize.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+indexmap.workspace = true
+regex.workspace = true
+toml.workspace = true
+url.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+hyperlocal.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+ghost-core = { workspace = true, features = ["fakes"] }
+tempfile.workspace = true
+tower.workspace = true
+tokio-tungstenite.workspace = true
+wiremock.workspace = true

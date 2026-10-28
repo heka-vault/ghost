@@ -13,6 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 ghost-api.workspace = true
+ghost-core.workspace = true
+
+serde_json.workspace = true
 
 anyhow.workspace = true
 tokio.workspace = true
