@@ -36,7 +36,7 @@ write_dropin() {
   [[ -n "${GHOST_RUNTIME_DIR:-}" ]] && cur="$RUNTIME/current"
   cat > "$DROPIN.tmp" <<EOF
 # Written by scripts/deploy.sh: the service runs the build in $RUNTIME/current.
-# \`scripts/deploy.sh off\` (make deploy-off) removes this file.
+# \`scripts/deploy.sh off\` removes this file.
 [Service]
 WorkingDirectory=%h
 ExecStartPre=

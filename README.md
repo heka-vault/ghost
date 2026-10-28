@@ -30,26 +30,28 @@ with [docs/architecture.md](docs/architecture.md) and the decisions in [docs/adr
 Needs Python 3.12 (via `uv`) and PipeWire with the PulseAudio shim.
 
 ```bash
-make sync            # uv workspace
-make echo-cancel     # echo-cancelled mic "ghost.mic" as a user service; without it Ghost hears itself
-make env             # render ~/.config/ghost/env from the secrets store (or: cp .env.example .env and fill it in)
-make check           # config sanity
-make run             # loads models (~3 s warm), then listens for "hey ghost"; Ctrl+C stops it
-make wake            # optional, from another shell: trigger a wake by hand
+make setup           # once: uv workspace, pnpm install, secrets from the store, the echo-cancelled mic "ghost.mic"
+make dev             # the daemon and the desktop app from this checkout, logging to this terminal; Ctrl+C stops both
+make reload          # from another terminal, after a Python change: restarts the daemon, not the app
 ```
+
+The desktop UI reloads on save and a Rust change rebuilds the window; only Python needs
+`make reload`. `make daemon` and `make desktop` run one half each, in two terminals if you
+prefer. Only one Ghost may have the microphone, so `make dev` stops the `ghostd` user
+service (your always-on Ghost, below) and `make service-on` starts it again.
 
 Say "Hey Ghost", or "Ghost, you there?" (`GHOST_WAKE_PHRASES` to change them; phonetic
 near-misses such as "hey guys" count too, `GHOST_WAKE_FUZZY=0` for exact only). Words
 in the same breath are the first request: "hey ghost, what needs me?".
 
-When Ghost does not react the way you expect, run `GHOST_DEBUG_AUDIO=1 make run`: it
+When Ghost does not react the way you expect, run `GHOST_DEBUG_AUDIO=1 make daemon`: it
 logs what Parakeet heard (also while passive), VAD starts and stops, wake matches and
 misses, barge-in decisions, and confirmation verdicts. It is off by default and logs
 only to your terminal.
 
 While it runs, `make status` shows the daemon's state and `make say TEXT="..."` types a turn
 to it through the control socket (`$XDG_RUNTIME_DIR/ghost/api.sock`), which is what the
-desktop app uses. `make help` lists the rest (`test`, `lint`, `start`/`stop` for a background daemon,
+desktop app uses. `make help` lists the rest, grouped by what you are doing (`ci` before a push, `start`/`stop` for a background daemon,
 `~/.config/ghost/settings.env`, which `make env` seeds and folds into the rendered file.
 
 The model is reached through `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN` by default.
@@ -124,10 +126,9 @@ log, skills and settings. It follows the system's light or dark theme.
 The prototypes are designs for screens in the [charter](docs/original/prd.md) that have no
 API yet; they render only with mock data. Screenshots are taken from the mock scenarios.
 
-Nothing needs installing to work on it: run the daemon from the checkout (`make run`) and
-either `make desktop-dev` (the Tauri window with hot reload) or `make desktop-web` (the same
-UI in a browser; Vite proxies the socket). Both talk to whichever daemon owns the socket,
-packaged or not. In development, `?mock=<scenario>` (for example `?mock=pending` or
+Nothing needs installing to work on it: `make dev` runs the daemon and the Tauri window
+from the checkout, and `make desktop-web` serves the same UI in a browser (Vite proxies the
+socket). Both talk to whichever daemon owns the socket. In development, `?mock=<scenario>` (for example `?mock=pending` or
 `?mock=busy`) runs the UI against a built-in mock daemon instead, and `#/gallery` shows every
 component in every state. The design rules are in
 [docs/design-system.md](docs/design-system.md). `make deb` builds the installable packages.
@@ -135,7 +136,8 @@ component in every state. The design rules are in
 To try a commit as your real Ghost, `make deploy` builds HEAD into
 `~/.local/share/ghost/runtime/<commit>/`, runs `ghostd check` against `~/.config/ghost`, and
 only then switches the `ghostd` user service to it and restarts it; no root and no .deb.
-`make deploy-rollback` goes back to the build before, `make deploy-off` back to the package.
+`make deploy-rollback` goes back to the build before. `make service-on` and `make service-off`
+start and stop it, at login too.
 
 Changes go to `main` through pull requests; the `ci` workflow (lint, tests, schema and client
 current, typecheck, the desktop build and the Tauri shell) must pass before one merges.
