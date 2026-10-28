@@ -69,8 +69,14 @@ def main(argv: list[str]) -> int:
     m.add_argument("--out", type=Path, default=None)
 
     lm = sub.add_parser("llm", help="model and endpoint TTFB with Ghost's real prompt and tools")
-    lm.add_argument("--model", default="claude-sonnet-5-5,claude-haiku-5-5")
-    lm.add_argument("--endpoint", default="current", help="current, proxy, openrouter, +sysbp")
+    lm.add_argument(
+        "--model",
+        default="",
+        help="for a named endpoint (default: Claude Sonnet and Haiku, or the provider's own)",
+    )
+    lm.add_argument(
+        "--endpoint", default="current", help="current, proxy, openrouter, a provider id, +sysbp"
+    )
     lm.add_argument("--openrouter-models", default="", help="non-Anthropic models via OpenRouter")
     lm.add_argument("--thinking", default="between_tools")
     lm.add_argument("--n", type=int, default=4)
