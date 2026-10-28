@@ -260,6 +260,29 @@ def test_disconnecting_forgets_only_that_apps_own_keys(world, tmp_path, monkeypa
     assert "GHOST_APP_WORK_MINE" in left  # the entry never named it
 
 
+def test_disconnecting_while_the_keyring_is_locked_changes_nothing(world, tmp_path, monkeypatch):
+    """Its passwords would stay behind in a vault Ghost can't open: refused, said why."""
+    client, deps, _ = with_apps(world, tmp_path, monkeypatch)
+    r = client.post(
+        "/apps",
+        json={"url": "https://mcp.example.com/mcp", "name": "work", "values": {"key": "k1"}},
+    )
+    assert r.status_code == 200, r.text
+    deps.passwords.keyring.locked = True
+    assert not deps.passwords.open()
+    r = client.delete("/apps/work")
+    assert r.status_code == 423 and "locked" in r.json()["detail"]
+    assert "work" in deps.apps.specs
+    deps.passwords.keyring.locked = False
+    assert deps.passwords.open()
+    assert client.delete("/apps/work").status_code == 200
+    assert "GHOST_APP_WORK_KEY" not in deps.passwords.names()
+    # An app with no passwords of Ghost's disconnects whatever the keyring says.
+    deps.passwords.keyring.locked = True
+    assert not deps.passwords.open()
+    assert client.delete("/apps/github").status_code == 200
+
+
 def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
     """``my-app`` and ``my_app`` keep their keys under the same names."""
     client, deps, _ = with_apps(world, tmp_path, monkeypatch)

@@ -698,7 +698,7 @@ class VaultView(BaseModel):
 
 class PasswordInfo(BaseModel):
     name: str  # what config files call it: ${NAME}
-    set: bool  # in the vault
+    set: bool | None  # in the vault; None while the vault is closed (locked): unknown
     used_by: list[str] = []  # "The model connection", "GitHub" (an app), "Webhook ci"
     ghost: bool = False  # one Ghost itself reads; a new value applies at its next start
     added: datetime | None = None
@@ -942,7 +942,8 @@ class ModelDraft(BaseModel):
     one), and a key typed but not saved yet, used for this one request and dropped."""
 
     values: dict[str, str | None] = {}
-    password_value: str | None = Field(default=None, max_length=4096)
+    # write-only, like PasswordSet.value: never echoed, not even in a validation error
+    password_value: SecretStr | None = Field(default=None, max_length=4096)
 
 
 class ModelOptionView(BaseModel):

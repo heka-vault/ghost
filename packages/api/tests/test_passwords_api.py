@@ -89,7 +89,10 @@ def test_unlock_opens_the_vault_and_the_daemon_follows(world):
     assert not deps.passwords.open()
     v = client.get("/passwords").json()
     assert v["vault"] == {**v["vault"], "state": "locked", "problem": "Your keyring is locked"}
-    assert all(not p["set"] for p in v["passwords"])
+    # Whether each is set can't be known while it's locked: unknown, never "not set".
+    assert all(p["set"] is None for p in v["passwords"])
+    r = client.delete("/passwords/HF_TOKEN")
+    assert r.status_code == 423 and "Unlock" in r.json()["detail"]
     v = client.post("/passwords/unlock").json()
     assert v["vault"]["state"] == "open" and rows(v)["HF_TOKEN"]["set"] is True
     assert ("passwords_opened",) in control.calls
@@ -114,3 +117,65 @@ def test_import_moves_the_plaintext_files_into_the_vault(world):
     assert not deps.env_path.exists() and not (config / "apps.env").exists()
     assert read_env(deps.settings_path) == {"ANTHROPIC_BASE_URL": "http://proxy:8317"}
     assert deps.passwords.value("ANTHROPIC_AUTH_TOKEN") == TOKEN
+
+
+def test_settings_never_shows_or_writes_a_password(world):
+    """settings.env is plain text: PUT /settings refuses a password under ``values`` and
+    GET /settings never returns one, whatever it is called (ADR 0036, ADR 0037)."""
+    client, *_, deps = world
+
+    class FakeApps:
+        specs = {
+            "proxy": AppSpec(
+                name="proxy", title="Proxy", url="http://x", headers={"A": "${PROXY_ACCESS}"}
+            )
+        }
+
+        def is_up(self, name):
+            return True
+
+    deps.apps = FakeApps()
+    deps.settings_path.write_text("GHOST_LLM_PASSWORD=MY_MODEL\n")
+    for name in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "LLM_API_KEY",
+        "PROXY_ACCESS",  # an app's ${NAME}, not shaped like a password
+        "MY_MODEL",  # the one the model connection names
+        "MCP_PROXY_KEY",  # shaped like one
+        "GHOST_APP_MOBBIN_KEY",
+    ):
+        r = client.put("/settings", json={"values": {name: "sk-the-value-0123456789"}})
+        assert r.status_code == 422, name
+        assert "sk-the-value-0123456789" not in r.text and "Passwords" in r.json()["detail"]
+    assert read_env(deps.settings_path) == {"GHOST_LLM_PASSWORD": "MY_MODEL"}
+
+    # One already written there by hand never comes back, and may be taken out.
+    deps.passwords.set("HAND_ADDED", "hand-added-0123456789")
+    deps.settings_path.write_text(
+        "GHOST_LLM_PASSWORD=MY_MODEL\nMCP_PROXY_KEY=proxy-key-0123456789\n"
+        "OPENAI_API_KEY=sk-openai-0123456789\nPROXY_ACCESS=proxy-access-0123456\n"
+        "MY_MODEL=my-model-key-0123456\nHAND_ADDED=hand-added-0123456789\n"
+        "GHOST_REPOS=acme/app\n"
+    )
+    r = client.get("/settings")
+    assert r.json()["values"] == {"GHOST_LLM_PASSWORD": "MY_MODEL", "GHOST_REPOS": "acme/app"}
+    for leaked in ("proxy-key", "sk-openai", "proxy-access", "my-model-key", "hand-added"):
+        assert leaked not in r.text
+    r = client.put("/settings", json={"values": {"MCP_PROXY_KEY": None}})
+    assert r.status_code == 200 and "MCP_PROXY_KEY" not in read_env(deps.settings_path)
+    assert "proxy-access" not in r.text
+
+
+def test_no_validation_error_echoes_what_was_sent(world):
+    """FastAPI's 422 carries each error's input; Ghost's says where and why only."""
+    client, *_ = world
+    typed = "sk-typed-" + "k" * 5000
+    r = client.post("/model/models", json={"values": {}, "password_value": typed})
+    assert r.status_code == 422 and "sk-typed-" not in r.text
+    assert r.json()["detail"][0]["loc"] == ["body", "password_value"]
+    r = client.put("/settings", json={"secrets": {"GITHUB_TOKEN": ["ghp_inside_a_list_0123"]}})
+    assert r.status_code == 422 and "ghp_inside_a_list" not in r.text
+    r = client.put("/passwords/A_TOKEN", json={"value": {"nested": "ghp_nested_value_0123"}})
+    assert r.status_code == 422 and "ghp_nested_value" not in r.text
+    assert set(r.json()["detail"][0]) == {"type", "loc", "msg"}

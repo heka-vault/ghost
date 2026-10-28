@@ -262,16 +262,18 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         if secrets:
             save_passwords(deps, dict(secrets))
 
-    def forget_secrets(spec: AppSpec) -> None:
+    def own_secrets(spec: AppSpec) -> list[str]:
         """The passwords Ghost kept for this app: the ``GHOST_APP_`` names its own entry
         refers to and no other app's does. A name the operator chose themselves stays, and
         so does every other app's (``github-2``'s are not ``github``'s)."""
         others = {n for s in deps.apps.specs.values() if s.name != spec.name for n in s.secrets()}
+        return [k for k in spec.secrets() if k.startswith("GHOST_APP_") and k not in others]
+
+    def forget_secrets(spec: AppSpec) -> None:
         vault = deps.passwords
-        if vault is None or not vault.is_open:
+        if vault is None:
             return
-        gone = [k for k in spec.secrets() if k.startswith("GHOST_APP_") and k not in others]
-        gone = [k for k in gone if k in vault]
+        gone = [k for k in own_secrets(spec) if k in vault]
         if gone:
             save_passwords(deps, dict.fromkeys(gone))
 
@@ -414,6 +416,15 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
         spec = deps.apps.specs.get(name)
         if spec is None:
             raise HTTPException(404, f"no app called {name!r}")
+        vault = deps.passwords
+        if vault is not None and not vault.is_open and own_secrets(spec):
+            # Its passwords would stay behind in a vault Ghost can't open now: nothing
+            # changes until it can.
+            raise HTTPException(
+                423,
+                "Your keyring is locked, so Ghost can't forget this app's passwords."
+                " Unlock it on Settings › Passwords, then disconnect again.",
+            )
         save([], remove=name)  # first: a file that won't take the change leaves it connected
         await deps.apps.remove(name)
         if deps.signins is not None:

@@ -2050,7 +2050,7 @@ export interface components {
             /** Name */
             name: string;
             /** Set */
-            set: boolean;
+            set: boolean | null;
             /** Updated */
             updated?: string | null;
             /**

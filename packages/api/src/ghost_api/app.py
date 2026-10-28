@@ -73,7 +73,13 @@ from ghost_api.models import (
     WatchInfo,
     WatchingView,
 )
-from ghost_api.passwords import referenced, revive_apps_using, save_passwords, secret_states
+from ghost_api.passwords import (
+    password_check,
+    referenced,
+    revive_apps_using,
+    save_passwords,
+    secret_states,
+)
 from ghost_api.state import DaemonState, now
 
 
@@ -316,6 +322,7 @@ def create_app(deps: Deps) -> FastAPI:
         ),
     )
     st = deps.state
+    _no_input_in_validation_errors(app)
 
     def status() -> Status:
         return status_snapshot(deps)
@@ -773,8 +780,10 @@ def create_app(deps: Deps) -> FastAPI:
     def settings_view() -> SettingsView:
         # ``values`` is whatever non-secret keys settings.env holds; the desktop app owns
         # the list it offers. The passwords are the vault's (ADR 0036): set or not, never
-        # a value.
-        values = {k: v for k, v in read_env(deps.settings_path).items() if k not in SECRET_KEYS_SET}
+        # a value. A password written into settings.env by hand is never shown; the
+        # waiting list asks for its import.
+        is_password = password_check(deps)
+        values = {k: v for k, v in read_env(deps.settings_path).items() if not is_password(k)}
         names = [*SECRET_KEYS, *sorted(referenced(deps) - SECRET_KEYS_SET)]
         return SettingsView(
             settings_path=str(deps.settings_path),
@@ -791,9 +800,18 @@ def create_app(deps: Deps) -> FastAPI:
         applied: list[str] = []
         try:
             if update.values:
-                bad = [k for k in update.values if k in SECRET_KEYS_SET]
+                # settings.env is plain text: a password never goes there (ADR 0036). One
+                # written there by hand may be taken out (None).
+                is_password = password_check(deps)
+                bad = sorted(
+                    k for k, v in update.values.items() if v is not None and is_password(k)
+                )
                 if bad:
-                    raise HTTPException(422, f"{bad} are secrets; send them under 'secrets'")
+                    raise HTTPException(
+                        422,
+                        f"{', '.join(bad)} {'are passwords' if len(bad) > 1 else 'is a password'};"
+                        " save it on Settings › Passwords",
+                    )
                 update_env(deps.settings_path, update.values, mode=0o600)
                 applied = deps.control.apply_settings(update.values)
             if update.secrets:
@@ -890,6 +908,20 @@ def create_app(deps: Deps) -> FastAPI:
             st.bus.unsubscribe(q)
 
     return app
+
+
+def _no_input_in_validation_errors(app: FastAPI) -> None:
+    """A 422 from a request body says where and why, never what was sent: FastAPI's own
+    answer carries each error's ``input``, which may be a password (ADR 0036)."""
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+    from starlette.requests import Request
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = [{k: e[k] for k in ("type", "loc", "msg") if k in e} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
 
 SECRET_KEYS_SET = frozenset(

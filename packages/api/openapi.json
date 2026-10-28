@@ -1773,8 +1773,10 @@
           "password_value": {
             "anyOf": [
               {
+                "format": "password",
                 "maxLength": 4096,
-                "type": "string"
+                "type": "string",
+                "writeOnly": true
               },
               {
                 "type": "null"
@@ -2325,8 +2327,15 @@
             "type": "string"
           },
           "set": {
-            "title": "Set",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set"
           },
           "updated": {
             "anyOf": [

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,15 @@ from fastapi import FastAPI, HTTPException
 from ghost_core.connection import PASSWORD_NAMES, ModelConnection
 from ghost_core.envfile import read_env
 from ghost_core.password_import import import_passwords, sources
-from ghost_core.passwords import GHOST_USES, Passwords, VaultClosed, check_name, check_value
+from ghost_core.passwords import (
+    GHOST_USES,
+    Passwords,
+    VaultClosed,
+    check_name,
+    check_value,
+    is_password_name,
+    password_names,
+)
 from loguru import logger
 
 from ghost_api.models import (
@@ -94,12 +102,23 @@ def referenced(deps: Any) -> set[str]:
     return set(used_by(deps)) | {"GITHUB_TOKEN"}
 
 
+def password_check(deps: Any) -> Callable[[str], bool]:
+    """Whether a settings.env key is a password, so ``/settings`` neither shows nor writes
+    it (ADR 0036): one Ghost, an app or a webhook names, any model provider's, one shaped
+    like a password, or one the vault or a plaintext file not imported yet holds."""
+    named = referenced(deps) | PASSWORD_NAMES | password_names()
+    vault: Passwords | None = deps.passwords
+    held = set(vault.names()) if vault is not None and vault.is_open else set()
+    return lambda k: is_password_name(k, named) or k in held
+
+
 def passwords_view(deps: Any) -> PasswordsView:
     vault: Passwords | None = deps.passwords
     if vault is None:
         raise HTTPException(503, "the vault is not available")
     uses = used_by(deps)
-    meta = {m.name: m for m in vault.info()} if vault.is_open else {}
+    is_open = vault.is_open
+    meta = {m.name: m for m in vault.info()} if is_open else {}
     # The keys of model providers not in use are listed once they're set (ADR 0037).
     settings = read_env(deps.settings_path)
     idle = (PROVIDER_ONLY - {model_password(settings)}) - set(meta)
@@ -111,7 +130,7 @@ def passwords_view(deps: Any) -> PasswordsView:
         rows.append(
             PasswordInfo(
                 name=name,
-                set=m is not None,
+                set=(m is not None) if is_open else None,  # unknown while it's closed
                 used_by=uses.get(name, []),
                 ghost=name in GHOST_USES and name != "GITHUB_TOKEN",
                 added=m.added if m else None,
@@ -191,7 +210,13 @@ def add_password_routes(app: FastAPI, deps: Any) -> None:
     @app.delete("/passwords/{name}", response_model=PasswordResult, tags=["passwords"])
     async def delete_password(name: str) -> PasswordResult:
         vault: Passwords | None = deps.passwords
-        if vault is None or name not in vault:
+        if vault is None:
+            raise HTTPException(503, "the vault is not available")
+        if not vault.is_open:  # whether it is there can't be known yet
+            raise HTTPException(
+                423, f"{vault.problem or 'The vault is closed'}. Unlock it, then try again."
+            )
+        if name not in vault:
             raise HTTPException(404, f"no password called {name}")
         restart = save_passwords(deps, {name: None})
         return PasswordResult(passwords=passwords_view(deps), restart_required=restart)

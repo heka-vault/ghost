@@ -85,7 +85,7 @@ def model_env(deps: Deps, draft: ModelDraft | None = None, *, use: bool = False)
     if not name:
         return env
     if draft is not None and draft.password_value:
-        env[name] = draft.password_value
+        env[name] = draft.password_value.get_secret_value()
         return env
     vault: Passwords | None = deps.passwords
     if vault is not None and vault.is_open and name in vault:
