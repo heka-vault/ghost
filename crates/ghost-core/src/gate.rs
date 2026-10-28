@@ -404,7 +404,7 @@ impl WriteGate {
         proposal.autonomy = autonomy.as_str().to_string();
         proposal.conversation = req.conversation.clone();
         proposal.asked_by = req.asked_by.clone();
-        proposal.expires_at = utcnow() + self.pending_ttl();
+        proposal.expires_at = proposal.created_at + self.pending_ttl();
         self.store.insert_proposal(&proposal)?;
         self.store.event(
             &proposal.id,

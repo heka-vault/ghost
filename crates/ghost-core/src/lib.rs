@@ -19,9 +19,11 @@ pub mod permissions;
 pub mod policy;
 pub mod redact;
 pub mod request;
+pub mod routes;
 pub mod source;
 pub mod store;
 pub mod time;
+pub mod waiting;
 
 pub use confirmation::{
     ConfirmationClassifier, ConfirmationContext, RegexClassifier, Verdict, classify_confirmation,
@@ -37,8 +39,10 @@ pub use permissions::{Mode, Permissions, Rule};
 pub use policy::{AutonomyPolicy, PolicyError};
 pub use redact::{also_redact, child_env, password_names, redact_json, redact_text};
 pub use request::{asked_for, number_mentions, words};
+pub use routes::{RouteEngine, RouteError, RoutePolicy, SpokenDigest};
 pub use source::{
     Event, EventKind, EventListener, Handled, Operation, Prepared, ReadTool, Slot, ToolSource,
     TurnInterceptor, UserTurn, Writer,
 };
 pub use store::Store;
+pub use waiting::{Items, WaitingError, WaitingList};
