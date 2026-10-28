@@ -4,13 +4,13 @@ plugins {
 }
 
 group = 'dev.heka.ghost'
-version = '0.1.0'
+version = '2026.10.0'
 
 android {
   namespace "dev.heka.ghost.call"
   defaultConfig {
     versionCode 1
-    versionName '0.1.0'
+    versionName '2026.10.0'
   }
 }
 

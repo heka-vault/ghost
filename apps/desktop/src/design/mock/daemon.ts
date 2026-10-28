@@ -44,7 +44,7 @@ import type {
 } from "@ghost/client-ts";
 import { pairLink } from "@ghost/client-ts";
 
-import { DESKTOP_VERSION } from "../../app/version";
+import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
@@ -107,14 +107,17 @@ function doneSummary(summary: string): string {
 
 const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-/** Mock-only knobs from the URL (the phone, ADR 0016; the catalog, ADR 0034): see mock/index.ts. */
+/** Another commit than this window's: what a make deploy or the package was built from. */
 const MOCK_COMMIT = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+/** A dev daemon runs from the same checkout as this window, so at its commit (vite.config.ts). */
+const CHECKOUT_COMMIT = DESKTOP_BUILD.commit ?? MOCK_COMMIT;
 
-/** The status's version and build for ?build= (MockOptions.build). */
+/** The status's version and build for ?build= (MockOptions.build). `deploy` and `release` are
+ *  this window's version at another commit, so General's notice says the builds differ. */
 function mockBuild(kind: MockOptions["build"]): Pick<Status, "version" | "build"> {
   switch (kind) {
     case "dirty":
-      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: MOCK_COMMIT, dirty: true } };
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: true } };
     case "deploy":
       return { version: DESKTOP_VERSION, build: { kind: "deploy", commit: MOCK_COMMIT, dirty: false } };
     case "release":
@@ -122,7 +125,7 @@ function mockBuild(kind: MockOptions["build"]): Pick<Status, "version" | "build"
     case "behind":
       return { version: "2026.9.4", build: { kind: "deploy", commit: "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432", dirty: false } };
     default:
-      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: MOCK_COMMIT, dirty: false } };
+      return { version: DESKTOP_VERSION, build: { kind: "dev", commit: CHECKOUT_COMMIT, dirty: false } };
   }
 }
 
@@ -189,7 +192,7 @@ export class MockDaemon {
   private voices: VoiceInfo[];
   private phone: PhoneView;
   private pairing: PhonePairing | null = null;
-  private phoneOpts: MockOptions;
+  private options: MockOptions;
   /** The SKILL.md folders Ghost reads (ADR 0023): Ghost's own and the operator's. */
   private skills: SkillFixture[];
   private script: SessionFixture;
@@ -197,10 +200,10 @@ export class MockDaemon {
   private waitingItems: WaitingItemView[];
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
-  constructor(scenario: Scenario, f: Fixtures, phoneOpts: MockOptions = {}) {
+  constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
     this.phone = f.settings.phone;
-    this.phoneOpts = phoneOpts;
+    this.options = options;
     this.script = f.session;
     this.turns = f.session.turns;
     this.pending = f.session.pending;
@@ -216,10 +219,10 @@ export class MockDaemon {
     this.audit = f.audit;
     this.settings = f.settings.settings;
     this.passwords = structuredClone(f.settings.passwords);
-    if (phoneOpts.vault === "locked") this.passwords.vault = { ...this.passwords.vault, state: "locked", problem: "Your keyring is locked" };
-    if (phoneOpts.vault === "broken")
+    if (options.vault === "locked") this.passwords.vault = { ...this.passwords.vault, state: "locked", problem: "Your keyring is locked" };
+    if (options.vault === "broken")
       this.passwords.vault = { ...this.passwords.vault, state: "broken", problem: "the key in your keyring doesn’t open this vault" };
-    if (phoneOpts.vault === "import" && !this.passwords.importable?.length)
+    if (options.vault === "import" && !this.passwords.importable?.length)
       this.passwords.importable = [
         { kind: "file", path: "~/.config/ghost/env" },
         { kind: "file", path: "~/.config/ghost/apps.env" },
@@ -241,7 +244,7 @@ export class MockDaemon {
       session_id: f.session.sessionId,
       models_ready: scenario.modelsReady,
       uptime_secs: 0,
-      ...mockBuild(phoneOpts.build ?? null),
+      ...mockBuild(options.build ?? null),
       api_version: "1",
       wake_mode: "transcript",
       apps: f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name),
@@ -545,7 +548,7 @@ export class MockDaemon {
     const q = search.trim().replace(/\s+/g, " ").slice(0, 100);
     if (q.length < 2) return { query: q, skills: [], problem: null, fetched_at: null };
     await sleep(250); // skills.sh takes a moment
-    if (this.phoneOpts.skillSearch === "down") return { query: q, skills: [], problem: "couldn't reach skills.sh (ConnectTimeout)", fetched_at: null };
+    if (this.options.skillSearch === "down") return { query: q, skills: [], problem: "couldn't reach skills.sh (ConnectTimeout)", fetched_at: null };
     const words = q.toLowerCase().split(" ");
     const hits = SKILL_CATALOG.filter((c) => words.every((w) => c.listing.id.toLowerCase().includes(w)));
     return { query: q, skills: hits.map((c) => ({ ...c.listing, installed: this.installedFrom(c.listing.source, c.listing.skill) })), problem: null, fetched_at: now() };
@@ -744,7 +747,7 @@ export class MockDaemon {
     };
   }
   private async catalogPage(search: string, offset: number, limit: number): Promise<CatalogPage> {
-    const opt = this.phoneOpts.catalog ?? (this.scenario.configured ? null : "slow");
+    const opt = this.options.catalog ?? (this.scenario.configured ? null : "slow");
     // The first copy arrives 4 seconds after Ghost starts; every request before then waits for it.
     if (opt === "slow") await sleep(Math.max(0, this.bootedAt + 4000 - Date.now()));
     if (opt === "empty" && Date.now() - this.bootedAt < 8000) return { entries: [], total: 0, fetched_at: null, refreshing: true, problem: null };
@@ -1267,11 +1270,11 @@ export class MockDaemon {
   private newPairing(): PhonePairing {
     if (!this.phone.address) throw new HttpError(409, "the phone listener is off (set GHOST_PHONE_LISTEN)");
     const code = String(Math.floor(rand() * 1_000_000)).padStart(6, "0");
-    const ttl = this.phoneOpts.codeTtlSecs ?? 120;
+    const ttl = this.options.codeTtlSecs ?? 120;
     const addresses = this.phone.addresses?.length ? this.phone.addresses : [this.phone.address];
     const p: PhonePairing = { code, address: this.phone.address, addresses, expires_at: new Date(Date.now() + ttl * 1000).toISOString(), link: pairLink(code, addresses) };
     this.pairing = p;
-    const after = this.phoneOpts.pairsAfterMs ?? 0;
+    const after = this.options.pairsAfterMs ?? 0;
     if (after > 0) {
       this.later(after, () => {
         if (this.pairing?.code !== code || Date.now() > new Date(p.expires_at).getTime()) return;

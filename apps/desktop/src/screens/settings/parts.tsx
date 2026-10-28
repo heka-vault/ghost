@@ -1,4 +1,6 @@
 /** Owner: settings. Page-local pieces: chips input, secret row, save bar, setup list. */
+import type { Status } from "@ghost/client-ts";
+import { useGhost } from "@ghost/ui";
 import { Check, CircleCheck, Copy, X } from "lucide-react";
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 
@@ -257,9 +259,25 @@ export type BarState =
     };
 
 export const RESTART_COMMAND = "systemctl --user restart ghostd";
+/** A checkout's daemon (make dev): restarting the service instead would start a second Ghost. */
+export const DEV_RESTART_COMMAND = "make reload";
 
-/** The restart command as plain mono text with Copy beside it. Used by the pill and by rows that owe a restart. */
-export function CommandCopy({ command = RESTART_COMMAND, copyRef, className }: { command?: string; copyRef?: Ref<HTMLButtonElement>; className?: string }) {
+/** How to restart the Ghost this window talks to, by its build (docs/releasing.md): `make reload`
+ *  in the checkout for a dev build, the service for a deploy or a release. Unknown: the service. */
+export function restartCommand(build: Status["build"] | null | undefined): string {
+  return build?.kind === "dev" ? DEV_RESTART_COMMAND : RESTART_COMMAND;
+}
+
+/** The restart command for the running Ghost. */
+export function useRestartCommand(): string {
+  return restartCommand(useGhost().status?.build);
+}
+
+/** A command as plain mono text with Copy beside it; the restart command by default. Used by the
+ *  pill and by rows that owe a restart. */
+export function CommandCopy({ command, copyRef, className }: { command?: string; copyRef?: Ref<HTMLButtonElement>; className?: string }) {
+  const restart = useRestartCommand();
+  command ??= restart;
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -310,9 +328,10 @@ function fewNames(keys: string[]): string {
  * same second line: one surface, one edge.
  */
 export function SaveBar({ state, onSave, onDiscard, onDismiss, onFix, copyRef, saveRef }: SaveBarProps) {
+  const restart = useRestartCommand();
   if (state.kind === "restart") {
     const names = `After the restart: ${lowerFirst(fewNames(state.waiting))}.${state.live.length ? ` Live now: ${lowerFirst(fewNames(state.live))}.` : ""}`;
-    return <SharedSaveBar variant="restart" title="Restart Ghost to apply" description={names} command={RESTART_COMMAND} copyRef={copyRef} onDismiss={onDismiss} />;
+    return <SharedSaveBar variant="restart" title="Restart Ghost to apply" description={names} command={restart} copyRef={copyRef} onDismiss={onDismiss} />;
   }
 
   const { keys, online, busy, error, invalid, restored } = state;

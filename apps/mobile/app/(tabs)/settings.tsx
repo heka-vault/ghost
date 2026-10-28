@@ -17,6 +17,7 @@ import { space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
 import { ConfirmDialog, Divider, LargeHead, LinkDot, linkLabel, List, Row, Screen, SwitchRow, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
+import { version as packageVersion } from "../../package.json";
 
 export default function Settings() {
   const c = useColors();
@@ -25,7 +26,7 @@ export default function Settings() {
   const { pairing, prefs } = usePhone();
   const { tone, title } = linkLabel(link);
   const [asking, setAsking] = useState(false);
-  const version = Constants.expoConfig?.version ?? "0.1.0";
+  const version = Constants.expoConfig?.version ?? packageVersion;
 
   const unpair = () => {
     setAsking(false);

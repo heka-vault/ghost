@@ -9,7 +9,7 @@ import { isRetired } from "../screens/conversations/threads";
 import { newAgentSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
-import { DESKTOP_VERSION, otherVersion } from "./version";
+import { difference } from "./version";
 
 /** Design-mode chrome, compiled only in development; null in production builds. */
 const MockBadge = import.meta.env.DEV ? lazy(() => import("../design/chrome").then((m) => ({ default: m.MockBadge }))) : null;
@@ -144,10 +144,11 @@ export function Sidebar() {
   // same liveLabel() feeds <LiveStatus /> wherever it is used, so the two never disagree.
   const { dot: cardPhase, title } = liveLabel(state, phase);
   // The footer never moves between states: the last known version, or a reserved empty row.
-  // When this window isn't the daemon's version (a checkout's window on the deployed Ghost),
-  // a second quiet line says which this one is (docs/releasing.md).
+  // When this window isn’t the daemon’s build (a checkout’s window on the deployed Ghost: another
+  // version, or the same at another commit), a second quiet line says which this one is
+  // (docs/releasing.md).
   const version = useRef<{ line: string; other: string | null } | null>(null);
-  if (status?.version) version.current = { line: versionLine(status.version, status.build), other: otherVersion(status.version) };
+  if (status?.version) version.current = { line: versionLine(status.version, status.build), other: difference(status)?.window ?? null };
   const sub =
     state === "connecting"
       ? "Looking for Ghost"
@@ -315,7 +316,7 @@ export function Sidebar() {
         {!rail && (
           <div className="sidebar__version t-caption t-3 t-num" aria-hidden={version.current ? undefined : true}>
             {version.current?.line ?? " "}
-            {version.current?.other && <span className="sidebar__version-other">This window is {DESKTOP_VERSION}</span>}
+            {version.current?.other && <span className="sidebar__version-other">This window is {version.current.other}</span>}
           </div>
         )}
       </div>

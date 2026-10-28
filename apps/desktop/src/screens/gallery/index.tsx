@@ -84,6 +84,7 @@ import {
   useToast,
 } from "../../ui";
 import { StatusCard } from "../../app/Sidebar";
+import { DESKTOP_VERSION } from "../../app/version";
 import "./gallery.css";
 
 const SCENARIO_FALLBACK = ["passive", "session", "pending", "speaking", "thinking", "starting", "disconnected", "firstrun", "empty", "expiring", "reconnecting", "busy"];
@@ -1053,7 +1054,7 @@ function Specimens({ theme }: { theme: string }) {
           <Badge variant="outline">Optional</Badge>
           <Badge variant="outline" tone="warn">Medium risk</Badge>
           <Badge variant="outline" tone="danger">High risk</Badge>
-          <Badge size="sm" mono>v0.1.0</Badge>
+          <Badge size="sm" mono>v{DESKTOP_VERSION}</Badge>
         </Spec>
         <Spec label="Progress">
           <div className="gal-progress">

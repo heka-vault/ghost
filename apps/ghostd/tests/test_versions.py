@@ -61,6 +61,13 @@ def every_copy() -> dict[str, str]:
     out["Cargo.toml"] = _toml("apps/desktop/src-tauri/Cargo.toml")["package"]["version"]
     cargo = _toml("apps/desktop/src-tauri/Cargo.lock")["package"]
     out["Cargo.lock"] = next(p["version"] for p in cargo if p["name"] == "heka-ghost-desktop")
+    # Gradle has no parser here: every quoted value on a version line, however it is written.
+    gradle = (ROOT / version_script.GRADLE_MODULE).read_text()
+    for i, line in enumerate(gradle.splitlines()):
+        words = line.split()
+        if words and words[0] in {"version", "versionName"}:
+            out[f"build.gradle:{i + 1}"] = line.split("'")[1] if "'" in line else line.split('"')[1]
+    assert sum(k.startswith("build.gradle") for k in out) == 2
     return out
 
 
@@ -76,7 +83,7 @@ def test_the_version_is_a_date_version():
 
 
 def test_no_manifest_is_left_out():
-    """A new package.json, pyproject.toml or Cargo.toml of Ghost's (the root, apps/,
+    """A new package.json, pyproject.toml, Cargo.toml or build.gradle of Ghost’s (the root, apps/,
     packages/) must be one of the script's copies."""
     try:
         files = subprocess.run(
@@ -87,7 +94,7 @@ def test_no_manifest_is_left_out():
     manifests = {
         f
         for f in files
-        if Path(f).name in {"package.json", "pyproject.toml", "Cargo.toml"}
+        if Path(f).name in {"package.json", "pyproject.toml", "Cargo.toml", "build.gradle"}
         and (Path(f).parent == Path(".") or f.startswith(("apps/", "packages/")))
     }
     known = {c.path for c in version_script.COPIES} | {version_script.SOURCE}

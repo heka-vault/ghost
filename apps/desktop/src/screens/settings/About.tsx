@@ -5,7 +5,7 @@
  */
 import type { Status } from "@ghost/client-ts";
 
-import { DESKTOP_VERSION, otherVersion } from "../../app/version";
+import { DESKTOP_BUILD, difference, windowLine } from "../../app/version";
 import { ListRow, Notice, buildText } from "../../ui";
 import "./settings.css";
 
@@ -28,18 +28,23 @@ export function VersionRows({ status }: { status: Status | null }) {
       {status && (
         <ListRow title="Build" description={buildDescription(status.build)} meta={<span className="set-value is-mono">{build ?? "–"}</span>} />
       )}
-      <ListRow title="Desktop app" description="This window." meta={<span className="set-value is-mono">{DESKTOP_VERSION}</span>} />
+      <ListRow
+        title="Desktop app"
+        description={DESKTOP_BUILD.dirty ? "This window. Built from a checkout with uncommitted changes." : "This window."}
+        meta={<span className="set-value is-mono">{windowLine(true)}</span>}
+      />
     </>
   );
 }
 
-/** Said once, above the card, when this window and the daemon are different versions. */
+/** Said once, above the card, when this window and the daemon are different builds: another
+ *  version, or the same version at another commit when both know theirs. */
 export function VersionNotice({ status }: { status: Status | null }) {
-  const other = otherVersion(status?.version);
-  if (!other) return null;
+  const d = difference(status);
+  if (!d) return null;
   return (
-    <Notice title="This window and Ghost are different versions">
-      The desktop app is {DESKTOP_VERSION} and Ghost is {other}. That’s expected while you run the app from a checkout against your deployed Ghost; otherwise, update the one that’s behind.
+    <Notice title={d.kind === "version" ? "This window and Ghost are different versions" : "This window and Ghost are different builds"}>
+      The desktop app is {d.window} and Ghost is {d.ghost}. That’s expected while you run the app from a checkout against your deployed Ghost; otherwise, update the one that’s behind.
     </Notice>
   );
 }

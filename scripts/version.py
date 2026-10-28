@@ -63,6 +63,8 @@ def _lock(path: str, name: str) -> Copy:
     return Copy(path, rf'^name = "{re.escape(name)}"\nversion = "([^"]*)"$')
 
 
+GRADLE_MODULE = "apps/mobile/modules/ghost-call/android/build.gradle"
+
 COPIES: tuple[Copy, ...] = (
     _project_toml("apps/ghostd/pyproject.toml"),
     _project_toml("packages/core/pyproject.toml"),
@@ -78,6 +80,9 @@ COPIES: tuple[Copy, ...] = (
     _project_toml("apps/desktop/src-tauri/Cargo.toml"),
     _lock("apps/desktop/src-tauri/Cargo.lock", "heka-ghost-desktop"),
     _top_json("apps/desktop/src-tauri/tauri.conf.json"),
+    # The phone's call module (apps/mobile/android itself is generated and not committed).
+    Copy(GRADLE_MODULE, r"^version = '([^']*)'$"),
+    Copy(GRADLE_MODULE, r"^ +versionName '([^']*)'$"),
 )
 
 
