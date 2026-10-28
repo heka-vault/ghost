@@ -832,7 +832,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     ) : page === "model" ? (
       "Where Ghost thinks: every session, its tool calls and its summaries go to this model."
     ) : page === "passwords" ? (
-      "Every API key, token and account password Ghost holds, in its own vault, locked with your keyring."
+      "Every password Ghost holds for you, in its own vault, locked with your keyring."
     ) : page === "sound" ? (
       "What Ghost hears with, how it wakes, and how it sounds."
     ) : (

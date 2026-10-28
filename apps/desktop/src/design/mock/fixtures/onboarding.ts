@@ -48,8 +48,8 @@ export default function onboarding(s: Scenario): OnboardingFixture {
   return {
     steps: [
       { id: "welcome", title: "Welcome", description: "What Ghost does and what stays on this computer.", done: true },
-      { id: "model", title: "Connect a model", description: "An Anthropic-compatible endpoint and its token.", done },
-      { id: "github", title: "Connect GitHub", description: "A fine‑grained token; the practice GitHub until then.", done },
+      { id: "model", title: "Connect a model", description: "A model provider and its password.", done },
+      { id: "github", title: "Connect GitHub", description: "Sign in to GitHub; the practice GitHub until then.", done },
       { id: "microphone", title: "Set up the microphone", description: "Echo cancellation and ghost.mic.", done },
       { id: "models", title: "Get the voice models", description: "Kokoro and Parakeet, about 1.6 GB.", done: modelsOnDisk },
       { id: "service", title: "Start Ghost", description: "The background service.", done: s.daemon && s.modelsReady && modelsOnDisk },

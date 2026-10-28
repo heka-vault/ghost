@@ -68,7 +68,7 @@ export function kindWords(kind: AppView["kind"]): string {
 export function optionHelp(kind: "sign_in" | "key" | "local"): string {
   return {
     sign_in: "Ghost opens your browser to sign in. Nothing to paste.",
-    key: "Paste the password the app gives you (its API key or token). Ghost keeps it in its vault and never shows it again.",
+    key: "Paste the password the app gives you. Ghost keeps it in its vault and never shows it again.",
     local: "Ghost starts it on this computer when it starts, with your user’s access to your files.",
   }[kind];
 }

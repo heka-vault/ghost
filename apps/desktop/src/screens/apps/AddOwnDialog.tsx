@@ -183,7 +183,7 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
                 }}
               />
             </Field>
-            <Field label="Password" optional help="The app’s API key or token. Leave it empty to sign in through your browser instead. A password is kept in Ghost’s vault and isn’t shown again.">
+            <Field label="Password" optional help="The password the app gives you. Leave it empty to sign in through your browser instead. A password is kept in Ghost’s vault and isn’t shown again.">
               <Input type="password" autoComplete="off" placeholder="Paste it here" value={key} onChange={(e) => setKey(e.target.value)} />
             </Field>
             <Disclosure summary="Advanced" defaultOpen={!!error?.taken}>

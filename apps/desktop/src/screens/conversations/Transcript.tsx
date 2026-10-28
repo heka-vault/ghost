@@ -79,7 +79,7 @@ export function Transcript({ turns, lineName, limit, total }: TranscriptProps) {
       {capped && (
         <div className="conv-transcript__note">
           <p className="t-small t-2">
-            Showing the last {turns.length} of {Math.max(total, turns.length)} turns. Everything older is in this line’s memory.
+            Showing the last {turns.length} of {Math.max(total, turns.length)} turns. Everything older is in this agent’s memory.
           </p>
           {/* Only while the summarized log is open: closed, the latest is already in view. */}
           {showFolded && (

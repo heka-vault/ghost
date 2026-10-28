@@ -284,7 +284,7 @@ export function validateConnection(v: Values): Record<string, string> {
       break;
     }
     if (/["\\$\n\r]/.test(part.slice(i + 1))) {
-      e.GHOST_LLM_HEADERS = `${name}’s value can’t hold quotes, backslashes or $. Keep keys in the password.`;
+      e.GHOST_LLM_HEADERS = `${name}’s value can’t hold quotes, backslashes or $. A password goes on its own row, never in a header.`;
       break;
     }
   }

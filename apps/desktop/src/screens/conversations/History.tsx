@@ -68,7 +68,7 @@ export function History({ versions, turns, whole, live, lineName, readOnly, onUs
   return (
     <div className="stack gap-3">
       <p className="t-small t-2">
-        {sorted.length} {sorted.length === 1 ? "version" : "versions"} of this line’s memory, newest first.
+        {sorted.length} {sorted.length === 1 ? "version" : "versions"} of this agent’s memory, newest first.
         {!live && !readOnly && ` Compact now works while a session is on ${lineName}.`}
       </p>
       <Card list>

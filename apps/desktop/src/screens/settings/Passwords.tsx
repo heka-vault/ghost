@@ -242,7 +242,7 @@ function importWords(r: PasswordImportResult): string {
   const parts: string[] = [];
   if (r.imported.length) parts.push(`${r.imported.join(", ")} ${r.imported.length === 1 ? "is" : "are"} in the vault now.`);
   if (r.kept.length) parts.push(`${r.kept.length} the vault already had ${r.kept.length === 1 ? "was" : "were"} kept as they were.`);
-  if (r.settings.length) parts.push(`Moved ${r.settings.join(", ")} to settings.env, which isn’t secret.`);
+  if (r.settings.length) parts.push(`Moved ${r.settings.join(", ")} to settings.env, which holds settings, never a password.`);
   if (r.removed.length) parts.push(`Deleted ${r.removed.map(tildePath).join(" and ")}.`);
   parts.push(...r.notes);
   if (r.restart_required) parts.push("Restart Ghost so it uses them.");
