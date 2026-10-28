@@ -32,7 +32,7 @@ First increment running on the workstation: generic write gate where everything 
 
 ## Commits
 
-Conventional commits. Commit on `main` until the project needs branches.
+Conventional commits. Every change reaches `main` through a pull request: `main` takes no direct pushes, and a PR merges only when the `ci` workflow passes (`.github/workflows/ci.yml`: ruff, pytest, `openapi.json` and the TS client current, typecheck, vitest, the desktop build, rustfmt and clippy on the Tauri shell; the ruleset requires its `ci-ok` job) and the branch is up to date with `main`. Run `make lint test` and `pnpm typecheck` before pushing. Don't merge a red PR or ask for a bypass; fix the check.
 
 ## Agent skills
 

@@ -4,21 +4,32 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+# A new push to a PR replaces its run; runs on main always finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   python:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with: { enable-cache: true }
       - run: uv sync --all-packages --frozen
-      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest -q -p no:cacheprovider
       - name: openapi.json is current
-        run: uv run python -m ghost_api.export | diff -q - packages/api/openapi.json
+        run: uv run python -m ghost_api.export | diff -u packages/api/openapi.json -
 
   typescript:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -29,3 +40,38 @@ jobs:
         run: pnpm gen:check
       - run: pnpm typecheck
       - run: pnpm test
+      - name: desktop frontend builds
+        run: pnpm build
+
+  # The Tauri shell of the desktop app. The .debs are built by release.yml, not here.
+  desktop-shell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run: { working-directory: apps/desktop/src-tauri }
+    steps:
+      - uses: actions/checkout@v4
+      - name: system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - run: rustup component add rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: apps/desktop/src-tauri }
+      - run: cargo fmt --check
+      # generate_context! wants the frontend's folder to exist; its contents don't matter to a check.
+      - run: mkdir -p ../dist
+      - run: cargo clippy --locked --all-targets -- -D warnings
+
+  # The one check main's ruleset requires, so adding or renaming a job above needs no
+  # settings change.
+  ci-ok:
+    if: always()
+    needs: [python, typescript, desktop-shell]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every job passed
+        run: |
+          echo '${{ toJSON(needs) }}' | jq -e 'all(.[]; .result == "success")'
