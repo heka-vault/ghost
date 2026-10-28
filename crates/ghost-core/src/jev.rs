@@ -1071,3 +1071,19 @@ mod tests {
         );
     }
 }
+
+#[async_trait::async_trait]
+impl crate::watches::Decider for WatchDecider {
+    async fn decide(
+        &self,
+        question: &str,
+        fields: &Map<String, Value>,
+        choices: &BTreeMap<crate::watches::Choice, String>,
+    ) -> anyhow::Result<Option<String>> {
+        let named: BTreeMap<String, String> = choices
+            .iter()
+            .map(|(c, why)| (c.as_str().to_string(), why.clone()))
+            .collect();
+        Ok(WatchDecider::decide(self, question, fields.clone(), &named).await)
+    }
+}

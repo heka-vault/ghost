@@ -646,7 +646,7 @@ fn has_symlink(dir: &Path) -> bool {
 
 /// Installed under a new name, the copy's front matter says that name too, so the folder
 /// and the file agree (a skill whose SKILL.md names another folder is a problem).
-fn name_front_matter(file: &Path, name: &str) -> io::Result<()> {
+pub(crate) fn name_front_matter(file: &Path, name: &str) -> io::Result<()> {
     let text = String::from_utf8_lossy(&fs::read(file)?).into_owned();
     let Some(m) = FRONT.captures(&text) else {
         return fs::write(file, format!("---\nname: {name}\n---\n{text}"));
@@ -1752,5 +1752,21 @@ mod tests {
         let origin = change.origin();
         assert!(origin.installed_at.ends_with('Z') && origin.installed_at.len() == 20);
         assert_eq!(origin.git_ref.as_deref(), Some("main"));
+    }
+}
+
+/// The skills module's front matter, as the catalog takes it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SkillsFrontMatter;
+
+impl crate::skill_catalog::FrontMatter for SkillsFrontMatter {
+    fn parse(&self, text: &str) -> std::result::Result<(Map<String, Value>, String), String> {
+        parse_front_matter(text)
+            .map(|(m, rest)| (m, rest.to_string()))
+            .map_err(|e| e.to_string())
+    }
+
+    fn set_name(&self, file: &Path, name: &str) -> io::Result<()> {
+        name_front_matter(file, name)
     }
 }

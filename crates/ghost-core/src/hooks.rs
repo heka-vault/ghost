@@ -1304,7 +1304,8 @@ fn compare(want: &Map<String, Value>, got: &Got) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::watches::testing::{StoreItems, items as store_items};
+    use crate::waiting::Items as StoreItems;
+    use crate::watches::testing::items as store_items;
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -1467,7 +1468,7 @@ mod tests {
 
     impl Rig {
         fn open(&self) -> Vec<crate::store::Item> {
-            self.items.open()
+            self.items.open(None).unwrap()
         }
         async fn receive(&self, headers: &HashMap<String, String>, raw: &[u8]) -> HookResult {
             self.intake
@@ -1642,7 +1643,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status, 401);
-        assert!(items.open().is_empty());
+        assert!(items.open(None).unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1786,7 +1787,11 @@ mod tests {
         let rig = intake(Some(Source::saying("success")));
         let key = "ci:ci:heka-vault/ghost";
         rig.items
-            .observe("watch:ci", &ItemDraft::new(key, "CI failed"), utcnow())
+            .observe(
+                "watch:ci",
+                &ItemDraft::new(key, "CI failed"),
+                Some(utcnow()),
+            )
             .unwrap();
         let (headers, raw) =
             github_request(&payload_of("success", "heka-vault/ghost", 101, json!({})));
@@ -1897,7 +1902,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ok.outcome, "item");
-        assert_eq!(items.open()[0].fields["checked"], Value::Bool(false)); // unchecked
+        assert_eq!(
+            items.open(None).unwrap()[0].fields["checked"],
+            Value::Bool(false)
+        ); // unchecked
     }
 
     #[test]

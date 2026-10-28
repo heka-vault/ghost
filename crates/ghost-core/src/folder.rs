@@ -488,3 +488,32 @@ mod tests {
         assert_eq!(arg_str(&args, "missing"), "");
     }
 }
+
+/// The parsers Ghost's folder uses: the watches' and the hooks' own.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Declared;
+
+impl Parsers for Declared {
+    type Watch = crate::watches::Watch;
+    type Hook = crate::hooks::Hook;
+
+    fn parse_watches(
+        body: Option<&Map<String, Value>>,
+        where_: &str,
+    ) -> (BTreeMap<String, Self::Watch>, Vec<String>) {
+        let value = body.map_or(Value::Null, |m| Value::Object(m.clone()));
+        crate::watches::parse_watches(&value, where_)
+    }
+
+    fn parse_hooks(
+        body: Option<&Map<String, Value>>,
+        where_: &str,
+        folder: &Path,
+    ) -> (BTreeMap<String, Self::Hook>, Vec<String>) {
+        let value = body.map_or(Value::Null, |m| Value::Object(m.clone()));
+        crate::hooks::parse_hooks(&value, where_, Some(folder))
+    }
+}
+
+/// Ghost's folder with its real parsers.
+pub type Folder = GhostFolder<Declared>;

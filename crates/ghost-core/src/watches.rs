@@ -120,74 +120,7 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// list (`FieldSpec::take` is the only maker).
 pub type Scalar = Value;
 
-/// What an item asks of the operator: `tell` (the waiting list) or `record` (kept, not
-/// alerted). `ghost_core.waiting.Response`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Response {
-    Tell,
-    Record,
-}
-
-impl Response {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Response::Tell => "tell",
-            Response::Record => "record",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "tell" => Some(Response::Tell),
-            "record" => Some(Response::Record),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for Response {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// What a source sees now, before the store knows it (`ghost_core.waiting.ItemDraft`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ItemDraft {
-    pub key: String,
-    pub title: String,
-    pub link: Option<String>,
-    pub fields: Map<String, Scalar>,
-    pub response: Response,
-}
-
-impl ItemDraft {
-    pub fn new(key: impl Into<String>, title: impl Into<String>) -> Self {
-        Self {
-            key: key.into(),
-            title: title.into(),
-            link: None,
-            fields: Map::new(),
-            response: Response::Tell,
-        }
-    }
-}
-
-/// What one `sync` found: keys new (or back after resolving), changed, resolved
-/// (`ghost_core.waiting.Sync`; `Synced` here, since `Sync` is the marker trait).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Synced {
-    pub new: Vec<String>,
-    pub changed: Vec<String>,
-    pub resolved: Vec<String>,
-}
-
-impl Synced {
-    pub fn any(&self) -> bool {
-        !(self.new.is_empty() && self.changed.is_empty() && self.resolved.is_empty())
-    }
-}
+pub use crate::waiting::{ItemDraft, Response, Synced};
 
 /// The waiting list, as a watch or a hook hands items to it (`ghost_core.waiting.Items`,
 /// ported on its own; this is the part these modules call). Keys are global: a key
@@ -209,6 +142,45 @@ pub trait WaitingItems: Send + Sync {
     /// `source` says `key` is over. False when there is no such open item of `source`.
     fn resolve(&self, source: &str, key: &str, now: DateTime<Utc>) -> anyhow::Result<bool>;
     fn get(&self, key: &str) -> anyhow::Result<Option<Item>>;
+}
+
+impl WaitingItems for crate::waiting::Items {
+    fn sync(
+        &self,
+        source: &str,
+        seen: &[ItemDraft],
+        now: DateTime<Utc>,
+        resolve: bool,
+    ) -> anyhow::Result<Synced> {
+        let out = if resolve {
+            self.sync(source, seen, Some(now))
+        } else {
+            self.sync_partial(source, seen, Some(now))
+        };
+        Ok(out?)
+    }
+
+    fn observe(&self, source: &str, draft: &ItemDraft, now: DateTime<Utc>) -> anyhow::Result<bool> {
+        Ok(crate::waiting::Items::observe(
+            self,
+            source,
+            draft,
+            Some(now),
+        )?)
+    }
+
+    fn resolve(&self, source: &str, key: &str, now: DateTime<Utc>) -> anyhow::Result<bool> {
+        Ok(crate::waiting::Items::resolve(
+            self,
+            source,
+            key,
+            Some(now),
+        )?)
+    }
+
+    fn get(&self, key: &str) -> anyhow::Result<Option<Item>> {
+        Ok(crate::waiting::Items::get(self, key)?)
+    }
 }
 
 /// One of a connected app's read-only tools, called as a watch or a hook's check declares
@@ -1491,151 +1463,21 @@ impl WatchRunner {
 #[cfg(test)]
 pub(crate) mod testing {
     use super::*;
-    use crate::store::{ItemSeen, Store};
+    use crate::store::Store;
 
-    const TITLE_MAX: usize = 200;
-
-    fn clip(text: &str) -> String {
-        let t = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        if t.chars().count() <= TITLE_MAX {
-            t
-        } else {
-            format!("{}…", clip_chars(&t, TITLE_MAX - 1))
-        }
-    }
-
-    pub struct StoreItems {
-        pub store: Arc<Store>,
-    }
-
-    impl StoreItems {
-        pub fn new(store: Arc<Store>) -> Self {
-            Self { store }
-        }
-
-        pub fn open(&self) -> Vec<Item> {
-            self.store.open_items(None).unwrap()
-        }
-
-        fn upsert(
-            &self,
-            source: &str,
-            d: &ItemDraft,
-            title: &str,
-            now: DateTime<Utc>,
-            changed: bool,
-        ) {
-            self.store
-                .upsert_item(
-                    ItemSeen {
-                        key: &d.key,
-                        source,
-                        title,
-                        link: d.link.as_deref(),
-                        fields: &d.fields,
-                        response: d.response.as_str(),
-                    },
-                    now,
-                    changed,
-                )
-                .unwrap();
-        }
-    }
-
-    impl WaitingItems for StoreItems {
-        fn sync(
-            &self,
-            source: &str,
-            seen: &[ItemDraft],
-            now: DateTime<Utc>,
-            resolve: bool,
-        ) -> anyhow::Result<Synced> {
-            let before: HashMap<String, Item> = self
-                .store
-                .open_items(Some(source))?
-                .into_iter()
-                .map(|i| (i.key.clone(), i))
-                .collect();
-            let mut found = Synced::default();
-            let mut kept: HashSet<String> = HashSet::new();
-            for d in seen {
-                if !kept.insert(d.key.clone()) {
-                    continue;
-                }
-                let title = clip(&d.title);
-                let is_change = match before.get(&d.key) {
-                    None => {
-                        if let Some(other) = self.store.get_item(&d.key)?
-                            && other.resolved_at.is_none()
-                        {
-                            continue; // open under another source
-                        }
-                        found.new.push(d.key.clone());
-                        true
-                    }
-                    Some(prior) => {
-                        let c = prior.title != title || prior.fields != d.fields;
-                        if c {
-                            found.changed.push(d.key.clone());
-                        }
-                        c
-                    }
-                };
-                self.upsert(source, d, &title, now, is_change);
-            }
-            if resolve {
-                for k in before.keys() {
-                    if !kept.contains(k) {
-                        self.store.resolve_item(k, now)?;
-                        found.resolved.push(k.clone());
-                    }
-                }
-            }
-            Ok(found)
-        }
-
-        fn observe(&self, source: &str, d: &ItemDraft, now: DateTime<Utc>) -> anyhow::Result<bool> {
-            let prior = self.store.get_item(&d.key)?;
-            if let Some(p) = &prior
-                && p.resolved_at.is_none()
-                && p.source != source
-            {
-                return Ok(false);
-            }
-            let title = clip(&d.title);
-            let open_now = prior.as_ref().is_some_and(|p| p.resolved_at.is_none());
-            let changed = !open_now
-                || prior
-                    .as_ref()
-                    .is_some_and(|p| p.title != title || p.fields != d.fields);
-            self.upsert(source, d, &title, now, changed);
-            Ok(changed)
-        }
-
-        fn resolve(&self, source: &str, key: &str, now: DateTime<Utc>) -> anyhow::Result<bool> {
-            match self.store.get_item(key)? {
-                Some(p) if p.resolved_at.is_none() && p.source == source => {
-                    self.store.resolve_item(key, now)?;
-                    Ok(true)
-                }
-                _ => Ok(false),
-            }
-        }
-
-        fn get(&self, key: &str) -> anyhow::Result<Option<Item>> {
-            Ok(self.store.get_item(key)?)
-        }
-    }
-
-    pub fn items() -> Arc<StoreItems> {
-        Arc::new(StoreItems::new(Arc::new(Store::in_memory().unwrap())))
+    /// The waiting list's items over a fresh in-memory store.
+    pub fn items() -> Arc<crate::waiting::Items> {
+        Arc::new(crate::waiting::Items::new(Arc::new(
+            Store::in_memory().unwrap(),
+        )))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::testing::{StoreItems, items};
+    use super::testing::items;
     use super::*;
+    use crate::waiting::Items as StoreItems;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
@@ -1869,7 +1711,12 @@ mod tests {
     }
 
     fn open_keys(items: &StoreItems) -> Vec<String> {
-        items.open().into_iter().map(|i| i.key).collect()
+        items
+            .open(None)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.key)
+            .collect()
     }
 
     #[tokio::test]
@@ -1880,7 +1727,7 @@ mod tests {
         let w = watch();
         assert!(runner.poll(&w, None).await.unwrap());
         assert!(runner.poll(&w, None).await.unwrap());
-        let open = items.open();
+        let open = items.open(None).unwrap();
         assert_eq!(open.len(), 1);
         let item = &open[0];
         assert_eq!(item.key, "ci:ci:7");
@@ -1894,7 +1741,7 @@ mod tests {
         assert_eq!(item.source, "watch:ci");
         results.set(vec![]);
         runner.poll(&w, None).await.unwrap();
-        assert!(items.open().is_empty());
+        assert!(items.open(None).unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1920,12 +1767,12 @@ mod tests {
         let w = watch_with(json!({"for_minutes": 5}));
         let t0 = utcnow();
         runner.poll(&w, Some(t0)).await.unwrap();
-        assert!(items.open().is_empty());
+        assert!(items.open(None).unwrap().is_empty());
         runner
             .poll(&w, Some(t0 + chrono::Duration::minutes(6)))
             .await
             .unwrap();
-        assert_eq!(items.open().len(), 1);
+        assert_eq!(items.open(None).unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -1966,7 +1813,7 @@ mod tests {
                 choices
             )]
         );
-        let open = items.open();
+        let open = items.open(None).unwrap();
         assert_eq!(open.len(), 1);
         assert_eq!(open[0].response, "record"); // not alerted
     }
@@ -1983,7 +1830,7 @@ mod tests {
                 .poll(&watch_with(json!({"jev": ask()})), None)
                 .await
                 .unwrap();
-            assert_eq!(items.open()[0].response, "tell", "{answer:?}");
+            assert_eq!(items.open(None).unwrap()[0].response, "tell", "{answer:?}");
         }
     }
 
@@ -2000,7 +1847,7 @@ mod tests {
             .poll(&watch_with(json!({"jev": ask(), "model": model})), None)
             .await
             .unwrap();
-        assert!(items.open().is_empty()); // the model said drop: not an item
+        assert!(items.open(None).unwrap().is_empty()); // the model said drop: not an item
     }
 
     #[tokio::test]
@@ -2014,7 +1861,7 @@ mod tests {
             .poll(&watch_with(json!({"jev": jev})), None)
             .await
             .unwrap();
-        assert_eq!(items.open()[0].response, "record");
+        assert_eq!(items.open(None).unwrap()[0].response, "record");
     }
 
     #[tokio::test]
@@ -2025,7 +1872,7 @@ mod tests {
         lock(&runner.watches).insert(w.source(), w.clone());
         runner.poll(&w, None).await.unwrap();
         runner.set_watches(&[]).unwrap();
-        assert!(items.open().is_empty());
+        assert!(items.open(None).unwrap().is_empty());
         runner.close().await;
     }
 
@@ -2042,7 +1889,7 @@ mod tests {
             .poll(&w, Some(t0 + chrono::Duration::minutes(6)))
             .await
             .unwrap();
-        let open = items.open();
+        let open = items.open(None).unwrap();
         assert_eq!(open.len(), 1);
         let told = open[0].clone();
         let again = runner(items.clone(), reader(vec![run(7)])); // the daemon restarted: no first_match
@@ -2055,7 +1902,7 @@ mod tests {
             .poll(&w, Some(t0 + chrono::Duration::minutes(13)))
             .await
             .unwrap();
-        let open = items.open();
+        let open = items.open(None).unwrap();
         assert_eq!(open.len(), 1);
         assert_eq!(open[0].first_seen, told.first_seen); // never resolved, so never news again
     }
@@ -2077,13 +1924,13 @@ mod tests {
         );
         runner.poll(&w, None).await.unwrap();
         runner.poll(&w, None).await.unwrap();
-        assert_eq!(items.open().len(), 12);
+        assert_eq!(items.open(None).unwrap().len(), 12);
         let restarted = Arc::new(
             WatchRunner::new(items.clone(), reader(results))
                 .with_jev(Some(Jev::answering(Some("tell")))),
         ); // nothing remembered
         restarted.poll(&w, None).await.unwrap();
-        assert_eq!(items.open().len(), 12);
+        assert_eq!(items.open(None).unwrap().len(), 12);
     }
 
     #[tokio::test]
@@ -2100,13 +1947,13 @@ mod tests {
             .poll(&w, None)
             .await
             .unwrap();
-        assert_eq!(items.open().len(), 1);
+        assert_eq!(items.open(None).unwrap().len(), 1);
         WatchRunner::new(items.clone(), reader(vec![run(7)]))
             .with_jev(Some(jev))
             .poll(&w, None)
             .await
             .unwrap();
-        assert_eq!(items.open().len(), 1);
+        assert_eq!(items.open(None).unwrap().len(), 1);
     }
 
     #[tokio::test]

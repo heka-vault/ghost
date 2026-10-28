@@ -1601,3 +1601,10 @@ mod tests {
         ));
     }
 }
+
+impl crate::hooks::Secrets for Passwords {
+    /// A webhook's `${NAME}`: the value, its use noted, for the signature check only.
+    fn secret(&self, name: &str) -> Option<Zeroizing<String>> {
+        self.value(name)
+    }
+}
