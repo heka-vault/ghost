@@ -71,12 +71,13 @@ export const KEY_LABEL: Record<string, string> = {
   GHOST_WAKE_FUZZY: "Wake sensitivity",
   GHOST_JEV: "How Ghost hears your yes",
   [GHOST_VOICE]: "Ghost’s voice",
-  ANTHROPIC_AUTH_TOKEN: "Anthropic token",
-  GITHUB_TOKEN: "GitHub token",
-  HF_TOKEN: "Hugging Face token",
-  OPENROUTER_API_KEY: "OpenRouter key",
-  TYPESAFE_API_KEY: "TypeSafe key",
-  ELEVENLABS_API_KEY: "ElevenLabs key",
+  // ADR 0036: the operator's word is password, whatever the service calls it.
+  ANTHROPIC_AUTH_TOKEN: "Anthropic password",
+  GITHUB_TOKEN: "GitHub password",
+  HF_TOKEN: "Hugging Face password",
+  OPENROUTER_API_KEY: "OpenRouter password",
+  TYPESAFE_API_KEY: "TypeSafe password",
+  ELEVENLABS_API_KEY: "ElevenLabs password",
 };
 
 export const KEY_SECTION: Record<string, SectionId> = {
@@ -92,14 +93,14 @@ export const KEY_SECTION: Record<string, SectionId> = {
 /** Keys the daemon applies without a restart (ghostd `apply_settings`). Everything else waits. */
 export const LIVE_KEYS = new Set(["GHOST_WAKE_PHRASES", "GHOST_WAKE_FUZZY"]);
 
-/** Secrets, in the order the page shows them: what Ghost needs first, then the optional ones. */
+/** Ghost's own passwords, in the order the page shows them: what Ghost needs first, then the optional ones. */
 export const SECRET_ORDER = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "HF_TOKEN", "ELEVENLABS_API_KEY"];
 export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
   ANTHROPIC_AUTH_TOKEN: { help: "Lets Ghost think and talk. Not needed if your own endpoint takes no key.", placeholder: "sk-ant-…" },
-  GITHUB_TOKEN: { help: "For a GitHub app you added by hand whose config names ${GITHUB_TOKEN}. Apps you connect under Apps keep their own key.", optional: true, placeholder: "github_pat_…" },
-  TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev keys are set.", optional: true, placeholder: "ts_…" },
+  GITHUB_TOKEN: { help: "For a GitHub app you added by hand whose config names ${GITHUB_TOKEN}. Apps you connect under Apps keep their own password.", optional: true, placeholder: "github_pat_…" },
+  TYPESAFE_API_KEY: { help: "Lets Jev hear your yes. Used first when both Jev passwords are set.", optional: true, placeholder: "ts_…" },
   OPENROUTER_API_KEY: { help: "Reaches Jev, and the model too when the endpoint setting is openrouter.", optional: true, placeholder: "sk-or-…" },
   HF_TOKEN: { help: "Speeds up the first download of the voice models.", optional: true, placeholder: "hf_…" },
   ELEVENLABS_API_KEY: { help: "Ghost speaks with an ElevenLabs voice when the voice engine is elevenlabs. Only what Ghost says is sent.", optional: true, placeholder: "sk_…" },
@@ -108,7 +109,7 @@ export const SECRET_INFO: Record<string, { help: string; optional?: boolean; pla
 /** A key Ghost keeps for an app it connected (ADR 0034): GHOST_APP_<APP>_<KEY>. */
 export const isAppSecret = (name: string) => name.startsWith("GHOST_APP_");
 
-/** "GHOST_APP_MOBBIN_KEY" → "Mobbin key": an app's key in words; the name stays as detail. */
+/** "GHOST_APP_MOBBIN_KEY" → "Mobbin key": an app's password in words; the name stays as detail. */
 export function secretLabel(name: string): string {
   if (KEY_LABEL[name]) return KEY_LABEL[name];
   if (!isAppSecret(name)) return name;
@@ -117,7 +118,7 @@ export function secretLabel(name: string): string {
   return words[0][0].toUpperCase() + words[0].slice(1) + (words.length > 1 ? ` ${words.slice(1).join(" ")}` : "");
 }
 
-export const APP_SECRET_INFO = { help: "Set when you connected the app. Replace it if the app asks for a new one.", placeholder: "Paste the new key" };
+export const APP_SECRET_INFO = { help: "Set when you connected the app. Replace it if the app asks for a new one.", placeholder: "Paste the new password" };
 
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const DEFAULT_FUZZY = 0.9;
@@ -166,13 +167,13 @@ export type Values = Record<string, string>;
 
 export interface Draft {
   values: Values;
-  /** Secret name -> the new value typed this session. Never read back from the daemon. */
+  /** Password name -> a value typed this session (the onboarding flow). Never read back from the daemon. */
   secrets: Record<string, string>;
 }
 
 const isSet = (s: SettingsView | null, name: string) => !!s?.secrets.find((x) => x.name === name)?.set;
 
-export const JEV_NEEDS_KEY = "Jev needs a TypeSafe or OpenRouter key. Add one under Passwords, or choose Automatic.";
+export const JEV_NEEDS_KEY = "Jev needs a TypeSafe or OpenRouter password. Add one under Passwords, or choose Automatic.";
 
 /** Which Jev path is live (or would be after a restart) for these values and secrets. */
 export function jevNow(mode: string, s: SettingsView | null, draftSecrets: Record<string, string>): { label: string; ok: boolean } {
@@ -182,7 +183,7 @@ export function jevNow(mode: string, s: SettingsView | null, draftSecrets: Recor
   if (m === "off") return { label: "The word list hears your yes.", ok: true };
   if (key) return { label: `Jev hears your yes, through ${key}.`, ok: true };
   if (m === "on") return { label: JEV_NEEDS_KEY, ok: false };
-  return { label: "No Jev key yet, so the word list hears your yes.", ok: true };
+  return { label: "No Jev password yet, so the word list hears your yes.", ok: true };
 }
 
 /** Field errors for the current draft, by key. Empty when it can be saved. */

@@ -71,7 +71,7 @@ export function trayState(opts: {
   }
   // Not set up: say what's missing, as the session's start state does.
   if (online && setupNeeded && !inSession && phase !== "starting") {
-    return { ...base, presence: dot, title: "Needs a model key", sub: "Ghost can’t answer yet" };
+    return { ...base, presence: dot, title: "Needs a model password", sub: "Ghost can’t answer yet" };
   }
   const sub =
     connection === "connecting"

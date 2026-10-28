@@ -13,7 +13,7 @@
  *
  * Addresses: ?step=<id> before the hash opens a step (welcome, model, github, microphone,
  * models, service, try, done); ?state= picks a designed state while the mock is on
- * (model: vault; models: idle, downloading, paused, failed, downloaded;
+ * (models: idle, downloading, paused, failed, downloaded;
  * microphone: quiet; try: heard, nothear). Note that in firstrun the models are already on
  * disk: the download itself only shows with &state=idle, downloading, paused or failed.
  *
@@ -126,8 +126,7 @@ export default function OnboardingPrototype({ params }: RouteProps) {
   const reload = useCallback(async () => {
     try {
       const [sv, dv, mv] = await Promise.all([client.settings(), client.devices().catch(() => null), client.models().catch(() => null)]);
-      // ?state=vault (mock only): the machine fills its model token from a vault when Ghost starts.
-      setSettings(design && demo === "vault" ? { ...sv, vault_managed: true } : sv);
+      setSettings(sv);
       setDevices(dv);
       setModels(mv);
       setLoadError(null);
@@ -176,7 +175,7 @@ export default function OnboardingPrototype({ params }: RouteProps) {
     const modelsOnDisk = fixture ? dl.phase === "done" : !!models?.ready;
     const tasks = {
       welcome: true,
-      model: !!settings && (settings.vault_managed || secret("ANTHROPIC_AUTH_TOKEN") || !!v.ANTHROPIC_BASE_URL),
+      model: !!settings && (secret("ANTHROPIC_AUTH_TOKEN") || !!v.ANTHROPIC_BASE_URL),
       // GitHub is an app (ADR 0034), connected from Apps. Until it is, a fresh install practices on sample issues.
       github: !!status?.apps.includes("github"),
       microphone: !!devices?.echo_cancel_active && !!v.GHOST_INPUT_DEVICE,

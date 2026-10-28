@@ -236,7 +236,7 @@ def parse_entry(raw: Mapping[str, Any]) -> CatalogEntry | None:
         )
         typed = [s for s in settings if s.required or s.secret]
         kind: Kind = "key" if any(s.secret for s in typed) else "sign_in"
-        label = "Use an API key" if kind == "key" else "Sign in"
+        label = "Use a password" if kind == "key" else "Sign in"  # ADR 0036: the product word
         if url.rstrip("/").endswith("readonly"):
             label += " (read only)"
         options.append(
@@ -328,7 +328,7 @@ def _plain(text: str, *, title: bool = True) -> str:
 
 
 def _tell_apart(options: list[ConnectOption]) -> None:
-    """Options that would read the same ("Use an API key" fifteen times) get the place
+    """Options that would read the same ("Use a password" fifteen times) get the place
     they connect to after their label."""
     seen: dict[str, int] = {}
     for o in options:

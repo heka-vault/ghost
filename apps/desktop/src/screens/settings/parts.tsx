@@ -1,9 +1,9 @@
 /** Owner: settings. Page-local pieces: chips input, secret row, save bar, setup list. */
-import { Check, CircleCheck, Copy, KeyRound, X } from "lucide-react";
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
+import { Check, CircleCheck, Copy, X } from "lucide-react";
+import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 
-import { Badge, Button, Card, IconButton, Input, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
-import { APP_SECRET_INFO, SECRET_INFO, type SectionId, SECTION_TITLE, isAppSecret, joinList, listWords, lowerFirst, sectionDomId, secretLabel, splitLines, splitList } from "./model";
+import { Button, Card, IconButton, ListRow, SaveBar as SharedSaveBar, Section, Textarea, cx, useFieldControl } from "../../ui";
+import { type SectionId, SECTION_TITLE, joinList, listWords, lowerFirst, sectionDomId, splitLines, splitList } from "./model";
 
 /* ------------------------------------------------------------------- ChipsInput */
 export interface ChipsInputProps {
@@ -230,119 +230,10 @@ export function LinesInput({ value, onChange, placeholder, rows = 3, disabled, .
   );
 }
 
-/* -------------------------------------------------------------------- SecretRow */
-export interface SecretRowProps {
-  name: string;
-  set: boolean;
-  value: string | undefined;
-  open: boolean;
-  onOpen: () => void;
-  onChange: (v: string) => void;
-  onCancel: () => void;
-  onSubmit: (e: FormEvent) => void;
-  disabled?: boolean;
-  /** Saved, but Ghost reads it only at its next start. */
-  waiting?: boolean;
-}
-
-/** The Replace…/Add… button's id, so the page can return focus to it after a save closes the row. */
+/* --------------------------------------------------------------- password rows */
+/** A password row's Add…/Replace… button id (Passwords.tsx), so the page can return focus to it
+ *  and a link elsewhere ("Add one under Passwords") can land on it. */
 export const secretActionId = (name: string) => `set-secret-${name}-action`;
-
-/**
- * One secret: its name, what it is for, and Set or Not set. Never a value, never a mask.
- * "Replace…" opens a password field in place; the value goes out with Save and is forgotten.
- * The badge keeps saying Set or Not set while a value is typed (that is the fact the operator
- * is deciding on); the help line says what Save will do with the typed one.
- * Closing the field (Cancel, Escape) puts focus back on the button that opened it.
- */
-export function SecretRow({ name, set, value, open, onOpen, onChange, onCancel, onSubmit, disabled, waiting }: SecretRowProps) {
-  const info = SECRET_INFO[name] ?? (isAppSecret(name) ? APP_SECRET_INFO : { help: "", placeholder: "Paste the value" });
-  const label = secretLabel(name);
-  const typed = !!value;
-  const inputId = `set-secret-${name}`;
-  const helpId = `${inputId}-help`;
-  const action = useRef<HTMLButtonElement>(null);
-  const cancel = () => {
-    onCancel();
-    requestAnimationFrame(() => action.current?.focus({ preventScroll: true }));
-  };
-  // Required and missing is the one secret that asks for attention; everything else stays quiet.
-  const variant = !set && !info.optional ? "secondary" : "ghost";
-  return (
-    <form className={cx("set-secret", open && "is-open")} onSubmit={onSubmit} autoComplete="off" aria-label={label}>
-      <div className="set-secret__main">
-        <div className="set-secret__text">
-          <p className="set-secret__label">
-            {open ? <label htmlFor={inputId}>{label}</label> : <span>{label}</span>}
-            <span className="set-detail">{name}</span>
-          </p>
-          <p className="set-help" id={helpId}>
-            {typed ? (
-              <span className="set-help-strong">{set ? "Replaces the saved value on Save. " : "Saved with your other changes. "}</span>
-            ) : (
-              waiting && <span className="set-waits">Waits for a restart. </span>
-            )}
-            {info.help}
-          </p>
-        </div>
-        <div className="set-secret__state">
-          {set ? (
-            <Badge tone="ok" size="sm" dot>Set</Badge>
-          ) : (
-            <Badge size="sm">Not set</Badge>
-          )}
-          <span className="set-secret__action">
-            {open ? (
-              <Button key="cancel" size="sm" variant="ghost" className="set-secret__btn" onClick={cancel} aria-label={`Cancel ${label}`}>
-                Cancel
-              </Button>
-            ) : (
-              <Button
-                key="open"
-                ref={action}
-                id={secretActionId(name)}
-                size="sm"
-                variant={variant}
-                className="set-secret__btn"
-                onClick={onOpen}
-                disabled={disabled}
-                aria-label={`${set ? "Replace" : "Add"} ${label}`}
-              >
-                {set ? "Replace…" : "Add…"}
-              </Button>
-            )}
-          </span>
-        </div>
-      </div>
-      {open && (
-        <div className="set-secret__edit">
-          <div className="set-secret__field">
-            <Input
-              id={inputId}
-              type="password"
-              autoComplete="off"
-              autoFocus
-              spellCheck={false}
-              mono
-              leading={<KeyRound size={14} aria-hidden />}
-              placeholder={info.placeholder}
-              aria-describedby={helpId}
-              value={value ?? ""}
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  cancel();
-                }
-              }}
-            />
-          </div>
-        </div>
-      )}
-    </form>
-  );
-}
 
 /* ---------------------------------------------------------------------- SaveBar */
 export type BarState =

@@ -133,7 +133,6 @@ def test_settings_write_only_secrets(world):
     client, *_, deps = world
     v = client.get("/settings").json()
     assert v["values"] == {} and all(s["set"] is False for s in v["secrets"])
-    assert v["vault_managed"] is False
     r = client.put(
         "/settings",
         json={
@@ -146,8 +145,12 @@ def test_settings_write_only_secrets(world):
     assert s["values"] == {"GHOST_REPOS": "acme/app"}
     assert {x["name"]: x["set"] for x in s["secrets"]}["GITHUB_TOKEN"] is True
     assert "ghp_secret" not in json.dumps(s)
-    assert stat.S_IMODE(os.stat(deps.env_path).st_mode) == 0o600
-    assert read_env(deps.env_path) == {"GHOST_REPOS": "acme/app", "GITHUB_TOKEN": "ghp_secret"}
+    assert stat.S_IMODE(os.stat(deps.settings_path).st_mode) == 0o600
+    # The value is in the vault (ADR 0036), sealed; no plaintext file holds it.
+    assert read_env(deps.settings_path) == {"GHOST_REPOS": "acme/app"}
+    assert not deps.env_path.exists()
+    assert deps.passwords.names() == ["GITHUB_TOKEN"]
+    assert b"ghp_secret" not in deps.passwords.path.read_bytes()
     assert client.put("/settings", json={"values": {"GITHUB_TOKEN": "x"}}).status_code == 422
     assert client.put("/settings", json={"secrets": {"NOPE": "x"}}).status_code == 422
     assert client.put("/settings", json={"values": {"bad-name": "x"}}).status_code == 422

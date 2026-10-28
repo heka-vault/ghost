@@ -369,6 +369,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/passwords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Passwords */
+        get: operations["get_passwords_passwords_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passwords/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Password
+         * @description Save or replace one. The value is never returned, here or anywhere.
+         */
+        put: operations["put_password_passwords__name__put"];
+        post?: never;
+        /** Delete Password */
+        delete: operations["delete_password_passwords__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passwords/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import All
+         * @description Once: heka-vault and the plaintext env files into the vault, then the plaintext
+         *     copies removed. A password already in the vault is kept.
+         */
+        post: operations["import_all_passwords_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passwords/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unlock
+         * @description Ask the keyring to unlock (it shows its own prompt on the desktop), then open
+         *     the vault. The daemon follows: Ghost's own settings and the apps that waited.
+         */
+        post: operations["unlock_passwords_unlock_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/permissions": {
         parameters: {
             query?: never;
@@ -1517,6 +1597,16 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImportSourceView */
+        ImportSourceView: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "heka_vault" | "file";
+            /** Path */
+            path: string;
+        };
         /** ItemKey */
         ItemKey: {
             /** Key */
@@ -1619,6 +1709,91 @@ export interface components {
             name: string;
             /** Path */
             path: string;
+        };
+        /** PasswordImportResult */
+        PasswordImportResult: {
+            /**
+             * Imported
+             * @default []
+             */
+            imported: string[];
+            /**
+             * Kept
+             * @default []
+             */
+            kept: string[];
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            passwords: components["schemas"]["PasswordsView"];
+            /**
+             * Removed
+             * @default []
+             */
+            removed: string[];
+            /**
+             * Restart Required
+             * @default false
+             */
+            restart_required: boolean;
+            /**
+             * Settings
+             * @default []
+             */
+            settings: string[];
+        };
+        /** PasswordInfo */
+        PasswordInfo: {
+            /** Added */
+            added?: string | null;
+            /**
+             * Ghost
+             * @default false
+             */
+            ghost: boolean;
+            /** Last Used */
+            last_used?: string | null;
+            /** Name */
+            name: string;
+            /** Set */
+            set: boolean;
+            /** Updated */
+            updated?: string | null;
+            /**
+             * Used By
+             * @default []
+             */
+            used_by: string[];
+        };
+        /** PasswordResult */
+        PasswordResult: {
+            passwords: components["schemas"]["PasswordsView"];
+            /**
+             * Restart Required
+             * @default false
+             */
+            restart_required: boolean;
+        };
+        /** PasswordSet */
+        PasswordSet: {
+            /**
+             * Value
+             * Format: password
+             */
+            value: string;
+        };
+        /** PasswordsView */
+        PasswordsView: {
+            /**
+             * Importable
+             * @default []
+             */
+            importable: components["schemas"]["ImportSourceView"][];
+            /** Passwords */
+            passwords: components["schemas"]["PasswordInfo"][];
+            vault: components["schemas"]["VaultView"];
         };
         /** PendingEvent */
         PendingEvent: {
@@ -1918,8 +2093,6 @@ export interface components {
         };
         /** SettingsView */
         SettingsView: {
-            /** Env Path */
-            env_path: string;
             /** Secrets */
             secrets: components["schemas"]["SecretState"][];
             /** Settings Path */
@@ -1928,8 +2101,6 @@ export interface components {
             values: {
                 [key: string]: string;
             };
-            /** Vault Managed */
-            vault_managed: boolean;
         };
         /** SkillAdd */
         SkillAdd: {
@@ -2289,6 +2460,21 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * VaultView
+         * @description Ghost's vault: one encrypted file, its key in the operator's keyring.
+         */
+        VaultView: {
+            /** Path */
+            path: string;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "locked" | "unavailable" | "broken";
+        };
         /** VoiceInfo */
         VoiceInfo: {
             /** Id */
@@ -2471,6 +2657,7 @@ export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
+export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
@@ -2478,6 +2665,11 @@ export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
 export type SchemaOutputInfo = components['schemas']['OutputInfo'];
+export type SchemaPasswordImportResult = components['schemas']['PasswordImportResult'];
+export type SchemaPasswordInfo = components['schemas']['PasswordInfo'];
+export type SchemaPasswordResult = components['schemas']['PasswordResult'];
+export type SchemaPasswordSet = components['schemas']['PasswordSet'];
+export type SchemaPasswordsView = components['schemas']['PasswordsView'];
 export type SchemaPendingEvent = components['schemas']['PendingEvent'];
 export type SchemaPendingProposal = components['schemas']['PendingProposal'];
 export type SchemaPermissionsUpdate = components['schemas']['PermissionsUpdate'];
@@ -2520,6 +2712,7 @@ export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
+export type SchemaVaultView = components['schemas']['VaultView'];
 export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
 export type SchemaWaitingEvent = components['schemas']['WaitingEvent'];
 export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
@@ -3247,6 +3440,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutputInfo"][];
+                };
+            };
+        };
+    };
+    get_passwords_passwords_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordsView"];
+                };
+            };
+        };
+    };
+    put_password_passwords__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_password_passwords__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_all_passwords_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordImportResult"];
+                };
+            };
+        };
+    };
+    unlock_passwords_unlock_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordsView"];
                 };
             };
         };

@@ -188,7 +188,7 @@ const ICONS = {
 };
 
 const signIn: CatalogOption = { id: "remote", kind: "sign_in", label: "Sign in", settings: [] };
-const apiKey = (label = "API key"): CatalogOption => ({ id: "remote-key", kind: "key", label: "Use an API key", settings: [{ key: "key", label, secret: true, required: true, default: null, choices: [] }] });
+const apiKey = (label = "API key"): CatalogOption => ({ id: "remote-key", kind: "key", label: "Use a password", settings: [{ key: "key", label, secret: true, required: true, default: null, choices: [] }] });
 
 export interface CatalogSeed extends Omit<CatalogEntryView, "connected" | "suggested_name" | "version" | "website" | "repository"> {
   /** The short name Ghost suggests (the registry entry's app_name). */

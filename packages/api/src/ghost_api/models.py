@@ -10,7 +10,7 @@ import enum
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 API_VERSION = "1"
 
@@ -630,21 +630,75 @@ class SecretState(BaseModel):
 
 class SettingsView(BaseModel):
     settings_path: str
-    env_path: str
     values: dict[str, str]  # non-secret settings, as written in settings.env
+    # Ghost's own passwords and the apps', set or not (ADR 0036); /passwords has the rest
     secrets: list[SecretState]
-    vault_managed: bool  # the operator's secrets store renders env at every start
 
 
 class SettingsUpdate(BaseModel):
     values: dict[str, str | None] | None = None  # None value deletes the key
-    secrets: dict[str, str | None] | None = None  # write-only; None deletes
+    # write-only, into the vault (ADR 0036); None deletes. PUT /passwords/{name} is the
+    # Passwords page's own way.
+    secrets: dict[str, str | None] | None = None
 
 
 class SettingsResult(BaseModel):
     settings: SettingsView
     applied: list[str] = []  # keys the daemon picked up without a restart
     restart_required: bool = False  # a pending value or a secret: the service must restart
+
+
+# --- passwords (ADR 0036) -------------------------------------------------------
+# A password goes in and never comes back out: these say what it is called, what uses it
+# and when it was last used. No route returns a value.
+
+
+class VaultView(BaseModel):
+    """Ghost's vault: one encrypted file, its key in the operator's keyring."""
+
+    state: Literal["open", "locked", "unavailable", "broken"]
+    problem: str | None = None  # why it isn't open, in the operator's words
+    path: str
+
+
+class PasswordInfo(BaseModel):
+    name: str  # what config files call it: ${NAME}
+    set: bool  # in the vault
+    used_by: list[str] = []  # "The model connection", "GitHub" (an app), "Webhook ci"
+    ghost: bool = False  # one Ghost itself reads; a new value applies at its next start
+    added: datetime | None = None
+    updated: datetime | None = None
+    last_used: datetime | None = None  # the last time Ghost filled it in
+
+
+class ImportSourceView(BaseModel):
+    kind: Literal["heka_vault", "file"]  # heka-vault's config, or a plaintext file
+    path: str
+
+
+class PasswordsView(BaseModel):
+    vault: VaultView
+    passwords: list[PasswordInfo]
+    importable: list[ImportSourceView] = []  # what an import would take; empty after one
+
+
+class PasswordSet(BaseModel):
+    value: SecretStr  # write-only; never echoed, not even in a validation error
+
+
+class PasswordResult(BaseModel):
+    passwords: PasswordsView
+    restart_required: bool = False  # Ghost's own: the service must restart to use it
+
+
+class PasswordImportResult(BaseModel):
+    imported: list[str] = []  # names now in the vault
+    kept: list[str] = []  # already in the vault; left as they were
+    settings: list[str] = []  # non-secret settings moved to settings.env
+    removed: list[str] = []  # plaintext files deleted
+    notes: list[str] = []
+    passwords: PasswordsView
+    restart_required: bool = False
 
 
 # --- devices + setup ------------------------------------------------------------

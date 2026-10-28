@@ -1394,6 +1394,28 @@
         "title": "HookInfo",
         "type": "object"
       },
+      "ImportSourceView": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "heka_vault",
+              "file"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "path"
+        ],
+        "title": "ImportSourceView",
+        "type": "object"
+      },
       "ItemKey": {
         "properties": {
           "key": {
@@ -1637,6 +1659,190 @@
           "modified"
         ],
         "title": "OutputInfo",
+        "type": "object"
+      },
+      "PasswordImportResult": {
+        "properties": {
+          "imported": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Imported",
+            "type": "array"
+          },
+          "kept": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
+          "notes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "passwords": {
+            "$ref": "#/components/schemas/PasswordsView"
+          },
+          "removed": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "restart_required": {
+            "default": false,
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "settings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Settings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "passwords"
+        ],
+        "title": "PasswordImportResult",
+        "type": "object"
+      },
+      "PasswordInfo": {
+        "properties": {
+          "added": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added"
+          },
+          "ghost": {
+            "default": false,
+            "title": "Ghost",
+            "type": "boolean"
+          },
+          "last_used": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "set": {
+            "title": "Set",
+            "type": "boolean"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "used_by": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Used By",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "set"
+        ],
+        "title": "PasswordInfo",
+        "type": "object"
+      },
+      "PasswordResult": {
+        "properties": {
+          "passwords": {
+            "$ref": "#/components/schemas/PasswordsView"
+          },
+          "restart_required": {
+            "default": false,
+            "title": "Restart Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "passwords"
+        ],
+        "title": "PasswordResult",
+        "type": "object"
+      },
+      "PasswordSet": {
+        "properties": {
+          "value": {
+            "format": "password",
+            "title": "Value",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "PasswordSet",
+        "type": "object"
+      },
+      "PasswordsView": {
+        "properties": {
+          "importable": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ImportSourceView"
+            },
+            "title": "Importable",
+            "type": "array"
+          },
+          "passwords": {
+            "items": {
+              "$ref": "#/components/schemas/PasswordInfo"
+            },
+            "title": "Passwords",
+            "type": "array"
+          },
+          "vault": {
+            "$ref": "#/components/schemas/VaultView"
+          }
+        },
+        "required": [
+          "vault",
+          "passwords"
+        ],
+        "title": "PasswordsView",
         "type": "object"
       },
       "PendingEvent": {
@@ -2465,10 +2671,6 @@
       },
       "SettingsView": {
         "properties": {
-          "env_path": {
-            "title": "Env Path",
-            "type": "string"
-          },
           "secrets": {
             "items": {
               "$ref": "#/components/schemas/SecretState"
@@ -2486,18 +2688,12 @@
             },
             "title": "Values",
             "type": "object"
-          },
-          "vault_managed": {
-            "title": "Vault Managed",
-            "type": "boolean"
           }
         },
         "required": [
           "settings_path",
-          "env_path",
           "values",
-          "secrets",
-          "vault_managed"
+          "secrets"
         ],
         "title": "SettingsView",
         "type": "object"
@@ -3353,6 +3549,42 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VaultView": {
+        "description": "Ghost's vault: one encrypted file, its key in the operator's keyring.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "locked",
+              "unavailable",
+              "broken"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "path"
+        ],
+        "title": "VaultView",
         "type": "object"
       },
       "VoiceInfo": {
@@ -4818,6 +5050,164 @@
         "summary": "Outputs",
         "tags": [
           "outputs"
+        ]
+      }
+    },
+    "/passwords": {
+      "get": {
+        "operationId": "get_passwords_passwords_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Passwords",
+        "tags": [
+          "passwords"
+        ]
+      }
+    },
+    "/passwords/import": {
+      "post": {
+        "description": "Once: heka-vault and the plaintext env files into the vault, then the plaintext\ncopies removed. A password already in the vault is kept.",
+        "operationId": "import_all_passwords_import_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Import All",
+        "tags": [
+          "passwords"
+        ]
+      }
+    },
+    "/passwords/unlock": {
+      "post": {
+        "description": "Ask the keyring to unlock (it shows its own prompt on the desktop), then open\nthe vault. The daemon follows: Ghost's own settings and the apps that waited.",
+        "operationId": "unlock_passwords_unlock_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Unlock",
+        "tags": [
+          "passwords"
+        ]
+      }
+    },
+    "/passwords/{name}": {
+      "delete": {
+        "operationId": "delete_password_passwords__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Password",
+        "tags": [
+          "passwords"
+        ]
+      },
+      "put": {
+        "description": "Save or replace one. The value is never returned, here or anywhere.",
+        "operationId": "put_password_passwords__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Password",
+        "tags": [
+          "passwords"
         ]
       }
     },

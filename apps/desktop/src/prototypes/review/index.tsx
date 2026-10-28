@@ -393,7 +393,7 @@ export default function ReviewPrototype(_: RouteProps) {
         size="page"
         icon={<Inbox />}
         title="Ghost builds this queue once it’s set up"
-        description="Ghost needs a model key before it can read your repositories and rank what’s waiting on you."
+        description="Ghost needs a model password before it can read your repositories and rank what’s waiting on you."
         actions={<Button variant="primary" href={live.setupHref}>Finish setup</Button>}
       />
     );

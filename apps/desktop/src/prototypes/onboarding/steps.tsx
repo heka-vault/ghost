@@ -82,7 +82,7 @@ function FieldsSkeleton({ n = 2 }: { n?: number }) {
 
 /* ----------------------------------------------------------------------------- welcome */
 
-/** The three promises. The copy follows the reader: a model already connected, keys in a vault. */
+/** The three promises. The copy follows the reader: a model already connected. */
 function promises(w: Wizard): { icon: ReactNode; title: string; body: ReactNode }[] {
   const connected = w.returning || w.done.model;
   return [
@@ -103,14 +103,8 @@ function promises(w: Wizard): { icon: ReactNode; title: string; body: ReactNode 
     },
     {
       icon: <KeyRound />,
-      title: "Your keys stay with you",
-      body: w.settings?.vault_managed ? (
-        <>Your vault provides them each time Ghost starts. This app never sees them.</>
-      ) : (
-        <>
-          Tokens are saved in <span className="t-mono">~/.config/ghost/env</span>, readable only by you. This app can set them, but never shows them again.
-        </>
-      ),
+      title: "Your passwords stay with you",
+      body: <>Ghost keeps them in its own vault, locked with your keyring. This app can save one, but never shows it again.</>,
     },
   ];
 }
@@ -160,7 +154,6 @@ export function ModelStep({ w }: { w: Wizard }) {
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
 
-  const vault = !!s?.vault_managed;
   const tokenInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (missing) tokenInput.current?.focus();
@@ -204,11 +197,7 @@ export function ModelStep({ w }: { w: Wizard }) {
     <StepFrame
       id="model"
       title="Connect a model"
-      description={
-        vault
-          ? "Ghost thinks with a large language model. On this computer, your vault provides the key, so there’s nothing to type."
-          : "Ghost thinks with a large language model. Give it an endpoint that speaks Anthropic’s API, and the token for it."
-      }
+      description="Ghost thinks with a large language model. Give it an endpoint that speaks Anthropic’s API, and the password for it."
       primary={{ label: "Continue", onClick: submit, loading: busy, disabled: (w.loading && !s) || (!online && (!w.done.model || dirty)) }}
       onBack={w.back}
       onSkip={w.done.model ? undefined : w.skip}
@@ -216,7 +205,7 @@ export function ModelStep({ w }: { w: Wizard }) {
       autoFocus={w.focusOnOpen}
       notices={
         <>
-          <NeedsGhost w={w} what="save a token" />
+          <NeedsGhost w={w} what="save a password" />
           {error && (
             <Notice tone="danger" title="Couldn’t save">
               {error}
@@ -227,23 +216,6 @@ export function ModelStep({ w }: { w: Wizard }) {
     >
       {!s ? (
         <FieldsSkeleton />
-      ) : vault ? (
-        <>
-          <Card list>
-            <ListRow
-              title="Model token"
-              description={<span className="t-mono">ANTHROPIC_AUTH_TOKEN</span>}
-              trailing={
-                <Badge tone="ok" dot>
-                  From your vault
-                </Badge>
-              }
-            />
-            {s?.values.ANTHROPIC_BASE_URL && <ListRow title="Endpoint" description={<span className="t-mono">{s.values.ANTHROPIC_BASE_URL}</span>} />}
-            {s?.values.GHOST_LLM_MODEL && <ListRow title="Model" description={<span className="t-mono">{s.values.GHOST_LLM_MODEL}</span>} />}
-          </Card>
-          <p className="onb-help onb-after-card">Ghost reads it from the vault each time it starts. To change it, change it there.</p>
-        </>
       ) : (
         <div className="onb-fields">
           <Field label="Endpoint" detail="ANTHROPIC_BASE_URL" optional help="Leave it empty for Anthropic itself. A local proxy or another provider works too.">
@@ -251,11 +223,11 @@ export function ModelStep({ w }: { w: Wizard }) {
           </Field>
           <Field
            
-            label="Token"
+            label="Password"
             detail="ANTHROPIC_AUTH_TOKEN"
             aside={<SecretBadge set={tokenSet} />}
-            help={tokenSet ? "Paste a new one only to replace it." : "Saved on this computer only. You won’t see it again."}
-            error={missing ? "Paste a token, or an endpoint that doesn’t need one. Or skip this for now." : undefined}
+            help={tokenSet ? "Paste a new one only to replace it." : "Kept in Ghost’s vault on this computer. You won’t see it again."}
+            error={missing ? "Paste a password, or an endpoint that doesn’t need one. Or skip this for now." : undefined}
           >
             <Input
               ref={tokenInput}

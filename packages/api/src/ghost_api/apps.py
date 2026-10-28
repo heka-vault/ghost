@@ -2,17 +2,15 @@
 sign-in, and the permissions.
 
 Connecting is the operator's own action, from the desktop: it writes ``apps.json`` and puts
-any secret into ``apps.env`` (0600, beside ``env``, which the vault renderer rewrites whole;
-ghostd loads it at start) and into the running daemon's environment, so the app connects
-at once. A secret value goes in and never comes back out; ``apps.json`` holds
-only ``${NAME}``. The model has no route here.
+any password into Ghost's vault (ADR 0036), where the app finds it when it connects, at
+once. A password goes in and never comes back out; ``apps.json`` holds only ``${NAME}``.
+The model has no route here.
 """
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
-import os
 import re
 import time
 from datetime import UTC, datetime
@@ -35,8 +33,7 @@ from ghost_core.levels import Autonomy
 from ghost_core.permissions import Mode, Rule, parse_rules
 from ghost_core.policy import AutonomyPolicy, write_permissions
 
-from ghost_api.app import Deps, apps_env_path, permissions_view
-from ghost_api.files import read_env, update_env
+from ghost_api.app import Deps, permissions_view
 from ghost_api.models import (
     Ack,
     AppAction,
@@ -50,6 +47,7 @@ from ghost_api.models import (
     PermissionsUpdate,
     PermissionsView,
 )
+from ghost_api.passwords import save_passwords
 
 CONNECT_WAIT_SECS = 10.0  # how long POST /apps waits for a connection or a sign-in address
 FIRST_COPY_WAIT_SECS = 15.0  # the catalog's first copy, so the screen has something to show
@@ -224,25 +222,23 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
     # --- connecting ----------------------------------------------------------------------
 
     def keep_secrets(secrets: dict[str, str]) -> None:
-        """Into apps.env and the running daemon's environment; never logged."""
-        if not secrets:
-            return
-        update_env(apps_env_path(deps), dict(secrets), mode=0o600)
-        os.environ.update(secrets)
+        """Into the vault (ADR 0036); never logged. A locked vault refuses the connection
+        before ``apps.json`` changes."""
+        if secrets:
+            save_passwords(deps, dict(secrets))
 
     def forget_secrets(spec: AppSpec) -> None:
-        """The keys Ghost kept for this app: the ``GHOST_APP_`` names its own entry refers
-        to and no other app's does. A name the operator chose themselves stays, and so
-        does every other app's key (``github-2``'s are not ``github``'s)."""
+        """The passwords Ghost kept for this app: the ``GHOST_APP_`` names its own entry
+        refers to and no other app's does. A name the operator chose themselves stays, and
+        so does every other app's (``github-2``'s are not ``github``'s)."""
         others = {n for s in deps.apps.specs.values() if s.name != spec.name for n in s.secrets()}
-        path = apps_env_path(deps)
-        kept = read_env(path)
+        vault = deps.passwords
+        if vault is None or not vault.is_open:
+            return
         gone = [k for k in spec.secrets() if k.startswith("GHOST_APP_") and k not in others]
-        gone = [k for k in gone if k in kept]
+        gone = [k for k in gone if k in vault]
         if gone:
-            update_env(path, dict.fromkeys(gone), mode=0o600)
-            for k in gone:
-                os.environ.pop(k, None)
+            save_passwords(deps, dict.fromkeys(gone))
 
     def clash(spec: AppSpec, secrets: dict[str, str]) -> str | None:
         """Another app whose keys this one's would overwrite: ``my-app`` and ``my_app``
@@ -354,6 +350,8 @@ def add_app_routes(app: FastAPI, deps: Deps) -> None:  # noqa: C901 - one route 
                 raise HTTPException(
                     409, f"{spec.name} would share its keys with {other}; give it another name"
                 )
+        if secrets and (deps.passwords is None or not deps.passwords.is_open):
+            raise HTTPException(423, "Your keyring is locked. Unlock it, then connect again.")
         save(specs)  # first: a file that won't take the entry changes nothing
         keep_secrets(secrets)
         url = await start(specs)

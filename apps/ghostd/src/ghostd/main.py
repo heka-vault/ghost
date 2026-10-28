@@ -32,9 +32,7 @@ from ghost_api import (
     status_snapshot,
 )
 from ghost_api import waiting_view as build_waiting_view
-from ghost_api.app import APPS_ENV
 from ghost_api.conversations import conversation_view
-from ghost_api.files import read_env
 from ghost_api.models import ConversationView, StatusEvent
 from ghost_core import (
     AutonomyPolicy,
@@ -54,6 +52,7 @@ from ghost_core.hooks import HookIntake, run_fixtures
 from ghost_core.jev import JevClassifier, JevClient, watch_decider
 from ghost_core.outputs import SOURCE as OUTPUTS
 from ghost_core.outputs import Outputs
+from ghost_core.passwords import Passwords
 from ghost_core.routes import RouteEngine, RoutePolicy, SpokenDigest
 from ghost_core.rules import SOURCE as RULES
 from ghost_core.rules import Rules, rules_source
@@ -83,6 +82,8 @@ from ghostd.config import GhostdSettings, runtime_dir
 from ghostd.deciders import model_decider
 from ghostd.dictation import is_dictating
 from ghostd.hooks import HooksListener
+from ghostd.passwords import VAULT_RETRY_SECS, in_use, open_passwords, passwords_cli, redacting
+from ghostd.passwords import problems as password_problems
 from ghostd.phone import PhoneListener, PhoneStore, Refusal
 from ghostd.routes import (
     GREETING_SECS,
@@ -159,22 +160,18 @@ def check_folder(config_dir: Path) -> list[str]:
         )
         problems += [f"hook {h.name}: {f}" for f in failures]
         if not os.environ.get(h.secret_name()):
-            problems.append(f"hook {h.name}: {h.secret_name()} is not set")
+            problems.append(f"hook {h.name}: password {h.secret_name()} is not set")
     return problems
 
 
-def load_app_secrets(path: Path) -> None:
-    """The keys the desktop kept for connected apps (ADR 0034): into the environment, never
-    over a value the service already has (the vault's)."""
-    for key, value in read_env(path).items():
-        os.environ.setdefault(key, value)
-
-
-def ghost_problems(apps: Apps, folder: GhostFolder) -> list[tuple[str, str]]:
-    """Ghost's own trouble, for the waiting list (ADR 0029): an app that isn't connected or
-    wants the operator to sign in again, a file in Ghost's folder that doesn't read or is
-    no longer read (ADR 0035)."""
-    out: list[tuple[str, str]] = []
+def ghost_problems(
+    apps: Apps, folder: GhostFolder, passwords: list[tuple[str, str]] | None = None
+) -> list[tuple[str, str]]:
+    """Ghost's own trouble, for the waiting list (ADR 0029): a keyring to unlock or
+    passwords still in plain files (ADR 0036), an app that isn't connected or wants the
+    operator to sign in again, a file in Ghost's folder that doesn't read or is no longer
+    read (ADR 0035)."""
+    out: list[tuple[str, str]] = list(passwords or [])
     for name, spec in apps.specs.items():
         state = apps.state(name)
         if state == "connected":
@@ -218,9 +215,13 @@ def wake_model_paths(cfg: GhostdSettings, voice: VoiceSettings) -> tuple[Path, l
 class Daemon:
     """Runs the loop and implements ``ghost_api.Controller`` for the desktop app."""
 
-    def __init__(self, cfg: GhostdSettings, voice: VoiceSettings) -> None:
+    def __init__(
+        self, cfg: GhostdSettings, voice: VoiceSettings, passwords: Passwords | None = None
+    ) -> None:
         self.cfg = cfg
         self.voice = voice
+        self.passwords = passwords  # ADR 0036; opened in cli(), or in run()
+        self._jevs: list[JevClient] = []  # closed when the daemon stops
         self.rt = runtime_dir()
         self._stop = asyncio.Event()
         self.state = DaemonState(
@@ -612,6 +613,60 @@ class Daemon:
 
     # --- the loop --------------------------------------------------------------
 
+    # --- passwords (ADR 0036) --------------------------------------------------
+
+    def _classifier(self, jev: JevClient | None) -> ConfirmationClassifier:
+        if jev is None:
+            return RegexClassifier()
+        if self.passwords is not None:
+            self.passwords.note_used(
+                "OPENROUTER_API_KEY" if jev.provider == "openrouter" else "TYPESAFE_API_KEY"
+            )
+        return JevClassifier(
+            jev,
+            fallback=RegexClassifier(),
+            threshold=self.cfg.jev_threshold,
+            deadline=self.cfg.jev_deadline_secs,
+            on_decision=debug.audio,
+        )
+
+    async def _wait_for_vault(self) -> None:
+        """The keyring was locked at start: try again every few seconds until it opens.
+        "Unlock your keyring" is on the waiting list meanwhile."""
+        vault = self.passwords
+        while vault is not None and not vault.is_open:
+            try:
+                await asyncio.wait_for(self._stop.wait(), VAULT_RETRY_SECS)
+                return
+            except TimeoutError:
+                pass
+            if not vault.is_open and await asyncio.to_thread(vault.open):
+                await self.passwords_opened()
+
+    async def passwords_opened(self) -> None:
+        """The vault opened after the keyring was locked: Ghost's own settings are read
+        again (the model connection, the voice), Jev joins when it has a key, and the apps
+        that waited for a password connect. A watch's model decider follows at the next
+        start."""
+        logger.info("passwords: the vault is open")
+        try:
+            self.voice = VoiceSettings()  # type: ignore[call-arg]
+        except Exception as e:  # noqa: BLE001 - names only; a value never reaches the log
+            logger.error(f"passwords: settings could not be read again ({type(e).__name__})")
+        try:
+            jev = build_jev(GhostdSettings())
+        except ValueError as e:
+            logger.error(f"passwords: {e}")
+            jev = None
+        if jev is not None and self.gate is not None:
+            self._jevs.append(jev)
+            self.gate.set_classifier(self._classifier(jev))
+        if self.apps is not None:
+            for name in list(self.apps.failed):
+                if await self.apps.revive(name):
+                    self.state.publish_apps(changed=name)
+        self._refresh_waiting_now()
+
     def build_wake(self, models: Models) -> WakeDetector:
         manual = FileWakeDetector(self.rt / WAKE_FILE)
         self._manual = manual
@@ -704,12 +759,15 @@ class Daemon:
         apps_file = load_apps(self.cfg.config_dir / APPS_FILE)
         for problem in apps_file.problems:
             logger.warning(f"apps: {problem}")
-        load_app_secrets(self.cfg.env_path.parent / APPS_ENV)
+        if self.passwords is None:
+            self.passwords = open_passwords(self.cfg)
+        passwords = self.passwords
         signins = SignIns(
             self.cfg.data_dir / "apps", port=self.cfg.signin_port, on_url=self._on_signin_url
         )
         self.signins = signins
-        apps = Apps(apps_file.apps, auth_for=signins.auth_for)
+        # ADR 0036: an app's ${NAME} is filled from the vault when it connects.
+        apps = Apps(apps_file.apps, environ=passwords.environ(), auth_for=signins.auth_for)
         self.apps = apps
         await apps.connect()
         self.catalog = Catalog(self.cfg.catalog_path)
@@ -721,21 +779,10 @@ class Daemon:
         # (the index, read_skill, add and remove).
         tool_sources: list[ToolSource] = [*apps.sources(), skills.source()]
         jev = build_jev(self.cfg)
-        classifier: ConfirmationClassifier = (
-            JevClassifier(
-                jev,
-                fallback=RegexClassifier(),
-                threshold=self.cfg.jev_threshold,
-                deadline=self.cfg.jev_deadline_secs,
-                on_decision=debug.audio,
-            )
-            if jev
-            else RegexClassifier()
-        )
         gate = WriteGate(
             store,
             autonomy=autonomy,
-            classifier=classifier,
+            classifier=self._classifier(jev),
             on_decision=debug.audio,
         )
         for a in tool_sources:  # every app's changes go through the gate
@@ -786,7 +833,9 @@ class Daemon:
         waiting = WaitingList(
             Items(store),
             changes=gate.waiting,
-            problems=lambda: ghost_problems(apps, folder),
+            problems=lambda: ghost_problems(
+                apps, folder, password_problems(self.passwords, self.cfg)
+            ),
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.waiting = waiting
@@ -804,6 +853,7 @@ class Daemon:
             waiting.items,
             store,
             read=read_for,
+            environ=passwords.environ(),
             on_change=lambda: self.state.set_waiting(waiting.count()),
         )
         self.hook_intake = hook_intake
@@ -842,6 +892,8 @@ class Daemon:
         waiting.refresh()
         self.state.set_waiting(waiting.count())
         refresher = asyncio.ensure_future(self._refresh_waiting(waiting))
+        # ADR 0036: a locked keyring is waited for, not a failure.
+        vault_waiter = None if passwords.is_open else asyncio.ensure_future(self._wait_for_vault())
 
         def follow_watches() -> None:
             """The folder was re-read: the declared watches and hooks again."""
@@ -899,6 +951,8 @@ class Daemon:
             await self._passive(wake, models, tool_sources, gate, events, ducker)
         finally:
             refresher.cancel()
+            if vault_waiter is not None:
+                vault_waiter.cancel()
             await watch_runner.close()
             for route in self.routes.routes.values():
                 if hasattr(route, "close"):
@@ -915,6 +969,8 @@ class Daemon:
             await apps.close()
             if jev:
                 await jev.aclose()
+            for late in self._jevs:
+                await late.aclose()
             store.close()
 
     async def _passive(
@@ -1048,6 +1104,7 @@ class Daemon:
             output_device=self.voice.output_device,
             stt_model=self.voice.stt_model,
             conversations=self.conversations,
+            passwords=self.passwords,
         )
         self._deps = deps
         server = ApiServer(create_app(deps), socket_path)
@@ -1115,6 +1172,8 @@ class Daemon:
         in the context, and a reply within the window is the acknowledgment; silence ends
         it with nothing kept."""
         origin = "phone" if phone is not None else "desk"
+        if self.passwords is not None:  # "last used" on the Passwords page (ADR 0036)
+            self.passwords.note_used(*in_use(self.voice))
         if phone is None and not self._chimed:
             ducker.duck()
             if self.cfg.chime:
@@ -1526,6 +1585,19 @@ def latency_command(args: list[str]) -> int:
     return 0
 
 
+def check_passwords(vault: Passwords, cfg: GhostdSettings) -> list[str]:
+    """``ghostd check`` for the vault (ADR 0036). Passwords still in plain files are said,
+    not a problem: a build is deployed before its import."""
+    print(f"passwords: {len(vault)} in {vault.path} ({vault.state})")
+    out = []
+    if not vault.is_open:
+        out.append(f"passwords: {vault.problem}")
+    for key, title in password_problems(vault, cfg):
+        if key == "passwords:import":
+            print(f"passwords: still in plain files; run `ghostd passwords import` ({title})")
+    return out
+
+
 def build_jev(cfg: GhostdSettings) -> JevClient | None:
     """A Jev client per GHOST_JEV and whichever key is present, or None for regex only."""
     return JevClient.from_env(
@@ -1539,8 +1611,10 @@ def cli(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     cmd = argv[0] if argv else "run"
     logger.remove()
-    # diagnose=False: a traceback never prints its frames' variables (a webhook's raw body,
-    # the environment's secrets); the journal gets the stack and the message only.
+    # No log line carries a password: each message is checked against the vault's values
+    # (ADR 0036). diagnose=False: a traceback never prints its frames' variables (a
+    # webhook's raw body, a password); the journal gets the stack and the message only.
+    logger.configure(patcher=redacting)  # type: ignore[arg-type]
     logger.add(
         sys.stderr,
         level="INFO",
@@ -1550,6 +1624,9 @@ def cli(argv: list[str] | None = None) -> None:
     )
 
     if cmd == "run":
+        # The vault first (ADR 0036): Ghost's settings read its passwords from this
+        # process's environment, so they are read after it.
+        passwords = open_passwords(GhostdSettings())
         cfg = GhostdSettings()
         voice = VoiceSettings()  # type: ignore[call-arg]
         if voice.log_level.upper() != "INFO":
@@ -1562,7 +1639,7 @@ def cli(argv: list[str] | None = None) -> None:
                 diagnose=False,
             )
         debug.enable(voice.debug_audio)
-        asyncio.run(Daemon(cfg, voice).run())
+        asyncio.run(Daemon(cfg, voice, passwords).run())
     elif cmd in {"wake", "say", "sleep", "status"}:
         sys.exit(_client_command(cmd, argv[1:]))
     elif cmd == "latency":
@@ -1570,7 +1647,10 @@ def cli(argv: list[str] | None = None) -> None:
     elif cmd == "perf":
         from ghostd.perf.cli import main as perf_main
 
+        open_passwords(GhostdSettings())  # the model and Jev keys (ADR 0036)
         sys.exit(perf_main(argv[1:]))
+    elif cmd == "passwords":
+        sys.exit(passwords_cli(argv[1:], GhostdSettings()))
     elif cmd == "restore-volumes":
         restore_from_state(runtime_dir() / DUCK_STATE)
     elif cmd == "devices":
@@ -1580,9 +1660,10 @@ def cli(argv: list[str] | None = None) -> None:
     elif cmd in {"version", "--version"}:
         print(ghost_build.describe(ghost_build.version(), ghost_build.detect()))
     elif cmd == "check":
+        vault = open_passwords(GhostdSettings())
         cfg = GhostdSettings()
-        problems = []
         print(f"version: {ghost_build.describe(ghost_build.version(), ghost_build.detect())}")
+        problems = check_passwords(vault, cfg)
         try:
             voice = VoiceSettings()  # type: ignore[call-arg]
         except Exception as e:  # noqa: BLE001 - pydantic-settings reports what is wrong
@@ -1624,7 +1705,7 @@ def cli(argv: list[str] | None = None) -> None:
 
             async def probe() -> list[str]:
                 signins = SignIns(cfg.data_dir / "apps", port=cfg.signin_port)
-                apps = Apps(apps_file.apps, auth_for=signins.auth_for)
+                apps = Apps(apps_file.apps, environ=vault.environ(), auth_for=signins.auth_for)
                 await apps.connect()
                 gate = WriteGate(Store(), autonomy=autonomy)
                 try:
@@ -1653,7 +1734,7 @@ def cli(argv: list[str] | None = None) -> None:
     else:
         print(
             "usage: ghostd [run|wake|say <text>|sleep|status|latency|perf|restore-volumes|"
-            "devices|check|version|push <hook> <event> [json]]"
+            "devices|check|version|passwords|push <hook> <event> [json]]"
             f"  (got {cmd!r})"
         )
         sys.exit(2)
@@ -1673,6 +1754,7 @@ def push_cli(args: list[str]) -> int:
         print("usage: ghostd push <hook> <event> [json]", file=sys.stderr)
         return 2
     cfg = GhostdSettings()
+    open_passwords(cfg)  # the hook's password (ADR 0036)
     hook = GhostFolder(cfg.config_dir).hooks.get(args[0])
     if hook is None or hook.verify != "hmac":
         print(f"no hmac hook {args[0]} is declared", file=sys.stderr)

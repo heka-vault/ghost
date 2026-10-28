@@ -27,6 +27,9 @@ import type {
   RulesView,
   SettingsUpdate,
   SettingsView,
+  PasswordImportResult,
+  PasswordResult,
+  PasswordsView,
   SkillInfo,
   SkillPreview,
   SkillSearchPage,
@@ -140,6 +143,12 @@ export interface MockOptions {
    * Ghost differ.
    */
   build?: "dev" | "dirty" | "deploy" | "release" | "behind" | null;
+  /**
+   * Ghost's vault (?vault=…, ADR 0036): `locked`, the keyring is locked (Unlock opens it after a
+   * moment); `import`, plaintext files wait to be imported in any scenario; `broken`, the key in the
+   * keyring doesn't open the vault.
+   */
+  vault?: "locked" | "import" | "broken" | null;
 }
 
 export class MockDaemon {
@@ -162,6 +171,8 @@ export class MockDaemon {
   private policy: PolicyView;
   private audit: AuditEntry[];
   private settings: SettingsView;
+  /** Ghost's vault (ADR 0036): names and metadata; the mock never keeps a value either. */
+  private passwords: PasswordsView;
   private devices: DevicesView;
   private models: ModelsView;
   private voices: VoiceInfo[];
@@ -193,6 +204,15 @@ export class MockDaemon {
     this.policy = f.policy;
     this.audit = f.audit;
     this.settings = f.settings.settings;
+    this.passwords = structuredClone(f.settings.passwords);
+    if (phoneOpts.vault === "locked") this.passwords.vault = { ...this.passwords.vault, state: "locked", problem: "Your keyring is locked" };
+    if (phoneOpts.vault === "broken")
+      this.passwords.vault = { ...this.passwords.vault, state: "broken", problem: "the key in your keyring doesn’t open this vault" };
+    if (phoneOpts.vault === "import" && !this.passwords.importable?.length)
+      this.passwords.importable = [
+        { kind: "file", path: "~/.config/ghost/env" },
+        { kind: "file", path: "~/.config/ghost/apps.env" },
+      ];
     this.devices = f.settings.devices;
     this.models = f.settings.models;
     this.skills = f.skills;
@@ -790,6 +810,8 @@ export class MockDaemon {
       if (!/^[a-z][a-z-]*$/.test(f.view.name)) throw new HttpError(422, `'${f.view.name}': a name is lower-case letters and -`);
       if (this.apps.some((a) => a.view.name === f.view.name) && !b.replace) throw new HttpError(409, `an app is already connected as ${f.view.name}`);
     }
+    // A key goes into the vault before apps.json changes, and a locked vault refuses it (423).
+    for (const f of made) if (f.view.kind !== "sign_in") this.keepPasswords(f.view.settings ?? [], f.view.title);
     let url: string | null = null;
     for (const f of made) {
       this.apps = [...this.apps.filter((a) => a.view.name !== f.view.name), f];
@@ -800,6 +822,89 @@ export class MockDaemon {
     }
     this.appsChanged(made[0]?.view.name ?? null, url);
     return { apps: made.map((f) => this.appView(f)), sign_in_url: url, problems: [] };
+  }
+  /* ------------------------------------------------------------- passwords (ADR 0036) */
+  /** While the keyring is locked nothing is readable, not even which are set. */
+  private passwordsView(): PasswordsView {
+    const p = this.passwords;
+    const closed = p.vault.state !== "open";
+    return {
+      ...p,
+      passwords: p.passwords.map((x) => (closed ? { ...x, set: false, added: null, updated: null, last_used: null } : { ...x })),
+      importable: [...(p.importable ?? [])],
+    };
+  }
+  private requireVault() {
+    const v = this.passwords.vault;
+    if (v.state !== "open") throw new HttpError(423, `${v.problem ?? "The vault isn’t open"}. Unlock it, then try again.`);
+  }
+  /** Ghost's own: Set or not on the Settings view too, which the setup checks read. */
+  private syncSecrets() {
+    const set = new Set(this.passwords.passwords.filter((x) => x.set).map((x) => x.name));
+    this.settings = { ...this.settings, secrets: this.settings.secrets.map((x) => ({ ...x, set: set.has(x.name) })) };
+  }
+  /** Keys a connection saves (POST /apps), into the vault like the daemon's. */
+  private keepPasswords(names: string[], usedBy: string) {
+    if (!names.length) return;
+    this.requireVault();
+    for (const name of names) {
+      const at = new Date().toISOString();
+      const row = this.passwords.passwords.find((x) => x.name === name);
+      if (row) Object.assign(row, { set: true, updated: at, used_by: row.used_by.length ? row.used_by : [usedBy] });
+      else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [usedBy], added: at, updated: at, last_used: null });
+      if (!this.settings.secrets.some((x) => x.name === name)) this.settings.secrets.push({ name, set: true });
+    }
+    this.syncSecrets();
+  }
+  private setPassword(name: string, value: string): PasswordResult {
+    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) throw new HttpError(422, "a password’s name is capital letters, digits and _, starting with a letter");
+    if (!value.trim()) throw new HttpError(422, "a password can’t be empty");
+    if (/\n/.test(value)) throw new HttpError(422, "a password is one line");
+    this.requireVault();
+    const at = new Date().toISOString();
+    const row = this.passwords.passwords.find((x) => x.name === name);
+    if (row) Object.assign(row, { set: true, updated: at, added: row.added ?? at });
+    else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [], added: at, updated: at, last_used: null });
+    this.syncSecrets();
+    return { passwords: this.passwordsView(), restart_required: !!row?.ghost };
+  }
+  private deletePassword(name: string): PasswordResult {
+    this.requireVault();
+    const row = this.passwords.passwords.find((x) => x.name === name);
+    if (!row?.set) throw new HttpError(404, `no password called ${name}`);
+    // A name nothing refers to leaves the list; one Ghost or an app names stays, not set.
+    if (row.ghost || row.used_by.length) Object.assign(row, { set: false, added: null, updated: null, last_used: null });
+    else this.passwords.passwords = this.passwords.passwords.filter((x) => x !== row);
+    this.syncSecrets();
+    return { passwords: this.passwordsView(), restart_required: row.ghost };
+  }
+  private async importPasswords(): Promise<PasswordImportResult> {
+    this.requireVault();
+    await sleep(800);
+    const files = this.passwords.importable ?? [];
+    const heka = files.some((f) => f.kind === "heka_vault");
+    const kept = this.passwords.passwords.filter((x) => x.set).map((x) => x.name);
+    const imported = files.length ? ["GITHUB_TOKEN", "HF_TOKEN"].filter((n) => !kept.includes(n)) : [];
+    for (const n of imported) {
+      const row = this.passwords.passwords.find((x) => x.name === n);
+      const at = new Date().toISOString();
+      if (row) Object.assign(row, { set: true, added: at, updated: at });
+    }
+    this.passwords.importable = [];
+    this.syncSecrets();
+    return {
+      imported,
+      kept: files.length ? kept : [],
+      settings: files.length ? ["ANTHROPIC_BASE_URL"] : [],
+      removed: files.filter((f) => f.kind === "file").map((f) => f.path),
+      notes: heka
+        ? ["~/.config/heka-vault/ghost.env still holds heka-vault’s read token. Ghost doesn’t read it any more; delete it when nothing else needs it."]
+        : files.length
+          ? []
+          : ["There was nothing to import."],
+      passwords: this.passwordsView(),
+      restart_required: imported.length > 0,
+    };
   }
   /** POST /apps/{name}/sign-in: sign in again, or reconnect an app that isn't connected. */
   private signIn(f: AppFixture): AppConnectResult {
@@ -946,6 +1051,15 @@ export class MockDaemon {
       this.settings = { ...this.settings, values: { ...this.settings.values }, secrets: [...this.settings.secrets] };
       return { applied, restart_required: restart, settings: this.settings };
     }
+    if (method === "GET" && path === "/passwords") return this.passwordsView();
+    if (method === "PUT" && (r = m(/^\/passwords\/([^/]+)$/))) return this.setPassword(decodeURIComponent(r[1]), (b as { value?: string })?.value ?? "");
+    if (method === "DELETE" && (r = m(/^\/passwords\/([^/]+)$/))) return this.deletePassword(decodeURIComponent(r[1]));
+    if (method === "POST" && path === "/passwords/unlock") {
+      await sleep(900); // the keyring's own prompt, answered
+      if (this.passwords.vault.state === "locked") this.passwords.vault = { ...this.passwords.vault, state: "open", problem: null };
+      return this.passwordsView();
+    }
+    if (method === "POST" && path === "/passwords/import") return this.importPasswords();
     if (method === "GET" && path === "/devices") return this.devices;
     if (method === "POST" && path === "/setup/echo-cancel") {
       await sleep(700);

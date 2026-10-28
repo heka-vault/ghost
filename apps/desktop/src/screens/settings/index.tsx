@@ -4,7 +4,7 @@
  *   general    Finish setup while it is unfinished, Ghost's version and build and this
  *              window's (About.tsx), the settings file
  *   model      where Ghost sends a session to think
- *   passwords  the keys Ghost holds (write-only; #31 rebuilds this as a vault)
+ *   passwords  Ghost's vault (ADR 0036): every password, each saved on its own row (Passwords.tsx)
  *   sound      Ghost's voice, wake and your yes; microphone and speakers; voice models
  *   phone      the one phone Ghost pairs with
  * Apps, Skills, Permissions, Notifications and the Audit log are their owners' screens; the
@@ -13,9 +13,10 @@
  *
  * Edits collect into one draft across the pages; a save bar in the Page dock appears once
  * something changed (Klaviyo), and says afterwards what applied now and what waits for a
- * restart. Ghost's voice is in the same draft, though it is saved to Ghost's agent. Non-secret
- * edits survive leaving Settings (sessionStorage); secrets never do. Discard is one click and
- * reversible from its toast (values only; a typed secret is gone).
+ * restart. Ghost's voice is in the same draft, though it is saved to Ghost's agent. Edits
+ * survive leaving Settings (sessionStorage). Discard is one click and reversible from its toast.
+ * A password is not in the draft: it saves on its own row, and one Ghost reads joins the
+ * restart pill.
  *
  * Focus never falls to <body>: closing a secret returns to its Replace… button, Save or Discard
  * return to the field you were in (or to the restart pill's Copy button), and echo Install or
@@ -26,7 +27,7 @@
  * lands under a Starting or Reconnecting banner.
  *
  * States by URL (mock): any scenario, plus `?section=<id>` to land on a section (on its own
- * page), and in mock mode only `?settings=dirty|invalid|error|restart|secret|loading|loaderror|nodevices|echoidle|pairing` to
+ * page), and in mock mode only `?settings=dirty|invalid|error|restart|loading|loaderror|nodevices|echoidle|pairing` to
  * hold a state for review (`pairing` opens the Pair a phone dialog on Phone; the phone's own
  * states are `?phone=off|unpaired|paired|pairs|expires`, see Phone.tsx).
  */
@@ -47,7 +48,7 @@ import {
   useState,
 } from "react";
 
-import { hrefFor, navigate } from "../../app/router";
+import { navigate } from "../../app/router";
 import { VersionNotice, VersionRows } from "./About";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
 import { type SettingsMark, type SettingsMarks, setSettingsMarks } from "../../app/settingsMarks";
@@ -96,7 +97,6 @@ import {
   fuzzyWords,
   isAppSecret,
   isSectionId,
-  isOptionalSecret,
   isSet,
   jevNow,
   joinList,
@@ -120,7 +120,8 @@ import {
   valueChanged,
 } from "./model";
 import { GhostVoice } from "./GhostVoice";
-import { type BarState, CommandCopy, Row, SaveBar, SecretRow, SetupSection, type SetupStep, secretActionId } from "./parts";
+import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
+import { PasswordsSection } from "./Passwords";
 import { PhoneSection } from "./Phone";
 import { WakePhrasesField, wakeHelp } from "./WakePhrases";
 import "./settings.css";
@@ -128,7 +129,7 @@ import "./settings.css";
 // Charter sections with no API yet. Compiled only in development; rendered only under the mock layer.
 const Prototype = import.meta.env.DEV ? lazy(() => import("./prototype")) : null;
 
-const FORCED = new Set(["dirty", "invalid", "error", "restart", "secret", "loading", "loaderror", "nodevices", "echoidle", "pairing"]);
+const FORCED = new Set(["dirty", "invalid", "error", "restart", "loading", "loaderror", "nodevices", "echoidle", "pairing"]);
 
 const FUZZY = "GHOST_WAKE_FUZZY";
 /** Every section on a page, for its mark in the settings nav. */
@@ -179,7 +180,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({ values: {}, secrets: {} });
   const [restored, setRestored] = useState(false);
-  const [openSecrets, setOpenSecrets] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [restartKeys, setRestartKeys] = useState<string[]>([]);
@@ -189,8 +189,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const [restartDismissed, setRestartDismissed] = useState(false);
   const [echoBusy, setEchoBusy] = useState<"install" | "remove" | null>(null);
   const [echoMsg, setEchoMsg] = useState<{ tone: "ok" | "danger"; title: string; text: string; offer?: "ghost.mic" | "default" } | null>(null);
-  // The optional keys' disclosure remounts open when something sends the operator to it.
-  const [optionalOpen, setOptionalOpen] = useState(0);
   // Ghost's voice: kept on Ghost's agent; the draft is null until Ghost has said which it is.
   const [ghost, setGhost] = useState<{ voice: string; speed: number } | null>(null);
   const [voiceDraft, setVoiceDraft] = useState<string | null>(null);
@@ -336,18 +334,15 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     if (forced === "dirty" || forced === "error") {
       setDraft({
         values: { ...v, GHOST_WAKE_PHRASES: joinList([...splitList(v.GHOST_WAKE_PHRASES), "ghost wake up"]), GHOST_LLM_MODEL: "claude-opus-5-5" },
-        secrets: { GITHUB_TOKEN: "github_pat_example_value" },
+        secrets: {},
       });
-      setOpenSecrets(new Set(["GITHUB_TOKEN"]));
       if (forced === "error") setSaveError("Ghost couldn’t write ~/.config/ghost/settings.env: permission denied. Check who owns the file, then save again.");
     } else if (forced === "invalid") {
       setDraft({ values: { ...v, ANTHROPIC_BASE_URL: "api.example.com" }, secrets: {} });
     } else if (forced === "restart") {
-      setRestartKeys(["ANTHROPIC_BASE_URL", "GITHUB_TOKEN"]);
+      setRestartKeys(["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]);
       setLastApplied(["GHOST_WAKE_PHRASES"]);
       setLiveMarks(["GHOST_WAKE_PHRASES"]);
-    } else if (forced === "secret") {
-      setOpenSecrets(new Set(["GITHUB_TOKEN"]));
     }
   }, [forced, s]);
 
@@ -409,7 +404,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
 
   /** Passwords, then the TypeSafe key: where "Add one under Passwords" leads. */
   const goToJevKey = useCallback(() => {
-    setOptionalOpen((n) => n + 1);
     go("secrets", {
       focus: false,
       then: () => requestAnimationFrame(() => focusInto(document.getElementById(secretActionId(isSet(sRef.current, "TYPESAFE_API_KEY") ? "OPENROUTER_API_KEY" : "TYPESAFE_API_KEY")))),
@@ -491,21 +485,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     setSaveError(null);
     setDraft((d) => ({ ...d, values: { ...d.values, [k]: v } }));
   };
-  const setSecret = (k: string, v: string) => {
-    setSaveError(null);
-    setDraft((d) => ({ ...d, secrets: { ...d.secrets, [k]: v } }));
-  };
-  const closeSecret = (k: string) => {
-    setOpenSecrets((o) => {
-      const n = new Set(o);
-      n.delete(k);
-      return n;
-    });
-    setDraft((d) => {
-      const { [k]: _, ...rest } = d.secrets;
-      return { ...d, secrets: rest };
-    });
-  };
   const discard = () => {
     if (!s) return;
     const back = returnTarget();
@@ -515,7 +494,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     const voiceBefore = voiceDirty ? voiceDraft : null;
     setDraft({ values: { ...s.values }, secrets: {} });
     if (ghost) setVoiceDraft(ghost.voice);
-    setOpenSecrets(new Set());
     setEntryErrors({});
     setSaveError(null);
     storeDraft(null);
@@ -573,7 +551,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       if (r) {
         setS(r.settings);
         setDraft({ values: { ...r.settings.values }, secrets: {} });
-        setOpenSecrets(new Set());
         storeDraft(null);
       }
       // Ghost speaks in a new voice from its next line.
@@ -754,8 +731,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
           id: "model",
           title: "Give Ghost a model",
           done: modelReady(s, s.values),
-          doneText: isSet(s, "ANTHROPIC_AUTH_TOKEN") ? "Anthropic token set." : "Using your own model endpoint.",
-          todoText: "Add an Anthropic token, or point Ghost at your own endpoint.",
+          doneText: isSet(s, "ANTHROPIC_AUTH_TOKEN") ? "Anthropic password saved." : "Using your own model endpoint.",
+          todoText: "Add the Anthropic password, or point Ghost at your own endpoint.",
           target: isSet(s, "ANTHROPIC_AUTH_TOKEN") || !s.values.ANTHROPIC_BASE_URL ? "secrets" : "model",
         },
         {
@@ -807,7 +784,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const jevWords = (text: string | undefined): ReactNode =>
     text === JEV_NEEDS_KEY ? (
       <>
-        Jev needs a TypeSafe or OpenRouter key.{" "}
+        Jev needs a TypeSafe or OpenRouter password.{" "}
         <button type="button" className="set-link" onClick={goToJevKey}>
           Add one under Passwords
         </button>
@@ -828,32 +805,18 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const jev = v.GHOST_JEV || "auto";
   const jevStatus = jevNow(jev, s, draft.secrets);
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
-  const secretNames = s
-    ? SECRET_ORDER.filter((n) => s.secrets.some((x) => x.name === n)).concat(s.secrets.map((x) => x.name).filter((n) => !SECRET_ORDER.includes(n)))
-    : [];
-  const requiredSecrets = secretNames.filter((n) => !isOptionalSecret(n) && !isAppSecret(n));
-  const optionalSecrets = secretNames.filter((n) => isOptionalSecret(n) && !isAppSecret(n));
-  /** Keys Ghost keeps for the apps it connected (ADR 0034): set from Apps, replaceable here. */
-  const appSecrets = secretNames.filter(isAppSecret);
-  const appSecretsSet = appSecrets.filter((n) => isSet(s, n)).length;
-  const appSecretsBusy = appSecrets.some((n) => openSecrets.has(n) || restartSet.has(n));
-  const optionalSet = optionalSecrets.filter((n) => isSet(s, n)).length;
-  const optionalBusy = optionalSecrets.some((n) => openSecrets.has(n) || restartSet.has(n));
-  const secretRow = (name: string) => (
-    <SecretRow
-      key={name}
-      name={name}
-      set={isSet(s, name)}
-      value={draft.secrets[name]}
-      open={openSecrets.has(name)}
-      onOpen={() => setOpenSecrets((o) => new Set(o).add(name))}
-      onChange={(val) => setSecret(name, val)}
-      onCancel={() => closeSecret(name)}
-      onSubmit={submit}
-      disabled={!online}
-      waiting={restartSet.has(name)}
-    />
-  );
+  // A password saved on its own row (Passwords.tsx): one Ghost reads joins the restart pill, and
+  // the setup list and the model page read set-or-not again.
+  const passwordRestart = (names: string[]) => {
+    setRestartKeys((prev) => Array.from(new Set([...prev, ...names])));
+    setRestartDismissed(false);
+  };
+  const passwordChanged = () => {
+    client
+      .settings()
+      .then((sv) => setS(sv))
+      .catch(() => {});
+  };
 
   const description: ReactNode =
     page === "general" ? (
@@ -861,9 +824,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     ) : page === "model" ? (
       "Where Ghost sends a session to think. Leave both empty to use Anthropic’s defaults."
     ) : page === "passwords" ? (
-      <>
-        Kept in <span className="set-path">{tildePath(s?.env_path) || "~/.config/ghost/env"}</span>. Never shown again once saved.
-      </>
+      "Every API key, token and account password Ghost holds, in its own vault, locked with your keyring."
     ) : page === "sound" ? (
       "What Ghost hears with, how it wakes, and how it sounds."
     ) : (
@@ -917,7 +878,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                 <VersionRows status={status} />
                 <ListRow
                   title="Settings file"
-                  description="Where these pages save. Passwords are kept in a file of their own."
+                  description="Where these pages save. Passwords are in Ghost’s vault, never in this file."
                   meta={<span className="set-value is-mono">{tildePath(s.settings_path) || "~/.config/ghost/settings.env"}</span>}
                 />
               </Card>
@@ -932,50 +893,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
 
         {s && page === "passwords" && (
           <Section id={sectionDomId("secrets")} className="set-section">
-            {/* Plain help, not a Notice: the section already shows a tinted block when setup is unfinished or a restart is owed. */}
-            {s.vault_managed && <p className="set-help is-readable set-vault-note">Filled from your vault each time Ghost starts. A value you save here lasts until the next start.</p>}
-            <Card list>
-              {requiredSecrets.map(secretRow)}
-              {optionalSecrets.length > 0 && (
-                <div className="set-optional-keys">
-                  <Disclosure
-                    key={optionalOpen}
-                    defaultOpen={optionalOpen > 0 || optionalBusy}
-                    summary={
-                      <span className="set-optional-keys__summary">
-                        Optional keys
-                        <span className="set-count t-num">
-                          {optionalSet} of {optionalSecrets.length} set
-                        </span>
-                      </span>
-                    }
-                  >
-                    <p className="set-help set-optional-keys__lead">Jev hears your yes with TypeSafe or OpenRouter. Hugging Face speeds up the first model download.</p>
-                    <div className="set-optional-keys__list">{optionalSecrets.map(secretRow)}</div>
-                  </Disclosure>
-                </div>
-              )}
-              {appSecrets.length > 0 && (
-                <div className="set-optional-keys">
-                  <Disclosure
-                    defaultOpen={appSecretsBusy}
-                    summary={
-                      <span className="set-optional-keys__summary">
-                        Keys for your apps
-                        <span className="set-count t-num">
-                          {appSecretsSet} of {appSecrets.length} set
-                        </span>
-                      </span>
-                    }
-                  >
-                    <p className="set-help set-optional-keys__lead">
-                      Set when you connected each app under <a href={hrefFor("/settings/apps")}>Apps</a>. Disconnecting an app clears the key Ghost saved for it; a key you named yourself stays here until you clear it.
-                    </p>
-                    <div className="set-optional-keys__list">{appSecrets.map(secretRow)}</div>
-                  </Disclosure>
-                </div>
-              )}
-            </Card>
+            <PasswordsSection onRestart={passwordRestart} waiting={restartSet} onChanged={passwordChanged} />
           </Section>
         )}
 
@@ -997,9 +915,9 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                 </Card>
                 {!ready && (
                   <p className="set-note">
-                    Ghost can’t answer until it has an Anthropic token or an endpoint.{" "}
+                    Ghost can’t answer until it has the Anthropic password or an endpoint.{" "}
                     <button type="button" className="set-link" onClick={() => focusKey("ANTHROPIC_AUTH_TOKEN")}>
-                      Add a token
+                      Add it
                     </button>
                   </p>
                 )}

@@ -48,6 +48,12 @@ export type PolicyUpdate = Schemas["PolicyUpdate"];
 export type PolicyResult = Schemas["PolicyResult"];
 export type SettingsView = Schemas["SettingsView"];
 export type SettingsUpdate = Schemas["SettingsUpdate"];
+/** Ghost's vault (ADR 0036): names and metadata only; a value never comes back. */
+export type PasswordsView = Schemas["PasswordsView"];
+export type PasswordInfo = Schemas["PasswordInfo"];
+export type PasswordResult = Schemas["PasswordResult"];
+export type PasswordImportResult = Schemas["PasswordImportResult"];
+export type VaultView = Schemas["VaultView"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
 export type Ack = Schemas["Ack"];
@@ -232,6 +238,26 @@ export class GhostClient {
   }
   updateSettings(update: SettingsUpdate) {
     return unwrap(this.api.PUT("/settings", { body: update }));
+  }
+  // --- passwords (ADR 0036): a value goes in and never comes back out ----------------------
+  /** Every password Ghost knows of: set or not, what uses it, when it was last used. Never a value. */
+  passwords() {
+    return unwrap(this.api.GET("/passwords"));
+  }
+  /** Save or replace one, into Ghost's vault. */
+  setPassword(name: string, value: string) {
+    return unwrap(this.api.PUT("/passwords/{name}", { params: { path: { name } }, body: { value } }));
+  }
+  deletePassword(name: string) {
+    return unwrap(this.api.DELETE("/passwords/{name}", { params: { path: { name } } }));
+  }
+  /** Once: heka-vault and the plaintext env files into the vault, then the files removed. */
+  importPasswords() {
+    return unwrap(this.api.POST("/passwords/import"));
+  }
+  /** Ask the keyring to unlock (it shows its own prompt), then open the vault. */
+  unlockPasswords() {
+    return unwrap(this.api.POST("/passwords/unlock"));
   }
   devices() {
     return unwrap(this.api.GET("/devices"));

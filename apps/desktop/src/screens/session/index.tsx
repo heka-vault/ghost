@@ -371,7 +371,7 @@ function startCopy({ online, loading, needsSetup, inSession, onPhone }: { online
   // The shell's banner and the status card already say the models are loading; this says
   // the next thing instead of repeating it.
   if (loading) return { title: "Almost ready", text: `Say ${quoted("Hey Ghost")} once the models finish` };
-  if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model key before it can answer." };
+  if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model password before it can answer." };
   // The header already says “Listening”; this says what to do with it.
   if (onPhone) return { title: "On your phone", text: "Ghost hears you through your phone. You can end the session here." };
   if (inSession) return { title: "Go ahead", text: "Ask what’s waiting on you." };

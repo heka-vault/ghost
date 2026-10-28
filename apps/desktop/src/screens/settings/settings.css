@@ -27,7 +27,6 @@
 .set-label { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); color: var(--text-1); display: flex; align-items: center; gap: var(--space-2); }
 .set-help { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
 .set-help.is-readable { color: var(--text-2); }
-.set-vault-note { margin: 0 0 var(--space-3); }
 .set-optional { color: var(--text-3); }
 .set-waits { color: var(--warn); font-weight: var(--weight-medium); }
 .set-live { color: var(--ok); font-weight: var(--weight-medium); }
@@ -100,6 +99,15 @@
 .set-secret__edit { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
 .set-secret__field { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 
+/* ------------------------------------------------------- passwords (ADR 0036) */
+.set-pw { display: flex; flex-direction: column; gap: var(--space-4); }
+/* Replace… (one width with Add… and Cancel), then the row's More, or its empty slot. */
+.set-pw__actions { display: grid; grid-template-columns: var(--set-secret-action) var(--control-sm); align-items: center; gap: var(--space-1); }
+.set-pw .set-secret__state { grid-template-columns: auto auto; }
+.set-pw__new .set-secret__edit { flex-wrap: wrap; }
+.set-pw__foot { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+.set-error { margin-top: var(--space-1); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--danger); }
+
 /* ---------------------------------------------------------------- save pill */
 /* The restart command: plain mono text with its Copy beside it, no box. In the pill it is
    the SaveBar's command slot; in a row it follows the sentence. */
@@ -108,15 +116,6 @@
 /* In a row's help line the command reads as detail: --text-2, one line with its Copy. */
 .set-row-command { display: inline-flex; align-items: center; gap: var(--space-1); margin-left: var(--space-1); }
 .set-row-command code { color: var(--text-2); }
-
-/* ------------------------------------------------------ optional secrets */
-.set-optional-keys { padding: var(--space-3) var(--space-4); }
-.set-optional-keys__summary { display: inline-flex; align-items: baseline; gap: var(--space-2); }
-.set-optional-keys__lead { margin-top: calc(var(--space-1) * -1); }
-.set-optional-keys__list { margin-top: var(--space-1); }
-.set-optional-keys__list .set-secret { padding-inline: 0; }
-.set-optional-keys__list .set-secret + .set-secret { border-top: 1px solid var(--border-subtle); }
-.set-optional-keys__list .set-secret:last-child { padding-bottom: var(--space-1); }
 
 /* ---------------------------------------------------------------- voice */
 .set-jev { width: 100%; }

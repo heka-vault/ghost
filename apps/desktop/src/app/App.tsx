@@ -148,7 +148,7 @@ export function App() {
           {state === "online" && !loadingModels && setupNeeded && !setupHere && (
             <div className="shell-banner shell-banner--setup" role="status">
               <span>
-                <strong>Ghost needs a model key before it can answer.</strong> Add an Anthropic token or a model endpoint.
+                <strong>Ghost needs a model password before it can answer.</strong> Add the Anthropic password or a model endpoint.
               </span>
               <Button size="sm" className="shell-banner__action" href={setupHref}>
                 Finish setup

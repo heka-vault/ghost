@@ -261,7 +261,7 @@ export const TrayPopover = forwardRef<HTMLElement, TrayPopoverProps>(function Tr
       </Button>
     );
   } else if (passive && setupNeeded) {
-    // Waking is pointless without a model key: the one action is the way to fix that.
+    // Waking is pointless without a model password: the one action is the way to fix that.
     action = (
       <Button variant="primary" size="sm" href={setupHref}>
         Finish setup

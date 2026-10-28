@@ -18,7 +18,7 @@
  *   ?mock=starting#/tray           loading voice models
  *   ?mock=disconnected#/tray       the service is stopped
  *   ?mock=reconnecting#/tray       the daemon dropped mid-session (after 1.5 s); the HUD stays
- *   ?mock=firstrun#/tray           no model key yet
+ *   ?mock=firstrun#/tray           no model password yet
  *   ?mock=expiring#/tray           the change lapses at 8 s and fades out as Expired
  * Add &native=1 for the native menu, &menu=closed to start with nothing open.
  */

@@ -135,9 +135,10 @@ def test_connecting_keeps_the_key_out_of_the_file_and_never_shows_it(world, tmp_
     assert app["settings"] == ["GHOST_APP_WORK_GITHUB_AUTHORIZATION"]
     saved = load_apps(deps.policy_path.parent / "apps.json").apps["work-github"]
     assert saved.headers == {"Authorization": "${GHOST_APP_WORK_GITHUB_AUTHORIZATION}"}
-    apps_env = deps.env_path.parent / "apps.env"
-    assert "Bearer ghp_secret_value" in apps_env.read_text()
-    assert not deps.env_path.exists() or "ghp_secret" not in deps.env_path.read_text()
+    # Into the vault (ADR 0036), sealed; no plaintext file holds it.
+    assert deps.passwords.value("GHOST_APP_WORK_GITHUB_AUTHORIZATION") == "Bearer ghp_secret_value"
+    assert b"ghp_secret" not in deps.passwords.path.read_bytes()
+    assert not (deps.env_path.parent / "apps.env").exists() and not deps.env_path.exists()
     assert [s.name for s in started] == ["work-github"]
     again = client.post(
         "/apps",
@@ -186,10 +187,9 @@ def test_disconnecting_takes_it_out_of_the_file_and_the_tools(world, tmp_path, m
         "/apps",
         json={"url": "https://mcp.example.com/mcp", "name": "example", "values": {"key": "k1"}},
     )
-    apps_env = deps.env_path.parent / "apps.env"
-    assert "GHOST_APP_EXAMPLE_KEY" in apps_env.read_text()
+    assert "GHOST_APP_EXAMPLE_KEY" in deps.passwords
     assert client.delete("/apps/example").json()["ok"] is True
-    assert "GHOST_APP_EXAMPLE_KEY" not in apps_env.read_text()  # its keys go with it
+    assert "GHOST_APP_EXAMPLE_KEY" not in deps.passwords  # its keys go with it
     assert client.delete("/apps/notion").json()["ok"] is True
     assert "notion" not in load_apps(deps.policy_path.parent / "apps.json").apps
     assert "notion" not in deps.apps.specs
@@ -251,13 +251,12 @@ def test_disconnecting_forgets_only_that_apps_own_keys(world, tmp_path, monkeypa
             json={"url": "https://mcp.example.com/mcp", "name": name, "values": {"key": key}},
         )
         assert r.status_code == 200, r.text
-    apps_env = deps.env_path.parent / "apps.env"
-    apps_env.write_text(apps_env.read_text() + "GHOST_APP_WORK_MINE=kept\n")
+    deps.passwords.set("GHOST_APP_WORK_MINE", "kept-by-the-operator")
     assert client.delete("/apps/work").status_code == 200
-    left = apps_env.read_text()
-    assert "GHOST_APP_WORK_KEY=" not in left
-    assert "GHOST_APP_WORK_2_KEY=" in left  # another app's
-    assert "GHOST_APP_WORK_MINE=kept" in left  # the entry never named it
+    left = deps.passwords.names()
+    assert "GHOST_APP_WORK_KEY" not in left
+    assert "GHOST_APP_WORK_2_KEY" in left  # another app's
+    assert "GHOST_APP_WORK_MINE" in left  # the entry never named it
 
 
 def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
@@ -268,7 +267,7 @@ def test_two_apps_never_share_key_names(world, tmp_path, monkeypatch):
     assert first.status_code == 200
     again = client.post("/apps", json={"url": url, "name": "my_app", "values": {"key": "k2"}})
     assert again.status_code == 409 and "my-app" in again.json()["detail"]
-    assert "k1" in (deps.env_path.parent / "apps.env").read_text()
+    assert deps.passwords.value("GHOST_APP_MY_APP_KEY") == "Bearer k1"
     assert "my_app" not in deps.apps.specs
 
 
@@ -347,8 +346,19 @@ def test_a_key_in_a_pasted_configs_arguments_or_address_is_moved_too(world, tmp_
     saved = load_apps(path).apps
     assert saved["brave"].args[-1] == "${GHOST_APP_BRAVE_API_KEY}"
     assert saved["maps"].url == "https://maps.example/mcp?key=${GHOST_APP_MAPS_KEY}&lang=en"
-    apps_env = (deps.env_path.parent / "apps.env").read_text()
-    assert "GHOST_APP_BRAVE_API_KEY=BSAx1" in apps_env
-    assert "GHOST_APP_MAPS_KEY=AIzaSy123" in apps_env
+    assert deps.passwords.value("GHOST_APP_BRAVE_API_KEY") == "BSAx1"
+    assert deps.passwords.value("GHOST_APP_MAPS_KEY") == "AIzaSy123"
     view = client.get("/apps/maps").json()
     assert view["settings"] == ["GHOST_APP_MAPS_KEY"] and view["kind"] == "key"
+
+
+def test_a_key_waits_for_a_locked_keyring_and_nothing_changes(world, tmp_path, monkeypatch):
+    client, deps, started = with_apps(world, tmp_path, monkeypatch)
+    deps.passwords.state = "locked"
+    r = client.post(
+        "/apps",
+        json={"url": "https://mcp.example.com/mcp", "name": "example", "values": {"key": "k1"}},
+    )
+    assert r.status_code == 423 and "keyring" in r.json()["detail"]
+    assert "example" not in load_apps(deps.policy_path.parent / "apps.json").apps
+    assert started == []

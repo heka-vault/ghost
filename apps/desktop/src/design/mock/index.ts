@@ -13,6 +13,7 @@
  *   ...&phone=tunnel-down   paired, with a tunnel address whose interface isn't up yet
  *   ...&phone=pairs    on with no phone; the phone pairs 5s after you ask for a code
  *   ...&phone=expires  on with no phone; codes last 8s, so the expired code can be seen
+ *   ...&vault=locked|import|broken   Ghost's vault: the keyring locked, plaintext files to import, or a key that doesn't open it
  *   ...&catalog=slow     the catalog's first copy takes 4s (first run does this by itself)
  *   ...&catalog=problem  the copy is three days old and the refresh failed
  *   ...&catalog=empty    the first copy hasn't arrived, and doesn't for 8s
@@ -46,6 +47,7 @@ export function createMock(name: string): { transport: Transport; design: Design
     catalog: (["slow", "problem", "empty"] as const).find((c) => c === params.get("catalog")) ?? null,
     build: (["dev", "dirty", "deploy", "release", "behind"] as const).find((b) => b === params.get("build")) ?? null,
     skillSearch: params.get("skillsearch") === "down" ? "down" : null,
+    vault: (["locked", "import", "broken"] as const).find((v) => v === params.get("vault")) ?? null,
   });
   const latency = Number(params.get("latency") ?? 140);
 

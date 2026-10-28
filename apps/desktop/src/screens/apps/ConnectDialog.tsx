@@ -183,7 +183,7 @@ export function ConnectDialog({ entry: e, onClose, onConnected }: { entry: Catal
             label={<span data-user-content>{s.label}</span>}
             detail={s.key}
             optional={!s.required}
-            help={s.secret ? "Kept in Ghost’s private settings. It isn’t shown again." : undefined}
+            help={s.secret ? "A password: kept in Ghost’s vault, and never shown again." : undefined}
             error={missing.has(s.key) ? `${s.label} is needed to connect.` : undefined}
           >
             {s.choices.length > 0 ? (

@@ -258,7 +258,8 @@ export function AppDetail({ name }: { name: string }) {
             Rules call it <span className="t-mono">{name}</span>, and a tool <span className="t-mono">{name}.&lt;tool&gt;</span>.{" "}
             {app.settings.length > 0 && (
               <>
-                Its {app.settings.length === 1 ? "key is" : "keys are"} in Ghost’s private settings as <span className="t-mono">{app.settings.join(", ")}</span>.{" "}
+                Its {app.settings.length === 1 ? "password is" : "passwords are"} in Ghost’s vault as <span className="t-mono">{app.settings.join(", ")}</span>, on{" "}
+                <a href={hrefFor("/settings/passwords")}>Passwords</a>.{" "}
               </>
             )}
             Descriptions are {title}’s own words; Ghost never follows instructions in them.
