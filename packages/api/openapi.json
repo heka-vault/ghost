@@ -2559,6 +2559,29 @@
         "title": "SkillBody",
         "type": "object"
       },
+      "SkillFileView": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "script": {
+            "title": "Script",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "bytes",
+          "script"
+        ],
+        "title": "SkillFileView",
+        "type": "object"
+      },
       "SkillInfo": {
         "description": "A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.",
         "properties": {
@@ -2585,6 +2608,16 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillOriginView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "path": {
             "title": "Path",
@@ -2621,6 +2654,369 @@
           "path"
         ],
         "title": "SkillInfo",
+        "type": "object"
+      },
+      "SkillInstall": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "replace": {
+            "default": false,
+            "title": "Replace",
+            "type": "boolean"
+          },
+          "token": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "SkillInstall",
+        "type": "object"
+      },
+      "SkillListing": {
+        "description": "A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,\nnever to the model.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed"
+          },
+          "installs": {
+            "title": "Installs",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skill": {
+            "title": "Skill",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "skill",
+          "name",
+          "installs"
+        ],
+        "title": "SkillListing",
+        "type": "object"
+      },
+      "SkillOriginView": {
+        "description": "Where one of Ghost's skills was installed from (#35), as its lock file records it.",
+        "properties": {
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "folder_hash": {
+            "title": "Folder Hash",
+            "type": "string"
+          },
+          "installed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed At"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "skill_path": {
+            "title": "Skill Path",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "source_url",
+          "skill_path",
+          "commit",
+          "folder_hash"
+        ],
+        "title": "SkillOriginView",
+        "type": "object"
+      },
+      "SkillPreview": {
+        "description": "A skill fetched from GitHub and staged, for the operator to read before installing.\nEverything in it but the hashes is the source's text: untrusted.",
+        "properties": {
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SkillFileView"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "folder_hash": {
+            "title": "Folder Hash",
+            "type": "string"
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ghost",
+                  "home"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "scripts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scripts",
+            "type": "array"
+          },
+          "skill_md": {
+            "title": "Skill Md",
+            "type": "string"
+          },
+          "skill_path": {
+            "title": "Skill Path",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "update_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Of"
+          }
+        },
+        "required": [
+          "token",
+          "name",
+          "description",
+          "source",
+          "source_url",
+          "skill_path",
+          "commit",
+          "folder_hash",
+          "skill_md"
+        ],
+        "title": "SkillPreview",
+        "type": "object"
+      },
+      "SkillPreviewRequest": {
+        "properties": {
+          "skill": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The skill's id in it.",
+            "title": "Skill"
+          },
+          "source": {
+            "description": "owner/repo, owner/repo/skill, or a github.com address of a skill's folder.",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "SkillPreviewRequest",
+        "type": "object"
+      },
+      "SkillSearchPage": {
+        "properties": {
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "skills": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SkillListing"
+            },
+            "title": "Skills",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SkillSearchPage",
+        "type": "object"
+      },
+      "SkillUpdateView": {
+        "description": "Whether an installed skill's source has moved on, checked when the page asks.",
+        "properties": {
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "latest_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Commit"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "update": {
+            "default": false,
+            "title": "Update",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "commit"
+        ],
+        "title": "SkillUpdateView",
         "type": "object"
       },
       "SnoozeRequest": {
@@ -5012,6 +5408,204 @@
         "summary": "Models",
         "tags": [
           "setup"
+        ]
+      }
+    },
+    "/skill-catalog": {
+      "get": {
+        "description": "Skills on skills.sh for a search of two letters or more, from Ghost's cache when\nrecent. A failure is ``problem``, with the last results for the search if any.",
+        "operationId": "search_skills_skill_catalog_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Search",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSearchPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Skills",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/install": {
+      "post": {
+        "description": "Copy a staged skill into Ghost's skills through the gate (``skills.install``),\naudited, with where it came from.",
+        "operationId": "install_skill_skill_catalog_install_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillInstall"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/preview": {
+      "post": {
+        "description": "Fetch a skill's folder from GitHub at the commit its branch is on, and stage it:\nits SKILL.md and its files, for the operator to read before installing.",
+        "operationId": "preview_skill_skill_catalog_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/updates": {
+      "get": {
+        "description": "For each skill Ghost installed from GitHub, whether its folder has changed at\nthe source since. Asks GitHub now (a recent answer per repository is reused).",
+        "operationId": "skill_updates_skill_catalog_updates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillUpdateView"
+                  },
+                  "title": "Response Skill Updates Skill Catalog Updates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Skill Updates",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill-catalog/updates/{name}": {
+      "post": {
+        "description": "The newer version of an installed skill, staged like any preview; installing it\nwith ``replace`` and this name updates the skill.",
+        "operationId": "preview_update_skill_catalog_updates__name__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Update",
+        "tags": [
+          "skills"
         ]
       }
     },

@@ -67,6 +67,13 @@ export type PhoneAddress = Schemas["PhoneAddress"];
 export type SkillInfo = Schemas["SkillInfo"];
 export type SkillBody = Schemas["SkillBody"];
 export type SkillAdd = Schemas["SkillAdd"];
+/** The skills catalog (#35): skills.sh results, a skill staged from GitHub, an update check. */
+export type SkillOriginView = Schemas["SkillOriginView"];
+export type SkillListing = Schemas["SkillListing"];
+export type SkillSearchPage = Schemas["SkillSearchPage"];
+export type SkillPreview = Schemas["SkillPreview"];
+export type SkillFileView = Schemas["SkillFileView"];
+export type SkillUpdateView = Schemas["SkillUpdateView"];
 /** Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt. */
 export type RulesView = Schemas["RulesView"];
 export type RuleAdd = Schemas["RuleAdd"];
@@ -353,6 +360,28 @@ export class GhostClient {
   /** Delete one of Ghost's own skills. 409 for one read in place from elsewhere. */
   removeSkill(name: string) {
     return unwrap(this.api.DELETE("/skills/{name}", { params: { path: { name } } }));
+  }
+  /** Skills on skills.sh for a search of two letters or more, cached an hour by the daemon.
+   *  `problem` says when skills.sh failed or changed shape. */
+  searchSkills(search: string) {
+    return unwrap(this.api.GET("/skill-catalog", { params: { query: { search } } }));
+  }
+  /** Fetch a skill from GitHub, pinned to a commit, and stage it for the operator to read:
+   *  owner/repo/skill, owner/repo with `skill`, or a github.com address. 409 with a sentence. */
+  previewSkill(source: string, skill?: string | null) {
+    return unwrap(this.api.POST("/skill-catalog/preview", { body: { source, skill: skill ?? null } }));
+  }
+  /** Install a staged preview into Ghost's skills, through the gate. */
+  installSkill({ token, name, replace }: { token: string; name?: string | null; replace?: boolean }) {
+    return unwrap(this.api.POST("/skill-catalog/install", { body: { token, name: name ?? null, replace: replace ?? false } }));
+  }
+  /** Whether each skill Ghost installed from GitHub has changed at its source. Asks GitHub. */
+  skillUpdates() {
+    return unwrap(this.api.GET("/skill-catalog/updates"));
+  }
+  /** Stage the newer version of an installed skill; install it with `replace` to update. */
+  previewSkillUpdate(name: string) {
+    return unwrap(this.api.POST("/skill-catalog/updates/{name}", { params: { path: { name } } }));
   }
 }
 

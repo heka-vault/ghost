@@ -124,6 +124,7 @@ class Deps:
         catalog: Any = None,  # ghost_core.catalog.Catalog
         signins: Any = None,  # ghost_core.signin.SignIns
         skills: Any = None,  # ghost_core.skills.Skills
+        skill_catalog: Any = None,  # ghost_core.skill_catalog.SkillCatalog (#35)
         folder: Any = None,  # ghost_core.folder.GhostFolder (ADR 0035)
         rules: Any = None,  # ghost_core.rules.Rules
         outputs: Any = None,  # ghost_core.outputs.Outputs
@@ -141,6 +142,7 @@ class Deps:
         self.catalog = catalog
         self.signins = signins
         self.skills = skills
+        self.skill_catalog = skill_catalog
         self.folder = folder
         self.rules = rules
         self.outputs = outputs
@@ -337,8 +339,10 @@ def create_app(deps: Deps) -> FastAPI:
 
         add_conversation_routes(app, deps)
     from ghost_api.apps import add_app_routes
+    from ghost_api.skill_catalog import add_skill_catalog_routes, skill_view
 
     add_app_routes(app, deps)
+    add_skill_catalog_routes(app, deps)
 
     # --- status + control -------------------------------------------------------
 
@@ -553,26 +557,15 @@ def create_app(deps: Deps) -> FastAPI:
     # --- skills (ADR 0023) ------------------------------------------------------------
 
     def skill_info(skill) -> SkillInfo:
-        servers = (
-            {n for n in deps.apps.apps if deps.apps.is_up(n)} if deps.apps is not None else set()
-        )
-        return SkillInfo(
-            name=skill.name,
-            description=skill.description,
-            source=skill.source,
-            path=str(skill.path),
-            requires=skill.apps(),
-            missing=skill.missing(servers),
-            files=skill.files(),
-            problem=skill.problem,
-        )
+        return skill_view(deps, skill)
 
     @app.get("/skills", response_model=list[SkillInfo], tags=["skills"])
     async def skills() -> list[SkillInfo]:
         if deps.skills is None:
             return []
         deps.skills.refresh()
-        return [skill_info(s) for s in deps.skills.all()]
+        origins = deps.skills.origins()
+        return [skill_view(deps, s, origins) for s in deps.skills.all()]
 
     @app.get("/skills/{name}", response_model=SkillBody, tags=["skills"])
     async def skill_body(name: str) -> SkillBody:

@@ -58,6 +58,8 @@ from ghost_core.routes import RouteEngine, RoutePolicy, SpokenDigest
 from ghost_core.rules import SOURCE as RULES
 from ghost_core.rules import Rules, rules_source
 from ghost_core.signin import SignIns
+from ghost_core.skill_catalog import SkillCatalog
+from ghost_core.skills import SOURCE as SKILLS
 from ghost_core.skills import Skills
 from ghost_core.waiting import Item, Items, WaitingList, waiting_source
 from ghost_core.watches import WatchRunner
@@ -250,6 +252,7 @@ class Daemon:
         self.apps: Apps | None = None
         self.signins: SignIns | None = None
         self.catalog: Catalog | None = None
+        self.skill_catalog: SkillCatalog | None = None
         self._reach: Callable[[Profile], list[ToolSource]] | None = None
         self._models: Models | None = None
         self._deps: Deps | None = None
@@ -710,6 +713,8 @@ class Daemon:
         self.apps = apps
         await apps.connect()
         self.catalog = Catalog(self.cfg.catalog_path)
+        # #35: skills.sh search and GitHub fetches for the Skills page, never for a session.
+        self.skill_catalog = SkillCatalog(self.cfg.catalog_path.parent / "skill-previews")
         skills = Skills(self.cfg.skills_dir, self.cfg.home_skills_dir)  # ADR 0035
         self.skills = skills
         # What Ghost's own sessions may call: every connected app's tools, and the skills
@@ -735,6 +740,8 @@ class Daemon:
         )
         for a in tool_sources:  # every app's changes go through the gate
             gate.register(a.name, a.operations)
+        # And skills.install, which the desktop's catalog prepares and the model is not offered.
+        gate.register(SKILLS, skills.gate_operations())
         self.gate = gate
         registered = {a.name for a in apps.sources()}
 
@@ -1022,6 +1029,7 @@ class Daemon:
             sources=sources,
             apps=self.apps,
             catalog=self.catalog,
+            skill_catalog=self.skill_catalog,
             signins=self.signins,
             skills=skills,
             folder=self.folder,

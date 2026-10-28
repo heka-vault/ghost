@@ -387,6 +387,18 @@ class PermissionsUpdate(BaseModel):
     set: RuleSet | None = None
 
 
+class SkillOriginView(BaseModel):
+    """Where one of Ghost's skills was installed from (#35), as its lock file records it."""
+
+    source: str  # "anthropics/skills", a GitHub repository
+    source_url: str
+    skill_path: str  # its SKILL.md in the repository
+    commit: str  # the commit it was installed at
+    folder_hash: str  # the folder's git tree hash at that commit
+    ref: str | None = None  # the branch or tag it follows; None: the default branch
+    installed_at: str | None = None
+
+
 class SkillInfo(BaseModel):
     """A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's."""
 
@@ -398,6 +410,78 @@ class SkillInfo(BaseModel):
     missing: list[str] = []  # the ones that are not connected
     files: list[str] = []  # the files beside SKILL.md
     problem: str | None = None  # why it is not offered to the model (ADR 0024), if it is not
+    origin: SkillOriginView | None = None  # installed from GitHub through the catalog
+
+
+class SkillListing(BaseModel):
+    """A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,
+    never to the model."""
+
+    id: str  # "anthropics/skills/pdf"
+    source: str  # "anthropics/skills"
+    skill: str  # "pdf"
+    name: str
+    installs: int
+    installed: str | None = None  # the name of Ghost's skill installed from it, if one is
+
+
+class SkillSearchPage(BaseModel):
+    query: str
+    skills: list[SkillListing] = []
+    problem: str | None = None  # skills.sh failed or answered in a shape Ghost doesn't know
+    fetched_at: datetime | None = None
+
+
+class SkillPreviewRequest(BaseModel):
+    source: str = Field(
+        min_length=1,
+        max_length=300,
+        description="owner/repo, owner/repo/skill, or a github.com address of a skill's folder.",
+    )
+    skill: str | None = Field(default=None, max_length=128, description="The skill's id in it.")
+
+
+class SkillFileView(BaseModel):
+    path: str
+    bytes: int
+    script: bool  # a file an interpreter runs, or one that was executable upstream
+
+
+class SkillPreview(BaseModel):
+    """A skill fetched from GitHub and staged, for the operator to read before installing.
+    Everything in it but the hashes is the source's text: untrusted."""
+
+    token: str  # what install takes; good for 30 minutes
+    name: str
+    description: str
+    source: str
+    source_url: str
+    skill_path: str
+    commit: str
+    folder_hash: str
+    ref: str | None = None
+    skill_md: str  # the whole SKILL.md, front matter included
+    files: list[SkillFileView] = []  # the files beside SKILL.md
+    scripts: list[str] = []  # the ones ghost-scripts could run, through the gate
+    installed: Literal["ghost", "home"] | None = None  # a skill of that name already
+    update_of: str | None = None  # the installed skill this is a newer version of
+
+
+class SkillInstall(BaseModel):
+    token: str = Field(min_length=1, max_length=64)
+    name: str | None = None
+    replace: bool = False
+
+
+class SkillUpdateView(BaseModel):
+    """Whether an installed skill's source has moved on, checked when the page asks."""
+
+    name: str
+    source: str
+    commit: str  # installed
+    latest_commit: str | None = None
+    update: bool = False  # the skill's folder changed upstream
+    problem: str | None = None  # the check failed, or the source no longer has it
 
 
 class SkillBody(BaseModel):

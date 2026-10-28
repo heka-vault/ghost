@@ -12,6 +12,12 @@ gets:
   so the desktop's drag-and-drop and "Ghost, add the invoicing skill from this folder"
   are the same write.
 
+``skills.install`` is the third write, the desktop's only: a folder fetched from GitHub
+and shown to the operator first (``ghost_core.skill_catalog``), copied in with where it
+came from (``SkillOrigin``) kept in ``.skill-lock.json`` beside the skills, as the
+``npx skills`` CLI keeps its own. It is not offered to the model: a session never reaches
+the catalog or GitHub.
+
 A folder without ``SKILL.md`` is not a skill. A ``SKILL.md`` whose ``name`` is not the
 folder's, or that will not parse, is a problem: listed with the problem for the operator,
 never offered to the model. A skill folder that is itself a symlink is followed (linking
@@ -24,11 +30,13 @@ do. Nothing here runs a skill's scripts (``ghost-scripts`` is the gated way).
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,9 +58,102 @@ MAX_DESCRIPTION_CHARS = 140
 MAX_FILES_LISTED = 40
 MAX_SKILL_BYTES = 2_000_000  # a folder bigger than this is not a skill, it is a repo
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+LOCK_FILE = ".skill-lock.json"  # where each installed skill came from, beside the skills
 _FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.S)
+_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 Places = Sequence[tuple[Path, str]]  # (folder of skill folders, the source label)
+
+
+@dataclass(frozen=True)
+class SkillOrigin:
+    """Where an installed skill was fetched from, as ``~/.agents/.skill-lock.json`` records
+    it: the repository, the path of its SKILL.md there, the commit it was pinned to, and
+    the folder's git tree hash at that commit (what changes when the skill does)."""
+
+    source: str  # "owner/repo" on GitHub
+    skill_path: str  # "skills/pdf/SKILL.md"
+    commit: str
+    folder_hash: str
+    ref: str | None = None  # a branch or tag it follows; None: the default branch
+    installed_at: str = ""
+
+    @property
+    def source_url(self) -> str:
+        return f"https://github.com/{self.source}"
+
+    @property
+    def folder(self) -> str:
+        """The skill's folder in the repository; "" for one at its root."""
+        return self.skill_path.rpartition("/")[0]
+
+
+def _origin_of(raw: object) -> SkillOrigin | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        origin = SkillOrigin(
+            source=str(raw["source"]),
+            skill_path=str(raw["skillPath"]),
+            commit=str(raw["commit"]),
+            folder_hash=str(raw["skillFolderHash"]),
+            ref=str(raw["ref"]) if raw.get("ref") else None,
+            installed_at=str(raw.get("installedAt") or ""),
+        )
+    except KeyError:
+        return None
+    if not (_SHA.match(origin.commit) and _SHA.match(origin.folder_hash)):
+        return None
+    return origin
+
+
+def read_origins(ghost_dir: Path) -> dict[str, SkillOrigin]:
+    """The lock file Ghost keeps beside its skills: by name, where each came from. A
+    file that is missing or will not parse is no origins, never an error."""
+    try:
+        raw = json.loads((ghost_dir / LOCK_FILE).read_text())
+    except (OSError, ValueError):
+        return {}
+    entries = raw.get("skills") if isinstance(raw, dict) else None
+    out: dict[str, SkillOrigin] = {}
+    for name, entry in (entries or {}).items() if isinstance(entries, dict) else []:
+        origin = _origin_of(entry)
+        if origin is not None and NAME_RE.match(str(name)):
+            out[str(name)] = origin
+    return out
+
+
+def _write_origin(ghost_dir: Path, name: str, origin: SkillOrigin | None) -> None:
+    """Record or forget one skill's origin, in the CLI's shape (version 3, camelCase) plus
+    the commit; the rest of the file is kept as it was."""
+    path = ghost_dir / LOCK_FILE
+    try:
+        raw = json.loads(path.read_text())
+        data = raw if isinstance(raw, dict) else {}
+    except (OSError, ValueError):
+        data = {}
+    skills = data.get("skills") if isinstance(data.get("skills"), dict) else {}
+    if origin is None:
+        if name not in skills:
+            return
+        skills.pop(name)
+    else:
+        skills[name] = {
+            "source": origin.source,
+            "sourceType": "github",
+            "sourceUrl": f"{origin.source_url}.git",
+            "skillPath": origin.skill_path,
+            "skillFolderHash": origin.folder_hash,
+            "commit": origin.commit,
+            **({"ref": origin.ref} if origin.ref else {}),
+            "installedAt": origin.installed_at,
+        }
+    data["version"] = data.get("version", 3)
+    data["skills"] = dict(sorted(skills.items()))
+    ghost_dir.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.replace(path)
 
 
 @dataclass(frozen=True)
@@ -217,6 +318,37 @@ class AddSkill(Change, frozen=True):
         )
 
 
+class InstallSkill(Change, frozen=True):
+    """A skill fetched from GitHub and shown to the operator, copied in from where it was
+    staged, with where it came from. The sibling of ``AddSkill`` for the desktop's catalog."""
+
+    staged_path: str
+    source: str  # owner/repo
+    skill_path: str
+    commit: str
+    folder_hash: str
+    ref: str | None = None
+    replace: bool = False
+
+    def describe(self) -> str:
+        return f"install it from {self.source} at {self.commit[:7]} into Ghost's skills" + (
+            " (replacing it)" if self.replace else ""
+        )
+
+    def rule_args(self) -> dict[str, object]:
+        return {"source": self.source}  # so a permission can block a repository
+
+    def origin(self) -> SkillOrigin:
+        return SkillOrigin(
+            source=self.source,
+            skill_path=self.skill_path,
+            commit=self.commit,
+            folder_hash=self.folder_hash,
+            ref=self.ref,
+            installed_at=datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        )
+
+
 class RemoveSkill(Change, frozen=True):
     def describe(self) -> str:
         return "remove it from Ghost's skills"
@@ -290,9 +422,9 @@ class SkillWriter:
     async def fetch(self, target: Target) -> SkillSnapshot:
         return self._snapshot(self._folder(target))
 
-    def _install(self, folder: Path, change: AddSkill, spoken: str) -> None:
+    def _install(self, folder: Path, source: Path, replace: bool, spoken: str) -> None:
         if folder.exists():
-            if not change.replace:
+            if not replace:
                 raise ValueError(f"{spoken} is already installed")
             shutil.rmtree(folder)
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -302,7 +434,7 @@ class SkillWriter:
             links = {n for n in names if (Path(dirpath) / n).is_symlink()}
             return links | {n for n in names if n in (".git", "__pycache__", "node_modules")}
 
-        shutil.copytree(Path(change.source_path), folder, symlinks=False, ignore=skip)
+        shutil.copytree(source, folder, symlinks=False, ignore=skip)
         _name_front_matter(folder / SKILL_FILE, folder.name)
 
     def _uninstall(self, folder: Path) -> None:
@@ -311,10 +443,15 @@ class SkillWriter:
 
     async def apply(self, target: Target, change: Change, idempotency_key: str) -> None:
         folder = self._folder(target)
-        if isinstance(change, AddSkill):
-            self._install(folder, change, target.spoken())
+        if isinstance(change, InstallSkill):
+            self._install(folder, Path(change.staged_path), change.replace, target.spoken())
+            _write_origin(self._dir, folder.name, change.origin())
+        elif isinstance(change, AddSkill):
+            self._install(folder, Path(change.source_path), change.replace, target.spoken())
+            _write_origin(self._dir, folder.name, None)  # a local copy has no source to follow
         elif isinstance(change, RemoveSkill):
             self._uninstall(folder)
+            _write_origin(self._dir, folder.name, None)
         else:
             raise ValueError("not a skill change")
         self._on_change()  # the registry sees the change at once, by voice or from the desktop
@@ -361,6 +498,15 @@ class Skills:
 
     def get(self, name: str) -> Skill | None:
         return self.lookup().get(name.strip().lower())
+
+    def origins(self) -> dict[str, SkillOrigin]:
+        """Where Ghost's installed skills came from, for the ones fetched from GitHub that
+        are still in its folder."""
+        return {
+            n: o
+            for n, o in read_origins(self.ghost_dir).items()
+            if (self.ghost_dir / n / SKILL_FILE).is_file()
+        }
 
     # --- what the model gets ---------------------------------------------------------
 
@@ -485,6 +631,66 @@ class Skills:
                 asked_by=("remove", "delete", "uninstall"),
             ),
         ]
+
+    def gate_operations(self) -> list[Operation]:
+        """What the gate registers for skills: the two the model is offered, and
+        ``install``, which only the desktop prepares (``prepare_install``)."""
+
+        async def refuse(_: dict[str, Any]) -> Prepared:
+            raise ValueError("a skill is installed from the desktop's catalog, after a look")
+
+        return [
+            *self.operations(),
+            Operation(
+                "install",
+                "Install a skill fetched from GitHub, after the operator has read it.",
+                {},
+                [],
+                prepare=refuse,
+                writer=self._writer,
+                risk="medium",
+            ),
+        ]
+
+    def prepare_install(
+        self,
+        staged: Path,
+        origin: SkillOrigin,
+        *,
+        name: str | None = None,
+        replace: bool = False,
+    ) -> Prepared:
+        """The ``install`` change for a folder fetched and staged by the catalog. Checked
+        like a folder named to ``add``: a skill, small enough, plain files only."""
+        src, skill = self._candidate(str(staged))
+        name = (name or skill.name).strip().lower()
+        if not NAME_RE.match(name):
+            raise ValueError(f"{name!r} is not a skill name (letters, digits, dots, dashes)")
+        existing = next((s for s in self.all() if s.name == name), None)
+        if existing is not None and existing.source != GHOST_SOURCE:
+            # Ghost's copy would hide the operator's own (Ghost's folder is read first), and
+            # Ghost never writes theirs: install it under another name instead.
+            raise ValueError(
+                f"{name} is already one of yours, in {existing.path.parent}; "
+                "install this one under another name"
+            )
+        return Prepared(
+            target=SkillTarget(name=name),
+            changes=ChangeSet(
+                steps=(
+                    InstallSkill(
+                        staged_path=str(src),
+                        source=origin.source,
+                        skill_path=origin.skill_path,
+                        commit=origin.commit,
+                        folder_hash=origin.folder_hash,
+                        ref=origin.ref,
+                        replace=replace,
+                    ),
+                )
+            ),
+            rationale="installed from the desktop's catalog",
+        )
 
     def _candidate(self, raw: str) -> tuple[Path, Skill]:
         """The folder a path names, checked: a folder (or its SKILL.md), not already

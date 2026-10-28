@@ -650,6 +650,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skill-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Skills
+         * @description Skills on skills.sh for a search of two letters or more, from Ghost's cache when
+         *     recent. A failure is ``problem``, with the last results for the search if any.
+         */
+        get: operations["search_skills_skill_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Skill
+         * @description Copy a staged skill into Ghost's skills through the gate (``skills.install``),
+         *     audited, with where it came from.
+         */
+        post: operations["install_skill_skill_catalog_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Skill
+         * @description Fetch a skill's folder from GitHub at the commit its branch is on, and stage it:
+         *     its SKILL.md and its files, for the operator to read before installing.
+         */
+        post: operations["preview_skill_skill_catalog_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Skill Updates
+         * @description For each skill Ghost installed from GitHub, whether its folder has changed at
+         *     the source since. Asks GitHub now (a recent answer per repository is reused).
+         */
+        get: operations["skill_updates_skill_catalog_updates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-catalog/updates/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Update
+         * @description The newer version of an installed skill, staged like any preview; installing it
+         *     with ``replace`` and this name updates the skill.
+         */
+        post: operations["preview_update_skill_catalog_updates__name__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skills": {
         parameters: {
             query?: never;
@@ -1853,6 +1958,15 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** SkillFileView */
+        SkillFileView: {
+            /** Bytes */
+            bytes: number;
+            /** Path */
+            path: string;
+            /** Script */
+            script: boolean;
+        };
         /**
          * SkillInfo
          * @description A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.
@@ -1872,6 +1986,7 @@ export interface components {
             missing: string[];
             /** Name */
             name: string;
+            origin?: components["schemas"]["SkillOriginView"] | null;
             /** Path */
             path: string;
             /** Problem */
@@ -1883,6 +1998,146 @@ export interface components {
             requires: string[];
             /** Source */
             source: string;
+        };
+        /** SkillInstall */
+        SkillInstall: {
+            /** Name */
+            name?: string | null;
+            /**
+             * Replace
+             * @default false
+             */
+            replace: boolean;
+            /** Token */
+            token: string;
+        };
+        /**
+         * SkillListing
+         * @description A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,
+         *     never to the model.
+         */
+        SkillListing: {
+            /** Id */
+            id: string;
+            /** Installed */
+            installed?: string | null;
+            /** Installs */
+            installs: number;
+            /** Name */
+            name: string;
+            /** Skill */
+            skill: string;
+            /** Source */
+            source: string;
+        };
+        /**
+         * SkillOriginView
+         * @description Where one of Ghost's skills was installed from (#35), as its lock file records it.
+         */
+        SkillOriginView: {
+            /** Commit */
+            commit: string;
+            /** Folder Hash */
+            folder_hash: string;
+            /** Installed At */
+            installed_at?: string | null;
+            /** Ref */
+            ref?: string | null;
+            /** Skill Path */
+            skill_path: string;
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /**
+         * SkillPreview
+         * @description A skill fetched from GitHub and staged, for the operator to read before installing.
+         *     Everything in it but the hashes is the source's text: untrusted.
+         */
+        SkillPreview: {
+            /** Commit */
+            commit: string;
+            /** Description */
+            description: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["SkillFileView"][];
+            /** Folder Hash */
+            folder_hash: string;
+            /** Installed */
+            installed?: ("ghost" | "home") | null;
+            /** Name */
+            name: string;
+            /** Ref */
+            ref?: string | null;
+            /**
+             * Scripts
+             * @default []
+             */
+            scripts: string[];
+            /** Skill Md */
+            skill_md: string;
+            /** Skill Path */
+            skill_path: string;
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+            /** Token */
+            token: string;
+            /** Update Of */
+            update_of?: string | null;
+        };
+        /** SkillPreviewRequest */
+        SkillPreviewRequest: {
+            /**
+             * Skill
+             * @description The skill's id in it.
+             */
+            skill?: string | null;
+            /**
+             * Source
+             * @description owner/repo, owner/repo/skill, or a github.com address of a skill's folder.
+             */
+            source: string;
+        };
+        /** SkillSearchPage */
+        SkillSearchPage: {
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Problem */
+            problem?: string | null;
+            /** Query */
+            query: string;
+            /**
+             * Skills
+             * @default []
+             */
+            skills: components["schemas"]["SkillListing"][];
+        };
+        /**
+         * SkillUpdateView
+         * @description Whether an installed skill's source has moved on, checked when the page asks.
+         */
+        SkillUpdateView: {
+            /** Commit */
+            commit: string;
+            /** Latest Commit */
+            latest_commit?: string | null;
+            /** Name */
+            name: string;
+            /** Problem */
+            problem?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * Update
+             * @default false
+             */
+            update: boolean;
         };
         /** SnoozeRequest */
         SnoozeRequest: {
@@ -2248,7 +2503,15 @@ export type SchemaSettingsUpdate = components['schemas']['SettingsUpdate'];
 export type SchemaSettingsView = components['schemas']['SettingsView'];
 export type SchemaSkillAdd = components['schemas']['SkillAdd'];
 export type SchemaSkillBody = components['schemas']['SkillBody'];
+export type SchemaSkillFileView = components['schemas']['SkillFileView'];
 export type SchemaSkillInfo = components['schemas']['SkillInfo'];
+export type SchemaSkillInstall = components['schemas']['SkillInstall'];
+export type SchemaSkillListing = components['schemas']['SkillListing'];
+export type SchemaSkillOriginView = components['schemas']['SkillOriginView'];
+export type SchemaSkillPreview = components['schemas']['SkillPreview'];
+export type SchemaSkillPreviewRequest = components['schemas']['SkillPreviewRequest'];
+export type SchemaSkillSearchPage = components['schemas']['SkillSearchPage'];
+export type SchemaSkillUpdateView = components['schemas']['SkillUpdateView'];
 export type SchemaSnoozeRequest = components['schemas']['SnoozeRequest'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
@@ -3482,6 +3745,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelsView"];
+                };
+            };
+        };
+    };
+    search_skills_skill_catalog_get: {
+        parameters: {
+            query?: {
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillSearchPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    install_skill_skill_catalog_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillInstall"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_skill_skill_catalog_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skill_updates_skill_catalog_updates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillUpdateView"][];
+                };
+            };
+        };
+    };
+    preview_update_skill_catalog_updates__name__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
