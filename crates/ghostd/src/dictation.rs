@@ -10,8 +10,11 @@ pub fn is_dictating(flag: &Path) -> bool {
     if flag.exists() {
         return true;
     }
+    // `[/]` so the pattern never matches a pgrep's own command line: two of these at the
+    // same moment (the passive loop and a test, or two daemons under test) would each see
+    // the other and say yes.
     Command::new("pgrep")
-        .args(["-f", "/nerd-dictation begin"])
+        .args(["-f", "[/]nerd-dictation begin"])
         .env_clear()
         .envs(child_env(std::env::vars()))
         .stdin(Stdio::null())

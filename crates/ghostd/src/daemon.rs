@@ -335,6 +335,9 @@ pub struct Daemon {
     pub state: Arc<DaemonState>,
     pub passwords: Mutex<Option<Arc<Passwords>>>,
     followed_vault: AtomicBool,
+    /// The last model load's failure while it is tried again; on the waiting list meanwhile.
+    models_problem: Mutex<Option<String>>,
+    models_retry: std::time::Duration,
     pub late: Late,
     /// The agents, with the voices once Kokoro is loaded.
     pub conversations: Mutex<Option<Arc<Conversations>>>,
@@ -369,6 +372,13 @@ pub struct Daemon {
     log_mirror: LogMirror,
 }
 
+/// A model that won't load is tried again this often (ADR 0038: under the app's
+/// supervisor a crash would be a restart loop with nothing to read; the waiting list
+/// says what is missing instead).
+pub const MODELS_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
+/// The waiting list's key for it.
+pub const MODELS_PROBLEM_KEY: &str = "models:missing";
+
 impl Daemon {
     pub fn new(cfg: GhostdSettings, voice: VoiceSettings, ports: Ports) -> Self {
         let build = build_info::detect(None, None, None);
@@ -388,6 +398,8 @@ impl Daemon {
             state,
             passwords: Mutex::new(None),
             followed_vault: AtomicBool::new(false),
+            models_problem: Mutex::new(None),
+            models_retry: MODELS_RETRY,
             late: Late::default(),
             conversations: Mutex::new(None),
             reach: Mutex::new(None),
@@ -432,6 +444,12 @@ impl Daemon {
     /// Where the wake file and the duck state live (`$XDG_RUNTIME_DIR/ghost`).
     pub fn with_runtime_dir(mut self, rt: impl Into<PathBuf>) -> Self {
         self.rt = rt.into();
+        self
+    }
+
+    /// How often a model load that failed is tried again (a test shortens it).
+    pub fn with_models_retry(mut self, retry: std::time::Duration) -> Self {
+        self.models_retry = retry;
         self
     }
 
@@ -1165,13 +1183,20 @@ impl Daemon {
                     let folder = folder.clone();
                     let vault = passwords.clone();
                     let cfg = cfg.clone();
+                    let weak = Arc::downgrade(d);
                     move || {
                         let folder_problems = lock(&folder).problems.clone();
-                        ghost_problems(
+                        let mut out = ghost_problems(
                             &*apps,
                             &folder_problems,
                             &password_problems(Some(&vault), &cfg),
-                        )
+                        );
+                        if let Some(d) = weak.upgrade()
+                            && let Some(problem) = lock(&d.models_problem).clone()
+                        {
+                            out.push((MODELS_PROBLEM_KEY.to_string(), problem));
+                        }
+                        out
                     }
                 }))
                 .with_on_change(on_change.clone()),
@@ -1407,25 +1432,52 @@ impl Daemon {
         );
 
         info!("loading models");
-        let models = {
+        // A model that won't load is waited for, like a locked keyring (ADR 0036), not a
+        // crash: under the app's supervisor (ADR 0038) that would be a restart loop with
+        // nothing to read. The API is up, the waiting list says what is missing, and the
+        // load is tried again until it works or the daemon is stopped.
+        let models = loop {
             let load = d.ports.load_models.clone();
             let voice = d.voice();
-            tokio::task::spawn_blocking(move || load(&voice)).await??
+            match tokio::task::spawn_blocking(move || load(&voice)).await? {
+                Ok(m) => break Some(m),
+                Err(e) => {
+                    warn!(
+                        "models: {e}; trying again in {} s (ghostd check says what is missing)",
+                        d.models_retry.as_secs_f64()
+                    );
+                    *lock(&d.models_problem) =
+                        Some(format!("Ghost's speech models are not loaded: {e}"));
+                    d.refresh_waiting_now();
+                    tokio::select! {
+                        _ = tokio::time::sleep(d.models_retry) => {}
+                        _ = d.stop.cancelled() => break None,
+                    }
+                }
+            }
         };
-        info!("models ready");
-        let models = Arc::new(models);
-        d.late.models.set(models.clone()).ok();
-        d.state.set_models_ready(true);
-        d.bind_voices(&models);
-        let duck_state = d.rt.join(DUCK_STATE);
-        let ducker = (d.ports.ducker)(&cfg, duck_state.clone());
-        if let Err(e) = ghost_audio::restore_from_state(&duck_state) {
-            warn!("duck: {e}"); // undo a previous crash
-        }
-        *lock(&d.ducker) = Some(ducker.clone());
-        let wake = d.build_wake(&models);
+        let running = if let Some(models) = models {
+            if lock(&d.models_problem).take().is_some() {
+                d.refresh_waiting_now(); // the item resolves
+            }
+            info!("models ready");
+            let models = Arc::new(models);
+            d.late.models.set(models.clone()).ok();
+            d.state.set_models_ready(true);
+            d.bind_voices(&models);
+            let duck_state = d.rt.join(DUCK_STATE);
+            let ducker = (d.ports.ducker)(&cfg, duck_state.clone());
+            if let Err(e) = ghost_audio::restore_from_state(&duck_state) {
+                warn!("duck: {e}"); // undo a previous crash
+            }
+            *lock(&d.ducker) = Some(ducker.clone());
+            let wake = d.build_wake(&models);
 
-        d.passive(wake.clone()).await;
+            d.passive(wake.clone()).await;
+            Some((wake, ducker))
+        } else {
+            None
+        };
 
         // the wind-down, in the Python's order
         refresher.abort();
@@ -1438,8 +1490,10 @@ impl Daemon {
         if let Some(h) = &hooks_listener {
             h.stop().await;
         }
-        wake.close();
-        ducker.restore();
+        if let Some((wake, ducker)) = running {
+            wake.close();
+            ducker.restore();
+        }
         let servers = lock(&d.phone_servers).take();
         if let Some(servers) = servers {
             servers.stop().await;

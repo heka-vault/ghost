@@ -105,6 +105,11 @@ struct World {
 }
 
 fn world(tmp: &std::path::Path, wake_mode: &str) -> World {
+    world_with(tmp, wake_mode, |_| {})
+}
+
+/// The same, with the ports changed before the daemon is built.
+fn world_with(tmp: &std::path::Path, wake_mode: &str, tweak: impl FnOnce(&mut Ports)) -> World {
     let (cfg, voice) = settings(tmp, wake_mode);
     std::fs::create_dir_all(tmp.join("rt")).unwrap();
     let spoken: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -144,7 +149,12 @@ fn world(tmp: &std::path::Path, wake_mode: &str) -> World {
         })
     };
     ports.passive_media = Some(Arc::new(|| Ok(Box::new(Silent) as Box<dyn MediaIn>)));
-    let daemon = Arc::new(Daemon::new(cfg.clone(), voice, ports).with_runtime_dir(tmp.join("rt")));
+    tweak(&mut ports);
+    let daemon = Arc::new(
+        Daemon::new(cfg.clone(), voice, ports)
+            .with_runtime_dir(tmp.join("rt"))
+            .with_models_retry(Duration::from_millis(200)),
+    );
     let client = GhostClient::with_timeout(cfg.api_socket.clone().unwrap(), Duration::from_secs(5));
     World {
         daemon,
@@ -314,4 +324,99 @@ async fn a_typed_line_without_a_session_wakes_with_those_words_and_a_call_names_
         .unwrap()
         .unwrap()
         .unwrap();
+}
+
+/// A load that fails as on a machine without the model files: the first `fails` tries.
+fn flaky_models(ports: &mut Ports, fails: usize) -> Arc<std::sync::atomic::AtomicUsize> {
+    let tries = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let inner = ports.load_models.clone();
+    let counted = tries.clone();
+    ports.load_models = Arc::new(move |s: &VoiceSettings| {
+        if counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < fails {
+            anyhow::bail!("Parakeet's files are not in the Hugging Face cache; set GHOST_STT_DIR");
+        }
+        inner(s)
+    });
+    tries
+}
+
+async fn waiting_text(client: &GhostClient) -> String {
+    client
+        .request(hyper::Method::GET, "/waiting", None)
+        .await
+        .map(|r| r.body.to_string())
+        .unwrap_or_default()
+}
+
+/// ADR 0038: a model that won't load is waited for, not a crash. The API answers, the
+/// waiting list says what is missing, the load is tried again, and the item resolves.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_model_that_wont_load_is_waited_for_not_a_crash() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut tries = None;
+    let w = world_with(tmp.path(), "file", |ports| {
+        tries = Some(flaky_models(ports, 2))
+    });
+    let tries = tries.unwrap();
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    let st = until(client, "the API up with the models missing", |v| {
+        v["models_ready"] == false && v["waiting"].as_u64().unwrap_or(0) >= 1
+    })
+    .await;
+    assert_ne!(st["phase"], "passive");
+    assert!(!run.is_finished(), "the daemon runs on");
+    let text = waiting_text(client).await;
+    assert!(
+        text.contains("models:missing"),
+        "the waiting list names it: {text}"
+    );
+    assert!(text.contains("not loaded"), "and says so in words: {text}");
+
+    until(client, "passive once the models load", |v| {
+        v["phase"] == "passive" && v["models_ready"] == true
+    })
+    .await;
+    assert!(
+        tries.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+        "the load was tried again"
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while waiting_text(client).await.contains("models:missing") {
+        assert!(
+            Instant::now() < deadline,
+            "the item resolves once the models load"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    w.daemon.stop.cancel();
+    run.await.unwrap().unwrap();
+}
+
+/// A stop while the models are still missing winds the daemon down cleanly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_while_the_models_are_missing_winds_down() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world_with(tmp.path(), "file", |ports| {
+        flaky_models(ports, usize::MAX);
+    });
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    until(client, "the API up with the models missing", |v| {
+        v["models_ready"] == false && v["waiting"].as_u64().unwrap_or(0) >= 1
+    })
+    .await;
+    w.daemon.stop.cancel();
+    tokio::time::timeout(Duration::from_secs(10), run)
+        .await
+        .expect("the daemon stops while waiting for its models")
+        .unwrap()
+        .unwrap();
+    assert!(client.status().await.is_err(), "the socket is gone");
 }
