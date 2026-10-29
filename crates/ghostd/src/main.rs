@@ -1,7 +1,10 @@
 //! `ghostd run`: the daemon. `ghostd status|wake|say|sleep`: clients of its socket.
-//! `ghostd passwords`: the vault from the command line. `ghostd api-schema`: the control
-//! API's document. `ghostd version`: what this build is. `ghostd restore-volumes`: what
-//! the shell runs before a start and after a stop (ADR 0038).
+//! `ghostd passwords`: the vault from the command line. `ghostd check`: the settings,
+//! the vault, Ghost's folder and the apps, with a problem as the exit code. `ghostd push`:
+//! a signed delivery to the webhook listener (ADR 0027). `ghostd latency`: where the
+//! turns' time went (ADR 0018). `ghostd api-schema`: the control API's document.
+//! `ghostd version`: what this build is. `ghostd restore-volumes`: what the shell runs
+//! before a start and after a stop (ADR 0038).
 //!
 //! W1 of heka-vault/ghost#39: the daemon starts, opens the control socket and answers
 //! `/status` with `starting`. W3 gave it the whole control API over a `Deps` with nothing
@@ -10,18 +13,23 @@
 
 mod parent;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use ghost_api::server::{default_socket_path, serve};
 use ghost_api::{DaemonState, Deps, GhostClient, Unavailable, router};
 use ghost_core::gate::WriteGate;
+use ghost_core::passwords::SharedEnviron;
 use ghost_core::store::Store;
 use ghostd::GhostdSettings;
 use ghostd::build_info;
-use ghostd::passwords::{Cli, Redacting, operator_keyring, passwords_cli};
+use ghostd::check::check_command;
+use ghostd::latency::latency_command;
+use ghostd::passwords::{Cli, Redacting, open_passwords, operator_keyring, passwords_cli};
+use ghostd::push::push_cli;
 use tokio::sync::Notify;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -52,6 +60,34 @@ fn main() -> anyhow::Result<()> {
         Some("say") => client("say", &args[1..]),
         Some("sleep") => client("sleep", &args[1..]),
         Some("restore-volumes") => restore_volumes(),
+        Some("check") => {
+            let cfg = GhostdSettings::load()?;
+            std::process::exit(check(&cfg))
+        }
+        Some("push") => {
+            let cfg = GhostdSettings::load()?;
+            // The hook's password (ADR 0036).
+            let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
+            let _vault = open_passwords(&cfg, operator_keyring(), Arc::clone(&environ));
+            let mut secrets: HashMap<String, String> = std::env::vars().collect();
+            secrets.extend(environ.lock().unwrap_or_else(|e| e.into_inner()).clone());
+            std::process::exit(push_cli(
+                &args[1..],
+                &cfg,
+                &secrets,
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            ))
+        }
+        Some("latency") => {
+            let cfg = GhostdSettings::load()?;
+            std::process::exit(latency_command(
+                &args[1..],
+                &cfg.latency_path(),
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            ))
+        }
         Some("passwords") => {
             let cfg = GhostdSettings::load()?;
             let stdin = std::io::stdin();
@@ -83,7 +119,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, restore-volumes, passwords, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, push, latency, restore-volumes, passwords, api-schema, version"
         ),
     }
 }
@@ -116,12 +152,24 @@ async fn shutdown_signal() {
     }
 }
 
-/// Music a crash left ducked comes back. W4 brings the ducking and what it saves; until
-/// then there is nothing to restore, and the shell's call before a start and after a stop
-/// succeeds all the same.
+/// Music a crash left ducked comes back: every stream `duck.json` saved goes back to its
+/// exact previous volume and the file is removed (crates/ghost-audio). The shell runs
+/// this before a start and after a stop (ADR 0038), so a sound stack that can't be
+/// reached is said, not failed on.
 fn restore_volumes() -> anyhow::Result<()> {
-    info!("restore-volumes: nothing to restore");
+    let state = ghost_audio::duck::default_state_file();
+    match ghost_audio::duck::restore_from_state(&state) {
+        Ok(restored) if restored.is_empty() => info!("restore-volumes: nothing to restore"),
+        Ok(restored) => info!("restore-volumes: {} stream(s) restored", restored.len()),
+        Err(e) => warn!("restore-volumes: {e}"),
+    }
     Ok(())
+}
+
+/// `ghostd check`, on its own runtime: the apps connect to be described.
+#[tokio::main]
+async fn check(cfg: &GhostdSettings) -> i32 {
+    check_command(cfg, operator_keyring(), &mut std::io::stdout()).await
 }
 
 /// One call over the socket, the body printed as the daemon sent it.
