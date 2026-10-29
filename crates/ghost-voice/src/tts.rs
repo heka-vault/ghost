@@ -97,6 +97,8 @@ pub struct KokoroTts {
     clause_min_words: Option<usize>,
     aggregator: ClauseAggregator,
     turns: Option<Arc<TurnControl>>,
+    /// The token of the reply being spoken, as the model stage stamped it.
+    reply_turn: Option<tokio_util::sync::CancellationToken>,
     speaking: bool,
     first_audio: bool,
 }
@@ -119,6 +121,7 @@ impl KokoroTts {
             clause_min_words,
             aggregator: ClauseAggregator::new(clause_min_words),
             turns: None,
+            reply_turn: None,
             speaking: false,
             first_audio: true,
         })
@@ -142,6 +145,7 @@ impl KokoroTts {
             clause_min_words,
             aggregator: ClauseAggregator::new(clause_min_words),
             turns: self.turns.clone(),
+            reply_turn: None,
             speaking: false,
             first_audio: true,
         }
@@ -172,13 +176,17 @@ impl KokoroTts {
             .map_or_else(tokio_util::sync::CancellationToken::new, |t| t.current())
     }
 
-    /// One piece of a reply to the model and out.
-    async fn say(&mut self, text: &str, out: &Out) {
+    /// One piece of a reply to the model and out. `reply` is the model's reply (its own
+    /// token); a line spoken directly takes the turn of the moment.
+    async fn say(&mut self, text: &str, reply: bool, out: &Out) {
         let text = spoken(text);
         if text.trim().is_empty() {
             return;
         }
-        let turn = self.token();
+        let turn = match (&self.reply_turn, reply) {
+            (Some(t), true) => t.clone(),
+            _ => self.token(),
+        };
         if turn.is_cancelled() {
             return;
         }
@@ -242,16 +250,20 @@ impl Stage for KokoroTts {
             return;
         }
         match &frame {
+            Frame::ReplyTurn(turn) => {
+                self.reply_turn = Some(turn.clone());
+                return;
+            }
             Frame::LlmText(text) => {
                 let clauses = self.aggregator.push(text);
                 for clause in clauses {
-                    self.say(&clause, out).await;
+                    self.say(&clause, true, out).await;
                 }
                 return; // the text was spoken; the taps upstream recorded it
             }
             Frame::LlmEnd => {
                 if let Some(rest) = self.aggregator.flush() {
-                    self.say(&rest, out).await;
+                    self.say(&rest, true, out).await;
                 }
                 self.stop_speaking(out).await;
             }
@@ -259,7 +271,7 @@ impl Stage for KokoroTts {
                 let mut pieces = self.aggregator.push(text);
                 pieces.extend(self.aggregator.flush());
                 for piece in pieces {
-                    self.say(&piece, out).await;
+                    self.say(&piece, false, out).await;
                 }
                 self.stop_speaking(out).await;
                 return;
@@ -280,11 +292,12 @@ impl Stage for KokoroTts {
             }
             Frame::Interruption => {
                 self.aggregator.reset();
+                self.reply_turn = None;
                 self.speaking = false;
             }
             Frame::End => {
                 if let Some(rest) = self.aggregator.flush() {
-                    self.say(&rest, out).await;
+                    self.say(&rest, true, out).await;
                 }
                 self.stop_speaking(out).await;
             }

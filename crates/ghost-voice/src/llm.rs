@@ -195,6 +195,7 @@ impl LlmStage {
         mut prefix: Option<mpsc::UnboundedReceiver<Event>>,
     ) -> Option<Reply> {
         out.push(Frame::LlmStart).await;
+        out.push(Frame::ReplyTurn(turn.clone())).await;
         let mut reply = Reply::default();
         let began = Instant::now();
         let mut first = true;

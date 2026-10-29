@@ -299,6 +299,8 @@ struct Shared {
     end_owed: AtomicBool,
     /// The context whose audio is being played, and whether speech was announced.
     speaking: AtomicBool,
+    /// The reply's token, as the model stage stamped it.
+    turn: Mutex<Option<tokio_util::sync::CancellationToken>>,
 }
 
 struct Socket {
@@ -334,6 +336,7 @@ impl ElevenLabsTts {
                 open: AtomicBool::new(false),
                 end_owed: AtomicBool::new(false),
                 speaking: AtomicBool::new(false),
+                turn: Mutex::new(None),
             }),
             socket: None,
             aggregator: ClauseAggregator::new(clause),
@@ -495,10 +498,13 @@ impl ElevenLabsTts {
                                     if !shared.speaking.swap(true, Ordering::SeqCst) {
                                         out.push(Frame::TtsStarted).await;
                                     }
-                                    let turn = turns.as_ref().map_or_else(
-                                        tokio_util::sync::CancellationToken::new,
-                                        |t| t.current(),
-                                    );
+                                    let turn =
+                                        shared.turn.lock().unwrap().clone().unwrap_or_else(|| {
+                                            turns.as_ref().map_or_else(
+                                                tokio_util::sync::CancellationToken::new,
+                                                |t| t.current(),
+                                            )
+                                        });
                                     out.push(Frame::TtsAudio {
                                         audio: Audio::new(pcm, SAMPLE_RATE),
                                         turn,
@@ -644,6 +650,9 @@ impl Stage for ElevenLabsTts {
                 self.shared.open.store(true, Ordering::SeqCst);
                 self.shared.end_owed.store(false, Ordering::SeqCst);
             }
+            Frame::ReplyTurn(turn) => {
+                *self.shared.turn.lock().unwrap() = Some(turn.clone());
+            }
             Frame::LlmText(text) => {
                 for clause in self.aggregator.push(text) {
                     self.say(&clause, out).await;
@@ -688,6 +697,7 @@ impl Stage for ElevenLabsTts {
             }
             Frame::Interruption => {
                 self.aggregator.reset();
+                *self.shared.turn.lock().unwrap() = None;
                 self.shared.unheard.lock().unwrap().clear();
                 self.shared.open.store(false, Ordering::SeqCst);
                 self.shared.end_owed.store(false, Ordering::SeqCst);
@@ -791,9 +801,9 @@ impl Stage for TtsFailover {
 
     async fn process(&mut self, frame: Frame, direction: Direction, out: &Out) {
         if direction == Direction::Down
-            && let Frame::VoiceChange { .. } = &frame
+            && matches!(frame, Frame::VoiceChange { .. } | Frame::ReplyTurn(_))
         {
-            // an agent's voice is for both engines
+            // an agent's voice is for both engines, and so is the reply's turn
             self.fallback
                 .lock()
                 .await

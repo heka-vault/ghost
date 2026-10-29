@@ -117,6 +117,9 @@ pub enum Frame {
     /// turn runs its own inference.
     EagerCancel,
     LlmStart,
+    /// The turn the reply after `LlmStart` was made for: the speech stages stamp its audio
+    /// with this token, so a reply still queued when the operator cut in never plays.
+    ReplyTurn(CancellationToken),
     LlmText(String),
     LlmThought,
     /// The names of the calls a reply makes, as the model finished them.
@@ -205,6 +208,7 @@ impl Frame {
             Frame::SpeculationCancelled => "SpeculationCancelled",
             Frame::EagerCancel => "EagerCancel",
             Frame::LlmStart => "LlmStart",
+            Frame::ReplyTurn(_) => "ReplyTurn",
             Frame::LlmText(_) => "LlmText",
             Frame::LlmThought => "LlmThought",
             Frame::FunctionCallsStarted(_) => "FunctionCallsStarted",
