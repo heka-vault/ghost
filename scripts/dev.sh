@@ -4,36 +4,28 @@
 #   scripts/dev.sh            the daemon and the desktop app          (make dev)
 #   scripts/dev.sh daemon     the daemon only                         (make daemon)
 #   scripts/dev.sh desktop    the desktop app only                    (make desktop)
-#   scripts/dev.sh reload     restart the daemon a running one started (make reload)
+#   scripts/dev.sh reload     rebuild and restart the daemon a running one started (make reload)
 #   scripts/dev.sh preflight  stop the service, refuse if a ghostd runs (make start uses it)
 #
-# GHOST_DAEMON_IMPL=rust runs the Rust daemon (ADR 0039; `cargo build -p ghostd`,
-# target/debug/ghostd) instead of the Python one, on the same socket: `make dev-rust`.
-#
-# The daemon runs the working tree's .venv (or its target/debug). Only one Ghost may have
-# the microphone, so starting it stops the ghostd user service first (the headless Ghost,
-# a `make deploy` build); `make service-on` starts that again. The desktop app is `tauri
-# dev`: Vite reloads the UI on save and a Rust change rebuilds the window. The app adopts
-# the daemon this script runs rather than starting its own (ADR 0038; GHOST_SHELL_ADOPT_ONLY).
-# A Python change needs the daemon restarted, which `make reload` does from another
-# terminal without touching the desktop. If the daemon exits on its own (a crash, `make
-# stop`) it stays down until `make reload`. Ctrl+C stops everything this script started.
+# The daemon is the working tree's `cargo build -p ghostd` (ADR 0039; target/debug/ghostd).
+# Only one Ghost may have the microphone, so starting it stops the ghostd user service first
+# (the headless Ghost, a `make deploy` build); `make service-on` starts that again. The
+# desktop app is `tauri dev`: Vite reloads the UI on save and a Rust change rebuilds the
+# window. The app adopts the daemon this script runs rather than starting its own (ADR 0038;
+# GHOST_SHELL_ADOPT_ONLY). A change to the daemon's crates needs it rebuilt and restarted,
+# which `make reload` does from another terminal without touching the desktop. If the daemon
+# exits on its own (a crash, `make stop`) it stays down until `make reload`. Ctrl+C stops
+# everything this script started.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-UV="${UV:-uv}"
-IMPL="${GHOST_DAEMON_IMPL:-python}"
 # Settings only: passwords are in Ghost's vault, which the daemon opens itself (ADR 0036).
 ENV_FILE="${ENV_FILE:-$HOME/.config/ghost/settings.env}"
 RUN_DIR="${XDG_RUNTIME_DIR:-/tmp}/ghost"
 RELOAD="$RUN_DIR/dev-reload"
-MINE="$ROOT/(.venv/bin|target/debug)/ghostd run$"  # this checkout's daemon, and no other
-case "$IMPL" in
-  python) GHOSTD="$ROOT/.venv/bin/ghostd" ;;
-  rust) GHOSTD="$ROOT/target/debug/ghostd" ;;
-  *) echo "dev: GHOST_DAEMON_IMPL must be python or rust, not '$IMPL'" >&2; exit 2 ;;
-esac
+GHOSTD="$ROOT/target/debug/ghostd"
+MINE="$ROOT/target/debug/ghostd run$"  # this checkout's daemon, and no other
 
 if [[ -t 1 ]]; then bold=$'\e[1m' off=$'\e[0m'; else bold='' off=''; fi
 say() { echo "${bold}dev:${off} $*"; }
@@ -75,12 +67,13 @@ start_desktop() {
   DESKTOP_PID=$!
 }
 
-# The daemon's build: the Python workspace synced, or the Rust daemon compiled.
+# The daemon compiled from the working tree, and the ONNX Runtime it loads in the cache
+# (scripts/onnxruntime.sh fetches it once).
 build_daemon() {
-  case "$IMPL" in
-    python) "$UV" sync --all-packages -q || say "uv sync failed; starting with the environment as it is" ;;
-    rust) cargo build -q -p ghostd || { say "cargo build -p ghostd failed"; return 1; } ;;
-  esac
+  cargo build -q -p ghostd || { say "cargo build -p ghostd failed"; return 1; }
+  if [[ -x scripts/onnxruntime.sh ]]; then
+    scripts/onnxruntime.sh >/dev/null || { say "scripts/onnxruntime.sh failed"; return 1; }
+  fi
 }
 
 stop_all() {
@@ -107,7 +100,7 @@ daemon_loop() {
       until [[ -e "$RELOAD" ]] || ((STOPPING)); do sleep 1; done
       ((STOPPING)) && return 0
     fi
-    say "restarting ghostd"
+    say "rebuilding and restarting ghostd"
   done
 }
 
@@ -129,7 +122,7 @@ case "$mode" in
       exit 1
     fi
     mkdir -p "$RUN_DIR" && touch "$RELOAD"
-    pkill -TERM -f "$MINE" && say "ghostd restarting" || say "ghostd starting"
+    pkill -TERM -f "$MINE" && say "ghostd restarting (rebuilt first)" || say "ghostd starting"
     ;;
   desktop)
     trap 'stop_all' INT TERM

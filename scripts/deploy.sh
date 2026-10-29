@@ -7,18 +7,16 @@
 #   scripts/deploy.sh status      which build the service runs
 #   scripts/deploy.sh dropin [commit]   print the drop-in a build runs with (current by default)
 #
-# A build is the commit's files (git archive, so uncommitted edits are never in it), a venv
-# with Ghost installed non-editable, and the Rust daemon (`cargo build --release -p ghostd`,
-# ADR 0039) as bin/ghostd, under ~/.local/share/ghost/runtime/<commit>/. `current` and
-# `previous` are links; the user unit's drop-in runs `current`, with GHOST_DAEMON_IMPL
-# (`python`, the default until W10 of #39 removes it, or `rust`) choosing which daemon the
-# service runs; a build records the choice in `daemon-impl`. The build is checked with
+# A build is the commit's files (git archive, so uncommitted edits are never in it) and the
+# daemon compiled from them (`cargo build --release -p ghostd`, ADR 0039) as bin/ghostd, with
+# the ONNX Runtime it loads beside it as lib/libonnxruntime.so.<version>
+# (scripts/onnxruntime.sh), under ~/.local/share/ghost/runtime/<commit>/. `current` and
+# `previous` are links; the user unit's drop-in runs `current`. The build is checked with
 # `ghostd check` against the operator's own folder before anything restarts.
 #
-# Each build records the drop-in it needs (`dropin-form`): `vault`, settings.env only and the
-# daemon opens Ghost's vault (ADR 0036), or `render`, a build from before the vault, whose
-# passwords come from ~/.config/ghost/env rendered by its own ghost-render-env.sh. A rollback
-# writes the form of the build it goes back to (docs/releasing.md).
+# The environment is settings.env only: the daemon opens Ghost's vault itself (ADR 0036). A
+# build from before the Rust daemon (no bin/ghostd) can't run any more; a rollback to one
+# refuses and changes nothing.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -27,14 +25,10 @@ UNIT=ghostd
 DROPIN_DIR="$HOME/.config/systemd/user/$UNIT.service.d"
 DROPIN="$DROPIN_DIR/60-runtime.conf"
 KEEP=${GHOST_RUNTIME_KEEP:-5}
-UV=${UV:-uv}
-IMPL=${GHOST_DAEMON_IMPL:-}  # which daemon the service runs; a build's record when empty
 CARGO_TARGET=${GHOST_CARGO_TARGET_DIR:-$RUNTIME/.cargo-target}  # shared, so a deploy is incremental
 SYSTEMCTL=${GHOST_SYSTEMCTL:-systemctl}  # the tests put a fake here
 JOURNALCTL=${GHOST_JOURNALCTL:-journalctl}
-LEGACY_ENV="$HOME/.config/ghost/env"
-# heka-vault's config: a pre-vault build's renderer writes ~/.config/ghost/env from it.
-HEKA_ENV="$HOME/.config/heka-vault/ghost.env"
+ORT_LIB=libonnxruntime.so.1.24.4  # what scripts/onnxruntime.sh fetches (option 1 on #39)
 
 say() { echo "deploy: $*" >&2; }
 
@@ -46,110 +40,49 @@ point() {
   mv -T "$RUNTIME/.$1.tmp" "$RUNTIME/$1"
 }
 
-# The drop-in form a build needs: what it recorded, or for a build with no record, `render`
-# when its tree still has ghost-render-env.sh (from before the vault), else `vault`.
-form_of() {
-  local dir=$1
-  if [[ -r "$dir/dropin-form" ]]; then
-    tr -d '[:space:]' < "$dir/dropin-form"
-  elif [[ -e "$dir/src/infra/systemd/ghost-render-env.sh" ]]; then
-    echo render
-  else
-    echo vault
-  fi
-}
-
-# Which daemon a build runs: what it recorded, else python (a build from before the Rust
-# daemon has no bin/ghostd).
-impl_of() {
-  local dir=$1
-  if [[ -r "$dir/daemon-impl" ]]; then tr -d '[:space:]' < "$dir/daemon-impl"; else echo python; fi
-}
-
-# The daemon binary of a build, by its implementation.
-ghostd_of() {
-  case "$(impl_of "$1")" in
-    rust) echo "$1/bin/ghostd" ;;
-    *) echo "$1/venv/bin/ghostd" ;;
-  esac
-}
-
-# A pre-vault build reads its passwords from ~/.config/ghost/env, which the vault's import
-# deletes. Its own renderer writes that file again from heka-vault when heka-vault's config is
-# still here; without either, refuse instead of starting a Ghost with no passwords.
+# A build runs when it has the daemon. One from before the Rust daemon (a venv only) can't.
 can_run() {
   local dir=$1
-  if [[ "$(impl_of "$dir")" == rust && ! -x "$dir/bin/ghostd" ]]; then
-    say "build $(basename "$dir" | cut -c1-12) records the Rust daemon but has no bin/ghostd"
-    return 1
-  fi
-  if [[ "$(form_of "$dir")" == render && ! -e "$LEGACY_ENV" ]]; then
-    if [[ -r "$HEKA_ENV" ]]; then
-      say "build $(basename "$dir" | cut -c1-12) is from before Ghost's vault: its renderer writes"
-      say "~/.config/ghost/env from heka-vault again (${HEKA_ENV/#$HOME/\~}) at its start."
-      return 0
-    fi
-    say "build $(basename "$dir" | cut -c1-12) is from before Ghost's vault: it reads its passwords from"
-    say "~/.config/ghost/env, which the import into the vault deleted. It would start with none."
-    say "Stay on this build, or put the passwords back in ~/.config/ghost/env by hand first."
+  if [[ ! -x "$dir/bin/ghostd" ]]; then
+    say "build $(basename "$dir" | cut -c1-12) is from before the Rust daemon (#39): it has no bin/ghostd"
+    say "and can't run any more. Stay on this build, or \`make deploy\` a commit."
     return 1
   fi
 }
 
-# The drop-in for the build `current` points at, in the form that build needs and with
-# the daemon it records.
+# The drop-in for the build `current` points at: settings.env only, no render step, the
+# build's own daemon and the runtime library beside it when the build carries one.
 render_dropin() {
-  local form=$1 impl=${2:-python}
+  local dir=$1
   local cur="%h/.local/share/ghost/runtime/current"
   [[ -n "${GHOST_RUNTIME_DIR:-}" ]] && cur="$RUNTIME/current"
   echo "# Written by scripts/deploy.sh: the service runs the build in $RUNTIME/current."
   echo "# \`scripts/deploy.sh off\` removes this file."
   echo "[Service]"
   echo "WorkingDirectory=%h"
-  case "$form" in
-    vault) cat <<EOF
+  cat <<EOF
 # ADR 0036: no render step, and no secret in the environment: settings.env only. The
 # daemon opens Ghost's vault itself.
 ExecStartPre=
 EnvironmentFile=
 EnvironmentFile=-%h/.config/ghost/settings.env
-EOF
-    ;;
-    render) cat <<EOF
-# A build from before Ghost's vault (ADR 0036): its own renderer writes ~/.config/ghost/env,
-# and the daemon reads its passwords from there. Optional (-) so the renderer can run when
-# the import deleted it; systemd reads it again for ExecStart.
-ExecStartPre=
-ExecStartPre=$cur/src/infra/systemd/ghost-render-env.sh
-EnvironmentFile=
-EnvironmentFile=-%h/.config/ghost/env
-EOF
-    ;;
-    *) say "unknown drop-in form '$form'"; return 1 ;;
-  esac
-  local ghostd
-  case "$impl" in
-    rust) ghostd="$cur/bin/ghostd" ;;
-    python) ghostd="$cur/venv/bin/ghostd" ;;
-    *) say "unknown daemon implementation '$impl'"; return 1 ;;
-  esac
-  cat <<EOF
 Environment=GHOST_INFRA_DIR=$cur/src/infra
-# ADR 0039: the Rust daemon (bin/ghostd) or the Python one (venv/bin/ghostd).
-Environment=GHOST_DAEMON_IMPL=$impl
+EOF
+  if [[ -e "$dir/lib/$ORT_LIB" ]]; then
+    echo "# The ONNX Runtime this build was checked with (ADR 0039)."
+    echo "Environment=ORT_DYLIB_PATH=$cur/lib/$ORT_LIB"
+  fi
+  cat <<EOF
 ExecStart=
-ExecStart=$ghostd run
+ExecStart=$cur/bin/ghostd run
 ExecStopPost=
-ExecStopPost=$ghostd restore-volumes
+ExecStopPost=$cur/bin/ghostd restore-volumes
 EOF
 }
 
 write_dropin() {
-  local form impl
-  form=$(form_of "$RUNTIME/current")
-  impl=$(impl_of "$RUNTIME/current")
   mkdir -p "$DROPIN_DIR"
-  render_dropin "$form" "$impl" > "$DROPIN.tmp"
+  render_dropin "$RUNTIME/current" > "$DROPIN.tmp"
   mv "$DROPIN.tmp" "$DROPIN"
   "$SYSTEMCTL" --user daemon-reload
 }
@@ -194,14 +127,13 @@ unit_ok() {
 # Restart and wait until the daemon answers on its socket (or the unit gives up).
 restart() {
   "$SYSTEMCTL" --user restart "$UNIT"
-  local ghostd
-  ghostd=$(ghostd_of "$RUNTIME/current")
+  local ghostd="$RUNTIME/current/bin/ghostd"
   for _ in $(seq 1 90); do
     case "$("$SYSTEMCTL" --user show "$UNIT" -p ActiveState --value)" in
       failed|inactive) say "$UNIT is not running:"; "$JOURNALCTL" --user -u "$UNIT" -n 30 --no-pager; return 1 ;;
     esac
     if "$ghostd" status >/dev/null 2>&1; then
-      say "$UNIT is up on $(commit_of current | cut -c1-12) ($(impl_of "$RUNTIME/current") daemon)"
+      say "$UNIT is up on $(commit_of current | cut -c1-12)"
       return 0
     fi
     sleep 2
@@ -219,38 +151,31 @@ prune() {
     | tail -n +$((KEEP - 1)) | while read -r old; do rm -rf "${RUNTIME:?}/$old"; done || true
 }
 
-# What the daemon reports as its build (ghostd.build, docs/releasing.md): a deploy of this
-# commit. In the venv's root, where ghostd looks (sys.prefix).
+# What the daemon reports as its build (ghostd::build_info, docs/releasing.md): a deploy of
+# this commit, recorded beside the binary.
 record_build() {
-  printf '{"kind": "deploy", "commit": "%s"}\n' "$2" > "$1/venv/ghost-build.json"
+  printf '{"kind": "deploy", "commit": "%s"}\n' "$2" > "$1/bin/ghost-build.json"
 }
 
-# The drop-in form this build needs, for a rollback to it later: this script is the build's
-# own (the build is HEAD), and it runs the vault (ADR 0036).
-record_form() {
-  echo vault > "$1/dropin-form"
-}
-
-# Which daemon the service runs from this build: GHOST_DAEMON_IMPL when given, else what
-# the build already records, else python.
-record_impl() {
-  local dir=$1 impl=${IMPL:-$(impl_of "$dir")}
-  case "$impl" in
-    python|rust) ;;
-    *) say "GHOST_DAEMON_IMPL must be python or rust, not '$impl'"; return 1 ;;
-  esac
-  echo "$impl" > "$dir/daemon-impl"
-}
-
-# The Rust daemon (ADR 0039), built from the archived tree with the workspace's own
-# toolchain and linker settings (rust-toolchain.toml, .cargo/config.toml, read from the
-# tree), into a target dir shared across builds so only what changed compiles.
+# The daemon (ADR 0039), built from the archived tree with the workspace's own toolchain and
+# linker settings (rust-toolchain.toml, .cargo/config.toml, read from the tree), into a
+# target dir shared across builds so only what changed compiles.
 build_rust() {
   local dir=$1
-  say "building the Rust daemon (cargo build --release -p ghostd)"
+  say "building the daemon (cargo build --release -p ghostd)"
   (cd "$dir/src" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo build --release --locked -q -p ghostd) >&2
   mkdir -p "$dir/bin"
   install -m 755 "$CARGO_TARGET/release/ghostd" "$dir/bin/ghostd"
+}
+
+# The ONNX Runtime the build loads, copied beside it from the cache, so the build is whole on
+# its own (the drop-in names it as ORT_DYLIB_PATH).
+install_runtime() {
+  local dir=$1 lib
+  [[ -x "$dir/src/scripts/onnxruntime.sh" ]] || return 0
+  lib=$("$dir/src/scripts/onnxruntime.sh") || { say "scripts/onnxruntime.sh failed"; return 1; }
+  mkdir -p "$dir/lib"
+  install -m 644 "$lib" "$dir/lib/$ORT_LIB"
 }
 
 build() {
@@ -262,29 +187,18 @@ build() {
   fi
   if [[ -r "$dir/commit" ]]; then
     say "build $(cut -c1-12 <<<"$sha") exists; reusing it"
-    [[ -e "$dir/venv/ghost-build.json" ]] || record_build "$dir" "$sha"
-    [[ -e "$dir/dropin-form" ]] || record_form "$dir"
-    # A build from before the Rust daemon gets it now when asked for.
-    if [[ "${IMPL:-}" == rust && ! -x "$dir/bin/ghostd" ]]; then build_rust "$dir"; fi
-    record_impl "$dir" || exit 1
+    [[ -x "$dir/bin/ghostd" ]] || build_rust "$dir"
+    [[ -e "$dir/bin/ghost-build.json" ]] || record_build "$dir" "$sha"
+    [[ -e "$dir/lib/$ORT_LIB" ]] || install_runtime "$dir"
   else
     say "building $(git -C "$ROOT" log -1 --format='%h %s' "$sha")"
-    # Built in place: a venv records its own path. `commit` is written last, so a build
-    # that stopped halfway has none and is rebuilt.
+    # `commit` is written last, so a build that stopped halfway has none and is rebuilt.
     rm -rf "$dir"
     mkdir -p "$dir/src"
     git -C "$ROOT" archive "$sha" | tar -x -C "$dir/src"
-    # --reinstall-package: uv caches workspace members' wheels by their pyproject, not
-    # their sources, so a build without it can ship another commit's code.
-    local reinstall=()
-    for member in ghostd ghost-core ghost-voice ghost-api; do reinstall+=(--reinstall-package "$member"); done
-    UV_PROJECT_ENVIRONMENT="$dir/venv" \
-      "$UV" sync --frozen --no-dev --no-editable --all-packages "${reinstall[@]}" \
-        --project "$dir/src" --quiet >&2
-    record_build "$dir" "$sha"
-    record_form "$dir"
     build_rust "$dir"
-    record_impl "$dir" || exit 1
+    record_build "$dir" "$sha"
+    install_runtime "$dir"
     echo "$sha" > "$dir/commit"
   fi
   echo "$sha"
@@ -300,14 +214,11 @@ check() {
     [[ -r "$HOME/.config/ghost/settings.env" ]] && . "$HOME/.config/ghost/settings.env"
     set +a
     export GHOST_INFRA_DIR="$dir/src/infra"
-    "$dir/venv/bin/ghostd" check
+    [[ -e "$dir/lib/$ORT_LIB" ]] && export ORT_DYLIB_PATH="$dir/lib/$ORT_LIB"
+    "$dir/bin/ghostd" check
   ) > "$dir/check.log" 2>&1 || { say "ghostd check failed; the service was not touched:"; tail -20 "$dir/check.log"; return 1; }
   grep -E '^(version:|config ok|apps:|  app |skills:|folder:|passwords:)' "$dir/check.log" | sed 's/^/  /'
   grep -iE 'no longer read|not read' "$dir/check.log" | sed 's/^/  /' || true
-  # The Rust daemon has no `check` yet (it arrives with its packages, #39): its version, at least.
-  if [[ "$(impl_of "$dir")" == rust ]]; then
-    say "the service runs the Rust daemon: $("$dir/bin/ghostd" version)"
-  fi
 }
 
 cmd=${1:-deploy}
@@ -332,7 +243,7 @@ case "$cmd" in
     point current "$prev"
     point previous "$cur"
     write_dropin
-    say "back to $(cut -c1-12 <<<"$prev") (drop-in: $(form_of "$RUNTIME/current"), $(impl_of "$RUNTIME/current") daemon)"
+    say "back to $(cut -c1-12 <<<"$prev")"
     restart
     ;;
   off)
@@ -345,7 +256,7 @@ case "$cmd" in
   status)
     if [[ -e "$DROPIN" ]]; then
       cur=$(commit_of current)
-      say "$UNIT runs build $(cut -c1-12 <<<"$cur") ($(impl_of "$RUNTIME/current") daemon): $(git -C "$ROOT" log -1 --format='%s (%cr)' "$cur" 2>/dev/null || echo '?')"
+      say "$UNIT runs build $(cut -c1-12 <<<"$cur"): $(git -C "$ROOT" log -1 --format='%s (%cr)' "$cur" 2>/dev/null || echo '?')"
       [[ -n "$(commit_of previous)" ]] && say "rollback goes to $(commit_of previous | cut -c1-12)"
     else
       say "no drop-in; $UNIT runs what its unit says"
@@ -355,7 +266,7 @@ case "$cmd" in
   dropin)
     sha=${2:-$(commit_of current)}
     [[ -n "$sha" && -d "$RUNTIME/$sha" ]] || { say "no build ${sha:-current} in $RUNTIME"; exit 1; }
-    render_dropin "$(form_of "$RUNTIME/$sha")" "$(impl_of "$RUNTIME/$sha")"
+    render_dropin "$RUNTIME/$sha"
     ;;
   *) echo "usage: $0 [deploy|rollback|off|status|dropin [commit]]" >&2; exit 2 ;;
 esac

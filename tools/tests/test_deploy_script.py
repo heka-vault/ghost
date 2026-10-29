@@ -1,7 +1,7 @@
-"""scripts/deploy.sh's drop-in across the vault (ADR 0036): a rollback writes the form the
-build it goes back to needs, refuses a pre-vault build whose ~/.config/ghost/env is gone,
-and `off` refuses a unit that would not start. Everything in a temp HOME and runtime with a
-fake systemctl: never the operator's service, unit or runtime."""
+"""scripts/deploy.sh: the drop-in a build runs with (ADR 0036, ADR 0039), a rollback to the
+build before, a build from before the Rust daemon refused, and `off` refusing a unit that
+would not start. Everything in a temp HOME and runtime with a fake systemctl: never the
+operator's service, unit or runtime."""
 
 from __future__ import annotations
 
@@ -12,9 +12,10 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy.sh"
-OLD = "a" * 40  # main before the vault: its own ghost-render-env.sh, no record
-NEW = "b" * 40  # a vault build, recorded
-UNRECORDED = "c" * 40  # a vault build deployed before builds recorded their form
+OLD = "a" * 40  # a build from before the Rust daemon: a venv, no bin/ghostd
+NEW = "b" * 40  # the build the service runs
+PREV = "c" * 40  # the build before it
+ORT = "libonnxruntime.so.1.24.4"
 
 FAKE_SYSTEMCTL = """#!/usr/bin/env bash
 echo "$*" >> "$FAKE_LOG"
@@ -37,13 +38,15 @@ def _exe(path: Path, text: str) -> None:
 def world(tmp_path: Path):
     home = tmp_path / "home"
     runtime = tmp_path / "runtime"
-    for sha in (OLD, NEW, UNRECORDED):
-        _exe(runtime / sha / "venv" / "bin" / "ghostd", "#!/bin/sh\nexit 0\n")
+    for sha in (NEW, PREV):
+        _exe(runtime / sha / "bin" / "ghostd", "#!/bin/sh\nexit 0\n")
         (runtime / sha / "commit").write_text(sha + "\n")
-    _exe(runtime / OLD / "src" / "infra" / "systemd" / "ghost-render-env.sh", "#!/bin/sh\n")
-    (runtime / NEW / "dropin-form").write_text("vault\n")
+    _exe(runtime / OLD / "venv" / "bin" / "ghostd", "#!/bin/sh\nexit 0\n")
+    (runtime / OLD / "commit").write_text(OLD + "\n")
+    (runtime / NEW / "lib").mkdir()
+    (runtime / NEW / "lib" / ORT).write_bytes(b"")
     os.symlink(runtime / NEW, runtime / "current")
-    os.symlink(runtime / OLD, runtime / "previous")
+    os.symlink(runtime / PREV, runtime / "previous")
     _exe(tmp_path / "bin" / "systemctl", FAKE_SYSTEMCTL)
     _exe(tmp_path / "bin" / "journalctl", "#!/bin/sh\n")
     (home / ".config" / "ghost").mkdir(parents=True)
@@ -70,63 +73,55 @@ def _current(runtime: Path) -> str:
     return Path(os.readlink(runtime / "current")).name
 
 
-def test_each_build_gets_the_drop_in_it_needs(world):
+def _point(runtime: Path, link: str, sha: str) -> None:
+    os.unlink(runtime / link)
+    os.symlink(runtime / sha, runtime / link)
+
+
+def test_the_drop_in_runs_the_builds_daemon_with_settings_only(world):
     run, _home, runtime, _ = world
-    vault = run("dropin", NEW)
-    assert vault.returncode == 0, vault.stderr
-    assert "ExecStartPre=\n" in vault.stdout and "ghost-render-env" not in vault.stdout
-    assert "EnvironmentFile=-%h/.config/ghost/settings.env" in vault.stdout
-    old = run("dropin", OLD).stdout
-    assert f"ExecStartPre={runtime}/current/src/infra/systemd/ghost-render-env.sh" in old
-    # Optional: the renderer runs first and writes it, even after the import deleted it.
-    assert "EnvironmentFile=\nEnvironmentFile=-%h/.config/ghost/env\n" in old
-    assert f"ExecStart={runtime}/current/venv/bin/ghostd run" in old
-    # No record and no renderer in its tree: a vault build.
-    assert "ghost-render-env" not in run("dropin", UNRECORDED).stdout
+    r = run("dropin", NEW)
+    assert r.returncode == 0, r.stderr
+    text = r.stdout
+    assert "ExecStartPre=\n" in text and "ghost-render-env" not in text
+    assert "EnvironmentFile=-%h/.config/ghost/settings.env" in text
+    assert f"Environment=GHOST_INFRA_DIR={runtime}/current/src/infra" in text
+    assert f"ExecStart={runtime}/current/bin/ghostd run" in text
+    assert f"ExecStopPost={runtime}/current/bin/ghostd restore-volumes" in text
+    assert "venv" not in text and "GHOST_DAEMON_IMPL" not in text
 
 
-def test_rollback_to_a_build_from_before_the_vault(world):
-    run, home, runtime, dropin = world
-    (home / ".config" / "ghost" / "env").write_text("ANTHROPIC_AUTH_TOKEN=x\n")
+def test_the_drop_in_names_the_runtime_library_the_build_carries(world):
+    run, _home, runtime, _ = world
+    assert f"Environment=ORT_DYLIB_PATH={runtime}/current/lib/{ORT}" in run("dropin", NEW).stdout
+    # A build without one leaves the daemon to find it (the bundle's, or the cache).
+    assert "ORT_DYLIB_PATH" not in run("dropin", PREV).stdout
+
+
+def test_rollback_goes_to_the_build_before_and_rewrites_the_drop_in(world):
+    run, _home, runtime, dropin = world
     r = run("rollback")
     assert r.returncode == 0, r.stderr
-    assert _current(runtime) == OLD
+    assert _current(runtime) == PREV
+    assert Path(os.readlink(runtime / "previous")).name == NEW
     text = dropin.read_text()
-    assert f"ExecStartPre={runtime}/current/src/infra/systemd/ghost-render-env.sh" in text
-    assert "EnvironmentFile=-%h/.config/ghost/env" in text
-    assert "settings.env" not in text
-    # And forward again: the vault build's own form.
+    assert f"ExecStart={runtime}/current/bin/ghostd run" in text
+    assert "ORT_DYLIB_PATH" not in text  # PREV carries no library
+    # And forward again.
     r = run("rollback")
     assert r.returncode == 0, r.stderr
     assert _current(runtime) == NEW
-    text = dropin.read_text()
-    assert (
-        "ghost-render-env" not in text and "EnvironmentFile=-%h/.config/ghost/settings.env" in text
-    )
+    assert f"Environment=ORT_DYLIB_PATH={runtime}/current/lib/{ORT}" in dropin.read_text()
 
 
-def test_rollback_refuses_a_pre_vault_build_once_env_is_gone(world):
+def test_rollback_refuses_a_build_from_before_the_rust_daemon(world):
     run, _home, runtime, dropin = world
+    _point(runtime, "previous", OLD)
     r = run("rollback")
     assert r.returncode == 1
-    assert "from before Ghost's vault" in r.stderr and "~/.config/ghost/env" in r.stderr
+    assert "from before the Rust daemon" in r.stderr and "no bin/ghostd" in r.stderr
     assert _current(runtime) == NEW  # nothing moved
     assert not dropin.exists()
-
-
-def test_rollback_to_a_pre_vault_build_with_heka_vault_still_here(world):
-    """Its renderer writes ~/.config/ghost/env from heka-vault's config again: allowed."""
-    run, home, runtime, dropin = world
-    heka = home / ".config" / "heka-vault" / "ghost.env"
-    heka.parent.mkdir(parents=True)
-    heka.write_text("HEKA_VAULT_URL=http://vault.lan\n")
-    r = run("rollback")
-    assert r.returncode == 0, r.stderr
-    assert _current(runtime) == OLD
-    assert "from heka-vault again" in r.stderr
-    assert f"ExecStartPre={runtime}/current/src/infra/systemd/ghost-render-env.sh" in (
-        dropin.read_text()
-    )
 
 
 def test_off_accepts_a_pre_step_whose_failure_is_ignored(world, tmp_path):
