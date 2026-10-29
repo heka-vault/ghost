@@ -1,24 +1,29 @@
 //! The phone's way in (ADR 0016): pairing, signed requests, WebRTC signalling.
 //!
-//! This slice is the foundation: the signing middleware, the pairing store and codes,
-//! the networks, and the pairing route's logic as functions the listener mounts. The
-//! routes that need the daemon's views and the media (`/hello`, `/audit`, `/waiting`,
-//! `/conversations`, `/offer`, `/end`) and the servers on each address arrive with them.
+//! `listener` is the foundation: the signing middleware, the pairing store and codes, the
+//! pairing route and `PhoneHost`, what the daemon gives the listener. `routes` mounts the
+//! signed routes (`/hello`, `/audit`, `/waiting`, `/conversations`, `/offer`, `/end`) and
+//! runs one server per configured address; the media (the WebRTC peer, the data channel)
+//! is the daemon's, behind `PhoneHost` and `PhoneEvents`. `networks` tells home from
+//! tunnel.
 
 pub mod listener;
 pub mod networks;
 pub mod pairing;
+pub mod routes;
 pub mod signing;
 
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 pub use listener::{
-    LocalAddr, PairRequest, PhoneHost, PhoneListener, Reach, Refusal, Signing, pair_link,
-    parse_listen, parse_listen_list, sign_requests,
+    Answer, Candidate, CandidateError, LocalAddr, OfferError, PairRequest, PhoneHost,
+    PhoneListener, Reach, Refusal, Signing, pair_link, parse_listen, parse_listen_list,
+    sign_requests,
 };
 pub use networks::Networks;
 pub use pairing::{Device, PairingCodes, PhoneStore};
+pub use routes::{Hangup, PhoneEvents, PhoneServers, forward_events, routes, watchdog};
 pub use signing::Verifier;
 
 /// Seconds from some origin: `wall` (Unix time, for the clock window) or `monotonic`

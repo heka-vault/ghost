@@ -27,9 +27,12 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
-use ghost_api::models::{PhoneAddress, PhoneDevice, PhonePairing, PhoneView};
+use ghost_api::models::{
+    AuditPage, ConversationView, PhoneAddress, PhoneDevice, PhonePairing, PhoneView, Status,
+    WaitingView,
+};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use tracing::info;
@@ -345,11 +348,94 @@ pub async fn sign_requests(State(s): State<Arc<Signing>>, req: Request, next: Ne
 
 // --- the listener ------------------------------------------------------------------------
 
-/// What the daemon gives the listener. This slice needs one thing of it; the routes that
-/// read the status, the audit, the waiting list and the agents, and that admit and start
-/// a phone session, add theirs.
+/// The desk's answer to an offer: `{sdp, type: "answer", pc_id}`, the media's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Answer {
+    pub sdp: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub pc_id: String,
+}
+
+impl Answer {
+    pub fn new(sdp: impl Into<String>, pc_id: impl Into<String>) -> Self {
+        Self {
+            sdp: sdp.into(),
+            kind: "answer".into(),
+            pc_id: pc_id.into(),
+        }
+    }
+}
+
+/// One trickled ICE candidate as the phone sends it (`PATCH /offer`). `candidate` may keep
+/// its `candidate:` prefix; an empty one means end of candidates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Candidate {
+    pub candidate: String,
+    pub sdp_mid: String,
+    pub sdp_mline_index: i64,
+}
+
+/// Why an offer got no answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfferError {
+    /// The daemon won't start a session now (409, 503) or there is no such line (404).
+    Refused(Refusal),
+    /// The SDP could not be taken (400 `bad_offer`).
+    BadOffer,
+    /// No live peer has that `pc_id` (404).
+    NoSuchPeer,
+    /// The media produced no answer (500).
+    Internal,
+}
+
+/// Why candidates were not added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CandidateError {
+    /// No live peer has that `pc_id` (404).
+    NoSuchPeer,
+    /// One candidate did not parse (400 `bad_candidate`).
+    BadCandidate,
+}
+
+/// What the daemon gives the listener. It owns sessions, so it decides whether a phone
+/// may start one, and it owns the media (the WebRTC peer, built by the media crate), so
+/// an offer's SDP goes to it and the answer's SDP comes back from it; the listener keeps
+/// no peer of its own.
 #[async_trait]
 pub trait PhoneHost: Send + Sync {
+    /// The control API's `Status`, as `/hello` carries it.
+    fn status(&self) -> Status;
+    /// A page of the audit log, newest first.
+    fn audit(&self, limit: i64, offset: i64) -> AuditPage;
+    /// What needs the operator (ADR 0029); the read is the phone route's delivery.
+    fn waiting_view(&self) -> WaitingView;
+    fn acknowledge_item(&self, key: &str) -> bool;
+    fn snooze_item(&self, key: &str, minutes: i64) -> bool;
+    /// The agents a call can start with: Ghost first, retired ones left out.
+    fn agents(&self) -> Vec<ConversationView>;
+    /// A cheap check before negotiating.
+    fn admit_phone(&self) -> Option<Refusal>;
+    /// Take the phone's offer: build the peer, and run the session on it, in `conversation`
+    /// (a slug from `/conversations`) or in Ghost. The answer the phone applies.
+    async fn start_phone(
+        &self,
+        sdp: &str,
+        conversation: Option<&str>,
+    ) -> Result<Answer, OfferError>;
+    /// A new offer for the live peer (`pc_id`): a renegotiation, an ICE restart.
+    async fn renegotiate(
+        &self,
+        pc_id: &str,
+        sdp: &str,
+        restart_pc: bool,
+    ) -> Result<Answer, OfferError>;
+    /// Trickled candidates for the live peer.
+    async fn add_candidates(
+        &self,
+        pc_id: &str,
+        candidates: &[Candidate],
+    ) -> Result<(), CandidateError>;
     /// End the phone's session if one is running.
     async fn end_phone(&self) -> bool;
 }
@@ -577,8 +663,62 @@ mod tests {
         ended: AtomicUsize,
     }
 
+    /// Only `end_phone` matters here: the routes (and their double) are in `routes.rs`.
     #[async_trait]
     impl PhoneHost for FakeHost {
+        fn status(&self) -> Status {
+            unimplemented!("the stub routes answer /hello")
+        }
+
+        fn audit(&self, _limit: i64, _offset: i64) -> AuditPage {
+            unimplemented!("the stub routes answer /audit")
+        }
+
+        fn waiting_view(&self) -> WaitingView {
+            unimplemented!()
+        }
+
+        fn acknowledge_item(&self, _key: &str) -> bool {
+            false
+        }
+
+        fn snooze_item(&self, _key: &str, _minutes: i64) -> bool {
+            false
+        }
+
+        fn agents(&self) -> Vec<ConversationView> {
+            Vec::new()
+        }
+
+        fn admit_phone(&self) -> Option<Refusal> {
+            None
+        }
+
+        async fn start_phone(
+            &self,
+            _sdp: &str,
+            _conversation: Option<&str>,
+        ) -> Result<Answer, OfferError> {
+            Err(OfferError::Refused(Refusal::NotReady))
+        }
+
+        async fn renegotiate(
+            &self,
+            _pc_id: &str,
+            _sdp: &str,
+            _restart_pc: bool,
+        ) -> Result<Answer, OfferError> {
+            Err(OfferError::NoSuchPeer)
+        }
+
+        async fn add_candidates(
+            &self,
+            _pc_id: &str,
+            _candidates: &[Candidate],
+        ) -> Result<(), CandidateError> {
+            Err(CandidateError::NoSuchPeer)
+        }
+
         async fn end_phone(&self) -> bool {
             self.ended.fetch_add(1, Ordering::SeqCst);
             true
