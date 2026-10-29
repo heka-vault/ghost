@@ -269,6 +269,7 @@ async fn a_barge_in_stops_playback_within_100ms() {
     loop {
         if let Some(c) = w.ear.cleared().into_iter().find(|c| *c > at) {
             let took = c.duration_since(at);
+            eprintln!("barge-in: playback cleared {took:?} after the operator's words");
             assert!(
                 took < Duration::from_millis(100),
                 "cleared {took:?} after the barge-in"

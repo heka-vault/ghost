@@ -165,10 +165,12 @@ impl LlmStage {
 
     // --- the reply ----------------------------------------------------------------------
 
-    /// One model run on the context, its calls, and the runs the results need.
+    /// One model run on the context, its calls, and the runs the results need. The turn's
+    /// token is taken once: a run interrupted between two calls stops, rather than going
+    /// on under the next turn's token.
     async fn run(&mut self, out: &Out) {
+        let turn = self.turns.current();
         loop {
-            let turn = self.turns.current();
             if turn.is_cancelled() {
                 return;
             }
@@ -621,14 +623,17 @@ impl ScriptedModel {
         }
     }
 
-    /// Which line of the script the context is on: its user turns, the notes aside.
-    fn line_of(context: &Context) -> Option<usize> {
+    /// Which line of the script the context is on: its user turns, the notes aside. A
+    /// turn past the script (a line the pause split in two) is the last line's.
+    fn line_of(&self, context: &Context) -> Option<usize> {
         let turns = context
             .messages
             .iter()
             .filter(|m| matches!(m, Message::User(t) if !t.starts_with("[system]")))
             .count();
-        turns.checked_sub(1)
+        turns
+            .checked_sub(1)
+            .map(|l| l.min(self.lines.len().saturating_sub(1)))
     }
 }
 
@@ -640,7 +645,7 @@ impl ModelPort for ScriptedModel {
         _options: &Options,
     ) -> BoxStream<'static, Result<Event, LlmError>> {
         *self.calls.lock().unwrap() += 1;
-        let line = Self::line_of(&context);
+        let line = self.line_of(&context);
         let reply = line
             .and_then(|l| {
                 let i = *self.served.lock().unwrap().get(l)?;
