@@ -1,0 +1,21 @@
+[package]
+name = "ghost-infer"
+description = "Ghost's local models on ONNX Runtime: Parakeet, Silero, Smart Turn, the wake detectors and Kokoro (ADR 0004, 0025, 0039)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ort.workspace = true
+realfft.workspace = true
+hound.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
