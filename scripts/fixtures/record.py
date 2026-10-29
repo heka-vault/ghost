@@ -443,6 +443,12 @@ def main() -> None:
         record_wake(out, clips, timings, meta)
     if want("kokoro"):
         record_kokoro(out, timings, meta)
+    if only and (out / "meta.json").exists():
+        # A partial run refreshes the versions and what it recorded; the other models' keys
+        # (`wake`, `kokoro`) come from the last full run and are kept.
+        existing = json.loads((out / "meta.json").read_text())
+        existing.update(meta)
+        meta = existing
     dump(out / "meta.json", meta)
     if not only:
         dump(out / "timings.json", timings)
