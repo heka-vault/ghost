@@ -155,11 +155,16 @@ fn main() -> anyhow::Result<()> {
 async fn run(mirror: LogMirror) -> anyhow::Result<()> {
     let base = GhostdSettings::load()?;
     let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
-    let vault = Arc::new(open_passwords(
-        &base,
-        operator_keyring(),
-        Arc::clone(&environ),
-    ));
+    // Off this runtime's thread: the keyring is a blocking client with a runtime of its
+    // own (crates/ghost-core passwords), as every later open and unlock already is.
+    let vault = {
+        let base = base.clone();
+        let environ = Arc::clone(&environ);
+        let keyring = operator_keyring();
+        Arc::new(
+            tokio::task::spawn_blocking(move || open_passwords(&base, keyring, environ)).await?,
+        )
+    };
     let mut env: HashMap<String, String> = std::env::vars().collect();
     env.extend(environ.lock().unwrap_or_else(|e| e.into_inner()).clone());
     let (cfg, voice) = settings_from(&env)?;

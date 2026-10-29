@@ -389,7 +389,19 @@ pub async fn check_command(
     // The vault first (ADR 0036): Ghost's settings read its passwords from this
     // environment, so they are read after it.
     let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
-    let vault = open_passwords(cfg, keyring, Arc::clone(&environ));
+    // Off this runtime's thread, as `ghostd run` opens it: the keyring is a blocking
+    // client with a runtime of its own (crates/ghost-core passwords).
+    let vault = {
+        let cfg = cfg.clone();
+        let environ = Arc::clone(&environ);
+        match tokio::task::spawn_blocking(move || open_passwords(&cfg, keyring, environ)).await {
+            Ok(vault) => vault,
+            Err(_) => {
+                let _ = writeln!(out, "passwords: the vault could not be opened");
+                return 1;
+            }
+        }
+    };
     let mut env: HashMap<String, String> = std::env::vars().collect();
     env.extend(environ.lock().unwrap_or_else(|e| e.into_inner()).clone());
     let cfg = GhostdSettings::from_env(&env).unwrap_or_else(|_| cfg.clone());

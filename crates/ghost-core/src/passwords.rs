@@ -211,10 +211,38 @@ impl SecretServiceKeyring {
         Self::ATTRIBUTES.into_iter().collect()
     }
 
-    /// The session bus, the service and its default collection, for one call. No bus or
-    /// no service is `KeyringUnavailable`; a locked collection is told apart inside `f`.
-    fn with_collection<T>(
+    /// The session bus, the service and its default collection, for one call, on a thread
+    /// of its own. No bus or no service is `KeyringUnavailable`; a locked collection is
+    /// told apart inside `f`.
+    ///
+    /// A thread of its own because the blocking client drives the bus on a tokio runtime
+    /// of its own (zbus's `tokio` feature), and tokio refuses to block a thread that is
+    /// already running a runtime: the daemon's first `load_key` from inside `ghostd run`
+    /// panicked with "Cannot start a runtime from within a runtime". A plain thread runs
+    /// none, wherever the caller is; the call is rare (an open, an unlock, a retry) and
+    /// the thread lives for it alone.
+    fn with_collection<T: Send>(
         &self,
+        f: impl FnOnce(&secret_service::blocking::Collection<'_>) -> Result<T, PasswordsError> + Send,
+    ) -> Result<T, PasswordsError> {
+        std::thread::scope(|scope| {
+            let worker = std::thread::Builder::new()
+                .name("ghost-keyring".into())
+                .spawn_scoped(scope, || Self::on_the_bus(f))
+                .map_err(|e| {
+                    PasswordsError::KeyringUnavailable(format!(
+                        "no thread for the keyring ({})",
+                        e.kind()
+                    ))
+                })?;
+            worker
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+    }
+
+    /// One call on the bus, on the calling thread.
+    fn on_the_bus<T>(
         f: impl FnOnce(&secret_service::blocking::Collection<'_>) -> Result<T, PasswordsError>,
     ) -> Result<T, PasswordsError> {
         use secret_service::EncryptionType;
@@ -1367,6 +1395,44 @@ mod tests {
                 "{name}={value:?} was taken"
             );
         }
+    }
+
+    /// The keyring is a blocking Secret Service client that drives the bus on a tokio
+    /// runtime of its own, and the daemon reaches it from inside its own runtime
+    /// (`ghostd run`, `ghostd check`). A keyring that can't be reached is said from there
+    /// too, never the "Cannot start a runtime from within a runtime" panic that stopped
+    /// the first `make dev` with a vault file. The bus address points nowhere, so the
+    /// operator's keyring is never reached.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_the_secret_service_keyring_answers_from_inside_a_runtime() {
+        // SAFETY: nextest runs each test in a process of its own, and nothing in this one
+        // reads the environment concurrently.
+        unsafe {
+            std::env::set_var(
+                "DBUS_SESSION_BUS_ADDRESS",
+                "unix:path=/nonexistent/ghost-test-bus",
+            )
+        };
+        let ring = SecretServiceKeyring;
+        assert!(matches!(
+            ring.load_key(),
+            Err(PasswordsError::KeyringUnavailable(_))
+        ));
+        assert!(matches!(
+            ring.unlock(),
+            Err(PasswordsError::KeyringUnavailable(_))
+        ));
+        assert!(matches!(
+            ring.store_key(b"k"),
+            Err(PasswordsError::KeyringUnavailable(_))
+        ));
+        // The vault around it: a file that exists and a keyring that can't be reached is
+        // unavailable and waited for, not a crash.
+        let tmp = TempDir::new().unwrap();
+        fs::write(vault_path(&tmp), b"{}").unwrap();
+        let v = Passwords::new(vault_path(&tmp), Arc::new(SecretServiceKeyring));
+        assert!(!v.open());
+        assert_eq!(v.state(), State::Unavailable);
     }
 
     #[test]

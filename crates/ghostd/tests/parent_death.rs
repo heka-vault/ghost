@@ -1,5 +1,9 @@
 //! `ghostd run` exits when the parent that named itself in `GHOST_PARENT_PID` is gone
 //! (ADR 0038), and `restore-volumes` exists.
+//!
+//! Isolated from the operator: Ghost's folders in the temp dir and a session bus address
+//! that points nowhere, so the daemon under test reads none of their files and never
+//! reaches their keyring.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -7,6 +11,16 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const GHOSTD: &str = env!("CARGO_BIN_EXE_ghostd");
+const NO_BUS: &str = "unix:path=/nonexistent/ghost-test-bus";
+
+/// Ghost's folders in `dir`, the socket there, and no bus to a keyring.
+fn isolated(cmd: &mut Command, dir: &Path, socket: &Path) {
+    std::fs::create_dir_all(dir.join("config")).unwrap();
+    cmd.env("GHOST_API_SOCKET", socket)
+        .env("GHOST_DATA_DIR", dir)
+        .env("GHOST_CONFIG_DIR", dir.join("config"))
+        .env("DBUS_SESSION_BUS_ADDRESS", NO_BUS);
+}
 
 fn alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
@@ -33,15 +47,15 @@ fn run_stops_when_the_parent_that_named_itself_dies() {
     let log = dir.path().join("ghostd.log");
     // A stand-in shell: starts the daemon with its own pid as the parent, prints the
     // daemon's pid, then lives (as sleep, the same pid) until killed.
-    let mut parent = Command::new("sh")
+    let mut parent = Command::new("sh");
+    parent
         .arg("-c")
         .arg(r#"GHOST_PARENT_PID=$$ "$0" run >"$1" 2>&1 & echo $!; exec sleep 300"#)
         .arg(GHOSTD)
         .arg(&log)
-        .env("GHOST_API_SOCKET", &socket)
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stdout(Stdio::piped());
+    isolated(&mut parent, dir.path(), &socket);
+    let mut parent = parent.spawn().unwrap();
     let mut line = String::new();
     BufReader::new(parent.stdout.take().unwrap())
         .read_line(&mut line)
@@ -74,15 +88,14 @@ fn run_without_a_named_parent_keeps_going_when_reparented() {
     let log = dir.path().join("ghostd.log");
     // No GHOST_PARENT_PID: the headless mode. The sh exits at once, so the daemon is
     // reparented, and must not care.
-    let out = Command::new("sh")
-        .arg("-c")
+    let mut sh = Command::new("sh");
+    sh.arg("-c")
         .arg(r#""$0" run >"$1" 2>&1 & echo $!"#)
         .arg(GHOSTD)
         .arg(&log)
-        .env("GHOST_API_SOCKET", &socket)
-        .env_remove("GHOST_PARENT_PID")
-        .output()
-        .unwrap();
+        .env_remove("GHOST_PARENT_PID");
+    isolated(&mut sh, dir.path(), &socket);
+    let out = sh.output().unwrap();
     let daemon: u32 = String::from_utf8_lossy(&out.stdout)
         .trim()
         .parse()
