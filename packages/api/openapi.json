@@ -4,37 +4,29 @@
       "Ack": {
         "properties": {
           "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "ok": {
-            "title": "Ok",
             "type": "boolean"
           }
         },
         "required": [
           "ok"
         ],
-        "title": "Ack",
         "type": "object"
       },
       "AppAction": {
         "description": "One of an app's tools, and what Ghost's own permissions say about it.",
         "properties": {
           "conditional": {
-            "default": false,
-            "title": "Conditional",
+            "description": "A rule with argument patterns may decide some calls.",
             "type": "boolean"
           },
           "description": {
-            "title": "Description",
+            "description": "The app's, first sentence: untrusted text, shown to the operator only.",
             "type": "string"
           },
           "level": {
@@ -44,19 +36,17 @@
               "block",
               "quiet"
             ],
-            "title": "Level",
             "type": "string"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "reads": {
-            "title": "Reads",
+            "description": "Read-only, by the app's own word; anything else is a change.",
             "type": "boolean"
           },
           "rule": {
-            "title": "Rule",
+            "description": "The rule that names just this tool (\"github.issue_write\").",
             "type": "string"
           }
         },
@@ -65,98 +55,63 @@
           "description",
           "reads",
           "level",
-          "rule"
+          "rule",
+          "conditional"
         ],
-        "title": "AppAction",
         "type": "object"
       },
       "AppConnect": {
-        "description": "Connect an app: from the catalog (``catalog`` and ``option``), from a URL, or from\nanother client's pasted config. Secret values go to Ghost's environment, never into\napps.json, and never come back out.",
+        "description": "Connect an app: from the catalog (`catalog` and `option`), from a URL, or from another\nclient's pasted config. Secret values go to Ghost's vault, never into apps.json, and\nnever come back out.",
         "properties": {
           "catalog": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Catalog"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "config": {
-            "anyOf": [
-              {
-                "maxLength": 20000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "anyOf": [
-              {
-                "maxLength": 40,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "option": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Option"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "replace": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Replace"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Url"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "values": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Values"
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           }
         },
-        "title": "AppConnect",
         "type": "object"
       },
       "AppConnectResult": {
@@ -165,67 +120,49 @@
             "items": {
               "$ref": "#/components/schemas/AppView"
             },
-            "title": "Apps",
             "type": "array"
           },
           "problems": {
-            "default": [],
+            "description": "What the operator should know about a pasted config: keys Ghost does not read.",
             "items": {
               "type": "string"
             },
-            "title": "Problems",
             "type": "array"
           },
           "sign_in_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sign In Url"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "apps"
+          "apps",
+          "problems"
         ],
-        "title": "AppConnectResult",
         "type": "object"
       },
       "AppView": {
         "description": "A connected app: how it is reached, whether it is up, and what it can do.",
         "properties": {
           "actions": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/AppAction"
             },
-            "title": "Actions",
             "type": "array"
           },
           "catalog": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Catalog"
+            "description": "The catalog entry it came from.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "icon": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Icon"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "kind": {
             "enum": [
@@ -234,42 +171,32 @@
               "local",
               "custom"
             ],
-            "title": "Kind",
             "type": "string"
           },
           "name": {
-            "title": "Name",
+            "description": "Its short name: the rules' and the tools' prefix.",
             "type": "string"
           },
           "problem": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Problem"
+            "description": "Not connected, or tools not offered, and why; never a secret.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "settings": {
-            "default": [],
+            "description": "The environment names it needs (secret values never shown).",
             "items": {
               "type": "string"
             },
-            "title": "Settings",
             "type": "array"
           },
           "sign_in_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sign In Url"
+            "description": "Waiting for the operator's browser.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "state": {
             "enum": [
@@ -279,11 +206,9 @@
               "failed",
               "stopped"
             ],
-            "title": "State",
             "type": "string"
           },
           "title": {
-            "title": "Title",
             "type": "string"
           }
         },
@@ -291,101 +216,76 @@
           "name",
           "title",
           "kind",
-          "state"
+          "state",
+          "actions",
+          "settings"
         ],
-        "title": "AppView",
         "type": "object"
       },
       "AppsEvent": {
-        "description": "An app was connected, disconnected or changed state: read ``GET /apps``. With\n``sign_in_url``, the app is waiting for the operator to sign in there; the desktop opens\nit in the browser.",
+        "description": "An app was connected, disconnected or changed state: read `GET /apps`. With\n`sign_in_url`, the app is waiting for the operator to sign in there; the desktop opens\nit in the browser.",
         "properties": {
           "changed": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Changed"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "sign_in_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sign In Url"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "type": {
-            "const": "apps",
             "default": "apps",
-            "title": "Type",
             "type": "string"
           }
         },
-        "title": "AppsEvent",
         "type": "object"
       },
       "AuditEntry": {
         "properties": {
           "autonomy": {
-            "title": "Autonomy",
             "type": "string"
           },
           "conversation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation"
+            "description": "The agent it was proposed with (ADR 0014); colours the entry.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "created_at": {
             "format": "date-time",
-            "title": "Created At",
             "type": "string"
           },
           "events": {
             "items": {
               "$ref": "#/components/schemas/AuditEventView"
             },
-            "title": "Events",
             "type": "array"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "operation": {
-            "title": "Operation",
             "type": "string"
           },
           "session_id": {
-            "title": "Session Id",
             "type": "string"
           },
           "source": {
-            "title": "Source",
+            "description": "An app, or Ghost's own (conversations, skills, ...).",
             "type": "string"
           },
           "status": {
-            "title": "Status",
             "type": "string"
           },
           "summary": {
-            "title": "Summary",
             "type": "string"
           },
           "target": {
-            "title": "Target",
             "type": "string"
           }
         },
@@ -401,30 +301,25 @@
           "created_at",
           "events"
         ],
-        "title": "AuditEntry",
         "type": "object"
       },
       "AuditEventView": {
         "properties": {
           "at": {
             "format": "date-time",
-            "title": "At",
             "type": "string"
           },
           "detail": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "event": {
-            "title": "Event",
             "type": "string"
           }
         },
@@ -432,7 +327,6 @@
           "at",
           "event"
         ],
-        "title": "AuditEventView",
         "type": "object"
       },
       "AuditPage": {
@@ -441,19 +335,18 @@
             "items": {
               "$ref": "#/components/schemas/AuditEntry"
             },
-            "title": "Items",
             "type": "array"
           },
           "limit": {
-            "title": "Limit",
+            "format": "int64",
             "type": "integer"
           },
           "offset": {
-            "title": "Offset",
+            "format": "int64",
             "type": "integer"
           },
           "total": {
-            "title": "Total",
+            "format": "int64",
             "type": "integer"
           }
         },
@@ -463,41 +356,30 @@
           "limit",
           "offset"
         ],
-        "title": "AuditPage",
         "type": "object"
       },
       "Build": {
-        "description": "Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a\ncheckout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The\ncommit is the full hash when known; ``dirty`` is a checkout that had uncommitted\nchanges when the daemon started. ``launcher`` is how a checkout's daemon was started,\nwhen the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and\n``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``\n(``make restart``); anything else (a unit running the checkout, ``uv run``) is None.",
+        "description": "Which kind of build the running daemon is (docs/releasing.md): `dev` runs from a\ncheckout, `deploy` from a `make deploy` runtime, `release` from the bundle. The commit\nis the full hash when known; `dirty` is a checkout that had uncommitted changes when\nthe daemon started. `launcher` is how a checkout's daemon was started, when the make\ntarget says so (`GHOST_LAUNCHER`).",
         "properties": {
           "commit": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{7,40}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Commit"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "dirty": {
-            "default": false,
-            "title": "Dirty",
             "type": "boolean"
           },
           "kind": {
-            "default": "dev",
             "enum": [
               "dev",
               "deploy",
               "release"
             ],
-            "title": "Kind",
             "type": "string"
           },
           "launcher": {
-            "anyOf": [
+            "oneOf": [
               {
                 "enum": [
                   "make-dev",
@@ -508,46 +390,39 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Launcher"
+            ]
           }
         },
-        "title": "Build",
+        "required": [
+          "kind",
+          "dirty"
+        ],
         "type": "object"
       },
       "CatalogEntryView": {
-        "description": "An app in the catalog. Its text is the registry's: shown to the operator, never\nto the model.",
+        "description": "An app in the catalog. Its text is the registry's: shown to the operator, never to the\nmodel.",
         "properties": {
           "connected": {
-            "default": [],
+            "description": "The names it is connected under already.",
             "items": {
               "type": "string"
             },
-            "title": "Connected",
             "type": "array"
           },
           "description": {
-            "title": "Description",
             "type": "string"
           },
           "featured": {
-            "default": false,
-            "title": "Featured",
             "type": "boolean"
           },
           "icon": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Icon"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "maker": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/CatalogMaker"
               },
@@ -557,49 +432,36 @@
             ]
           },
           "name": {
-            "title": "Name",
+            "description": "The registry's name, reverse-DNS.",
             "type": "string"
           },
           "options": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/CatalogOption"
             },
-            "title": "Options",
             "type": "array"
           },
           "others": {
-            "default": [],
+            "description": "In search results: other publishers' entries for the same product, folded under\nthe maker's own. Always empty on `GET /catalog/{name}`.",
             "items": {
               "$ref": "#/components/schemas/CatalogEntryView"
             },
-            "title": "Others",
             "type": "array"
           },
           "product": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Product"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "product_maker": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Product Maker"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "publisher": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/CatalogPublisher"
               },
@@ -609,50 +471,33 @@
             ]
           },
           "repository": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repository"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "suggested_name": {
-            "title": "Suggested Name",
+            "description": "The short name it would be connected under.",
             "type": "string"
           },
           "title": {
-            "title": "Title",
             "type": "string"
           },
           "updated_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "version": {
-            "title": "Version",
             "type": "string"
           },
           "website": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Website"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -660,13 +505,16 @@
           "title",
           "description",
           "version",
-          "suggested_name"
+          "featured",
+          "options",
+          "suggested_name",
+          "connected",
+          "others"
         ],
-        "title": "CatalogEntryView",
         "type": "object"
       },
       "CatalogMaker": {
-        "description": "The entry is the product maker's own, and what agreed: the publisher's name is the\nproduct's (``publisher``) or Ghost's own list says so (``listed``); it connects to the\nmaker's host (``remote``); its repository is theirs; its website is theirs.",
+        "description": "The entry is the product maker's own, and what agreed.",
         "properties": {
           "evidence": {
             "items": {
@@ -679,11 +527,9 @@
               ],
               "type": "string"
             },
-            "title": "Evidence",
             "type": "array"
           },
           "product": {
-            "title": "Product",
             "type": "string"
           }
         },
@@ -691,25 +537,21 @@
           "product",
           "evidence"
         ],
-        "title": "CatalogMaker",
         "type": "object"
       },
       "CatalogOption": {
-        "description": "One way to connect: sign in, an API key, or run on this computer. Where it runs:\na remote's ``host``, and whose host that is; a package's ``registry`` and name.",
+        "description": "One way to connect: sign in, an API key, or run on this computer. Where it runs: a\nremote's `host`, and whose host that is; a package's `registry` and name.",
         "properties": {
           "host": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Host"
+            "description": "A remote's host: what Ghost sends the app goes there.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "host_owner": {
-            "anyOf": [
+            "description": "The product maker's host, the publisher's own, or someone else's.",
+            "oneOf": [
               {
                 "enum": [
                   "maker",
@@ -721,11 +563,9 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Host Owner"
+            ]
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "kind": {
@@ -734,26 +574,20 @@
               "key",
               "local"
             ],
-            "title": "Kind",
             "type": "string"
           },
           "label": {
-            "title": "Label",
             "type": "string"
           },
           "package": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Package"
+            "description": "Its name there: \"posthog-mcp\".",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "registry": {
-            "anyOf": [
+            "oneOf": [
               {
                 "enum": [
                   "npm",
@@ -765,24 +599,21 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Registry"
+            ]
           },
           "settings": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/CatalogSetting"
             },
-            "title": "Settings",
             "type": "array"
           }
         },
         "required": [
           "id",
           "kind",
-          "label"
+          "label",
+          "settings"
         ],
-        "title": "CatalogOption",
         "type": "object"
       },
       "CatalogPage": {
@@ -791,54 +622,42 @@
             "items": {
               "$ref": "#/components/schemas/CatalogEntryView"
             },
-            "title": "Entries",
             "type": "array"
           },
           "fetched_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fetched At"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "problem": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Problem"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "refreshing": {
-            "default": false,
-            "title": "Refreshing",
             "type": "boolean"
           },
           "total": {
-            "title": "Total",
+            "description": "Results, counting a maker's own with what folds under it as one.",
+            "format": "int64",
             "type": "integer"
           }
         },
         "required": [
           "entries",
-          "total"
+          "total",
+          "refreshing"
         ],
-        "title": "CatalogPage",
         "type": "object"
       },
       "CatalogPublisher": {
-        "description": "Who published an entry, as the registry checked it: the GitHub account it signed in\nwith (``io.github.PostHog/\u2026``), or the domain it proved it owns (``com.mcparmory/\u2026``).\nWho published it, not whether it is safe.",
+        "description": "Who published an entry, as the registry checked it. Who published it, not whether it\nis safe.",
         "properties": {
           "name": {
-            "title": "Name",
+            "description": "\"PostHog\", \"mcparmory.com\"",
             "type": "string"
           },
           "verified": {
@@ -846,7 +665,6 @@
               "github",
               "domain"
             ],
-            "title": "Verified",
             "type": "string"
           }
         },
@@ -854,85 +672,65 @@
           "name",
           "verified"
         ],
-        "title": "CatalogPublisher",
         "type": "object"
       },
       "CatalogSetting": {
         "properties": {
           "choices": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Choices",
             "type": "array"
           },
           "default": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "key": {
-            "title": "Key",
             "type": "string"
           },
           "label": {
-            "title": "Label",
             "type": "string"
           },
           "required": {
-            "default": true,
-            "title": "Required",
             "type": "boolean"
           },
           "secret": {
-            "default": false,
-            "title": "Secret",
             "type": "boolean"
           }
         },
         "required": [
           "key",
-          "label"
+          "label",
+          "secret",
+          "required",
+          "choices"
         ],
-        "title": "CatalogSetting",
         "type": "object"
       },
       "CompactionView": {
         "properties": {
           "at": {
             "format": "date-time",
-            "title": "At",
             "type": "string"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "source": {
-            "title": "Source",
             "type": "string"
           },
           "summary": {
-            "title": "Summary",
             "type": "string"
           },
           "through_turn_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Through Turn Id"
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
@@ -942,437 +740,248 @@
           "summary",
           "through_turn_id"
         ],
-        "title": "CompactionView",
         "type": "object"
       },
       "ConversationCreate": {
         "description": "Hire an agent.",
         "properties": {
           "aliases": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Aliases",
             "type": "array"
           },
           "job": {
-            "default": "",
-            "maxLength": 200,
-            "title": "Job",
             "type": "string"
           },
           "name": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Name",
             "type": "string"
           },
           "persona": {
-            "default": "",
-            "maxLength": 4000,
-            "title": "Persona",
             "type": "string"
           },
           "seed_from": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seed From"
+            "description": "Slug of a retired agent whose memory.md becomes this one's first memory, as a\nhandoff. Never Ghost.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "speed": {
-            "anyOf": [
-              {
-                "maximum": 2.0,
-                "minimum": 0.5,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Speed"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "voice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Voice"
+            "description": "None: Ghost's voice.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "name"
+          "name",
+          "aliases",
+          "job",
+          "persona"
         ],
-        "title": "ConversationCreate",
         "type": "object"
       },
       "ConversationDetail": {
-        "properties": {
-          "active": {
-            "title": "Active",
-            "type": "boolean"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ConversationView"
           },
-          "aliases": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Aliases",
-            "type": "array"
-          },
-          "compactions": {
-            "title": "Compactions",
-            "type": "integer"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "dir": {
-            "title": "Dir",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_ghost": {
-            "title": "Is Ghost",
-            "type": "boolean"
-          },
-          "job": {
-            "default": "",
-            "title": "Job",
-            "type": "string"
-          },
-          "last_active_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
+          {
+            "properties": {
+              "compactions": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "dir": {
                 "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Active At"
-          },
-          "memory": {
-            "title": "Memory",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "notes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Notes",
-            "type": "array"
-          },
-          "own_voice": {
-            "default": false,
-            "title": "Own Voice",
-            "type": "boolean"
-          },
-          "persona": {
-            "title": "Persona",
-            "type": "string"
-          },
-          "retired_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
+              "memory": {
                 "type": "string"
               },
-              {
-                "type": "null"
+              "notes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "persona": {
+                "type": "string"
+              },
+              "turn_count": {
+                "format": "int64",
+                "type": "integer"
               }
+            },
+            "required": [
+              "persona",
+              "memory",
+              "notes",
+              "turn_count",
+              "compactions",
+              "dir"
             ],
-            "title": "Retired At"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "speed": {
-            "title": "Speed",
-            "type": "number"
-          },
-          "turn_count": {
-            "title": "Turn Count",
-            "type": "integer"
-          },
-          "voice": {
-            "title": "Voice",
-            "type": "string"
+            "type": "object"
           }
-        },
-        "required": [
-          "id",
-          "slug",
-          "name",
-          "aliases",
-          "voice",
-          "speed",
-          "created_at",
-          "last_active_at",
-          "active",
-          "is_ghost",
-          "persona",
-          "memory",
-          "notes",
-          "turn_count",
-          "compactions",
-          "dir"
-        ],
-        "title": "ConversationDetail",
-        "type": "object"
+        ]
       },
       "ConversationEvent": {
         "description": "The session moved to another conversation, or one was created, changed or removed.",
         "properties": {
           "active": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "changed": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Changed"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "type": {
-            "const": "conversation",
             "default": "conversation",
-            "title": "Type",
             "type": "string"
           }
         },
         "required": [
           "active"
         ],
-        "title": "ConversationEvent",
         "type": "object"
       },
       "ConversationUpdate": {
-        "description": "Each field present is applied as its own audited write.",
+        "description": "Each field present is applied as its own audited write. `voice` \"\" means back to\nGhost's voice.",
         "properties": {
           "aliases": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Aliases"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "job": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Job"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "memory": {
-            "anyOf": [
-              {
-                "maxLength": 20000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "anyOf": [
-              {
-                "maxLength": 80,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "notes": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "persona": {
-            "anyOf": [
-              {
-                "maxLength": 4000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Persona"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "seed_from": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seed From"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "speed": {
-            "anyOf": [
-              {
-                "maximum": 2.0,
-                "minimum": 0.5,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Speed"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "voice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Voice"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "title": "ConversationUpdate",
         "type": "object"
       },
       "ConversationView": {
         "description": "An agent (ADR 0014, ADR 0035): a conversation with a persona and a job.",
         "properties": {
           "active": {
-            "title": "Active",
+            "description": "The running session is with it.",
             "type": "boolean"
           },
           "aliases": {
             "items": {
               "type": "string"
             },
-            "title": "Aliases",
             "type": "array"
           },
           "created_at": {
             "format": "date-time",
-            "title": "Created At",
             "type": "string"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "is_ghost": {
-            "title": "Is Ghost",
             "type": "boolean"
           },
           "job": {
-            "default": "",
-            "title": "Job",
             "type": "string"
           },
           "last_active_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Active At"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "own_voice": {
-            "default": false,
-            "title": "Own Voice",
+            "description": "True when the voice is the agent's own.",
             "type": "boolean"
           },
           "retired_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Retired At"
+            "description": "Set: off the roster and voice routing, still readable.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "slug": {
-            "title": "Slug",
             "type": "string"
           },
           "speed": {
-            "title": "Speed",
+            "format": "double",
             "type": "number"
           },
           "voice": {
-            "title": "Voice",
+            "description": "The voice heard: its own, else Ghost's.",
             "type": "string"
           }
         },
@@ -1381,44 +990,42 @@
           "slug",
           "name",
           "aliases",
+          "job",
           "voice",
           "speed",
+          "own_voice",
           "created_at",
           "last_active_at",
           "active",
           "is_ghost"
         ],
-        "title": "ConversationView",
         "type": "object"
       },
       "DeviceInfo": {
         "properties": {
           "default_samplerate": {
-            "title": "Default Samplerate",
+            "format": "double",
             "type": "number"
           },
           "index": {
-            "title": "Index",
+            "format": "int64",
             "type": "integer"
           },
           "is_default_input": {
-            "title": "Is Default Input",
             "type": "boolean"
           },
           "is_default_output": {
-            "title": "Is Default Output",
             "type": "boolean"
           },
           "max_input_channels": {
-            "title": "Max Input Channels",
+            "format": "int64",
             "type": "integer"
           },
           "max_output_channels": {
-            "title": "Max Output Channels",
+            "format": "int64",
             "type": "integer"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           }
         },
@@ -1431,7 +1038,6 @@
           "is_default_input",
           "is_default_output"
         ],
-        "title": "DeviceInfo",
         "type": "object"
       },
       "DevicesView": {
@@ -1440,38 +1046,25 @@
             "items": {
               "$ref": "#/components/schemas/DeviceInfo"
             },
-            "title": "Devices",
             "type": "array"
           },
           "echo_cancel_active": {
-            "title": "Echo Cancel Active",
             "type": "boolean"
           },
           "echo_cancel_source_present": {
-            "title": "Echo Cancel Source Present",
             "type": "boolean"
           },
           "input_device": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Input Device"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "output_device": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Device"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1481,81 +1074,72 @@
           "echo_cancel_active",
           "echo_cancel_source_present"
         ],
-        "title": "DevicesView",
         "type": "object"
       },
       "HTTPValidationError": {
+        "description": "The 422 body: a list of what was wrong.",
         "properties": {
           "detail": {
             "items": {
               "$ref": "#/components/schemas/ValidationError"
             },
-            "title": "Detail",
             "type": "array"
           }
         },
-        "title": "HTTPValidationError",
         "type": "object"
       },
       "HookInfo": {
-        "description": "A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of\ndeliveries since the daemon started. Counts only; never a body.",
+        "description": "A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of deliveries\nsince the daemon started. Counts only; never a body.",
         "properties": {
           "accepted": {
             "additionalProperties": {
+              "format": "int64",
               "type": "integer"
             },
-            "default": {},
-            "title": "Accepted",
+            "description": "item, resolved, ignored",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "events": {
             "items": {
               "type": "string"
             },
-            "title": "Events",
             "type": "array"
           },
           "last": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "off_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Off Reason"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "on": {
-            "title": "On",
             "type": "boolean"
           },
           "path": {
-            "title": "Path",
+            "description": "POST here on the webhook listener.",
             "type": "string"
           },
           "rejected": {
             "additionalProperties": {
+              "format": "int64",
               "type": "integer"
             },
-            "default": {},
-            "title": "Rejected",
+            "description": "By reason.",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "verify": {
@@ -1563,7 +1147,6 @@
               "github",
               "hmac"
             ],
-            "title": "Verify",
             "type": "string"
           }
         },
@@ -1572,9 +1155,10 @@
           "path",
           "verify",
           "events",
-          "on"
+          "on",
+          "accepted",
+          "rejected"
         ],
-        "title": "HookInfo",
         "type": "object"
       },
       "ImportSourceView": {
@@ -1584,11 +1168,9 @@
               "heka_vault",
               "file"
             ],
-            "title": "Kind",
             "type": "string"
           },
           "path": {
-            "title": "Path",
             "type": "string"
           }
         },
@@ -1596,41 +1178,33 @@
           "kind",
           "path"
         ],
-        "title": "ImportSourceView",
         "type": "object"
       },
       "ItemKey": {
         "properties": {
           "key": {
-            "title": "Key",
             "type": "string"
           }
         },
         "required": [
           "key"
         ],
-        "title": "ItemKey",
         "type": "object"
       },
       "LogEvent": {
         "properties": {
           "at": {
             "format": "date-time",
-            "title": "At",
             "type": "string"
           },
           "level": {
-            "title": "Level",
             "type": "string"
           },
           "message": {
-            "title": "Message",
             "type": "string"
           },
           "type": {
-            "const": "log",
             "default": "log",
-            "title": "Type",
             "type": "string"
           }
         },
@@ -1639,71 +1213,56 @@
           "message",
           "at"
         ],
-        "title": "LogEvent",
         "type": "object"
       },
       "ModelConnectionView": {
         "description": "The model connection now. No key is in it: only whether its Password is set.",
         "properties": {
           "base_url": {
-            "title": "Base Url",
+            "description": "Where calls go.",
             "type": "string"
           },
           "base_url_override": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Url Override"
+            "description": "Set when it isn't the provider's own.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "headers": {
             "additionalProperties": {
               "type": "string"
             },
-            "default": {},
-            "title": "Headers",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "legacy": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Legacy"
+            "description": "The older setting it comes from (\"GHOST_LLM_ENDPOINT=openrouter\").",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "model": {
-            "title": "Model",
+            "description": "As saved; \"\" means the provider's default.",
             "type": "string"
           },
           "password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Password"
+            "description": "The name.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "password_set": {
-            "title": "Password Set",
             "type": "boolean"
           },
           "problems": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Problems",
             "type": "array"
           },
           "protocol": {
@@ -1711,62 +1270,50 @@
               "anthropic",
               "openai"
             ],
-            "title": "Protocol",
             "type": "string"
           },
           "provider": {
-            "title": "Provider",
             "type": "string"
           },
           "providers": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/ModelProviderView"
             },
-            "title": "Providers",
             "type": "array"
           },
           "ready": {
-            "title": "Ready",
             "type": "boolean"
           },
           "sign_in_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sign In Error"
+            "description": "The last sign-in didn't go through.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "sign_in_pending": {
-            "default": false,
-            "title": "Sign In Pending",
+            "description": "OpenRouter is waiting for the browser.",
             "type": "boolean"
           },
           "timeout_secs": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timeout Secs"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "values": {
             "additionalProperties": {
               "type": "string"
             },
-            "default": {},
-            "title": "Values",
+            "description": "The GHOST_LLM_* values that say this connection explicitly.",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "wire_model": {
-            "title": "Wire Model",
+            "description": "What is sent.",
             "type": "string"
           }
         },
@@ -1777,154 +1324,122 @@
           "model",
           "wire_model",
           "password_set",
-          "ready"
+          "headers",
+          "problems",
+          "ready",
+          "values",
+          "providers",
+          "sign_in_pending"
         ],
-        "title": "ModelConnectionView",
         "type": "object"
       },
       "ModelDraft": {
-        "description": "A connection being edited: GHOST_LLM_* values over the saved ones (None removes\none), and a key typed but not saved yet, used for this one request and dropped.",
+        "description": "A connection being edited: GHOST_LLM_* values over the saved ones (None removes one),\nand a key typed but not saved yet, used for this one request and dropped.",
         "properties": {
           "password_value": {
-            "anyOf": [
-              {
-                "format": "password",
-                "maxLength": 4096,
-                "type": "string",
-                "writeOnly": true
-              },
-              {
-                "type": "null"
-              }
+            "description": "Write-only, like `PasswordSet.value`: never echoed.",
+            "format": "password",
+            "maxLength": 4096,
+            "type": [
+              "string",
+              "null"
             ],
-            "title": "Password Value"
+            "writeOnly": true
           },
           "values": {
             "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
+              "type": [
+                "string",
+                "null"
               ]
             },
-            "default": {},
-            "title": "Values",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           }
         },
-        "title": "ModelDraft",
+        "required": [
+          "values"
+        ],
         "type": "object"
       },
       "ModelListView": {
         "properties": {
           "default": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default"
+            "description": "The provider's default, when it lists it.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
+            "description": "Why the list couldn't be read; models is empty then.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "models": {
             "items": {
               "$ref": "#/components/schemas/ModelOptionView"
             },
-            "title": "Models",
             "type": "array"
           }
         },
         "required": [
           "models"
         ],
-        "title": "ModelListView",
         "type": "object"
       },
       "ModelOptionView": {
         "properties": {
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id"
         ],
-        "title": "ModelOptionView",
         "type": "object"
       },
       "ModelProviderView": {
         "description": "One way to reach a model, as the Model page offers it.",
         "properties": {
           "base_url": {
-            "title": "Base Url",
+            "description": "\"\" for a URL of the operator's own.",
             "type": "string"
           },
           "blurb": {
-            "title": "Blurb",
             "type": "string"
           },
           "default_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Model"
+            "description": "None: the first the provider lists.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "local": {
-            "default": false,
-            "title": "Local",
             "type": "boolean"
           },
           "password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Password"
+            "description": "The Password's name it uses by default.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "password_optional": {
-            "default": false,
-            "title": "Password Optional",
             "type": "boolean"
           },
           "protocol": {
@@ -1932,16 +1447,13 @@
               "anthropic",
               "openai"
             ],
-            "title": "Protocol",
             "type": "string"
           },
           "sign_in": {
-            "default": false,
-            "title": "Sign In",
+            "description": "OpenRouter: signing in gives the key.",
             "type": "boolean"
           },
           "title": {
-            "title": "Title",
             "type": "string"
           }
         },
@@ -1950,92 +1462,71 @@
           "title",
           "blurb",
           "protocol",
-          "base_url"
+          "base_url",
+          "password_optional",
+          "sign_in",
+          "local"
         ],
-        "title": "ModelProviderView",
         "type": "object"
       },
       "ModelSignInResult": {
         "properties": {
           "url": {
-            "title": "Url",
+            "description": "The desktop opens it; the loopback takes the browser's way back.",
             "type": "string"
           }
         },
         "required": [
           "url"
         ],
-        "title": "ModelSignInResult",
         "type": "object"
       },
       "ModelTestResult": {
-        "description": "One tiny request, timed like ``make perf-llm``: request to first token.",
+        "description": "One tiny request, timed like `make perf-llm`: request to first token.",
         "properties": {
           "answered_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Answered By"
+            "description": "What the provider said answered, when it says.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "model": {
-            "title": "Model",
+            "description": "What was asked for.",
             "type": "string"
           },
           "ok": {
-            "title": "Ok",
             "type": "boolean"
           },
           "reply": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply"
+            "description": "The first words, shortened.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "total_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Ms"
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "ttft_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ttft Ms"
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "where": {
-            "title": "Where",
+            "description": "Provider, protocol and host; never a key.",
             "type": "string"
           }
         },
@@ -2044,25 +1535,20 @@
           "model",
           "where"
         ],
-        "title": "ModelTestResult",
         "type": "object"
       },
       "ModelsView": {
         "properties": {
           "cache_dir": {
-            "title": "Cache Dir",
             "type": "string"
           },
           "kokoro_present": {
-            "title": "Kokoro Present",
             "type": "boolean"
           },
           "ready": {
-            "title": "Ready",
             "type": "boolean"
           },
           "stt_model": {
-            "title": "Stt Model",
             "type": "string"
           }
         },
@@ -2072,37 +1558,34 @@
           "kokoro_present",
           "stt_model"
         ],
-        "title": "ModelsView",
         "type": "object"
       },
       "OperationInfo": {
         "properties": {
           "autonomy": {
-            "title": "Autonomy",
+            "description": "By name alone; a rule with argument patterns may decide some calls.",
             "type": "string"
           },
           "description": {
-            "title": "Description",
             "type": "string"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "properties": {
-            "additionalProperties": true,
-            "title": "Properties",
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "required": {
             "items": {
               "type": "string"
             },
-            "title": "Required",
             "type": "array"
           },
           "risk": {
-            "title": "Risk",
             "type": "string"
           }
         },
@@ -2114,7 +1597,6 @@
           "properties",
           "required"
         ],
-        "title": "OperationInfo",
         "type": "object"
       },
       "OutcomeEvent": {
@@ -2123,9 +1605,7 @@
             "$ref": "#/components/schemas/OutcomeView"
           },
           "type": {
-            "const": "outcome",
             "default": "outcome",
-            "title": "Type",
             "type": "string"
           },
           "via": {
@@ -2134,7 +1614,6 @@
               "ui",
               "autonomous"
             ],
-            "title": "Via",
             "type": "string"
           }
         },
@@ -2142,7 +1621,6 @@
           "outcome",
           "via"
         ],
-        "title": "OutcomeEvent",
         "type": "object"
       },
       "OutcomeView": {
@@ -2151,45 +1629,28 @@
             "items": {
               "type": "string"
             },
-            "title": "Applied",
             "type": "array"
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "failed_step": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failed Step"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "proposal_id": {
-            "title": "Proposal Id",
             "type": "string"
           },
           "state_now": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "State Now"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "status": {
             "enum": [
@@ -2197,15 +1658,12 @@
               "partial",
               "failed"
             ],
-            "title": "Status",
             "type": "string"
           },
           "summary": {
-            "title": "Summary",
             "type": "string"
           },
           "target": {
-            "title": "Target",
             "type": "string"
           }
         },
@@ -2216,27 +1674,24 @@
           "applied",
           "summary"
         ],
-        "title": "OutcomeView",
         "type": "object"
       },
       "OutputInfo": {
         "description": "A file Ghost made in its out/ folder (ADR 0033). Ghost never runs it.",
         "properties": {
           "bytes": {
-            "title": "Bytes",
+            "format": "int64",
+            "minimum": 0,
             "type": "integer"
           },
           "modified": {
             "format": "date-time",
-            "title": "Modified",
             "type": "string"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "path": {
-            "title": "Path",
             "type": "string"
           }
         },
@@ -2246,138 +1701,115 @@
           "bytes",
           "modified"
         ],
-        "title": "OutputInfo",
         "type": "object"
       },
       "PasswordImportResult": {
         "properties": {
           "imported": {
-            "default": [],
+            "description": "Names now in the vault.",
             "items": {
               "type": "string"
             },
-            "title": "Imported",
             "type": "array"
           },
           "kept": {
-            "default": [],
+            "description": "Already in the vault; left as they were.",
             "items": {
               "type": "string"
             },
-            "title": "Kept",
             "type": "array"
           },
           "notes": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Notes",
             "type": "array"
           },
           "passwords": {
             "$ref": "#/components/schemas/PasswordsView"
           },
           "removed": {
-            "default": [],
+            "description": "Plaintext files deleted.",
             "items": {
               "type": "string"
             },
-            "title": "Removed",
             "type": "array"
           },
           "restart_required": {
-            "default": false,
-            "title": "Restart Required",
             "type": "boolean"
           },
           "settings": {
-            "default": [],
+            "description": "Non-secret settings moved to settings.env.",
             "items": {
               "type": "string"
             },
-            "title": "Settings",
             "type": "array"
           }
         },
         "required": [
-          "passwords"
+          "imported",
+          "kept",
+          "settings",
+          "removed",
+          "notes",
+          "passwords",
+          "restart_required"
         ],
-        "title": "PasswordImportResult",
         "type": "object"
       },
       "PasswordInfo": {
         "properties": {
           "added": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Added"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "ghost": {
-            "default": false,
-            "title": "Ghost",
+            "description": "One Ghost itself reads; a new value applies at its next start.",
             "type": "boolean"
           },
           "last_used": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Used"
+            "description": "The last time Ghost filled it in.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "title": "Name",
+            "description": "What config files call it: ${NAME}",
             "type": "string"
           },
           "set": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Set"
+            "description": "In the vault; None while the vault is closed (locked): unknown.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "updated": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "used_by": {
-            "default": [],
+            "description": "\"The model connection\", \"GitHub\" (an app), \"Webhook ci\"",
             "items": {
               "type": "string"
             },
-            "title": "Used By",
             "type": "array"
           }
         },
         "required": [
           "name",
-          "set"
+          "set",
+          "used_by",
+          "ghost"
         ],
-        "title": "PasswordInfo",
         "type": "object"
       },
       "PasswordResult": {
@@ -2386,22 +1818,21 @@
             "$ref": "#/components/schemas/PasswordsView"
           },
           "restart_required": {
-            "default": false,
-            "title": "Restart Required",
+            "description": "Ghost's own: the service must restart to use it.",
             "type": "boolean"
           }
         },
         "required": [
-          "passwords"
+          "passwords",
+          "restart_required"
         ],
-        "title": "PasswordResult",
         "type": "object"
       },
       "PasswordSet": {
+        "description": "Write-only; never echoed, not even in a validation error.",
         "properties": {
           "value": {
             "format": "password",
-            "title": "Value",
             "type": "string",
             "writeOnly": true
           }
@@ -2409,24 +1840,21 @@
         "required": [
           "value"
         ],
-        "title": "PasswordSet",
         "type": "object"
       },
       "PasswordsView": {
         "properties": {
           "importable": {
-            "default": [],
+            "description": "What an import would take; empty after one.",
             "items": {
               "$ref": "#/components/schemas/ImportSourceView"
             },
-            "title": "Importable",
             "type": "array"
           },
           "passwords": {
             "items": {
               "$ref": "#/components/schemas/PasswordInfo"
             },
-            "title": "Passwords",
             "type": "array"
           },
           "vault": {
@@ -2435,15 +1863,16 @@
         },
         "required": [
           "vault",
-          "passwords"
+          "passwords",
+          "importable"
         ],
-        "title": "PasswordsView",
         "type": "object"
       },
       "PendingEvent": {
+        "description": "`pending` None when it was resolved or cancelled.",
         "properties": {
           "pending": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/PendingProposal"
               },
@@ -2453,51 +1882,42 @@
             ]
           },
           "type": {
-            "const": "pending",
             "default": "pending",
-            "title": "Type",
             "type": "string"
           }
         },
         "required": [
           "pending"
         ],
-        "title": "PendingEvent",
         "type": "object"
       },
       "PendingProposal": {
         "properties": {
           "expires_at": {
             "format": "date-time",
-            "title": "Expires At",
             "type": "string"
           },
           "expires_in_secs": {
-            "title": "Expires In Secs",
+            "format": "double",
             "type": "number"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "operation": {
-            "title": "Operation",
             "type": "string"
           },
           "rationale": {
-            "title": "Rationale",
             "type": "string"
           },
           "source": {
-            "title": "Source",
+            "description": "What it changes: an app, or Ghost's own (a `ToolSource` name).",
             "type": "string"
           },
           "summary": {
-            "title": "Summary",
             "type": "string"
           },
           "target": {
-            "title": "Target",
             "type": "string"
           }
         },
@@ -2511,56 +1931,40 @@
           "expires_at",
           "expires_in_secs"
         ],
-        "title": "PendingProposal",
         "type": "object"
       },
       "PermissionsUpdate": {
         "description": "Whole lists, the mode, or one rule moved; what is not given is kept.",
         "properties": {
           "allow": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Allow"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "ask": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ask"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "block": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Block"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "mode": {
-            "anyOf": [
+            "oneOf": [
               {
                 "enum": [
                   "open",
@@ -2572,25 +1976,19 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Mode"
+            ]
           },
           "quiet": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quiet"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "set": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/RuleSet"
               },
@@ -2600,34 +1998,27 @@
             ]
           }
         },
-        "title": "PermissionsUpdate",
         "type": "object"
       },
       "PermissionsView": {
-        "description": "``[permissions]`` in policy.toml: everything runs unless a rule says otherwise.",
+        "description": "`[permissions]` in policy.toml: everything runs unless a rule says otherwise.",
         "properties": {
           "allow": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Allow",
             "type": "array"
           },
           "ask": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Ask",
             "type": "array"
           },
           "block": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Block",
             "type": "array"
           },
           "mode": {
@@ -2636,30 +2027,30 @@
               "ask",
               "read-only"
             ],
-            "title": "Mode",
             "type": "string"
           },
           "path": {
-            "title": "Path",
             "type": "string"
           },
           "quiet": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Quiet",
             "type": "array"
           }
         },
         "required": [
           "path",
-          "mode"
+          "mode",
+          "block",
+          "ask",
+          "quiet",
+          "allow"
         ],
-        "title": "PermissionsView",
         "type": "object"
       },
       "Phase": {
+        "description": "Where the daemon is. The tray tooltip and the phone's Home read it.",
         "enum": [
           "starting",
           "passive",
@@ -2669,23 +2060,23 @@
           "hold",
           "asking"
         ],
-        "title": "Phase",
         "type": "string"
       },
       "PhoneAddress": {
-        "description": "One ``GHOST_PHONE_LISTEN`` address and the network it is on.",
+        "description": "One `GHOST_PHONE_LISTEN` address and the network it is on.",
         "properties": {
           "address": {
-            "title": "Address",
             "type": "string"
           },
           "listening": {
-            "title": "Listening",
+            "description": "Bound now; a tunnel address whose interface isn't up yet is retried.",
             "type": "boolean"
           },
           "network": {
-            "anyOf": [
+            "description": "None when Ghost can't tell: the address is on every interface (0.0.0.0), or on\nnone of this computer's right now.",
+            "oneOf": [
               {
+                "description": "The network a phone address is on (ADR 0020): the home network, or the operator's\nWireGuard tunnel for away from home.",
                 "enum": [
                   "home",
                   "tunnel"
@@ -2695,8 +2086,7 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Network"
+            ]
           }
         },
         "required": [
@@ -2704,29 +2094,25 @@
           "network",
           "listening"
         ],
-        "title": "PhoneAddress",
         "type": "object"
       },
       "PhoneDevice": {
         "properties": {
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "last_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Address"
+            "description": "The listen address that request came in on.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "last_network": {
-            "anyOf": [
+            "description": "And the network it came over.",
+            "oneOf": [
               {
+                "description": "The network a phone address is on (ADR 0020): the home network, or the operator's\nWireGuard tunnel for away from home.",
                 "enum": [
                   "home",
                   "tunnel"
@@ -2736,28 +2122,21 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Last Network"
+            ]
           },
           "last_seen": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Seen"
+            "description": "The phone's last verified request.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "paired_at": {
             "format": "date-time",
-            "title": "Paired At",
             "type": "string"
           }
         },
@@ -2767,34 +2146,32 @@
           "paired_at",
           "last_seen"
         ],
-        "title": "PhoneDevice",
         "type": "object"
       },
       "PhonePairing": {
         "description": "A fresh pairing code for the phone listener. Shown to the operator only.",
         "properties": {
           "address": {
-            "title": "Address",
+            "description": "The first GHOST_PHONE_LISTEN address, host:port; what the operator types.",
             "type": "string"
           },
           "addresses": {
+            "description": "Every address the listener serves.",
             "items": {
               "type": "string"
             },
-            "title": "Addresses",
             "type": "array"
           },
           "code": {
-            "title": "Code",
+            "description": "Six digits.",
             "type": "string"
           },
           "expires_at": {
             "format": "date-time",
-            "title": "Expires At",
             "type": "string"
           },
           "link": {
-            "title": "Link",
+            "description": "The QR code's payload: ghost://pair?code=…&address=…, every address in order.",
             "type": "string"
           }
         },
@@ -2804,31 +2181,26 @@
           "expires_at",
           "link"
         ],
-        "title": "PhonePairing",
         "type": "object"
       },
       "PhoneView": {
         "properties": {
           "address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Address"
+            "description": "None when the listener is off.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "addresses": {
+            "description": "LAN first, then the tunnel (ADR 0020).",
             "items": {
               "type": "string"
             },
-            "title": "Addresses",
             "type": "array"
           },
           "device": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/PhoneDevice"
               },
@@ -2838,10 +2210,10 @@
             ]
           },
           "listen": {
+            "description": "The same, with each network.",
             "items": {
               "$ref": "#/components/schemas/PhoneAddress"
             },
-            "title": "Listen",
             "type": "array"
           }
         },
@@ -2849,13 +2221,12 @@
           "address",
           "device"
         ],
-        "title": "PhoneView",
         "type": "object"
       },
       "PolicyResult": {
         "properties": {
           "applied": {
-            "title": "Applied",
+            "description": "Reloaded live.",
             "type": "boolean"
           },
           "policy": {
@@ -2866,14 +2237,13 @@
           "policy",
           "applied"
         ],
-        "title": "PolicyResult",
         "type": "object"
       },
       "PolicyUpdate": {
-        "description": "Either the raw TOML, or the routes rendered into it (the permissions have their own\nroute, ``PUT /permissions``).",
+        "description": "Either the raw TOML, or the routes rendered into it (the permissions have their own\nroute, `PUT /permissions`).",
         "properties": {
           "routes": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/RoutesView"
               },
@@ -2883,35 +2253,27 @@
             ]
           },
           "text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "title": "PolicyUpdate",
         "type": "object"
       },
       "PolicyView": {
         "properties": {
           "exists": {
-            "title": "Exists",
             "type": "boolean"
           },
           "path": {
-            "title": "Path",
             "type": "string"
           },
           "permissions": {
             "$ref": "#/components/schemas/PermissionsView"
           },
           "routes": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/RoutesView"
               },
@@ -2921,7 +2283,6 @@
             ]
           },
           "text": {
-            "title": "Text",
             "type": "string"
           }
         },
@@ -2931,17 +2292,14 @@
           "text",
           "permissions"
         ],
-        "title": "PolicyView",
         "type": "object"
       },
       "ReadToolInfo": {
         "properties": {
           "description": {
-            "title": "Description",
             "type": "string"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           }
         },
@@ -2949,14 +2307,13 @@
           "name",
           "description"
         ],
-        "title": "ReadToolInfo",
         "type": "object"
       },
       "RoutesView": {
-        "description": "``[routes]`` in the policy file (ADR 0031): how Ghost reaches the operator.",
+        "description": "`[routes]` in the policy file (ADR 0031): how Ghost reaches the operator.",
         "properties": {
           "available": {
-            "default": [],
+            "description": "The routes this daemon has something behind; the others can be listed but do\nnothing yet.",
             "items": {
               "enum": [
                 "digest",
@@ -2969,19 +2326,18 @@
               ],
               "type": "string"
             },
-            "title": "Available",
             "type": "array"
           },
           "batch_secs": {
-            "title": "Batch Secs",
+            "format": "int64",
             "type": "integer"
           },
           "calls_per_day": {
-            "title": "Calls Per Day",
+            "format": "int64",
             "type": "integer"
           },
           "calls_per_hour": {
-            "title": "Calls Per Hour",
+            "format": "int64",
             "type": "integer"
           },
           "carry": {
@@ -2989,7 +2345,6 @@
               "count",
               "title"
             ],
-            "title": "Carry",
             "type": "string"
           },
           "enabled": {
@@ -3005,27 +2360,22 @@
               ],
               "type": "string"
             },
-            "title": "Enabled",
             "type": "array"
           },
           "escalate_after": {
-            "title": "Escalate After",
+            "description": "Minutes.",
+            "format": "int64",
             "type": "integer"
           },
           "greeting": {
-            "title": "Greeting",
             "type": "string"
           },
           "quiet_hours": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quiet Hours"
+            "description": "\"22:00-07:00\"",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "urgency": {
             "additionalProperties": {
@@ -3036,8 +2386,9 @@
               ],
               "type": "string"
             },
-            "default": {},
-            "title": "Urgency",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           }
         },
@@ -3048,32 +2399,29 @@
           "calls_per_hour",
           "calls_per_day",
           "carry",
-          "greeting"
+          "greeting",
+          "urgency",
+          "available"
         ],
-        "title": "RoutesView",
         "type": "object"
       },
       "RuleAdd": {
         "description": "A rule appended to Ghost's AGENTS.md, verbatim (ADR 0035).",
         "properties": {
           "text": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Text",
             "type": "string"
           }
         },
         "required": [
           "text"
         ],
-        "title": "RuleAdd",
         "type": "object"
       },
       "RuleSet": {
-        "description": "One toggle: move ``rule`` into ``level``'s list, or out of every list (None).",
+        "description": "One toggle: move `rule` into `level`'s list, or out of every list (None).",
         "properties": {
           "level": {
-            "anyOf": [
+            "oneOf": [
               {
                 "enum": [
                   "allow",
@@ -3086,31 +2434,25 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Level"
+            ]
           },
           "rule": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Rule",
             "type": "string"
           }
         },
         "required": [
           "rule"
         ],
-        "title": "RuleSet",
         "type": "object"
       },
       "RulesView": {
         "description": "Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt.",
         "properties": {
           "path": {
-            "title": "Path",
+            "description": "The file the operator opens.",
             "type": "string"
           },
           "text": {
-            "title": "Text",
             "type": "string"
           }
         },
@@ -3118,69 +2460,51 @@
           "path",
           "text"
         ],
-        "title": "RulesView",
         "type": "object"
       },
       "SampleRequest": {
         "properties": {
           "speed": {
-            "default": 1.0,
-            "maximum": 2.0,
-            "minimum": 0.5,
-            "title": "Speed",
+            "format": "double",
             "type": "number"
           },
           "text": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "title": "SampleRequest",
+        "required": [
+          "speed"
+        ],
         "type": "object"
       },
       "SayRequest": {
         "properties": {
           "conversation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "With no session running, the line the new one opens in; Ghost when unset.",
-            "title": "Conversation"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "text": {
-            "maxLength": 4000,
-            "minLength": 1,
-            "title": "Text",
+            "description": "1 to 4000 characters.",
             "type": "string"
           }
         },
         "required": [
           "text"
         ],
-        "title": "SayRequest",
         "type": "object"
       },
       "SecretState": {
         "properties": {
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "set": {
-            "title": "Set",
             "type": "boolean"
           }
         },
@@ -3188,22 +2512,19 @@
           "name",
           "set"
         ],
-        "title": "SecretState",
         "type": "object"
       },
       "SettingsResult": {
         "properties": {
           "applied": {
-            "default": [],
+            "description": "Keys the daemon picked up without a restart.",
             "items": {
               "type": "string"
             },
-            "title": "Applied",
             "type": "array"
           },
           "restart_required": {
-            "default": false,
-            "title": "Restart Required",
+            "description": "A pending value or a secret: the service must restart.",
             "type": "boolean"
           },
           "settings": {
@@ -3211,77 +2532,68 @@
           }
         },
         "required": [
-          "settings"
+          "settings",
+          "applied",
+          "restart_required"
         ],
-        "title": "SettingsResult",
         "type": "object"
       },
       "SettingsUpdate": {
+        "description": "`values`: a None value deletes the key. `secrets`: write-only, into the vault (ADR\n0036); None deletes.",
         "properties": {
           "secrets": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Secrets"
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "values": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Values"
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           }
         },
-        "title": "SettingsUpdate",
         "type": "object"
       },
       "SettingsView": {
         "properties": {
           "secrets": {
+            "description": "Ghost's own passwords and the apps', set or not (ADR 0036); /passwords has the rest.",
             "items": {
               "$ref": "#/components/schemas/SecretState"
             },
-            "title": "Secrets",
             "type": "array"
           },
           "settings_path": {
-            "title": "Settings Path",
             "type": "string"
           },
           "values": {
             "additionalProperties": {
               "type": "string"
             },
-            "title": "Values",
+            "description": "Non-secret settings, as written in settings.env.",
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           }
         },
@@ -3290,78 +2602,65 @@
           "values",
           "secrets"
         ],
-        "title": "SettingsView",
         "type": "object"
       },
       "SkillAdd": {
         "properties": {
           "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "path": {
             "description": "A folder on this machine holding SKILL.md.",
-            "minLength": 1,
-            "title": "Path",
             "type": "string"
           },
           "replace": {
-            "default": false,
-            "title": "Replace",
             "type": "boolean"
           }
         },
         "required": [
-          "path"
+          "path",
+          "replace"
         ],
-        "title": "SkillAdd",
         "type": "object"
       },
       "SkillBody": {
         "properties": {
           "body": {
-            "title": "Body",
+            "description": "SKILL.md without its front matter, trimmed.",
             "type": "string"
           },
           "files": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Files",
             "type": "array"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           }
         },
         "required": [
           "name",
-          "body"
+          "body",
+          "files"
         ],
-        "title": "SkillBody",
         "type": "object"
       },
       "SkillFileView": {
         "properties": {
           "bytes": {
-            "title": "Bytes",
+            "format": "int64",
+            "minimum": 0,
             "type": "integer"
           },
           "path": {
-            "title": "Path",
             "type": "string"
           },
           "script": {
-            "title": "Script",
+            "description": "A file an interpreter runs, or one that was executable upstream.",
             "type": "boolean"
           }
         },
@@ -3370,38 +2669,31 @@
           "bytes",
           "script"
         ],
-        "title": "SkillFileView",
         "type": "object"
       },
       "SkillInfo": {
         "description": "A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.",
         "properties": {
           "description": {
-            "title": "Description",
             "type": "string"
           },
           "files": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Files",
             "type": "array"
           },
           "missing": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Missing",
             "type": "array"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "origin": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/SkillOriginView"
               },
@@ -3411,30 +2703,22 @@
             ]
           },
           "path": {
-            "title": "Path",
             "type": "string"
           },
           "problem": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Problem"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "requires": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Requires",
             "type": "array"
           },
           "source": {
-            "title": "Source",
+            "description": "\"ghost\" for Ghost's own folder, \"home\" for the operator's ~/.agents/skills.",
             "type": "string"
           }
         },
@@ -3442,74 +2726,57 @@
           "name",
           "description",
           "source",
-          "path"
+          "path",
+          "requires",
+          "missing",
+          "files"
         ],
-        "title": "SkillInfo",
         "type": "object"
       },
       "SkillInstall": {
         "properties": {
           "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "replace": {
-            "default": false,
-            "title": "Replace",
             "type": "boolean"
           },
           "token": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Token",
             "type": "string"
           }
         },
         "required": [
-          "token"
+          "token",
+          "replace"
         ],
-        "title": "SkillInstall",
         "type": "object"
       },
       "SkillListing": {
         "description": "A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,\nnever to the model.",
         "properties": {
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "installed": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Installed"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "installs": {
-            "title": "Installs",
+            "format": "int64",
             "type": "integer"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "skill": {
-            "title": "Skill",
             "type": "string"
           },
           "source": {
-            "title": "Source",
             "type": "string"
           }
         },
@@ -3520,52 +2787,36 @@
           "name",
           "installs"
         ],
-        "title": "SkillListing",
         "type": "object"
       },
       "SkillOriginView": {
         "description": "Where one of Ghost's skills was installed from (#35), as its lock file records it.",
         "properties": {
           "commit": {
-            "title": "Commit",
             "type": "string"
           },
           "folder_hash": {
-            "title": "Folder Hash",
             "type": "string"
           },
           "installed_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Installed At"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ref"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "skill_path": {
-            "title": "Skill Path",
             "type": "string"
           },
           "source": {
-            "title": "Source",
             "type": "string"
           },
           "source_url": {
-            "title": "Source Url",
             "type": "string"
           }
         },
@@ -3576,34 +2827,28 @@
           "commit",
           "folder_hash"
         ],
-        "title": "SkillOriginView",
         "type": "object"
       },
       "SkillPreview": {
         "description": "A skill fetched from GitHub and staged, for the operator to read before installing.\nEverything in it but the hashes is the source's text: untrusted.",
         "properties": {
           "commit": {
-            "title": "Commit",
             "type": "string"
           },
           "description": {
-            "title": "Description",
             "type": "string"
           },
           "files": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/SkillFileView"
             },
-            "title": "Files",
             "type": "array"
           },
           "folder_hash": {
-            "title": "Folder Hash",
             "type": "string"
           },
           "installed": {
-            "anyOf": [
+            "oneOf": [
               {
                 "enum": [
                   "ghost",
@@ -3614,62 +2859,46 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Installed"
+            ]
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ref"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "scripts": {
-            "default": [],
+            "description": "The ones ghost-scripts could run, through the gate.",
             "items": {
               "type": "string"
             },
-            "title": "Scripts",
             "type": "array"
           },
           "skill_md": {
-            "title": "Skill Md",
+            "description": "The whole SKILL.md, front matter included.",
             "type": "string"
           },
           "skill_path": {
-            "title": "Skill Path",
             "type": "string"
           },
           "source": {
-            "title": "Source",
             "type": "string"
           },
           "source_url": {
-            "title": "Source Url",
             "type": "string"
           },
           "token": {
-            "title": "Token",
+            "description": "What install takes; good for 30 minutes.",
             "type": "string"
           },
           "update_of": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Update Of"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -3681,145 +2910,105 @@
           "skill_path",
           "commit",
           "folder_hash",
-          "skill_md"
+          "skill_md",
+          "files",
+          "scripts"
         ],
-        "title": "SkillPreview",
         "type": "object"
       },
       "SkillPreviewRequest": {
         "properties": {
           "skill": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The skill's id in it.",
-            "title": "Skill"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
             "description": "owner/repo, owner/repo/skill, or a github.com address of a skill's folder.",
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Source",
             "type": "string"
           }
         },
         "required": [
           "source"
         ],
-        "title": "SkillPreviewRequest",
         "type": "object"
       },
       "SkillSearchPage": {
         "properties": {
           "fetched_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fetched At"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "problem": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Problem"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "query": {
-            "title": "Query",
             "type": "string"
           },
           "skills": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/SkillListing"
             },
-            "title": "Skills",
             "type": "array"
           }
         },
         "required": [
-          "query"
+          "query",
+          "skills"
         ],
-        "title": "SkillSearchPage",
         "type": "object"
       },
       "SkillUpdateView": {
         "description": "Whether an installed skill's source has moved on, checked when the page asks.",
         "properties": {
           "commit": {
-            "title": "Commit",
             "type": "string"
           },
           "latest_commit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latest Commit"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "problem": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Problem"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
-            "title": "Source",
             "type": "string"
           },
           "update": {
-            "default": false,
-            "title": "Update",
             "type": "boolean"
           }
         },
         "required": [
           "name",
           "source",
-          "commit"
+          "commit",
+          "update"
         ],
-        "title": "SkillUpdateView",
         "type": "object"
       },
       "SnoozeRequest": {
         "properties": {
           "key": {
-            "title": "Key",
             "type": "string"
           },
           "minutes": {
-            "maximum": 10080.0,
-            "minimum": 1.0,
-            "title": "Minutes",
+            "description": "1 to a week.",
+            "format": "int64",
             "type": "integer"
           }
         },
@@ -3827,93 +3016,75 @@
           "key",
           "minutes"
         ],
-        "title": "SnoozeRequest",
         "type": "object"
       },
       "SourceInfo": {
         "description": "A source of tools the gate knows: Ghost's own (built in) or a connected app.",
         "properties": {
           "description": {
-            "title": "Description",
             "type": "string"
           },
           "kind": {
-            "title": "Kind",
+            "description": "\"built-in\" or \"app\"",
             "type": "string"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "operations": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/OperationInfo"
             },
-            "title": "Operations",
             "type": "array"
           },
           "read_tools": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/ReadToolInfo"
             },
-            "title": "Read Tools",
             "type": "array"
           }
         },
         "required": [
           "name",
           "kind",
-          "description"
+          "description",
+          "operations",
+          "read_tools"
         ],
-        "title": "SourceInfo",
         "type": "object"
       },
       "Status": {
+        "description": "`GET /status`.",
         "properties": {
           "api_version": {
-            "default": "1",
-            "title": "Api Version",
             "type": "string"
           },
           "apps": {
-            "default": [],
+            "description": "The apps connected now (ADR 0034).",
             "items": {
               "type": "string"
             },
-            "title": "Apps",
             "type": "array"
           },
           "build": {
-            "$ref": "#/components/schemas/Build",
-            "default": {
-              "dirty": false,
-              "kind": "dev"
-            }
+            "$ref": "#/components/schemas/Build"
           },
           "conversation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation"
+            "description": "Slug of the agent the session is with (ADR 0014).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "ending": {
-            "default": false,
-            "title": "Ending",
+            "description": "Ghost has decided to hang up: its goodbye may still be playing.",
             "type": "boolean"
           },
           "models_ready": {
-            "title": "Models Ready",
             "type": "boolean"
           },
           "pending": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/PendingProposal"
               },
@@ -3926,19 +3097,15 @@
             "$ref": "#/components/schemas/Phase"
           },
           "session_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Session Id"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "session_origin": {
-            "anyOf": [
+            "oneOf": [
               {
+                "description": "Where a live session's audio is: the desk's mic and speaker, or the paired phone over\nWebRTC (ADR 0016).",
                 "enum": [
                   "desk",
                   "phone"
@@ -3948,24 +3115,23 @@
               {
                 "type": "null"
               }
-            ],
-            "title": "Session Origin"
+            ]
           },
           "uptime_secs": {
-            "title": "Uptime Secs",
+            "format": "double",
             "type": "number"
           },
           "version": {
-            "title": "Version",
+            "description": "YYYY.M.N, the same in every copy (`scripts/version.py`).",
             "type": "string"
           },
           "waiting": {
-            "default": 0,
-            "title": "Waiting",
+            "description": "Items on the waiting list the operator has still to hear (ADR 0029).",
+            "format": "int64",
+            "minimum": 0,
             "type": "integer"
           },
           "wake_mode": {
-            "title": "Wake Mode",
             "type": "string"
           }
         },
@@ -3975,9 +3141,13 @@
           "models_ready",
           "uptime_secs",
           "version",
-          "wake_mode"
+          "build",
+          "api_version",
+          "wake_mode",
+          "apps",
+          "ending",
+          "waiting"
         ],
-        "title": "Status",
         "type": "object"
       },
       "StatusEvent": {
@@ -3986,23 +3156,19 @@
             "$ref": "#/components/schemas/Status"
           },
           "type": {
-            "const": "status",
             "default": "status",
-            "title": "Type",
             "type": "string"
           }
         },
         "required": [
           "status"
         ],
-        "title": "StatusEvent",
         "type": "object"
       },
       "Turn": {
         "properties": {
           "at": {
             "format": "date-time",
-            "title": "At",
             "type": "string"
           },
           "role": {
@@ -4011,26 +3177,21 @@
               "assistant",
               "system"
             ],
-            "title": "Role",
             "type": "string"
           },
           "session_id": {
-            "title": "Session Id",
             "type": "string"
           },
           "text": {
-            "title": "Text",
             "type": "string"
           },
           "via": {
-            "default": "voice",
             "enum": [
               "voice",
               "text",
               "interceptor",
               "system"
             ],
-            "title": "Via",
             "type": "string"
           }
         },
@@ -4038,9 +3199,9 @@
           "role",
           "text",
           "session_id",
-          "at"
+          "at",
+          "via"
         ],
-        "title": "Turn",
         "type": "object"
       },
       "TurnEvent": {
@@ -4049,31 +3210,26 @@
             "$ref": "#/components/schemas/Turn"
           },
           "type": {
-            "const": "turn",
             "default": "turn",
-            "title": "Type",
             "type": "string"
           }
         },
         "required": [
           "turn"
         ],
-        "title": "TurnEvent",
         "type": "object"
       },
       "TurnView": {
         "properties": {
           "at": {
             "format": "date-time",
-            "title": "At",
             "type": "string"
           },
           "compacted": {
-            "title": "Compacted",
             "type": "boolean"
           },
           "id": {
-            "title": "Id",
+            "format": "int64",
             "type": "integer"
           },
           "role": {
@@ -4083,15 +3239,12 @@
               "call",
               "system"
             ],
-            "title": "Role",
             "type": "string"
           },
           "session_id": {
-            "title": "Session Id",
             "type": "string"
           },
           "text": {
-            "title": "Text",
             "type": "string"
           }
         },
@@ -4103,38 +3256,32 @@
           "at",
           "compacted"
         ],
-        "title": "TurnView",
         "type": "object"
       },
       "ValidationError": {
+        "description": "One thing wrong with a request, as FastAPI says it: the kind, where, and why.",
         "properties": {
           "ctx": {
-            "title": "Context",
-            "type": "object"
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "input": {
-            "title": "Input"
+            "description": "pydantic's extra, never filled: Ghost's 422 says where and why only (ADR 0036)."
           },
           "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
+            "items": {},
             "type": "array"
           },
           "msg": {
-            "title": "Message",
             "type": "string"
           },
           "type": {
-            "title": "Error Type",
             "type": "string"
           }
         },
@@ -4143,26 +3290,20 @@
           "msg",
           "type"
         ],
-        "title": "ValidationError",
         "type": "object"
       },
       "VaultView": {
         "description": "Ghost's vault: one encrypted file, its key in the operator's keyring.",
         "properties": {
           "path": {
-            "title": "Path",
             "type": "string"
           },
           "problem": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Problem"
+            "description": "Why it isn't open, in the operator's words.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "state": {
             "enum": [
@@ -4171,7 +3312,6 @@
               "unavailable",
               "broken"
             ],
-            "title": "State",
             "type": "string"
           }
         },
@@ -4179,17 +3319,15 @@
           "state",
           "path"
         ],
-        "title": "VaultView",
         "type": "object"
       },
       "VoiceInfo": {
         "properties": {
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "label": {
-            "title": "Label",
+            "description": "\"American female: Heart\"",
             "type": "string"
           }
         },
@@ -4197,50 +3335,42 @@
           "id",
           "label"
         ],
-        "title": "VoiceInfo",
         "type": "object"
       },
       "WaitingEvent": {
-        "description": "The waiting list changed: read ``GET /waiting`` for it.",
+        "description": "The waiting list changed: read `GET /waiting` for it.",
         "properties": {
           "count": {
-            "title": "Count",
+            "format": "int64",
+            "minimum": 0,
             "type": "integer"
           },
           "type": {
-            "const": "waiting",
             "default": "waiting",
-            "title": "Type",
             "type": "string"
           }
         },
         "required": [
           "count"
         ],
-        "title": "WaitingEvent",
         "type": "object"
       },
       "WaitingItemView": {
-        "description": "One item that needs the operator. ``title`` comes from an outside system: show\nit as text, never as markup. ``change`` is set for a change waiting for a yes.",
+        "description": "One item that needs the operator. `title` comes from an outside system: show it as\ntext, never as markup. `change` is set for a change waiting for a yes.",
         "properties": {
           "acknowledged_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Acknowledged At"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "age_secs": {
-            "title": "Age Secs",
+            "format": "int64",
             "type": "integer"
           },
           "change": {
-            "anyOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/PendingProposal"
               },
@@ -4251,66 +3381,42 @@
           },
           "changed_at": {
             "format": "date-time",
-            "title": "Changed At",
             "type": "string"
           },
           "delivered_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Delivered At"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "delivered_via": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Delivered Via"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "first_seen": {
             "format": "date-time",
-            "title": "First Seen",
             "type": "string"
           },
           "key": {
-            "title": "Key",
             "type": "string"
           },
           "link": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Link"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "snoozed_until": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snoozed Until"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
-            "title": "Source",
             "type": "string"
           },
           "state": {
@@ -4320,11 +3426,9 @@
               "acknowledged",
               "snoozed"
             ],
-            "title": "State",
             "type": "string"
           },
           "title": {
-            "title": "Title",
             "type": "string"
           }
         },
@@ -4337,20 +3441,20 @@
           "changed_at",
           "age_secs"
         ],
-        "title": "WaitingItemView",
         "type": "object"
       },
       "WaitingView": {
         "properties": {
           "count": {
-            "title": "Count",
+            "description": "How many still need the operator to hear them.",
+            "format": "int64",
+            "minimum": 0,
             "type": "integer"
           },
           "items": {
             "items": {
               "$ref": "#/components/schemas/WaitingItemView"
             },
-            "title": "Items",
             "type": "array"
           }
         },
@@ -4358,96 +3462,66 @@
           "items",
           "count"
         ],
-        "title": "WaitingView",
         "type": "object"
       },
       "WakeRequest": {
         "properties": {
           "conversation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "The line the session opens in; Ghost when unset.",
-            "title": "Conversation"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Words to treat as the first turn.",
-            "title": "Text"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "title": "WakeRequest",
         "type": "object"
       },
       "WatchInfo": {
         "description": "A watch in watches.json (ADR 0028, ADR 0035) and how its last look went.",
         "properties": {
           "app": {
-            "title": "App",
             "type": "string"
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "every_secs": {
-            "title": "Every Secs",
+            "format": "int64",
             "type": "integer"
           },
           "last_ok": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Ok"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "last_run": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Run"
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "open": {
-            "default": 0,
-            "title": "Open",
+            "description": "Items it holds open now.",
+            "format": "int64",
             "type": "integer"
           },
           "read": {
-            "title": "Read",
             "type": "string"
           },
           "response": {
@@ -4455,19 +3529,18 @@
               "tell",
               "record"
             ],
-            "title": "Response",
             "type": "string"
           },
           "seen": {
-            "default": 0,
-            "title": "Seen",
+            "description": "Results the last look kept.",
+            "format": "int64",
             "type": "integer"
           },
           "steps": {
+            "description": "\"check\", then \"jev\" and \"model\" where declared.",
             "items": {
               "type": "string"
             },
-            "title": "Steps",
             "type": "array"
           },
           "urgency": {
@@ -4476,7 +3549,6 @@
               "notify",
               "call"
             ],
-            "title": "Urgency",
             "type": "string"
           }
         },
@@ -4487,48 +3559,47 @@
           "every_secs",
           "steps",
           "response",
-          "urgency"
+          "urgency",
+          "seen",
+          "open"
         ],
-        "title": "WatchInfo",
         "type": "object"
       },
       "WatchingView": {
-        "description": "What Ghost watches (ADR 0035): the watches in watches.json, the webhooks in\nhooks.json, where the webhook listener is, and what is wrong in those files or left\nin Ghost's folder from an older layout.",
+        "description": "What Ghost watches (ADR 0035): the watches, the webhooks, where the webhook listener\nis, and what is wrong in those files or left in Ghost's folder from an older layout.",
         "properties": {
           "hooks": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/HookInfo"
             },
-            "title": "Hooks",
             "type": "array"
           },
           "listening": {
-            "default": [],
+            "description": "The webhook listener's addresses; empty when it is off.",
             "items": {
               "type": "string"
             },
-            "title": "Listening",
             "type": "array"
           },
           "problems": {
-            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Problems",
             "type": "array"
           },
           "watches": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/WatchInfo"
             },
-            "title": "Watches",
             "type": "array"
           }
         },
-        "title": "WatchingView",
+        "required": [
+          "watches",
+          "hooks",
+          "listening",
+          "problems"
+        ],
         "type": "object"
       }
     }
@@ -4552,7 +3623,6 @@
                   "items": {
                     "$ref": "#/components/schemas/AppView"
                   },
-                  "title": "Response List Apps Apps Get",
                   "type": "array"
                 }
               }
@@ -4616,7 +3686,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -4656,7 +3725,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -4699,7 +3767,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -4743,9 +3810,9 @@
             "required": false,
             "schema": {
               "default": 50,
+              "format": "int64",
               "maximum": 500,
               "minimum": 1,
-              "title": "Limit",
               "type": "integer"
             }
           },
@@ -4755,8 +3822,8 @@
             "required": false,
             "schema": {
               "default": 0,
+              "format": "int64",
               "minimum": 0,
-              "title": "Offset",
               "type": "integer"
             }
           },
@@ -4765,15 +3832,7 @@
             "name": "source",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source"
+              "type": "string"
             }
           },
           {
@@ -4781,15 +3840,7 @@
             "name": "status",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
+              "type": "string"
             }
           },
           {
@@ -4797,15 +3848,7 @@
             "name": "session_id",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Session Id"
+              "type": "string"
             }
           }
         ],
@@ -4849,7 +3892,6 @@
             "schema": {
               "default": "",
               "maxLength": 100,
-              "title": "Search",
               "type": "string"
             }
           },
@@ -4859,8 +3901,8 @@
             "required": false,
             "schema": {
               "default": 0,
+              "format": "int64",
               "minimum": 0,
-              "title": "Offset",
               "type": "integer"
             }
           },
@@ -4870,9 +3912,9 @@
             "required": false,
             "schema": {
               "default": 40,
+              "format": "int64",
               "maximum": 100,
               "minimum": 1,
-              "title": "Limit",
               "type": "integer"
             }
           }
@@ -4914,7 +3956,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -4957,15 +3998,7 @@
             "name": "retired",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Retired"
+              "type": "boolean"
             }
           }
         ],
@@ -4977,7 +4010,6 @@
                   "items": {
                     "$ref": "#/components/schemas/ConversationView"
                   },
-                  "title": "Response List Conversations Conversations Get",
                   "type": "array"
                 }
               }
@@ -5050,7 +4082,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5090,7 +4121,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5130,7 +4160,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5182,7 +4211,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5224,7 +4252,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5237,7 +4264,6 @@
                   "items": {
                     "$ref": "#/components/schemas/CompactionView"
                   },
-                  "title": "Response Conversation Compactions Conversations  Slug  Compactions Get",
                   "type": "array"
                 }
               }
@@ -5270,7 +4296,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5324,7 +4349,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5366,7 +4390,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5409,7 +4432,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5451,7 +4473,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           }
@@ -5493,7 +4514,6 @@
             "name": "slug",
             "required": true,
             "schema": {
-              "title": "Slug",
               "type": "string"
             }
           },
@@ -5503,7 +4523,7 @@
             "required": false,
             "schema": {
               "default": 200,
-              "title": "Limit",
+              "format": "int64",
               "type": "integer"
             }
           }
@@ -5516,7 +4536,6 @@
                   "items": {
                     "$ref": "#/components/schemas/TurnView"
                   },
-                  "title": "Response Conversation Turns Conversations  Slug  Turns Get",
                   "type": "array"
                 }
               }
@@ -5570,6 +4589,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "description": "What the event stream carries, discriminated by `type`.",
                   "discriminator": {
                     "mapping": {
                       "apps": "#/components/schemas/AppsEvent",
@@ -5608,8 +4628,7 @@
                     {
                       "$ref": "#/components/schemas/AppsEvent"
                     }
-                  ],
-                  "title": "Response Events Schema Events Schema Get"
+                  ]
                 }
               }
             },
@@ -5762,7 +4781,6 @@
                   "items": {
                     "$ref": "#/components/schemas/OutputInfo"
                   },
-                  "title": "Response Outputs Outputs Get",
                   "type": "array"
                 }
               }
@@ -5850,7 +4868,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -5891,7 +4908,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -6126,15 +5142,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
+                  "oneOf": [
                     {
                       "$ref": "#/components/schemas/PendingProposal"
                     },
                     {
                       "type": "null"
                     }
-                  ],
-                  "title": "Response Pending Proposals Pending Get"
+                  ]
                 }
               }
             },
@@ -6198,7 +5213,6 @@
             "name": "proposal_id",
             "required": true,
             "schema": {
-              "title": "Proposal Id",
               "type": "string"
             }
           }
@@ -6241,7 +5255,6 @@
             "name": "proposal_id",
             "required": true,
             "schema": {
-              "title": "Proposal Id",
               "type": "string"
             }
           }
@@ -6386,7 +5399,6 @@
               "application/json": {
                 "schema": {
                   "items": {},
-                  "title": "Response Turns Session Turns Get",
                   "type": "array"
                 }
               }
@@ -6470,7 +5482,6 @@
             "required": false,
             "schema": {
               "default": false,
-              "title": "Uninstall",
               "type": "boolean"
             }
           }
@@ -6536,7 +5547,6 @@
             "schema": {
               "default": "",
               "maxLength": 100,
-              "title": "Search",
               "type": "string"
             }
           }
@@ -6655,7 +5665,7 @@
     },
     "/skill-catalog/updates": {
       "get": {
-        "description": "For each skill Ghost installed from GitHub, whether its folder has changed at\nthe source since. Asks GitHub now (a recent answer per repository is reused).",
+        "description": "For each skill Ghost installed from GitHub, whether its folder has changed at the\nsource since. Asks GitHub now (a recent answer per repository is reused).",
         "operationId": "skill_updates_skill_catalog_updates_get",
         "responses": {
           "200": {
@@ -6665,7 +5675,6 @@
                   "items": {
                     "$ref": "#/components/schemas/SkillUpdateView"
                   },
-                  "title": "Response Skill Updates Skill Catalog Updates Get",
                   "type": "array"
                 }
               }
@@ -6689,7 +5698,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -6733,7 +5741,6 @@
                   "items": {
                     "$ref": "#/components/schemas/SkillInfo"
                   },
-                  "title": "Response Skills Skills Get",
                   "type": "array"
                 }
               }
@@ -6795,7 +5802,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -6835,7 +5841,6 @@
             "name": "name",
             "required": true,
             "schema": {
-              "title": "Name",
               "type": "string"
             }
           }
@@ -6900,7 +5905,6 @@
                   "items": {
                     "$ref": "#/components/schemas/SourceInfo"
                   },
-                  "title": "Response Sources Sources Get",
                   "type": "array"
                 }
               }
@@ -6946,7 +5950,6 @@
                   "items": {
                     "$ref": "#/components/schemas/VoiceInfo"
                   },
-                  "title": "Response Voices Voices Get",
                   "type": "array"
                 }
               }
@@ -6969,7 +5972,6 @@
             "name": "voice",
             "required": true,
             "schema": {
-              "title": "Voice",
               "type": "string"
             }
           }
@@ -6978,15 +5980,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "anyOf": [
+                "oneOf": [
                   {
                     "$ref": "#/components/schemas/SampleRequest"
                   },
                   {
                     "type": "null"
                   }
-                ],
-                "title": "Req"
+                ]
               }
             }
           }
@@ -7130,15 +6131,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "anyOf": [
+                "oneOf": [
                   {
                     "$ref": "#/components/schemas/WakeRequest"
                   },
                   {
                     "type": "null"
                   }
-                ],
-                "title": "Req"
+                ]
               }
             }
           }

@@ -24,8 +24,6 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -p no:cacheprovider
-      - name: openapi.json is current
-        run: uv run python -m ghost_api.export | diff -u packages/api/openapi.json -
       # The .debs are built only on a release; at least the files they copy must exist.
       - name: every file the packages copy exists
         run: |
@@ -72,6 +70,9 @@ jobs:
       - run: mkdir -p apps/desktop/dist
       - run: cargo clippy --workspace --locked --all-targets -- -D warnings
       - run: cargo nextest run --workspace --locked
+      # The contract the TypeScript client is generated from is the Rust types' document.
+      - name: openapi.json is current
+        run: cargo run -q -p ghost-api --bin ghost-api-export --locked | diff -u packages/api/openapi.json -
       - uses: EmbarkStudios/cargo-deny-action@v2
         with: { command: check }
       # The bundle (ADR 0038): the daemon and the app's two binaries in release, then one

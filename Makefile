@@ -173,8 +173,9 @@ test: ## the Python test suite
 typecheck: ## the TypeScript apps and packages
 	pnpm typecheck
 
-api-schema: ## regenerate packages/api/openapi.json from the pydantic models (then pnpm gen for the TS client)
-	$(UV) run python -m ghost_api.export > packages/api/openapi.json
+api-schema: ## regenerate packages/api/openapi.json from the Rust types (crates/ghost-api), then the TS client
+	cargo run -q -p ghost-api --bin ghost-api-export > packages/api/openapi.json
+	pnpm gen
 
 ##@ Versions and releases (docs/releasing.md; a version is YYYY.M.N and its bump is a PR)
 

@@ -886,8 +886,8 @@ export interface paths {
         };
         /**
          * Skill Updates
-         * @description For each skill Ghost installed from GitHub, whether its folder has changed at
-         *     the source since. Asks GitHub now (a recent answer per repository is reused).
+         * @description For each skill Ghost installed from GitHub, whether its folder has changed at the
+         *     source since. Asks GitHub now (a recent answer per repository is reused).
          */
         get: operations["skill_updates_skill_catalog_updates_get"];
         put?: never;
@@ -1138,83 +1138,53 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** Ack */
         Ack: {
-            /** Detail */
             detail?: string | null;
-            /** Ok */
             ok: boolean;
         };
-        /**
-         * AppAction
-         * @description One of an app's tools, and what Ghost's own permissions say about it.
-         */
+        /** @description One of an app's tools, and what Ghost's own permissions say about it. */
         AppAction: {
-            /**
-             * Conditional
-             * @default false
-             */
+            /** @description A rule with argument patterns may decide some calls. */
             conditional: boolean;
-            /** Description */
+            /** @description The app's, first sentence: untrusted text, shown to the operator only. */
             description: string;
-            /**
-             * Level
-             * @enum {string}
-             */
+            /** @enum {string} */
             level: "allow" | "ask" | "block" | "quiet";
-            /** Name */
             name: string;
-            /** Reads */
+            /** @description Read-only, by the app's own word; anything else is a change. */
             reads: boolean;
-            /** Rule */
+            /** @description The rule that names just this tool ("github.issue_write"). */
             rule: string;
         };
         /**
-         * AppConnect
-         * @description Connect an app: from the catalog (``catalog`` and ``option``), from a URL, or from
-         *     another client's pasted config. Secret values go to Ghost's environment, never into
-         *     apps.json, and never come back out.
+         * @description Connect an app: from the catalog (`catalog` and `option`), from a URL, or from another
+         *     client's pasted config. Secret values go to Ghost's vault, never into apps.json, and
+         *     never come back out.
          */
         AppConnect: {
-            /** Catalog */
             catalog?: string | null;
-            /** Config */
             config?: string | null;
-            /** Name */
             name?: string | null;
-            /** Option */
             option?: string | null;
-            /** Replace */
             replace?: boolean | null;
-            /** Url */
             url?: string | null;
-            /** Values */
             values?: {
                 [key: string]: string;
             } | null;
         };
-        /** AppConnectResult */
         AppConnectResult: {
-            /** Apps */
             apps: components["schemas"]["AppView"][];
-            /**
-             * Problems
-             * @default []
-             */
+            /** @description What the operator should know about a pasted config: keys Ghost does not read. */
             problems: string[];
-            /** Sign In Url */
             sign_in_url?: string | null;
         };
         /**
-         * AppsEvent
-         * @description An app was connected, disconnected or changed state: read ``GET /apps``. With
-         *     ``sign_in_url``, the app is waiting for the operator to sign in there; the desktop opens
+         * @description An app was connected, disconnected or changed state: read `GET /apps`. With
+         *     `sign_in_url`, the app is waiting for the operator to sign in there; the desktop opens
          *     it in the browser.
          */
         AppsEvent: {
-            /** Changed */
             changed?: string | null;
-            /** Sign In Url */
             sign_in_url?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -1222,374 +1192,195 @@ export interface components {
              */
             type: "apps";
         };
-        /**
-         * AppView
-         * @description A connected app: how it is reached, whether it is up, and what it can do.
-         */
+        /** @description A connected app: how it is reached, whether it is up, and what it can do. */
         AppView: {
-            /**
-             * Actions
-             * @default []
-             */
             actions: components["schemas"]["AppAction"][];
-            /** Catalog */
+            /** @description The catalog entry it came from. */
             catalog?: string | null;
-            /** Icon */
             icon?: string | null;
-            /**
-             * Kind
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "sign_in" | "key" | "local" | "custom";
-            /** Name */
+            /** @description Its short name: the rules' and the tools' prefix. */
             name: string;
-            /** Problem */
+            /** @description Not connected, or tools not offered, and why; never a secret. */
             problem?: string | null;
-            /**
-             * Settings
-             * @default []
-             */
+            /** @description The environment names it needs (secret values never shown). */
             settings: string[];
-            /** Sign In Url */
+            /** @description Waiting for the operator's browser. */
             sign_in_url?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
+            /** @enum {string} */
             state: "connected" | "connecting" | "needs_sign_in" | "failed" | "stopped";
-            /** Title */
             title: string;
         };
-        /** AuditEntry */
         AuditEntry: {
-            /** Autonomy */
             autonomy: string;
-            /** Conversation */
+            /** @description The agent it was proposed with (ADR 0014); colours the entry. */
             conversation?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
+            /** Format: date-time */
             created_at: string;
-            /** Events */
             events: components["schemas"]["AuditEventView"][];
-            /** Id */
             id: string;
-            /** Operation */
             operation: string;
-            /** Session Id */
             session_id: string;
-            /** Source */
+            /** @description An app, or Ghost's own (conversations, skills, ...). */
             source: string;
-            /** Status */
             status: string;
-            /** Summary */
             summary: string;
-            /** Target */
             target: string;
         };
-        /** AuditEventView */
         AuditEventView: {
-            /**
-             * At
-             * Format: date-time
-             */
+            /** Format: date-time */
             at: string;
-            /** Detail */
             detail?: {
                 [key: string]: unknown;
             } | null;
-            /** Event */
             event: string;
         };
-        /** AuditPage */
         AuditPage: {
-            /** Items */
             items: components["schemas"]["AuditEntry"][];
-            /** Limit */
+            /** Format: int64 */
             limit: number;
-            /** Offset */
+            /** Format: int64 */
             offset: number;
-            /** Total */
+            /** Format: int64 */
             total: number;
         };
         /**
-         * Build
-         * @description Which kind of build the running daemon is (docs/releasing.md): ``dev`` runs from a
-         *     checkout, ``deploy`` from a ``make deploy`` runtime, ``release`` from the .deb. The
-         *     commit is the full hash when known; ``dirty`` is a checkout that had uncommitted
-         *     changes when the daemon started. ``launcher`` is how a checkout's daemon was started,
-         *     when the make target says so (``GHOST_LAUNCHER``): ``make-dev`` for ``make dev`` and
-         *     ``make daemon`` (restarted with ``make reload``), ``make-start`` for ``make start``
-         *     (``make restart``); anything else (a unit running the checkout, ``uv run``) is None.
+         * @description Which kind of build the running daemon is (docs/releasing.md): `dev` runs from a
+         *     checkout, `deploy` from a `make deploy` runtime, `release` from the bundle. The commit
+         *     is the full hash when known; `dirty` is a checkout that had uncommitted changes when
+         *     the daemon started. `launcher` is how a checkout's daemon was started, when the make
+         *     target says so (`GHOST_LAUNCHER`).
          */
         Build: {
-            /** Commit */
             commit?: string | null;
-            /**
-             * Dirty
-             * @default false
-             */
             dirty: boolean;
-            /**
-             * Kind
-             * @default dev
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "dev" | "deploy" | "release";
-            /** Launcher */
             launcher?: ("make-dev" | "make-start") | null;
         };
         /**
-         * CatalogEntryView
-         * @description An app in the catalog. Its text is the registry's: shown to the operator, never
-         *     to the model.
+         * @description An app in the catalog. Its text is the registry's: shown to the operator, never to the
+         *     model.
          */
         CatalogEntryView: {
-            /**
-             * Connected
-             * @default []
-             */
+            /** @description The names it is connected under already. */
             connected: string[];
-            /** Description */
             description: string;
-            /**
-             * Featured
-             * @default false
-             */
             featured: boolean;
-            /** Icon */
             icon?: string | null;
             maker?: components["schemas"]["CatalogMaker"] | null;
-            /** Name */
+            /** @description The registry's name, reverse-DNS. */
             name: string;
-            /**
-             * Options
-             * @default []
-             */
             options: components["schemas"]["CatalogOption"][];
             /**
-             * Others
-             * @default []
+             * @description In search results: other publishers' entries for the same product, folded under
+             *     the maker's own. Always empty on `GET /catalog/{name}`.
              */
             others: components["schemas"]["CatalogEntryView"][];
-            /** Product */
             product?: string | null;
-            /** Product Maker */
             product_maker?: string | null;
             publisher?: components["schemas"]["CatalogPublisher"] | null;
-            /** Repository */
             repository?: string | null;
-            /** Suggested Name */
+            /** @description The short name it would be connected under. */
             suggested_name: string;
-            /** Title */
             title: string;
-            /** Updated At */
+            /** Format: date-time */
             updated_at?: string | null;
-            /** Version */
             version: string;
-            /** Website */
             website?: string | null;
         };
-        /**
-         * CatalogMaker
-         * @description The entry is the product maker's own, and what agreed: the publisher's name is the
-         *     product's (``publisher``) or Ghost's own list says so (``listed``); it connects to the
-         *     maker's host (``remote``); its repository is theirs; its website is theirs.
-         */
+        /** @description The entry is the product maker's own, and what agreed. */
         CatalogMaker: {
-            /** Evidence */
             evidence: ("publisher" | "listed" | "remote" | "repository" | "website")[];
-            /** Product */
             product: string;
         };
         /**
-         * CatalogOption
-         * @description One way to connect: sign in, an API key, or run on this computer. Where it runs:
-         *     a remote's ``host``, and whose host that is; a package's ``registry`` and name.
+         * @description One way to connect: sign in, an API key, or run on this computer. Where it runs: a
+         *     remote's `host`, and whose host that is; a package's `registry` and name.
          */
         CatalogOption: {
-            /** Host */
+            /** @description A remote's host: what Ghost sends the app goes there. */
             host?: string | null;
-            /** Host Owner */
+            /** @description The product maker's host, the publisher's own, or someone else's. */
             host_owner?: ("maker" | "publisher" | "other") | null;
-            /** Id */
             id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "sign_in" | "key" | "local";
-            /** Label */
             label: string;
-            /** Package */
+            /** @description Its name there: "posthog-mcp". */
             package?: string | null;
-            /** Registry */
             registry?: ("npm" | "pypi" | "oci") | null;
-            /**
-             * Settings
-             * @default []
-             */
             settings: components["schemas"]["CatalogSetting"][];
         };
-        /** CatalogPage */
         CatalogPage: {
-            /** Entries */
             entries: components["schemas"]["CatalogEntryView"][];
-            /** Fetched At */
+            /** Format: date-time */
             fetched_at?: string | null;
-            /** Problem */
             problem?: string | null;
-            /**
-             * Refreshing
-             * @default false
-             */
             refreshing: boolean;
-            /** Total */
+            /**
+             * Format: int64
+             * @description Results, counting a maker's own with what folds under it as one.
+             */
             total: number;
         };
         /**
-         * CatalogPublisher
-         * @description Who published an entry, as the registry checked it: the GitHub account it signed in
-         *     with (``io.github.PostHog/…``), or the domain it proved it owns (``com.mcparmory/…``).
-         *     Who published it, not whether it is safe.
+         * @description Who published an entry, as the registry checked it. Who published it, not whether it
+         *     is safe.
          */
         CatalogPublisher: {
-            /** Name */
+            /** @description "PostHog", "mcparmory.com" */
             name: string;
-            /**
-             * Verified
-             * @enum {string}
-             */
+            /** @enum {string} */
             verified: "github" | "domain";
         };
-        /** CatalogSetting */
         CatalogSetting: {
-            /**
-             * Choices
-             * @default []
-             */
             choices: string[];
-            /** Default */
             default?: string | null;
-            /** Key */
             key: string;
-            /** Label */
             label: string;
-            /**
-             * Required
-             * @default true
-             */
             required: boolean;
-            /**
-             * Secret
-             * @default false
-             */
             secret: boolean;
         };
-        /** CompactionView */
         CompactionView: {
-            /**
-             * At
-             * Format: date-time
-             */
+            /** Format: date-time */
             at: string;
-            /** Id */
             id: string;
-            /** Source */
             source: string;
-            /** Summary */
             summary: string;
-            /** Through Turn Id */
+            /** Format: int64 */
             through_turn_id: number | null;
         };
-        /**
-         * ConversationCreate
-         * @description Hire an agent.
-         */
+        /** @description Hire an agent. */
         ConversationCreate: {
-            /**
-             * Aliases
-             * @default []
-             */
             aliases: string[];
-            /**
-             * Job
-             * @default
-             */
             job: string;
-            /** Name */
             name: string;
-            /**
-             * Persona
-             * @default
-             */
             persona: string;
-            /** Seed From */
+            /**
+             * @description Slug of a retired agent whose memory.md becomes this one's first memory, as a
+             *     handoff. Never Ghost.
+             */
             seed_from?: string | null;
-            /** Speed */
+            /** Format: double */
             speed?: number | null;
-            /** Voice */
+            /** @description None: Ghost's voice. */
             voice?: string | null;
         };
-        /** ConversationDetail */
-        ConversationDetail: {
-            /** Active */
-            active: boolean;
-            /** Aliases */
-            aliases: string[];
-            /** Compactions */
+        ConversationDetail: components["schemas"]["ConversationView"] & {
+            /** Format: int64 */
             compactions: number;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Dir */
             dir: string;
-            /** Id */
-            id: string;
-            /** Is Ghost */
-            is_ghost: boolean;
-            /**
-             * Job
-             * @default
-             */
-            job: string;
-            /** Last Active At */
-            last_active_at: string | null;
-            /** Memory */
             memory: string;
-            /** Name */
-            name: string;
-            /** Notes */
             notes: string[];
-            /**
-             * Own Voice
-             * @default false
-             */
-            own_voice: boolean;
-            /** Persona */
             persona: string;
-            /** Retired At */
-            retired_at?: string | null;
-            /** Slug */
-            slug: string;
-            /** Speed */
-            speed: number;
-            /** Turn Count */
+            /** Format: int64 */
             turn_count: number;
-            /** Voice */
-            voice: string;
         };
-        /**
-         * ConversationEvent
-         * @description The session moved to another conversation, or one was created, changed or removed.
-         */
+        /** @description The session moved to another conversation, or one was created, changed or removed. */
         ConversationEvent: {
-            /** Active */
             active: string | null;
-            /** Changed */
             changed?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -1598,168 +1389,107 @@ export interface components {
             type: "conversation";
         };
         /**
-         * ConversationUpdate
-         * @description Each field present is applied as its own audited write.
+         * @description Each field present is applied as its own audited write. `voice` "" means back to
+         *     Ghost's voice.
          */
         ConversationUpdate: {
-            /** Aliases */
             aliases?: string[] | null;
-            /** Job */
             job?: string | null;
-            /** Memory */
             memory?: string | null;
-            /** Name */
             name?: string | null;
-            /** Notes */
             notes?: string[] | null;
-            /** Persona */
             persona?: string | null;
-            /** Seed From */
             seed_from?: string | null;
-            /** Speed */
+            /** Format: double */
             speed?: number | null;
-            /** Voice */
             voice?: string | null;
         };
-        /**
-         * ConversationView
-         * @description An agent (ADR 0014, ADR 0035): a conversation with a persona and a job.
-         */
+        /** @description An agent (ADR 0014, ADR 0035): a conversation with a persona and a job. */
         ConversationView: {
-            /** Active */
+            /** @description The running session is with it. */
             active: boolean;
-            /** Aliases */
             aliases: string[];
-            /**
-             * Created At
-             * Format: date-time
-             */
+            /** Format: date-time */
             created_at: string;
-            /** Id */
             id: string;
-            /** Is Ghost */
             is_ghost: boolean;
-            /**
-             * Job
-             * @default
-             */
             job: string;
-            /** Last Active At */
+            /** Format: date-time */
             last_active_at: string | null;
-            /** Name */
             name: string;
-            /**
-             * Own Voice
-             * @default false
-             */
+            /** @description True when the voice is the agent's own. */
             own_voice: boolean;
-            /** Retired At */
+            /**
+             * Format: date-time
+             * @description Set: off the roster and voice routing, still readable.
+             */
             retired_at?: string | null;
-            /** Slug */
             slug: string;
-            /** Speed */
+            /** Format: double */
             speed: number;
-            /** Voice */
+            /** @description The voice heard: its own, else Ghost's. */
             voice: string;
         };
-        /** DeviceInfo */
         DeviceInfo: {
-            /** Default Samplerate */
+            /** Format: double */
             default_samplerate: number;
-            /** Index */
+            /** Format: int64 */
             index: number;
-            /** Is Default Input */
             is_default_input: boolean;
-            /** Is Default Output */
             is_default_output: boolean;
-            /** Max Input Channels */
+            /** Format: int64 */
             max_input_channels: number;
-            /** Max Output Channels */
+            /** Format: int64 */
             max_output_channels: number;
-            /** Name */
             name: string;
         };
-        /** DevicesView */
         DevicesView: {
-            /** Devices */
             devices: components["schemas"]["DeviceInfo"][];
-            /** Echo Cancel Active */
             echo_cancel_active: boolean;
-            /** Echo Cancel Source Present */
             echo_cancel_source_present: boolean;
-            /** Input Device */
             input_device: string | null;
-            /** Output Device */
             output_device: string | null;
         };
         /**
-         * HookInfo
-         * @description A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of
-         *     deliveries since the daemon started. Counts only; never a body.
+         * @description A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of deliveries
+         *     since the daemon started. Counts only; never a body.
          */
         HookInfo: {
-            /**
-             * Accepted
-             * @default {}
-             */
+            /** @description item, resolved, ignored */
             accepted: {
                 [key: string]: number;
             };
-            /** Events */
             events: string[];
-            /** Last */
+            /** Format: date-time */
             last?: string | null;
-            /** Name */
             name: string;
-            /** Off Reason */
             off_reason?: string | null;
-            /** On */
             on: boolean;
-            /** Path */
+            /** @description POST here on the webhook listener. */
             path: string;
-            /**
-             * Rejected
-             * @default {}
-             */
+            /** @description By reason. */
             rejected: {
                 [key: string]: number;
             };
-            /**
-             * Verify
-             * @enum {string}
-             */
+            /** @enum {string} */
             verify: "github" | "hmac";
         };
-        /** HTTPValidationError */
+        /** @description The 422 body: a list of what was wrong. */
         HTTPValidationError: {
-            /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /** ImportSourceView */
         ImportSourceView: {
-            /**
-             * Kind
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "heka_vault" | "file";
-            /** Path */
             path: string;
         };
-        /** ItemKey */
         ItemKey: {
-            /** Key */
             key: string;
         };
-        /** LogEvent */
         LogEvent: {
-            /**
-             * At
-             * Format: date-time
-             */
+            /** Format: date-time */
             at: string;
-            /** Level */
             level: string;
-            /** Message */
             message: string;
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -1767,194 +1497,122 @@ export interface components {
              */
             type: "log";
         };
-        /**
-         * ModelConnectionView
-         * @description The model connection now. No key is in it: only whether its Password is set.
-         */
+        /** @description The model connection now. No key is in it: only whether its Password is set. */
         ModelConnectionView: {
-            /** Base Url */
+            /** @description Where calls go. */
             base_url: string;
-            /** Base Url Override */
+            /** @description Set when it isn't the provider's own. */
             base_url_override?: string | null;
-            /**
-             * Headers
-             * @default {}
-             */
             headers: {
                 [key: string]: string;
             };
-            /** Legacy */
+            /** @description The older setting it comes from ("GHOST_LLM_ENDPOINT=openrouter"). */
             legacy?: string | null;
-            /** Model */
+            /** @description As saved; "" means the provider's default. */
             model: string;
-            /** Password */
+            /** @description The name. */
             password?: string | null;
-            /** Password Set */
             password_set: boolean;
-            /**
-             * Problems
-             * @default []
-             */
             problems: string[];
-            /**
-             * Protocol
-             * @enum {string}
-             */
+            /** @enum {string} */
             protocol: "anthropic" | "openai";
-            /** Provider */
             provider: string;
-            /**
-             * Providers
-             * @default []
-             */
             providers: components["schemas"]["ModelProviderView"][];
-            /** Ready */
             ready: boolean;
-            /** Sign In Error */
+            /** @description The last sign-in didn't go through. */
             sign_in_error?: string | null;
-            /**
-             * Sign In Pending
-             * @default false
-             */
+            /** @description OpenRouter is waiting for the browser. */
             sign_in_pending: boolean;
-            /** Timeout Secs */
+            /** Format: double */
             timeout_secs?: number | null;
-            /**
-             * Values
-             * @default {}
-             */
+            /** @description The GHOST_LLM_* values that say this connection explicitly. */
             values: {
                 [key: string]: string;
             };
-            /** Wire Model */
+            /** @description What is sent. */
             wire_model: string;
         };
         /**
-         * ModelDraft
-         * @description A connection being edited: GHOST_LLM_* values over the saved ones (None removes
-         *     one), and a key typed but not saved yet, used for this one request and dropped.
+         * @description A connection being edited: GHOST_LLM_* values over the saved ones (None removes one),
+         *     and a key typed but not saved yet, used for this one request and dropped.
          */
         ModelDraft: {
-            /** Password Value */
-            password_value?: string | null;
             /**
-             * Values
-             * @default {}
+             * Format: password
+             * @description Write-only, like `PasswordSet.value`: never echoed.
              */
+            password_value?: string | null;
             values: {
                 [key: string]: string | null;
             };
         };
-        /** ModelListView */
         ModelListView: {
-            /** Default */
+            /** @description The provider's default, when it lists it. */
             default?: string | null;
-            /** Error */
+            /** @description Why the list couldn't be read; models is empty then. */
             error?: string | null;
-            /** Models */
             models: components["schemas"]["ModelOptionView"][];
         };
-        /** ModelOptionView */
         ModelOptionView: {
-            /** Id */
             id: string;
-            /** Name */
             name?: string | null;
         };
-        /**
-         * ModelProviderView
-         * @description One way to reach a model, as the Model page offers it.
-         */
+        /** @description One way to reach a model, as the Model page offers it. */
         ModelProviderView: {
-            /** Base Url */
+            /** @description "" for a URL of the operator's own. */
             base_url: string;
-            /** Blurb */
             blurb: string;
-            /** Default Model */
+            /** @description None: the first the provider lists. */
             default_model?: string | null;
-            /** Id */
             id: string;
-            /**
-             * Local
-             * @default false
-             */
             local: boolean;
-            /** Password */
+            /** @description The Password's name it uses by default. */
             password?: string | null;
-            /**
-             * Password Optional
-             * @default false
-             */
             password_optional: boolean;
-            /**
-             * Protocol
-             * @enum {string}
-             */
+            /** @enum {string} */
             protocol: "anthropic" | "openai";
-            /**
-             * Sign In
-             * @default false
-             */
+            /** @description OpenRouter: signing in gives the key. */
             sign_in: boolean;
-            /** Title */
             title: string;
         };
-        /** ModelSignInResult */
         ModelSignInResult: {
-            /** Url */
+            /** @description The desktop opens it; the loopback takes the browser's way back. */
             url: string;
         };
-        /** ModelsView */
         ModelsView: {
-            /** Cache Dir */
             cache_dir: string;
-            /** Kokoro Present */
             kokoro_present: boolean;
-            /** Ready */
             ready: boolean;
-            /** Stt Model */
             stt_model: string;
         };
-        /**
-         * ModelTestResult
-         * @description One tiny request, timed like ``make perf-llm``: request to first token.
-         */
+        /** @description One tiny request, timed like `make perf-llm`: request to first token. */
         ModelTestResult: {
-            /** Answered By */
+            /** @description What the provider said answered, when it says. */
             answered_by?: string | null;
-            /** Error */
             error?: string | null;
-            /** Model */
+            /** @description What was asked for. */
             model: string;
-            /** Ok */
             ok: boolean;
-            /** Reply */
+            /** @description The first words, shortened. */
             reply?: string | null;
-            /** Total Ms */
+            /** Format: int64 */
             total_ms?: number | null;
-            /** Ttft Ms */
+            /** Format: int64 */
             ttft_ms?: number | null;
-            /** Where */
+            /** @description Provider, protocol and host; never a key. */
             where: string;
         };
-        /** OperationInfo */
         OperationInfo: {
-            /** Autonomy */
+            /** @description By name alone; a rule with argument patterns may decide some calls. */
             autonomy: string;
-            /** Description */
             description: string;
-            /** Name */
             name: string;
-            /** Properties */
             properties: {
                 [key: string]: unknown;
             };
-            /** Required */
             required: string[];
-            /** Risk */
             risk: string;
         };
-        /** OutcomeEvent */
         OutcomeEvent: {
             outcome: components["schemas"]["OutcomeView"];
             /**
@@ -1962,137 +1620,78 @@ export interface components {
              * @enum {string}
              */
             type: "outcome";
-            /**
-             * Via
-             * @enum {string}
-             */
+            /** @enum {string} */
             via: "voice" | "ui" | "autonomous";
         };
-        /** OutcomeView */
         OutcomeView: {
-            /** Applied */
             applied: string[];
-            /** Error */
             error?: string | null;
-            /** Failed Step */
             failed_step?: string | null;
-            /** Proposal Id */
             proposal_id: string;
-            /** State Now */
             state_now?: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
+            /** @enum {string} */
             status: "success" | "partial" | "failed";
-            /** Summary */
             summary: string;
-            /** Target */
             target: string;
         };
-        /**
-         * OutputInfo
-         * @description A file Ghost made in its out/ folder (ADR 0033). Ghost never runs it.
-         */
+        /** @description A file Ghost made in its out/ folder (ADR 0033). Ghost never runs it. */
         OutputInfo: {
-            /** Bytes */
+            /** Format: int64 */
             bytes: number;
-            /**
-             * Modified
-             * Format: date-time
-             */
+            /** Format: date-time */
             modified: string;
-            /** Name */
             name: string;
-            /** Path */
             path: string;
         };
-        /** PasswordImportResult */
         PasswordImportResult: {
-            /**
-             * Imported
-             * @default []
-             */
+            /** @description Names now in the vault. */
             imported: string[];
-            /**
-             * Kept
-             * @default []
-             */
+            /** @description Already in the vault; left as they were. */
             kept: string[];
-            /**
-             * Notes
-             * @default []
-             */
             notes: string[];
             passwords: components["schemas"]["PasswordsView"];
-            /**
-             * Removed
-             * @default []
-             */
+            /** @description Plaintext files deleted. */
             removed: string[];
-            /**
-             * Restart Required
-             * @default false
-             */
             restart_required: boolean;
-            /**
-             * Settings
-             * @default []
-             */
+            /** @description Non-secret settings moved to settings.env. */
             settings: string[];
         };
-        /** PasswordInfo */
         PasswordInfo: {
-            /** Added */
+            /** Format: date-time */
             added?: string | null;
-            /**
-             * Ghost
-             * @default false
-             */
+            /** @description One Ghost itself reads; a new value applies at its next start. */
             ghost: boolean;
-            /** Last Used */
-            last_used?: string | null;
-            /** Name */
-            name: string;
-            /** Set */
-            set: boolean | null;
-            /** Updated */
-            updated?: string | null;
             /**
-             * Used By
-             * @default []
+             * Format: date-time
+             * @description The last time Ghost filled it in.
              */
+            last_used?: string | null;
+            /** @description What config files call it: ${NAME} */
+            name: string;
+            /** @description In the vault; None while the vault is closed (locked): unknown. */
+            set: boolean | null;
+            /** Format: date-time */
+            updated?: string | null;
+            /** @description "The model connection", "GitHub" (an app), "Webhook ci" */
             used_by: string[];
         };
-        /** PasswordResult */
         PasswordResult: {
             passwords: components["schemas"]["PasswordsView"];
-            /**
-             * Restart Required
-             * @default false
-             */
+            /** @description Ghost's own: the service must restart to use it. */
             restart_required: boolean;
         };
-        /** PasswordSet */
+        /** @description Write-only; never echoed, not even in a validation error. */
         PasswordSet: {
-            /**
-             * Value
-             * Format: password
-             */
+            /** Format: password */
             value: string;
         };
-        /** PasswordsView */
         PasswordsView: {
-            /**
-             * Importable
-             * @default []
-             */
+            /** @description What an import would take; empty after one. */
             importable: components["schemas"]["ImportSourceView"][];
-            /** Passwords */
             passwords: components["schemas"]["PasswordInfo"][];
             vault: components["schemas"]["VaultView"];
         };
-        /** PendingEvent */
+        /** @description `pending` None when it was resolved or cancelled. */
         PendingEvent: {
             pending: components["schemas"]["PendingProposal"] | null;
             /**
@@ -2101,588 +1700,348 @@ export interface components {
              */
             type: "pending";
         };
-        /** PendingProposal */
         PendingProposal: {
-            /**
-             * Expires At
-             * Format: date-time
-             */
+            /** Format: date-time */
             expires_at: string;
-            /** Expires In Secs */
+            /** Format: double */
             expires_in_secs: number;
-            /** Id */
             id: string;
-            /** Operation */
             operation: string;
-            /** Rationale */
             rationale: string;
-            /** Source */
+            /** @description What it changes: an app, or Ghost's own (a `ToolSource` name). */
             source: string;
-            /** Summary */
             summary: string;
-            /** Target */
             target: string;
         };
-        /**
-         * PermissionsUpdate
-         * @description Whole lists, the mode, or one rule moved; what is not given is kept.
-         */
+        /** @description Whole lists, the mode, or one rule moved; what is not given is kept. */
         PermissionsUpdate: {
-            /** Allow */
             allow?: string[] | null;
-            /** Ask */
             ask?: string[] | null;
-            /** Block */
             block?: string[] | null;
-            /** Mode */
             mode?: ("open" | "ask" | "read-only") | null;
-            /** Quiet */
             quiet?: string[] | null;
             set?: components["schemas"]["RuleSet"] | null;
         };
-        /**
-         * PermissionsView
-         * @description ``[permissions]`` in policy.toml: everything runs unless a rule says otherwise.
-         */
+        /** @description `[permissions]` in policy.toml: everything runs unless a rule says otherwise. */
         PermissionsView: {
-            /**
-             * Allow
-             * @default []
-             */
             allow: string[];
-            /**
-             * Ask
-             * @default []
-             */
             ask: string[];
-            /**
-             * Block
-             * @default []
-             */
             block: string[];
-            /**
-             * Mode
-             * @enum {string}
-             */
+            /** @enum {string} */
             mode: "open" | "ask" | "read-only";
-            /** Path */
             path: string;
-            /**
-             * Quiet
-             * @default []
-             */
             quiet: string[];
         };
         /**
-         * Phase
+         * @description Where the daemon is. The tray tooltip and the phone's Home read it.
          * @enum {string}
          */
         Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking";
-        /**
-         * PhoneAddress
-         * @description One ``GHOST_PHONE_LISTEN`` address and the network it is on.
-         */
+        /** @description One `GHOST_PHONE_LISTEN` address and the network it is on. */
         PhoneAddress: {
-            /** Address */
             address: string;
-            /** Listening */
+            /** @description Bound now; a tunnel address whose interface isn't up yet is retried. */
             listening: boolean;
-            /** Network */
+            /**
+             * @description None when Ghost can't tell: the address is on every interface (0.0.0.0), or on
+             *     none of this computer's right now.
+             */
             network: ("home" | "tunnel") | null;
         };
-        /** PhoneDevice */
         PhoneDevice: {
-            /** Id */
             id: string;
-            /** Last Address */
+            /** @description The listen address that request came in on. */
             last_address?: string | null;
-            /** Last Network */
+            /** @description And the network it came over. */
             last_network?: ("home" | "tunnel") | null;
-            /** Last Seen */
-            last_seen: string | null;
-            /** Name */
-            name: string;
             /**
-             * Paired At
              * Format: date-time
+             * @description The phone's last verified request.
              */
+            last_seen: string | null;
+            name: string;
+            /** Format: date-time */
             paired_at: string;
         };
-        /**
-         * PhonePairing
-         * @description A fresh pairing code for the phone listener. Shown to the operator only.
-         */
+        /** @description A fresh pairing code for the phone listener. Shown to the operator only. */
         PhonePairing: {
-            /** Address */
+            /** @description The first GHOST_PHONE_LISTEN address, host:port; what the operator types. */
             address: string;
-            /** Addresses */
+            /** @description Every address the listener serves. */
             addresses?: string[];
-            /** Code */
+            /** @description Six digits. */
             code: string;
-            /**
-             * Expires At
-             * Format: date-time
-             */
+            /** Format: date-time */
             expires_at: string;
-            /** Link */
+            /** @description The QR code's payload: ghost://pair?code=…&address=…, every address in order. */
             link: string;
         };
-        /** PhoneView */
         PhoneView: {
-            /** Address */
+            /** @description None when the listener is off. */
             address: string | null;
-            /** Addresses */
+            /** @description LAN first, then the tunnel (ADR 0020). */
             addresses?: string[];
             device: components["schemas"]["PhoneDevice"] | null;
-            /** Listen */
+            /** @description The same, with each network. */
             listen?: components["schemas"]["PhoneAddress"][];
         };
-        /** PolicyResult */
         PolicyResult: {
-            /** Applied */
+            /** @description Reloaded live. */
             applied: boolean;
             policy: components["schemas"]["PolicyView"];
         };
         /**
-         * PolicyUpdate
          * @description Either the raw TOML, or the routes rendered into it (the permissions have their own
-         *     route, ``PUT /permissions``).
+         *     route, `PUT /permissions`).
          */
         PolicyUpdate: {
             routes?: components["schemas"]["RoutesView"] | null;
-            /** Text */
             text?: string | null;
         };
-        /** PolicyView */
         PolicyView: {
-            /** Exists */
             exists: boolean;
-            /** Path */
             path: string;
             permissions: components["schemas"]["PermissionsView"];
             routes?: components["schemas"]["RoutesView"] | null;
-            /** Text */
             text: string;
         };
-        /** ReadToolInfo */
         ReadToolInfo: {
-            /** Description */
             description: string;
-            /** Name */
             name: string;
         };
-        /**
-         * RoutesView
-         * @description ``[routes]`` in the policy file (ADR 0031): how Ghost reaches the operator.
-         */
+        /** @description `[routes]` in the policy file (ADR 0031): how Ghost reaches the operator. */
         RoutesView: {
             /**
-             * Available
-             * @default []
+             * @description The routes this daemon has something behind; the others can be listed but do
+             *     nothing yet.
              */
             available: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
-            /** Batch Secs */
+            /** Format: int64 */
             batch_secs: number;
-            /** Calls Per Day */
+            /** Format: int64 */
             calls_per_day: number;
-            /** Calls Per Hour */
+            /** Format: int64 */
             calls_per_hour: number;
-            /**
-             * Carry
-             * @enum {string}
-             */
+            /** @enum {string} */
             carry: "count" | "title";
-            /** Enabled */
             enabled: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
-            /** Escalate After */
-            escalate_after: number;
-            /** Greeting */
-            greeting: string;
-            /** Quiet Hours */
-            quiet_hours?: string | null;
             /**
-             * Urgency
-             * @default {}
+             * Format: int64
+             * @description Minutes.
              */
+            escalate_after: number;
+            greeting: string;
+            /** @description "22:00-07:00" */
+            quiet_hours?: string | null;
             urgency: {
                 [key: string]: "digest" | "notify" | "call";
             };
         };
-        /**
-         * RuleAdd
-         * @description A rule appended to Ghost's AGENTS.md, verbatim (ADR 0035).
-         */
+        /** @description A rule appended to Ghost's AGENTS.md, verbatim (ADR 0035). */
         RuleAdd: {
-            /** Text */
             text: string;
         };
-        /**
-         * RuleSet
-         * @description One toggle: move ``rule`` into ``level``'s list, or out of every list (None).
-         */
+        /** @description One toggle: move `rule` into `level`'s list, or out of every list (None). */
         RuleSet: {
-            /** Level */
             level?: ("allow" | "ask" | "block" | "quiet") | null;
-            /** Rule */
             rule: string;
         };
-        /**
-         * RulesView
-         * @description Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt.
-         */
+        /** @description Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt. */
         RulesView: {
-            /** Path */
+            /** @description The file the operator opens. */
             path: string;
-            /** Text */
             text: string;
         };
-        /** SampleRequest */
         SampleRequest: {
-            /**
-             * Speed
-             * @default 1
-             */
+            /** Format: double */
             speed: number;
-            /** Text */
             text?: string | null;
         };
-        /** SayRequest */
         SayRequest: {
-            /**
-             * Conversation
-             * @description With no session running, the line the new one opens in; Ghost when unset.
-             */
+            /** @description With no session running, the line the new one opens in; Ghost when unset. */
             conversation?: string | null;
-            /** Text */
+            /** @description 1 to 4000 characters. */
             text: string;
         };
-        /** SecretState */
         SecretState: {
-            /** Name */
             name: string;
-            /** Set */
             set: boolean;
         };
-        /** SettingsResult */
         SettingsResult: {
-            /**
-             * Applied
-             * @default []
-             */
+            /** @description Keys the daemon picked up without a restart. */
             applied: string[];
-            /**
-             * Restart Required
-             * @default false
-             */
+            /** @description A pending value or a secret: the service must restart. */
             restart_required: boolean;
             settings: components["schemas"]["SettingsView"];
         };
-        /** SettingsUpdate */
+        /**
+         * @description `values`: a None value deletes the key. `secrets`: write-only, into the vault (ADR
+         *     0036); None deletes.
+         */
         SettingsUpdate: {
-            /** Secrets */
             secrets?: {
                 [key: string]: string | null;
             } | null;
-            /** Values */
             values?: {
                 [key: string]: string | null;
             } | null;
         };
-        /** SettingsView */
         SettingsView: {
-            /** Secrets */
+            /** @description Ghost's own passwords and the apps', set or not (ADR 0036); /passwords has the rest. */
             secrets: components["schemas"]["SecretState"][];
-            /** Settings Path */
             settings_path: string;
-            /** Values */
+            /** @description Non-secret settings, as written in settings.env. */
             values: {
                 [key: string]: string;
             };
         };
-        /** SkillAdd */
         SkillAdd: {
-            /** Name */
             name?: string | null;
-            /**
-             * Path
-             * @description A folder on this machine holding SKILL.md.
-             */
+            /** @description A folder on this machine holding SKILL.md. */
             path: string;
-            /**
-             * Replace
-             * @default false
-             */
             replace: boolean;
         };
-        /** SkillBody */
         SkillBody: {
-            /** Body */
+            /** @description SKILL.md without its front matter, trimmed. */
             body: string;
-            /**
-             * Files
-             * @default []
-             */
             files: string[];
-            /** Name */
             name: string;
         };
-        /** SkillFileView */
         SkillFileView: {
-            /** Bytes */
+            /** Format: int64 */
             bytes: number;
-            /** Path */
             path: string;
-            /** Script */
+            /** @description A file an interpreter runs, or one that was executable upstream. */
             script: boolean;
         };
-        /**
-         * SkillInfo
-         * @description A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.
-         */
+        /** @description A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's. */
         SkillInfo: {
-            /** Description */
             description: string;
-            /**
-             * Files
-             * @default []
-             */
             files: string[];
-            /**
-             * Missing
-             * @default []
-             */
             missing: string[];
-            /** Name */
             name: string;
             origin?: components["schemas"]["SkillOriginView"] | null;
-            /** Path */
             path: string;
-            /** Problem */
             problem?: string | null;
-            /**
-             * Requires
-             * @default []
-             */
             requires: string[];
-            /** Source */
+            /** @description "ghost" for Ghost's own folder, "home" for the operator's ~/.agents/skills. */
             source: string;
         };
-        /** SkillInstall */
         SkillInstall: {
-            /** Name */
             name?: string | null;
-            /**
-             * Replace
-             * @default false
-             */
             replace: boolean;
-            /** Token */
             token: string;
         };
         /**
-         * SkillListing
          * @description A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,
          *     never to the model.
          */
         SkillListing: {
-            /** Id */
             id: string;
-            /** Installed */
             installed?: string | null;
-            /** Installs */
+            /** Format: int64 */
             installs: number;
-            /** Name */
             name: string;
-            /** Skill */
             skill: string;
-            /** Source */
             source: string;
         };
-        /**
-         * SkillOriginView
-         * @description Where one of Ghost's skills was installed from (#35), as its lock file records it.
-         */
+        /** @description Where one of Ghost's skills was installed from (#35), as its lock file records it. */
         SkillOriginView: {
-            /** Commit */
             commit: string;
-            /** Folder Hash */
             folder_hash: string;
-            /** Installed At */
             installed_at?: string | null;
-            /** Ref */
             ref?: string | null;
-            /** Skill Path */
             skill_path: string;
-            /** Source */
             source: string;
-            /** Source Url */
             source_url: string;
         };
         /**
-         * SkillPreview
          * @description A skill fetched from GitHub and staged, for the operator to read before installing.
          *     Everything in it but the hashes is the source's text: untrusted.
          */
         SkillPreview: {
-            /** Commit */
             commit: string;
-            /** Description */
             description: string;
-            /**
-             * Files
-             * @default []
-             */
             files: components["schemas"]["SkillFileView"][];
-            /** Folder Hash */
             folder_hash: string;
-            /** Installed */
             installed?: ("ghost" | "home") | null;
-            /** Name */
             name: string;
-            /** Ref */
             ref?: string | null;
-            /**
-             * Scripts
-             * @default []
-             */
+            /** @description The ones ghost-scripts could run, through the gate. */
             scripts: string[];
-            /** Skill Md */
+            /** @description The whole SKILL.md, front matter included. */
             skill_md: string;
-            /** Skill Path */
             skill_path: string;
-            /** Source */
             source: string;
-            /** Source Url */
             source_url: string;
-            /** Token */
+            /** @description What install takes; good for 30 minutes. */
             token: string;
-            /** Update Of */
             update_of?: string | null;
         };
-        /** SkillPreviewRequest */
         SkillPreviewRequest: {
-            /**
-             * Skill
-             * @description The skill's id in it.
-             */
             skill?: string | null;
-            /**
-             * Source
-             * @description owner/repo, owner/repo/skill, or a github.com address of a skill's folder.
-             */
+            /** @description owner/repo, owner/repo/skill, or a github.com address of a skill's folder. */
             source: string;
         };
-        /** SkillSearchPage */
         SkillSearchPage: {
-            /** Fetched At */
+            /** Format: date-time */
             fetched_at?: string | null;
-            /** Problem */
             problem?: string | null;
-            /** Query */
             query: string;
-            /**
-             * Skills
-             * @default []
-             */
             skills: components["schemas"]["SkillListing"][];
         };
-        /**
-         * SkillUpdateView
-         * @description Whether an installed skill's source has moved on, checked when the page asks.
-         */
+        /** @description Whether an installed skill's source has moved on, checked when the page asks. */
         SkillUpdateView: {
-            /** Commit */
             commit: string;
-            /** Latest Commit */
             latest_commit?: string | null;
-            /** Name */
             name: string;
-            /** Problem */
             problem?: string | null;
-            /** Source */
             source: string;
-            /**
-             * Update
-             * @default false
-             */
             update: boolean;
         };
-        /** SnoozeRequest */
         SnoozeRequest: {
-            /** Key */
             key: string;
-            /** Minutes */
+            /**
+             * Format: int64
+             * @description 1 to a week.
+             */
             minutes: number;
         };
-        /**
-         * SourceInfo
-         * @description A source of tools the gate knows: Ghost's own (built in) or a connected app.
-         */
+        /** @description A source of tools the gate knows: Ghost's own (built in) or a connected app. */
         SourceInfo: {
-            /** Description */
             description: string;
-            /** Kind */
+            /** @description "built-in" or "app" */
             kind: string;
-            /** Name */
             name: string;
-            /**
-             * Operations
-             * @default []
-             */
             operations: components["schemas"]["OperationInfo"][];
-            /**
-             * Read Tools
-             * @default []
-             */
             read_tools: components["schemas"]["ReadToolInfo"][];
         };
-        /** Status */
+        /** @description `GET /status`. */
         Status: {
-            /**
-             * Api Version
-             * @default 1
-             */
             api_version: string;
-            /**
-             * Apps
-             * @default []
-             */
+            /** @description The apps connected now (ADR 0034). */
             apps: string[];
-            /**
-             * @default {
-             *       "dirty": false,
-             *       "kind": "dev"
-             *     }
-             */
             build: components["schemas"]["Build"];
-            /** Conversation */
+            /** @description Slug of the agent the session is with (ADR 0014). */
             conversation?: string | null;
-            /**
-             * Ending
-             * @default false
-             */
+            /** @description Ghost has decided to hang up: its goodbye may still be playing. */
             ending: boolean;
-            /** Models Ready */
             models_ready: boolean;
             pending?: components["schemas"]["PendingProposal"] | null;
             phase: components["schemas"]["Phase"];
-            /** Session Id */
             session_id: string | null;
-            /** Session Origin */
             session_origin?: ("desk" | "phone") | null;
-            /** Uptime Secs */
+            /** Format: double */
             uptime_secs: number;
-            /** Version */
+            /** @description YYYY.M.N, the same in every copy (`scripts/version.py`). */
             version: string;
             /**
-             * Waiting
-             * @default 0
+             * Format: int64
+             * @description Items on the waiting list the operator has still to hear (ADR 0029).
              */
             waiting: number;
-            /** Wake Mode */
             wake_mode: string;
         };
-        /** StatusEvent */
         StatusEvent: {
             status: components["schemas"]["Status"];
             /**
@@ -2691,30 +2050,16 @@ export interface components {
              */
             type: "status";
         };
-        /** Turn */
         Turn: {
-            /**
-             * At
-             * Format: date-time
-             */
+            /** Format: date-time */
             at: string;
-            /**
-             * Role
-             * @enum {string}
-             */
+            /** @enum {string} */
             role: "user" | "assistant" | "system";
-            /** Session Id */
             session_id: string;
-            /** Text */
             text: string;
-            /**
-             * Via
-             * @default voice
-             * @enum {string}
-             */
+            /** @enum {string} */
             via: "voice" | "text" | "interceptor" | "system";
         };
-        /** TurnEvent */
         TurnEvent: {
             turn: components["schemas"]["Turn"];
             /**
@@ -2723,68 +2068,44 @@ export interface components {
              */
             type: "turn";
         };
-        /** TurnView */
         TurnView: {
-            /**
-             * At
-             * Format: date-time
-             */
+            /** Format: date-time */
             at: string;
-            /** Compacted */
             compacted: boolean;
-            /** Id */
+            /** Format: int64 */
             id: number;
-            /**
-             * Role
-             * @enum {string}
-             */
+            /** @enum {string} */
             role: "user" | "assistant" | "call" | "system";
-            /** Session Id */
             session_id: string;
-            /** Text */
             text: string;
         };
-        /** ValidationError */
+        /** @description One thing wrong with a request, as FastAPI says it: the kind, where, and why. */
         ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
+            ctx?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description pydantic's extra, never filled: Ghost's 422 says where and why only (ADR 0036). */
             input?: unknown;
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
+            loc: unknown[];
             msg: string;
-            /** Error Type */
             type: string;
         };
-        /**
-         * VaultView
-         * @description Ghost's vault: one encrypted file, its key in the operator's keyring.
-         */
+        /** @description Ghost's vault: one encrypted file, its key in the operator's keyring. */
         VaultView: {
-            /** Path */
             path: string;
-            /** Problem */
+            /** @description Why it isn't open, in the operator's words. */
             problem?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
+            /** @enum {string} */
             state: "open" | "locked" | "unavailable" | "broken";
         };
-        /** VoiceInfo */
         VoiceInfo: {
-            /** Id */
             id: string;
-            /** Label */
+            /** @description "American female: Heart" */
             label: string;
         };
-        /**
-         * WaitingEvent
-         * @description The waiting list changed: read ``GET /waiting`` for it.
-         */
+        /** @description The waiting list changed: read `GET /waiting` for it. */
         WaitingEvent: {
-            /** Count */
+            /** Format: int64 */
             count: number;
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -2793,134 +2114,83 @@ export interface components {
             type: "waiting";
         };
         /**
-         * WaitingItemView
-         * @description One item that needs the operator. ``title`` comes from an outside system: show
-         *     it as text, never as markup. ``change`` is set for a change waiting for a yes.
+         * @description One item that needs the operator. `title` comes from an outside system: show it as
+         *     text, never as markup. `change` is set for a change waiting for a yes.
          */
         WaitingItemView: {
-            /** Acknowledged At */
+            /** Format: date-time */
             acknowledged_at?: string | null;
-            /** Age Secs */
+            /** Format: int64 */
             age_secs: number;
             change?: components["schemas"]["PendingProposal"] | null;
-            /**
-             * Changed At
-             * Format: date-time
-             */
+            /** Format: date-time */
             changed_at: string;
-            /** Delivered At */
+            /** Format: date-time */
             delivered_at?: string | null;
-            /** Delivered Via */
             delivered_via?: string | null;
-            /**
-             * First Seen
-             * Format: date-time
-             */
+            /** Format: date-time */
             first_seen: string;
-            /** Key */
             key: string;
-            /** Link */
             link?: string | null;
-            /** Snoozed Until */
+            /** Format: date-time */
             snoozed_until?: string | null;
-            /** Source */
             source: string;
-            /**
-             * State
-             * @enum {string}
-             */
+            /** @enum {string} */
             state: "new" | "delivered" | "acknowledged" | "snoozed";
-            /** Title */
             title: string;
         };
-        /** WaitingView */
         WaitingView: {
-            /** Count */
+            /**
+             * Format: int64
+             * @description How many still need the operator to hear them.
+             */
             count: number;
-            /** Items */
             items: components["schemas"]["WaitingItemView"][];
         };
-        /** WakeRequest */
         WakeRequest: {
-            /**
-             * Conversation
-             * @description The line the session opens in; Ghost when unset.
-             */
+            /** @description The line the session opens in; Ghost when unset. */
             conversation?: string | null;
-            /**
-             * Text
-             * @description Words to treat as the first turn.
-             */
+            /** @description Words to treat as the first turn. */
             text?: string | null;
         };
-        /**
-         * WatchInfo
-         * @description A watch in watches.json (ADR 0028, ADR 0035) and how its last look went.
-         */
+        /** @description A watch in watches.json (ADR 0028, ADR 0035) and how its last look went. */
         WatchInfo: {
-            /** App */
             app: string;
-            /** Error */
             error?: string | null;
-            /** Every Secs */
+            /** Format: int64 */
             every_secs: number;
-            /** Last Ok */
+            /** Format: date-time */
             last_ok?: string | null;
-            /** Last Run */
+            /** Format: date-time */
             last_run?: string | null;
-            /** Name */
             name: string;
             /**
-             * Open
-             * @default 0
+             * Format: int64
+             * @description Items it holds open now.
              */
             open: number;
-            /** Read */
             read: string;
-            /**
-             * Response
-             * @enum {string}
-             */
+            /** @enum {string} */
             response: "tell" | "record";
             /**
-             * Seen
-             * @default 0
+             * Format: int64
+             * @description Results the last look kept.
              */
             seen: number;
-            /** Steps */
+            /** @description "check", then "jev" and "model" where declared. */
             steps: string[];
-            /**
-             * Urgency
-             * @enum {string}
-             */
+            /** @enum {string} */
             urgency: "digest" | "notify" | "call";
         };
         /**
-         * WatchingView
-         * @description What Ghost watches (ADR 0035): the watches in watches.json, the webhooks in
-         *     hooks.json, where the webhook listener is, and what is wrong in those files or left
-         *     in Ghost's folder from an older layout.
+         * @description What Ghost watches (ADR 0035): the watches, the webhooks, where the webhook listener
+         *     is, and what is wrong in those files or left in Ghost's folder from an older layout.
          */
         WatchingView: {
-            /**
-             * Hooks
-             * @default []
-             */
             hooks: components["schemas"]["HookInfo"][];
-            /**
-             * Listening
-             * @default []
-             */
+            /** @description The webhook listener's addresses; empty when it is off. */
             listening: string[];
-            /**
-             * Problems
-             * @default []
-             */
             problems: string[];
-            /**
-             * Watches
-             * @default []
-             */
             watches: components["schemas"]["WatchInfo"][];
         };
     };
@@ -3179,9 +2449,9 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
-                session_id?: string | null;
-                source?: string | null;
-                status?: string | null;
+                session_id?: string;
+                source?: string;
+                status?: string;
             };
             header?: never;
             path?: never;
@@ -3276,7 +2546,7 @@ export interface operations {
     list_conversations_conversations_get: {
         parameters: {
             query?: {
-                retired?: boolean | null;
+                retired?: boolean;
             };
             header?: never;
             path?: never;

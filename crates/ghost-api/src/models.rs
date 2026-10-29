@@ -108,10 +108,12 @@ pub enum Launcher {
 pub struct Build {
     #[serde(default)]
     #[schema(inline)]
+    #[schema(required)]
     pub kind: BuildKind,
     #[serde(default)]
     pub commit: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub dirty: bool,
     #[serde(default)]
     #[schema(inline)]
@@ -142,12 +144,15 @@ pub struct Status {
     /// YYYY.M.N, the same in every copy (`scripts/version.py`).
     pub version: String,
     #[serde(default)]
+    #[schema(required)]
     pub build: Build,
     #[serde(default = "api_version")]
+    #[schema(required)]
     pub api_version: String,
     pub wake_mode: String,
     /// The apps connected now (ADR 0034).
     #[serde(default)]
+    #[schema(required)]
     pub apps: Vec<String>,
     #[serde(default)]
     pub pending: Option<PendingProposal>,
@@ -159,9 +164,11 @@ pub struct Status {
     pub session_origin: Option<SessionOrigin>,
     /// Ghost has decided to hang up: its goodbye may still be playing.
     #[serde(default)]
+    #[schema(required)]
     pub ending: bool,
     /// Items on the waiting list the operator has still to hear (ADR 0029).
     #[serde(default)]
+    #[schema(required)]
     pub waiting: u64,
 }
 
@@ -192,6 +199,7 @@ pub struct Turn {
     pub at: DateTime<Utc>,
     #[serde(default)]
     #[schema(inline)]
+    #[schema(required)]
     pub via: TurnVia,
 }
 
@@ -467,13 +475,16 @@ pub struct AppAction {
     pub description: String,
     /// Read-only, by the app's own word; anything else is a change.
     pub reads: bool,
-    /// For a change; a read is allow or block.
+    // For a change; a read is allow or block. (Not a doc comment: utoipa would wrap the
+    // inlined enum in an allOf with a description object, which the TS client reads as an
+    // intersection with Record<string, never>.)
     #[schema(inline)]
     pub level: Level,
     /// The rule that names just this tool ("github.issue_write").
     pub rule: String,
     /// A rule with argument patterns may decide some calls.
     #[serde(default)]
+    #[schema(required)]
     pub conditional: bool,
 }
 
@@ -515,12 +526,14 @@ pub struct AppView {
     #[serde(default)]
     pub icon: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub actions: Vec<AppAction>,
     /// Waiting for the operator's browser.
     #[serde(default)]
     pub sign_in_url: Option<String>,
     /// The environment names it needs (secret values never shown).
     #[serde(default)]
+    #[schema(required)]
     pub settings: Vec<String>,
 }
 
@@ -529,12 +542,15 @@ pub struct CatalogSetting {
     pub key: String,
     pub label: String,
     #[serde(default)]
+    #[schema(required)]
     pub secret: bool,
     #[serde(default = "default_true")]
+    #[schema(required)]
     pub required: bool,
     #[serde(default)]
     pub default: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub choices: Vec<String>,
 }
 
@@ -575,6 +591,7 @@ pub struct CatalogOption {
     pub kind: CatalogOptionKind,
     pub label: String,
     #[serde(default)]
+    #[schema(required)]
     pub settings: Vec<CatalogSetting>,
     /// A remote's host: what Ghost sends the app goes there.
     #[serde(default)]
@@ -642,13 +659,16 @@ pub struct CatalogEntryView {
     #[serde(default)]
     pub icon: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub featured: bool,
     #[serde(default)]
+    #[schema(required)]
     pub options: Vec<CatalogOption>,
     /// The short name it would be connected under.
     pub suggested_name: String,
     /// The names it is connected under already.
     #[serde(default)]
+    #[schema(required)]
     pub connected: Vec<String>,
     #[serde(default)]
     pub updated_at: Option<DateTime<Utc>>,
@@ -664,6 +684,7 @@ pub struct CatalogEntryView {
     /// the maker's own. Always empty on `GET /catalog/{name}`.
     #[serde(default)]
     #[schema(no_recursion)]
+    #[schema(required)]
     pub others: Vec<CatalogEntryView>,
 }
 
@@ -675,6 +696,7 @@ pub struct CatalogPage {
     #[serde(default)]
     pub fetched_at: Option<DateTime<Utc>>,
     #[serde(default)]
+    #[schema(required)]
     pub refreshing: bool,
     #[serde(default)]
     pub problem: Option<String>,
@@ -692,6 +714,7 @@ pub struct AppConnect {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    #[schema(value_type = Option<std::collections::BTreeMap<String, String>>)]
     pub values: Option<Map<String, Value>>,
     #[serde(default)]
     pub url: Option<String>,
@@ -708,6 +731,7 @@ pub struct AppConnectResult {
     pub sign_in_url: Option<String>,
     /// What the operator should know about a pasted config: keys Ghost does not read.
     #[serde(default)]
+    #[schema(required)]
     pub problems: Vec<String>,
 }
 
@@ -728,12 +752,16 @@ pub struct PermissionsView {
     #[schema(inline)]
     pub mode: Mode,
     #[serde(default)]
+    #[schema(required)]
     pub block: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub ask: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub quiet: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub allow: Vec<String>,
 }
 
@@ -789,10 +817,13 @@ pub struct SkillInfo {
     pub source: String,
     pub path: String,
     #[serde(default)]
+    #[schema(required)]
     pub requires: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub missing: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub files: Vec<String>,
     #[serde(default)]
     pub problem: Option<String>,
@@ -817,6 +848,7 @@ pub struct SkillListing {
 pub struct SkillSearchPage {
     pub query: String,
     #[serde(default)]
+    #[schema(required)]
     pub skills: Vec<SkillListing>,
     #[serde(default)]
     pub problem: Option<String>,
@@ -865,9 +897,11 @@ pub struct SkillPreview {
     /// The whole SKILL.md, front matter included.
     pub skill_md: String,
     #[serde(default)]
+    #[schema(required)]
     pub files: Vec<SkillFileView>,
     /// The ones ghost-scripts could run, through the gate.
     #[serde(default)]
+    #[schema(required)]
     pub scripts: Vec<String>,
     #[serde(default)]
     #[schema(inline)]
@@ -882,6 +916,7 @@ pub struct SkillInstall {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub replace: bool,
 }
 
@@ -894,6 +929,7 @@ pub struct SkillUpdateView {
     #[serde(default)]
     pub latest_commit: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub update: bool,
     #[serde(default)]
     pub problem: Option<String>,
@@ -905,6 +941,7 @@ pub struct SkillBody {
     /// SKILL.md without its front matter, trimmed.
     pub body: String,
     #[serde(default)]
+    #[schema(required)]
     pub files: Vec<String>,
 }
 
@@ -915,6 +952,7 @@ pub struct SkillAdd {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub replace: bool,
 }
 
@@ -956,9 +994,11 @@ pub struct WatchInfo {
     pub error: Option<String>,
     /// Results the last look kept.
     #[serde(default)]
+    #[schema(required)]
     pub seen: i64,
     /// Items it holds open now.
     #[serde(default)]
+    #[schema(required)]
     pub open: i64,
 }
 
@@ -984,9 +1024,11 @@ pub struct HookInfo {
     pub off_reason: Option<String>,
     /// item, resolved, ignored
     #[serde(default)]
+    #[schema(required, value_type = std::collections::BTreeMap<String, i64>)]
     pub accepted: Map<String, Value>,
     /// By reason.
     #[serde(default)]
+    #[schema(required, value_type = std::collections::BTreeMap<String, i64>)]
     pub rejected: Map<String, Value>,
     #[serde(default)]
     pub last: Option<DateTime<Utc>>,
@@ -1006,13 +1048,17 @@ pub struct OutputInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, ToSchema)]
 pub struct WatchingView {
     #[serde(default)]
+    #[schema(required)]
     pub watches: Vec<WatchInfo>,
     #[serde(default)]
+    #[schema(required)]
     pub hooks: Vec<HookInfo>,
     /// The webhook listener's addresses; empty when it is off.
     #[serde(default)]
+    #[schema(required)]
     pub listening: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub problems: Vec<String>,
 }
 
@@ -1038,8 +1084,10 @@ pub struct SourceInfo {
     pub kind: String,
     pub description: String,
     #[serde(default)]
+    #[schema(required)]
     pub operations: Vec<OperationInfo>,
     #[serde(default)]
+    #[schema(required)]
     pub read_tools: Vec<ReadToolInfo>,
 }
 
@@ -1080,11 +1128,13 @@ pub struct RoutesView {
     pub greeting: String,
     #[serde(default)]
     #[schema(inline)]
+    #[schema(required)]
     pub urgency: std::collections::BTreeMap<String, Urgency>,
     /// The routes this daemon has something behind; the others can be listed but do
     /// nothing yet.
     #[serde(default)]
     #[schema(inline)]
+    #[schema(required)]
     pub available: Vec<RouteName>,
 }
 
@@ -1156,9 +1206,11 @@ pub struct SettingsResult {
     pub settings: SettingsView,
     /// Keys the daemon picked up without a restart.
     #[serde(default)]
+    #[schema(required)]
     pub applied: Vec<String>,
     /// A pending value or a secret: the service must restart.
     #[serde(default)]
+    #[schema(required)]
     pub restart_required: bool,
 }
 
@@ -1195,9 +1247,11 @@ pub struct PasswordInfo {
     pub set: Option<bool>,
     /// "The model connection", "GitHub" (an app), "Webhook ci"
     #[serde(default)]
+    #[schema(required)]
     pub used_by: Vec<String>,
     /// One Ghost itself reads; a new value applies at its next start.
     #[serde(default)]
+    #[schema(required)]
     pub ghost: bool,
     #[serde(default)]
     pub added: Option<DateTime<Utc>>,
@@ -1228,6 +1282,7 @@ pub struct PasswordsView {
     pub passwords: Vec<PasswordInfo>,
     /// What an import would take; empty after one.
     #[serde(default)]
+    #[schema(required)]
     pub importable: Vec<ImportSourceView>,
 }
 
@@ -1243,6 +1298,7 @@ pub struct PasswordResult {
     pub passwords: PasswordsView,
     /// Ghost's own: the service must restart to use it.
     #[serde(default)]
+    #[schema(required)]
     pub restart_required: bool,
 }
 
@@ -1250,20 +1306,26 @@ pub struct PasswordResult {
 pub struct PasswordImportResult {
     /// Names now in the vault.
     #[serde(default)]
+    #[schema(required)]
     pub imported: Vec<String>,
     /// Already in the vault; left as they were.
     #[serde(default)]
+    #[schema(required)]
     pub kept: Vec<String>,
     /// Non-secret settings moved to settings.env.
     #[serde(default)]
+    #[schema(required)]
     pub settings: Vec<String>,
     /// Plaintext files deleted.
     #[serde(default)]
+    #[schema(required)]
     pub removed: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub notes: Vec<String>,
     pub passwords: PasswordsView,
     #[serde(default)]
+    #[schema(required)]
     pub restart_required: bool,
 }
 
@@ -1309,12 +1371,14 @@ pub struct ConversationView {
     pub name: String,
     pub aliases: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub job: String,
     /// The voice heard: its own, else Ghost's.
     pub voice: String,
     pub speed: f64,
     /// True when the voice is the agent's own.
     #[serde(default)]
+    #[schema(required)]
     pub own_voice: bool,
     pub created_at: DateTime<Utc>,
     #[schema(required)]
@@ -1344,8 +1408,10 @@ pub struct ConversationDetail {
 pub struct ConversationCreate {
     pub name: String,
     #[serde(default)]
+    #[schema(required)]
     pub aliases: Vec<String>,
     #[serde(default)]
+    #[schema(required)]
     pub job: String,
     /// None: Ghost's voice.
     #[serde(default)]
@@ -1353,6 +1419,7 @@ pub struct ConversationCreate {
     #[serde(default)]
     pub speed: Option<f64>,
     #[serde(default)]
+    #[schema(required)]
     pub persona: String,
     /// Slug of a retired agent whose memory.md becomes this one's first memory, as a
     /// handoff. Never Ghost.
@@ -1424,6 +1491,7 @@ pub struct VoiceInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SampleRequest {
     #[serde(default = "default_speed")]
+    #[schema(required)]
     pub speed: f64,
     #[serde(default)]
     pub text: Option<String>,
@@ -1527,11 +1595,14 @@ pub struct ModelProviderView {
     #[serde(default)]
     pub password: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub password_optional: bool,
     /// OpenRouter: signing in gives the key.
     #[serde(default)]
+    #[schema(required)]
     pub sign_in: bool,
     #[serde(default)]
+    #[schema(required)]
     pub local: bool,
     /// None: the first the provider lists.
     #[serde(default)]
@@ -1558,6 +1629,7 @@ pub struct ModelConnectionView {
     pub password: Option<String>,
     pub password_set: bool,
     #[serde(default)]
+    #[schema(required)]
     pub headers: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub timeout_secs: Option<f64>,
@@ -1565,15 +1637,19 @@ pub struct ModelConnectionView {
     #[serde(default)]
     pub legacy: Option<String>,
     #[serde(default)]
+    #[schema(required)]
     pub problems: Vec<String>,
     pub ready: bool,
     /// The GHOST_LLM_* values that say this connection explicitly.
     #[serde(default)]
+    #[schema(required)]
     pub values: std::collections::BTreeMap<String, String>,
     #[serde(default)]
+    #[schema(required)]
     pub providers: Vec<ModelProviderView>,
     /// OpenRouter is waiting for the browser.
     #[serde(default)]
+    #[schema(required)]
     pub sign_in_pending: bool,
     /// The last sign-in didn't go through.
     #[serde(default)]
@@ -1585,6 +1661,7 @@ pub struct ModelConnectionView {
 #[derive(Debug, Clone, Deserialize, Default, ToSchema)]
 pub struct ModelDraft {
     #[serde(default)]
+    #[schema(required)]
     pub values: std::collections::BTreeMap<String, Option<String>>,
     /// Write-only, like `PasswordSet.value`: never echoed.
     #[serde(default)]

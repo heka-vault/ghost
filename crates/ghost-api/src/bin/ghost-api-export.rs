@@ -1,6 +1,6 @@
-//! Write the OpenAPI document: `cargo run -p ghost-api --bin ghost-api-export >
-//! packages/api/openapi.json`. The committed file is what `packages/client-ts` is
-//! generated from; a test fails when it is stale.
+//! Write the OpenAPI document: `make api-schema` (`cargo run -p ghost-api --bin
+//! ghost-api-export > packages/api/openapi.json`, then `pnpm gen`). The committed file is
+//! what `packages/client-ts` is generated from; a test and CI fail when it is stale.
 
 fn main() {
     let doc = ghost_api::openapi::document();
