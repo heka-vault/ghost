@@ -4,11 +4,11 @@ Every Ghost turn is timed, live, and a harness replays scripted conversations th
 real pipeline to find slow parts without a human. Results from the first runs are in
 [2026-10-19-latency.md](2026-10-19-latency.md).
 
-## The live timeline (`ghost_voice.latency`)
+## The live timeline (`ghost_voice::latency`)
 
-`LatencyObserver` is a Pipecat observer that `build_session` attaches to every session, desk
-and phone. It sees each frame once (on its first push), keeps the moments of a turn on the
-pipeline clock, and takes a few durations straight from Ghost's own processors (the turn
+The timeline is a sink (`ghost_voice::latency::Sink`) that `build_session` attaches to every
+session, desk and phone. It sees each frame once as it leaves its stage, keeps the moments
+of a turn on the pipeline clock, and takes a few durations straight from Ghost's own stages (the turn
 hold, the interceptors, the confirmation classifier, the steps inside a tool). When a turn
 is over it writes one INFO line to ghostd's log and one JSON record to
 `~/.local/share/ghost/latency.jsonl` (`GHOST_LATENCY_LOG` to move it; rotated to `.1` at
@@ -40,66 +40,70 @@ interim transcripts off and on. A confirmation turn carries
 
 Records hold numbers, counts, model ids, tool and operation names and classifier verdicts.
 Never transcripts, model text, tool arguments or results (tested in
-`packages/voice/tests/test_latency.py`).
+`crates/ghost-voice/src/latency.rs`).
 
 `make latency` (`ghostd latency [--last N] [--origin desk|phone] [--json]`) prints p50/p95
 per stage, overall and per origin, and the last turns.
 
 ## The harness (`ghostd perf`)
 
-Scripted conversations through `build_session`, headless:
+`crates/ghost-voice/src/perf/` (ADR 0039). Scripted conversations through `build_session`,
+headless:
 
 - **In:** the operator's lines rendered once by Kokoro in another voice (`am_michael`),
   16 kHz, cached in `.scratch/perf/utterances/`; a line with ` ... ` has a 0.7 s pause in the
   middle. A scripted input transport sends 20 ms frames at real-time pace, silence between
   lines. Real Silero VAD, Parakeet, Smart Turn.
 - **Out:** an output transport that takes Ghost's audio at sound-card pace and drops it, so
-  `BotStarted/StoppedSpeaking` behave as on the desk. It notes when the output turns loud:
-  `audible` is the operator's last frame to Ghost's voice at the speaker.
-- **Model:** `--endpoint current` (the default) is the model connection as configured (ADR
-  0037), on whichever protocol it speaks; a provider id (`anthropic`, `openrouter`,
-  `ollama`, …) is that provider as it comes; `proxy` and `openrouter` are the older
-  `GHOST_LLM_ENDPOINT` switch. `perf llm --endpoint current` times the same connection over
-  the client sessions share. Keys are read from the environment and never printed.
+  Ghost started and stopped speaking behave as on the desk. It notes when the output turns
+  loud: `audible` is the operator's last frame to Ghost's voice at the speaker.
+- **Model:** scripted (`ghost_voice::llm::ScriptedModel`) with the scenario's replies, so
+  every tool call reaches the real gate and the real mock app while the model's own time is
+  a setting (`--ttfb-ms`); no tokens are spent. The real model connection is measured by
+  `ghostd perf llm` (below), with Ghost's real system prompt and tool schemas.
 - **Before and after:** `--ablate` turns the 2026-10-19 changes off one by one, so a change
   can be measured against Ghost without it in the same run: `tts_clauses` (whole sentences
-  to Kokoro), `prompt_lines` (no "lead with a
-  few words" and "parallel lookups" lines), `system_cache` (no cache marker on the system
-  prompt), `shared_client` (a client per session), `speculate` (the model waits out the
-  turn grace, 2026-10-22). `all` is Ghost before them, `none` after.
-- **Interleaved:** every config runs a scenario before any runs it again, so a slow minute
-  at the endpoint lands on all of them.
+  to Kokoro), `speculate` (the model waits out the turn grace, 2026-10-22); `prompt_lines`,
+  `system_cache` and `shared_client` are the model connection's and change nothing with the
+  scripted model, accepted for the label's sake. `all` is Ghost before them, `none` after.
+- **Interleaved:** every config runs a scenario before any runs it again.
 - **State:** a fresh temp dir per run: its own SQLite, conversations, mock GitHub
-  (`the mock GitHub server declared in infra/policy.example.toml (ghost-mock-github)nnounces, `close` confirms), Jev
-  when a key is set. The operator's data is never read or written. No mic, no speakers.
-- **Phone:** `--transport webrtc` runs the same scenario through `SmallWebRTCTransport` with an
-  aiortc peer on loopback sending Opus; `audible` is then measured at the peer, so it includes
-  both jitter buffers. Use `--set thinking_sound=false` so loud means Ghost's voice.
+  (`ghost-mock-github`, the app `infra/example/apps.json` names; the harness's policy asks
+  before a close so the scenarios that measure the yes have one to measure), Jev when a key
+  is set (`--no-jev` for the regex alone). The operator's data is never read or written. No
+  mic, no speakers.
 
-Scenarios (`ghostd/perf/scenarios.py`): `greeting`, `small_talk`, `lookup`
-(github_list_issues on the mock GitHub server), `lookup_pause` (the same with a pause mid-sentence), `chain`
+Scenarios (`crates/ghost-voice/src/perf/scenarios.rs`): `greeting`, `small_talk`, `lookup`
+(github_list_issues on the mock GitHub app), `lookup_pause` (the same with a pause mid-sentence), `chain`
 (an issue and what people said: github_issue_read for the issue and its comments), `announce` (a label), `confirm_plain` ("close infra 17": the
 request is the yes, ADR 0017), `confirm_yes` (a hedge, Ghost asks, "yes, go ahead"),
 `bye_shortcut` (quick intents), `bye_model` (go_to_sleep), `session` (four turns, cache growth).
 
 ```sh
-make perf                                        # every scenario, 3 runs, Ghost's model
+make perf                                        # every scenario, 3 runs
 make perf SCENARIO=lookup,chain RUNS=5
-make perf MODEL=claude-sonnet-5-5,claude-haiku-5-5 ENDPOINT=proxy,openrouter RUNS=2
-make perf ARGS="--thinking between_tools,adaptive"   # Sonnet 5.5 rejects disabled; Haiku rejects between_tools
 make perf ARGS="--set turn_grace_secs=0.4"       # any VoiceSettings field
-make perf ENDPOINT=proxy,openrouter ARGS="--ablate all,none"   # before vs after, both endpoints
-make perf ARGS="--transport webrtc --set thinking_sound=false"
+make perf ARGS="--ablate all,none"               # before vs after
+make perf ARGS="--ttfb-ms 800"                   # the scripted model's time to its first token
 make perf ARGS="--history 8"                     # seed earlier turns into the record
 make perf-micro                                  # STT by length, Kokoro first audio, Smart Turn, Jev
+make perf-llm                                    # the model connection as configured: hello TTFB, the tool call, the answer
+make perf-llm ARGS="--endpoint proxy,openrouter --model claude-sonnet-5-5,claude-haiku-5-5 --n 4"
 make perf-llm ARGS="--openrouter-models google/gemini-3.8-flash,openai/gpt-5.6-luna"
 ```
+
+`perf llm`: `--endpoint current` (the default) is the model connection as configured (ADR
+0037), on whichever protocol it speaks; a provider id (`anthropic`, `openrouter`, `ollama`,
+…) is that provider as it comes, with its own key; `proxy` and `openrouter` are the older
+`GHOST_LLM_ENDPOINT` switch; `+sysbp` puts the cache marker on the system prompt. Keys are
+read from the environment (the vault's, through `ghostd`) and never printed. Spend is small:
+a few thousand input tokens a call, mostly cached.
 
 Each run writes `.scratch/perf/<timestamp>/report.md` (ranked contributors, per-scenario and
 per-stage p50/p95, model calls with cache reads and writes call by call, tools,
 confirmation, STT accuracy, opening), `records.json` (re-render with
-`ghostd perf report records.json`) and `latency.jsonl`. Checks are soft: a run where the
-model drifts (asks instead of acting) is listed under Problems, not failed.
+`ghostd perf report records.json`) and `latency.jsonl`; `perf micro` writes `micro.md` and
+`micro.json`, `perf llm` `llm.md` and `llm.json`. Checks are soft: a run where the scripted
+reply drifts from what the scenario expects is listed under Problems, not failed.
 
-Cost: a scenario run is one to four model calls of about 3.5k input tokens, mostly cache
-reads. Wall time is dominated by Ghost speaking in real time: about 30 s a run.
+Wall time is dominated by Ghost speaking in real time: about 30 s a run.

@@ -380,7 +380,7 @@ export class LiveDesk implements Desk {
     try {
       // The Android module turns on the hardware echo canceller and noise suppressor by
       // itself; on speakerphone some of Ghost's voice still leaks, and the desk drops it
-      // (ghost_voice.echo).
+      // (ghost_voice::echo).
       this.mic = (await mediaDevices.getUserMedia({ audio: true, video: false })) as MediaStream;
       const pc = new RTCPeerConnection({ iceServers: [] });
       this.pc = pc;

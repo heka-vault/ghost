@@ -1,0 +1,37 @@
+# The oracle: the Python the Rust daemon was measured against (ADR 0039). The Python daemon
+# is gone (W10 of heka-vault/ghost#39); what stays is the model wrappers it ran, pinned at the
+# versions the parity fixtures were recorded with, so `scripts/fixtures/record.py` still
+# writes the same fixtures, `scripts/rtc/phone.py` is still the aiortc far end, and the wake
+# tooling (`scripts/record-wake-takes.py`, `docs/benchmarks/scripts/wake_*.py`) still runs.
+# Its own lock, outside the root workspace: `uv sync --project tools/oracle`, then
+# `uv run --project tools/oracle python -I <script>`.
+[project]
+name = "ghost-oracle"
+version = "2026.10.0"
+description = "The Python the Rust daemon is measured against: the model wrappers, the aiortc far end, the wake tooling"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+dependencies = [
+    "numpy>=1.26",
+    # The runtime the fixtures were recorded on, and the one the bundle ships (option 1 on #39).
+    "onnxruntime==1.24.4",
+    "onnx-asr[hub]==0.12.0",
+    # Pipecat's VAD and turn analyzers and their model files (Silero, Smart Turn v3.2).
+    "pipecat-ai==1.12.0",
+    "kokoro-onnx==0.6.1",
+    "phonemizer==3.4.0",
+    "livekit-wakeword==0.3.0",
+    "aiortc>=1.14,<2",
+    "loguru>=0.7",
+    "soxr>=0.5",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["oracle"]

@@ -7,7 +7,7 @@ import { defineConfig } from "vite";
 /**
  * The commit this window is built from, so the version notice can tell a `make dev` window
  * from the deployed Ghost of the same version (src/app/version.ts, docs/releasing.md). Read
- * once, when Vite builds or the dev server starts, the way ghostd.build reads a checkout:
+ * once, when Vite builds or the dev server starts, the way ghostd::build_info reads a checkout:
  * HEAD, and dirty when tracked files have uncommitted changes. Outside git: no commit.
  */
 function windowBuild(): { commit: string | null; dirty: boolean } {

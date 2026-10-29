@@ -1,3 +1,8 @@
+# The root of the Python that is left (ADR 0039): the daemon is Rust (`Cargo.toml`, `crates/`).
+# This file is the one source of Ghost's version (`tools/version.py` writes every copy from
+# it, docs/releasing.md), the ruff settings for every Python file in the repository, and the
+# uv workspace of the tools. The oracle (`tools/oracle`, the model wrappers the Rust daemon
+# is measured against) has its own lock and is not a member.
 [project]
 name = "ghost"
 version = "2026.10.0"
@@ -5,35 +10,20 @@ description = "Ghost: a voice-first assistant that triages GitHub issues on one 
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
-dependencies = [
-    "ghostd",
-    "ghost-voice",
-    "ghost-core",
-    "ghost-api",
-]
+dependencies = []
+
+[tool.uv]
+package = false
 
 [tool.uv.workspace]
-members = ["apps/ghostd", "packages/voice", "packages/core", "packages/api"]
-
-[tool.uv.sources]
-ghostd = { workspace = true }
-ghost-voice = { workspace = true }
-ghost-api = { workspace = true }
-ghost-core = { workspace = true }
+members = ["tools"]
+exclude = ["tools/oracle"]
 
 [dependency-groups]
-dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.8",
-    "mypy>=1.13",
-    "respx>=0.21",
-]
+dev = ["pytest>=8.3", "ruff>=0.8"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["packages", "apps"]
-consider_namespace_packages = true
+testpaths = ["tools/tests"]
 
 [tool.ruff]
 extend-exclude = ["docs/benchmarks/scripts"]
@@ -42,8 +32,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
-
-[tool.mypy]
-python_version = "3.12"
-strict = true
-ignore_missing_imports = true

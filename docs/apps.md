@@ -42,7 +42,7 @@ fill in are.
 Anyone can publish to the registry, so a search for "posthog" finds six apps, five of them
 called "Posthog". The description is the publisher's own words: "Official PostHog app"
 in a description proves nothing. What the registry does check is the start of each app's
-registry name, and Ghost reads it (`ghost_core.provenance`, string rules, no model):
+registry name, and Ghost reads it (`ghost_core::provenance`, string rules, no model):
 
 - **Who published it.** `io.github.PostHog/mcp` was published by someone signed in to
   GitHub as PostHog: the card says "by PostHog · verified on GitHub". `com.mcparmory/posthog`
@@ -201,7 +201,8 @@ reads. Older declarations that say `server` still read ([folder.md](folder.md#wa
 
 ## Before a token exists
 
-`ghost-mock-github` (`ghost_core.mock_github`) is a pretend GitHub with the official app's
+`ghost-mock-github` (`ghost_core::mock_github`, a binary of the workspace that the bundle
+carries beside `ghostd`) is a pretend GitHub with the official app's
 tool shape. It is seeded with a few issues and keeps its changes in a state file.
 `infra/example/apps.json` connects it as `github`, and `make env` seeds a fresh install
 with it. Ghost triages pretend issues until you connect the real GitHub. The latency
@@ -226,11 +227,11 @@ harness (`make perf`) runs on it.
 
 ## For developers
 
-An app speaks the Model Context Protocol. `ghost_core.apps` is the client (`App`, `Apps`,
-the gate bridge `AppTarget`, `AppChange`, `AppWriter`), `ghost_core.catalog` the registry
-copy, `ghost_core.provenance` who publishes a catalog entry, whether it is the maker's own
+An app speaks the Model Context Protocol. `ghost_core::apps` is the client (`App`, `Apps`,
+the gate bridge `AppTarget`, `AppChange`, `AppWriter`), `ghost_core::catalog` the registry
+copy, `ghost_core::provenance` who publishes a catalog entry, whether it is the maker's own
 and where it runs (`KNOWN_MAKERS` and `SHARED_HOSTS` are the hand-kept lists),
-`ghost_core.signin` the OAuth client storage and loopback, and
-`ghost_core.permissions` the rules. Nothing in the daemon or the pipeline knows an app by
+`ghost_core::signin` the OAuth client storage and loopback, and
+`ghost_core::permissions` the rules. Nothing in the daemon or the pipeline knows an app by
 name: never add a capability by editing them, and never write a bespoke client for a
 service. Connect an app.

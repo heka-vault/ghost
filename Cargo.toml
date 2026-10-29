@@ -1,0 +1,104 @@
+# The Rust workspace: the daemon's crates under crates/ and the desktop app's Tauri shell
+# (ADR 0039). One lock file; `cargo build --workspace` builds both binaries the bundle ships.
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "2026.10.0"
+edition = "2024"
+license = "MIT"
+authors = ["Eric Polerecky"]
+rust-version = "1.98"
+
+[workspace.dependencies]
+ghost-api = { path = "crates/ghost-api" }
+ghost-core = { path = "crates/ghost-core" }
+ghost-infer = { path = "crates/ghost-infer" }
+ghost-llm = { path = "crates/ghost-llm" }
+ghost-audio = { path = "crates/ghost-audio" }
+ghost-voice = { path = "crates/ghost-voice" }
+ghost-rtc = { path = "crates/ghost-rtc" }
+
+anyhow = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "io-util", "fs", "process"] }
+axum = { version = "0.8", features = ["json", "ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+regex = "1"
+sha2 = "0.10"
+sha1 = "0.10"
+percent-encoding = "2"
+hmac = "0.12"
+hex = "0.4"
+toml = { version = "0.8", features = ["preserve_order"] }
+async-trait = "0.1"
+futures = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "json", "stream", "query"] }
+# The MCP client (ADR 0034): an app speaks the protocol; the product says app.
+rmcp = { version = "3.8", default-features = false }
+indexmap = { version = "2", features = ["serde"] }
+url = "2"
+# ghost-infer: ONNX Runtime through `ort` (a pinned release candidate) loading the library
+# at run time: the build the Python daemon ran, 1.24.4, fetched by scripts/onnxruntime.sh,
+# shipped in the bundle and resolved by `ghost_infer::runtime` (the crate's own download
+# would be 1.31.0, whose int8 kernels and vocoder drift from the oracle); the FFT behind
+# the log-mel extractors, and WAV reading.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic"] }
+realfft = "3"
+wiremock = "0.6"
+unicode-normalization = "0.1"
+yaml-rust2 = { version = "0.13", default-features = false }
+tempfile = "3"
+aes-gcm = "0.11"
+base64 = "0.22"
+rustix = { version = "1", features = ["fs"] }
+secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
+schemars = "1"
+rand = "0.9"
+# The phone listener's networks (ADR 0020): which interface holds an address, from getifaddrs.
+nix = { version = "0.31", features = ["net", "hostname"] }
+tower = { version = "0.5", features = ["util"] }
+# The audio engine (crates/ghost-audio): PipeWire through the project's own binding, a
+# realtime-safe ring between its thread and tokio, WAV assets.
+pipewire = { version = "0.10", features = ["v1_0_0"] } # bindings for PipeWire 1.0 and up: the workstation runs 1.6, the CI runner 1.0.5
+libspa = "0.10"
+rtrb = "0.4"
+hound = "3.5"
+# The control API's OpenAPI document (ADR 0013), generated from the Rust types; the TS client
+# is generated from that.
+utoipa = { version = "6", features = ["axum_extras", "chrono"] }
+utoipa-axum = "0.3"
+# A client of the socket (`ghostd status|wake|say|sleep`), the way the Tauri shell reaches it.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+hyperlocal = "0.9"
+serde_path_to_error = "0.1"
+tokio-tungstenite = "0.29"
+# The phone's WebRTC audio (crates/ghost-rtc, ADR 0016, ADR 0020): three stacks behind
+# features, the daemon picks one by measurement; Opus through the system libopus; rubato for
+# the 48 kHz <-> 16/24 kHz resampling either side of the codec.
+str0m = { version = "0.24", default-features = false, features = ["openssl"] }
+webrtc = "0.21"
+rtc = "0.21" # webrtc-rs's sans-IO core: the Sample and RTP packet types webrtc 0.21 takes but does not re-export
+bytes = "1"
+libwebrtc = "0.3"
+opus = "0.4"
+rubato = "5"
+# ghost-voice: a CancellationToken per session and per turn, so a barge-in or an end
+# drains every stage without a stale frame reaching the speaker (ADR 0039).
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[profile.release]
+debug = 1 # line tables, so a panic in the journal has a location
+lto = "thin"
+codegen-units = 4

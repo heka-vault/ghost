@@ -4,26 +4,28 @@
 #   scripts/dev.sh            the daemon and the desktop app          (make dev)
 #   scripts/dev.sh daemon     the daemon only                         (make daemon)
 #   scripts/dev.sh desktop    the desktop app only                    (make desktop)
-#   scripts/dev.sh reload     restart the daemon a running one started (make reload)
+#   scripts/dev.sh reload     rebuild and restart the daemon a running one started (make reload)
 #   scripts/dev.sh preflight  stop the service, refuse if a ghostd runs (make start uses it)
 #
-# The daemon runs the working tree's .venv. Only one Ghost may have the microphone, so
-# starting it stops the ghostd user service first (the always-on Ghost, a `make deploy`
-# build); `make service-on` starts that again. The desktop app is `tauri dev`: Vite reloads
-# the UI on save and a Rust change rebuilds the window. A Python change needs the daemon
-# restarted, which `make reload` does from another terminal without touching the desktop.
-# If the daemon exits on its own (a crash, `make stop`) it stays down until `make reload`.
-# Ctrl+C stops everything this script started.
+# The daemon is the working tree's `cargo build -p ghostd` (ADR 0039; target/debug/ghostd).
+# Only one Ghost may have the microphone, so starting it stops the ghostd user service first
+# (the headless Ghost, a `make deploy` build); `make service-on` starts that again. The
+# desktop app is `tauri dev`: Vite reloads the UI on save and a Rust change rebuilds the
+# window. The app adopts the daemon this script runs rather than starting its own (ADR 0038;
+# GHOST_SHELL_ADOPT_ONLY). A change to the daemon's crates needs it rebuilt and restarted,
+# which `make reload` does from another terminal without touching the desktop. If the daemon
+# exits on its own (a crash, `make stop`) it stays down until `make reload`. Ctrl+C stops
+# everything this script started.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-UV="${UV:-uv}"
 # Settings only: passwords are in Ghost's vault, which the daemon opens itself (ADR 0036).
 ENV_FILE="${ENV_FILE:-$HOME/.config/ghost/settings.env}"
 RUN_DIR="${XDG_RUNTIME_DIR:-/tmp}/ghost"
 RELOAD="$RUN_DIR/dev-reload"
-MINE="$ROOT/.venv/bin/ghostd run$"  # this checkout's daemon, and no other
+GHOSTD="$ROOT/target/debug/ghostd"
+MINE="$ROOT/target/debug/ghostd run$"  # this checkout's daemon, and no other
 
 if [[ -t 1 ]]; then bold=$'\e[1m' off=$'\e[0m'; else bold='' off=''; fi
 say() { echo "${bold}dev:${off} $*"; }
@@ -42,7 +44,7 @@ preflight() {
   fi
   local pids
   if pids="$(pgrep -f 'ghostd run$')"; then
-    say "a ghostd is already running (pid ${pids//$'\n'/ }); make stop, then try again"
+    say "a ghostd is already running (pid ${pids//$'\n'/ }); make stop, or Quit Ghost in its tray, then try again"
     return 1
   fi
 }
@@ -54,14 +56,27 @@ DAEMON_PID='' DESKTOP_PID='' STOPPING=0
 
 # GHOST_LAUNCHER tells the daemon it was started here, so the desktop says make reload.
 start_daemon() {
-  setsid env GHOST_LAUNCHER=make-dev bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$ROOT/.venv/bin/ghostd" \
+  setsid env GHOST_LAUNCHER=make-dev bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$GHOSTD" \
     </dev/null > >(prefix "ghostd " 36) 2>&1 &
   DAEMON_PID=$!
 }
 
+# The app only adopts the daemon on the socket here; this script is what starts it.
 start_desktop() {
-  setsid pnpm -s tauri dev </dev/null > >(prefix "desktop" 35) 2>&1 &
+  setsid env GHOST_SHELL_ADOPT_ONLY=1 pnpm -s tauri dev </dev/null > >(prefix "desktop" 35) 2>&1 &
   DESKTOP_PID=$!
+}
+
+# The daemon compiled from the working tree, and in the cache the ONNX Runtime it loads
+# and the four small model files (scripts/onnxruntime.sh and scripts/models.sh, each once).
+build_daemon() {
+  cargo build -q -p ghostd || { say "cargo build -p ghostd failed"; return 1; }
+  if [[ -x scripts/onnxruntime.sh ]]; then
+    scripts/onnxruntime.sh >/dev/null || { say "scripts/onnxruntime.sh failed"; return 1; }
+  fi
+  if [[ -x scripts/models.sh ]]; then
+    scripts/models.sh >/dev/null || { say "scripts/models.sh failed"; return 1; }
+  fi
 }
 
 stop_all() {
@@ -77,7 +92,7 @@ daemon_loop() {
   while :; do
     rm -f "$RELOAD"
     preflight || return 1
-    "$UV" sync --all-packages -q || say "uv sync failed; starting with the environment as it is"
+    build_daemon || return 1
     ((STOPPING)) && return 0
     start_daemon
     wait_for "$DAEMON_PID"
@@ -88,7 +103,7 @@ daemon_loop() {
       until [[ -e "$RELOAD" ]] || ((STOPPING)); do sleep 1; done
       ((STOPPING)) && return 0
     fi
-    say "restarting ghostd"
+    say "rebuilding and restarting ghostd"
   done
 }
 
@@ -110,7 +125,7 @@ case "$mode" in
       exit 1
     fi
     mkdir -p "$RUN_DIR" && touch "$RELOAD"
-    pkill -TERM -f "$MINE" && say "ghostd restarting" || say "ghostd starting"
+    pkill -TERM -f "$MINE" && say "ghostd restarting (rebuilt first)" || say "ghostd starting"
     ;;
   desktop)
     trap 'stop_all' INT TERM

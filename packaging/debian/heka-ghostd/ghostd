@@ -1,6 +1,0 @@
-#!/bin/sh
-# heka-ghostd: entry point. The bundled runtime lives under /opt/ghost.
-export GHOST_INFRA_DIR="${GHOST_INFRA_DIR:-/usr/share/heka-ghost}"
-export PYTHONUNBUFFERED=1
-export HF_HUB_DISABLE_TELEMETRY=1
-exec /opt/ghost/venv/bin/ghostd "$@"

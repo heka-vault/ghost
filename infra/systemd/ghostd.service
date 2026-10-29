@@ -1,6 +1,10 @@
-# Ghost desktop daemon (ADR 0009). Install:
-#   mkdir -p ~/.config/systemd/user && cp infra/systemd/ghostd.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload && systemctl --user enable --now ghostd
+# Ghost's headless mode (ADR 0038): the daemon under systemd --user, for a desk with no
+# display or for the operator who wants the observers up with the app closed. The service
+# runs a fixed build that `make deploy` made (scripts/deploy.sh: the link
+# ~/.local/share/ghost/runtime/current), never the working tree. Install:
+#   make service-install      (this file into ~/.config/systemd/user/)
+#   make deploy               (a build, and the drop-in that points the service at it)
+#   make service-on           (now, and at every login)
 # The environment is settings.env, which holds no secret. Passwords are in Ghost's own vault,
 # which the daemon opens itself; its key is in your keyring (ADR 0036). Nothing secret is
 # baked into this file or rendered beside it.
@@ -11,13 +15,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/projects/active/ghost
+WorkingDirectory=%h
 EnvironmentFile=-%h/.config/ghost/settings.env
-Environment=PYTHONUNBUFFERED=1
-Environment=HF_HUB_DISABLE_TELEMETRY=1
-ExecStart=%h/.local/bin/uv run --frozen --package ghostd ghostd run
+Environment=GHOST_INFRA_DIR=%h/.local/share/ghost/runtime/current/src/infra
+ExecStart=%h/.local/share/ghost/runtime/current/bin/ghostd run
 # Undo any music ducking left behind by a crash.
-ExecStopPost=%h/.local/bin/uv run --frozen --package ghostd ghostd restore-volumes
+ExecStopPost=%h/.local/share/ghost/runtime/current/bin/ghostd restore-volumes
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20

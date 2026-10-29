@@ -12,7 +12,7 @@ Ghost is a personal tool that runs entirely on your own Linux machine:
 
 - **Wake word** detected locally. Idle audio never leaves the machine.
 - **Speech-to-text and text-to-speech** run locally on CPU (Parakeet and Kokoro).
-- **Conversation** is built on [Pipecat](https://github.com/pipecat-ai/pipecat). No media server and no cloud voice platform.
+- **The conversation pipeline** is Ghost's own, in Rust (ADR 0039; [Pipecat](https://github.com/pipecat-ai/pipecat)'s ideas, not its code). No media server and no cloud voice platform.
 - **The LLM** is one model connection: Anthropic, OpenRouter (sign in), your Claude subscription through CLIProxy, OpenAI, a local Ollama or LM Studio, or any address that speaks Anthropic's or OpenAI's API (ADR 0037).
 - **GitHub** is reached with a fine-grained personal access token scoped to the repositories you choose.
 
@@ -20,23 +20,26 @@ It costs nothing to run beyond the LLM calls.
 
 ## Status
 
-First increment in progress: the `uv` workspace exists, the write gate and the GitHub
-issue skill are implemented with tests, and the desktop daemon runs the voice loop
-with a local transcript matcher as the wake phrase until a wake model is trained. Start
-with [docs/architecture.md](docs/architecture.md) and the decisions in [docs/adr/](docs/adr/).
+First increment running: the daemon is Rust, one Cargo workspace with the desktop app's
+shell (ADR 0039), shipped inside the desktop app (ADR 0038); the write gate, the apps, the
+agents, the phone and the webhook listener are in, and the wake phrase is a local transcript
+matcher or the trained detectors. Start with [docs/architecture.md](docs/architecture.md)
+and the decisions in [docs/adr/](docs/adr/).
 
 ## Run it
 
-Needs Python 3.12 (via `uv`) and PipeWire with the PulseAudio shim.
+Needs the Rust toolchain (`rust-toolchain.toml`), the development packages the workspace
+links (WebKitGTK, PipeWire, espeak-ng, Opus; the list is in `.github/workflows/ci.yml`),
+Node 22 with pnpm, Python 3.12 via `uv` for the tools, and PipeWire.
 
 ```bash
-make setup           # once: uv workspace, pnpm install, Ghost's folder, the echo-cancelled mic "ghost.mic"
-make dev             # the daemon and the desktop app from this checkout, logging to this terminal; Ctrl+C stops both
-make reload          # from another terminal, after a Python change: restarts the daemon, not the app
+make setup           # once: the daemon built, the tools synced, pnpm install, Ghost's folder, the echo-cancelled mic "ghost.mic"
+make dev             # the daemon (cargo build -p ghostd) and the desktop app from this checkout, logging to this terminal; Ctrl+C stops both
+make reload          # from another terminal, after a Rust change: rebuilds and restarts the daemon, not the app
 ```
 
-The desktop UI reloads on save and a Rust change rebuilds the window; only Python needs
-`make reload`. `make daemon` and `make desktop` run one half each, in two terminals if you
+The desktop UI reloads on save and a change to the shell rebuilds the window; a change to
+the daemon's crates needs `make reload`. `make daemon` and `make desktop` run one half each, in two terminals if you
 prefer. Only one Ghost may have the microphone, so `make dev` stops the `ghostd` user
 service (your always-on Ghost, below) and `make service-on` starts it again.
 
@@ -57,7 +60,7 @@ Non-secret settings are in `~/.config/ghost/settings.env`, which `make env` seed
 Passwords (every API key, token and account password Ghost holds) are in Ghost's own vault,
 `~/.local/share/ghost/passwords.vault`, encrypted, its key in your login keyring (ADR 0036).
 Save them on the desktop's Settings › Passwords, or with
-`uv run ghostd passwords set ANTHROPIC_AUTH_TOKEN` (the value is read without echo);
+`target/debug/ghostd passwords set ANTHROPIC_AUTH_TOKEN` (the value is read without echo);
 `make passwords` lists them by name. A value is never shown again, and anything an app
 sends back with one in it has it replaced before Ghost reads it. Coming from heka-vault or
 the old `~/.config/ghost/env` and `apps.env`? `make passwords-import` moves them into the
@@ -80,7 +83,7 @@ The phone app joins over the home LAN only (ADR 0016). Set `GHOST_PHONE_LISTEN` 
 `settings.env` to the workstation's LAN address and a port, for example
 `GHOST_PHONE_LISTEN=192.168.1.20:8765`, restart, and pair from the desktop app (it shows
 a six-digit code for two minutes). If `ufw` is on, allow the port and UDP from the LAN,
-because aiortc picks its UDP ports at random:
+because the call's media picks its UDP port at random:
 
 ```bash
 sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp
@@ -146,16 +149,19 @@ from the checkout, and `make desktop-web` serves the same UI in a browser (Vite 
 socket). Both talk to whichever daemon owns the socket. In development, `?mock=<scenario>` (for example `?mock=pending` or
 `?mock=busy`) runs the UI against a built-in mock daemon instead, and `#/gallery` shows every
 component in every state. The design rules are in
-[docs/design-system.md](docs/design-system.md). `make deb` builds the installable packages.
+[docs/design-system.md](docs/design-system.md). `make bundle` builds the installable
+.deb and AppImage, the desktop app with the daemon inside (ADR 0038).
 
-To try a commit as your real Ghost, `make deploy` builds HEAD into
-`~/.local/share/ghost/runtime/<commit>/`, runs `ghostd check` against `~/.config/ghost`, and
-only then switches the `ghostd` user service to it and restarts it; no root and no .deb.
+To try a commit as your real Ghost headless, `make deploy` builds HEAD
+(`cargo build --release -p ghostd`) into `~/.local/share/ghost/runtime/<commit>/`, runs
+`ghostd check` against `~/.config/ghost`, and only then switches the `ghostd` user service to
+it and restarts it; no root and no .deb.
 `make deploy-rollback` goes back to the build before. `make service-on` and `make service-off`
 start and stop it, at login too.
 
-Changes go to `main` through pull requests; the `ci` workflow (lint, tests, schema and client
-current, typecheck, the desktop build and the Tauri shell) must pass before one merges.
+Changes go to `main` through pull requests; the `ci` workflow (rustfmt, clippy, nextest and
+cargo-deny over the workspace, the schema and the client current, the bundle, ruff and the
+tools' tests, typecheck, the desktop build) must pass before one merges.
 
 Versions are dates, `YYYY.M.N` (the Nth release of the month, from 0). `make version V=next`
 writes the next one everywhere, in a PR; once it merges, `make release` on `main` tags it.

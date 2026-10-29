@@ -1,6 +1,6 @@
 /**
  * Owner: conversations. Kokoro voices by accent and sex. ghostd labels each voice
- * "American female: Heart" (ghost_api.conversations.voice_label); the id carries the same
+ * "American female: Heart" (ghost_api::conversations::voice_label); the id carries the same
  * facts ("af_heart": a = American, f = female), so either is enough.
  */
 import type { VoiceInfo } from "@ghost/client-ts";

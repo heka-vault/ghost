@@ -1,0 +1,64 @@
+[package]
+name = "ghost-core"
+description = "Ghost's core: the write gate, the permissions, the audit, the agents and the apps (ADR 0007, 0011, 0034, 0035)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+# The two MCP servers Ghost ships as apps (ADR 0034): the names apps.json names.
+[[bin]]
+name = "ghost-mock-github"
+path = "src/bin/ghost-mock-github.rs"
+
+[[bin]]
+name = "ghost-scripts"
+path = "src/bin/ghost-scripts.rs"
+
+[features]
+# An issue-like write model for the gate's tests, in this crate and in others.
+fakes = []
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+rusqlite.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+regex.workspace = true
+sha2.workspace = true
+sha1.workspace = true
+percent-encoding.workspace = true
+reqwest.workspace = true
+hmac.workspace = true
+hex.workspace = true
+toml.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+tokio.workspace = true
+unicode-normalization.workspace = true
+yaml-rust2.workspace = true
+aes-gcm.workspace = true
+base64.workspace = true
+rustix.workspace = true
+secret-service.workspace = true
+tempfile.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest", "auth", "server", "macros", "transport-io"] }
+schemars.workspace = true
+rand.workspace = true
+url.workspace = true
+tracing-subscriber.workspace = true
+
+indexmap.workspace = true
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+axum.workspace = true
+# A fake app in process for the tests: rmcp's server side over a duplex pipe and over HTTP.
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }

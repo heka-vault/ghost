@@ -4,9 +4,13 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# The bundle (ADR 0038): one .deb and one AppImage carrying the desktop app and ghostd,
+# built the way CI builds them, installed into a clean Ubuntu 26.04, and attached to the
+# release. Nothing here bumps a version or makes a tag (docs/releasing.md).
 jobs:
-  debs:
+  bundle:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions: { contents: write }
     steps:
       - uses: actions/checkout@v4
@@ -14,17 +18,50 @@ jobs:
       - name: the tag is the version
         if: startsWith(github.ref, 'refs/tags/')
         run: python3 scripts/version.py check-tag "$GITHUB_REF_NAME"
-      - name: build image
-        run: docker build -t heka-ghost-build -f packaging/Dockerfile.build .
-      - name: build packages
-        run: docker run --rm -v "$PWD":/src -w /src -e GITHUB_SHA heka-ghost-build packaging/build-debs.sh
+      - name: system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev clang libclang-dev lld patchelf \
+            libpipewire-0.3-dev libspa-0.2-dev libpulse-dev libasound2-dev \
+            libespeak-ng-dev libopus-dev
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: the bundle
+        run: pnpm tauri build --ci
+      - name: collect
+        run: |
+          mkdir -p dist/bundle
+          cp target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage dist/bundle/
+          ls -la dist/bundle
+      # The way the Python package's `make deb-test` ran it: in /usr/bin, with nothing set,
+      # the daemon must say the commit the bundle recorded (ghost-build.json in its
+      # resources) and find ONNX Runtime and the four model files in the bundle's
+      # /usr/lib/heka-ghost-desktop/ on its own (W10 of #39). Parakeet and Kokoro are not
+      # in a clean container, so `ghostd check` names their steps and exits 1; what it
+      # must not name is either fetch script, which would mean the bundle's own copies
+      # were not found.
       - name: install test in a clean Ubuntu 26.04
         run: |
-          docker run --rm -v "$PWD/dist/deb":/deb:ro ubuntu:26.04 bash -ec '
-            apt-get update -qq && apt-get install -y -qq /deb/heka-ghostd_*.deb >/dev/null
-            ANTHROPIC_BASE_URL=http://x ghostd check'
+          docker run --rm -e COMMIT="$(git rev-parse HEAD)" -v "$PWD/dist/bundle":/bundle:ro ubuntu:26.04 bash -ec '
+            apt-get update -qq && apt-get install -y -qq /bundle/*.deb >/dev/null
+            ghostd version | tee /dev/stderr | grep -qF "release ${COMMIT:0:7}"
+            ghostd restore-volumes
+            ghost-mock-github --help >/dev/null && ghost-scripts --help >/dev/null
+            out=$(ANTHROPIC_BASE_URL=http://x ghostd check 2>&1) || true
+            printf "%s\n" "$out"
+            grep -q "^onnxruntime: /usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4$" <<<"$out"
+            grep -q "^models: /usr/lib/heka-ghost-desktop/models$" <<<"$out"
+            grep -q "^Parakeet.s files are not in the Hugging Face cache" <<<"$out"
+            ! grep -q "scripts/onnxruntime.sh\|scripts/models.sh" <<<"$out"'
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: dist/deb/*.deb
+          files: |
+            dist/bundle/*.deb
+            dist/bundle/*.AppImage
           generate_release_notes: true

@@ -1,0 +1,68 @@
+{
+  "backend": "webrtc",
+  "date": "2026-10-28",
+  "seconds": 61.02255129814148,
+  "uplink_phone_to_desk": {
+    "count": 60,
+    "p50_ms": 20.62392234802246,
+    "p95_ms": 21.204233169555664,
+    "max_ms": 21.539688110351562,
+    "mean_ms": 20.651765664418537
+  },
+  "downlink_desk_to_phone": {
+    "count": 60,
+    "p50_ms": 85.71076393127441,
+    "p95_ms": 86.25936508178711,
+    "max_ms": 86.45915985107422,
+    "mean_ms": 85.61230897903442
+  },
+  "bursts_sent_by_phone": 61,
+  "bursts_heard_by_desk": 60,
+  "bursts_sent_by_desk": 61,
+  "bursts_heard_by_phone": 60,
+  "desk": {
+    "packets_received": 3001,
+    "packets_lost": 0,
+    "concealed": 0,
+    "frames_dropped": 0,
+    "jitter_ms": 0.15306168352926564,
+    "packets_sent": 3001,
+    "cpu_seconds": 0.6,
+    "cpu_percent_of_one_core": 0.9832430588956279,
+    "cpu_percent_self_reported": 0.995569034834628
+  },
+  "phone": {
+    "packets_received": 3001,
+    "packets_lost": 0,
+    "jitter_ms": 0.14583333333333334,
+    "remote_inbound_packets_lost": 0,
+    "remote_round_trip_ms": 0.20579748183268198,
+    "bot_ready": 1,
+    "server_messages": 1,
+    "other_messages": 0,
+    "errors": [],
+    "exit": 0
+  },
+  "answers": [
+    {
+      "restart": false,
+      "took_ms": 7.518768310546875,
+      "fingerprint": "sha-256 E2:56:59:5E:86:C8:78:E4:0F:07:83:1E:F0:05:68:BD:88:EA:71:81:66:23:68:AB:91:4E:0C:36:A9:4E:57:5F",
+      "setup": "passive",
+      "candidates": 1,
+      "ice_lite": false
+    }
+  ],
+  "restart_ok": false,
+  "fingerprints_match": true,
+  "links": [
+    [
+      1793241470.4461155,
+      "Waiting"
+    ],
+    [
+      1793241470.691747,
+      "Connected"
+    ]
+  ]
+}

@@ -10,7 +10,7 @@ import type { Scenario } from "../scenarios";
 
 export const POLICY_PATH = "~/.config/ghost/policy.toml";
 
-/** ghost_core.policy's first line. */
+/** ghost_core::policy's first line. */
 const HEADER = "# Ghost's policy (ADR 0034): what it may not do, what it asks first, and how it reaches you.";
 
 /** [routes] as the daemon reports it (ADR 0031): the digest, desk voice and the phone. */

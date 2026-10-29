@@ -1,8 +1,0 @@
-#!/bin/sh
-set -e
-# Per-user units can't be stopped from a system prerm for every user; stop ours if any
-# instance is running under the invoking user's session.
-if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
-  pkill -INT -f '/opt/ghost/venv/bin/python.*ghostd run' 2>/dev/null || true
-fi
-exit 0

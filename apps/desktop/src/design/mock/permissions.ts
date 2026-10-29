@@ -1,5 +1,5 @@
 /**
- * The mock's copy of ghost_core.permissions (ADR 0034): a rule is `app`, `app.tool` or
+ * The mock's copy of ghost_core::permissions (ADR 0034): a rule is `app`, `app.tool` or
  * `app.tool(arg=value, arg!=value)` with `*` and `?` globs; the most careful list that
  * names a tool wins (block, ask, quiet, allow), then the mode. Without a call's arguments a
  * rule with argument patterns can't match, so it never decides a tool's level here; it only
@@ -22,7 +22,7 @@ export interface Rule {
   conditions: { arg: string; value: string; negated: boolean }[];
 }
 
-/** Python's repr of a string, as the daemon's messages quote the operator's text. */
+/** A string as Python's repr wrote it: how the daemon's messages quote the operator's text (kept word for word by the Rust port). */
 const repr = (s: string) => (s.includes("'") && !s.includes('"') ? `"${s}"` : `'${s.replace(/'/g, "\\'")}'`);
 
 export function parseRule(text: string): Rule {
@@ -78,7 +78,7 @@ export function withRule(p: PermissionsView, text: string, level: PermissionLeve
   return out;
 }
 
-/** `[permissions]` as ghost_core.policy.write_permissions writes it. */
+/** `[permissions]` as ghost_core::policy::write_permissions writes it. */
 export function permissionsToml(p: PermissionsView): string {
   const lines = ["[permissions]", `mode = "${p.mode}"`];
   for (const list of LISTS) if (p[list].length) lines.push(`${list} = [${p[list].map((r) => JSON.stringify(r)).join(", ")}]`);

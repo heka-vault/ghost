@@ -13,25 +13,21 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The Python that is left (ADR 0039): the tools under tools/ and the scripts. ruff over
+  # every Python file in the repository, pytest over the tools' tests (the version script,
+  # scripts/deploy.sh). The oracle (tools/oracle) is not synced here: its lock is read by
+  # the version test, and its model libraries are for the workstation.
   python:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with: { enable-cache: true }
-      - run: uv sync --all-packages --frozen
+      - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest -q -p no:cacheprovider
-      - name: openapi.json is current
-        run: uv run python -m ghost_api.export | diff -u packages/api/openapi.json -
-      # The .debs are built only on a release; at least the files they copy must exist.
-      - name: every file the packages copy exists
-        run: |
-          grep -o '"\$ROOT/[^"]*"' packaging/build-debs.sh | tr -d '"' | sed 's#^\$ROOT/##' \
-            | grep -v '^dist/\|^apps/desktop/src-tauri/target/' | sort -u \
-            | while read -r f; do [ -e "$f" ] || { echo "missing: $f"; exit 1; }; done
+      - run: uv run --project tools pytest -q -p no:cacheprovider
 
   typescript:
     runs-on: ubuntu-24.04
@@ -49,32 +45,75 @@ jobs:
       - name: desktop frontend builds
         run: pnpm build
 
-  # The Tauri shell of the desktop app. The .debs are built by release.yml, not here.
-  desktop-shell:
+  # The Rust workspace: the daemon's crates and the Tauri shell (ADR 0039). Clippy is
+  # strict, every test runs, cargo-deny fails on a known vulnerability or a license outside
+  # deny.toml's allowlist, and the control API's document is checked against the Rust types.
+  # Two builds and no more: one dev build serves clippy, the tests and the export; one
+  # release build makes the daemon, the two app binaries and the shell for the bundle.
+  rust:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run: { working-directory: apps/desktop/src-tauri }
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: system libraries
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-      - run: rustup component add rustfmt clippy
+          sudo apt-get install -y -qq --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev clang libclang-dev lld \
+            libpipewire-0.3-dev libspa-0.2-dev libpulse-dev libasound2-dev \
+            libespeak-ng-dev libopus-dev
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: apps/desktop/src-tauri }
-      - run: cargo fmt --check
+      - uses: taiki-e/install-action@nextest
+      - run: cargo fmt --all --check
       # generate_context! wants the frontend's folder to exist; its contents don't matter to a check.
-      - run: mkdir -p ../dist
-      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: mkdir -p apps/desktop/dist
+      - run: cargo clippy --workspace --locked --all-targets -- -D warnings
+      # ONNX Runtime 1.24.4 and the four small model files into the cache (W10 of #39):
+      # `ort` loads the library at run time, so every test that opens a session needs it
+      # there, and the daemon the parent-death tests start reads Silero from the cache
+      # (`ghost_infer::models`). The bundle below carries the same files.
+      - run: scripts/onnxruntime.sh
+      - run: scripts/models.sh
+      - run: cargo nextest run --workspace --locked
+      # The contract the TypeScript client is generated from is the Rust types' document.
+      - name: openapi.json is current
+        run: cargo run -q -p ghost-api --bin ghost-api-export --locked | diff -u packages/api/openapi.json -
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with: { command: check }
+      # The bundle (ADR 0038): the daemon and the app's two binaries in release, then one
+      # .deb and one AppImage with them inside, proven on every push.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: the bundle
+        run: pnpm tauri build --ci
+      - name: the bundle carries the daemon, the app binaries, ONNX Runtime, the model files and its record
+        run: |
+          ls -la target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage
+          for b in ghostd ghost-mock-github ghost-scripts heka-ghost-desktop; do
+            dpkg-deb -c target/release/bundle/deb/*.deb | grep -q "usr/bin/$b\$" || { echo "missing: $b"; exit 1; }
+          done
+          for f in onnxruntime/libonnxruntime.so.1.24.4 onnxruntime/LICENSE \
+                   models/silero_vad.onnx models/smart-turn-v3.2-cpu.onnx \
+                   models/melspectrogram.onnx models/embedding_model.onnx \
+                   models/LICENSE.silero-vad models/LICENSE.smart-turn models/LICENSE.openwakeword \
+                   ghost-build.json; do
+            dpkg-deb -c target/release/bundle/deb/*.deb | grep -q "usr/lib/heka-ghost-desktop/$f\$" \
+              || { echo "missing: $f"; exit 1; }
+          done
+          # The record names this commit (ghostd::build_info reads it; docs/releasing.md).
+          # Tauri's bundler stores members as usr/..., dpkg's as ./usr/...; match either.
+          dpkg-deb --fsys-tarfile target/release/bundle/deb/*.deb \
+            | tar -xO --wildcards '*/heka-ghost-desktop/ghost-build.json' \
+            | tee /dev/stderr | grep -qF "\"commit\": \"$(git rev-parse HEAD)\""
 
   # The one check main's ruleset requires, so adding or renaming a job above needs no
   # settings change.
   ci-ok:
     if: always()
-    needs: [python, typescript, desktop-shell]
+    needs: [python, typescript, rust]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

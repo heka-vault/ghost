@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { pairLink, parsePairLink } from "../src";
 
 describe("the pairing link", () => {
-  // The daemon's own spelling (apps/ghostd/tests/test_phone.py builds the same string).
+  // The daemon's own spelling (ghostd::phone::pairing builds the same string).
   const daemon = "ghost://pair?code=482913&address=192.168.1.20%3A8765&address=10.8.0.4%3A8765&address=%5Bfd00%3A%3A4%5D%3A8765";
   const addresses = ["192.168.1.20:8765", "10.8.0.4:8765", "[fd00::4]:8765"];
 

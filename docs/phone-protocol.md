@@ -30,7 +30,7 @@ ghost://pair?code=482913&address=192.168.1.20%3A8765&address=10.8.0.4%3A8765
 
 `code` is the six digits. `address` repeats once per listen address, in the configured order (home
 first, then the tunnel); each is `host:port`, form-encoded, an IPv6 host in brackets. The daemon builds
-it (`ghostd.phone.pair_link`), and `@ghost/client-ts/pairLink` builds and parses the same string. The
+it (`ghostd::phone::pairing`), and `@ghost/client-ts/pairLink` builds and parses the same string. The
 phone accepts only exactly this shape: scheme `ghost`, host `pair`, one six-digit `code`, one to eight
 addresses; it ignores other keys, which are left for later versions. The link carries what typing
 would and nothing more: no secret, and the code is still single use, 120 s and five tries.
@@ -61,7 +61,7 @@ address, and its network in `phone.json`: written at most once a minute, or at o
 or network changed. `GET /phone` returns them as `last_seen`, `last_address` and `last_network`.
 
 The network is `home` or `tunnel`, from the interface that holds the local IP the connection landed on
-(`ghostd.phone.networks`): an interface the kernel calls WireGuard (`DEVTYPE=wireguard` in
+(`ghostd::phone::networks`): an interface the kernel calls WireGuard (`DEVTYPE=wireguard` in
 `/sys/class/net/<name>/uevent`) or any other tun device is the tunnel, any other interface is the home
 network. Nothing is configured and nothing is read from the order of `GHOST_PHONE_LISTEN`. `listen`
 gives each configured address the same way, with `listening` false while its interface isn't up (it is
@@ -141,7 +141,7 @@ After a peer drops, the desk can take about 10 s to wind the session down. A pee
 ## The data channel
 
 The phone creates one data channel labelled `chat` before making the offer. It sends the text `ping`
-once a second (Pipecat's keepalive), then RTVI messages `{label: "rtvi-ai", type, id, data}`:
+once a second (the keepalive the desk expects), then RTVI messages `{label: "rtvi-ai", type, id, data}`:
 
 - `client-ready` `{version: "2.1.0", about: {library: "ghost-mobile"}}`, sent once the channel opens.
 - `disconnect-bot`, which ends the session (the same as `POST /end`).
@@ -165,7 +165,7 @@ leaves the session open. Both ends use `iceServers: []`.
 
 On speakerphone some of Ghost's voice leaks past the phone's echo canceller and comes back late, after
 Ghost has stopped speaking. The desk drops a transcript heard during Ghost's speech or up to 3 s after it
-(`GHOST_ECHO_WINDOW_SECS`) when it is mostly a run of what Ghost just said (`ghost_voice.echo`). Answers
+(`GHOST_ECHO_WINDOW_SECS`) when it is mostly a run of what Ghost just said (`ghost_voice::echo`). Answers
 under three words always pass, so a spoken yes is never mistaken for echo.
 
 End sends `disconnect-bot` on the data channel, then `POST /end`, then closes the peer.

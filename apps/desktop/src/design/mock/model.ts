@@ -1,5 +1,5 @@
 /**
- * The mock daemon's model connection (ADR 0037): the providers ghost_core.connection offers,
+ * The mock daemon's model connection (ADR 0037): the providers ghost_core::connection offers,
  * resolved from the mock's settings the way the daemon resolves them, made-up model lists,
  * a Test connection that answers after a moment, and an OpenRouter sign-in that finishes on
  * its own a few seconds later. Nothing leaves the window.
@@ -59,7 +59,7 @@ export class MockModel {
     return this.held(name);
   }
 
-  /** The connection a set of values names, as ghost_core.connection resolves it. */
+  /** The connection a set of values names, as ghost_core::connection resolves it. */
   view(draft?: ModelDraft): ModelConnectionView {
     const values: Record<string, string> = { ...this.settings().values };
     for (const [k, v] of Object.entries(draft?.values ?? {})) {

@@ -15,7 +15,8 @@
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
     "dev:desktop": "pnpm --filter @ghost/desktop dev",
-    "tauri": "pnpm --filter @ghost/desktop tauri"
+    "tauri": "pnpm --filter @ghost/desktop tauri",
+    "sidecars": "scripts/sidecars.sh"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

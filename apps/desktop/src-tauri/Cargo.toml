@@ -1,10 +1,10 @@
 [package]
 name = "heka-ghost-desktop"
 version = "2026.10.0"
-description = "Ghost desktop: tray, status, chat, policy, audit"
+description = "Ghost desktop: the window, the tray, and the daemon it runs (ADR 0038)"
 authors = ["Eric Polerecky"]
 license = "MIT"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "heka_ghost_desktop_lib"
@@ -12,16 +12,25 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+serde_json = "1"
 
 [dependencies]
+ghost-api.workspace = true
+
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["net", "rt-multi-thread", "macros", "time", "io-util", "process"] }
+tokio = { version = "1", features = ["net", "rt-multi-thread", "macros", "time", "io-util", "process", "signal"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 hyperlocal = "0.9"
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
+rustix = { workspace = true, features = ["process"] }
+
+[dev-dependencies]
+tempfile = "3"

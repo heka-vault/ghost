@@ -48,11 +48,11 @@ function phone(s: Scenario): PhoneView {
 }
 
 const SECRET_NAMES = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "HF_TOKEN", "OPENROUTER_API_KEY", "TYPESAFE_API_KEY", "ELEVENLABS_API_KEY"];
-/** Keys only one model provider uses (ghost_api.passwords.PROVIDER_ONLY): the mock daemon lists
+/** Keys only one model provider uses (ghost_api::passwords::PROVIDER_ONLY): the mock daemon lists
  *  each once it is set or once its provider is the one in use, as GET /passwords does. */
 export const PROVIDER_ONLY = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"];
 
-/** What Ghost itself reads each of its own passwords for (ghost_core.passwords.GHOST_USES). */
+/** What Ghost itself reads each of its own passwords for (ghost_core::passwords::GHOST_USES). */
 export const GHOST_USES: Record<string, string> = {
   ANTHROPIC_AUTH_TOKEN: "The model connection",
   ANTHROPIC_API_KEY: "The model connection",

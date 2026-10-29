@@ -1,6 +1,6 @@
 # 0003: Python for everything except the mobile app
 
-- **Status:** accepted
+- **Status:** superseded by ADR 0039 (2026-10-28): the daemon is Rust, in one Cargo workspace with the desktop app's shell; the Python daemon was removed in W10 of heka-vault/ghost#39
 - **Date:** 2026-10-16
 - **Supersedes:** original spec's NestJS/TypeScript API and Node agent
 

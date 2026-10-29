@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { inTauri, startDaemon } from "../transport";
 import { Button, EmptyState, IconButton, Notice, Spinner, errorText } from "../ui";
+import { daemonLine, useDaemon } from "./daemon";
 
 const COMMAND = "systemctl --user enable --now ghostd";
 
@@ -11,6 +12,7 @@ export function Offline() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const daemon = useDaemon();
 
   const start = async () => {
     setBusy(true);
@@ -34,6 +36,9 @@ export function Offline() {
     }
   };
 
+  // The app runs the daemon itself (ADR 0038): a Start button only while it is between
+  // tries, where it skips the rest of the delay. In a browser, the headless mode's command.
+  const canStart = inTauri && (daemon?.state === "restarting" || daemon?.state === "failed");
   // One EmptyState holds everything, so this page sits at the same optical center as every
   // other page-level state (not found, a crashed screen).
   return (
@@ -42,14 +47,15 @@ export function Offline() {
       className="shell-offline"
       icon={<Power />}
       title="Ghost isn’t running"
-      description="The Ghost service isn’t answering on this computer. Start it, and this window connects on its own."
+      description={inTauri ? daemonLine(daemon) : "The Ghost service isn’t answering on this computer. Start it, and this window connects on its own."}
       actions={
         <div className="shell-offline__actions">
-          {inTauri ? (
+          {canStart && (
             <Button variant="primary" size="lg" loading={busy} onClick={start}>
-              Start Ghost
+              Start Ghost now
             </Button>
-          ) : (
+          )}
+          {!inTauri && (
             <div className="shell-offline__command">
               <code>{COMMAND}</code>
               <IconButton size="sm" label={copied ? "Copied" : "Copy command"} icon={copied ? <Check /> : <Copy />} onClick={copy} />

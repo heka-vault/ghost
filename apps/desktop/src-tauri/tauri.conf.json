@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm --filter @ghost/desktop dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm --filter @ghost/desktop build",
+    "beforeBuildCommand": "pnpm -w sidecars && pnpm --filter @ghost/desktop build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -23,13 +23,20 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb"],
+    "targets": ["deb", "appimage"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
     "category": "Utility",
-    "shortDescription": "Ghost voice assistant: status, chat, policy and audit",
+    "shortDescription": "Ghost voice assistant: the app that runs Ghost",
+    "longDescription": "Ghost, a voice-first assistant for one Linux workstation. The app carries the daemon (ghostd) and runs it while you are logged in; closing the window keeps it in the tray, and Quit stops everything.",
+    "externalBin": ["binaries/ghostd", "binaries/ghost-mock-github", "binaries/ghost-scripts"],
+    "resources": {
+      "resources/onnxruntime/": "onnxruntime/",
+      "resources/models/": "models/",
+      "resources/ghost-build.json": "ghost-build.json"
+    },
     "linux": {
       "deb": {
-        "depends": ["heka-ghostd"],
+        "depends": ["libespeak-ng1"],
         "section": "utils",
         "desktopTemplate": "./ghost.desktop"
       }
