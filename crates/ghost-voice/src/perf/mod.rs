@@ -13,6 +13,7 @@
 pub mod audio;
 pub mod cli;
 pub mod harness;
+pub mod llm;
 pub mod micro;
 pub mod report;
 pub mod scenarios;

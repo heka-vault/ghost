@@ -5,11 +5,14 @@
 //!                   [--no-jev] [--ablate none,all,tts_clauses+speculate] [--ttfb-ms N]
 //!                   [--out DIR] [--show-text]
 //! ghost-perf micro  [--only stt,tts,jev,turn] [--n N] [--out DIR]
+//! ghost-perf llm    [--model a,b] [--endpoint current,proxy,openrouter+sysbp,<provider>]
+//!                   [--openrouter-models a,b] [--thinking between_tools] [--n N] [--out DIR]
 //! ghost-perf report DIR/records.json
 //! ```
 //!
-//! Output goes to `.scratch/perf/<timestamp>/` (report.md, records.json, latency.jsonl).
-//! Keys are read from the environment and never printed.
+//! Output goes to `.scratch/perf/<timestamp>/` (report.md, records.json, latency.jsonl;
+//! micro.txt and micro.json; llm.md and llm.json). Keys are read from the environment and
+//! never printed.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -22,7 +25,7 @@ use super::harness::{Bench, RunConfig, parse_ablations};
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
-pub const USAGE: &str = "usage: ghost-perf run|micro|report [options]";
+pub const USAGE: &str = "usage: ghost-perf run|micro|llm|report [options]";
 
 fn csv(s: Option<&String>) -> Vec<String> {
     s.map(|s| {
@@ -149,6 +152,31 @@ pub fn main(argv: &[String]) -> i32 {
                 Ok(code) => code,
                 Err(e) => {
                     eprintln!("micro: {e}");
+                    1
+                }
+            }
+        }
+        "llm" => {
+            let endpoints = match args.one("endpoint") {
+                Some(e) => csv(Some(e)),
+                None => vec!["current".into()],
+            };
+            let run = super::llm::LlmRun {
+                models: csv(args.one("model")),
+                endpoints,
+                openrouter_models: csv(args.one("openrouter-models")),
+                thinking: args
+                    .one("thinking")
+                    .cloned()
+                    .unwrap_or_else(|| "between_tools".into()),
+                n: args.one("n").and_then(|n| n.parse().ok()).unwrap_or(4),
+                out: out.clone(),
+                infra_dir: root.join("infra"),
+            };
+            match rt.block_on(super::llm::run_llm(&run)) {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("llm: {e}");
                     1
                 }
             }

@@ -278,7 +278,7 @@ impl Bench {
     }
 
     /// Where `ghost-mock-github` is: on the PATH, or beside this binary.
-    fn mock_github_command() -> String {
+    pub(crate) fn mock_github_command() -> String {
         if let Ok(exe) = std::env::current_exe()
             && let Some(dir) = exe.parent()
         {
