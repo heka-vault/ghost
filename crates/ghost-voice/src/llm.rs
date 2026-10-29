@@ -625,7 +625,8 @@ impl ScriptedModel {
     }
 
     /// Which line of the script the context is on: its user turns, the notes aside. A
-    /// turn past the script (a line the pause split in two) is the last line's.
+    /// turn past the script (a line the pause split in two) is the last line's, and a
+    /// line's replies, once spent, end on its last one.
     fn line_of(&self, context: &Context) -> Option<usize> {
         let turns = context
             .messages
@@ -647,10 +648,13 @@ impl ModelPort for ScriptedModel {
     ) -> BoxStream<'static, Result<Event, LlmError>> {
         *self.calls.lock().unwrap() += 1;
         let line = self.line_of(&context);
+        // A line whose replies are spent (the second half of a split line) gets its last
+        // reply again, as a real model answers the second half of what it already answered.
         let reply = line
             .and_then(|l| {
                 let i = *self.served.lock().unwrap().get(l)?;
-                self.lines.get(l)?.get(i).cloned()
+                let replies = self.lines.get(l)?;
+                replies.get(i).or_else(|| replies.last()).cloned()
             })
             .unwrap_or_default();
         let words: Vec<String> = reply.text.split_inclusive(' ').map(String::from).collect();
