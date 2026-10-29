@@ -74,7 +74,8 @@ pub enum MediaError {
 }
 
 /// The name of the stack [`new_media`] builds: the first feature enabled, in the order
-/// `str0m`, `webrtc`, `libwebrtc`.
+/// `str0m`, `webrtc`, `libwebrtc`. The default feature is `str0m`, chosen by measurement
+/// (`README.md`).
 pub const BACKEND: &str = if cfg!(feature = "str0m") {
     "str0m"
 } else if cfg!(feature = "webrtc") {

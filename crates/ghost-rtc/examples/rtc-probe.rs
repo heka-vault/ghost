@@ -182,11 +182,15 @@ async fn end(State(app): State<Arc<App>>) -> Json<Value> {
     Json(json!({"ok": true}))
 }
 
-/// This process's CPU time so far, from `/proc/self/schedstat` (nanoseconds on a CPU).
+/// This process's CPU time so far, every thread: user plus system from `/proc/self/stat`,
+/// in clock ticks (100 a second on Linux).
 fn cpu_seconds() -> Option<f64> {
-    let text = std::fs::read_to_string("/proc/self/schedstat").ok()?;
-    let ns: f64 = text.split_whitespace().next()?.parse().ok()?;
-    Some(ns / 1e9)
+    let text = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let after_comm = text.rsplit_once(')')?.1;
+    let fields: Vec<&str> = after_comm.split_whitespace().collect();
+    let utime: f64 = fields.get(11)?.parse().ok()?;
+    let stime: f64 = fields.get(12)?.parse().ok()?;
+    Some((utime + stime) / 100.0)
 }
 
 #[tokio::main]

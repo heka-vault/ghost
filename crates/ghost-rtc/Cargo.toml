@@ -8,7 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [features]
-default = []
+# The stack the daemon runs, chosen by measurement (README.md).
+default = ["str0m"]
 str0m = ["dep:str0m"]
 webrtc = ["dep:webrtc", "dep:rtc", "dep:bytes"]
 libwebrtc = ["dep:libwebrtc"]
