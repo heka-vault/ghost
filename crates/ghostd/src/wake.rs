@@ -745,6 +745,11 @@ pub fn desk_capture(input_device: Option<String>) -> MediaFactory {
     })
 }
 
+/// The wake file under the runtime dir (`ghostd wake` without a daemon touches it).
+pub fn wake_file_in(rt: &Path) -> PathBuf {
+    rt.join(WAKE_FILE)
+}
+
 /// The detector phrase, for the listener in detector mode.
 pub fn detector_phrases() -> Vec<String> {
     vec![DETECTOR_PHRASE.to_string()]

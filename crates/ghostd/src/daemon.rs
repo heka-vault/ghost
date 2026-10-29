@@ -18,7 +18,7 @@
 //! runner; everything else is the real thing over a temp folder.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 use std::time::{Duration, Instant};
@@ -1977,11 +1977,6 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogMirror {
     }
 }
 
-/// An `Arc<Daemon>` as the sessions' turn handler sees it.
-pub fn weak_heard(d: &Arc<Daemon>) -> std::sync::Weak<Daemon> {
-    Arc::downgrade(d)
-}
-
 /// The settings the process environment gives, with the vault's values over it.
 pub fn settings_from(
     env: &HashMap<String, String>,
@@ -1991,16 +1986,12 @@ pub fn settings_from(
     Ok((cfg, voice))
 }
 
-/// Whether `path` is the wake file this daemon reads.
-pub fn wake_file(rt: &Path) -> PathBuf {
-    rt.join(WAKE_FILE)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     //! `apps/ghostd/tests/test_ghostd.py` and `test_passwords_daemon.py`, the daemon's
     //! own, by name. A fake keyring and temp folders: never the operator's (ADR 0036).
 
+    use std::path::Path;
     use std::sync::atomic::AtomicUsize;
 
     use ghost_core::MemoryKeyring;

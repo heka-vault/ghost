@@ -220,13 +220,13 @@ service-install: ## install the ghostd user unit (make deploy then points it at 
 # real pipeline (crates/ghost-voice, ADR 0039), headless, the real local models and the mock
 # GitHub app in a temp dir, a scripted model. No mic, no speakers, no tokens spent.
 perf: ## latency harness: make perf [SCENARIO=lookup,chain] [RUNS=3] [ARGS=--no-jev ...]
-	@cargo build --release -q -p ghost-voice --bin ghost-perf -p ghost-core --bin ghost-mock-github
-	@$(load_env) target/release/ghost-perf run --runs $(or $(RUNS),3) \
+	@cargo build --release -q -p ghostd --bin ghostd -p ghost-core --bin ghost-mock-github
+	@$(load_env) target/release/ghostd perf run --runs $(or $(RUNS),3) \
 	  $(if $(SCENARIO),--scenario $(SCENARIO)) $(ARGS)
 
 perf-micro: ## component micro-benchmarks: STT, Kokoro first audio, Smart Turn, Jev
-	@cargo build --release -q -p ghost-voice --bin ghost-perf
-	@$(load_env) target/release/ghost-perf micro $(ARGS)
+	@cargo build --release -q -p ghostd --bin ghostd
+	@$(load_env) target/release/ghostd perf micro $(ARGS)
 
 perf-llm: ## LLM TTFB per endpoint and model with Ghost's prompt and tools: make perf-llm [ARGS=...]
 	@$(load_env) $(UV) run ghostd perf llm $(ARGS)
