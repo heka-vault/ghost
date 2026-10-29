@@ -31,7 +31,7 @@
 mod bridge;
 mod collection;
 mod connection;
-mod spec;
+pub(crate) mod spec;
 #[cfg(test)]
 mod tests;
 mod tools;

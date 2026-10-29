@@ -8,6 +8,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use utoipa::ToSchema;
 use zeroize::Zeroizing;
 
 pub const API_VERSION: &str = "1";
@@ -50,7 +51,7 @@ fn subtle_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Where the daemon is. The tray tooltip and the phone's Home read it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Phase {
     /// Models loading; the socket is up so the UI can show progress.
@@ -69,7 +70,7 @@ pub enum Phase {
     Asking,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PendingProposal {
     pub id: String,
     /// What it changes: an app, or Ghost's own (a `ToolSource` name).
@@ -82,7 +83,7 @@ pub struct PendingProposal {
     pub expires_in_secs: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum BuildKind {
     #[default]
@@ -91,7 +92,7 @@ pub enum BuildKind {
     Release,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Launcher {
     MakeDev,
@@ -103,21 +104,23 @@ pub enum Launcher {
 /// is the full hash when known; `dirty` is a checkout that had uncommitted changes when
 /// the daemon started. `launcher` is how a checkout's daemon was started, when the make
 /// target says so (`GHOST_LAUNCHER`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 pub struct Build {
     #[serde(default)]
+    #[schema(inline)]
     pub kind: BuildKind,
     #[serde(default)]
     pub commit: Option<String>,
     #[serde(default)]
     pub dirty: bool,
     #[serde(default)]
+    #[schema(inline)]
     pub launcher: Option<Launcher>,
 }
 
 /// Where a live session's audio is: the desk's mic and speaker, or the paired phone over
 /// WebRTC (ADR 0016).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionOrigin {
     Desk,
@@ -129,9 +132,10 @@ fn api_version() -> String {
 }
 
 /// `GET /status`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct Status {
     pub phase: Phase,
+    #[schema(required)]
     pub session_id: Option<String>,
     pub models_ready: bool,
     pub uptime_secs: f64,
@@ -151,6 +155,7 @@ pub struct Status {
     #[serde(default)]
     pub conversation: Option<String>,
     #[serde(default)]
+    #[schema(inline)]
     pub session_origin: Option<SessionOrigin>,
     /// Ghost has decided to hang up: its goodbye may still be playing.
     #[serde(default)]
@@ -160,7 +165,7 @@ pub struct Status {
     pub waiting: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TurnRole {
     User,
@@ -168,7 +173,7 @@ pub enum TurnRole {
     System,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TurnVia {
     #[default]
@@ -178,17 +183,19 @@ pub enum TurnVia {
     System,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct Turn {
+    #[schema(inline)]
     pub role: TurnRole,
     pub text: String,
     pub session_id: String,
     pub at: DateTime<Utc>,
     #[serde(default)]
+    #[schema(inline)]
     pub via: TurnVia,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OutcomeStatus {
     Success,
@@ -196,10 +203,11 @@ pub enum OutcomeStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct OutcomeView {
     pub proposal_id: String,
     pub target: String,
+    #[schema(inline)]
     pub status: OutcomeStatus,
     pub applied: Vec<String>,
     #[serde(default)]
@@ -213,7 +221,7 @@ pub struct OutcomeView {
 
 // --- events over the WebSocket ----------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OutcomeVia {
     Voice,
@@ -222,7 +230,7 @@ pub enum OutcomeVia {
 }
 
 /// What the event stream carries, discriminated by `type`. Never a passive transcript.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Event {
     Status {
@@ -266,7 +274,7 @@ pub enum Event {
 
 // --- the waiting list (ADR 0029, ADR 0030) ----------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WaitingState {
     New,
@@ -277,13 +285,14 @@ pub enum WaitingState {
 
 /// One item that needs the operator. `title` comes from an outside system: show it as
 /// text, never as markup. `change` is set for a change waiting for a yes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct WaitingItemView {
     pub key: String,
     pub source: String,
     pub title: String,
     #[serde(default)]
     pub link: Option<String>,
+    #[schema(inline)]
     pub state: WaitingState,
     pub first_seen: DateTime<Utc>,
     pub changed_at: DateTime<Utc>,
@@ -300,19 +309,19 @@ pub struct WaitingItemView {
     pub change: Option<PendingProposal>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct WaitingView {
     pub items: Vec<WaitingItemView>,
     /// How many still need the operator to hear them.
     pub count: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ItemKey {
     pub key: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SnoozeRequest {
     pub key: String,
     /// 1 to a week.
@@ -321,7 +330,7 @@ pub struct SnoozeRequest {
 
 // --- requests ----------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 pub struct WakeRequest {
     /// Words to treat as the first turn.
     #[serde(default)]
@@ -331,7 +340,7 @@ pub struct WakeRequest {
     pub conversation: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SayRequest {
     /// 1 to 4000 characters.
     pub text: String,
@@ -340,7 +349,7 @@ pub struct SayRequest {
     pub conversation: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Ack {
     pub ok: bool,
     #[serde(default)]
@@ -365,7 +374,7 @@ impl Ack {
 
 // --- audit -------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct AuditEventView {
     pub at: DateTime<Utc>,
     pub event: String,
@@ -373,7 +382,7 @@ pub struct AuditEventView {
     pub detail: Option<Map<String, Value>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct AuditEntry {
     pub id: String,
     pub session_id: String,
@@ -391,7 +400,7 @@ pub struct AuditEntry {
     pub conversation: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct AuditPage {
     pub items: Vec<AuditEntry>,
     pub total: i64,
@@ -401,7 +410,7 @@ pub struct AuditPage {
 
 // --- sources + policy ----------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct OperationInfo {
     pub name: String,
     pub description: String,
@@ -412,7 +421,7 @@ pub struct OperationInfo {
     pub required: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ReadToolInfo {
     pub name: String,
     pub description: String,
@@ -420,7 +429,7 @@ pub struct ReadToolInfo {
 
 // --- apps and permissions (ADR 0034) --------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
     Allow,
@@ -451,7 +460,7 @@ impl Level {
 }
 
 /// One of an app's tools, and what Ghost's own permissions say about it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AppAction {
     pub name: String,
     /// The app's, first sentence: untrusted text, shown to the operator only.
@@ -459,6 +468,7 @@ pub struct AppAction {
     /// Read-only, by the app's own word; anything else is a change.
     pub reads: bool,
     /// For a change; a read is allow or block.
+    #[schema(inline)]
     pub level: Level,
     /// The rule that names just this tool ("github.issue_write").
     pub rule: String,
@@ -467,7 +477,7 @@ pub struct AppAction {
     pub conditional: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AppKind {
     SignIn,
@@ -476,7 +486,7 @@ pub enum AppKind {
     Custom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AppState {
     Connected,
@@ -487,12 +497,14 @@ pub enum AppState {
 }
 
 /// A connected app: how it is reached, whether it is up, and what it can do.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AppView {
     /// Its short name: the rules' and the tools' prefix.
     pub name: String,
     pub title: String,
+    #[schema(inline)]
     pub kind: AppKind,
+    #[schema(inline)]
     pub state: AppState,
     /// Not connected, or tools not offered, and why; never a secret.
     #[serde(default)]
@@ -512,7 +524,7 @@ pub struct AppView {
     pub settings: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CatalogSetting {
     pub key: String,
     pub label: String,
@@ -530,7 +542,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CatalogOptionKind {
     SignIn,
@@ -538,7 +550,7 @@ pub enum CatalogOptionKind {
     Local,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum HostOwner {
     Maker,
@@ -546,7 +558,7 @@ pub enum HostOwner {
     Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Registry {
     Npm,
@@ -556,9 +568,10 @@ pub enum Registry {
 
 /// One way to connect: sign in, an API key, or run on this computer. Where it runs: a
 /// remote's `host`, and whose host that is; a package's `registry` and name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CatalogOption {
     pub id: String,
+    #[schema(inline)]
     pub kind: CatalogOptionKind,
     pub label: String,
     #[serde(default)]
@@ -568,15 +581,17 @@ pub struct CatalogOption {
     pub host: Option<String>,
     /// The product maker's host, the publisher's own, or someone else's.
     #[serde(default)]
+    #[schema(inline)]
     pub host_owner: Option<HostOwner>,
     #[serde(default)]
+    #[schema(inline)]
     pub registry: Option<Registry>,
     /// Its name there: "posthog-mcp".
     #[serde(default)]
     pub package: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Verified {
     Github,
@@ -585,14 +600,15 @@ pub enum Verified {
 
 /// Who published an entry, as the registry checked it. Who published it, not whether it
 /// is safe.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CatalogPublisher {
     /// "PostHog", "mcparmory.com"
     pub name: String,
+    #[schema(inline)]
     pub verified: Verified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MakerEvidence {
     Publisher,
@@ -603,15 +619,16 @@ pub enum MakerEvidence {
 }
 
 /// The entry is the product maker's own, and what agreed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CatalogMaker {
     pub product: String,
+    #[schema(inline)]
     pub evidence: Vec<MakerEvidence>,
 }
 
 /// An app in the catalog. Its text is the registry's: shown to the operator, never to the
 /// model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct CatalogEntryView {
     /// The registry's name, reverse-DNS.
     pub name: String,
@@ -646,10 +663,11 @@ pub struct CatalogEntryView {
     /// In search results: other publishers' entries for the same product, folded under
     /// the maker's own. Always empty on `GET /catalog/{name}`.
     #[serde(default)]
+    #[schema(no_recursion)]
     pub others: Vec<CatalogEntryView>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct CatalogPage {
     pub entries: Vec<CatalogEntryView>,
     /// Results, counting a maker's own with what folds under it as one.
@@ -665,7 +683,7 @@ pub struct CatalogPage {
 /// Connect an app: from the catalog (`catalog` and `option`), from a URL, or from another
 /// client's pasted config. Secret values go to Ghost's vault, never into apps.json, and
 /// never come back out.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 pub struct AppConnect {
     #[serde(default)]
     pub catalog: Option<String>,
@@ -683,7 +701,7 @@ pub struct AppConnect {
     pub replace: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AppConnectResult {
     pub apps: Vec<AppView>,
     #[serde(default)]
@@ -693,7 +711,7 @@ pub struct AppConnectResult {
     pub problems: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum Mode {
     #[serde(rename = "open")]
     Open,
@@ -704,9 +722,10 @@ pub enum Mode {
 }
 
 /// `[permissions]` in policy.toml: everything runs unless a rule says otherwise.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PermissionsView {
     pub path: String,
+    #[schema(inline)]
     pub mode: Mode,
     #[serde(default)]
     pub block: Vec<String>,
@@ -719,17 +738,19 @@ pub struct PermissionsView {
 }
 
 /// One toggle: move `rule` into `level`'s list, or out of every list (None).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct RuleSet {
     pub rule: String,
     #[serde(default)]
+    #[schema(inline)]
     pub level: Option<Level>,
 }
 
 /// Whole lists, the mode, or one rule moved; what is not given is kept.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 pub struct PermissionsUpdate {
     #[serde(default)]
+    #[schema(inline)]
     pub mode: Option<Mode>,
     #[serde(default)]
     pub block: Option<Vec<String>>,
@@ -746,7 +767,7 @@ pub struct PermissionsUpdate {
 // --- skills ------------------------------------------------------------------------------
 
 /// Where one of Ghost's skills was installed from (#35), as its lock file records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillOriginView {
     pub source: String,
     pub source_url: String,
@@ -760,7 +781,7 @@ pub struct SkillOriginView {
 }
 
 /// A skill Ghost can read (ADR 0023): a SKILL.md folder, Ghost's own or the operator's.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillInfo {
     pub name: String,
     pub description: String,
@@ -781,7 +802,7 @@ pub struct SkillInfo {
 
 /// A skill skills.sh lists (#35). Its text is the directory's: shown to the operator,
 /// never to the model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillListing {
     pub id: String,
     pub source: String,
@@ -792,7 +813,7 @@ pub struct SkillListing {
     pub installed: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SkillSearchPage {
     pub query: String,
     #[serde(default)]
@@ -803,7 +824,7 @@ pub struct SkillSearchPage {
     pub fetched_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillPreviewRequest {
     /// owner/repo, owner/repo/skill, or a github.com address of a skill's folder.
     pub source: String,
@@ -811,7 +832,7 @@ pub struct SkillPreviewRequest {
     pub skill: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillFileView {
     pub path: String,
     pub bytes: u64,
@@ -819,7 +840,7 @@ pub struct SkillFileView {
     pub script: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SkillPlace {
     Ghost,
@@ -828,7 +849,7 @@ pub enum SkillPlace {
 
 /// A skill fetched from GitHub and staged, for the operator to read before installing.
 /// Everything in it but the hashes is the source's text: untrusted.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillPreview {
     /// What install takes; good for 30 minutes.
     pub token: String,
@@ -849,12 +870,13 @@ pub struct SkillPreview {
     #[serde(default)]
     pub scripts: Vec<String>,
     #[serde(default)]
+    #[schema(inline)]
     pub installed: Option<SkillPlace>,
     #[serde(default)]
     pub update_of: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillInstall {
     pub token: String,
     #[serde(default)]
@@ -864,7 +886,7 @@ pub struct SkillInstall {
 }
 
 /// Whether an installed skill's source has moved on, checked when the page asks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillUpdateView {
     pub name: String,
     pub source: String,
@@ -877,7 +899,7 @@ pub struct SkillUpdateView {
     pub problem: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillBody {
     pub name: String,
     /// SKILL.md without its front matter, trimmed.
@@ -886,7 +908,7 @@ pub struct SkillBody {
     pub files: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SkillAdd {
     /// A folder on this machine holding SKILL.md.
     pub path: String,
@@ -898,14 +920,14 @@ pub struct SkillAdd {
 
 // --- watching ------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Response {
     Tell,
     Record,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Urgency {
     Digest,
@@ -914,7 +936,7 @@ pub enum Urgency {
 }
 
 /// A watch in watches.json (ADR 0028, ADR 0035) and how its last look went.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct WatchInfo {
     pub name: String,
     pub app: String,
@@ -922,7 +944,9 @@ pub struct WatchInfo {
     pub every_secs: i64,
     /// "check", then "jev" and "model" where declared.
     pub steps: Vec<String>,
+    #[schema(inline)]
     pub response: Response,
+    #[schema(inline)]
     pub urgency: Urgency,
     #[serde(default)]
     pub last_run: Option<DateTime<Utc>>,
@@ -938,7 +962,7 @@ pub struct WatchInfo {
     pub open: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Verify {
     Github,
@@ -947,11 +971,12 @@ pub enum Verify {
 
 /// A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of deliveries
 /// since the daemon started. Counts only; never a body.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct HookInfo {
     pub name: String,
     /// POST here on the webhook listener.
     pub path: String,
+    #[schema(inline)]
     pub verify: Verify,
     pub events: Vec<String>,
     pub on: bool,
@@ -968,7 +993,7 @@ pub struct HookInfo {
 }
 
 /// A file Ghost made in its out/ folder (ADR 0033). Ghost never runs it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct OutputInfo {
     pub name: String,
     pub path: String,
@@ -978,7 +1003,7 @@ pub struct OutputInfo {
 
 /// What Ghost watches (ADR 0035): the watches, the webhooks, where the webhook listener
 /// is, and what is wrong in those files or left in Ghost's folder from an older layout.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, ToSchema)]
 pub struct WatchingView {
     #[serde(default)]
     pub watches: Vec<WatchInfo>,
@@ -992,7 +1017,7 @@ pub struct WatchingView {
 }
 
 /// Ghost's AGENTS.md (ADR 0035): the rules in every agent's prompt.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct RulesView {
     /// The file the operator opens.
     pub path: String,
@@ -1000,13 +1025,13 @@ pub struct RulesView {
 }
 
 /// A rule appended to Ghost's AGENTS.md, verbatim (ADR 0035).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct RuleAdd {
     pub text: String,
 }
 
 /// A source of tools the gate knows: Ghost's own (built in) or a connected app.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SourceInfo {
     pub name: String,
     /// "built-in" or "app"
@@ -1018,7 +1043,7 @@ pub struct SourceInfo {
     pub read_tools: Vec<ReadToolInfo>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RouteName {
     Digest,
@@ -1030,7 +1055,7 @@ pub enum RouteName {
     Whatsapp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Carry {
     Count,
@@ -1038,8 +1063,9 @@ pub enum Carry {
 }
 
 /// `[routes]` in the policy file (ADR 0031): how Ghost reaches the operator.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct RoutesView {
+    #[schema(inline)]
     pub enabled: Vec<RouteName>,
     /// Minutes.
     pub escalate_after: i64,
@@ -1049,17 +1075,20 @@ pub struct RoutesView {
     pub batch_secs: i64,
     pub calls_per_hour: i64,
     pub calls_per_day: i64,
+    #[schema(inline)]
     pub carry: Carry,
     pub greeting: String,
     #[serde(default)]
+    #[schema(inline)]
     pub urgency: std::collections::BTreeMap<String, Urgency>,
     /// The routes this daemon has something behind; the others can be listed but do
     /// nothing yet.
     #[serde(default)]
+    #[schema(inline)]
     pub available: Vec<RouteName>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PolicyView {
     pub path: String,
     pub exists: bool,
@@ -1071,7 +1100,7 @@ pub struct PolicyView {
 
 /// Either the raw TOML, or the routes rendered into it (the permissions have their own
 /// route, `PUT /permissions`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 pub struct PolicyUpdate {
     #[serde(default)]
     pub text: Option<String>,
@@ -1079,7 +1108,7 @@ pub struct PolicyUpdate {
     pub routes: Option<RoutesView>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PolicyResult {
     pub policy: PolicyView,
     /// Reloaded live.
@@ -1097,13 +1126,13 @@ pub const SECRET_KEYS: [&str; 6] = [
     "ELEVENLABS_API_KEY",
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SecretState {
     pub name: String,
     pub set: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SettingsView {
     pub settings_path: String,
     /// Non-secret settings, as written in settings.env.
@@ -1114,7 +1143,7 @@ pub struct SettingsView {
 
 /// `values`: a None value deletes the key. `secrets`: write-only, into the vault (ADR
 /// 0036); None deletes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 pub struct SettingsUpdate {
     #[serde(default)]
     pub values: Option<std::collections::BTreeMap<String, Option<String>>>,
@@ -1122,7 +1151,7 @@ pub struct SettingsUpdate {
     pub secrets: Option<std::collections::BTreeMap<String, Option<String>>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SettingsResult {
     pub settings: SettingsView,
     /// Keys the daemon picked up without a restart.
@@ -1137,7 +1166,7 @@ pub struct SettingsResult {
 // A password goes in and never comes back out: these say what it is called, what uses it
 // and when it was last used. No route returns a value.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum VaultState {
     Open,
@@ -1147,8 +1176,9 @@ pub enum VaultState {
 }
 
 /// Ghost's vault: one encrypted file, its key in the operator's keyring.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct VaultView {
+    #[schema(inline)]
     pub state: VaultState,
     /// Why it isn't open, in the operator's words.
     #[serde(default)]
@@ -1156,11 +1186,12 @@ pub struct VaultView {
     pub path: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PasswordInfo {
     /// What config files call it: ${NAME}
     pub name: String,
     /// In the vault; None while the vault is closed (locked): unknown.
+    #[schema(required)]
     pub set: Option<bool>,
     /// "The model connection", "GitHub" (an app), "Webhook ci"
     #[serde(default)]
@@ -1177,20 +1208,21 @@ pub struct PasswordInfo {
     pub last_used: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportSourceKind {
     HekaVault,
     File,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ImportSourceView {
+    #[schema(inline)]
     pub kind: ImportSourceKind,
     pub path: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PasswordsView {
     pub vault: VaultView,
     pub passwords: Vec<PasswordInfo>,
@@ -1200,12 +1232,13 @@ pub struct PasswordsView {
 }
 
 /// Write-only; never echoed, not even in a validation error.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct PasswordSet {
+    #[schema(value_type = String, format = Password, write_only)]
     pub value: Secret,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PasswordResult {
     pub passwords: PasswordsView,
     /// Ghost's own: the service must restart to use it.
@@ -1213,7 +1246,7 @@ pub struct PasswordResult {
     pub restart_required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PasswordImportResult {
     /// Names now in the vault.
     #[serde(default)]
@@ -1236,7 +1269,7 @@ pub struct PasswordImportResult {
 
 // --- devices + setup -----------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct DeviceInfo {
     pub index: i64,
     pub name: String,
@@ -1247,16 +1280,18 @@ pub struct DeviceInfo {
     pub is_default_output: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct DevicesView {
     pub devices: Vec<DeviceInfo>,
+    #[schema(required)]
     pub input_device: Option<String>,
+    #[schema(required)]
     pub output_device: Option<String>,
     pub echo_cancel_active: bool,
     pub echo_cancel_source_present: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelsView {
     pub ready: bool,
     pub cache_dir: String,
@@ -1267,7 +1302,7 @@ pub struct ModelsView {
 // --- conversations (ADR 0014) --------------------------------------------------------------
 
 /// An agent (ADR 0014, ADR 0035): a conversation with a persona and a job.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ConversationView {
     pub id: String,
     pub slug: String,
@@ -1282,6 +1317,7 @@ pub struct ConversationView {
     #[serde(default)]
     pub own_voice: bool,
     pub created_at: DateTime<Utc>,
+    #[schema(required)]
     pub last_active_at: Option<DateTime<Utc>>,
     /// Set: off the roster and voice routing, still readable.
     #[serde(default)]
@@ -1291,7 +1327,7 @@ pub struct ConversationView {
     pub is_ghost: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ConversationDetail {
     #[serde(flatten)]
     pub view: ConversationView,
@@ -1304,7 +1340,7 @@ pub struct ConversationDetail {
 }
 
 /// Hire an agent.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ConversationCreate {
     pub name: String,
     #[serde(default)]
@@ -1326,7 +1362,7 @@ pub struct ConversationCreate {
 
 /// Each field present is applied as its own audited write. `voice` "" means back to
 /// Ghost's voice.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, ToSchema)]
 pub struct ConversationUpdate {
     #[serde(default)]
     pub name: Option<String>,
@@ -1348,7 +1384,7 @@ pub struct ConversationUpdate {
     pub seed_from: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TurnViewRole {
     User,
@@ -1357,33 +1393,35 @@ pub enum TurnViewRole {
     System,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct TurnView {
     pub id: i64,
     pub session_id: String,
+    #[schema(inline)]
     pub role: TurnViewRole,
     pub text: String,
     pub at: DateTime<Utc>,
     pub compacted: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct CompactionView {
     pub id: String,
     pub at: DateTime<Utc>,
     pub source: String,
     pub summary: String,
+    #[schema(required)]
     pub through_turn_id: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct VoiceInfo {
     pub id: String,
     /// "American female: Heart"
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SampleRequest {
     #[serde(default = "default_speed")]
     pub speed: f64,
@@ -1398,7 +1436,7 @@ fn default_speed() -> f64 {
 // --- the paired phone (ADR 0016) -----------------------------------------------------------
 
 /// A fresh pairing code for the phone listener. Shown to the operator only.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PhonePairing {
     /// Six digits.
     pub code: String,
@@ -1414,7 +1452,7 @@ pub struct PhonePairing {
 
 /// The network a phone address is on (ADR 0020): the home network, or the operator's
 /// WireGuard tunnel for away from home.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PhoneNetwork {
     Home,
@@ -1422,34 +1460,39 @@ pub enum PhoneNetwork {
 }
 
 /// One `GHOST_PHONE_LISTEN` address and the network it is on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PhoneAddress {
     pub address: String,
     /// None when Ghost can't tell: the address is on every interface (0.0.0.0), or on
     /// none of this computer's right now.
+    #[schema(required)]
+    #[schema(inline)]
     pub network: Option<PhoneNetwork>,
     /// Bound now; a tunnel address whose interface isn't up yet is retried.
     pub listening: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PhoneDevice {
     pub id: String,
     pub name: String,
     pub paired_at: DateTime<Utc>,
     /// The phone's last verified request.
+    #[schema(required)]
     pub last_seen: Option<DateTime<Utc>>,
     /// The listen address that request came in on.
     #[serde(default)]
     pub last_address: Option<String>,
     /// And the network it came over.
     #[serde(default)]
+    #[schema(inline)]
     pub last_network: Option<PhoneNetwork>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct PhoneView {
     /// None when the listener is off.
+    #[schema(required)]
     pub address: Option<String>,
     /// LAN first, then the tunnel (ADR 0020).
     #[serde(default)]
@@ -1457,12 +1500,13 @@ pub struct PhoneView {
     /// The same, with each network.
     #[serde(default)]
     pub listen: Vec<PhoneAddress>,
+    #[schema(required)]
     pub device: Option<PhoneDevice>,
 }
 
 // --- the model connection (ADR 0037) -------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Anthropic,
@@ -1470,11 +1514,12 @@ pub enum Protocol {
 }
 
 /// One way to reach a model, as the Model page offers it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelProviderView {
     pub id: String,
     pub title: String,
     pub blurb: String,
+    #[schema(inline)]
     pub protocol: Protocol,
     /// "" for a URL of the operator's own.
     pub base_url: String,
@@ -1494,9 +1539,10 @@ pub struct ModelProviderView {
 }
 
 /// The model connection now. No key is in it: only whether its Password is set.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ModelConnectionView {
     pub provider: String,
+    #[schema(inline)]
     pub protocol: Protocol,
     /// Where calls go.
     pub base_url: String,
@@ -1536,23 +1582,24 @@ pub struct ModelConnectionView {
 
 /// A connection being edited: GHOST_LLM_* values over the saved ones (None removes one),
 /// and a key typed but not saved yet, used for this one request and dropped.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
 pub struct ModelDraft {
     #[serde(default)]
     pub values: std::collections::BTreeMap<String, Option<String>>,
     /// Write-only, like `PasswordSet.value`: never echoed.
     #[serde(default)]
+    #[schema(value_type = Option<String>, format = Password, write_only, max_length = 4096)]
     pub password_value: Option<Secret>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelOptionView {
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelListView {
     pub models: Vec<ModelOptionView>,
     /// The provider's default, when it lists it.
@@ -1564,7 +1611,7 @@ pub struct ModelListView {
 }
 
 /// One tiny request, timed like `make perf-llm`: request to first token.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelTestResult {
     pub ok: bool,
     #[serde(default)]
@@ -1582,10 +1629,11 @@ pub struct ModelTestResult {
     #[serde(default)]
     pub error: Option<String>,
     /// Provider, protocol and host; never a key.
+    #[serde(rename = "where")]
     pub where_: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelSignInResult {
     /// The desktop opens it; the loopback takes the browser's way back.
     pub url: String,

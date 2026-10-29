@@ -15,6 +15,7 @@ rust-version = "1.98"
 ghost-api = { path = "crates/ghost-api" }
 ghost-core = { path = "crates/ghost-core" }
 ghost-infer = { path = "crates/ghost-infer" }
+ghost-llm = { path = "crates/ghost-llm" }
 
 anyhow = "1"
 thiserror = "2"
@@ -47,7 +48,6 @@ url = "2"
 # matching onnxruntime build), the FFT behind the log-mel extractors, and WAV reading.
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls"] }
 realfft = "3"
-hound = "3"
 wiremock = "0.6"
 unicode-normalization = "0.1"
 yaml-rust2 = { version = "0.13", default-features = false }
@@ -58,6 +58,26 @@ rustix = { version = "1", features = ["fs"] }
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
 schemars = "1"
 rand = "0.9"
+# The phone listener's networks (ADR 0020): which interface holds an address, from getifaddrs.
+nix = { version = "0.31", features = ["net", "hostname"] }
+tower = { version = "0.5", features = ["util"] }
+# The audio engine (crates/ghost-audio): PipeWire through the project's own binding, a
+# realtime-safe ring between its thread and tokio, WAV assets.
+pipewire = { version = "0.10", features = ["v1_0_0"] } # bindings for PipeWire 1.0 and up: the workstation runs 1.6, the CI runner 1.0.5
+libspa = "0.10"
+rtrb = "0.4"
+hound = "3.5"
+# The control API's OpenAPI document (ADR 0013), generated from the Rust types; the TS client
+# is generated from that.
+utoipa = { version = "6", features = ["axum_extras", "chrono"] }
+utoipa-axum = "0.3"
+# A client of the socket (`ghostd status|wake|say|sleep`), the way the Tauri shell reaches it.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+hyperlocal = "0.9"
+serde_path_to_error = "0.1"
+tokio-tungstenite = "0.29"
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location

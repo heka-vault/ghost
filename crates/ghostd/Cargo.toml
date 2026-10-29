@@ -13,8 +13,33 @@ path = "src/main.rs"
 
 [dependencies]
 ghost-api.workspace = true
+ghost-core.workspace = true
+ghost-llm.workspace = true
+
+serde_json.workspace = true
 
 anyhow.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+chrono.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+regex.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hex.workspace = true
+base64.workspace = true
+rand.workspace = true
+percent-encoding.workspace = true
+async-trait.workspace = true
+nix.workspace = true
+# termios: `ghostd passwords set` reads the value from the terminal without echo.
+rustix = { workspace = true, features = ["termios"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tower.workspace = true

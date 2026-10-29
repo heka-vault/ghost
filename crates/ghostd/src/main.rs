@@ -1,47 +1,91 @@
-//! `ghostd run`: the daemon. `ghostd status`: a client of its socket.
+//! `ghostd run`: the daemon. `ghostd status|wake|say|sleep`: clients of its socket.
+//! `ghostd passwords`: the vault from the command line. `ghostd api-schema`: the control
+//! API's document. `ghostd version`: what this build is.
 //!
 //! W1 of heka-vault/ghost#39: the daemon starts, opens the control socket and answers
-//! `/status` with `starting`. Everything else arrives package by package.
+//! `/status` with `starting`. W3 gave it the whole control API over a `Deps` with nothing
+//! behind it yet; W8 the foundations in the library (`ghostd::*`); the pipeline, the apps
+//! and the folder arrive package by package.
 
 use std::sync::Arc;
 
 use anyhow::Context;
 use ghost_api::server::{default_socket_path, serve};
-use ghost_api::{DaemonState, router};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
-use tokio::sync::RwLock;
+use ghost_api::{DaemonState, Deps, GhostClient, Unavailable, router};
+use ghost_core::gate::WriteGate;
+use ghost_core::store::Store;
+use ghostd::GhostdSettings;
+use ghostd::build_info;
+use ghostd::passwords::{Cli, Redacting, operator_keyring, passwords_cli};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> anyhow::Result<()> {
+    // No log line carries a password: every line is redacted against the vault's values
+    // before it is written (ADR 0036).
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_env("GHOST_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
         )
+        .with_writer(Redacting(std::io::stderr))
         .with_target(false)
         .init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None | Some("run") => run(),
-        Some("status") => status(),
-        Some("--version" | "version") => {
-            println!("ghostd {VERSION}");
+        Some("status") => client("status", &args[1..]),
+        Some("wake") => client("wake", &args[1..]),
+        Some("say") => client("say", &args[1..]),
+        Some("sleep") => client("sleep", &args[1..]),
+        Some("passwords") => {
+            let cfg = GhostdSettings::load()?;
+            let stdin = std::io::stdin();
+            let mut input = stdin.lock();
+            let mut out = std::io::stdout();
+            let mut err = std::io::stderr();
+            let tty = rustix::termios::isatty(std::io::stdin());
+            let mut cli = Cli {
+                stdin: &mut input,
+                stdout: &mut out,
+                stderr: &mut err,
+                tty,
+            };
+            std::process::exit(passwords_cli(
+                &args[1..],
+                &cfg,
+                operator_keyring(),
+                &mut cli,
+            ))
+        }
+        Some("api-schema") => {
+            let doc = ghost_api::openapi::document();
+            println!("{}", serde_json::to_string_pretty(&doc)?);
             Ok(())
         }
-        Some(other) => anyhow::bail!("unknown command {other:?}; commands: run, status, version"),
+        Some("--version" | "version") => {
+            let build = build_info::detect(None, None, None);
+            println!("{}", build_info::describe(VERSION, &build));
+            Ok(())
+        }
+        Some(other) => anyhow::bail!(
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, passwords, api-schema, version"
+        ),
     }
 }
 
 #[tokio::main]
 async fn run() -> anyhow::Result<()> {
-    let wake_mode = std::env::var("GHOST_WAKE_MODE").unwrap_or_else(|_| "transcript".into());
-    let state = Arc::new(RwLock::new(DaemonState::new(VERSION, wake_mode)));
-    info!("ghostd {VERSION} starting");
-    serve(&default_socket_path(), router(state), shutdown_signal()).await?;
+    let cfg = GhostdSettings::load()?;
+    let build = build_info::detect(None, None, None);
+    let state = Arc::new(DaemonState::new(VERSION, cfg.wake_mode.clone()));
+    let store = Arc::new(Store::in_memory().context("opening the store")?);
+    let gate = Arc::new(WriteGate::new(store.clone()));
+    let deps = Arc::new(Deps::minimal(state, Arc::new(Unavailable), store, gate));
+    info!("{} starting", build_info::describe(VERSION, &build));
+    serve(&default_socket_path(), router(deps), shutdown_signal()).await?;
     info!("ghostd stopped");
     Ok(())
 }
@@ -57,22 +101,28 @@ async fn shutdown_signal() {
     }
 }
 
-/// One GET over the socket, the body printed as the daemon sent it.
+/// One call over the socket, the body printed as the daemon sent it.
 #[tokio::main]
-async fn status() -> anyhow::Result<()> {
+async fn client(cmd: &str, args: &[String]) -> anyhow::Result<()> {
     let path = default_socket_path();
-    let mut stream = UnixStream::connect(&path)
-        .await
-        .with_context(|| format!("ghostd not reachable on {}", path.display()))?;
-    stream
-        .write_all(b"GET /status HTTP/1.1\r\nHost: ghost\r\nConnection: close\r\n\r\n")
-        .await?;
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await?;
-    let text = String::from_utf8_lossy(&raw);
-    let body = text
-        .split_once("\r\n\r\n")
-        .map_or(text.as_ref(), |(_, b)| b);
-    println!("{body}");
+    let client = GhostClient::new(&path);
+    let text = args.join(" ");
+    let out = match cmd {
+        "status" => client.status().await,
+        "wake" => {
+            client
+                .wake((!text.is_empty()).then_some(text.as_str()))
+                .await
+        }
+        "say" => {
+            if text.is_empty() {
+                anyhow::bail!("say what? ghostd say <words>");
+            }
+            client.say(&text).await
+        }
+        _ => client.sleep().await,
+    }
+    .with_context(|| format!("ghostd {cmd} on {}", path.display()))?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())
 }

@@ -16,7 +16,7 @@ use super::{AppError, Environ};
 
 pub const APPS_FILE: &str = "apps.json";
 /// `$NAME`, `${NAME}` or `${env:NAME}` (the shape other clients' config files use).
-static SECRET: LazyLock<Regex> =
+pub(crate) static SECRET: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\$\{(?:env:)?([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)").unwrap());
 pub static APP_NAME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{0,39}$").unwrap());
