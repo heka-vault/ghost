@@ -236,7 +236,14 @@ capture -> [speech-in: Silero VAD, Parakeet] -> interceptors -> confirmation -> 
 ```
 
 Each stage is one task over a bounded channel, one fresh set per session
-(`ghost_voice::pipeline::build_session`). The interceptors (`ghost_voice::intercept`) see
+(`ghost_voice::pipeline::build_session`). A frame waits in a stage's inbox behind that
+stage's current work, so whether Ghost is speaking is also shared by handle
+(`ghost_voice::speaking`): the output stage raises it at a reply's first sample, and the
+barge-in rule, the interim re-reads, the echo filter and the confirmation processor read it
+there rather than from the `BotStarted` frame queued behind a TTS stage still rendering the
+reply. The echo filter is also told each clause as it is rendered, a clause ahead of the
+speaker, so what leaks past the canceller is recognised as Ghost's own words at once.
+The interceptors (`ghost_voice::intercept`) see
 each user turn first (Ghost's own fixed intents: a goodbye, "hang on", "never mind" while a
 change is pending); a handled turn is spoken to or acted on directly and never reaches the
 model.

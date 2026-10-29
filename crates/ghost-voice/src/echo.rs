@@ -8,10 +8,17 @@
 //! is speaking, or within `window_secs` after, and whose words are mostly a run of what
 //! Ghost just said, is dropped before anything else sees it.
 //!
-//! Short answers are never echo: a transcript under `min_words` always passes, so "yes" or
-//! "close it" after "Close it?" still reach the confirmation path. An interim transcript
-//! (only while Ghost speaks) serves nothing but barge-in, so two of Ghost's own words are
-//! enough to drop one; the final that follows is judged as above.
+//! Short answers are never echo once Ghost has stopped: a transcript under `min_words`
+//! passes then, so "yes" or "close it" after "Close it?" still reach the confirmation
+//! path. While Ghost speaks a transcript, interim or final, serves nothing but barge-in
+//! (the confirmation processor ignores it), so two of Ghost's own words are enough to drop
+//! one: the first half second of a reply leaks past the echo canceller while it converges,
+//! and reads as a word or two of what Ghost just started saying.
+//!
+//! The filter knows the reply in progress a clause ahead of the speaker (`saying`, fed by
+//! the TTS stage as it renders), not only the finished replies (`spoke`, fed by the
+//! assistant tap at the reply's end), and that Ghost is speaking from the output stage's
+//! shared flag (`crate::speaking`) as much as from the frames, which reach it late.
 
 use std::collections::VecDeque;
 use std::sync::LazyLock;
@@ -22,6 +29,7 @@ use regex::Regex;
 
 use crate::debug;
 use crate::frames::{Direction, Frame, Out, Stage};
+use crate::speaking::Speaking;
 
 static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-z0-9']+").unwrap());
 /// An interim this long cuts Ghost off (GHOST_BARGE_IN_MIN_WORDS default).
@@ -82,7 +90,10 @@ pub struct EchoFilter {
     threshold: f64,
     clock: Box<dyn Fn() -> f64 + Send + Sync>,
     spoken: VecDeque<String>,
+    /// The reply being spoken, a clause ahead of the speaker.
+    current: String,
     speaking: bool,
+    speaking_now: Speaking,
     stopped_at: f64,
 }
 
@@ -99,12 +110,20 @@ impl EchoFilter {
             threshold: 0.8,
             clock: Box::new(clock),
             spoken: VecDeque::with_capacity(3),
+            current: String::new(),
             speaking: false,
+            speaking_now: Speaking::new(),
             stopped_at: f64::NEG_INFINITY,
         }
     }
 
-    /// What Ghost said, as the assistant tap records it (the greeting included).
+    pub fn with_speaking(mut self, speaking: Speaking) -> Self {
+        self.speaking_now = speaking;
+        self
+    }
+
+    /// What Ghost said, as the assistant tap records it (the greeting included): the reply
+    /// is complete, so what was being said is this.
     pub fn spoke(&mut self, text: &str) {
         if !text.trim().is_empty() {
             if self.spoken.len() == 3 {
@@ -112,6 +131,19 @@ impl EchoFilter {
             }
             self.spoken.push_back(text.to_string());
         }
+        self.current.clear();
+    }
+
+    /// A clause Ghost is about to say, as the TTS stage hands it to the voice.
+    pub fn saying(&mut self, text: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        if !self.current.is_empty() {
+            self.current.push(' ');
+        }
+        self.current.push_str(text);
     }
 
     /// Ghost's voice started or stopped, as the output transport reports it.
@@ -122,17 +154,27 @@ impl EchoFilter {
         }
     }
 
+    /// Ghost's voice is at the speaker: the frames said so, or the output stage's flag does.
+    fn speaking(&self) -> bool {
+        self.speaking || self.speaking_now.is_on()
+    }
+
     pub fn is_echo(&self, text: &str, min_words: Option<usize>) -> bool {
-        let least = min_words.unwrap_or(self.min_words);
-        if self.spoken.is_empty() || words(text).len() < least {
+        let speaking = self.speaking();
+        let least = min_words.unwrap_or(if speaking {
+            INTERIM_MIN_WORDS
+        } else {
+            self.min_words
+        });
+        if words(text).len() < least {
             return false;
         }
-        let recent = self.speaking || (self.clock)() - self.stopped_at <= self.window;
-        if !recent {
+        if !(speaking || (self.clock)() - self.stopped_at <= self.window) {
             return false;
         }
         self.spoken
             .iter()
+            .chain((!self.current.is_empty()).then_some(&self.current))
             .map(|s| echo_share(text, s))
             .fold(0.0, f64::max)
             >= self.threshold
@@ -212,13 +254,37 @@ mod tests {
     }
 
     #[test]
-    fn test_short_answers_always_pass() {
-        let (mut f, _clock) = filter(3.0);
+    fn test_short_answers_pass_once_ghost_has_stopped() {
+        let (mut f, clock) = filter(3.0);
         f.spoke("Infra 77 looks fixed. Close it with a note saying so?");
         f.bot_speaking(true);
         assert!(!f.is_echo("yes", None));
-        assert!(!f.is_echo("close it", None));
-        assert!(!f.is_echo("yeah close it", None));
+        assert!(!f.is_echo("yeah close it", None)); // a word of the operator's own
+        assert!(f.is_echo("close it", None)); // two of Ghost's words mid-question: a leak
+        stopped(&mut f, &clock, 100.0);
+        *clock.lock().unwrap() = 100.5;
+        assert!(!f.is_echo("yes", None));
+        assert!(!f.is_echo("close it", None)); // the answer to the question
+        assert!(f.is_echo("close it with a note", None));
+    }
+
+    #[test]
+    fn test_the_reply_in_progress_is_known_a_clause_ahead_of_the_speaker() {
+        let speaking = Speaking::new();
+        let (f, _clock) = filter(3.0);
+        let mut f = f.with_speaking(speaking.clone());
+        f.spoke("Yeah?");
+        speaking.set(true); // the first sample is at the speaker; no BotStarted frame yet
+        f.saying("Here is everything,");
+        assert!(f.is_echo("here is everything", Some(INTERIM_MIN_WORDS)));
+        assert!(f.is_echo("is everything", None)); // a short final, mid-reply
+        assert!(!f.is_echo("wait stop", Some(INTERIM_MIN_WORDS)));
+        f.saying("in great detail,");
+        assert!(f.is_echo("everything in great detail", None));
+        f.spoke("Here is everything, in great detail."); // the tap, at the reply's end
+        assert!(f.is_echo("in great detail", None));
+        f.saying("Next:"); // a new reply: the old one is kept as finished, not as current
+        assert!(f.is_echo("in great detail", None));
     }
 
     #[test]

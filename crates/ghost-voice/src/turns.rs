@@ -13,6 +13,12 @@
 //!   re-reads the operator's open segment while Ghost speaks), so the operator needn't
 //!   pause to cut Ghost off.
 //!
+//! The rule learns that Ghost is speaking two ways: the `BotStarted` and `BotStopped`
+//! frames, and the output stage's shared flag (`crate::speaking`), true from the first
+//! sample written. The frames reach this stage late, behind a TTS stage still rendering
+//! the rest of a long reply, and the leak of Ghost's own first words past the echo
+//! canceller falls in exactly that window; the flag is what closes it.
+//!
 //! [`PatientTurnStopStrategy`] is Smart Turn's end of turn, held for `grace_secs` before it
 //! counts, with the speculative answer started at the verdict. [`UserAggregator`] is the
 //! stage that runs both over the frames, keeps the turn's pieces, and hands the model the
@@ -30,6 +36,7 @@ use tokio_util::sync::CancellationToken;
 use crate::debug;
 use crate::frames::{Direction, Frame, Metric, Out, Stage};
 use crate::latency::{LatencyProbe, null_probe};
+use crate::speaking::Speaking;
 
 // --- the start -------------------------------------------------------------------------
 
@@ -50,6 +57,7 @@ pub enum StartEvent {
 pub struct BargeInUserTurnStartStrategy {
     min_words: usize,
     bot_speaking: bool,
+    speaking: Speaking,
     events: Vec<StartEvent>,
 }
 
@@ -58,12 +66,23 @@ impl BargeInUserTurnStartStrategy {
         Self {
             min_words,
             bot_speaking: false,
+            speaking: Speaking::new(),
             events: Vec::new(),
         }
     }
 
+    pub fn with_speaking(mut self, speaking: Speaking) -> Self {
+        self.speaking = speaking;
+        self
+    }
+
+    pub fn set_speaking(&mut self, speaking: Speaking) {
+        self.speaking = speaking;
+    }
+
+    /// Ghost's voice is at the speaker: the frames said so, or the output stage's flag does.
     pub fn bot_speaking(&self) -> bool {
-        self.bot_speaking
+        self.bot_speaking || self.speaking.is_on()
     }
 
     /// What the strategy triggered since the last call, in order.
@@ -82,7 +101,7 @@ impl BargeInUserTurnStartStrategy {
             Frame::BotStarted => self.bot_speaking = true,
             Frame::BotStopped => self.bot_speaking = false,
             Frame::VadStarted { .. } => {
-                if !self.bot_speaking {
+                if !self.bot_speaking() {
                     debug::audio(|| "turn: started by VAD".into());
                     self.events.push(StartEvent::Started);
                     return ProcessFrameResult::Stop;
@@ -98,7 +117,7 @@ impl BargeInUserTurnStartStrategy {
 
     fn on_text(&mut self, text: &str, interim: bool) -> ProcessFrameResult {
         let words = text.split_whitespace().count();
-        if !self.bot_speaking {
+        if !self.bot_speaking() {
             if words >= 1 {
                 self.events.push(StartEvent::Started);
                 return ProcessFrameResult::Stop;
@@ -617,6 +636,7 @@ pub struct UserAggregator {
     state: Arc<Mutex<Aggregation>>,
     turns: Arc<TurnControl>,
     bot_speaking: bool,
+    speaking: Speaking,
     idle_timeout: Option<Duration>,
     on_idle: Option<OnIdle>,
     idle: Option<JoinHandle<()>>,
@@ -647,6 +667,7 @@ impl UserAggregator {
             state,
             turns,
             bot_speaking: false,
+            speaking: Speaking::new(),
             idle_timeout: None,
             on_idle: None,
             idle: None,
@@ -656,6 +677,14 @@ impl UserAggregator {
 
     pub fn with_probe(mut self, probe: Arc<dyn LatencyProbe>) -> Self {
         self.stop = self.stop.with_probe(probe);
+        self
+    }
+
+    /// The output stage's flag (`crate::speaking`): the barge-in rule reads it, and the
+    /// idle timeout does not fire while Ghost is still talking.
+    pub fn with_speaking(mut self, speaking: Speaking) -> Self {
+        self.start.set_speaking(speaking.clone());
+        self.speaking = speaking;
         self
     }
 
@@ -690,9 +719,12 @@ impl UserAggregator {
             t.abort();
         }
         let held = self.held.clone();
+        let speaking = self.speaking.clone();
         self.idle = Some(tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
-            if !held() {
+            // Still talking (the BotStarted that disarms this is behind the TTS stage):
+            // the BotStopped that follows arms it again.
+            if !held() && !speaking.is_on() {
                 on_idle().await;
             }
         }));
@@ -862,6 +894,24 @@ mod tests {
         s.process_frame(&Frame::BotStarted);
         assert_eq!(s.process_frame(&vad_start()), ProcessFrameResult::Continue);
         assert!(s.take_events().is_empty());
+    }
+
+    #[test]
+    fn test_vad_ignored_while_the_speaker_says_ghost_talks_before_any_frame() {
+        // The first clause is at the speaker; the BotStarted frame is still behind the
+        // TTS stage. Ghost's own voice is VAD activity and no more; words still cut in.
+        let speaking = Speaking::new();
+        let mut s = strategy(2).with_speaking(speaking.clone());
+        speaking.set(true);
+        assert_eq!(s.process_frame(&vad_start()), ProcessFrameResult::Continue);
+        assert!(s.take_events().is_empty());
+        assert_eq!(
+            s.process_frame(&said("stop that")),
+            ProcessFrameResult::Stop
+        );
+        assert_eq!(s.take_events(), vec![StartEvent::Started]);
+        speaking.set(false);
+        assert_eq!(s.process_frame(&vad_start()), ProcessFrameResult::Stop);
     }
 
     #[test]

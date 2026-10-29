@@ -33,6 +33,7 @@ pub mod perf;
 pub mod pipeline;
 pub mod prompt;
 pub mod rtvi;
+pub mod speaking;
 pub mod spoken;
 pub mod stt;
 pub mod tap;

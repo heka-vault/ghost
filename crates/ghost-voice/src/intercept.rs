@@ -22,6 +22,7 @@ use crate::confirmation::{LastAssistant, SessionGate};
 use crate::debug;
 use crate::frames::{Direction, Frame, Out, Stage};
 use crate::latency::{LatencyProbe, null_probe};
+use crate::speaking::Speaking;
 
 pub type SessionAction = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
@@ -41,6 +42,7 @@ pub struct InterceptorProcessor {
     /// This turn's transcripts that went to the model.
     turn_pieces: Vec<String>,
     bot_speaking: bool,
+    speaking: Speaking,
 }
 
 impl InterceptorProcessor {
@@ -61,7 +63,18 @@ impl InterceptorProcessor {
             events: Arc::new(Events::default()),
             turn_pieces: Vec::new(),
             bot_speaking: false,
+            speaking: Speaking::new(),
         }
+    }
+
+    /// The output stage's flag (`crate::speaking`), read next to the frames.
+    pub fn with_speaking(mut self, speaking: Speaking) -> Self {
+        self.speaking = speaking;
+        self
+    }
+
+    fn bot_speaking(&self) -> bool {
+        self.bot_speaking || self.speaking.is_on()
     }
 
     pub fn with_hold(mut self, on_hold: SessionAction) -> Self {
@@ -138,7 +151,7 @@ impl Stage for InterceptorProcessor {
             Frame::BotStopped => self.bot_speaking = false,
             // a new turn, or this one has gone to the model
             Frame::UserStarted | Frame::UserStopped => self.turn_pieces.clear(),
-            Frame::Transcript(text) if !self.bot_speaking && !self.interceptors.is_empty() => {
+            Frame::Transcript(text) if !self.bot_speaking() && !self.interceptors.is_empty() => {
                 let pending = self.gate.pending(&self.session_id);
                 let last = (self.last_assistant)();
                 let began = Instant::now();

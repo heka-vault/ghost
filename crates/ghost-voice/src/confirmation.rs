@@ -26,6 +26,7 @@ use tracing::{info, warn};
 use crate::debug;
 use crate::frames::{Direction, Frame, Out, Stage};
 use crate::latency::{LatencyProbe, null_probe};
+use crate::speaking::Speaking;
 
 /// What the pipeline asks of the gate inside a session: whether a change waits for a yes,
 /// the operator's transcribed turn as the answer, and what to do with a change when the
@@ -97,6 +98,7 @@ pub struct ConfirmationProcessor {
     gate: Arc<dyn SessionGate>,
     session_id: String,
     bot_speaking: bool,
+    speaking: Speaking,
     last_assistant: LastAssistant,
     events: Arc<Events>,
     probe: Arc<dyn LatencyProbe>,
@@ -112,10 +114,18 @@ impl ConfirmationProcessor {
             gate,
             session_id: session_id.to_string(),
             bot_speaking: false,
+            speaking: Speaking::new(),
             last_assistant,
             events: Arc::new(Events::default()),
             probe: null_probe(),
         }
+    }
+
+    /// The output stage's flag (`crate::speaking`): the operator has not heard the
+    /// question yet while it is on, whether or not `BotStarted` has arrived here.
+    pub fn with_speaking(mut self, speaking: Speaking) -> Self {
+        self.speaking = speaking;
+        self
     }
 
     pub fn with_events(mut self, events: Arc<Events>) -> Self {
@@ -129,7 +139,7 @@ impl ConfirmationProcessor {
     }
 
     pub fn bot_speaking(&self) -> bool {
-        self.bot_speaking
+        self.bot_speaking || self.speaking.is_on()
     }
 }
 
@@ -143,13 +153,15 @@ impl Stage for ConfirmationProcessor {
         match &frame {
             Frame::BotStarted => self.bot_speaking = true,
             Frame::BotStopped => self.bot_speaking = false,
-            Frame::Transcript(text) if self.bot_speaking && self.gate.pending(&self.session_id) => {
+            Frame::Transcript(text)
+                if self.bot_speaking() && self.gate.pending(&self.session_id) =>
+            {
                 debug::audio(|| format!("confirmation: ignored {text:?}, Ghost still speaking"));
             }
             _ => {}
         }
         if let Frame::Transcript(text) = &frame
-            && !self.bot_speaking
+            && !self.bot_speaking()
             && self.gate.pending(&self.session_id)
         {
             let began = Instant::now();

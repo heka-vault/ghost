@@ -39,7 +39,7 @@ use zeroize::Zeroizing;
 use crate::config::VoiceSettings;
 use crate::frames::{Audio, Direction, Frame, Out, Stage};
 use crate::spoken::spoken;
-use crate::tts::{KokoroTts, SharedSynth, TtsSettings};
+use crate::tts::{KokoroTts, OnSay, SharedSynth, TtsSettings};
 use crate::turns::TurnControl;
 
 /// Kokoro's rate; the output transport runs at it.
@@ -133,6 +133,7 @@ pub fn session_tts(
     clause_min_words: Option<usize>,
     line: Option<LineFn>,
     turns: Arc<TurnControl>,
+    on_say: Option<OnSay>,
 ) -> Box<dyn Stage> {
     let local = match KokoroTts::new(kokoro, settings, clause_min_words) {
         Ok(k) => k.with_turns(turns.clone()),
@@ -145,6 +146,10 @@ pub fn session_tts(
             )
             .expect("the empty synth takes any voice")
         }
+    };
+    let local = match &on_say {
+        Some(f) => local.with_on_say(f.clone()),
+        None => local,
     };
     if s.tts_engine != "elevenlabs" {
         return Box::new(local);
@@ -175,6 +180,10 @@ pub fn session_tts(
         connect_timeout: Duration::from_secs_f64(CONNECT_TIMEOUT_SECS),
     })
     .with_turns(turns);
+    let cloud = match on_say {
+        Some(f) => cloud.with_on_say(f),
+        None => cloud,
+    };
     Box::new(TtsFailover::new(cloud, local))
 }
 
@@ -322,6 +331,7 @@ pub struct ElevenLabsTts {
     speed: Option<f64>,
     /// Kokoro, taking over on failure: set by the failover.
     fallback: Option<Arc<tokio::sync::Mutex<KokoroTts>>>,
+    on_say: Option<OnSay>,
 }
 
 impl ElevenLabsTts {
@@ -344,11 +354,18 @@ impl ElevenLabsTts {
             turns: None,
             speed: None,
             fallback: None,
+            on_say: None,
         }
     }
 
     pub fn with_turns(mut self, turns: Arc<TurnControl>) -> Self {
         self.turns = Some(turns);
+        self
+    }
+
+    /// Told each clause as it goes to the cloud, before its audio comes back (`crate::tts::OnSay`).
+    pub fn with_on_say(mut self, on_say: OnSay) -> Self {
+        self.on_say = Some(on_say);
         self
     }
 
@@ -610,6 +627,9 @@ impl ElevenLabsTts {
         let text = spoken(text);
         if text.trim().is_empty() {
             return;
+        }
+        if let Some(on_say) = &self.on_say {
+            on_say(&text);
         }
         if !self.ensure_socket(out).await {
             return;
@@ -1110,6 +1130,7 @@ mod tests {
             Some(4),
             None,
             TurnControl::new(tokio_util::sync::CancellationToken::new()),
+            None,
         )
     }
 

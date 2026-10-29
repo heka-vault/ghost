@@ -11,6 +11,8 @@
 //!
 //! One recognition runs at a time on the loaded model, across every session: a final waits
 //! for an interim in flight, and an interim tick that finds the model busy is skipped.
+//! Whether Ghost is speaking comes from the output stage's shared flag (`crate::speaking`)
+//! as much as from the `BotStarted` frame, which reaches this stage last of all.
 //!
 //! The VAD runs here (Pipecat ran it in the user aggregator and sent its frames back up):
 //! the frames it makes are the same, `VadStarted` and `VadStopped`, and every stage below
@@ -29,6 +31,7 @@ use tracing::warn;
 
 use crate::debug;
 use crate::frames::{Direction, Frame, Metric, Out, Stage};
+use crate::speaking::Speaking;
 
 pub const SAMPLE_RATE: u32 = 16_000;
 /// Audio kept before the VAD's start, so the first word isn't clipped: the VAD fires its
@@ -98,6 +101,10 @@ pub struct ParakeetStt {
     pre_roll: VecDeque<i16>,
     segment: Vec<i16>,
     user_speaking: bool,
+    /// As the frames said it.
+    bot_speaking: bool,
+    /// As the output stage says it.
+    speaking: Speaking,
     interim_task: Option<JoinHandle<()>>,
     zero: Instant,
 }
@@ -120,8 +127,27 @@ impl ParakeetStt {
             pre_roll: VecDeque::new(),
             segment: Vec::new(),
             user_speaking: false,
+            bot_speaking: false,
+            speaking: Speaking::new(),
             interim_task: None,
             zero: Instant::now(),
+        }
+    }
+
+    pub fn with_speaking(mut self, speaking: Speaking) -> Self {
+        self.speaking = speaking;
+        self
+    }
+
+    /// The interim schedule follows Ghost's voice as the output stage reports it, not only
+    /// the frames, which reach this stage late behind a busy TTS stage.
+    fn sync_speaking(&mut self) {
+        let on = self.bot_speaking || self.speaking.is_on();
+        let mut schedule = self.schedule.lock().unwrap();
+        if on {
+            schedule.bot_started();
+        } else {
+            schedule.bot_stopped();
         }
     }
 
@@ -278,6 +304,7 @@ impl Stage for ParakeetStt {
                         self.pre_roll.pop_front();
                     }
                 }
+                self.sync_speaking();
                 self.maybe_interim(out);
             }
             // VAD frames from upstream (a transport with its own VAD, or a test).
@@ -295,9 +322,15 @@ impl Stage for ParakeetStt {
                 self.final_(out).await;
                 return;
             }
-            Frame::BotStarted => self.schedule.lock().unwrap().bot_started(),
+            Frame::BotStarted => {
+                self.bot_speaking = true;
+                self.schedule.lock().unwrap().bot_started();
+            }
             // an interruption silences Ghost before BotStopped
-            Frame::BotStopped | Frame::Interruption => self.schedule.lock().unwrap().bot_stopped(),
+            Frame::BotStopped | Frame::Interruption => {
+                self.bot_speaking = false;
+                self.sync_speaking();
+            }
             Frame::End | Frame::Cancel => self.cancel_interim(),
             _ => {}
         }
@@ -462,6 +495,21 @@ mod tests {
         assert!(interims(&down).len() >= 3, "{:?}", interims(&down));
         assert!(interims(&down).iter().all(|t| t == "stop that"));
         assert_eq!(finals(&down), vec!["stop that"]); // the final still comes, once, at the pause
+    }
+
+    #[tokio::test]
+    async fn test_interims_follow_the_speaking_flag_before_bot_started_arrives() {
+        // The first clause is at the speaker and the BotStarted frame is still behind the
+        // TTS stage: the operator's open segment is re-read all the same.
+        let m = model("stop that", 0.0);
+        let speaking = Speaking::new();
+        speaking.set(true);
+        let down = run(
+            m.fork(0.05).with_speaking(speaking),
+            seq(vec![vec![vad_start()], audio(0.3), vec![vad_stop()]]),
+        )
+        .await;
+        assert!(interims(&down).len() >= 3, "{:?}", interims(&down));
     }
 
     #[tokio::test]
@@ -692,15 +740,26 @@ mod tests {
             &out,
         )
         .await;
-        let kept: Vec<String> = drain(&mut rx)
-            .await
-            .iter()
-            .filter_map(|f| match f {
-                Frame::Interim(t) | Frame::Transcript(t) => Some(t.clone()),
-                _ => None,
-            })
-            .collect();
-        // a two-word final is still a short answer, judged by the usual rule
-        assert_eq!(kept, vec!["wait stop", "stop the", "three issues"]);
+        let texts = |frames: &[Frame]| -> Vec<String> {
+            frames
+                .iter()
+                .filter_map(|f| match f {
+                    Frame::Interim(t) | Frame::Transcript(t) => Some(t.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        // While Ghost speaks a two-word final can only be a barge-in, and these are
+        // Ghost's words: dropped like the interim.
+        assert_eq!(texts(&drain(&mut rx).await), vec!["wait stop", "stop the"]);
+        // Once Ghost has stopped the same two words are a short answer, kept.
+        echo.process(Frame::BotStopped, Direction::Down, &out).await;
+        echo.process(
+            Frame::Transcript("three issues".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        assert_eq!(texts(&drain(&mut rx).await), vec!["three issues"]);
     }
 }

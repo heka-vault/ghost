@@ -90,6 +90,12 @@ pub enum TtsError {
     UnknownVoice(String),
 }
 
+/// Told each piece of text as it is about to be rendered, before its audio exists: the
+/// echo filter's feed (`crate::echo::EchoFilter::saying`), by handle rather than by frame,
+/// so it is there before the first sample is at the speaker whatever the stages in
+/// between are busy with.
+pub type OnSay = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Kokoro as one session's TTS stage.
 pub struct KokoroTts {
     synth: SharedSynth,
@@ -97,6 +103,7 @@ pub struct KokoroTts {
     clause_min_words: Option<usize>,
     aggregator: ClauseAggregator,
     turns: Option<Arc<TurnControl>>,
+    on_say: Option<OnSay>,
     /// The token of the reply being spoken, as the model stage stamped it.
     reply_turn: Option<tokio_util::sync::CancellationToken>,
     speaking: bool,
@@ -121,6 +128,7 @@ impl KokoroTts {
             clause_min_words,
             aggregator: ClauseAggregator::new(clause_min_words),
             turns: None,
+            on_say: None,
             reply_turn: None,
             speaking: false,
             first_audio: true,
@@ -129,6 +137,11 @@ impl KokoroTts {
 
     pub fn with_turns(mut self, turns: Arc<TurnControl>) -> Self {
         self.turns = Some(turns);
+        self
+    }
+
+    pub fn with_on_say(mut self, on_say: OnSay) -> Self {
+        self.on_say = Some(on_say);
         self
     }
 
@@ -145,6 +158,7 @@ impl KokoroTts {
             clause_min_words,
             aggregator: ClauseAggregator::new(clause_min_words),
             turns: self.turns.clone(),
+            on_say: self.on_say.clone(),
             reply_turn: None,
             speaking: false,
             first_audio: true,
@@ -189,6 +203,9 @@ impl KokoroTts {
         };
         if turn.is_cancelled() {
             return;
+        }
+        if let Some(on_say) = &self.on_say {
+            on_say(&text);
         }
         if !self.speaking {
             self.speaking = true;
@@ -526,6 +543,24 @@ in app, and the Redis versus Postgres call for the session cache.";
     #[tokio::test]
     async fn test_whole_sentences_when_clauses_are_off() {
         assert_eq!(say_through_tts(None).await, vec![LIST]);
+    }
+
+    #[tokio::test]
+    async fn test_each_clause_is_announced_before_it_is_rendered() {
+        let synth = recording();
+        let announced = Arc::new(Mutex::new(Vec::new()));
+        let a = announced.clone();
+        let mut tts = KokoroTts::new(synth.clone(), TtsSettings::default(), Some(4))
+            .unwrap()
+            .with_on_say(Arc::new(move |t: &str| {
+                a.lock().unwrap().push(t.to_string())
+            }));
+        let (out, _rx) = Out::capture();
+        tts.process(Frame::Speak(LIST.into()), Direction::Down, &out)
+            .await;
+        let said = said(&synth);
+        assert!(said.len() > 1, "{said:?}");
+        assert_eq!(*announced.lock().unwrap(), said);
     }
 
     #[test]

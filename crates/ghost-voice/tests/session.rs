@@ -27,9 +27,10 @@ impl Recognizer for FakeParakeet {
     }
 }
 
-/// A clause takes `secs` of audio at 24 kHz.
+/// A clause takes `secs` of audio at 24 kHz and `render` to make (Kokoro's is about 0.5 s).
 struct FakeKokoro {
     secs: f64,
+    render: Duration,
     spoken: Arc<Mutex<Vec<String>>>,
 }
 
@@ -44,7 +45,7 @@ impl Synth for FakeKokoro {
         _speed: f32,
     ) -> ghost_infer::Result<Vec<i16>> {
         self.spoken.lock().unwrap().push(text.to_string());
-        std::thread::sleep(Duration::from_millis(40)); // Kokoro's render, scaled
+        std::thread::sleep(self.render);
         Ok(vec![20000; (24000.0 * self.secs) as usize])
     }
 }
@@ -74,6 +75,7 @@ fn world(
     replies: Vec<Vec<ScriptedReply>>,
     clause_secs: f64,
     grace: f64,
+    render_ms: u64,
 ) -> World {
     let settings = VoiceSettings::from_vars(|name| match name {
         "GHOST_TURN_GRACE_SECS" => Some(grace.to_string()),
@@ -88,6 +90,7 @@ fn world(
     let spoken = Arc::new(Mutex::new(Vec::new()));
     let tts: SharedSynth = Arc::new(Mutex::new(FakeKokoro {
         secs: clause_secs,
+        render: Duration::from_millis(render_ms),
         spoken: spoken.clone(),
     }));
     let models = Arc::new(Models {
@@ -192,6 +195,7 @@ async fn a_voice_turn_runs_through_every_stage() {
         )]],
         0.3,
         0.1,
+        40,
     );
     w.session.start(true).await;
     let opening = wait_for(&w.records, "opening", Duration::from_secs(5)).await;
@@ -248,6 +252,7 @@ async fn a_barge_in_stops_playback_within_100ms() {
         )]],
         3.0,
         0.1,
+        40,
     );
     w.session.start(true).await;
     wait_for(&w.records, "opening", Duration::from_secs(5)).await;
@@ -287,9 +292,88 @@ async fn a_barge_in_stops_playback_within_100ms() {
     let _ = &w.mouth;
 }
 
+/// Ghost's reply just reaching the speaker, as the echo tests want it: the greeting (3 s)
+/// has played, the reply's first clause has started, and the TTS stage is still rendering
+/// the second and third (0.5 s each, Kokoro's pace), with the `BotStarted` frame queued
+/// behind that work. The first half second of a reply is where the echo canceller leaks.
+async fn speaking_a_long_reply(transcripts: &[&str]) -> World {
+    let w = world(
+        transcripts,
+        vec![vec![ScriptedModel::say(
+            "Here is everything, in great detail, for a long while.",
+        )]],
+        3.0,
+        0.1,
+        500,
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while w.ear.seconds_played() < 2.99 {
+        assert!(Instant::now() < deadline, "the greeting never finished");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    say(&w, 0.3).await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while w.ear.seconds_played() < 3.01 {
+        assert!(Instant::now() < deadline, "Ghost never spoke the reply");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    w
+}
+
+/// The reply plays on for `secs` after `at`: nothing cleared the speaker and more audio
+/// reached it.
+async fn plays_on(w: &World, at: Instant, secs: f64) {
+    let before = w.ear.seconds_played();
+    tokio::time::sleep(Duration::from_secs_f64(secs)).await;
+    let cleared: Vec<_> = w.ear.cleared().into_iter().filter(|c| *c > at).collect();
+    assert!(cleared.is_empty(), "the speaker was cleared {cleared:?}");
+    assert!(
+        w.ear.seconds_played() > before,
+        "Ghost stopped speaking: {before} s played before, {} after",
+        w.ear.seconds_played()
+    );
+}
+
+#[tokio::test]
+async fn a_vad_start_alone_while_ghost_speaks_does_not_cut_it_off() {
+    // Ghost's own voice past the echo canceller is VAD activity and nothing more. The
+    // output stage says Ghost is speaking through the shared flag the moment it writes the
+    // first sample; the BotStarted frame reaches the barge-in rule only once the TTS stage
+    // has rendered the reply, which for a long reply is seconds later.
+    let w = speaking_a_long_reply(&["tell me everything"]).await;
+    let at = Instant::now();
+    w.session
+        .inject(vec![Frame::VadStarted { start_secs: 0.2 }])
+        .await;
+    plays_on(&w, at, 1.5).await;
+    w.session.cancel().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = &w.mouth;
+}
+
+#[tokio::test]
+async fn the_replys_own_words_heard_while_it_plays_do_not_cut_it_off() {
+    // What leaks past the canceller reads as the words Ghost is saying right now. The
+    // echo filter knows them a clause ahead of the speaker and drops the interim.
+    let w = speaking_a_long_reply(&["tell me everything"]).await;
+    let at = Instant::now();
+    w.session
+        .inject(vec![
+            Frame::VadStarted { start_secs: 0.2 },
+            Frame::Interim("here is everything".into()),
+        ])
+        .await;
+    plays_on(&w, at, 1.5).await;
+    w.session.cancel().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = &w.mouth;
+}
+
 #[tokio::test]
 async fn a_goodbye_ends_the_session_without_the_model() {
-    let w = world(&["That's all for now, bye."], vec![vec![]], 0.2, 0.1);
+    let w = world(&["That's all for now, bye."], vec![vec![]], 0.2, 0.1, 40);
     w.session.start(true).await;
     wait_for(&w.records, "opening", Duration::from_secs(5)).await;
     say(&w, 0.3).await;

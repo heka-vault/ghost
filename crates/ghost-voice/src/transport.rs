@@ -5,7 +5,11 @@
 //!
 //! The output stage is where a barge-in is felt: every audio frame carries its turn's
 //! token, a cancelled one is dropped unplayed, and the write of the one in progress stops
-//! within a frame and clears what the device still queued.
+//! within a frame and clears what the device still queued. It is also where Ghost's
+//! speaking is known first: it raises the shared flag (`crate::speaking`) as it writes a
+//! reply's first sample and lowers it when the last has played or the turn was cut, so
+//! the stages that must not mistake Ghost's voice for the operator's learn it then and
+//! not when the `BotStarted` frame has worked its way up behind a busy TTS stage.
 
 use std::collections::VecDeque;
 use std::path::Path;
@@ -20,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::frames::{Audio, Direction, Frame, Out, Stage};
+use crate::speaking::Speaking;
 
 pub const IN_RATE: u32 = 16_000;
 pub const OUT_RATE: u32 = 24_000;
@@ -127,6 +132,8 @@ impl Stage for AudioInput {
 pub struct AudioOutput {
     media: Box<dyn MediaOut>,
     speaking: bool,
+    /// Shared with the stages that must know at once.
+    speaking_now: Speaking,
 }
 
 impl AudioOutput {
@@ -134,7 +141,13 @@ impl AudioOutput {
         Self {
             media,
             speaking: false,
+            speaking_now: Speaking::new(),
         }
+    }
+
+    pub fn with_speaking(mut self, speaking: Speaking) -> Self {
+        self.speaking_now = speaking;
+        self
     }
 
     /// Write in frames, stopping the moment the turn is cancelled.
@@ -142,6 +155,7 @@ impl AudioOutput {
         let step = (f64::from(audio.rate) * FRAME_SECS) as usize;
         for chunk in audio.samples.chunks(step.max(1)) {
             if turn.is_cancelled() {
+                self.speaking_now.set(false);
                 self.media.clear().await;
                 return false;
             }
@@ -152,6 +166,7 @@ impl AudioOutput {
             };
             match wrote {
                 None => {
+                    self.speaking_now.set(false);
                     self.media.clear().await;
                     return false;
                 }
@@ -169,6 +184,7 @@ impl AudioOutput {
         if turn.is_cancelled() {
             return; // a stale frame: never reaches the speaker
         }
+        self.speaking_now.set(true);
         if !self.speaking {
             self.speaking = true;
             out.push_up(Frame::BotStarted).await;
@@ -190,6 +206,7 @@ impl AudioOutput {
             }
             None => self.media.drain().await,
         }
+        self.speaking_now.set(false);
         self.speaking = false;
         out.push_up(Frame::BotStopped).await;
     }
@@ -227,6 +244,7 @@ impl Stage for AudioOutput {
                 return;
             }
             Frame::Interruption => {
+                self.speaking_now.set(false);
                 self.media.clear().await;
                 if self.speaking {
                     self.speaking = false;
@@ -239,6 +257,7 @@ impl Stage for AudioOutput {
                 self.media.set_thinking(false);
             }
             Frame::Cancel => {
+                self.speaking_now.set(false);
                 self.media.clear().await;
                 self.media.set_thinking(false);
             }
@@ -248,6 +267,7 @@ impl Stage for AudioOutput {
     }
 
     async fn stopped(&mut self) {
+        self.speaking_now.set(false);
         self.media.set_thinking(false);
         self.media.close();
     }
@@ -671,5 +691,31 @@ mod tests {
         assert!(took < Duration::from_millis(200), "{took:?}");
         let pushed = drain(&mut rx).await;
         assert!(pushed.iter().any(|f| matches!(f, Frame::BotStarted)));
+    }
+
+    #[tokio::test]
+    async fn the_speaking_flag_follows_the_speaker_not_the_frames() {
+        let (media, _mouth, _ear) = scripted_media();
+        let speaking = Speaking::new();
+        let mut out_stage = AudioOutput::new(media.output).with_speaking(speaking.clone());
+        let (out, _rx) = Out::capture();
+        let turn = CancellationToken::new();
+        let clause = |secs: f64| Frame::TtsAudio {
+            audio: Audio::new(vec![20000; (f64::from(OUT_RATE) * secs) as usize], OUT_RATE),
+            turn: turn.clone(),
+        };
+        assert!(!speaking.is_on());
+        out_stage.process(clause(0.1), Direction::Down, &out).await;
+        assert!(speaking.is_on(), "on from the first sample written");
+        out_stage
+            .process(Frame::TtsStopped, Direction::Down, &out)
+            .await; // drains what was queued
+        assert!(!speaking.is_on(), "off once the last sample played");
+        out_stage.process(clause(0.1), Direction::Down, &out).await;
+        assert!(speaking.is_on());
+        out_stage
+            .process(Frame::Interruption, Direction::Down, &out)
+            .await;
+        assert!(!speaking.is_on(), "off when the operator cut in");
     }
 }

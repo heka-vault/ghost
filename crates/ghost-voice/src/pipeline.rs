@@ -36,6 +36,7 @@ use crate::latency::LatencyObserver;
 use crate::llm::{Compaction, LlmStage, ModelPort, SharedContext};
 use crate::narration::NarrationCut;
 use crate::prompt::{Persona, build_system_prompt};
+use crate::speaking::Speaking;
 use crate::stt::{ParakeetStt, SharedRecognizer};
 use crate::tap::{AssistantTap, OnPhase, OnTurn, SessionPhase, UserTap, no_phase, no_turn};
 use crate::thinking::{ThinkingSoundCut, ThinkingSoundProcessor};
@@ -575,7 +576,19 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     // for in, read by the gate as a possible yes (ghost_core.request).
     let heard: Arc<Mutex<(Vec<String>, String)>> =
         Arc::new(Mutex::new((Vec::new(), String::new())));
-    let echo = Arc::new(Mutex::new(EchoFilter::new(settings.echo_window_secs)));
+    // Whether Ghost's voice is at the speaker, by handle: the output stage sets it, and
+    // the stages that must not take Ghost's voice for the operator's read it before the
+    // BotStarted frame has made its way up behind a TTS stage still rendering the reply.
+    let speaking = Speaking::new();
+    let echo = Arc::new(Mutex::new(
+        EchoFilter::new(settings.echo_window_secs).with_speaking(speaking.clone()),
+    ));
+    // Each clause as it is rendered, a clause ahead of the speaker: what a leak of
+    // Ghost's own voice would read as.
+    let on_say: crate::tts::OnSay = {
+        let echo = echo.clone();
+        Arc::new(move |text: &str| echo.lock().unwrap().saying(text))
+    };
     let last_request: crate::tools::LastRequest = {
         let heard = heard.clone();
         Arc::new(move || {
@@ -731,12 +744,15 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     };
     stages.push((
         None,
-        Box::new(ParakeetStt::new(
-            p.models.stt.clone(),
-            p.models.vad(&settings),
-            settings.vad_params(),
-            interim,
-        )),
+        Box::new(
+            ParakeetStt::new(
+                p.models.stt.clone(),
+                p.models.vad(&settings),
+                settings.vad_params(),
+                interim,
+            )
+            .with_speaking(speaking.clone()),
+        ),
     ));
     let hold_gate = HoldGate::new(
         on_resume,
@@ -764,7 +780,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 .with_hold(hold_action)
                 .with_last_assistant(last_assistant.clone())
                 .with_probe(probe.clone())
-                .with_events(events.clone()),
+                .with_events(events.clone())
+                .with_speaking(speaking.clone()),
         ),
     ));
     stages.push((
@@ -772,7 +789,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         Box::new(
             ConfirmationProcessor::new(p.gate.clone(), &session_id, last_assistant)
                 .with_events(events.clone())
-                .with_probe(probe.clone()),
+                .with_probe(probe.clone())
+                .with_speaking(speaking.clone()),
         ),
     ));
     let analyzer = SmartTurnAnalyzer::new(
@@ -804,7 +822,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 turns.clone(),
             )
             .with_probe(probe.clone())
-            .with_idle(settings.idle_timeout_secs, on_idle, held.clone()),
+            .with_idle(settings.idle_timeout_secs, on_idle, held.clone())
+            .with_speaking(speaking.clone()),
         ),
     ));
     let compaction = runtime.as_ref().map(|_| Compaction {
@@ -866,10 +885,14 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         settings.clause_min_words(),
         line,
         turns.clone(),
+        Some(on_say),
     );
     stages.push((Some(Slot::AudioOut), tts));
     stages.push((None, Box::new(ThinkingSoundCut)));
-    stages.push((None, Box::new(AudioOutput::new(output))));
+    stages.push((
+        None,
+        Box::new(AudioOutput::new(output).with_speaking(speaking)),
+    ));
 
     let stages = assemble(stages, Vec::new());
     let mut pipeline = Pipeline::new(stages, observer);
