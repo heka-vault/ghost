@@ -14,6 +14,7 @@ rust-version = "1.98"
 [workspace.dependencies]
 ghost-api = { path = "crates/ghost-api" }
 ghost-core = { path = "crates/ghost-core" }
+ghost-infer = { path = "crates/ghost-infer" }
 ghost-llm = { path = "crates/ghost-llm" }
 ghost-audio = { path = "crates/ghost-audio" }
 
@@ -44,6 +45,10 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 rmcp = { version = "3.8", default-features = false }
 indexmap = { version = "2", features = ["serde"] }
 url = "2"
+# ghost-infer: ONNX Runtime (a pinned release candidate; download-binaries fetches the
+# matching onnxruntime build), the FFT behind the log-mel extractors, and WAV reading.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls"] }
+realfft = "3"
 wiremock = "0.6"
 unicode-normalization = "0.1"
 yaml-rust2 = { version = "0.13", default-features = false }
