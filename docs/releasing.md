@@ -74,23 +74,38 @@ workflow attaches it.
 
 What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
 
-1. `scripts/sidecars.sh`: `cargo build --release -p ghostd -p ghost-core --bins`, then the
-   three binaries the bundle carries, `ghostd`, `ghost-mock-github` and `ghost-scripts`
-   (the two apps `apps.json` names), copied to `apps/desktop/src-tauri/binaries/<name>-<target
-   triple>`, where Tauri's bundler looks for `bundle.externalBin`; and the ONNX Runtime
-   library the daemon loads (`scripts/onnxruntime.sh`, 1.24.4, the one the parity fixtures
-   were recorded on) staged under `apps/desktop/src-tauri/resources/` for `bundle.resources`.
-   Neither folder is committed.
+1. `scripts/sidecars.sh`: first `scripts/onnxruntime.sh stage`, which fetches ONNX Runtime
+   1.24.4 once (Microsoft's release archive, pinned by SHA-256, into
+   `~/.cache/ghost/onnxruntime/1.24.4/`) and copies the library and its license to
+   `apps/desktop/src-tauri/resources/onnxruntime/`; then `cargo build --release -p ghostd
+   -p ghost-core --bins` and the three binaries the bundle carries, `ghostd`,
+   `ghost-mock-github` and `ghost-scripts` (the two apps `apps.json` names), copied to
+   `apps/desktop/src-tauri/binaries/<name>-<target triple>`, where Tauri's bundler looks for
+   `bundle.externalBin`. Neither folder is committed.
 2. The frontend (`pnpm --filter @ghost/desktop build`).
 3. The shell (`cargo build --release` of `heka-ghost-desktop`), then the bundles under
    `target/release/bundle/deb/` and `target/release/bundle/appimage/`. The .deb installs
-   the four binaries in `/usr/bin` and the runtime library under `/usr/lib/heka-ghost-desktop/`;
-   the AppImage carries them in its `usr/bin` and `usr/lib`.
+   the four binaries in `/usr/bin` and the runtime's library in
+   `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4` (`bundle.resources`);
+   the AppImage carries them in its `usr/bin` and `usr/lib`. The .deb depends on
+   `libespeak-ng1` (Kokoro's phonemizer; the one system library `ghostd` links that a bare
+   Ubuntu lacks) on top of the GTK and WebKit packages Tauri adds.
 
-The shell's build script hides `externalBin` from `tauri-build` (the sidecars are the
-workspace's own binaries, which `tauri-build` would otherwise copy over cargo's fresh output
-in `target/` and demand at every `cargo build`), so a plain `cargo build`, `clippy` or
-`nextest` never needs `binaries/`; only the bundler reads it.
+The shell's build script hides `externalBin` and `resources` from `tauri-build` (the
+sidecars are the workspace's own binaries, which `tauri-build` would otherwise copy over
+cargo's fresh output in `target/` and demand at every `cargo build`, and it would demand
+the staged library the same way), so a plain `cargo build`, `clippy` or `nextest` never
+needs `binaries/` or `resources/`; only the bundler reads them.
+
+ONNX Runtime is loaded at run time, not linked (`ort` with `load-dynamic`): the one Ghost
+runs is 1.24.4, the build the Python daemon ran, on which every model is bit-exact with
+the oracle (`crates/ghost-infer/tests/parity.rs`); the crate's own download, 1.31.0, moves
+the int8 kernels and the vocoder. `ghostd` looks for the library in `ORT_DYLIB_PATH`, then
+beside itself in the bundle (`/usr/bin/ghostd` finds `/usr/lib/heka-ghost-desktop/onnxruntime/`),
+then in the cache (`crates/ghost-infer/src/runtime.rs`); `ghostd check` prints the one it
+would load. CI runs `scripts/onnxruntime.sh` before `cargo nextest`, since every test that
+opens a session needs it, and the release workflow's install test runs `ghostd check` in a
+clean container, where the daemon must find the bundle's copy on its own.
 
 The installed app supervises the daemon (ADR 0038): at launch it adopts a daemon already
 answering on the control socket, else runs `ghostd restore-volumes` and starts `ghostd run`

@@ -17,29 +17,30 @@
 //! Silero, Smart Turn and the wake front end, `~/.cache/ghost/` for the wake classifiers
 //! and Kokoro.
 //!
-//! Two runtimes. The crate links the ONNX Runtime build `ort` 2.0.0-rc.15 bundles (1.31.0);
-//! the Python ran 1.24.4. On the Python's own library every port is the oracle's: Parakeet
-//! 225/225 transcripts, and Kokoro's audio, Silero's probabilities, Smart Turn's
-//! probabilities and the wake scores bit for bit. On the bundled runtime
-//! Silero and the wake chain stay there, and the two int8 graphs and the vocoder move with
-//! the runtime's kernels: Parakeet flips a comma or a capital on about one clip in twenty
-//! (its features are within 3e-6 of NumPy's, the float32 log's ulp, and the Python model
-//! fed the Rust features matches its own transcripts on every clip,
-//! `scripts/fixtures/check_parakeet.py`), Smart Turn's probabilities spread while 99 % of
-//! its verdicts agree, and Kokoro's audio differs by a few 1e-3 RMS as the vocoder
-//! integrates phase. Run against the Python's library to see the port alone:
+//! Two runtimes. The Python ran ONNX Runtime 1.24.4; `ort` 2.0.0-rc.15's own download is
+//! 1.31.0. On the Python's library every port is the oracle's: Parakeet 225/225
+//! transcripts, and Kokoro's audio, Silero's probabilities, Smart Turn's probabilities and
+//! the wake scores bit for bit. On 1.31.0 Silero and the wake chain stay there, and the
+//! two int8 graphs and the vocoder move with the runtime's kernels: Parakeet flips a comma
+//! or a capital on about one clip in twenty (its features are within 3e-6 of NumPy's, the
+//! float32 log's ulp, and the Python model fed the Rust features matches its own
+//! transcripts on every clip, `scripts/fixtures/check_parakeet.py`), Smart Turn's
+//! probabilities spread while 99 % of its verdicts agree, and Kokoro's audio differs by a
+//! few 1e-3 RMS as the vocoder integrates phase. So Ghost runs 1.24.4: the crate loads the
+//! library at run time from Ghost's cache (`scripts/onnxruntime.sh` fetches it) or the
+//! bundle, `ORT_DYLIB_PATH` overriding (`src/runtime.rs`), and the strict run is the
+//! ordinary one with the strict bars on:
 //!
 //! ```text
-//! ORT_DYLIB_PATH=<oracle venv>/onnxruntime/capi/libonnxruntime.so.1.24.4 GHOST_PARITY_STRICT=1 \
-//!   cargo nextest run -p ghost-infer --release --features ort/load-dynamic --run-ignored all --no-capture
+//! GHOST_PARITY_STRICT=1 cargo nextest run -p ghost-infer --release --run-ignored all --no-capture
 //! ```
 //!
 //! With `GHOST_PARITY_STRICT` the bars are the oracle's: every Parakeet transcript, Kokoro
 //! within 1e-3 RMS at the same length, Smart Turn within 1e-3 with every verdict the same.
-//! Without it they are what the bundled runtime reaches: Parakeet matching by words (case
-//! and punctuation aside) on all but one clip in a hundred and exactly on nine in ten,
-//! Kokoro within 1e-2 RMS, 99 % of Smart Turn's verdicts. `GHOST_PARITY_TIMING` adds the
-//! speed bars of ADR 0004 on an idle CPU.
+//! Without it they are what 1.31.0 reaches (`ORT_DYLIB_PATH` pointed at one): Parakeet
+//! matching by words (case and punctuation aside) on all but one clip in a hundred and
+//! exactly on nine in ten, Kokoro within 1e-2 RMS, 99 % of Smart Turn's verdicts.
+//! `GHOST_PARITY_TIMING` adds the speed bars of ADR 0004 on an idle CPU.
 
 use std::{
     fs,

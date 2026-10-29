@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
 # The bundle's external binaries (ADR 0038): ghostd, ghost-mock-github and ghost-scripts,
 # built from this workspace and copied where Tauri's bundler looks for them,
-# apps/desktop/src-tauri/binaries/<name>-<target triple>. `tauri build` runs this first
-# (beforeBuildCommand in tauri.conf.json); `make bundle` is `tauri build`.
+# apps/desktop/src-tauri/binaries/<name>-<target triple>; and the bundle's one resource,
+# ONNX Runtime 1.24.4, staged by scripts/onnxruntime.sh under apps/desktop/src-tauri/
+# resources/onnxruntime/. `tauri build` runs this first (beforeBuildCommand in
+# tauri.conf.json); `make bundle` is `tauri build`.
 #
 #   scripts/sidecars.sh            release builds (the bundle's)
 #   scripts/sidecars.sh dev        debug builds, for trying the bundle layout quickly
 #
-# The shell's build script hides externalBin from tauri-build, so a plain cargo build or
-# clippy never needs these files; only the bundler does.
+# The shell's build script hides externalBin and resources from tauri-build, so a plain
+# cargo build or clippy never needs these files; only the bundler does.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PROFILE=${1:-release}
 TRIPLE=${TAURI_ENV_TARGET_TRIPLE:-$(rustc -vV | sed -n 's/^host: //p')}
 DEST="$ROOT/apps/desktop/src-tauri/binaries"
+# Where cargo puts them: CARGO_TARGET_DIR when set (a shared target dir), else target/.
+TARGET=${CARGO_TARGET_DIR:-$ROOT/target}
 case "$PROFILE" in
-  release) OUT="$ROOT/target/release"; FLAG=--release ;;
-  dev) OUT="$ROOT/target/debug"; FLAG= ;;
+  release) OUT="$TARGET/release"; FLAG=--release ;;
+  dev) OUT="$TARGET/debug"; FLAG= ;;
   *) echo "usage: $0 [release|dev]" >&2; exit 2 ;;
 esac
 # CI builds against the lock file as it is committed.
 LOCKED=${CI:+--locked}
+
+"$ROOT/scripts/onnxruntime.sh" stage >/dev/null
 
 echo "sidecars: cargo build $FLAG $LOCKED -p ghostd -p ghost-core --bins" >&2
 # shellcheck disable=SC2086

@@ -21,6 +21,7 @@ pub mod mel;
 pub mod npy;
 pub mod parakeet;
 pub mod phonemize;
+pub mod runtime;
 pub mod session;
 pub mod silero;
 pub mod smart_turn;
@@ -50,6 +51,9 @@ pub enum InferError {
     Audio(String),
     #[error("espeak-ng: {0}")]
     Espeak(String),
+    /// ONNX Runtime's library is not where `runtime` looks for it.
+    #[error("{0}")]
+    Runtime(String),
 }
 
 pub type Result<T> = std::result::Result<T, InferError>;

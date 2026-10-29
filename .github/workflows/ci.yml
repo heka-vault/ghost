@@ -69,6 +69,11 @@ jobs:
       # generate_context! wants the frontend's folder to exist; its contents don't matter to a check.
       - run: mkdir -p apps/desktop/dist
       - run: cargo clippy --workspace --locked --all-targets -- -D warnings
+      # ONNX Runtime 1.24.4 into the cache (W10 of #39): `ort` loads it at run time, so
+      # every test that opens a session needs it there (today those are the parity tests
+      # and the model probes, ignored without fixtures; a new one must not fail for the
+      # library's absence). The bundle below carries the same file.
+      - run: scripts/onnxruntime.sh
       - run: cargo nextest run --workspace --locked
       # The contract the TypeScript client is generated from is the Rust types' document.
       - name: openapi.json is current
@@ -83,12 +88,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: the bundle
         run: pnpm tauri build --ci
-      - name: the bundle carries the daemon and the app binaries
+      - name: the bundle carries the daemon, the app binaries and ONNX Runtime
         run: |
           ls -la target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage
           for b in ghostd ghost-mock-github ghost-scripts heka-ghost-desktop; do
             dpkg-deb -c target/release/bundle/deb/*.deb | grep -q "usr/bin/$b\$" || { echo "missing: $b"; exit 1; }
           done
+          dpkg-deb -c target/release/bundle/deb/*.deb \
+            | grep -q "usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4\$" \
+            || { echo "missing: libonnxruntime.so.1.24.4"; exit 1; }
 
   # The one check main's ruleset requires, so adding or renaming a job above needs no
   # settings change.

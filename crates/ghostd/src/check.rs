@@ -296,6 +296,13 @@ pub async fn check_command(
     let _ = writeln!(out, "llm: {}", connection.target(&env).describe());
     problems.extend(connection.problems(&env, locked));
     let _ = writeln!(out, "wake: {}", cfg.wake_mode);
+    // The models' runtime (W10 of #39): the library `ghostd run` would load, or why not.
+    match ghost_infer::runtime::resolve_for_process() {
+        Ok(path) => {
+            let _ = writeln!(out, "onnxruntime: {}", path.display());
+        }
+        Err(e) => problems.push(e.to_string()),
+    }
 
     let autonomy = match AutonomyPolicy::load(&cfg.policy_path) {
         Ok(p) => {

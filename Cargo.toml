@@ -47,9 +47,12 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 rmcp = { version = "3.8", default-features = false }
 indexmap = { version = "2", features = ["serde"] }
 url = "2"
-# ghost-infer: ONNX Runtime (a pinned release candidate; download-binaries fetches the
-# matching onnxruntime build), the FFT behind the log-mel extractors, and WAV reading.
-ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls"] }
+# ghost-infer: ONNX Runtime through `ort` (a pinned release candidate) loading the library
+# at run time: the build the Python daemon ran, 1.24.4, fetched by scripts/onnxruntime.sh,
+# shipped in the bundle and resolved by `ghost_infer::runtime` (the crate's own download
+# would be 1.31.0, whose int8 kernels and vocoder drift from the oracle); the FFT behind
+# the log-mel extractors, and WAV reading.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic"] }
 realfft = "3"
 wiremock = "0.6"
 unicode-normalization = "0.1"

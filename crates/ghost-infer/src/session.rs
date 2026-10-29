@@ -1,6 +1,7 @@
 //! One ONNX Runtime environment per process and the session options the Python set:
 //! CPU only, sequential execution, every graph optimization, and the thread counts each
-//! wrapper chose (`intra_op_num_threads`, `inter_op_num_threads = 1`).
+//! wrapper chose (`intra_op_num_threads`, `inter_op_num_threads = 1`). The environment
+//! loads the runtime's library from where `runtime` resolves it (1.24.4, the oracle's).
 
 use std::{path::Path, sync::OnceLock};
 
@@ -9,14 +10,18 @@ use ort::{
     session::{Session, SessionOutputs, builder::GraphOptimizationLevel},
 };
 
-use crate::{InferError, Result};
+use crate::{InferError, Result, runtime};
 
 /// The process's ONNX Runtime environment, created on first use. `ort` allows one per
-/// process, so every model shares it.
+/// process, so every model shares it. The library is resolved once here, before the first
+/// session (`runtime::resolve_for_process`), and its path logged.
 pub fn environment() -> Result<&'static Environment> {
     static ENV: OnceLock<std::result::Result<Environment, String>> = OnceLock::new();
     ENV.get_or_init(|| {
-        ort::init()
+        let library = runtime::resolve_for_process().map_err(|e| e.to_string())?;
+        tracing::info!("onnxruntime: {}", library.display());
+        ort::init_from(&library)
+            .map_err(|e| e.to_string())?
             .with_name("ghost")
             .build()
             .map_err(|e| e.to_string())
