@@ -18,8 +18,8 @@
 //!
 //! Two runtimes. The crate links the ONNX Runtime build `ort` 2.0.0-rc.15 bundles (1.31.0);
 //! the Python ran 1.24.4. On the Python's own library every port is the oracle's: Parakeet
-//! 225/225 transcripts, Kokoro's audio, Silero's probabilities and the wake scores bit for
-//! bit, Smart Turn's verdicts 225/225 with its features exact. On the bundled runtime
+//! 225/225 transcripts, and Kokoro's audio, Silero's probabilities, Smart Turn's
+//! probabilities and the wake scores bit for bit. On the bundled runtime
 //! Silero and the wake chain stay there, and the two int8 graphs and the vocoder move with
 //! the runtime's kernels: Parakeet flips a comma or a capital on about one clip in twenty
 //! (its features are within 3e-6 of NumPy's, the float32 log's ulp, and the Python model
@@ -470,7 +470,7 @@ fn smart_turn_matches_within_1e_3() {
     assert_eq!(feat_ok, n, "features differ");
     if strict() {
         assert_eq!(verdict_ok, n, "verdicts differ");
-        assert!(worst_prob <= 2e-2, "a probability differs by {worst_prob}");
+        assert_eq!(prob_ok, n, "{prob_ok} of {n} probabilities within 1e-3");
     } else {
         assert!(
             verdict_ok * 100 >= n * 99,
