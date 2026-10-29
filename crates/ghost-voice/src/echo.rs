@@ -36,7 +36,7 @@ pub fn words(text: &str) -> Vec<String> {
 
 /// `difflib.SequenceMatcher.get_matching_blocks` over words, summed: the longest common
 /// block, then recursively on either side (what `ratio` rests on).
-fn matching(a: &[String], b: &[String]) -> usize {
+pub(crate) fn matching(a: &[String], b: &[String]) -> usize {
     fn longest(a: &[String], b: &[String]) -> (usize, usize, usize) {
         let (mut bi, mut bj, mut bk) = (0, 0, 0);
         let mut prev = vec![0usize; b.len() + 1];

@@ -39,7 +39,8 @@ hound.workspace = true
 sha1.workspace = true
 hex.workspace = true
 indexmap.workspace = true
+# The replay harness: an isolated Ghost per run.
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 ghost-core = { workspace = true, features = ["fakes"] }
