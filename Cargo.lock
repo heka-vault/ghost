@@ -2292,6 +2292,7 @@ dependencies = [
  "ghost-voice",
  "hex",
  "hmac 0.12.1",
+ "hyper",
  "indexmap 2.14.2",
  "nix",
  "percent-encoding",
