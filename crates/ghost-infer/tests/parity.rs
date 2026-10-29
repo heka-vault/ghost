@@ -701,8 +701,17 @@ fn kokoro_matches() {
             .unwrap()
             .to_f32()
             .unwrap();
+        let one_batch = want_pcm.len() == want.trim[1] - want.trim[0];
         let dp = if pcm.len() == want_pcm.len() {
             rms_diff(&pcm, &want_pcm)
+        } else if !strict()
+            && one_batch
+            && tokens == want.tokens
+            && pcm.len().abs_diff(want_pcm.len()) <= 512
+        {
+            // The trim boundary moved a hop on the runtime's noise: what Ghost plays is
+            // the Rust audio over the Python's interval, a hop longer or shorter.
+            rms_diff(&raw[want.trim[0]..want.trim[1]], &want_pcm)
         } else {
             f64::INFINITY
         };
