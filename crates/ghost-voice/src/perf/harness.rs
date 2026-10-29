@@ -260,6 +260,7 @@ impl Bench {
         show_text: bool,
     ) -> anyhow::Result<Self> {
         let base = VoiceSettings::from_env()?;
+        crate::debug::enable(base.debug_audio); // the operator's own debugging session only
         let t = Instant::now();
         let models = Arc::new(Models::load(&base)?);
         let load_secs = t.elapsed().as_secs_f64();
@@ -441,10 +442,17 @@ impl Bench {
             tokio::time::sleep(Duration::from_millis(800)).await; // the operator heard the end and starts talking
             let (n0, h0) = (records.lock().unwrap().len(), heard.lock().unwrap().len());
             let done = mouth.say(&u.pcm);
-            // A goodbye can end the session before the line's last frames are sent.
-            tokio::select! {
-                _ = done => {}
-                _ = async { while !run_task.is_finished() { tokio::time::sleep(Duration::from_millis(50)).await } } => {}
+            // A goodbye can end the session before the line's last frames are sent; a stuck
+            // pipeline must not hang the batch.
+            let sent = tokio::time::timeout(Duration::from_secs_f64(u.seconds() + 10.0), async {
+                tokio::select! {
+                    _ = done => {}
+                    _ = async { while !run_task.is_finished() { tokio::time::sleep(Duration::from_millis(50)).await } } => {}
+                }
+            })
+            .await;
+            if sent.is_err() {
+                problems.push(format!("line {}: the microphone stalled", lines.len() + 1));
             }
             let spoke_at = Instant::now();
             if line.ends {
@@ -536,11 +544,13 @@ impl Bench {
     ) -> Option<Value> {
         let deadline = Instant::now() + within;
         loop {
-            if let Some(r) = records.lock().unwrap()[start.min(records.lock().unwrap().len())..]
-                .iter()
-                .find(|r| want(r))
-            {
-                return Some(r.clone());
+            let found = {
+                let recs = records.lock().unwrap();
+                let from = start.min(recs.len());
+                recs[from..].iter().find(|r| want(r)).cloned()
+            };
+            if found.is_some() {
+                return found;
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
