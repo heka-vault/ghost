@@ -576,10 +576,14 @@ impl Stage for LlmStage {
     }
 }
 
-/// A scripted model for tests and the replay harness: each turn's reply is what the
-/// script says, streamed a word at a time after `ttfb`.
+/// A scripted model for tests and the replay harness: each line of the script has its
+/// replies in order (a tool call, then the answer), streamed a word at a time after
+/// `ttfb`. A line is the n-th user turn of the context (system notes aside). A reply
+/// whose stream was dropped before its end (a speculation withdrawn or thrown away) is
+/// served again, as a real model regenerates its answer on the confirmed turn.
 pub struct ScriptedModel {
-    replies: Mutex<std::collections::VecDeque<ScriptedReply>>,
+    lines: Vec<Vec<ScriptedReply>>,
+    served: Arc<Mutex<Vec<usize>>>,
     ttfb: std::time::Duration,
     name: String,
     pub calls: Mutex<usize>,
@@ -592,9 +596,11 @@ pub struct ScriptedReply {
 }
 
 impl ScriptedModel {
-    pub fn new(replies: Vec<ScriptedReply>, ttfb: std::time::Duration) -> Arc<Self> {
+    pub fn new(lines: Vec<Vec<ScriptedReply>>, ttfb: std::time::Duration) -> Arc<Self> {
+        let n = lines.len();
         Arc::new(Self {
-            replies: Mutex::new(replies.into()),
+            lines,
+            served: Arc::new(Mutex::new(vec![0; n])),
             ttfb,
             name: "scripted".into(),
             calls: Mutex::new(0),
@@ -614,21 +620,45 @@ impl ScriptedModel {
             tool_calls: vec![ToolCall::new(format!("call_{name}"), name, args)],
         }
     }
+
+    /// Which line of the script the context is on: its user turns, the notes aside.
+    fn line_of(context: &Context) -> Option<usize> {
+        let turns = context
+            .messages
+            .iter()
+            .filter(|m| matches!(m, Message::User(t) if !t.starts_with("[system]")))
+            .count();
+        turns.checked_sub(1)
+    }
 }
 
 impl ModelPort for ScriptedModel {
     fn stream(
         &self,
-        _context: Context,
+        context: Context,
         _tools: &Tools,
         _options: &Options,
     ) -> BoxStream<'static, Result<Event, LlmError>> {
         *self.calls.lock().unwrap() += 1;
-        let reply = self.replies.lock().unwrap().pop_front().unwrap_or_default();
-        let ttfb = self.ttfb;
+        let line = Self::line_of(&context);
+        let reply = line
+            .and_then(|l| {
+                let i = *self.served.lock().unwrap().get(l)?;
+                self.lines.get(l)?.get(i).cloned()
+            })
+            .unwrap_or_default();
         let words: Vec<String> = reply.text.split_inclusive(' ').map(String::from).collect();
-        let calls = reply.tool_calls;
-        Box::pin(async_stream_words(words, calls, ttfb))
+        let done = {
+            let served = self.served.clone();
+            move || {
+                if let Some(l) = line
+                    && let Some(n) = served.lock().unwrap().get_mut(l)
+                {
+                    *n += 1;
+                }
+            }
+        };
+        Box::pin(async_stream_words(words, reply.tool_calls, self.ttfb, done))
     }
 
     fn complete(
@@ -645,10 +675,13 @@ impl ModelPort for ScriptedModel {
     }
 }
 
+/// `done` runs when the last event has been taken: a stream dropped before that was a
+/// speculation that never became the answer.
 fn async_stream_words(
     words: Vec<String>,
     calls: Vec<ToolCall>,
     ttfb: std::time::Duration,
+    done: impl Fn() + Send + 'static,
 ) -> impl futures::Stream<Item = Result<Event, LlmError>> + Send {
     let mut events: Vec<Event> = words.into_iter().map(Event::Text).collect();
     let n_calls = calls.len();
@@ -665,13 +698,24 @@ fn async_stream_words(
     } else {
         ghost_llm::FinishReason::End
     }));
+    let total = events.len();
     futures::stream::unfold(
-        (events.into_iter(), true),
-        move |(mut it, first)| async move {
-            if first {
+        (events.into_iter(), 0usize, Some(done)),
+        move |(mut it, taken, done)| async move {
+            if taken == 0 {
                 tokio::time::sleep(ttfb).await;
             }
-            it.next().map(|ev| (Ok(ev), (it, false)))
+            let ev = it.next()?;
+            let taken = taken + 1;
+            let done = if taken == total {
+                if let Some(d) = &done {
+                    d();
+                }
+                None
+            } else {
+                done
+            };
+            Some((Ok(ev), (it, taken, done)))
         },
     )
 }

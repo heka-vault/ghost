@@ -31,8 +31,11 @@ use crate::debug;
 use crate::frames::{Direction, Frame, Metric, Out, Stage};
 
 pub const SAMPLE_RATE: u32 = 16_000;
-/// Audio kept before the VAD's start, so the first word isn't clipped.
-pub const PRE_ROLL_SECS: f64 = 0.4;
+/// Audio kept before the VAD's start, so the first word isn't clipped: the VAD fires its
+/// `start_secs` and the model's onset after speech began, and Parakeet reads a first word
+/// better with the room's silence before it (a 0.4 s pre-roll lost "What's" from "What's
+/// waiting for triage?" on the replay rig).
+pub const PRE_ROLL_SECS: f64 = 1.0;
 /// Silence after a segment, so the model sees its end.
 pub const TRAILING_SECS: f64 = 0.2;
 
@@ -246,9 +249,10 @@ impl Stage for ParakeetStt {
         match &frame {
             Frame::AudioIn(audio) => {
                 if let Some(vad) = &mut self.vad {
-                    let before = vad.state();
-                    let after = vad.analyze(&audio.samples, epoch()).unwrap_or(before);
-                    if before != VadState::Speaking && after == VadState::Speaking {
+                    // Pipecat's rule: only Speaking and Quiet are states the pipeline sees;
+                    // a dip through Stopping and back is the same segment.
+                    let after = vad.analyze(&audio.samples, epoch()).unwrap_or(vad.state());
+                    if !self.user_speaking && after == VadState::Speaking {
                         self.vad_started(out).await;
                     }
                     if self.user_speaking {
@@ -260,7 +264,7 @@ impl Stage for ParakeetStt {
                             self.pre_roll.pop_front();
                         }
                     }
-                    if before != VadState::Quiet && after == VadState::Quiet && self.user_speaking {
+                    if self.user_speaking && after == VadState::Quiet {
                         out.forward(frame.clone(), direction).await;
                         self.vad_stopped(out).await;
                         return;

@@ -69,7 +69,12 @@ struct World {
     spoken: Arc<Mutex<Vec<String>>>,
 }
 
-fn world(transcripts: &[&str], replies: Vec<ScriptedReply>, clause_secs: f64, grace: f64) -> World {
+fn world(
+    transcripts: &[&str],
+    replies: Vec<Vec<ScriptedReply>>,
+    clause_secs: f64,
+    grace: f64,
+) -> World {
     let settings = VoiceSettings::from_vars(|name| match name {
         "GHOST_TURN_GRACE_SECS" => Some(grace.to_string()),
         "GHOST_THINKING_DELAY_SECS" => Some("0.1".into()),
@@ -182,9 +187,9 @@ async fn wait_for(records: &Arc<Mutex<Vec<Value>>>, kind: &str, within: Duration
 async fn a_voice_turn_runs_through_every_stage() {
     let w = world(
         &["What needs my sign off"],
-        vec![ScriptedModel::say(
+        vec![vec![ScriptedModel::say(
             "Three issues are waiting, the oldest from Monday.",
-        )],
+        )]],
         0.3,
         0.1,
     );
@@ -238,9 +243,9 @@ async fn a_barge_in_stops_playback_within_100ms() {
     // A long reply (3 s a clause); two heard words while Ghost speaks cut it off.
     let w = world(
         &["tell me everything", "stop that"],
-        vec![ScriptedModel::say(
+        vec![vec![ScriptedModel::say(
             "Here is everything, in great detail, for a long while.",
-        )],
+        )]],
         3.0,
         0.1,
     );
@@ -283,7 +288,7 @@ async fn a_barge_in_stops_playback_within_100ms() {
 
 #[tokio::test]
 async fn a_goodbye_ends_the_session_without_the_model() {
-    let w = world(&["That's all for now, bye."], vec![], 0.2, 0.1);
+    let w = world(&["That's all for now, bye."], vec![vec![]], 0.2, 0.1);
     w.session.start(true).await;
     wait_for(&w.records, "opening", Duration::from_secs(5)).await;
     say(&w, 0.3).await;

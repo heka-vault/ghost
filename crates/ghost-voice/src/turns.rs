@@ -706,21 +706,19 @@ impl UserAggregator {
 
     async fn turn_started(&mut self, out: &Out) {
         self.disarm_idle();
-        let interrupts = self.bot_speaking;
         self.start.handle_user_turn_started();
         self.stop.handle_user_turn_started().await;
         {
             let mut s = self.state.lock().unwrap();
             s.open = true;
         }
-        if interrupts {
-            // The operator cut in: the reply's token is cancelled first, so the voice stops
-            // within the frame, then the stages are told.
-            self.turns.interrupt();
-            out.push(Frame::Interruption).await;
-            out.push_up(Frame::Interruption).await;
-            self.bot_speaking = false;
-        }
+        // A new turn interrupts whatever Ghost was doing for the last one, spoken or still
+        // being made (Pipecat's interruption): the reply's token is cancelled first, so the
+        // voice stops within the frame and the model's stream ends, then the stages are told.
+        self.turns.interrupt();
+        out.push(Frame::Interruption).await;
+        out.push_up(Frame::Interruption).await;
+        self.bot_speaking = false;
         out.push_up(Frame::UserStarted).await;
         out.push(Frame::UserStarted).await;
     }

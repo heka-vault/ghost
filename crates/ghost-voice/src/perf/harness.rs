@@ -379,12 +379,8 @@ impl Bench {
             }
         };
         let (media, mouth, ear) = scripted_media();
-        let replies: Vec<_> = scenario
-            .lines
-            .iter()
-            .flat_map(|l| l.replies.clone())
-            .collect();
-        let model = ScriptedModel::new(replies, cfg.ttfb);
+        let lines: Vec<Vec<_>> = scenario.lines.iter().map(|l| l.replies.clone()).collect();
+        let model = ScriptedModel::new(lines, cfg.ttfb);
         let session = build_session(SessionParams {
             settings: Arc::new(settings),
             models: self.models.clone(),
