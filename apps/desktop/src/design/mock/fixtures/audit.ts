@@ -138,7 +138,7 @@ const OPS: Op[] = [
   },
   { op: "reopen", autonomy: "confirm", make: (t) => ({ summary: `On ${t}: reopened the issue.`, steps: ["open the issue"] }) },
 ];
-/** Conversation writes, with steps as ghost_core.conversations describes them (Python repr quotes). */
+/** Conversation writes, with steps as ghost_core::conversations describes them (the operator's text quoted as Python's repr did, kept word for word by the port). */
 const CONV_OPS: { op: string; autonomy: string; target: string; summary: string; steps: string[] }[] = [
   ...["Stripe renewal is due November 3.", "Marta signs off on anything over 5,000.", "Close the books by the 5th; Priya needs the export the day before."].map((note) => ({
     op: "remember", autonomy: "announce", target: "conversation:accounting", summary: `On the Accounting line: pinned “${note}”`, steps: [`remember: ${note}`],

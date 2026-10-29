@@ -6,7 +6,7 @@ what is said is the **conversation**. The phone metaphor of the first increment 
 
 | Term | Meaning | Not |
 |---|---|---|
-| **Agent** | What the operator hires, talks to and retires: its own name, job, persona, voice, private memory, notes and transcript, in `~/.config/ghost/agents/<slug>/`. Ghost is agent zero. The desktop's Agents screen and the phone's Home list them. The code and the control API call the same object a *conversation* (`ghost_core.conversations`, `/conversations`); the word to show is **agent**. | A session. |
+| **Agent** | What the operator hires, talks to and retires: its own name, job, persona, voice, private memory, notes and transcript, in `~/.config/ghost/agents/<slug>/`. Ghost is agent zero. The desktop's Agents screen and the phone's Home list them. The code and the control API call the same object a *conversation* (`ghost_core::conversations`, `/conversations`); the word to show is **agent**. | A session. |
 | **Conversation** | What is said with an agent: its transcript, with the agent's memory of it. Opening an agent in the desktop shows the conversation first; the agent's settings sit behind it. In code, also the storage name for the agent. | |
 | **Session** | One stretch with the mic open, from a wake or a call to a hang-up. A session starts in one agent (Ghost at the desk; on the phone, Ghost or the agent you called) and can be transferred to another. | |
 | **Call** | A phone session, started from the phone's Home: the ghost for Ghost, a key for an agent. | |

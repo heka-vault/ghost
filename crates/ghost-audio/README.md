@@ -1,9 +1,10 @@
 # ghost-audio
 
-Ghost's audio engine (ADR 0039; W4 of heka-vault/ghost#39). It replaces the Python daemon's
+Ghost's audio engine (ADR 0039; W4 of heka-vault/ghost#39). It replaced the Python daemon's
 `ghost_voice.transport` (a sounddevice port of Pipecat's PyAudio transport), `ghostd.audio`
 (the `Ducker` and the chime), `ghost_voice.sounds`, and the mixer under
-`ghost_voice.thinking`, on PipeWire through the project's own Rust binding.
+`ghost_voice.thinking`, which are in history now (W10), on PipeWire through the project's own
+Rust binding.
 
 The rules hold here as everywhere (CLAUDE.md): idle audio stays on the machine, and nothing
 from the microphone is logged or stored. The crate writes samples only into a ring the daemon

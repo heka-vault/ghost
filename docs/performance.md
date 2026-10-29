@@ -32,8 +32,13 @@ narrow or block what it costs too much ([apps.md](apps.md#performance)).
 
 Every live turn writes its timeline, timings only and never text, to
 `~/.local/share/ghost/latency.jsonl`, with one line in the daemon log. `make latency`
-summarises it. `make perf` drives scripted conversations through the real pipeline without a
-person and reports each stage's p50 and p95.
+summarises it. `make perf` (`ghostd perf run`, `crates/ghost-voice/src/perf/`) drives scripted
+conversations through the real pipeline without a person, the models real and the model's
+replies scripted, and reports each stage's p50 and p95; `make perf-micro` times the models one
+by one and `make perf-llm` the real model connection with Ghost's prompt and tools. The
+fixtures the models are checked against come from the oracle (`tools/oracle`,
+`scripts/fixtures/record.py`; `crates/ghost-infer/tests/parity.rs`), the Python wrappers the
+Rust was measured against (ADR 0039).
 
 ## Budgets
 
@@ -57,7 +62,7 @@ reply until it is complete, so narration before a lookup is never spoken. Each o
 setting, and the harness shows what it costs. One more is conditional: a reply that hits
 the model's output cap (`GHOST_LLM_MAX_TOKENS`, 2000 tokens, tool calls included) is
 redone in smaller steps, one extra model call, because the alternative is losing the calls
-it held (`ghost_voice.llm`; the turn is flagged `cut_off` in `latency.jsonl`).
+it held (`ghost_llm`; the turn is flagged `cut_off` in `latency.jsonl`).
 
 ## How we work on it
 
@@ -81,4 +86,4 @@ it held (`ghost_voice.llm`; the turn is flagged `cut_off` in `latency.jsonl`).
 
 - **No model run on an intercepted turn (2026-10-20).** A goodbye that STT handed over in pieces ("All right. Good." then "I will talk to you later.") used to start a model run on the first piece, cancelled a moment later: wasted tokens and a request. The interceptor now judges the turn's pieces together and takes the earlier ones back from the aggregator when a quick phrase handles the turn (`on_handled`). Check `latency.jsonl`: an intercepted turn should carry no `llm` entry.
 - **End-of-turn fallback (2026-10-20).** When the turn model says "incomplete" the stop strategy waits its full fallback before closing the turn. Seen on 4 of 10 phone turns in the morning and again on a goodbye in the afternoon ("I will talk to you later." judged incomplete; the hang-up waited 2.8 s for nothing). Shortened the same day: `GHOST_TURN_STOP_SECS` (Smart Turn's `stop_secs`) defaults to 1.6 s instead of 3 s. Watch for cut-off mid-sentence pauses; if they appear, raise it or make the fallback depend on how the utterance ended.
-- **Answer during the turn grace (2026-10-22).** The model used to start only after the 0.8 s grace. It now starts at Smart Turn's verdict through Pipecat's speculative inference, held in the LLM service until the grace ends (`GHOST_TURN_SPECULATE`, `PatientTurnStopStrategy`). The answer is to the user aggregator's whole turn, not the analyzer's latest transcript, which alone answered "what's waiting for triage ... in the app repo" as "in the app repo". `make perf ARGS="--ablate none,speculate"` through the proxy: small talk p50 3.22 to 2.48 s, a goodbye through the model 3.38 to 2.60 s (tool turns there were lost in the proxy's bad minutes). Through OpenRouter: small talk 4.00 to 3.38 s, a lookup 6.76 to 6.33 s, "close infra 17" 5.58 to 5.16 s; a tool turn gains less because the turn is confirmed before the model reaches its call, which then runs as usual. `hear.speculation` in `latency.jsonl` counts answers started, kept and withdrawn; each withdrawal is a discarded model call.
+- **Answer during the turn grace (2026-10-22).** The model used to start only after the 0.8 s grace. It now starts at Smart Turn's verdict, the speculative turn, its answer held in the model stage until the grace ends (`GHOST_TURN_SPECULATE`; the patient stop in `ghost_voice::turns`). The answer is to the user aggregator's whole turn, not the analyzer's latest transcript, which alone answered "what's waiting for triage ... in the app repo" as "in the app repo". `make perf ARGS="--ablate none,speculate"` through the proxy: small talk p50 3.22 to 2.48 s, a goodbye through the model 3.38 to 2.60 s (tool turns there were lost in the proxy's bad minutes). Through OpenRouter: small talk 4.00 to 3.38 s, a lookup 6.76 to 6.33 s, "close infra 17" 5.58 to 5.16 s; a tool turn gains less because the turn is confirmed before the model reaches its call, which then runs as usual. `hear.speculation` in `latency.jsonl` counts answers started, kept and withdrawn; each withdrawal is a discarded model call.

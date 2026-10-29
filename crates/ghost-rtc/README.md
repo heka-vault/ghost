@@ -2,8 +2,8 @@
 
 The phone's WebRTC audio (ADR 0016, ADR 0020; W8 of heka-vault/ghost#39). One trait,
 `Media`, that the daemon's phone session talks to, and three stacks behind Cargo features,
-one chosen by measurement (below). It replaces Pipecat's `SmallWebRTCConnection` and
-`SmallWebRTCTransport` and the Python daemon's `ghost_voice.rtvi`.
+one chosen by measurement (below). It replaced Pipecat's `SmallWebRTCConnection` and
+`SmallWebRTCTransport` and the Python daemon's `ghost_voice.rtvi`, in history now (W10).
 
 The rules hold here (CLAUDE.md): nothing from the phone's audio is logged or stored by
 this crate; a data-channel message outside the RTVI subset is dropped without its contents

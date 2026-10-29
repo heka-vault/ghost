@@ -237,7 +237,7 @@ export class MockDaemon {
     this.models = f.settings.models;
     this.skills = f.skills;
     this.waitingItems = f.waiting;
-    // The daemon's own item while the keyring is locked (ghostd.passwords.problems).
+    // The daemon's own item while the keyring is locked (ghostd::passwords::problems).
     if (options.vault === "locked") {
       const at = new Date().toISOString();
       this.waitingItems = [
@@ -457,7 +457,7 @@ export class MockDaemon {
   private ghostVoice(): string {
     return this.agents.get("ghost")?.detail.voice ?? "af_heart";
   }
-  /** The old agent speaks the transfer, as ghost_voice/conversation.py does, then the new one is active. */
+  /** The old agent speaks the transfer, as ghost_voice::conversation does, then the new one is active. */
   private switchTo(slug: string) {
     const target = this.agent(slug);
     if (!this.status.session_id) throw new HttpError(409, "Wake Ghost first: switching transfers a live session.");
@@ -479,7 +479,7 @@ export class MockDaemon {
   /**
    * POST /rules: the operator's own click, through the gate as rules.add at quiet (the
    * daemon's apply_internal): the permissions' block still refuses it (409, the gate's own
-   * sentence), anything else runs at once. Appended verbatim, as ghost_core.rules does: a
+   * sentence), anything else runs at once. Appended verbatim, as ghost_core::rules does: a
    * heading when the file is new, the rule as its own paragraph.
    */
   private addRule(text: string): OutcomeView {
@@ -514,7 +514,7 @@ export class MockDaemon {
   }
   /**
    * POST /skills without a file system: the folder's last name is the skill's. The refusals
-   * are worded as ghost_core.skills words them (409), so the screen shows the real sentences:
+   * are worded as ghost_core::skills words them (409), so the screen shows the real sentences:
    * not a folder, no SKILL.md, inside Ghost's own directory, already installed.
    */
   private addSkill(raw: string, wanted: string | null, replace: boolean): SkillInfo {
@@ -559,7 +559,7 @@ export class MockDaemon {
     const hits = SKILL_CATALOG.filter((c) => words.every((w) => c.listing.id.toLowerCase().includes(w)));
     return { query: q, skills: hits.map((c) => ({ ...c.listing, installed: this.installedFrom(c.listing.source, c.listing.skill) })), problem: null, fetched_at: now() };
   }
-  /** What the operator named, resolved as ghost_core.skill_catalog does, with its sentences. */
+  /** What the operator named, resolved as ghost_core::skill_catalog does, with its sentences. */
   private catalogSkill(raw: string, skill: string | null): CatalogSkill {
     const text = raw.trim();
     if (!text) throw new HttpError(409, "name a repository, like anthropics/skills");

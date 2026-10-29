@@ -2,7 +2,7 @@
  * Owner: apps. "About this app" in the connect dialog, before anything is connected (#37): who
  * published it and what the registry checked, whether it is the product maker's own and why,
  * where it runs, its code, its website, its version and when it last changed. All of it is the
- * registry's text and Ghost's deterministic reading of it (ghost_core.provenance); shown to the
+ * registry's text and Ghost's deterministic reading of it (ghost_core::provenance); shown to the
  * operator, never to the model.
  */
 import type { CatalogEntryView } from "@ghost/client-ts";

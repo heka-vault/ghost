@@ -37,8 +37,8 @@ In this order, and the first folder with a name wins:
 
 Settings › Skills has **Find skills**: a search of [skills.sh](https://skills.sh), the open
 directory behind the `npx skills` CLI, and **Install from GitHub…** for a skill it doesn't
-list. Everything here is the operator's doing, from the desktop (`ghost_core.skill_catalog`,
-`ghost_api.skill_catalog`).
+list. Everything here is the operator's doing, from the desktop (`ghost_core::skill_catalog`,
+`ghost_api::skill_catalog`).
 
 - **Search.** skills.sh's documented API needs a Vercel token Ghost can't have, so Ghost uses
   the site's public search (`GET https://skills.sh/api/search?q=`), which is undocumented.

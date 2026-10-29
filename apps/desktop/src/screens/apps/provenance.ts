@@ -1,6 +1,6 @@
 /**
  * Owner: apps. A catalog entry's publisher, maker and place in the operator's words (#37). The
- * daemon decides (ghost_core.provenance, deterministic, no model); this only words it. Every
+ * daemon decides (ghost_core::provenance, deterministic, no model); this only words it. Every
  * name here is the registry's text: shown, never acted on, never sent to the model.
  */
 import type { CatalogEntryView, CatalogOption } from "@ghost/client-ts";

@@ -12,7 +12,7 @@ export type AuditEvent = Schemas["AuditEventView"];
 /* ---------------------------------------------------------------------------- status */
 
 /**
- * How long a confirm-level change can wait for a yes (ghost_core.models.PROPOSAL_TTL is 60
+ * How long a confirm-level change can wait for a yes (ghost_core::models::PROPOSAL_TTL_SECS is 60
  * seconds), with a little room for the clock and the event stream. A stored "pending" older
  * than this, that isn't the change the daemon says is waiting now, lapsed without an expiry
  * event (a restart, a crash while it waited): nothing is waiting, and the row says so.

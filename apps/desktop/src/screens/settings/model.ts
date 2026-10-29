@@ -265,7 +265,7 @@ export const modelReady = (conn: ModelConnectionView | null) => !!conn?.ready;
 /* ------------------------------------------------------------- the model connection */
 const HEADER_NAME = /^[A-Za-z0-9!#%&'*+.^_`|~-]+$/;
 
-/** The connection's own field errors, as ghost_core.connection checks them. */
+/** The connection's own field errors, as ghost_core::connection checks them. */
 export function validateConnection(v: Values): Record<string, string> {
   const e: Record<string, string> = {};
   const base = (v.GHOST_LLM_BASE_URL ?? "").trim();

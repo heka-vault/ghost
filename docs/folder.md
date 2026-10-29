@@ -2,7 +2,7 @@
 
 Everything the operator edits lives in one folder, `~/.config/ghost/` (ADR 0035; there are
 no departments). The words the operator sees are **agent**, **app** and **permission**; the
-code and the control API keep *conversation* for an agent (`ghost_core.conversations`,
+code and the control API keep *conversation* for an agent (`ghost_core::conversations`,
 `/conversations`).
 
 ```
