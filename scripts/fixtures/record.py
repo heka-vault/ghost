@@ -78,7 +78,7 @@ SENTENCES = [
     "The meeting moved to 9:15 tomorrow.",
     "Owner slash app colon 142.",
     "Pipecat's aggregator held the sentence.",
-    "She said, \"ship it\" and left.",
+    'She said, "ship it" and left.',
     "Wait... are you sure?",
     "Right, let's work on the wake word.",
     "One, two, three, four, five.",
@@ -189,7 +189,7 @@ def record_silero(out: Path, clips: list[tuple[str, np.ndarray]], timings: dict)
         # The analyzer, its wall clock replaced by the audio clock so the 5 s state resets
         # land at the same chunks every run.
         clock = {"now": 0.0}
-        silero_mod.time = type("T", (), {"time": staticmethod(lambda: clock["now"])})()
+        silero_mod.time = type("T", (), {"time": staticmethod(lambda clock=clock: clock["now"])})()
         an = SileroVADAnalyzer(sample_rate=RATE, params=params)
         an.set_sample_rate(RATE)
         confidences: list[float] = []
@@ -226,7 +226,9 @@ def record_silero(out: Path, clips: list[tuple[str, np.ndarray]], timings: dict)
             },
         )
     timings["silero_per_chunk"] = pct(secs)
-    print(f"silero: {len(clips)} clips, p50 {timings['silero_per_chunk']['p50'] * 1000:.2f}ms/chunk")
+    print(
+        f"silero: {len(clips)} clips, p50 {timings['silero_per_chunk']['p50'] * 1000:.2f}ms/chunk"
+    )
 
 
 def record_smart_turn(out: Path, clips: list[tuple[str, np.ndarray]], timings: dict) -> None:
@@ -247,15 +249,17 @@ def record_smart_turn(out: Path, clips: list[tuple[str, np.ndarray]], timings: d
         np.save(out / "smart_turn" / f"{cid}.npy", feats.astype(np.float32))
         dump(
             out / "smart_turn" / f"{cid}.json",
-            {"probability": res["probability"], "complete": res["prediction"] == 1, "secs": secs[-1]},
+            {
+                "probability": res["probability"],
+                "complete": res["prediction"] == 1,
+                "secs": secs[-1],
+            },
         )
     timings["smart_turn"] = pct(secs)
     print(f"smart_turn: {len(clips)} clips, p50 {timings['smart_turn']['p50']:.3f}s")
 
 
-def record_wake(
-    out: Path, clips: list[tuple[str, np.ndarray]], timings: dict, meta: dict
-) -> None:
+def record_wake(out: Path, clips: list[tuple[str, np.ndarray]], timings: dict, meta: dict) -> None:
     from ghost_voice.wakeword import WakeModel, WakeWordScorer
 
     cache = Path.home() / ".cache" / "ghost" / "wake"
@@ -274,7 +278,11 @@ def record_wake(
 
     def first_hit(frames: list[dict[str, float]], models) -> dict | None:
         for k, scores in enumerate(frames):
-            over = [(scores.get(m.name, 0.0), m) for m in models if scores.get(m.name, 0.0) >= m.threshold]
+            over = [
+                (scores.get(m.name, 0.0), m)
+                for m in models
+                if scores.get(m.name, 0.0) >= m.threshold
+            ]
             if over:
                 score, m = max(over, key=lambda h: h[0])
                 return {"model": m.name, "frame": WINDOW // STEP + k, "score": score}
@@ -305,7 +313,10 @@ def record_wake(
             },
         )
     timings["wake_per_frame"] = pct(secs)
-    print(f"wake: {len(clips)} clips, p50 {timings['wake_per_frame'].get('p50', 0) * 1000:.1f}ms/frame")
+    print(
+        f"wake: {len(clips)} clips, "
+        f"p50 {timings['wake_per_frame'].get('p50', 0) * 1000:.1f}ms/frame"
+    )
 
 
 def record_kokoro(out: Path, timings: dict, meta: dict) -> None:
@@ -372,8 +383,12 @@ def record_tables(out: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", type=Path, default=None)
-    ap.add_argument("--ghost", type=Path, default=None, help="the main checkout (default: the venv's parent)")
-    ap.add_argument("--only", default="", help="comma-separated: parakeet,silero,smart_turn,wake,kokoro")
+    ap.add_argument(
+        "--ghost", type=Path, default=None, help="the main checkout (default: the venv's parent)"
+    )
+    ap.add_argument(
+        "--only", default="", help="comma-separated: parakeet,silero,smart_turn,wake,kokoro"
+    )
     ap.add_argument("--limit", type=int, default=0, help="first N clips only (for a quick run)")
     args = ap.parse_args()
     ghost = args.ghost or ghost_root()
@@ -431,7 +446,11 @@ def main() -> None:
     if not only:
         dump(out / "timings.json", timings)
     else:
-        existing = json.loads((out / "timings.json").read_text()) if (out / "timings.json").exists() else {}
+        existing = (
+            json.loads((out / "timings.json").read_text())
+            if (out / "timings.json").exists()
+            else {}
+        )
         existing.update(timings)
         dump(out / "timings.json", existing)
     print(json.dumps(timings, indent=1))

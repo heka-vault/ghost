@@ -40,11 +40,16 @@ def main() -> None:
             continue
         checked += 1
         rust = np.load(rust_path)[None]
-        rust_len = np.array([int(np.load(out / "rust-parakeet-features" / f"{clip['id']}.len.npy")[0])])
+        rust_len = np.array(
+            [int(np.load(out / "rust-parakeet-features" / f"{clip['id']}.len.npy")[0])]
+        )
         import wave
 
         with wave.open(clip["wav"]) as w:
-            pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+            pcm = (
+                np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32)
+                / 32768.0
+            )
         feats, lens = asr._preprocessor(pcm[None], np.array([len(pcm)]))
         diff = float(np.abs(feats - rust).max()) if feats.shape == rust.shape else float("inf")
         worst = max(worst, diff)
@@ -54,8 +59,14 @@ def main() -> None:
         if text == want:
             same_on_rust_features += 1
         else:
-            print(f"{clip['id']}: python on rust features {text!r} vs python {want!r} (feature diff {diff:.2e}, lens {lens[0]} vs {rust_len[0]})")
-    print(f"{checked} clips: worst feature difference {worst:.2e}; python decode of rust features matches python {same_on_rust_features}/{checked}")
+            print(
+                f"{clip['id']}: python on rust features {text!r} vs python {want!r} "
+                f"(feature diff {diff:.2e}, lens {lens[0]} vs {rust_len[0]})"
+            )
+    print(
+        f"{checked} clips: worst feature difference {worst:.2e}; "
+        f"python decode of rust features matches python {same_on_rust_features}/{checked}"
+    )
 
 
 if __name__ == "__main__":
