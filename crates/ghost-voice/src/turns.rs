@@ -763,27 +763,38 @@ impl Stage for UserAggregator {
                 return;
             }
             Frame::Transcript(text) => {
-                let was_open = self.turn_open();
-                self.start.process_frame(&frame);
-                self.apply_start_events(out).await;
+                // The start strategies run while no turn is open; the stop strategy while one is.
+                if !self.turn_open() {
+                    self.start.process_frame(&frame);
+                    self.apply_start_events(out).await;
+                }
                 if self.turn_open() {
                     self.state.lock().unwrap().pieces.push(text.clone());
-                } else if !was_open {
-                    // Dropped while Ghost speaks: nothing to aggregate.
+                    self.stop.process_frame(&frame).await;
+                }
+                out.forward(frame, direction).await;
+                return;
+            }
+            Frame::Interim(_) => {
+                if !self.turn_open() {
+                    self.start.process_frame(&frame);
+                    self.apply_start_events(out).await;
+                }
+                return; // only the barge-in rule reads an interim
+            }
+            Frame::VadStarted { .. } => {
+                if !self.turn_open() {
+                    self.start.process_frame(&frame);
+                    self.apply_start_events(out).await;
                 }
                 self.stop.process_frame(&frame).await;
                 out.forward(frame, direction).await;
                 return;
             }
-            Frame::Interim(_) => {
-                self.start.process_frame(&frame);
-                self.apply_start_events(out).await;
-                return; // only the barge-in rule reads an interim
-            }
-            Frame::VadStarted { .. } | Frame::VadStopped { .. } => {
-                self.start.process_frame(&frame);
-                self.apply_start_events(out).await;
-                if let Some((verdict, ms)) = self.stop.process_frame(&frame).await {
+            Frame::VadStopped { .. } => {
+                if self.turn_open()
+                    && let Some((verdict, ms)) = self.stop.process_frame(&frame).await
+                {
                     out.push(Frame::Metrics(Metric::Turn {
                         complete: verdict.complete,
                         probability: f64::from(verdict.probability),

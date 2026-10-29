@@ -138,6 +138,12 @@ impl HoldGate {
         self.state.clone()
     }
 
+    /// Share the session's hold flag, so whoever puts the session on hold flips the gate.
+    pub fn with_state(mut self, state: Arc<HoldState>) -> Self {
+        self.state = state;
+        self
+    }
+
     pub fn on_hold(&self) -> bool {
         self.state.on_hold()
     }

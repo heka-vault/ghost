@@ -48,6 +48,26 @@ impl Synth for Kokoro {
 
 pub type SharedSynth = Arc<Mutex<dyn Synth>>;
 
+/// No voice at all: every voice is known, nothing is rendered. The stand-in when a
+/// session's voice isn't in the loaded model's file, so the session still runs.
+#[derive(Debug, Default)]
+pub struct NoSynth;
+
+impl Synth for NoSynth {
+    fn voices(&self) -> Vec<String> {
+        vec![TtsSettings::default().voice]
+    }
+
+    fn synthesize(
+        &mut self,
+        _text: &str,
+        _voice: &str,
+        _speed: f32,
+    ) -> ghost_infer::Result<Vec<i16>> {
+        Ok(Vec::new())
+    }
+}
+
 /// A session's voice: the Kokoro voice id and the speed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TtsSettings {
@@ -89,7 +109,7 @@ impl KokoroTts {
     ) -> Result<Self, TtsError> {
         {
             let s = synth.lock().unwrap_or_else(|e| e.into_inner());
-            if !s.voices().iter().any(|v| *v == settings.voice) {
+            if !s.voices().contains(&settings.voice) {
                 return Err(TtsError::UnknownVoice(settings.voice.clone()));
             }
         }
@@ -245,7 +265,7 @@ impl Stage for KokoroTts {
                 return;
             }
             Frame::VoiceChange { voice, speed } => {
-                if self.voices().iter().any(|v| v == voice) {
+                if self.voices().contains(voice) {
                     self.settings = TtsSettings {
                         voice: voice.clone(),
                         speed: *speed,
@@ -371,7 +391,7 @@ in app, and the Redis versus Postgres call for the session cache.";
     }
 
     impl FakeKokoro {
-        pub(crate) fn new() -> SharedSynth {
+        pub(crate) fn shared() -> SharedSynth {
             Arc::new(Mutex::new(Self {
                 spoken: Vec::new(),
                 voices: vec!["af_heart".into(), "am_adam".into()],
@@ -406,7 +426,8 @@ in app, and the Redis versus Postgres call for the session cache.";
 
     // The fake records through a side table (a trait object can't be downcast without
     // `Any` on the trait), keyed by the shared synth.
-    static FAKES: Mutex<Vec<(SharedSynth, Arc<Mutex<Vec<String>>>)>> = Mutex::new(Vec::new());
+    type Log = Arc<Mutex<Vec<String>>>;
+    static FAKES: Mutex<Vec<(SharedSynth, Log)>> = Mutex::new(Vec::new());
 
     struct Recording {
         inner: FakeKokoro,
@@ -496,7 +517,8 @@ in app, and the Redis versus Postgres call for the session cache.";
 
     #[test]
     fn test_fork_keeps_or_overrides_the_clause_setting() {
-        let template = KokoroTts::new(FakeKokoro::new(), TtsSettings::default(), Some(4)).unwrap();
+        let template =
+            KokoroTts::new(FakeKokoro::shared(), TtsSettings::default(), Some(4)).unwrap();
         assert_eq!(template.fork().clause_min_words(), Some(4));
         assert_eq!(template.fork_with(None).clause_min_words(), None);
     }
@@ -535,7 +557,7 @@ in app, and the Redis versus Postgres call for the session cache.";
     #[test]
     fn test_fork_keeps_the_template_settings() {
         let tts = KokoroTts::new(
-            FakeKokoro::new(),
+            FakeKokoro::shared(),
             TtsSettings {
                 voice: "am_adam".into(),
                 speed: 1.2,
@@ -551,7 +573,7 @@ in app, and the Redis versus Postgres call for the session cache.";
     #[test]
     fn test_unknown_voice_is_rejected() {
         let err = KokoroTts::new(
-            FakeKokoro::new(),
+            FakeKokoro::shared(),
             TtsSettings {
                 voice: "nope".into(),
                 speed: 1.0,
