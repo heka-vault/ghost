@@ -27,9 +27,7 @@ use tokio::sync::watch;
 
 fn python() -> PathBuf {
     let venv = std::env::var("GHOST_VENV")
-        .unwrap_or_else(|_| {
-            format!("{}/../../tools/oracle/.venv", env!("CARGO_MANIFEST_DIR"))
-        });
+        .unwrap_or_else(|_| format!("{}/../../tools/oracle/.venv", env!("CARGO_MANIFEST_DIR")));
     PathBuf::from(venv).join("bin/python")
 }
 
