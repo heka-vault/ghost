@@ -2,6 +2,14 @@
 //! log-mel front end (the NumPy preprocessor `onnx_asr` picks on CPU), the encoder, the
 //! decoder-joint, and the TDT greedy decode of `onnx_asr.models.nemo` and `onnx_asr.asr`.
 //!
+//! The front end follows the NumPy to the rounding: the int8 model flips a comma or a
+//! capital on a feature difference of 1e-5, so the filterbank is the float32 table NeMo
+//! exported (`parakeet_fbanks`), the mel energies accumulate in float32 with one FMA per
+//! non-zero weight in bin order (what one K block of OpenBLAS's sgemm does, bit for bit),
+//! and the mean and variance are sequential float32 sums over the frames (NumPy's
+//! `sum(axis=1)` on a `(1, T, 128)` array). What is left is the log: NumPy's float32 `log`
+//! (Intel SVML) differs from a correctly rounded one by an ulp on a few per cent of values.
+//!
 //! Measured on the target CPU: about 0.16 s per command, 1.7 GB RAM, 10 s to load
 //! (docs/benchmarks/2026-10-16-speech-cpu.md). Four `intra_op` threads, one `inter_op`.
 //!
@@ -23,6 +31,9 @@ use crate::{
     mel::{Spectrum, hann_symmetric, slaney_filterbank},
     session::{self, SessionConfig},
 };
+
+#[path = "parakeet_fbanks.rs"]
+mod fbanks;
 
 /// An interim reads at most this much of the open segment: enough for the pre-roll and the
 /// first words, which is all barge-in needs, and it keeps each pass near 0.2 s when the
@@ -75,16 +86,28 @@ struct AsrConfig {
     max_tokens_per_step: Option<usize>,
 }
 
+/// NeMo's filterbank table as a dense `[bins, filters]` row-major float32 matrix, the
+/// numbers `onnx_asr` ships (`preprocessors/data/fbanks.npz`, `nemo128`).
+pub fn nemo128_table() -> Vec<f32> {
+    let mut out = vec![0.0f32; fbanks::BINS * fbanks::FILTERS];
+    for &(bin, filter, bits) in fbanks::WEIGHTS {
+        out[usize::from(bin) * fbanks::FILTERS + usize::from(filter)] = f32::from_bits(bits);
+    }
+    out
+}
+
 /// NeMo's preprocessor as `onnx_asr.preprocessors.numpy_preprocessor.NemoPreprocessorNumpy`
 /// computes it: pre-emphasis 0.97, a 512-point FFT over a 400-sample Hann window every 160
-/// samples, the Slaney filterbank, `log(mel + 2^-24)`, then per-feature normalization over
+/// samples, the mel filterbank, `log(mel + 2^-24)`, then per-feature normalization over
 /// the valid frames.
 struct NemoFeatures {
     n_mels: usize,
     window: Vec<f64>,
-    fbanks: Vec<f32>,
+    /// Per FFT bin, the filters it feeds and their float32 weights.
+    taps: Vec<Vec<(usize, f32)>>,
     spectrum: Spectrum,
-    power: Vec<f64>,
+    magnitude: Vec<f64>,
+    energies: Vec<f32>,
 }
 
 impl NemoFeatures {
@@ -92,24 +115,39 @@ impl NemoFeatures {
     const WIN_LENGTH: usize = 400;
     const HOP: usize = 160;
     const PREEMPH: f32 = 0.97;
+    /// `log_zero_guard_value`, 2^-24.
+    const GUARD: f32 = 5.960_464_5e-8;
 
     fn new(n_mels: usize) -> Self {
         let pad = (Self::N_FFT - Self::WIN_LENGTH) / 2;
         let mut window = vec![0.0; Self::N_FFT];
         window[pad..pad + Self::WIN_LENGTH].copy_from_slice(&hann_symmetric(Self::WIN_LENGTH));
         let bins = Self::N_FFT / 2 + 1;
-        // librosa.filters.mel(sr=16000, n_fft=512, n_mels=128): fmax = sr / 2; NeMo stores
-        // it as float32 (onnx_asr ships that array in fbanks.npz).
-        let fbanks = slaney_filterbank(bins, n_mels, 0.0, 8000.0, SAMPLE_RATE as u32)
-            .into_iter()
-            .map(|w| w as f32)
-            .collect();
+        let mut taps: Vec<Vec<(usize, f32)>> = vec![Vec::new(); bins];
+        if n_mels == fbanks::FILTERS {
+            for &(bin, filter, bits) in fbanks::WEIGHTS {
+                taps[usize::from(bin)].push((usize::from(filter), f32::from_bits(bits)));
+            }
+        } else {
+            // No exported table for this size: librosa.filters.mel(sr=16000, n_fft=512,
+            // n_mels) in float64, stored as float32 as NeMo does.
+            let dense = slaney_filterbank(bins, n_mels, 0.0, 8000.0, SAMPLE_RATE as u32);
+            for (bin, row) in taps.iter_mut().enumerate() {
+                for m in 0..n_mels {
+                    let w = dense[bin * n_mels + m] as f32;
+                    if w != 0.0 {
+                        row.push((m, w));
+                    }
+                }
+            }
+        }
         Self {
             n_mels,
             window,
-            fbanks,
+            taps,
             spectrum: Spectrum::new(Self::N_FFT),
-            power: vec![0.0; bins],
+            magnitude: vec![0.0; bins],
+            energies: vec![0.0; n_mels],
         }
     }
 
@@ -122,6 +160,7 @@ impl NemoFeatures {
                 "too little audio for Parakeet (under 20 ms)".into(),
             ));
         }
+        // Pre-emphasis in float32, then n_fft / 2 zeros on either side.
         let mut x = Vec::with_capacity(n + Self::N_FFT);
         x.resize(Self::N_FFT / 2, 0.0f32);
         x.push(wav[0]);
@@ -130,44 +169,50 @@ impl NemoFeatures {
         }
         x.resize(n + Self::N_FFT, 0.0);
         let frames = n / Self::HOP + 1;
-        let bins = self.power.len();
+        let n_mels = self.n_mels;
         let mut frame = vec![0.0f64; Self::N_FFT];
-        let mut log_mel = vec![0.0f32; frames * self.n_mels];
+        let mut log_mel = vec![0.0f32; frames * n_mels];
         for t in 0..frames {
             let start = t * Self::HOP;
             for (i, f) in frame.iter_mut().enumerate() {
                 *f = f64::from(x[start + i]) * self.window[i];
             }
-            self.spectrum.magnitude(&frame, &mut self.power);
-            // |X| is cast to float32 before it is squared, as the NumPy does.
-            let spec: Vec<f32> = self
-                .power
-                .iter()
-                .map(|m| (*m as f32) * (*m as f32))
-                .collect();
-            for m in 0..self.n_mels {
-                let mut acc = 0.0f64;
-                for (b, s) in spec.iter().enumerate().take(bins) {
-                    acc += f64::from(*s) * f64::from(self.fbanks[b * self.n_mels + m]);
+            self.spectrum.magnitude(&frame, &mut self.magnitude);
+            self.energies.fill(0.0);
+            for (taps, &magnitude) in self.taps.iter().zip(&self.magnitude) {
+                // |X| is cast to float32 before it is squared, as the NumPy does; then one
+                // float32 FMA per weight, bins in order, as sgemm accumulates.
+                let power = magnitude as f32;
+                let power = power * power;
+                for &(m, w) in taps {
+                    self.energies[m] = power.mul_add(w, self.energies[m]);
                 }
-                let mel = acc as f32 + f32::from_bits(0x3380_0000); // 2^-24
-                log_mel[t * self.n_mels + m] = mel.ln();
+            }
+            for (m, &e) in self.energies.iter().enumerate() {
+                log_mel[t * n_mels + m] = (e + Self::GUARD).ln();
             }
         }
-        let mut out = vec![0.0f32; self.n_mels * frames];
-        for m in 0..self.n_mels {
-            let column = |t: usize| f64::from(log_mel[t * self.n_mels + m]);
-            let mean = ((0..valid).map(column).sum::<f64>() / valid as f64) as f32;
-            let var = ((0..valid)
-                .map(|t| {
-                    let d = log_mel[t * self.n_mels + m] - mean;
-                    f64::from(d * d)
-                })
-                .sum::<f64>()
-                / (valid as f64 - 1.0)) as f32;
+        // Sequential float32 sums over the valid frames, as NumPy reduces the frame axis.
+        let mut sum = vec![0.0f32; n_mels];
+        for t in 0..valid {
+            for (m, s) in sum.iter_mut().enumerate() {
+                *s += log_mel[t * n_mels + m];
+            }
+        }
+        let mean: Vec<f32> = sum.iter().map(|s| s / valid as f32).collect();
+        let mut squares = vec![0.0f32; n_mels];
+        for t in 0..valid {
+            for (m, s) in squares.iter_mut().enumerate() {
+                let d = log_mel[t * n_mels + m] - mean[m];
+                *s += d * d;
+            }
+        }
+        let mut out = vec![0.0f32; n_mels * frames];
+        for m in 0..n_mels {
+            let var = squares[m] / (valid - 1) as f32;
             let denom = var.sqrt() + 1e-5;
             for t in 0..valid {
-                out[m * frames + t] = (log_mel[t * self.n_mels + m] - mean) / denom;
+                out[m * frames + t] = (log_mel[t * n_mels + m] - mean[m]) / denom;
             }
         }
         Ok((out, frames, valid))

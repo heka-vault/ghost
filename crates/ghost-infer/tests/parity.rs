@@ -217,11 +217,13 @@ fn filterbanks_match_the_python_tables() {
     let Some(dir) = fixtures() else { return };
     let nemo = npy::read(&dir.join("nemo128_fbanks.npy")).unwrap();
     assert_eq!(nemo.shape, vec![257, 128]);
-    let ours: Vec<f32> = ghost_infer::mel::slaney_filterbank(257, 128, 0.0, 8000.0, 16000)
-        .into_iter()
-        .map(|w| w as f32)
-        .collect();
+    let ours = ghost_infer::parakeet::nemo128_table();
     let d = max_abs_diff(&ours, &nemo.to_f32().unwrap());
+    assert_eq!(
+        ours,
+        nemo.to_f32().unwrap(),
+        "the embedded nemo128 table is not the file's"
+    );
     let whisper = npy::read(&dir.join("whisper80_fbanks.npy")).unwrap();
     assert_eq!(whisper.shape, vec![201, 80]);
     let ours_w = ghost_infer::mel::slaney_filterbank(201, 80, 0.0, 8000.0, 16000);
@@ -231,7 +233,7 @@ fn filterbanks_match_the_python_tables() {
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f64, f64::max);
     eprintln!("filterbanks: nemo128 within {d:.2e}, whisper80 within {dw:.2e}");
-    assert!(d <= 1e-6, "nemo128 differs by {d}");
+    assert_eq!(d, 0.0, "nemo128 differs by {d}");
     assert!(dw <= 1e-12, "whisper80 differs by {dw}");
 }
 

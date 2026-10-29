@@ -7,13 +7,18 @@ use std::sync::Arc;
 
 use realfft::{RealFftPlanner, RealToComplex, num_complex::Complex};
 
-/// `np.hanning(n)`: the symmetric Hann window.
+/// `np.hanning(n)`: the symmetric Hann window, by NumPy's own formula
+/// (`0.5 + 0.5 * cos(pi * k / (n - 1))` for `k` in `1 - n, 3 - n, ..., n - 1`) so the
+/// float64 values are the same ones.
 pub fn hann_symmetric(n: usize) -> Vec<f64> {
     if n == 1 {
         return vec![1.0];
     }
     (0..n)
-        .map(|k| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * k as f64 / (n as f64 - 1.0)).cos())
+        .map(|i| {
+            let k = (1 + 2 * i) as f64 - n as f64;
+            0.5 + 0.5 * (std::f64::consts::PI * k / (n as f64 - 1.0)).cos()
+        })
         .collect()
 }
 
