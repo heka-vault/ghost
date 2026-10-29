@@ -484,6 +484,7 @@ mod tests {
         // no session yet: starting refuses, passive wakes with the words
         assert!(!d.say("yeah, go on".into(), None).await);
         let manual = crate::wake::FileWakeDetector::new(tmp.path().join("rt/wake"));
+        manual.arm();
         *lock(&d.manual) = Some(manual.clone());
         d.state.set_phase(Phase::Passive, None, None);
         let waiting = {

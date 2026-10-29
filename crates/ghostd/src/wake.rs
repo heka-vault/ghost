@@ -100,6 +100,9 @@ impl Event {
 /// What the passive loop waits on: the wake, with any words spoken after it.
 #[async_trait]
 pub trait WakeDetector: Send + Sync {
+    /// Before a wait: forget a trigger from before (a file touched during a session),
+    /// so what arrives from now on counts. The loop arms before it says it is passive.
+    fn arm(&self) {}
     /// Return when the wake word fires, with any words spoken after it.
     async fn wait(&self) -> Option<String>;
     /// Release the microphone: after a `wait` that was dropped (the loop chose something
@@ -148,11 +151,15 @@ impl FileWakeDetector {
         self.event.set();
     }
 
-    /// Until the file appears, the signal arrives or `trigger` is called.
-    pub async fn wait(&self) -> Option<String> {
+    /// Forget a trigger from before: the file, the event and its words.
+    pub fn arm(&self) {
         let _ = std::fs::remove_file(&self.path);
         self.event.clear();
         *lock(&self.text) = None;
+    }
+
+    /// Until the file appears, the signal arrives or `trigger` is called (since `arm`).
+    pub async fn wait(&self) -> Option<String> {
         while !self.event.is_set() {
             if self.path.exists() {
                 let _ = std::fs::remove_file(&self.path);
@@ -170,6 +177,10 @@ impl FileWakeDetector {
 
 #[async_trait]
 impl WakeDetector for FileWakeDetector {
+    fn arm(&self) {
+        FileWakeDetector::arm(self);
+    }
+
     async fn wait(&self) -> Option<String> {
         FileWakeDetector::wait(self).await
     }
@@ -206,6 +217,10 @@ impl SpokenWakeDetector {
 
 #[async_trait]
 impl WakeDetector for SpokenWakeDetector {
+    fn arm(&self) {
+        self.manual.arm();
+    }
+
     async fn wait(&self) -> Option<String> {
         let spoken = self.listener.wait(self.on_heard.clone());
         let manual = self.manual.wait();
@@ -996,6 +1011,7 @@ mod tests {
     async fn the_file_trigger_fires_on_the_file_or_a_call_with_words() {
         let dir = tempfile::tempdir().unwrap();
         let d = FileWakeDetector::new(dir.path().join(WAKE_FILE));
+        d.arm();
         let waiting = {
             let d = d.clone();
             tokio::spawn(async move { d.wait().await })
@@ -1004,6 +1020,7 @@ mod tests {
         std::fs::write(d.path(), "").unwrap();
         assert_eq!(waiting.await.unwrap(), None);
         assert!(!d.path().exists());
+        d.arm();
         let waiting = {
             let d = d.clone();
             tokio::spawn(async move { d.wait().await })
@@ -1019,6 +1036,7 @@ mod tests {
         let manual = FileWakeDetector::new(dir.path().join(WAKE_FILE));
         let l = Arc::new(listener(inert_media(), nothing_stt()));
         let d = SpokenWakeDetector::new(l.clone(), manual.clone(), None);
+        d.arm();
         let waiting = tokio::spawn(async move { WakeDetector::wait(&d).await });
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(l.is_running());

@@ -56,6 +56,8 @@ rustix = { workspace = true, features = ["termios", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# The integration test reads the daemon's own socket (`GET /session/turns`).
+hyper.workspace = true
 # A paused clock for the passive listener's idle test.
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true

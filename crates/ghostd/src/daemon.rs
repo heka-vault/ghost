@@ -1467,6 +1467,7 @@ impl Daemon {
         let d = self;
         while !d.stop.is_cancelled() {
             info!("passive: waiting for wake word");
+            wake.arm(); // a trigger from before the loop said passive is forgotten
             d.state.set_phase(Phase::Passive, None, None);
             d.rearm.clear();
             *lock(&d.start_in) = GHOST.to_string(); // a spoken wake lands in Ghost; a Call sets it
