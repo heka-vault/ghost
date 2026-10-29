@@ -234,7 +234,7 @@ impl Ports {
                 ))
             }),
             sessions: Arc::new(LiveSessions),
-            devices: Arc::new(ghost_api::deps::NoDevices),
+            devices: Arc::new(PwDevices),
         }
     }
 
@@ -1920,6 +1920,66 @@ impl AppReader for ReadFor {
     }
 }
 
+// --- the devices (GET /devices) ---------------------------------------------------------------
+
+/// The sound devices the desktop's Devices page lists: PipeWire's audio nodes (sources,
+/// sinks, duplex), by `node.name`, with the channels and rate they say they have. Which
+/// is the default is PipeWire's metadata, which the registry doesn't carry; the page
+/// reads the configured names beside this list.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PwDevices;
+
+impl DevicesPort for PwDevices {
+    fn devices(&self) -> Vec<ghost_api::models::DeviceInfo> {
+        let nodes = ghost_audio::Session::connect("ghostd").and_then(|s| s.nodes());
+        match nodes {
+            Ok(nodes) => nodes
+                .iter()
+                .filter_map(|n| device_of(n.id, &n.props))
+                .collect(),
+            Err(e) => {
+                warn!("devices: {e}");
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// One registry node as a device, or None when it isn't an audio source or sink.
+pub fn device_of(
+    id: u32,
+    props: &BTreeMap<String, String>,
+) -> Option<ghost_api::models::DeviceInfo> {
+    let class = props.get("media.class").map(String::as_str).unwrap_or("");
+    let (input, output) = match class {
+        "Audio/Source" => (true, false),
+        "Audio/Sink" => (false, true),
+        "Audio/Duplex" => (true, true),
+        _ => return None,
+    };
+    let channels: i64 = props
+        .get("audio.channels")
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(2);
+    let rate: f64 = props
+        .get("audio.rate")
+        .and_then(|r| r.parse().ok())
+        .unwrap_or(48_000.0);
+    let name = props
+        .get("node.name")
+        .cloned()
+        .or_else(|| props.get("node.description").cloned())?;
+    Some(ghost_api::models::DeviceInfo {
+        index: i64::from(id),
+        name,
+        max_input_channels: if input { channels } else { 0 },
+        max_output_channels: if output { channels } else { 0 },
+        default_samplerate: rate,
+        is_default_input: false,
+        is_default_output: false,
+    })
+}
+
 // --- the log mirror -------------------------------------------------------------------------
 
 /// The log, mirrored into the event stream for the desktop app's log view: the daemon's
@@ -2350,6 +2410,45 @@ pub(crate) mod tests {
         values.insert("GHOST_LLM_PROVIDER".to_string(), None);
         assert_eq!(d.apply_model(&values), vec!["GHOST_LLM_PROVIDER"]);
         assert!(!lock(&d.environ).contains_key("GHOST_LLM_PROVIDER"));
+    }
+
+    #[test]
+    fn the_devices_page_lists_audio_sources_and_sinks_by_node_name() {
+        let props = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let mic = device_of(
+            41,
+            &props(&[
+                ("media.class", "Audio/Source"),
+                ("node.name", "ghost.mic"),
+                ("audio.channels", "1"),
+                ("audio.rate", "16000"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!((mic.index, mic.name.as_str()), (41, "ghost.mic"));
+        assert_eq!((mic.max_input_channels, mic.max_output_channels), (1, 0));
+        assert_eq!(mic.default_samplerate, 16000.0);
+        let sink = device_of(
+            7,
+            &props(&[("media.class", "Audio/Sink"), ("node.name", "speakers")]),
+        )
+        .unwrap();
+        assert_eq!((sink.max_input_channels, sink.max_output_channels), (0, 2));
+        assert!(
+            device_of(
+                9,
+                &props(&[
+                    ("media.class", "Stream/Output/Audio"),
+                    ("node.name", "spotify")
+                ])
+            )
+            .is_none()
+        );
     }
 
     #[tokio::test]
