@@ -2241,6 +2241,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghost-voice"
+version = "2026.10.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "ghost-api",
+ "ghost-audio",
+ "ghost-core",
+ "ghost-infer",
+ "ghost-llm",
+ "hex",
+ "hound",
+ "indexmap 2.14.2",
+ "rand 0.9.5",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "ghostd"
 version = "2026.10.0"
 dependencies = [
@@ -6720,8 +6753,12 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite 0.29.0",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -6733,6 +6770,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",
@@ -7010,6 +7048,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.5",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.21",
 ]
@@ -7105,7 +7145,7 @@ dependencies = [
  "rustls-pki-types",
  "ureq-proto",
  "utf8-zero",
- "webpki-roots",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -7453,6 +7493,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
