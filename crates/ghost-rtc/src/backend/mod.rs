@@ -1,10 +1,8 @@
 //! The three stacks, each behind a feature, and what they share: the channels the daemon
 //! reads and writes, the link state, the ping rule, the inbound path (packet to 16 kHz
 //! frame) and the outbound path (24 kHz frame to packet).
-#![cfg_attr(
-    not(any(feature = "str0m", feature = "webrtc", feature = "libwebrtc")),
-    allow(dead_code)
-)]
+// The Opus and rubato paths are str0m's and webrtc-rs's; libwebrtc has its own inside.
+#![cfg_attr(not(any(feature = "str0m", feature = "webrtc")), allow(dead_code))]
 
 #[cfg(feature = "libwebrtc")]
 pub mod libwebrtc;
@@ -130,13 +128,17 @@ impl Shared {
         }
     }
 
+    /// The stats, the inbound RTP counts from the counters where the stack feeds them
+    /// (str0m, webrtc-rs); libwebrtc fills the fields itself from its own report.
     pub(crate) fn stats(&self) -> CallStats {
         let mut s = self.stats.lock().expect("stats lock").clone();
         let c = self.counters.lock().expect("counters lock");
-        s.packets_received = c.received();
-        s.bytes_received = c.bytes();
-        s.packets_lost = c.lost();
-        s.jitter_ms = c.jitter_ms();
+        if c.received() > 0 {
+            s.packets_received = c.received();
+            s.bytes_received = c.bytes();
+            s.packets_lost = c.lost();
+            s.jitter_ms = c.jitter_ms();
+        }
         s
     }
 
@@ -208,6 +210,8 @@ impl InboundPath {
         }
     }
 
+    /// A renegotiation in place: start the resampler over (str0m's path).
+    #[cfg_attr(not(feature = "str0m"), allow(dead_code))]
     pub(crate) fn reset(&mut self) {
         self.resampler.reset();
     }

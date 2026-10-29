@@ -78,7 +78,7 @@ async fn call(seconds: f64, restart_at: f64) -> Call {
         };
         match v["type"].as_str() {
             Some("offer") => {
-                let restart = v["restart"].as_bool().unwrap_or(false);
+                let restart = v["restart_pc"].as_bool().unwrap_or(false);
                 let sdp = media
                     .answer(v["sdp"].as_str().unwrap(), restart)
                     .await
@@ -209,15 +209,17 @@ async fn restart_pc_mid_call_gives_a_fresh_peer_and_the_phone_pins_each_answer()
         after_down >= 2,
         "downlink bursts after the restart: {after_down}"
     );
-    // The phone closes its old peer first, so the link passes through Gone and comes back.
+    // The phone closes its old peer first: a stack that notices passes through Gone before
+    // the restart's Waiting, one that does not goes straight to Waiting; both come back.
     let states: Vec<&str> = c.desk.links.iter().map(|(_, s)| s.as_str()).collect();
     assert_eq!(
         states.iter().filter(|s| **s == "Connected").count(),
         2,
         "{states:?}"
     );
+    let without_gone: Vec<&str> = states.iter().copied().filter(|s| *s != "Gone").collect();
     assert!(
-        states.starts_with(&["Waiting", "Connected", "Gone", "Waiting", "Connected"]),
+        without_gone.starts_with(&["Waiting", "Connected", "Waiting", "Connected"]),
         "{states:?}"
     );
 }

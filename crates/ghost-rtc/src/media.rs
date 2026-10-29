@@ -188,6 +188,7 @@ impl Sink {
     }
 
     /// One 20 ms frame for the wire.
+    #[cfg_attr(not(any(feature = "str0m", feature = "webrtc")), allow(dead_code))]
     pub(crate) fn pull_frame(&self) -> Vec<i16> {
         self.pull(frame_samples(OUT_RATE))
     }

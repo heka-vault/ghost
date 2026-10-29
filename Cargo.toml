@@ -78,6 +78,8 @@ tokio-tungstenite = "0.29"
 # the 48 kHz <-> 16/24 kHz resampling either side of the codec.
 str0m = { version = "0.24", default-features = false, features = ["openssl"] }
 webrtc = "0.21"
+rtc = "0.21" # webrtc-rs's sans-IO core: the Sample and RTP packet types webrtc 0.21 takes but does not re-export
+bytes = "1"
 libwebrtc = "0.3"
 opus = "0.4"
 rubato = "5"

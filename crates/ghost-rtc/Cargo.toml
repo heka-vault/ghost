@@ -10,12 +10,14 @@ rust-version.workspace = true
 [features]
 default = []
 str0m = ["dep:str0m"]
-webrtc = ["dep:webrtc"]
+webrtc = ["dep:webrtc", "dep:rtc", "dep:bytes"]
 libwebrtc = ["dep:libwebrtc"]
 
 [dependencies]
 str0m = { workspace = true, optional = true }
 webrtc = { workspace = true, optional = true }
+rtc = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 libwebrtc = { workspace = true, optional = true }
 opus.workspace = true
 rubato.workspace = true
