@@ -14,5 +14,6 @@ pub mod passwords;
 pub mod phone;
 pub mod push;
 pub mod routes;
+pub mod wake;
 
 pub use config::GhostdSettings;

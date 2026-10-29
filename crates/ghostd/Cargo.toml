@@ -15,8 +15,13 @@ path = "src/main.rs"
 ghost-api.workspace = true
 ghost-core.workspace = true
 ghost-llm.workspace = true
-# restore-volumes: the ducked volumes a crash left (crates/ghost-audio, ADR 0038).
+# restore-volumes: the ducked volumes a crash left (crates/ghost-audio, ADR 0038); the desk's
+# devices and the passive capture (W7).
 ghost-audio.workspace = true
+# The voice pipeline, the models and the wake detectors (W7), the phone's media (W8).
+ghost-voice.workspace = true
+ghost-infer.workspace = true
+ghost-rtc.workspace = true
 
 serde_json.workspace = true
 indexmap.workspace = true
@@ -27,6 +32,8 @@ uuid.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
 axum.workspace = true
 serde.workspace = true
 tracing.workspace = true
@@ -49,5 +56,7 @@ rustix = { workspace = true, features = ["termios", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# A paused clock for the passive listener's idle test.
+tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
-futures.workspace = true
+ghost-core = { workspace = true, features = ["fakes"] }
