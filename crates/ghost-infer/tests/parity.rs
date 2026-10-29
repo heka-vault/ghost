@@ -654,6 +654,7 @@ fn kokoro_matches() {
     let mut worst_pcm = 0.0f64;
     let mut secs = Vec::new();
     let mut first_clause = Vec::new();
+    let mut first_clause_bench = Vec::new();
     let mut failures = Vec::new();
     for (i, text) in sentences.iter().enumerate() {
         let want: KokoroFixture = json(&dir.join("kokoro").join(format!("{i}.json")));
@@ -751,15 +752,24 @@ fn kokoro_matches() {
             .stream(text, "af_heart", 1.0, "en-us", Some(4))
             .unwrap();
         let first = stream.next().expect("a first clause").unwrap();
-        first_clause.push(t.elapsed().as_secs_f64());
+        let took = t.elapsed().as_secs_f64();
         assert!(!first.pcm.is_empty());
+        first_clause.push(took);
+        // ADR 0004's bar is for a first sentence of 1.6 to 1.9 s of audio
+        // (docs/benchmarks/2026-10-16-speech-cpu.md).
+        let audio_secs = first.pcm.len() as f64 / f64::from(kokoro::SAMPLE_RATE);
+        if (1.6..=1.9).contains(&audio_secs) {
+            first_clause_bench.push(took);
+        }
     }
     let (p50, p95) = percentiles(&mut secs);
     let (fp50, fp95) = percentiles(&mut first_clause);
+    let (bp50, bp95) = percentiles(&mut first_clause_bench);
     eprintln!(
         "kokoro: phonemes {phon_ok}/{n}, tokens {tok_ok}/{n}, trim {trim_ok}/{n}, raw audio {raw_ok}/{n} within 1e-3 RMS \
          (worst {worst_raw:.2e}), PCM {pcm_ok}/{n} (worst {worst_pcm:.2e}); sentence p50 {p50:.3}s p95 {p95:.3}s; \
-         first clause p50 {fp50:.3}s p95 {fp95:.3}s",
+         first clause p50 {fp50:.3}s p95 {fp95:.3}s; first clauses of 1.6-1.9 s audio (n={}) p50 {bp50:.3}s p95 {bp95:.3}s",
+        first_clause_bench.len(),
         n = sentences.len()
     );
     for f in &failures {
@@ -768,8 +778,8 @@ fn kokoro_matches() {
     assert!(failures.is_empty(), "{} differences", failures.len());
     if timing() {
         assert!(
-            fp50 <= 0.37,
-            "the first clause takes {fp50:.3}s p50, over the 0.37 s of ADR 0004"
+            bp50 <= 0.37,
+            "a first clause of 1.6-1.9 s of audio takes {bp50:.3}s p50, over the 0.37 s of ADR 0004"
         );
     }
 }
