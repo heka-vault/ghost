@@ -1,0 +1,41 @@
+[package]
+name = "ghost-rtc"
+description = "The phone's WebRTC audio (ADR 0016, ADR 0020): one Media trait, three stacks behind features, Opus and the resamplers, the RTVI subset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+str0m = ["dep:str0m"]
+webrtc = ["dep:webrtc"]
+libwebrtc = ["dep:libwebrtc"]
+
+[dependencies]
+str0m = { workspace = true, optional = true }
+webrtc = { workspace = true, optional = true }
+libwebrtc = { workspace = true, optional = true }
+opus.workspace = true
+rubato.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+tempfile.workspace = true
+tracing-subscriber.workspace = true
+axum.workspace = true
+
+[[example]]
+name = "rtc-probe"
+path = "examples/rtc-probe.rs"
