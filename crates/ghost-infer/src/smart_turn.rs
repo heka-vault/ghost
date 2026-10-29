@@ -6,6 +6,11 @@
 //! peak, `(x + 4) / 4`), 800 frames of 80 bins, and the model's probability that the turn
 //! is complete, which Pipecat compares with 0.5. Two intra-op threads in Ghost
 //! (`smart_turn_threads`), one inter-op, sequential execution.
+//!
+//! The waveform normalization is NumPy's to the bit: `x.mean()` and `x.var()` on a
+//! contiguous float32 array reduce with NumPy's pairwise sum (`pairwise_sum`), and the
+//! int8 model moves its probability by 1e-2 on a feature difference of 6e-6, so the sum
+//! is ported rather than approximated.
 
 use std::path::Path;
 
@@ -82,16 +87,18 @@ impl SmartTurn {
     /// Log-mel features for `audio` (float32 16 kHz, any length), `[80, 800]` row-major.
     pub fn features(&mut self, audio: &[f32]) -> Vec<f32> {
         let mut x = Self::last_eight_seconds(audio);
-        // Zero-mean unit-variance in float32, before the spectrogram.
-        let mean = (x.iter().map(|&v| f64::from(v)).sum::<f64>() / x.len() as f64) as f32;
-        let var = (x
-            .iter()
-            .map(|&v| f64::from((v - mean) * (v - mean)))
-            .sum::<f64>()
-            / x.len() as f64) as f32;
+        // Zero-mean unit-variance in float32, before the spectrogram, as NumPy computes
+        // `(x - x.mean()) / np.sqrt(x.var() + eps)`.
+        let n = x.len() as f32;
+        let mean = pairwise_sum(&x) / n;
+        for v in x.iter_mut() {
+            *v -= mean;
+        }
+        let squares: Vec<f32> = x.iter().map(|&d| d * d).collect();
+        let var = pairwise_sum(&squares) / n;
         let denom = (var + NORM_VARIANCE_EPS).sqrt();
         for v in x.iter_mut() {
-            *v = (*v - mean) / denom;
+            *v /= denom;
         }
         // Reflect-pad by n_fft / 2, then a frame every hop; the last frame is dropped.
         let pad = N_FFT / 2;
@@ -151,9 +158,77 @@ impl SmartTurn {
     }
 }
 
+/// NumPy's `pairwise_sum` for a contiguous float32 reduction (`numpy/_core/src/umath/
+/// loops_utils.h.src`): under 8 elements a running sum, up to 128 eight interleaved
+/// partial sums folded as `((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7))` with the
+/// remainder added one by one, and above that the two halves (the first cut to a multiple
+/// of 8) summed recursively.
+pub fn pairwise_sum(a: &[f32]) -> f32 {
+    const BLOCK: usize = 128;
+    let n = a.len();
+    if n < 8 {
+        let mut res = 0.0f32;
+        for &v in a {
+            res += v;
+        }
+        res
+    } else if n <= BLOCK {
+        let mut r = [0.0f32; 8];
+        r.copy_from_slice(&a[..8]);
+        let mut i = 8;
+        while i < n - (n % 8) {
+            for (j, rj) in r.iter_mut().enumerate() {
+                *rj += a[i + j];
+            }
+            i += 8;
+        }
+        let mut res = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]));
+        while i < n {
+            res += a[i];
+            i += 1;
+        }
+        res
+    } else {
+        let mut n2 = n / 2;
+        n2 -= n2 % 8;
+        pairwise_sum(&a[..n2]) + pairwise_sum(&a[n2..])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sums NumPy 2.5 gives for `((i * 7919) % 1000) / 997 - 0.5` as float32, which
+    /// a running float32 sum does not reach from 128 elements on.
+    #[test]
+    fn pairwise_sum_is_numpys() {
+        let input = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|i| (((i * 7919) % 1000) as f64 / 997.0 - 0.5) as f32)
+                .collect()
+        };
+        for (n, bits) in [
+            (7usize, 0x3f4f_db06u32),
+            (20, 0x3f24_5540),
+            (128, 0xbe34_c430),
+            (129, 0xbd2e_9adc),
+            (1000, 0x3f80_629d),
+            (128_000, 0x4300_629d),
+        ] {
+            let got = pairwise_sum(&input(n));
+            assert_eq!(
+                got.to_bits(),
+                bits,
+                "n={n}: {got} vs {}",
+                f32::from_bits(bits)
+            );
+        }
+        assert_eq!(pairwise_sum(&vec![0.1f32; 1000]).to_bits(), 0x42c8_0002);
+        assert_eq!(pairwise_sum(&[]), 0.0);
+        let running: f32 = input(1000).iter().sum();
+        assert_ne!(running.to_bits(), 0x3f80_629d);
+    }
 
     #[test]
     fn the_last_eight_seconds_are_kept_and_padded_in_front() {

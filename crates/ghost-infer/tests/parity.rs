@@ -9,32 +9,36 @@
 //! `~/projects/active/ghost/.scratch/spike-fixtures`), so CI without fixtures stays green:
 //!
 //! ```text
-//! cargo nextest run -p ghost-infer --run-ignored all --no-capture
+//! cargo nextest run -p ghost-infer --release --run-ignored all --no-capture
 //! ```
 //!
 //! The model files are read where the Python has them: the Hugging Face cache for
 //! Parakeet, the venv's `site-packages` for Silero, Smart Turn and the wake front end
 //! (`GHOST_SITE_PACKAGES`), `~/.cache/ghost/` for the wake classifiers and Kokoro.
 //!
-//! Two runtimes. The crate links the ONNX Runtime build `ort` bundles (1.31.0); the Python
-//! ran 1.24.4. Silero and the wake chain come out bit-identical on both; Kokoro's audio and
-//! Smart Turn's probability move with the runtime's kernels (Kokoro's vocoder integrates
-//! phase, so a last-bit difference in F0 grows along the utterance; Smart Turn is an int8
-//! graph). Run against the Python's own library to see the port alone:
+//! Two runtimes. The crate links the ONNX Runtime build `ort` 2.0.0-rc.15 bundles (1.31.0);
+//! the Python ran 1.24.4. On the Python's own library every port is the oracle's: Parakeet
+//! 225/225 transcripts, Kokoro's audio, Silero's probabilities and the wake scores bit for
+//! bit, Smart Turn's verdicts 225/225 with its features exact. On the bundled runtime
+//! Silero and the wake chain stay there, and the two int8 graphs and the vocoder move with
+//! the runtime's kernels: Parakeet flips a comma or a capital on about one clip in twenty
+//! (its features are within 3e-6 of NumPy's, the float32 log's ulp, and the Python model
+//! fed the Rust features matches its own transcripts on every clip,
+//! `scripts/fixtures/check_parakeet.py`), Smart Turn's probabilities spread while 99 % of
+//! its verdicts agree, and Kokoro's audio differs by a few 1e-3 RMS as the vocoder
+//! integrates phase. Run against the Python's library to see the port alone:
 //!
 //! ```text
 //! ORT_DYLIB_PATH=<venv>/onnxruntime/capi/libonnxruntime.so.1.24.4 GHOST_PARITY_STRICT=1 \
-//!   cargo nextest run -p ghost-infer --features ort/load-dynamic --run-ignored all --no-capture
+//!   cargo nextest run -p ghost-infer --release --features ort/load-dynamic --run-ignored all --no-capture
 //! ```
 //!
-//! With `GHOST_PARITY_STRICT` the bars are the oracle's: Kokoro within 1e-3 RMS and every
-//! Smart Turn verdict the same. Without it (the bundled runtime) they are what that
-//! runtime reaches: Kokoro within 1e-2 RMS at the same length, 99 % of the verdicts.
-//! Parakeet's bar is the same on both: the int8 model flips a comma, a capital or a
-//! hyphen on about 5 % of clips for a 1e-5 change in its features, and the Python model
-//! fed the Rust features does so too (`scripts/fixtures/check_parakeet.py`), so the bar is
-//! every clip matching by words with case and punctuation aside on all but one clip in a
-//! hundred, and nine clips in ten matching exactly.
+//! With `GHOST_PARITY_STRICT` the bars are the oracle's: every Parakeet transcript, Kokoro
+//! within 1e-3 RMS at the same length, Smart Turn within 1e-3 with every verdict the same.
+//! Without it they are what the bundled runtime reaches: Parakeet matching by words (case
+//! and punctuation aside) on all but one clip in a hundred and exactly on nine in ten,
+//! Kokoro within 1e-2 RMS, 99 % of Smart Turn's verdicts. `GHOST_PARITY_TIMING` adds the
+//! speed bars of ADR 0004 on an idle CPU.
 
 use std::{
     fs,
@@ -112,9 +116,19 @@ fn peak_rss_gb() -> f64 {
         .map_or(0.0, |kb| kb / 1024.0 / 1024.0)
 }
 
+fn env_flag(name: &str) -> bool {
+    std::env::var_os(name).is_some_and(|v| !v.is_empty() && v != "0")
+}
+
 /// `GHOST_PARITY_STRICT`: the bars for the Python's own ONNX Runtime.
 fn strict() -> bool {
-    std::env::var_os("GHOST_PARITY_STRICT").is_some_and(|v| !v.is_empty() && v != "0")
+    env_flag("GHOST_PARITY_STRICT")
+}
+
+/// `GHOST_PARITY_TIMING`: assert the speed bars of ADR 0004 too (a run on an idle CPU;
+/// the numbers are printed either way).
+fn timing() -> bool {
+    env_flag("GHOST_PARITY_TIMING")
 }
 
 /// Words, lowercased, punctuation and hyphens aside: what a transcript says.
@@ -190,23 +204,29 @@ fn parakeet_matches_word_for_word() {
     for f in &failures {
         eprintln!("  {f}");
     }
-    assert!(
-        word_matches * 100 >= n * 99,
-        "{word_matches} of {n} transcripts match by words"
-    );
-    assert!(
-        matches * 10 >= n * 9,
-        "{matches} of {n} transcripts match exactly"
-    );
-    assert!(
-        p50_2s <= 0.16,
-        "a 2 s utterance takes {p50_2s:.3}s p50, over the 0.16 s of ADR 0004"
-    );
-    assert!(
-        peak_rss_gb() < 1.7,
-        "peak RSS {:.2} GB, over the 1.7 GB of ADR 0004",
-        peak_rss_gb()
-    );
+    if strict() {
+        assert_eq!(matches, n, "{matches} of {n} transcripts match exactly");
+    } else {
+        assert!(
+            word_matches * 100 >= n * 99,
+            "{word_matches} of {n} transcripts match by words"
+        );
+        assert!(
+            matches * 10 >= n * 9,
+            "{matches} of {n} transcripts match exactly"
+        );
+    }
+    if timing() {
+        assert!(
+            p50_2s <= 0.16,
+            "a 2 s utterance takes {p50_2s:.3}s p50, over the 0.16 s of ADR 0004"
+        );
+        assert!(
+            peak_rss_gb() < 1.7,
+            "peak RSS {:.2} GB, over the 1.7 GB of ADR 0004",
+            peak_rss_gb()
+        );
+    }
 }
 
 /// The filterbanks the crate computes against the tables the Python used (NeMo's
@@ -746,8 +766,10 @@ fn kokoro_matches() {
         eprintln!("  {f}");
     }
     assert!(failures.is_empty(), "{} differences", failures.len());
-    assert!(
-        fp50 <= 0.37 || !strict(),
-        "the first clause takes {fp50:.3}s p50, over the 0.37 s of ADR 0004"
-    );
+    if timing() {
+        assert!(
+            fp50 <= 0.37,
+            "the first clause takes {fp50:.3}s p50, over the 0.37 s of ADR 0004"
+        );
+    }
 }
