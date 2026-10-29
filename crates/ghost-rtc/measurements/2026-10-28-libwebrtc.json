@@ -1,0 +1,84 @@
+{
+  "backend": "libwebrtc",
+  "date": "2026-10-28",
+  "seconds": 300.60174584388733,
+  "uplink_phone_to_desk": {
+    "count": 300,
+    "p50_ms": 31.201601028442383,
+    "p95_ms": 31.71396255493164,
+    "max_ms": 51.76067352294922,
+    "mean_ms": 29.630801677703857
+  },
+  "downlink_desk_to_phone": {
+    "count": 300,
+    "p50_ms": 97.64957427978516,
+    "p95_ms": 98.13237190246582,
+    "max_ms": 98.26278686523438,
+    "mean_ms": 95.96394618352254
+  },
+  "bursts_sent_by_phone": 300,
+  "bursts_heard_by_desk": 300,
+  "bursts_sent_by_desk": 300,
+  "bursts_heard_by_phone": 300,
+  "desk": {
+    "packets_received": 7464,
+    "packets_lost": 0,
+    "concealed": 0,
+    "frames_dropped": 0,
+    "jitter_ms": 0.0,
+    "packets_sent": 7494,
+    "cpu_seconds": 5.74,
+    "cpu_percent_of_one_core": 1.909503214589105,
+    "cpu_percent_self_reported": 1.9119016400068807
+  },
+  "phone": {
+    "packets_received": 7494,
+    "packets_lost": 0,
+    "jitter_ms": 0.041666666666666664,
+    "remote_inbound_packets_lost": 0,
+    "remote_round_trip_ms": 0.2675991900151914,
+    "bot_ready": 2,
+    "server_messages": 2,
+    "other_messages": 0,
+    "errors": [],
+    "exit": 0
+  },
+  "answers": [
+    {
+      "restart": false,
+      "took_ms": 109.26485061645508,
+      "fingerprint": "sha-256 00:D6:D7:EB:60:8F:01:C2:23:D1:3F:44:D0:BC:EF:CC:8D:64:4E:D2:3F:84:D5:DF:9C:95:7E:26:89:EB:7C:6B",
+      "setup": "active",
+      "candidates": 10,
+      "ice_lite": false
+    },
+    {
+      "restart": true,
+      "took_ms": 104.28738594055176,
+      "fingerprint": "sha-256 45:6C:2A:F3:1B:2F:4C:17:89:0D:DE:95:FC:3C:75:C9:7C:36:1A:36:98:DD:DA:D1:03:C0:66:C9:85:5B:D2:DA",
+      "setup": "active",
+      "candidates": 10,
+      "ice_lite": false
+    }
+  ],
+  "restart_ok": true,
+  "fingerprints_match": true,
+  "links": [
+    [
+      1793241031.7041388,
+      "Waiting"
+    ],
+    [
+      1793241032.0309389,
+      "Connected"
+    ],
+    [
+      1793241182.0214982,
+      "Waiting"
+    ],
+    [
+      1793241182.0447016,
+      "Connected"
+    ]
+  ]
+}

@@ -79,6 +79,16 @@ http-body-util = "0.1"
 hyperlocal = "0.9"
 serde_path_to_error = "0.1"
 tokio-tungstenite = "0.29"
+# The phone's WebRTC audio (crates/ghost-rtc, ADR 0016, ADR 0020): three stacks behind
+# features, the daemon picks one by measurement; Opus through the system libopus; rubato for
+# the 48 kHz <-> 16/24 kHz resampling either side of the codec.
+str0m = { version = "0.24", default-features = false, features = ["openssl"] }
+webrtc = "0.21"
+rtc = "0.21" # webrtc-rs's sans-IO core: the Sample and RTP packet types webrtc 0.21 takes but does not re-export
+bytes = "1"
+libwebrtc = "0.3"
+opus = "0.4"
+rubato = "5"
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location

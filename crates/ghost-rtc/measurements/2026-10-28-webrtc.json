@@ -1,0 +1,84 @@
+{
+  "backend": "webrtc",
+  "date": "2026-10-28",
+  "seconds": 301.08421659469604,
+  "uplink_phone_to_desk": {
+    "count": 300,
+    "p50_ms": 20.394325256347656,
+    "p95_ms": 21.3015079498291,
+    "max_ms": 22.413253784179688,
+    "mean_ms": 20.393516222635906
+  },
+  "downlink_desk_to_phone": {
+    "count": 300,
+    "p50_ms": 98.6628532409668,
+    "p95_ms": 100.25930404663086,
+    "max_ms": 315.2952194213867,
+    "mean_ms": 98.23623259862264
+  },
+  "bursts_sent_by_phone": 301,
+  "bursts_heard_by_desk": 300,
+  "bursts_sent_by_desk": 301,
+  "bursts_heard_by_phone": 300,
+  "desk": {
+    "packets_received": 7494,
+    "packets_lost": 0,
+    "concealed": 0,
+    "frames_dropped": 0,
+    "jitter_ms": 0.47371125985107665,
+    "packets_sent": 14997,
+    "cpu_seconds": null,
+    "cpu_percent_of_one_core": null,
+    "cpu_percent_self_reported": 0.00013159583407413252
+  },
+  "phone": {
+    "packets_received": 7493,
+    "packets_lost": 0,
+    "jitter_ms": 0.4791666666666667,
+    "remote_inbound_packets_lost": 0,
+    "remote_round_trip_ms": 0.18888647991560137,
+    "bot_ready": 2,
+    "server_messages": 2,
+    "other_messages": 0,
+    "errors": [],
+    "exit": 0
+  },
+  "answers": [
+    {
+      "restart": false,
+      "took_ms": 5.761146545410156,
+      "fingerprint": "sha-256 A5:F3:8B:0E:14:52:F1:C7:DF:85:BA:33:19:51:C2:FE:B5:63:37:37:19:71:F2:84:D9:79:40:7A:DE:F5:34:20",
+      "setup": "passive",
+      "candidates": 2,
+      "ice_lite": false
+    },
+    {
+      "restart": true,
+      "took_ms": 102.20003128051758,
+      "fingerprint": "sha-256 5D:81:A6:31:DA:FE:91:41:F0:A0:4B:51:E4:A2:85:3B:44:82:98:B8:B9:F2:07:65:08:19:AF:15:72:BE:70:B1",
+      "setup": "passive",
+      "candidates": 2,
+      "ice_lite": false
+    }
+  ],
+  "restart_ok": true,
+  "fingerprints_match": true,
+  "links": [
+    [
+      1793240715.5248969,
+      "Waiting"
+    ],
+    [
+      1793240715.769367,
+      "Connected"
+    ],
+    [
+      1793240865.9599307,
+      "Waiting"
+    ],
+    [
+      1793240866.0032597,
+      "Connected"
+    ]
+  ]
+}
