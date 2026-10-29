@@ -1465,6 +1465,16 @@ impl Daemon {
             d.late.models.set(models.clone()).ok();
             d.state.set_models_ready(true);
             d.bind_voices(&models);
+            // The acknowledgments in the default voice, before the first session (#43);
+            // an agent's own voice is rendered when its session starts.
+            {
+                let v = d.voice();
+                if v.ack && v.tts_engine != "elevenlabs" {
+                    models
+                        .acks
+                        .warm(models.tts.clone(), &v.tts_voice, v.tts_speed);
+                }
+            }
             let duck_state = d.rt.join(DUCK_STATE);
             let ducker = (d.ports.ducker)(&cfg, duck_state.clone());
             if let Err(e) = ghost_audio::restore_from_state(&duck_state) {

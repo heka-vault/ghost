@@ -192,6 +192,25 @@ impl AudioOutput {
         self.play(audio, turn).await;
     }
 
+    /// An acknowledgment (`crate::acks`): played whole before anything after it, never over
+    /// the reply, and without `BotStarted`/`BotStopped`, which belong to the reply. The
+    /// shared flag is on while it plays, so the barge-in rule and the echo filter know.
+    async fn acknowledge(&mut self, audio: &Audio, turn: &CancellationToken, out: &Out) {
+        if turn.is_cancelled() || self.speaking {
+            return;
+        }
+        self.speaking_now.set(true);
+        out.push_up(Frame::AckPlayed).await;
+        if self.play(audio, turn).await {
+            tokio::select! {
+                biased;
+                _ = turn.cancelled() => self.media.clear().await,
+                _ = self.media.drain() => {}
+            }
+        }
+        self.speaking_now.set(false);
+    }
+
     async fn stopped_speaking(&mut self, turn: Option<CancellationToken>, out: &Out) {
         if !self.speaking {
             return;
@@ -237,6 +256,10 @@ impl Stage for AudioOutput {
             }
             Frame::TtsStopped => {
                 self.stopped_speaking(None, out).await;
+                return;
+            }
+            Frame::Ack { audio, turn, .. } => {
+                self.acknowledge(audio, turn, out).await;
                 return;
             }
             Frame::MixerEnable(on) => {
@@ -691,6 +714,49 @@ mod tests {
         assert!(took < Duration::from_millis(200), "{took:?}");
         let pushed = drain(&mut rx).await;
         assert!(pushed.iter().any(|f| matches!(f, Frame::BotStarted)));
+    }
+
+    #[tokio::test]
+    async fn an_acknowledgment_plays_without_the_replys_frames() {
+        let (media, _mouth, ear) = scripted_media();
+        let speaking = Speaking::new();
+        let mut out_stage = AudioOutput::new(media.output).with_speaking(speaking.clone());
+        let (out, mut rx) = Out::capture();
+        let turn = CancellationToken::new();
+        out_stage
+            .process(
+                Frame::Ack {
+                    text: "Sure.".into(),
+                    audio: Audio::new(vec![20000; OUT_RATE as usize / 5], OUT_RATE),
+                    turn: turn.clone(),
+                },
+                Direction::Down,
+                &out,
+            )
+            .await;
+        assert!((ear.seconds_played() - 0.2).abs() < 1e-6);
+        assert!(!speaking.is_on(), "off once it has played");
+        let up = drain(&mut rx).await;
+        assert!(up.iter().any(|f| matches!(f, Frame::AckPlayed)));
+        assert!(
+            !up.iter()
+                .any(|f| matches!(f, Frame::BotStarted | Frame::BotStopped)),
+            "the reply's frames are the reply's"
+        );
+        // a cut-off turn's acknowledgment is never heard
+        turn.cancel();
+        out_stage
+            .process(
+                Frame::Ack {
+                    text: "Okay.".into(),
+                    audio: Audio::new(vec![20000; OUT_RATE as usize / 5], OUT_RATE),
+                    turn,
+                },
+                Direction::Down,
+                &out,
+            )
+            .await;
+        assert!((ear.seconds_played() - 0.2).abs() < 1e-6);
     }
 
     #[tokio::test]
