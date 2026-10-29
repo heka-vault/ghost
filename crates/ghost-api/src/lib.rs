@@ -3,115 +3,45 @@
 //! route to it, and nothing passive crosses it.
 //!
 //! `models` holds the types; `packages/api/openapi.json` stays the contract the TypeScript
-//! client is generated from, and W3 of heka-vault/ghost#39 generates it from these types.
+//! client is generated from, and `openapi::document` generates it from these types.
+//!
+//! What never passes through here: passive audio or passive transcripts (the idle-audio
+//! rule), a password's value (write-only, ADR 0036), or a way for the model to reach it. A
+//! Confirm click in the operator's own desktop session is confirmation evidence, recorded
+//! as `classifier: ui`.
 
+pub mod app;
+pub mod apps;
+pub mod client;
+pub mod controller;
+pub mod conversations;
+pub mod deps;
+pub mod error;
+pub mod model;
 pub mod models;
+pub mod openapi;
+pub mod passwords;
 pub mod server;
+pub mod skill_catalog;
+pub mod state;
 
-use std::sync::Arc;
-use std::time::Instant;
+pub use app::{
+    audit_page, create_app, outcome_view, pending_view, permissions_view, status_snapshot,
+    waiting_view,
+};
+pub use client::{ClientError, GhostClient, Reply};
+pub use controller::{Controller, PhoneConnection, Probe, Refusal, Unavailable};
+pub use conversations::{conversation_detail, conversation_view};
+pub use deps::{AppsPort, Deps, DevicesPort, ModelNet, SharedDeps, SignInPort, UI_SESSION};
+pub use error::{ApiError, ApiResult, HTTPValidationError, ValidationError};
+pub use models::{
+    AuditPage, Build, Phase, PhoneAddress, PhoneDevice, PhonePairing, PhoneView, Status,
+    WaitingView,
+};
+pub use server::{bind, default_socket_path, serve};
+pub use state::{DaemonState, EventBus};
 
-use axum::extract::State;
-use axum::routing::get;
-use axum::{Json, Router};
-use tokio::sync::RwLock;
-
-use crate::models::{API_VERSION, Build, Phase, Status};
-
-/// What the daemon knows about itself, read by every route that reports it.
-#[derive(Debug)]
-pub struct DaemonState {
-    pub phase: Phase,
-    pub session_id: Option<String>,
-    pub models_ready: bool,
-    pub version: String,
-    pub wake_mode: String,
-    pub apps: Vec<String>,
-    pub conversation: Option<String>,
-    pub waiting: u64,
-    started: Instant,
-}
-
-impl DaemonState {
-    pub fn new(version: impl Into<String>, wake_mode: impl Into<String>) -> Self {
-        Self {
-            phase: Phase::Starting,
-            session_id: None,
-            models_ready: false,
-            version: version.into(),
-            wake_mode: wake_mode.into(),
-            apps: Vec::new(),
-            conversation: None,
-            waiting: 0,
-            started: Instant::now(),
-        }
-    }
-
-    pub fn uptime_secs(&self) -> f64 {
-        self.started.elapsed().as_secs_f64()
-    }
-}
-
-/// The one place a `Status` is built, as in the Python daemon: the control API, its event
-/// stream and the phone's `/hello` all read it.
-pub fn status_snapshot(st: &DaemonState) -> Status {
-    Status {
-        phase: st.phase,
-        session_id: st.session_id.clone(),
-        models_ready: st.models_ready,
-        uptime_secs: st.uptime_secs(),
-        version: st.version.clone(),
-        build: Build::default(),
-        api_version: API_VERSION.to_string(),
-        wake_mode: st.wake_mode.clone(),
-        apps: st.apps.clone(),
-        pending: None,
-        conversation: st.conversation.clone(),
-        session_origin: None,
-        ending: false,
-        waiting: st.waiting,
-    }
-}
-
-pub type SharedState = Arc<RwLock<DaemonState>>;
-
-async fn get_status(State(state): State<SharedState>) -> Json<Status> {
-    Json(status_snapshot(&*state.read().await))
-}
-
-/// The routes. Only `/status` so far; the rest arrive with W3.
-pub fn router(state: SharedState) -> Router {
-    Router::new()
-        .route("/status", get(get_status))
-        .with_state(state)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_fresh_daemon_is_starting_with_nothing_loaded() {
-        let st = DaemonState::new("2026.10.0", "transcript");
-        let s = status_snapshot(&st);
-        assert_eq!(s.phase, Phase::Starting);
-        assert!(!s.models_ready);
-        assert_eq!(s.session_id, None);
-        assert_eq!(s.version, "2026.10.0");
-        assert_eq!(s.waiting, 0);
-    }
-
-    #[test]
-    fn status_serializes_the_way_the_typescript_client_reads_it() {
-        let st = DaemonState::new("2026.10.0", "onnx");
-        let v: serde_json::Value = serde_json::to_value(status_snapshot(&st)).unwrap();
-        assert_eq!(v["phase"], "starting");
-        assert_eq!(v["session_id"], serde_json::Value::Null);
-        assert_eq!(v["models_ready"], false);
-        assert_eq!(v["wake_mode"], "onnx");
-        assert_eq!(v["apps"], serde_json::json!([]));
-        assert_eq!(v["ending"], false);
-        assert_eq!(v["waiting"], 0);
-        assert!(v["uptime_secs"].is_number());
-    }
+/// The routes over `deps`, as `axum::serve` takes them.
+pub fn router(deps: SharedDeps) -> axum::Router {
+    create_app(deps).0
 }
