@@ -56,8 +56,11 @@ use ghost_infer::{
 use serde::Deserialize;
 
 const FIXTURES_DEFAULT: &str = "/home/detroitpro/projects/active/ghost/.scratch/spike-fixtures";
-const SITE_PACKAGES_DEFAULT: &str =
-    "/home/detroitpro/projects/active/ghost/tools/oracle/.venv/lib/python3.12/site-packages";
+/// The oracle's venv in this checkout (`uv sync --project tools/oracle`).
+const SITE_PACKAGES_DEFAULT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../tools/oracle/.venv/lib/python3.12/site-packages"
+);
 
 fn fixtures() -> Option<PathBuf> {
     let dir = std::env::var_os("GHOST_FIXTURES")
