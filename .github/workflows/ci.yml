@@ -13,23 +13,21 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The Python that is left (ADR 0039): the tools under tools/ and the scripts. ruff over
+  # every Python file in the repository, pytest over the tools' tests (the version script,
+  # scripts/deploy.sh). The oracle (tools/oracle) is not synced here: its lock is read by
+  # the version test, and its model libraries are for the workstation.
   python:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with: { enable-cache: true }
-      - run: uv sync --all-packages --frozen
+      - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest -q -p no:cacheprovider
-      # The .debs are built only on a release; at least the files they copy must exist.
-      - name: every file the packages copy exists
-        run: |
-          grep -o '"\$ROOT/[^"]*"' packaging/build-debs.sh | tr -d '"' | sed 's#^\$ROOT/##' \
-            | grep -v '^dist/\|^apps/desktop/src-tauri/target/' | sort -u \
-            | while read -r f; do [ -e "$f" ] || { echo "missing: $f"; exit 1; }; done
+      - run: uv run --project tools pytest -q -p no:cacheprovider
 
   typescript:
     runs-on: ubuntu-24.04
@@ -48,8 +46,10 @@ jobs:
         run: pnpm build
 
   # The Rust workspace: the daemon's crates and the Tauri shell (ADR 0039). Clippy is
-  # strict, every test runs, and cargo-deny fails on a known vulnerability or a license
-  # outside deny.toml's allowlist.
+  # strict, every test runs, cargo-deny fails on a known vulnerability or a license outside
+  # deny.toml's allowlist, and the control API's document is checked against the Rust types.
+  # Two builds and no more: one dev build serves clippy, the tests and the export; one
+  # release build makes the daemon, the two app binaries and the shell for the bundle.
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
