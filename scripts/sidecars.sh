@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The bundle's external binaries (ADR 0038): ghostd, ghost-mock-github and ghost-scripts,
 # built from this workspace and copied where Tauri's bundler looks for them,
-# apps/desktop/src-tauri/binaries/<name>-<target triple>; and the bundle's one resource,
-# ONNX Runtime 1.24.4, staged by scripts/onnxruntime.sh under apps/desktop/src-tauri/
-# resources/onnxruntime/. `tauri build` runs this first (beforeBuildCommand in
-# tauri.conf.json); `make bundle` is `tauri build`.
+# apps/desktop/src-tauri/binaries/<name>-<target triple>; and the bundle's resources under
+# apps/desktop/src-tauri/resources/: ONNX Runtime 1.24.4 (scripts/onnxruntime.sh stage) and
+# the four small model files with their licences (scripts/models.sh stage). `tauri build`
+# runs this first (beforeBuildCommand in tauri.conf.json); `make bundle` is `tauri build`.
 #
 #   scripts/sidecars.sh            release builds (the bundle's)
 #   scripts/sidecars.sh dev        debug builds, for trying the bundle layout quickly
@@ -28,6 +28,7 @@ esac
 LOCKED=${CI:+--locked}
 
 "$ROOT/scripts/onnxruntime.sh" stage >/dev/null
+"$ROOT/scripts/models.sh" stage >/dev/null
 
 echo "sidecars: cargo build $FLAG $LOCKED -p ghostd -p ghost-core --bins" >&2
 # shellcheck disable=SC2086

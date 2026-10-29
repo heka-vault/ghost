@@ -77,7 +77,11 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
 1. `scripts/sidecars.sh`: first `scripts/onnxruntime.sh stage`, which fetches ONNX Runtime
    1.24.4 once (Microsoft's release archive, pinned by SHA-256, into
    `~/.cache/ghost/onnxruntime/1.24.4/`) and copies the library and its license to
-   `apps/desktop/src-tauri/resources/onnxruntime/`; then `cargo build --release -p ghostd
+   `apps/desktop/src-tauri/resources/onnxruntime/`; then `scripts/models.sh stage`, which
+   fetches the four small model files once (each from its upstream release, pinned by
+   SHA-256 to the bytes the Python wheels shipped, into `~/.cache/ghost/models/`; [the
+   speech models](#the-speech-models)) and copies them with their licences to
+   `apps/desktop/src-tauri/resources/models/`; then `cargo build --release -p ghostd
    -p ghost-core --bins` and the three binaries the bundle carries, `ghostd`,
    `ghost-mock-github` and `ghost-scripts` (the two apps `apps.json` names), copied to
    `apps/desktop/src-tauri/binaries/<name>-<target triple>`, where Tauri's bundler looks for
@@ -85,9 +89,10 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
 2. The frontend (`pnpm --filter @ghost/desktop build`).
 3. The shell (`cargo build --release` of `heka-ghost-desktop`), then the bundles under
    `target/release/bundle/deb/` and `target/release/bundle/appimage/`. The .deb installs
-   the four binaries in `/usr/bin` and the runtime's library in
-   `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4` (`bundle.resources`);
-   the AppImage carries them in its `usr/bin` and `usr/lib`. The .deb depends on
+   the four binaries in `/usr/bin`, the runtime's library in
+   `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4` and the model files
+   in `/usr/lib/heka-ghost-desktop/models/` (`bundle.resources`); the AppImage carries them
+   in its `usr/bin` and `usr/lib`. The .deb depends on
    `libespeak-ng1` (Kokoro's phonemizer; the one system library `ghostd` links that a bare
    Ubuntu lacks) on top of the GTK and WebKit packages Tauri adds.
 
@@ -103,9 +108,12 @@ the oracle (`crates/ghost-infer/tests/parity.rs`); the crate's own download, 1.3
 the int8 kernels and the vocoder. `ghostd` looks for the library in `ORT_DYLIB_PATH`, then
 beside itself in the bundle (`/usr/bin/ghostd` finds `/usr/lib/heka-ghost-desktop/onnxruntime/`),
 then in the cache (`crates/ghost-infer/src/runtime.rs`); `ghostd check` prints the one it
-would load. CI runs `scripts/onnxruntime.sh` before `cargo nextest`, since every test that
-opens a session needs it, and the release workflow's install test runs `ghostd check` in a
-clean container, where the daemon must find the bundle's copy on its own.
+would load. The four small model files are found the same way (`GHOST_MODELS_DIR`, the
+bundle's `models/`, `~/.cache/ghost/models/`; `crates/ghost-infer/src/models.rs`). CI runs
+`scripts/onnxruntime.sh` and `scripts/models.sh` before `cargo nextest`, since every test
+that opens a session needs the library and the daemon the parent-death tests start reads
+Silero, and the release workflow's install test runs `ghostd check` in a clean container,
+where the daemon must find the bundle's copies on its own.
 
 The installed app supervises the daemon (ADR 0038): at launch it adopts a daemon already
 answering on the control socket, else runs `ghostd restore-volumes` and starts `ghostd run`
@@ -119,6 +127,24 @@ daemon also stops on its own when the app is gone (`GHOST_PARENT_PID`). The app 
 login, in the tray with its window hidden (`--hidden`), off from the tray's "Start at login"
 (`~/.local/state/ghost/autostart`), and a second launch opens the first one's window. Under `make dev` the app only adopts (`GHOST_SHELL_ADOPT_ONLY=1`), since
 `scripts/dev.sh` runs the daemon.
+
+## The speech models
+
+Four small model files are in the bundle, and the daemon finds them on its own; the three
+large ones are not, and each gets to its place by a step run once on the machine.
+
+| Model | Where `ghostd` reads it | How it gets there |
+|---|---|---|
+| Silero VAD (`silero_vad.onnx`), Smart Turn v3.2 (`smart-turn-v3.2-cpu.onnx`) and the wake front end (`melspectrogram.onnx`, `embedding_model.onnx`) | `GHOST_MODELS_DIR`, else the bundle's `/usr/lib/heka-ghost-desktop/models/`, else `~/.cache/ghost/models/` (`crates/ghost-infer/src/models.rs`; `GHOST_SILERO_MODEL` and `GHOST_SMART_TURN_MODEL` name a file of their own) | `scripts/models.sh` (`make models`; `make setup`, `make dev` and CI run it): each from its upstream release, pinned by SHA-256 to the bytes the Python wheels shipped (pipecat-ai 1.12.0, livekit-wakeword 0.3.0; every upstream file matched its wheel's on 2026-10-29). Silero from snakers4/silero-vad at v6.0 (MIT), Smart Turn from the pipecat-ai/smart-turn-v3 Hugging Face repository at `f766f81` (BSD-2-Clause), the two graphs from dscripka/openWakeWord's v0.5.1 release (Apache-2.0), each licence beside its file. `stage` copies them into the bundle; a file that doesn't match its pin is refused with both hashes printed |
+| Parakeet TDT 0.6B v3, int8 (ADR 0004) | `GHOST_STT_DIR`, else the Hugging Face cache, `~/.cache/huggingface/hub/models--istupakov--parakeet-tdt-0.6b-v3-onnx/` | `onnx_asr` in the oracle fetches it on first use (about 700 MB): `uv run --project tools/oracle python -I -c "import onnx_asr; onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', quantization='int8')"` |
+| Kokoro v1.0 (ADR 0004) | `GHOST_TTS_MODEL_PATH` and `GHOST_TTS_VOICES_PATH`, else `~/.cache/ghost/kokoro/kokoro-v1.0.onnx` and `voices-v1.0.bin` | The two files of the `model-files-v1.0` release of thewh1teagle/kokoro-onnx, which the Python daemon fetched through Pipecat (about 340 MB together): `curl -fL --create-dirs -o ~/.cache/ghost/kokoro/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx`, and the same URL and path with `voices-v1.0.bin` |
+| The trained wake classifiers (ADR 0025, `GHOST_WAKE_MODE=onnx`) | `GHOST_WAKE_MODEL_PATH`, else `~/.cache/ghost/wake/hey_ghost.onnx`, and every `ghost_*.onnx` beside it for Ghost by name | The operator's own, trained and copied there as [wake-recording.md](wake-recording.md) says; nothing fetches them |
+
+`ghostd check` prints the folder of each it finds (`models:`, `parakeet:`, `kokoro:`, and
+`wake models:` in onnx wake mode) and, for one that is missing, names the script or the step
+above as a problem; nothing panics for a missing file, and a daemon started without one
+says so and exits (or, for a classifier, listens by transcript instead). The parity suite
+reads the same files (`crates/ghost-infer/tests/parity.rs`).
 
 ## What each build says it is
 

@@ -12,10 +12,11 @@
 //! cargo nextest run -p ghost-infer --release --run-ignored all --no-capture
 //! ```
 //!
-//! The model files are read where the oracle has them: the Hugging Face cache for
-//! Parakeet, the oracle's `site-packages` (`tools/oracle/.venv`, `GHOST_SITE_PACKAGES`) for
-//! Silero, Smart Turn and the wake front end, `~/.cache/ghost/` for the wake classifiers
-//! and Kokoro.
+//! The model files are read where the daemon reads them: the Hugging Face cache for
+//! Parakeet, `ghost_infer::models` for Silero, Smart Turn and the wake front end
+//! (`GHOST_MODELS_DIR`, the bundle, or `~/.cache/ghost/models/`, where `scripts/models.sh`
+//! puts the files the oracle's wheels ship, pinned to the same bytes), `~/.cache/ghost/`
+//! for the wake classifiers and Kokoro.
 //!
 //! Two runtimes. The Python ran ONNX Runtime 1.24.4; `ort` 2.0.0-rc.15's own download is
 //! 1.31.0. On the Python's library every port is the oracle's: Parakeet 225/225
@@ -56,11 +57,6 @@ use ghost_infer::{
 use serde::Deserialize;
 
 const FIXTURES_DEFAULT: &str = "/home/detroitpro/projects/active/ghost/.scratch/spike-fixtures";
-/// The oracle's venv in this checkout (`uv sync --project tools/oracle`).
-const SITE_PACKAGES_DEFAULT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../tools/oracle/.venv/lib/python3.12/site-packages"
-);
 
 fn fixtures() -> Option<PathBuf> {
     let dir = std::env::var_os("GHOST_FIXTURES")
@@ -77,10 +73,9 @@ fn fixtures() -> Option<PathBuf> {
     }
 }
 
-fn site_packages() -> PathBuf {
-    std::env::var_os("GHOST_SITE_PACKAGES")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(SITE_PACKAGES_DEFAULT))
+/// One of the four small files, where `ghost_infer::models` finds it (`scripts/models.sh`).
+fn model(name: &str) -> PathBuf {
+    ghost_infer::models::resolve_for_process(name).unwrap_or_else(|e| panic!("{e}"))
 }
 
 #[derive(Deserialize)]
@@ -323,7 +318,7 @@ struct SileroFixture {
 #[ignore = "needs the parity fixtures (scripts/fixtures/record.py)"]
 fn silero_matches_within_1e_3() {
     let Some(dir) = fixtures() else { return };
-    let model = site_packages().join("pipecat/audio/vad/data/silero_vad.onnx");
+    let model = model(ghost_infer::models::SILERO);
     let clips = clips(&dir);
     let (mut prob_ok, mut state_ok, mut conf_ok, mut vol_ok) = (0, 0, 0, 0);
     let mut worst_prob = 0.0f32;
@@ -417,7 +412,7 @@ struct SmartTurnFixture {
 #[ignore = "needs the parity fixtures (scripts/fixtures/record.py)"]
 fn smart_turn_matches_within_1e_3() {
     let Some(dir) = fixtures() else { return };
-    let model = site_packages().join("pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx");
+    let model = model(ghost_infer::models::SMART_TURN);
     let mut smart_turn = SmartTurn::load(&model, 2).unwrap();
     let clips = clips(&dir);
     let (mut feat_ok, mut prob_ok, mut verdict_ok) = (0, 0, 0);
@@ -514,10 +509,9 @@ struct Meta {
 fn wake_scores_match_and_hits_agree() {
     let Some(dir) = fixtures() else { return };
     let meta: Meta = json(&dir.join("meta.json"));
-    let resources = site_packages().join("livekit/wakeword/resources");
     let mut scorer = WakeScorer::load(
-        &resources.join("melspectrogram.onnx"),
-        &resources.join("embedding_model.onnx"),
+        &model(ghost_infer::models::MELSPECTROGRAM),
+        &model(ghost_infer::models::EMBEDDING),
         &meta.wake.models,
         1,
     )

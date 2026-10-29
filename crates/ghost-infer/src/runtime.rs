@@ -29,14 +29,28 @@ pub const BUNDLE_NAME: &str = "heka-ghost-desktop";
 /// `ort`'s own override, honoured first.
 pub const ENV_VAR: &str = "ORT_DYLIB_PATH";
 
+/// The bundle's resource folder for the binaries in `bin_dir`: `<bin_dir>/../lib/
+/// heka-ghost-desktop`, the `..` taken lexically. `/usr/bin` gives
+/// `/usr/lib/heka-ghost-desktop`, in the .deb and in the AppImage's `usr/` alike. The one
+/// rule for everything the bundle carries beside its binaries: the runtime, the model
+/// files (`models`) and the build record (`ghostd::build_info`).
+pub fn resources_beside(bin_dir: &Path) -> Option<PathBuf> {
+    Some(bin_dir.parent()?.join("lib").join(BUNDLE_NAME))
+}
+
+/// Ghost's cache: `GHOST_CACHE_DIR` when given, else `~/.cache/ghost`.
+pub fn ghost_cache(cache_dir: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    match cache_dir {
+        Some(dir) => Some(dir.to_path_buf()),
+        None => Some(home?.join(".cache").join("ghost")),
+    }
+}
+
 /// The library's path in the bundle, for the executable at `exe`: `<dir of exe>/../lib/
-/// heka-ghost-desktop/onnxruntime/<library>`, the `..` taken lexically.
+/// heka-ghost-desktop/onnxruntime/<library>` (`resources_beside`).
 pub fn bundle_path(exe: &Path) -> Option<PathBuf> {
-    let prefix = exe.parent()?.parent()?;
     Some(
-        prefix
-            .join("lib")
-            .join(BUNDLE_NAME)
+        resources_beside(exe.parent()?)?
             .join("onnxruntime")
             .join(LIBRARY),
     )
@@ -44,12 +58,8 @@ pub fn bundle_path(exe: &Path) -> Option<PathBuf> {
 
 /// The library's path in Ghost's cache: `GHOST_CACHE_DIR`, else `~/.cache/ghost`.
 pub fn cache_path(cache_dir: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
-    let cache = match cache_dir {
-        Some(dir) => dir.to_path_buf(),
-        None => home?.join(".cache").join("ghost"),
-    };
     Some(
-        cache
+        ghost_cache(cache_dir, home)?
             .join("onnxruntime")
             .join(VERSION)
             .join("lib")
@@ -57,7 +67,7 @@ pub fn cache_path(cache_dir: Option<&Path>, home: Option<&Path>) -> Option<PathB
     )
 }
 
-fn non_empty(value: Option<OsString>) -> Option<PathBuf> {
+pub(crate) fn non_empty(value: Option<OsString>) -> Option<PathBuf> {
     value.filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
@@ -261,6 +271,15 @@ mod tests {
             )
         );
         assert!(bundle_path(Path::new("ghostd")).is_none());
+        assert_eq!(
+            resources_beside(Path::new("/usr/bin")).unwrap(),
+            PathBuf::from("/usr/lib/heka-ghost-desktop")
+        );
+        assert!(resources_beside(Path::new("/")).is_none());
+        assert_eq!(
+            ghost_cache(None, Some(Path::new("/home/op"))).unwrap(),
+            PathBuf::from("/home/op/.cache/ghost")
+        );
         assert_eq!(
             cache_path(None, Some(Path::new("/home/op"))).unwrap(),
             PathBuf::from("/home/op/.cache/ghost/onnxruntime/1.24.4/lib/libonnxruntime.so.1.24.4")
