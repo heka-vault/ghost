@@ -6,9 +6,14 @@
 //! - `deploy`: a `make deploy` runtime: the deploy records the commit beside the binary.
 //! - `release`: the bundle (ADR 0038): its build records it the same way.
 //!
-//! A recorded build is `ghost-build.json` beside the executable (what the venv's root was
-//! for the Python daemon); a binary without one is a checkout's. Read once, at start: two
-//! `git` calls for a checkout, nothing for the others, and never on a turn.
+//! A recorded build is `ghost-build.json` beside the executable (a `make deploy` build
+//! writes it there, as the venv's root held it for the Python daemon), else in the bundle's
+//! resources beside it by the same lexical rule as the runtime's (`/usr/bin/ghostd` reads
+//! `/usr/lib/heka-ghost-desktop/ghost-build.json`, which `scripts/sidecars.sh` writes;
+//! `ghost_infer::runtime::resources_beside`); a binary with neither is a checkout's. The
+//! record names the version it was built at too; one that differs from this binary's is
+//! said in the log and believed. Read once, at start: two `git` calls for a checkout,
+//! nothing for the others, and never on a turn.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -19,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use ghost_api::models::{Build, BuildKind, Launcher};
 use ghost_core::redact::child_env;
+use ghost_infer::runtime::resources_beside;
 use regex::Regex;
 use tracing::warn;
 
@@ -34,9 +40,10 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// The build recorded beside the executable, else the checkout `source` (this crate's
-/// folder when it was built) is in, else a dev build with no commit. A checkout's says
-/// which make target started it, when `GHOST_LAUNCHER` names one.
+/// The build recorded beside the executable, else in the bundle's resources beside it,
+/// else the checkout `source` (this crate's folder when it was built) is in, else a dev
+/// build with no commit. A checkout's says which make target started it, when
+/// `GHOST_LAUNCHER` names one.
 pub fn detect(
     prefix: Option<&Path>,
     source: Option<&Path>,
@@ -44,6 +51,11 @@ pub fn detect(
 ) -> Build {
     let prefix = prefix.map_or_else(default_prefix, Path::to_path_buf);
     if let Some(recorded) = recorded(&prefix.join(BUILD_FILE)) {
+        return recorded;
+    }
+    if let Some(resources) = resources_beside(&prefix)
+        && let Some(recorded) = recorded(&resources.join(BUILD_FILE))
+    {
         return recorded;
     }
     let source = source.map_or_else(
@@ -63,7 +75,8 @@ pub fn detect(
     found
 }
 
-/// The executable's folder, where a deploy or a release records its build.
+/// The executable's folder, where a deploy records its build (a release's is in the
+/// resources beside it).
 fn default_prefix() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -94,8 +107,19 @@ fn recorded(path: &Path) -> Option<Build> {
             return None;
         }
     };
-    match validate(data) {
-        Some(build) => Some(build),
+    match validate(&data) {
+        Some(build) => {
+            if let Some(recorded) = data.get("version").and_then(|v| v.as_str())
+                && recorded != version()
+            {
+                warn!(
+                    "{} says version {recorded}; this ghostd is {}",
+                    path.display(),
+                    version()
+                );
+            }
+            Some(build)
+        }
         None => {
             warn!(
                 "{} isn't a build record; reporting a dev build",
@@ -107,11 +131,12 @@ fn recorded(path: &Path) -> Option<Build> {
 }
 
 /// `Build` as the Python model validated it: a kind it knows, a commit that is a hash.
-fn validate(data: serde_json::Value) -> Option<Build> {
+/// The record's `version` is read apart (`recorded`), not part of the `Build`.
+fn validate(data: &serde_json::Value) -> Option<Build> {
     if !data.is_object() {
         return None;
     }
-    let build: Build = serde_json::from_value(data).ok()?;
+    let build: Build = serde_json::from_value(data.clone()).ok()?;
     if let Some(commit) = &build.commit
         && !COMMIT.is_match(commit)
     {
@@ -185,13 +210,12 @@ fn git(where_: &Path, args: &[&str]) -> Option<String> {
     reader.join().ok().map(|s| s.trim().to_string())
 }
 
-/// One line: "Ghost 2026.10.0 · dev a1b2c3d", as the desktop's sidebar says it. A
-/// clean release names no commit; its version is the tag.
+/// One line: "Ghost 2026.10.0 · dev a1b2c3d", the version, the kind and the commit when
+/// known, as Settings › General says it. A release names its commit too, since the bundle
+/// records it (the release workflow's install test reads it from `ghostd version`); the
+/// desktop's sidebar footer shows a release's version alone, since its version is its tag.
 pub fn describe(ver: &str, build: &Build) -> String {
     let mut line = format!("Ghost {ver}");
-    if build.kind == BuildKind::Release && !build.dirty {
-        return line;
-    }
     let kind = match build.kind {
         BuildKind::Dev => "dev",
         BuildKind::Deploy => "deploy",
@@ -255,6 +279,51 @@ mod tests {
             std::fs::write(dir.path().join(BUILD_FILE), record.to_string()).unwrap();
             assert_eq!(detect_in(dir.path()), want);
         }
+    }
+
+    #[test]
+    fn a_build_recorded_in_the_bundles_resources_is_read() {
+        // `usr/bin/ghostd` and `usr/lib/heka-ghost-desktop/ghost-build.json`, as the .deb
+        // and the AppImage lay them out (scripts/sidecars.sh writes the record there);
+        // nothing beside the binary.
+        const OTHER: &str = "fedcba9876543210fedcba9876543210fedcba98";
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join("usr/bin");
+        let resources = tmp
+            .path()
+            .join("usr/lib")
+            .join(ghost_infer::runtime::BUNDLE_NAME);
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::write(
+            resources.join(BUILD_FILE),
+            serde_json::json!({"kind": "release", "commit": SHA, "version": version()}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(detect_in(&bin), build(BuildKind::Release, Some(SHA), false));
+        // A record whose version isn't this binary's is still believed (and said in the log).
+        std::fs::write(
+            resources.join(BUILD_FILE),
+            serde_json::json!({"kind": "release", "commit": SHA, "version": "1999.1.0"})
+                .to_string(),
+        )
+        .unwrap();
+        assert_eq!(detect_in(&bin), build(BuildKind::Release, Some(SHA), false));
+        // A record beside the executable (a make deploy build) wins over the resources'.
+        std::fs::write(
+            bin.join(BUILD_FILE),
+            serde_json::json!({"kind": "deploy", "commit": OTHER}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            detect_in(&bin),
+            build(BuildKind::Deploy, Some(OTHER), false)
+        );
+        // A folder with no record and no bundle resources beside it is a checkout's or
+        // nothing: dev.
+        let alone = tmp.path().join("alone");
+        std::fs::create_dir_all(&alone).unwrap();
+        assert_eq!(detect_in(&alone), build(BuildKind::Dev, None, false));
     }
 
     #[test]
@@ -383,7 +452,11 @@ mod tests {
             ),
             (
                 build(BuildKind::Release, Some(SHA), false),
-                "Ghost 2026.10.0".to_string(),
+                "Ghost 2026.10.0 · release 0123456".to_string(),
+            ),
+            (
+                build(BuildKind::Release, None, false),
+                "Ghost 2026.10.0 · release".to_string(),
             ),
             (
                 build(BuildKind::Release, Some(SHA), true),

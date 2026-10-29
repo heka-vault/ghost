@@ -89,7 +89,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: the bundle
         run: pnpm tauri build --ci
-      - name: the bundle carries the daemon, the app binaries, ONNX Runtime and the model files
+      - name: the bundle carries the daemon, the app binaries, ONNX Runtime, the model files and its record
         run: |
           ls -la target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage
           for b in ghostd ghost-mock-github ghost-scripts heka-ghost-desktop; do
@@ -98,10 +98,16 @@ jobs:
           for f in onnxruntime/libonnxruntime.so.1.24.4 onnxruntime/LICENSE \
                    models/silero_vad.onnx models/smart-turn-v3.2-cpu.onnx \
                    models/melspectrogram.onnx models/embedding_model.onnx \
-                   models/LICENSE.silero-vad models/LICENSE.smart-turn models/LICENSE.openwakeword; do
+                   models/LICENSE.silero-vad models/LICENSE.smart-turn models/LICENSE.openwakeword \
+                   ghost-build.json; do
             dpkg-deb -c target/release/bundle/deb/*.deb | grep -q "usr/lib/heka-ghost-desktop/$f\$" \
               || { echo "missing: $f"; exit 1; }
           done
+          # The record names this commit (ghostd::build_info reads it; docs/releasing.md).
+          # Tauri's bundler stores members as usr/..., dpkg's as ./usr/...; match either.
+          dpkg-deb --fsys-tarfile target/release/bundle/deb/*.deb \
+            | tar -xO --wildcards '*/heka-ghost-desktop/ghost-build.json' \
+            | tee /dev/stderr | grep -qF "\"commit\": \"$(git rev-parse HEAD)\""
 
   # The one check main's ruleset requires, so adding or renaming a job above needs no
   # settings change.

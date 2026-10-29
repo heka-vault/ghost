@@ -58,7 +58,9 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
 
    The tag starts `.github/workflows/release.yml`. It checks the tag names the version the
    files say, builds the bundle (below), installs the .deb into a clean Ubuntu 26.04 and
-   runs `ghostd version`, and attaches the .deb and the AppImage to a GitHub release.
+   runs `ghostd version`, which must name the tagged commit, and `ghostd check`, which must
+   find the bundle's runtime and model files on its own, and attaches the .deb and the
+   AppImage to a GitHub release.
 
 If the month turns between the merge and the tag, `make release` refuses: the merged
 `2026.10.x` is no longer this month's. Bump again with `make version V=next` in a PR.
@@ -81,18 +83,20 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
    fetches the four small model files once (each from its upstream release, pinned by
    SHA-256 to the bytes the Python wheels shipped, into `~/.cache/ghost/models/`; [the
    speech models](#the-speech-models)) and copies them with their licences to
-   `apps/desktop/src-tauri/resources/models/`; then `cargo build --release -p ghostd
-   -p ghost-core --bins` and the three binaries the bundle carries, `ghostd`,
-   `ghost-mock-github` and `ghost-scripts` (the two apps `apps.json` names), copied to
-   `apps/desktop/src-tauri/binaries/<name>-<target triple>`, where Tauri's bundler looks for
-   `bundle.externalBin`. Neither folder is committed.
+   `apps/desktop/src-tauri/resources/models/`; then `apps/desktop/src-tauri/resources/
+   ghost-build.json`, the record of what the build is ([below](#what-each-build-says-it-is));
+   then `cargo build --release -p ghostd -p ghost-core --bins` and the three binaries the
+   bundle carries, `ghostd`, `ghost-mock-github` and `ghost-scripts` (the two apps
+   `apps.json` names), copied to `apps/desktop/src-tauri/binaries/<name>-<target triple>`,
+   where Tauri's bundler looks for `bundle.externalBin`. Neither folder is committed.
 2. The frontend (`pnpm --filter @ghost/desktop build`).
 3. The shell (`cargo build --release` of `heka-ghost-desktop`), then the bundles under
    `target/release/bundle/deb/` and `target/release/bundle/appimage/`. The .deb installs
    the four binaries in `/usr/bin`, the runtime's library in
-   `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4` and the model files
-   in `/usr/lib/heka-ghost-desktop/models/` (`bundle.resources`); the AppImage carries them
-   in its `usr/bin` and `usr/lib`. The .deb depends on
+   `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4`, the model files
+   in `/usr/lib/heka-ghost-desktop/models/` and the build's record beside them,
+   `/usr/lib/heka-ghost-desktop/ghost-build.json` (`bundle.resources`); the AppImage
+   carries them in its `usr/bin` and `usr/lib`. The .deb depends on
    `libespeak-ng1` (Kokoro's phonemizer; the one system library `ghostd` links that a bare
    Ubuntu lacks) on top of the GTK and WebKit packages Tauri adds.
 
@@ -112,8 +116,9 @@ would load. The four small model files are found the same way (`GHOST_MODELS_DIR
 bundle's `models/`, `~/.cache/ghost/models/`; `crates/ghost-infer/src/models.rs`). CI runs
 `scripts/onnxruntime.sh` and `scripts/models.sh` before `cargo nextest`, since every test
 that opens a session needs the library and the daemon the parent-death tests start reads
-Silero, and the release workflow's install test runs `ghostd check` in a clean container,
-where the daemon must find the bundle's copies on its own.
+Silero, and the release workflow's install test runs `ghostd version` and `ghostd check`
+in a clean container, where the daemon must say the recorded commit and find the bundle's
+copies on its own.
 
 The installed app supervises the daemon (ADR 0038): at launch it adopts a daemon already
 answering on the control socket, else runs `ghostd restore-volumes` and starts `ghostd run`
@@ -155,20 +160,26 @@ The daemon reports its version and its build in the status the control API retur
 |---|---|---|
 | `dev` | Ghost from a checkout (`make dev`, `make daemon`, `cargo run -p ghostd`) | The checkout's `HEAD`, and `dirty` when tracked files had uncommitted changes as the daemon started |
 | `deploy` | A `make deploy` runtime in `~/.local/share/ghost/runtime/<commit>/` | `scripts/deploy.sh` writes `bin/ghost-build.json` beside the binary |
-| `release` | The bundle (the .deb or the AppImage) | Not recorded yet: the bundle's daemon says `dev` with no commit, since nothing beside `/usr/bin/ghostd` is written at build time (open) |
+| `release` | The bundle (the .deb or the AppImage) | `scripts/sidecars.sh` writes `ghost-build.json` into the bundle's resources, `/usr/lib/heka-ghost-desktop/` (the AppImage's `usr/lib/heka-ghost-desktop/`): the commit `tauri build` ran at, `dirty` when tracked files had uncommitted changes, and the version |
 
-A recorded build is `ghost-build.json` beside the executable; a binary without one is a
-checkout's (`ghostd::build_info`). The daemon reads it once when it starts: a file read, or
-two `git` calls for a checkout, and nothing on a turn. The version is the one the crate was
-built with (`Cargo.toml`'s `[workspace.package]`, a copy of the root `pyproject.toml`'s).
+A recorded build is `ghost-build.json` beside the executable (a `make deploy` build), else in
+the bundle's resources beside it by the same lexical rule as the runtime's (`/usr/bin/ghostd`
+reads `/usr/lib/heka-ghost-desktop/ghost-build.json`); a binary with neither is a checkout's
+(`ghostd::build_info`). The record names the version it was built at too (`{"kind":
+"release", "commit": "<sha>", "dirty": false, "version": "2026.10.0"}`); a daemon whose own
+version differs says so in its log and keeps the record. The daemon reads it once when it
+starts: a file read, or two `git` calls for a checkout, and nothing on a turn. The version
+it reports is the one the crate was built with (`Cargo.toml`'s `[workspace.package]`, a copy
+of the root `pyproject.toml`'s).
 
 It reads the same everywhere:
 
-- `ghostd version`: `Ghost 2026.10.0 · dev a1b2c3d` (with `, uncommitted changes` when dirty).
-  `ghostd check` and the daemon's first log line start with it, and `make deploy` shows it
-  from the build's check.
+- `ghostd version`: `Ghost 2026.10.0 · dev a1b2c3d` (with `, uncommitted changes` when dirty);
+  a release says `Ghost 2026.10.0 · release a1b2c3d`, and the release workflow's install
+  test reads the tagged commit from it. `ghostd check` and the daemon's first log line
+  start with it, and `make deploy` shows it from the build's check.
 - The desktop's sidebar footer: `Ghost 2026.10.0 · dev a1b2c3d`. A release shows the version
-  alone, since its version is its tag.
+  alone, since its version is its tag; General shows its commit.
 - Settings › General: the version, the build in words, and the desktop app's own version.
 
 The desktop app's version is its `package.json`'s, the same as every other copy, and its
@@ -178,8 +189,10 @@ window and the daemon differ, for example a window from a checkout talking to th
 Ghost, the sidebar adds a quiet second line ("This window is 2026.10.1") and General shows a
 neutral notice. They differ when the versions do, or, at the same version, when both know
 their commits and the commits differ ("This window is 2026.10.1 · e54c2a5"); uncommitted
-changes aren't compared. A daemon older than this change has no `build` in its status; the
-app shows its version alone.
+changes aren't compared. A bundled daemon reports its commit from the record, so a window
+from a checkout talking to an installed Ghost at the same version sees the commits differ.
+A daemon older than this change has no `build` in its status; the app shows its version
+alone.
 
 The restart Settings asks for follows the build: `systemctl --user restart ghostd` for a
 deploy or a release; for a `dev` daemon, the make target that started it, which it reports as

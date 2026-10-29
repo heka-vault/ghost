@@ -38,16 +38,26 @@ jobs:
           mkdir -p dist/bundle
           cp target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage dist/bundle/
           ls -la dist/bundle
-      # `ghostd check` the way the Python package's `make deb-test` ran it: in /usr/bin,
-      # with no ORT_DYLIB_PATH, the daemon must find ONNX Runtime in the bundle's
-      # /usr/lib/heka-ghost-desktop/onnxruntime/ (W10 of #39).
+      # The way the Python package's `make deb-test` ran it: in /usr/bin, with nothing set,
+      # the daemon must say the commit the bundle recorded (ghost-build.json in its
+      # resources) and find ONNX Runtime and the four model files in the bundle's
+      # /usr/lib/heka-ghost-desktop/ on its own (W10 of #39). Parakeet and Kokoro are not
+      # in a clean container, so `ghostd check` names their steps and exits 1; what it
+      # must not name is either fetch script, which would mean the bundle's own copies
+      # were not found.
       - name: install test in a clean Ubuntu 26.04
         run: |
-          docker run --rm -v "$PWD/dist/bundle":/bundle:ro ubuntu:26.04 bash -ec '
+          docker run --rm -e COMMIT="$(git rev-parse HEAD)" -v "$PWD/dist/bundle":/bundle:ro ubuntu:26.04 bash -ec '
             apt-get update -qq && apt-get install -y -qq /bundle/*.deb >/dev/null
-            ghostd version && ghostd restore-volumes
+            ghostd version | tee /dev/stderr | grep -qF "release ${COMMIT:0:7}"
+            ghostd restore-volumes
             ghost-mock-github --help >/dev/null && ghost-scripts --help >/dev/null
-            ANTHROPIC_BASE_URL=http://x ghostd check'
+            out=$(ANTHROPIC_BASE_URL=http://x ghostd check 2>&1) || true
+            printf "%s\n" "$out"
+            grep -q "^onnxruntime: /usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4$" <<<"$out"
+            grep -q "^models: /usr/lib/heka-ghost-desktop/models$" <<<"$out"
+            grep -q "^Parakeet.s files are not in the Hugging Face cache" <<<"$out"
+            ! grep -q "scripts/onnxruntime.sh\|scripts/models.sh" <<<"$out"'
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
