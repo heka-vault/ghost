@@ -29,7 +29,7 @@ enabled in the order `str0m`, `webrtc`, `libwebrtc`; `BACKEND` names it.
 
 ## The far end and the measurements
 
-`scripts/rtc/phone.py` is the phone, automated with aiortc from the Python venv: one Opus
+`scripts/rtc/phone.py` is the phone, automated with aiortc from the oracle's venv: one Opus
 track playing the marker tone, a `chat` data channel with `ping` once a second and
 `client-ready`, a `restart_pc` mid-call on a fresh peer connection, the call's stats, a
 `disconnect-bot` at the end, and a JSON report with every burst's send and receive time.
@@ -39,10 +39,10 @@ pairs the two reports.
 ```bash
 # unit tests (27), the SDP shaping, the resamplers, the Opus round trip, the RTVI subset
 cargo nextest run -p ghost-rtc
-# the loopback tests against aiortc, per stack (GHOST_VENV defaults to the main checkout's .venv)
+# the loopback tests against aiortc, per stack (GHOST_VENV defaults to tools/oracle/.venv)
 cargo nextest run -p ghost-rtc --features str0m --run-ignored only
 # a 5-minute measured call with a restart_pc at 150 s
-/home/detroitpro/projects/active/ghost/.venv/bin/python -I scripts/rtc/measure.py --backend str0m
+uv run --project tools/oracle python -I scripts/rtc/measure.py --backend str0m
 ```
 
 One-way latency is each burst's receive time minus its send time, both wall clock on the

@@ -12,8 +12,9 @@ vault open as they are and the words Ghost says do not change.
    `codec.rs` (the stored form), `store.rs` (SQLite, the same schema), `redact.rs`,
    `time.rs`, `source.rs` (the tool-source contract), `gate.rs`, `permissions.rs`,
    `policy.rs`.
-4. The Python module in `packages/core/src/ghost_core/` and its tests in
-   `packages/core/tests/` of the main checkout at `/home/detroitpro/projects/active/ghost`.
+4. The Python module and its tests, in history now that the Python daemon is gone (W10 of
+   #39): `git show c5d32fb:packages/core/src/ghost_core/<name>.py` and
+   `git show c5d32fb:packages/core/tests/test_<name>.py`.
 
 ## Conventions
 
@@ -52,7 +53,7 @@ cargo deny check
 
 All four clean before a commit.
 
-Any Python you add (a fixture recorder, an automated far end under `scripts/`) is linted by CI's python job over the whole repo: `~/projects/active/ghost/.venv/bin/ruff check <path>` and `ruff format <path>` clean too, lines at most 100 columns.
+Any Python you add (a fixture recorder, an automated far end under `scripts/`) is linted by CI's python job over the whole repo: `uv run ruff check <path>` and `uv run ruff format --check <path>` clean too (the root workspace has ruff; the oracle in `tools/oracle` has the model libraries), lines at most 100 columns.
 
 ## Branch protocol
 

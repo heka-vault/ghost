@@ -1,11 +1,13 @@
 #!/usr/bin/env python
-"""Record the Python daemon's model outputs as parity fixtures for ``crates/ghost-infer``.
+"""Record the oracle's model outputs as parity fixtures for ``crates/ghost-infer``.
 
-The Python daemon is the oracle (ADR 0039): the Rust crate must match these files word for
-word, verdict for verdict, and within 1e-3 where numbers are compared. Run it through the
-main checkout's venv, which has every model and its Python wrapper installed::
+The Python wrappers the daemon ran are the oracle (ADR 0039; ``tools/oracle``): the Rust
+crate must match these files word for word, verdict for verdict, and within 1e-3 where
+numbers are compared. Run it through the oracle's environment, which has every model and
+its Python wrapper installed at the versions the fixtures were first recorded with::
 
-    /home/detroitpro/projects/active/ghost/.venv/bin/python -I scripts/fixtures/record.py
+    uv sync --project tools/oracle
+    uv run --project tools/oracle python -I scripts/fixtures/record.py
 
 The fixtures land under ``<ghost>/.scratch/spike-fixtures/`` and are never committed. The
 clips are the operator's deliberately recorded takes and the synthetic wake-review corpus
@@ -13,7 +15,7 @@ clips are the operator's deliberately recorded takes and the synthetic wake-revi
 
 Per clip (``clips.json`` lists them):
 
-- ``parakeet/<id>.json``: the transcript as ``ghost_voice.parakeet`` returns it, its tokens.
+- ``parakeet/<id>.json``: the transcript as ``oracle.parakeet`` returns it, its tokens.
 - ``silero/<id>.json``: the raw model's probability per 512-sample chunk (fresh state, no
   reset), and Pipecat's analyzer over the same chunks with its clock driven by the audio:
   confidence, smoothed volume and VAD state per chunk.
@@ -36,7 +38,6 @@ import glob
 import json
 import os
 import statistics
-import sys
 import time
 import wave
 from pathlib import Path
@@ -97,13 +98,13 @@ SENTENCES = [
 ]
 
 RATE = 16000
-STEP = 1280  # 80 ms, ghost_voice.wakeword.STEP
-WINDOW = 32000  # 2 s, ghost_voice.wakeword.WINDOW
+STEP = 1280  # 80 ms, oracle.wakeword.STEP
+WINDOW = 32000  # 2 s, oracle.wakeword.WINDOW
 
 
 def ghost_root() -> Path:
-    # The venv is <ghost>/.venv; its python may be a symlink elsewhere, so go by the prefix.
-    return Path(sys.prefix).parent
+    # This file is <ghost>/scripts/fixtures/record.py.
+    return Path(__file__).resolve().parents[2]
 
 
 def read_wav(path: Path) -> np.ndarray:
@@ -147,12 +148,12 @@ def dump(path: Path, obj: object) -> None:
 
 
 def record_parakeet(out: Path, clips: list[tuple[str, np.ndarray]], timings: dict) -> None:
-    from ghost_voice.parakeet import ParakeetSTTService
+    from oracle.parakeet import ParakeetSTT
 
-    svc = ParakeetSTTService(threads=4)
+    svc = ParakeetSTT(threads=4)
     svc.load()
-    assert svc._model is not None
-    timed = svc._model.with_timestamps()
+    assert svc.model is not None
+    timed = svc.model.with_timestamps()
     secs: list[float] = []
     for cid, pcm in clips:
         audio = pcm.astype(np.float32) / 32768.0
@@ -260,12 +261,12 @@ def record_smart_turn(out: Path, clips: list[tuple[str, np.ndarray]], timings: d
 
 
 def record_wake(out: Path, clips: list[tuple[str, np.ndarray]], timings: dict, meta: dict) -> None:
-    from ghost_voice.wakeword import WakeModel, WakeWordScorer
+    from oracle.wakeword import WakeModel, WakeWordScorer
 
     cache = Path.home() / ".cache" / "ghost" / "wake"
     paths = [cache / "hey_ghost.onnx", *sorted(cache.glob("ghost_*.onnx"))]
     scorer = WakeWordScorer(paths)
-    # ghostd's defaults (apps/ghostd/src/ghostd/config.py): 0.3 with Parakeet's check on,
+    # ghostd's defaults (crates/ghostd/src/config.rs): 0.3 with Parakeet's check on,
     # 0.7 with it off, for "hey ghost" and for the ghost_* models alike.
     checked = tuple(WakeModel.known(p, 0.3) for p in paths)
     unchecked = tuple(WakeModel.known(p, 0.7) for p in paths)

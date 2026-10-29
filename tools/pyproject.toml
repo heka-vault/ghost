@@ -1,0 +1,18 @@
+# Ghost's repository tools, a member of the root uv workspace: the version script
+# (docs/releasing.md) and the tests of the scripts (`uv run --project tools pytest`).
+[project]
+name = "ghost-tools"
+version = "2026.10.0"
+description = "Ghost's repository tools: the version script and the tests of the scripts"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.3", "ruff>=0.8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,6 +1,6 @@
 """Offline wake-phrase check over recorded clips: what Parakeet hears, what the matcher does.
 
-    uv run python docs/benchmarks/scripts/wake_eval.py [.scratch/clips/*.wav] [--fuzzy 0.8]
+    uv run --project tools/oracle python -I docs/benchmarks/scripts/wake_eval.py [.scratch/clips/*.wav] [--fuzzy 0.8]
 
 Each clip is transcribed whole and in 2 s windows (the passive listener sees short VAD
 segments, so the windows are the realistic case). Clips named ``*-neg*`` are expected
@@ -15,7 +15,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
-from ghost_voice.wake import DEFAULT_WAKE_PHRASES, match_wake, parse_phrases
+from oracle.wake import DEFAULT_WAKE_PHRASES, match_wake, parse_phrases
 
 
 def load(path: Path) -> np.ndarray:

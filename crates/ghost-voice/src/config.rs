@@ -86,7 +86,7 @@ pub struct VoiceSettings {
     pub hold_timeout_secs: f64,
     pub smart_turn_threads: usize,
     /// `GHOST_SILERO_MODEL`, `GHOST_SMART_TURN_MODEL`: the ONNX files; unset, where the
-    /// Python venv has them (`GHOST_SITE_PACKAGES`).
+    /// oracle's venv has them (`GHOST_SITE_PACKAGES`), else `~/.cache/ghost/models/`.
     pub silero_model: PathBuf,
     pub smart_turn_model: PathBuf,
 
@@ -130,13 +130,15 @@ fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Where the Python venv keeps Pipecat's model files, when it is there.
+/// Where the oracle's venv keeps Pipecat's model files (Silero, Smart Turn, the wake
+/// front end), when it is there: `GHOST_SITE_PACKAGES`, else `tools/oracle/.venv` of the
+/// checkout this binary was built in (`make setup` syncs it), else nothing.
 pub fn site_packages(get: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     if let Some(v) = get("GHOST_SITE_PACKAGES").filter(|v| !v.trim().is_empty()) {
         return Some(PathBuf::from(v));
     }
-    let known =
-        PathBuf::from("/home/detroitpro/projects/active/ghost/.venv/lib/python3.12/site-packages");
+    let known = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/oracle/.venv/lib/python3.12/site-packages");
     known.is_dir().then_some(known)
 }
 

@@ -1310,11 +1310,15 @@ async fn a_stdio_apps_stderr_reaches_the_journal_redacted() {
     also_redact("test-apps-relay", []);
 }
 
-/// `ghost-mock-github` from the Python checkout's venv, when it is on this machine.
+/// `ghost-mock-github`, this workspace's own binary, when it has been built
+/// (`GHOST_MOCK_GITHUB` names another).
 #[tokio::test]
 async fn an_app_that_runs_on_this_computer_gets_only_what_its_env_names() {
     let bin = std::env::var("GHOST_MOCK_GITHUB").unwrap_or_else(|_| {
-        "/home/detroitpro/projects/active/ghost/.venv/bin/ghost-mock-github".to_string()
+        format!(
+            "{}/../../target/debug/ghost-mock-github",
+            env!("CARGO_MANIFEST_DIR")
+        )
     });
     if !Path::new(&bin).is_file() {
         eprintln!("skipped: {bin} is not on this machine");

@@ -12,9 +12,10 @@
 //! cargo nextest run -p ghost-infer --release --run-ignored all --no-capture
 //! ```
 //!
-//! The model files are read where the Python has them: the Hugging Face cache for
-//! Parakeet, the venv's `site-packages` for Silero, Smart Turn and the wake front end
-//! (`GHOST_SITE_PACKAGES`), `~/.cache/ghost/` for the wake classifiers and Kokoro.
+//! The model files are read where the oracle has them: the Hugging Face cache for
+//! Parakeet, the oracle's `site-packages` (`tools/oracle/.venv`, `GHOST_SITE_PACKAGES`) for
+//! Silero, Smart Turn and the wake front end, `~/.cache/ghost/` for the wake classifiers
+//! and Kokoro.
 //!
 //! Two runtimes. The crate links the ONNX Runtime build `ort` 2.0.0-rc.15 bundles (1.31.0);
 //! the Python ran 1.24.4. On the Python's own library every port is the oracle's: Parakeet
@@ -29,7 +30,7 @@
 //! integrates phase. Run against the Python's library to see the port alone:
 //!
 //! ```text
-//! ORT_DYLIB_PATH=<venv>/onnxruntime/capi/libonnxruntime.so.1.24.4 GHOST_PARITY_STRICT=1 \
+//! ORT_DYLIB_PATH=<oracle venv>/onnxruntime/capi/libonnxruntime.so.1.24.4 GHOST_PARITY_STRICT=1 \
 //!   cargo nextest run -p ghost-infer --release --features ort/load-dynamic --run-ignored all --no-capture
 //! ```
 //!
@@ -55,7 +56,7 @@ use serde::Deserialize;
 
 const FIXTURES_DEFAULT: &str = "/home/detroitpro/projects/active/ghost/.scratch/spike-fixtures";
 const SITE_PACKAGES_DEFAULT: &str =
-    "/home/detroitpro/projects/active/ghost/.venv/lib/python3.12/site-packages";
+    "/home/detroitpro/projects/active/ghost/tools/oracle/.venv/lib/python3.12/site-packages";
 
 fn fixtures() -> Option<PathBuf> {
     let dir = std::env::var_os("GHOST_FIXTURES")

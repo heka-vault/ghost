@@ -5,9 +5,9 @@ For every clip, this compares the Rust port's encoder input (features the ignore
 ``parakeet_dump_features`` writes under ``<fixtures>/rust-parakeet-features/``) with the
 NumPy preprocessor's, and runs the Python model's encoder and decoder on the Rust features:
 if that gives the Python transcript, the port's front end is not what differs, the
-ONNX Runtime build is. Run through the main checkout's venv::
+ONNX Runtime build is. Run through the oracle's environment (``tools/oracle``)::
 
-    /home/detroitpro/projects/active/ghost/.venv/bin/python -I scripts/fixtures/check_parakeet.py
+    uv run --project tools/oracle python -I scripts/fixtures/check_parakeet.py
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import numpy as np
 
 
 def main() -> None:
-    ghost = Path(sys.prefix).parent
+    ghost = Path(__file__).resolve().parents[2]
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else ghost / ".scratch" / "spike-fixtures"
     import onnx_asr
     import onnxruntime as ort

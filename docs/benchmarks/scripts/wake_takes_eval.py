@@ -2,7 +2,7 @@
 alone and with Parakeet confirming it (ADR 0025, issue #8).
 
     make wake-takes-eval [TAKES=.scratch/wake-takes/2026-10-22] [ARGS="--show-text"]
-    uv run python docs/benchmarks/scripts/wake_takes_eval.py [--takes DIR] [--model PATH]
+    uv run --project tools/oracle python -I docs/benchmarks/scripts/wake_takes_eval.py [--takes DIR] [--model PATH]
 
 Reads the ``.aec.wav`` takes (what Ghost hears) listed in a session's takes.jsonl, as
 scripts/record-wake-takes.py writes them; the default session is the newest under
@@ -108,7 +108,7 @@ def default_model() -> Path | None:
 
 
 class Parakeet:
-    """Parakeet TDT 0.6B v3 int8 through onnx-asr, as ghost_voice.parakeet loads it."""
+    """Parakeet TDT 0.6B v3 int8 through onnx-asr, as oracle.parakeet loads it."""
 
     def __init__(self) -> None:
         import onnx_asr
@@ -192,7 +192,7 @@ class Result:
 
 
 def score_take(path: Path, take: dict, stt: Parakeet, model, eos: EndOfSpeech) -> Result:
-    from ghost_voice.wake import DEFAULT_WAKE_PHRASES, match_wake
+    from oracle.wake import DEFAULT_WAKE_PHRASES, match_wake
 
     pcm = load(path)
     whole = stt(pcm)

@@ -6,9 +6,10 @@ member ``nemo128``, float32, 257 bins by 128 filters) and its NumPy preprocessor
 the power spectrum by it. The table was computed in float32 and is up to 8 ulps off the
 Slaney formula evaluated in float64, and the int8 model flips a comma or a capital on a
 feature difference that small, so the Rust port carries the same numbers: the non-zero
-weights (about two per bin) as ``(bin, filter, bits)``. Run through the main checkout's venv::
+weights (about two per bin) as ``(bin, filter, bits)``. Run through the oracle's environment
+(``tools/oracle``)::
 
-    /home/detroitpro/projects/active/ghost/.venv/bin/python -I scripts/fixtures/nemo_fbanks.py
+    uv run --project tools/oracle python -I scripts/fixtures/nemo_fbanks.py
 """
 
 from __future__ import annotations

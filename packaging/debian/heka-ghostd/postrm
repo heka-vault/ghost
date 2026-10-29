@@ -1,9 +1,0 @@
-#!/bin/sh
-set -e
-# The bundled runtime writes byte-code caches under /opt/ghost at run time; dpkg does
-# not know those files, so clear the tree ourselves. User data in ~/.config, ~/.cache
-# and ~/.local/share/ghost is never touched.
-if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
-  rm -rf /opt/ghost
-fi
-exit 0

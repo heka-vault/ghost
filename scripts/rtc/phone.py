@@ -15,9 +15,10 @@ read the one-way latency in each direction.
 
 Signalling is either HTTP (``--url http://127.0.0.1:PORT``, the probe's unsigned
 ``/offer``) or stdio (``--stdio``: an offer as one JSON line on stdout, the answer as one
-JSON line on stdin; used by the crate's integration tests). Run it with the venv's Python:
+JSON line on stdin; used by the crate's integration tests). Run it with the oracle's Python
+(``tools/oracle``, which has aiortc):
 
-    /home/detroitpro/projects/active/ghost/.venv/bin/python -I scripts/rtc/phone.py --url ...
+    uv run --project tools/oracle python -I scripts/rtc/phone.py --url ...
 
 This file reads nothing but its own arguments; nothing it receives is kept but numbers.
 """

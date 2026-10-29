@@ -2,7 +2,8 @@
 """Record the operator's own wake takes: the wake test set (ADR 0025, issue #8).
 
     make record-takes [BLOCKS=A,C,F]
-    uv run python scripts/record-wake-takes.py [--blocks A,C,F] [--session DIR] [--dry-run]
+    uv run --project tools/oracle python -I scripts/record-wake-takes.py \
+        [--blocks A,C,F] [--session DIR] [--dry-run]
 
 A guided recorder. Each block says once where to stand and how to speak; each take shows
 the exact line, counts down 3-2-1 on screen and records it from ghost.mic (what Ghost

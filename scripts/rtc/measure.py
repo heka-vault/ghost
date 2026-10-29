@@ -2,7 +2,8 @@
 a call from the aiortc phone (``phone.py``) against it, and print the numbers the README
 tables are made of.
 
-    .venv/bin/python -I scripts/rtc/measure.py --backend str0m --seconds 300 --restart-at 150
+    uv run --project tools/oracle python -I scripts/rtc/measure.py \
+        --backend str0m --seconds 300 --restart-at 150
 
 One-way latency in each direction (the bursts' send times on one side paired with their
 receive times on the other, both wall clock, both on this machine), packet loss and jitter

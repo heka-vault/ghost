@@ -5,10 +5,11 @@
 //!
 //! ```bash
 //! cargo nextest run -p ghost-rtc --features str0m --run-ignored ignored-only
-//! GHOST_VENV=/path/to/.venv cargo test -p ghost-rtc --features webrtc -- --ignored
+//! GHOST_VENV=tools/oracle/.venv cargo test -p ghost-rtc --features webrtc -- --ignored
 //! ```
 //!
-//! `GHOST_VENV` defaults to the main checkout's `.venv`. Nothing from the call is kept but
+//! `GHOST_VENV` defaults to the oracle's venv (`tools/oracle/.venv`, `uv sync --project
+//! tools/oracle`). Nothing from the call is kept but
 //! numbers.
 #![cfg(any(feature = "str0m", feature = "webrtc", feature = "libwebrtc"))]
 
@@ -26,7 +27,9 @@ use tokio::sync::watch;
 
 fn python() -> PathBuf {
     let venv = std::env::var("GHOST_VENV")
-        .unwrap_or_else(|_| "/home/detroitpro/projects/active/ghost/.venv".to_string());
+        .unwrap_or_else(|_| {
+            format!("{}/../../tools/oracle/.venv", env!("CARGO_MANIFEST_DIR"))
+        });
     PathBuf::from(venv).join("bin/python")
 }
 
