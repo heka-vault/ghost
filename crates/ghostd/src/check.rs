@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -23,10 +23,12 @@ use ghost_core::signin::{SignIns, auth_for_apps};
 use ghost_core::skills::Skills;
 use ghost_core::waiting::Items;
 use ghost_core::watches::WaitingItems;
+use ghost_voice::VoiceSettings;
 
 use crate::build_info;
 use crate::config::GhostdSettings;
 use crate::passwords::{KEYRING_WAITS, check_passwords, keyring_waits, open_passwords};
+use crate::wake::wake_model_paths;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -132,6 +134,113 @@ pub async fn check_folder(
         let name = h.secret_name();
         if secrets.secret(&name).is_none_or(|s| s.is_empty()) {
             problems.push(format!("hook {}: password {name} is not set", h.name));
+        }
+    }
+    problems
+}
+
+/// `ghostd check` for the model files `ghostd run` would load, or the script or the step
+/// that gets each one there (docs/releasing.md, "The speech models"): the four the bundle
+/// carries, through `resolve` (`ghost_infer::models`; `GHOST_SILERO_MODEL` and
+/// `GHOST_SMART_TURN_MODEL` name their own), Parakeet in the Hugging Face cache (or
+/// `GHOST_STT_DIR`), Kokoro in Ghost's cache (or `GHOST_TTS_MODEL_PATH` and
+/// `GHOST_TTS_VOICES_PATH`), and in onnx wake mode the trained "hey ghost" classifier.
+/// Prints the lines; returns the problems.
+pub fn check_models(
+    cfg: &GhostdSettings,
+    voice: &VoiceSettings,
+    env: &HashMap<String, String>,
+    resolve: &dyn Fn(&str) -> ghost_infer::Result<PathBuf>,
+    out: &mut dyn Write,
+) -> Vec<String> {
+    use ghost_infer::models::{ENV_VAR, FILES, SILERO, SMART_TURN};
+    let mut problems = Vec::new();
+    let mut found: Vec<PathBuf> = Vec::new();
+    let set = |var: &str| env.get(var).is_some_and(|v| !v.trim().is_empty());
+    for name in FILES {
+        let named = match name {
+            SILERO if set("GHOST_SILERO_MODEL") => {
+                Some(("GHOST_SILERO_MODEL", voice.silero_model.clone()))
+            }
+            SMART_TURN if set("GHOST_SMART_TURN_MODEL") => {
+                Some(("GHOST_SMART_TURN_MODEL", voice.smart_turn_model.clone()))
+            }
+            _ => None,
+        };
+        match named {
+            Some((_, path)) if path.is_file() => found.push(path),
+            Some((var, path)) => problems.push(format!(
+                "{name}: {var} names {}, which is not there",
+                path.display()
+            )),
+            None => match resolve(name) {
+                Ok(path) if path.is_file() => found.push(path),
+                Ok(path) => problems.push(format!(
+                    "{name}: {} is not there ({ENV_VAR} names its folder)",
+                    path.display()
+                )),
+                Err(e) => problems.push(e.to_string()),
+            },
+        }
+    }
+    if !found.is_empty() {
+        let folders: BTreeSet<PathBuf> = found
+            .iter()
+            .filter_map(|p| p.parent().map(Path::to_path_buf))
+            .collect();
+        let shown: Vec<String> = if folders.len() == 1 {
+            folders.iter().map(|f| f.display().to_string()).collect()
+        } else {
+            found.iter().map(|p| p.display().to_string()).collect()
+        };
+        let _ = writeln!(out, "models: {}", shown.join(", "));
+    }
+
+    match voice.parakeet_paths() {
+        Some(paths) if paths.encoder.is_file() => {
+            let dir = paths.encoder.parent().unwrap_or(&paths.encoder);
+            let _ = writeln!(out, "parakeet: {}", dir.display());
+        }
+        Some(paths) => problems.push(format!(
+            "Parakeet: {} is not there (GHOST_STT_DIR names its folder)",
+            paths.encoder.display()
+        )),
+        None => problems.push(
+            "Parakeet's files are not in the Hugging Face cache \
+             (models--istupakov--parakeet-tdt-0.6b-v3-onnx); fetch them as docs/releasing.md \
+             says under \"The speech models\", or set GHOST_STT_DIR"
+                .to_string(),
+        ),
+    }
+
+    let kokoro = voice.kokoro_paths();
+    if kokoro.model.is_file() && kokoro.voices.is_file() {
+        let dir = kokoro.model.parent().unwrap_or(&kokoro.model);
+        let _ = writeln!(out, "kokoro: {}", dir.display());
+    } else {
+        problems.push(format!(
+            "Kokoro's files are not there ({}, {}); fetch them as docs/releasing.md says \
+             under \"The speech models\", or set GHOST_TTS_MODEL_PATH and GHOST_TTS_VOICES_PATH",
+            kokoro.model.display(),
+            kokoro.voices.display()
+        ));
+    }
+
+    if cfg.wake_mode == "onnx" {
+        let (hey, address) = wake_model_paths(cfg, voice);
+        if hey.is_file() {
+            let _ = writeln!(
+                out,
+                "wake models: {}, {} for Ghost by name",
+                hey.display(),
+                address.len()
+            );
+        } else {
+            problems.push(format!(
+                "GHOST_WAKE_MODE=onnx but there is no model at {}; train one and copy it \
+                 there as docs/wake-recording.md says, or set GHOST_WAKE_MODEL_PATH",
+                hey.display()
+            ));
         }
     }
     problems
@@ -302,6 +411,19 @@ pub async fn check_command(
             let _ = writeln!(out, "onnxruntime: {}", path.display());
         }
         Err(e) => problems.push(e.to_string()),
+    }
+    // The model files: the four the bundle carries, through `ghost_infer::models`;
+    // Parakeet, Kokoro and the trained wake classifiers where they stay. A missing one
+    // names the script or the step that gets it there (docs/releasing.md), never a panic.
+    match VoiceSettings::from_vars(|name| env.get(name).cloned()) {
+        Ok(voice) => problems.extend(check_models(
+            &cfg,
+            &voice,
+            &env,
+            &ghost_infer::models::resolve_for_process,
+            out,
+        )),
+        Err(e) => problems.push(format!("voice settings: {e}")),
     }
 
     let autonomy = match AutonomyPolicy::load(&cfg.policy_path) {
@@ -543,6 +665,168 @@ mod tests {
         assert_eq!(
             ghost_problems(&apps, &[], &passwords)[0].0,
             "passwords:locked"
+        );
+    }
+
+    /// A temp home with every model where `ghostd run` would read it: the four small files
+    /// in the cache, Parakeet's int8 snapshot in `GHOST_STT_DIR`, Kokoro in the cache's
+    /// `kokoro/`, the trained classifier in `wake/`.
+    fn models_home() -> (tempfile::TempDir, HashMap<String, String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let cache = home.join(".cache/ghost");
+        let models = cache.join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        for name in ghost_infer::models::FILES {
+            std::fs::write(models.join(name), b"m").unwrap();
+        }
+        let stt = home.join("stt");
+        std::fs::create_dir_all(&stt).unwrap();
+        std::fs::write(stt.join("encoder-model.int8.onnx"), b"m").unwrap();
+        let kokoro = cache.join("kokoro");
+        std::fs::create_dir_all(&kokoro).unwrap();
+        std::fs::write(kokoro.join("kokoro-v1.0.onnx"), b"m").unwrap();
+        std::fs::write(kokoro.join("voices-v1.0.bin"), b"m").unwrap();
+        let wake = cache.join("wake");
+        std::fs::create_dir_all(&wake).unwrap();
+        std::fs::write(wake.join("hey_ghost.onnx"), b"m").unwrap();
+        std::fs::write(wake.join("ghost_address.onnx"), b"m").unwrap();
+        let env: HashMap<String, String> = [
+            ("GHOST_CACHE_DIR".to_string(), cache.display().to_string()),
+            ("GHOST_STT_DIR".to_string(), stt.display().to_string()),
+        ]
+        .into();
+        (dir, env)
+    }
+
+    fn check_models_in(
+        home: &Path,
+        env: &HashMap<String, String>,
+        wake_mode: &str,
+    ) -> (String, Vec<String>) {
+        let voice = VoiceSettings::from_vars(|name| env.get(name).cloned()).unwrap();
+        let cfg = GhostdSettings {
+            wake_mode: wake_mode.into(),
+            ..GhostdSettings::default()
+        };
+        let resolve = |name: &str| {
+            ghost_infer::models::resolve(
+                name,
+                |var| env.get(var).map(std::ffi::OsString::from),
+                None,
+                Some(home),
+            )
+        };
+        let mut out = Vec::new();
+        let problems = check_models(&cfg, &voice, env, &resolve, &mut out);
+        (String::from_utf8(out).unwrap(), problems)
+    }
+
+    #[test]
+    fn every_model_found_is_said_once_by_its_folder() {
+        let (dir, env) = models_home();
+        let (out, problems) = check_models_in(dir.path(), &env, "onnx");
+        assert_eq!(problems, Vec::<String>::new(), "{out}");
+        let cache = dir.path().join(".cache/ghost");
+        assert!(
+            out.contains(&format!("models: {}\n", cache.join("models").display())),
+            "{out}"
+        );
+        assert!(
+            out.contains(&format!("parakeet: {}\n", dir.path().join("stt").display())),
+            "{out}"
+        );
+        assert!(
+            out.contains(&format!("kokoro: {}\n", cache.join("kokoro").display())),
+            "{out}"
+        );
+        assert!(
+            out.contains(&format!(
+                "wake models: {}, 1 for Ghost by name\n",
+                cache.join("wake/hey_ghost.onnx").display()
+            )),
+            "{out}"
+        );
+        // Transcript wake needs no classifier, and says nothing about one.
+        let (out, problems) = check_models_in(dir.path(), &env, "transcript");
+        assert!(problems.is_empty());
+        assert!(!out.contains("wake models"));
+    }
+
+    #[test]
+    fn a_missing_model_names_the_script_or_the_step_and_nothing_panics() {
+        let (dir, env) = models_home();
+        let cache = dir.path().join(".cache/ghost");
+        std::fs::remove_file(cache.join("models/smart-turn-v3.2-cpu.onnx")).unwrap();
+        std::fs::remove_file(cache.join("kokoro/voices-v1.0.bin")).unwrap();
+        std::fs::remove_file(cache.join("wake/hey_ghost.onnx")).unwrap();
+        std::fs::remove_dir_all(dir.path().join("stt")).unwrap();
+        let (out, problems) = check_models_in(dir.path(), &env, "onnx");
+        assert_eq!(problems.len(), 4, "{problems:?}\n{out}");
+        assert!(
+            problems[0].starts_with("smart-turn-v3.2-cpu.onnx was not found")
+                && problems[0].contains("scripts/models.sh")
+                && problems[0].contains("GHOST_MODELS_DIR"),
+            "{}",
+            problems[0]
+        );
+        assert!(
+            problems[1].starts_with("Parakeet: ") && problems[1].contains("GHOST_STT_DIR"),
+            "{}",
+            problems[1]
+        );
+        assert!(
+            problems[2].starts_with("Kokoro's files are not there")
+                && problems[2].contains("docs/releasing.md"),
+            "{}",
+            problems[2]
+        );
+        assert!(
+            problems[3].starts_with("GHOST_WAKE_MODE=onnx but there is no model at")
+                && problems[3].contains("docs/wake-recording.md"),
+            "{}",
+            problems[3]
+        );
+        // The three still there are said by their folder.
+        assert!(
+            out.contains(&format!("models: {}\n", cache.join("models").display())),
+            "{out}"
+        );
+        assert!(!out.contains("kokoro:"));
+    }
+
+    #[test]
+    fn a_model_the_settings_name_is_checked_where_they_point() {
+        let (dir, mut env) = models_home();
+        let own = dir.path().join("own/silero_vad.onnx");
+        env.insert("GHOST_SILERO_MODEL".to_string(), own.display().to_string());
+        let (_, problems) = check_models_in(dir.path(), &env, "transcript");
+        assert_eq!(
+            problems,
+            vec![format!(
+                "silero_vad.onnx: GHOST_SILERO_MODEL names {}, which is not there",
+                own.display()
+            )]
+        );
+        std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+        std::fs::write(&own, b"m").unwrap();
+        let (out, problems) = check_models_in(dir.path(), &env, "transcript");
+        assert!(problems.is_empty(), "{problems:?}");
+        // Two folders now, so each file is named.
+        assert!(
+            out.contains(&format!("models: {}, ", own.display())),
+            "{out}"
+        );
+        // A folder GHOST_MODELS_DIR names is taken as given, and checked.
+        let mine = dir.path().join("mine");
+        env.remove("GHOST_SILERO_MODEL");
+        env.insert("GHOST_MODELS_DIR".to_string(), mine.display().to_string());
+        let (_, problems) = check_models_in(dir.path(), &env, "transcript");
+        assert_eq!(problems.len(), 4, "{problems:?}");
+        assert!(
+            problems[0].contains("is not there (GHOST_MODELS_DIR names its folder)"),
+            "{}",
+            problems[0]
         );
     }
 

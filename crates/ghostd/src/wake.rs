@@ -725,16 +725,14 @@ fn matches_glob(path: &Path, glob: &str) -> bool {
     }
 }
 
-/// Where livekit-wakeword's feature models are (`melspectrogram.onnx`,
-/// `embedding_model.onnx`): the voice cache's `wake/` folder, else the Python venv's copy.
-pub fn wake_resources(voice: &VoiceSettings) -> Option<PathBuf> {
-    let cached = voice.cache_dir.join("wake");
-    if cached.join("melspectrogram.onnx").is_file() {
-        return Some(cached);
-    }
-    let site = ghost_voice::config::site_packages(&|name| std::env::var(name).ok())?;
-    let dir = site.join("livekit/wakeword/resources");
-    dir.join("melspectrogram.onnx").is_file().then_some(dir)
+/// The wake front end's graphs (`melspectrogram.onnx`, then `embedding_model.onnx`), where
+/// `ghost_infer::models` finds them: `GHOST_MODELS_DIR`, the bundle's resources, Ghost's
+/// cache. The error names `scripts/models.sh`.
+pub fn wake_resources() -> Result<(PathBuf, PathBuf), String> {
+    use ghost_infer::models::{EMBEDDING, MELSPECTROGRAM, resolve_for_process};
+    let mel = resolve_for_process(MELSPECTROGRAM).map_err(|e| e.to_string())?;
+    let embedding = resolve_for_process(EMBEDDING).map_err(|e| e.to_string())?;
+    Ok((mel, embedding))
 }
 
 /// The capture from the desk's microphone, as the passive pipeline takes it.

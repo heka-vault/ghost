@@ -899,21 +899,13 @@ impl Daemon {
                 path.display()
             ));
         }
-        let Some(resources) = wake_resources(&voice) else {
-            return fall_back(
-                "GHOST_WAKE_MODE=onnx but the feature models (melspectrogram.onnx, \
-                 embedding_model.onnx) are not in the voice cache's wake/ folder"
-                    .into(),
-            );
+        let (mel, embedding) = match wake_resources() {
+            Ok(found) => found,
+            Err(why) => return fall_back(format!("GHOST_WAKE_MODE=onnx but {why}")),
         };
         let mut files = vec![path.clone()];
         files.extend(address.iter().cloned());
-        let scorer = match WakeScorer::load(
-            &resources.join("melspectrogram.onnx"),
-            &resources.join("embedding_model.onnx"),
-            &files,
-            1,
-        ) {
+        let scorer = match WakeScorer::load(&mel, &embedding, &files, 1) {
             Ok(s) => s,
             Err(e) => return fall_back(format!("the wake models did not load: {e}")),
         };

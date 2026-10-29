@@ -88,7 +88,7 @@ One Cargo workspace (ADR 0039): the crates under `crates/` and the desktop app's
 | `ghostd` | The daemon (`crates/ghostd`). Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010, or the trained detectors, ADR 0025), and on wake runs a session over the desk's audio; ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021). Serves the control API, the phone listener and the webhook listener, runs the watches and the routes, and is the desktop's `Controller`. `ghostd check`, `passwords`, `latency`, `perf`, `push`, `restore-volumes` and `api-schema` are its subcommands |
 | `ghost-voice` | Ghost's own pipeline, written for one session and one transport at a time (ADR 0039; Pipecat's ideas, not its code): typed frames over bounded channels, one task per stage, a cancellation token per session and per turn. The speech-in stage (Silero VAD, Parakeet with interim re-reads), the user's turn (Smart Turn, the patient stop with the grace, the speculative answer, barge-in), the interceptors and the confirmation processor, the model stage with compaction, the narration cut and the spoken filter, Kokoro a clause at a time or ElevenLabs with failover, the echo filter, hold, the latency timeline, and the harness behind `make perf` |
 | `ghost-llm` | The one model client (ADR 0037): the session's streamed reply, a one-shot completion and a first-token probe, for the Anthropic Messages API and for OpenAI-compatible Chat Completions. Every tool call of a reply is delivered; a reply cut at the output cap is redone once in smaller steps and flagged `cut_off` |
-| `ghost-infer` | The local models on ONNX Runtime (ADR 0004): Parakeet TDT v3 for speech to text, Silero for voice activity, Smart Turn v3 for the end of a turn, the trained wake detectors with the transcript matcher behind them, and Kokoro for speech. The runtime is loaded at start (ONNX Runtime 1.24.4, the one the parity fixtures were recorded on: in the bundle, or `~/.cache/ghost/onnxruntime/`, or `ORT_DYLIB_PATH`) |
+| `ghost-infer` | The local models on ONNX Runtime (ADR 0004): Parakeet TDT v3 for speech to text, Silero for voice activity, Smart Turn v3 for the end of a turn, the trained wake detectors with the transcript matcher behind them, and Kokoro for speech. The runtime is loaded at start (ONNX Runtime 1.24.4, the one the parity fixtures were recorded on: in the bundle, or `~/.cache/ghost/onnxruntime/`, or `ORT_DYLIB_PATH`), and the four small model files are found the same way (`GHOST_MODELS_DIR`, the bundle, `~/.cache/ghost/models/`, where `scripts/models.sh` puts them) |
 | `ghost-audio` | The audio engine: PipeWire through the project's own binding (one clock domain), a realtime-safe ring between its thread and tokio, ducking, the chime and the thinking sound |
 | `ghost-rtc` | The phone's WebRTC audio behind one `Media` trait (ADR 0016, ADR 0020): str0m by default, Opus through the system libopus, the resampling either side of the codec, the RTVI subset |
 | `ghost-api` | The control API (ADR 0013): axum on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending change with Confirm and Cancel, audit, the apps (connect, disconnect, sign in) and the catalog, the permissions and the policy file, the passwords (names and metadata out, values only in, ADR 0036), the model connection (`/model`: its view, the provider's models, Test connection, OpenRouter's sign-in; ADR 0037), devices and setup. `packages/api/openapi.json` is generated from its types (`make api-schema`) and `packages/client-ts` from that. Nothing passive crosses it |
@@ -265,15 +265,16 @@ committed.
 - Real-voice benchmark on the workstation mic, with music playing ([benchmarks](benchmarks/2026-10-16-speech-cpu.md) used synthetic clips).
 - LLM default: `claude-sonnet-5-5` with `thinking: {"type": "between_tools"}` (0.77 s to first token; see the [benchmark](benchmarks/2026-10-16-speech-cpu.md#llm-time-to-first-token)). Where a turn's time goes, measured: [2026-10-19](benchmarks/2026-10-19-latency.md), and the Rust pipeline against it: [2026-10-29](benchmarks/perf/2026-10-29-rust-voice.md).
 - A dedicated LLM API key for Ghost, so it can be revoked on its own: signing in to OpenRouter under Settings › Model gives Ghost a key of its own (ADR 0037). The connection is one provider for everything; a cheaper model for compaction or a watch's step would be a second one, not yet asked for.
-- The bundle carries the ONNX Runtime but not Silero's, Smart Turn's or the wake front end's model files, which the daemon reads from the oracle's venv (`tools/oracle/.venv`, `GHOST_SITE_PACKAGES`) or `~/.cache/ghost/models/`; Parakeet, Kokoro and the wake classifiers download on first run. Shipping those three as resources is open.
 
 ## Shipping
 
 One bundle (ADR 0038): `tauri build` makes a .deb and an AppImage carrying the desktop app,
-`ghostd`, `ghost-mock-github`, `ghost-scripts` and the ONNX Runtime library. `make bundle`;
+`ghostd`, `ghost-mock-github`, `ghost-scripts`, the ONNX Runtime library, the four small
+model files (Silero, Smart Turn, the wake front end) and the build's record. `make bundle`;
 CI builds it on every push and the release workflow attaches it to a release
-([releasing.md](releasing.md)). Speech models are not in the package; they download on first
-run. Passwords are never in the package or in a plain file: they are in Ghost's vault, its
+([releasing.md](releasing.md)). Parakeet, Kokoro and the trained wake classifiers are not in
+the package; [releasing.md](releasing.md#the-speech-models) says how each gets to its place.
+Passwords are never in the package or in a plain file: they are in Ghost's vault, its
 key in the keyring (below). Target is Ubuntu 26.04 amd64.
 
 ## Passwords (ADR 0036)

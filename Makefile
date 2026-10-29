@@ -58,7 +58,7 @@ endef
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
         perf perf-micro perf-llm record wake-eval record-takes wake-takes-eval \
         android android-apk android-install mobile-web \
-        bundle sidecars onnxruntime
+        bundle sidecars onnxruntime models
 
 help: ## list the targets
 	@awk 'BEGIN {FS = ":.*## "} /^##@ / {printf "\n%s\n", substr($$0, 5)} /^[a-z][a-z-]*:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -72,18 +72,22 @@ setup: ## build the daemon, sync the tools, pnpm install, env, echo-cancel and c
 	cargo build -p ghostd
 	@$(MAKE) --no-print-directory sync
 	@$(MAKE) --no-print-directory onnxruntime
+	@$(MAKE) --no-print-directory models
 	pnpm install
 	@$(MAKE) --no-print-directory env
 	@systemctl --user is-active --quiet ghost-echo-cancel || infra/pipewire/install.sh
 	@$(ghostd) check
 	@echo; echo "Ready: make dev starts the daemon and the desktop app from this checkout."
 
-sync: ## install or refresh the Python tools: the root workspace and the oracle (Silero and Smart Turn's model files come with it)
+sync: ## install or refresh the Python tools: the root workspace and the oracle
 	$(UV) sync
 	$(UV) sync --project tools/oracle
 
 onnxruntime: ## fetch ONNX Runtime 1.24.4 into ~/.cache/ghost/onnxruntime/ once, where the daemon loads it from (the bundle carries its own)
 	@scripts/onnxruntime.sh >/dev/null
+
+models: ## fetch Silero, Smart Turn and the wake front end's model files into ~/.cache/ghost/models/ once, pinned (the bundle carries its own)
+	@scripts/models.sh >/dev/null
 
 env: ## seed settings.env, policy.toml and Ghost's folder on first run (passwords: make passwords)
 	@if [[ ! -e "$(SETTINGS)" ]]; then \
@@ -303,8 +307,8 @@ mobile-web: ## the phone app in a browser (Expo web), for layout work without a 
 
 ##@ The bundle (ADR 0038: one .deb and one AppImage, the desktop app with ghostd inside)
 
-bundle: ## tauri build: the daemon, the two app binaries and the ONNX Runtime in release, then the .deb and the AppImage under target/release/bundle/
+bundle: ## tauri build: the daemon, the two app binaries, the ONNX Runtime and the model files in release, then the .deb and the AppImage under target/release/bundle/
 	@pnpm tauri build
 
-sidecars: ## only the bundle's binaries and the runtime library, into apps/desktop/src-tauri/ (tauri build does this itself)
+sidecars: ## only the bundle's binaries, the runtime library and the model files, into apps/desktop/src-tauri/ (tauri build does this itself)
 	@scripts/sidecars.sh

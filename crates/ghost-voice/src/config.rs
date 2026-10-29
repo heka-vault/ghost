@@ -85,8 +85,10 @@ pub struct VoiceSettings {
     pub idle_timeout_secs: f64,
     pub hold_timeout_secs: f64,
     pub smart_turn_threads: usize,
-    /// `GHOST_SILERO_MODEL`, `GHOST_SMART_TURN_MODEL`: the ONNX files; unset, where the
-    /// oracle's venv has them (`GHOST_SITE_PACKAGES`), else `~/.cache/ghost/models/`.
+    /// `GHOST_SILERO_MODEL`, `GHOST_SMART_TURN_MODEL`: the ONNX files; unset, where
+    /// `ghost_infer::models` finds them (`GHOST_MODELS_DIR`, the bundle's resources, then
+    /// `~/.cache/ghost/models/`, where `scripts/models.sh` puts them), else the cache's
+    /// path, so a load error names where the script would have put the file.
     pub silero_model: PathBuf,
     pub smart_turn_model: PathBuf,
 
@@ -128,18 +130,6 @@ fn home() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
-}
-
-/// Where the oracle's venv keeps Pipecat's model files (Silero, Smart Turn, the wake
-/// front end), when it is there: `GHOST_SITE_PACKAGES`, else `tools/oracle/.venv` of the
-/// checkout this binary was built in (`make setup` syncs it), else nothing.
-pub fn site_packages(get: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    if let Some(v) = get("GHOST_SITE_PACKAGES").filter(|v| !v.trim().is_empty()) {
-        return Some(PathBuf::from(v));
-    }
-    let known = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tools/oracle/.venv/lib/python3.12/site-packages");
-    known.is_dir().then_some(known)
 }
 
 impl Default for VoiceSettings {
@@ -194,17 +184,23 @@ impl VoiceSettings {
         }
         let cache_dir =
             path("GHOST_CACHE_DIR").unwrap_or_else(|| home().join(".cache").join("ghost"));
-        let site = site_packages(&get);
-        let silero_model = path("GHOST_SILERO_MODEL").unwrap_or_else(|| {
-            site.as_ref()
-                .map(|s| s.join("pipecat/audio/vad/data/silero_vad.onnx"))
-                .unwrap_or_else(|| cache_dir.join("models/silero_vad.onnx"))
-        });
-        let smart_turn_model = path("GHOST_SMART_TURN_MODEL").unwrap_or_else(|| {
-            site.as_ref()
-                .map(|s| s.join("pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx"))
-                .unwrap_or_else(|| cache_dir.join("models/smart-turn-v3.2-cpu.onnx"))
-        });
+        // The small model files, where `ghost_infer::models` finds them; one that is
+        // nowhere is named at the cache's path, which is where scripts/models.sh puts it.
+        let exe = std::env::current_exe().ok();
+        let home_dir = home();
+        let model_file = |name: &str| {
+            ghost_infer::models::resolve(
+                name,
+                |var| get(var).map(std::ffi::OsString::from),
+                exe.as_deref(),
+                Some(&home_dir),
+            )
+            .unwrap_or_else(|_| cache_dir.join(ghost_infer::models::FOLDER).join(name))
+        };
+        let silero_model =
+            path("GHOST_SILERO_MODEL").unwrap_or_else(|| model_file(ghost_infer::models::SILERO));
+        let smart_turn_model = path("GHOST_SMART_TURN_MODEL")
+            .unwrap_or_else(|| model_file(ghost_infer::models::SMART_TURN));
         Ok(Self {
             llm_env,
             llm_thinking: string("GHOST_LLM_THINKING", ghost_llm::DEFAULT_THINKING),

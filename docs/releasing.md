@@ -58,7 +58,9 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
 
    The tag starts `.github/workflows/release.yml`. It checks the tag names the version the
    files say, builds the bundle (below), installs the .deb into a clean Ubuntu 26.04 and
-   runs `ghostd version`, and attaches the .deb and the AppImage to a GitHub release.
+   runs `ghostd version`, which must name the tagged commit, and `ghostd check`, which must
+   find the bundle's runtime and model files on its own, and attaches the .deb and the
+   AppImage to a GitHub release.
 
 If the month turns between the merge and the tag, `make release` refuses: the merged
 `2026.10.x` is no longer this month's. Bump again with `make version V=next` in a PR.
@@ -77,17 +79,24 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
 1. `scripts/sidecars.sh`: first `scripts/onnxruntime.sh stage`, which fetches ONNX Runtime
    1.24.4 once (Microsoft's release archive, pinned by SHA-256, into
    `~/.cache/ghost/onnxruntime/1.24.4/`) and copies the library and its license to
-   `apps/desktop/src-tauri/resources/onnxruntime/`; then `cargo build --release -p ghostd
-   -p ghost-core --bins` and the three binaries the bundle carries, `ghostd`,
-   `ghost-mock-github` and `ghost-scripts` (the two apps `apps.json` names), copied to
-   `apps/desktop/src-tauri/binaries/<name>-<target triple>`, where Tauri's bundler looks for
-   `bundle.externalBin`. Neither folder is committed.
+   `apps/desktop/src-tauri/resources/onnxruntime/`; then `scripts/models.sh stage`, which
+   fetches the four small model files once (each from its upstream release, pinned by
+   SHA-256 to the bytes the Python wheels shipped, into `~/.cache/ghost/models/`; [the
+   speech models](#the-speech-models)) and copies them with their licences to
+   `apps/desktop/src-tauri/resources/models/`; then `apps/desktop/src-tauri/resources/
+   ghost-build.json`, the record of what the build is ([below](#what-each-build-says-it-is));
+   then `cargo build --release -p ghostd -p ghost-core --bins` and the three binaries the
+   bundle carries, `ghostd`, `ghost-mock-github` and `ghost-scripts` (the two apps
+   `apps.json` names), copied to `apps/desktop/src-tauri/binaries/<name>-<target triple>`,
+   where Tauri's bundler looks for `bundle.externalBin`. Neither folder is committed.
 2. The frontend (`pnpm --filter @ghost/desktop build`).
 3. The shell (`cargo build --release` of `heka-ghost-desktop`), then the bundles under
    `target/release/bundle/deb/` and `target/release/bundle/appimage/`. The .deb installs
-   the four binaries in `/usr/bin` and the runtime's library in
-   `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4` (`bundle.resources`);
-   the AppImage carries them in its `usr/bin` and `usr/lib`. The .deb depends on
+   the four binaries in `/usr/bin`, the runtime's library in
+   `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4`, the model files
+   in `/usr/lib/heka-ghost-desktop/models/` and the build's record beside them,
+   `/usr/lib/heka-ghost-desktop/ghost-build.json` (`bundle.resources`); the AppImage
+   carries them in its `usr/bin` and `usr/lib`. The .deb depends on
    `libespeak-ng1` (Kokoro's phonemizer; the one system library `ghostd` links that a bare
    Ubuntu lacks) on top of the GTK and WebKit packages Tauri adds.
 
@@ -103,9 +112,13 @@ the oracle (`crates/ghost-infer/tests/parity.rs`); the crate's own download, 1.3
 the int8 kernels and the vocoder. `ghostd` looks for the library in `ORT_DYLIB_PATH`, then
 beside itself in the bundle (`/usr/bin/ghostd` finds `/usr/lib/heka-ghost-desktop/onnxruntime/`),
 then in the cache (`crates/ghost-infer/src/runtime.rs`); `ghostd check` prints the one it
-would load. CI runs `scripts/onnxruntime.sh` before `cargo nextest`, since every test that
-opens a session needs it, and the release workflow's install test runs `ghostd check` in a
-clean container, where the daemon must find the bundle's copy on its own.
+would load. The four small model files are found the same way (`GHOST_MODELS_DIR`, the
+bundle's `models/`, `~/.cache/ghost/models/`; `crates/ghost-infer/src/models.rs`). CI runs
+`scripts/onnxruntime.sh` and `scripts/models.sh` before `cargo nextest`, since every test
+that opens a session needs the library and the daemon the parent-death tests start reads
+Silero, and the release workflow's install test runs `ghostd version` and `ghostd check`
+in a clean container, where the daemon must say the recorded commit and find the bundle's
+copies on its own.
 
 The installed app supervises the daemon (ADR 0038): at launch it adopts a daemon already
 answering on the control socket, else runs `ghostd restore-volumes` and starts `ghostd run`
@@ -120,6 +133,24 @@ login, in the tray with its window hidden (`--hidden`), off from the tray's "Sta
 (`~/.local/state/ghost/autostart`), and a second launch opens the first one's window. Under `make dev` the app only adopts (`GHOST_SHELL_ADOPT_ONLY=1`), since
 `scripts/dev.sh` runs the daemon.
 
+## The speech models
+
+Four small model files are in the bundle, and the daemon finds them on its own; the three
+large ones are not, and each gets to its place by a step run once on the machine.
+
+| Model | Where `ghostd` reads it | How it gets there |
+|---|---|---|
+| Silero VAD (`silero_vad.onnx`), Smart Turn v3.2 (`smart-turn-v3.2-cpu.onnx`) and the wake front end (`melspectrogram.onnx`, `embedding_model.onnx`) | `GHOST_MODELS_DIR`, else the bundle's `/usr/lib/heka-ghost-desktop/models/`, else `~/.cache/ghost/models/` (`crates/ghost-infer/src/models.rs`; `GHOST_SILERO_MODEL` and `GHOST_SMART_TURN_MODEL` name a file of their own) | `scripts/models.sh` (`make models`; `make setup`, `make dev` and CI run it): each from its upstream release, pinned by SHA-256 to the bytes the Python wheels shipped (pipecat-ai 1.12.0, livekit-wakeword 0.3.0; every upstream file matched its wheel's on 2026-10-29). Silero from snakers4/silero-vad at v6.0 (MIT), Smart Turn from the pipecat-ai/smart-turn-v3 Hugging Face repository at `f766f81` (BSD-2-Clause), the two graphs from dscripka/openWakeWord's v0.5.1 release (Apache-2.0), each licence beside its file. `stage` copies them into the bundle; a file that doesn't match its pin is refused with both hashes printed |
+| Parakeet TDT 0.6B v3, int8 (ADR 0004) | `GHOST_STT_DIR`, else the Hugging Face cache, `~/.cache/huggingface/hub/models--istupakov--parakeet-tdt-0.6b-v3-onnx/` | `onnx_asr` in the oracle fetches it on first use (about 700 MB): `uv run --project tools/oracle python -I -c "import onnx_asr; onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', quantization='int8')"` |
+| Kokoro v1.0 (ADR 0004) | `GHOST_TTS_MODEL_PATH` and `GHOST_TTS_VOICES_PATH`, else `~/.cache/ghost/kokoro/kokoro-v1.0.onnx` and `voices-v1.0.bin` | The two files of the `model-files-v1.0` release of thewh1teagle/kokoro-onnx, which the Python daemon fetched through Pipecat (about 340 MB together): `curl -fL --create-dirs -o ~/.cache/ghost/kokoro/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx`, and the same URL and path with `voices-v1.0.bin` |
+| The trained wake classifiers (ADR 0025, `GHOST_WAKE_MODE=onnx`) | `GHOST_WAKE_MODEL_PATH`, else `~/.cache/ghost/wake/hey_ghost.onnx`, and every `ghost_*.onnx` beside it for Ghost by name | The operator's own, trained and copied there as [wake-recording.md](wake-recording.md) says; nothing fetches them |
+
+`ghostd check` prints the folder of each it finds (`models:`, `parakeet:`, `kokoro:`, and
+`wake models:` in onnx wake mode) and, for one that is missing, names the script or the step
+above as a problem; nothing panics for a missing file, and a daemon started without one
+says so and exits (or, for a classifier, listens by transcript instead). The parity suite
+reads the same files (`crates/ghost-infer/tests/parity.rs`).
+
 ## What each build says it is
 
 The daemon reports its version and its build in the status the control API returns
@@ -129,20 +160,26 @@ The daemon reports its version and its build in the status the control API retur
 |---|---|---|
 | `dev` | Ghost from a checkout (`make dev`, `make daemon`, `cargo run -p ghostd`) | The checkout's `HEAD`, and `dirty` when tracked files had uncommitted changes as the daemon started |
 | `deploy` | A `make deploy` runtime in `~/.local/share/ghost/runtime/<commit>/` | `scripts/deploy.sh` writes `bin/ghost-build.json` beside the binary |
-| `release` | The bundle (the .deb or the AppImage) | Not recorded yet: the bundle's daemon says `dev` with no commit, since nothing beside `/usr/bin/ghostd` is written at build time (open) |
+| `release` | The bundle (the .deb or the AppImage) | `scripts/sidecars.sh` writes `ghost-build.json` into the bundle's resources, `/usr/lib/heka-ghost-desktop/` (the AppImage's `usr/lib/heka-ghost-desktop/`): the commit `tauri build` ran at, `dirty` when tracked files had uncommitted changes, and the version |
 
-A recorded build is `ghost-build.json` beside the executable; a binary without one is a
-checkout's (`ghostd::build_info`). The daemon reads it once when it starts: a file read, or
-two `git` calls for a checkout, and nothing on a turn. The version is the one the crate was
-built with (`Cargo.toml`'s `[workspace.package]`, a copy of the root `pyproject.toml`'s).
+A recorded build is `ghost-build.json` beside the executable (a `make deploy` build), else in
+the bundle's resources beside it by the same lexical rule as the runtime's (`/usr/bin/ghostd`
+reads `/usr/lib/heka-ghost-desktop/ghost-build.json`); a binary with neither is a checkout's
+(`ghostd::build_info`). The record names the version it was built at too (`{"kind":
+"release", "commit": "<sha>", "dirty": false, "version": "2026.10.0"}`); a daemon whose own
+version differs says so in its log and keeps the record. The daemon reads it once when it
+starts: a file read, or two `git` calls for a checkout, and nothing on a turn. The version
+it reports is the one the crate was built with (`Cargo.toml`'s `[workspace.package]`, a copy
+of the root `pyproject.toml`'s).
 
 It reads the same everywhere:
 
-- `ghostd version`: `Ghost 2026.10.0 · dev a1b2c3d` (with `, uncommitted changes` when dirty).
-  `ghostd check` and the daemon's first log line start with it, and `make deploy` shows it
-  from the build's check.
+- `ghostd version`: `Ghost 2026.10.0 · dev a1b2c3d` (with `, uncommitted changes` when dirty);
+  a release says `Ghost 2026.10.0 · release a1b2c3d`, and the release workflow's install
+  test reads the tagged commit from it. `ghostd check` and the daemon's first log line
+  start with it, and `make deploy` shows it from the build's check.
 - The desktop's sidebar footer: `Ghost 2026.10.0 · dev a1b2c3d`. A release shows the version
-  alone, since its version is its tag.
+  alone, since its version is its tag; General shows its commit.
 - Settings › General: the version, the build in words, and the desktop app's own version.
 
 The desktop app's version is its `package.json`'s, the same as every other copy, and its
@@ -152,8 +189,10 @@ window and the daemon differ, for example a window from a checkout talking to th
 Ghost, the sidebar adds a quiet second line ("This window is 2026.10.1") and General shows a
 neutral notice. They differ when the versions do, or, at the same version, when both know
 their commits and the commits differ ("This window is 2026.10.1 · e54c2a5"); uncommitted
-changes aren't compared. A daemon older than this change has no `build` in its status; the
-app shows its version alone.
+changes aren't compared. A bundled daemon reports its commit from the record, so a window
+from a checkout talking to an installed Ghost at the same version sees the commits differ.
+A daemon older than this change has no `build` in its status; the app shows its version
+alone.
 
 The restart Settings asks for follows the build: `systemctl --user restart ghostd` for a
 deploy or a release; for a `dev` daemon, the make target that started it, which it reports as

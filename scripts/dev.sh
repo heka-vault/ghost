@@ -67,12 +67,15 @@ start_desktop() {
   DESKTOP_PID=$!
 }
 
-# The daemon compiled from the working tree, and the ONNX Runtime it loads in the cache
-# (scripts/onnxruntime.sh fetches it once).
+# The daemon compiled from the working tree, and in the cache the ONNX Runtime it loads
+# and the four small model files (scripts/onnxruntime.sh and scripts/models.sh, each once).
 build_daemon() {
   cargo build -q -p ghostd || { say "cargo build -p ghostd failed"; return 1; }
   if [[ -x scripts/onnxruntime.sh ]]; then
     scripts/onnxruntime.sh >/dev/null || { say "scripts/onnxruntime.sh failed"; return 1; }
+  fi
+  if [[ -x scripts/models.sh ]]; then
+    scripts/models.sh >/dev/null || { say "scripts/models.sh failed"; return 1; }
   fi
 }
 

@@ -18,6 +18,7 @@ pub mod espeak;
 pub mod kokoro;
 pub mod loudness;
 pub mod mel;
+pub mod models;
 pub mod npy;
 pub mod parakeet;
 pub mod phonemize;
