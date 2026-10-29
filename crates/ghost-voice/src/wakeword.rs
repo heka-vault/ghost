@@ -519,8 +519,8 @@ mod tests {
         for f in frames {
             proc_.process(f, Direction::Down, &out).await;
         }
-        let out = events.lock().unwrap().clone();
-        out
+        let seen: Vec<String> = events.lock().unwrap().clone();
+        seen
     }
 
     async fn run(detector: Detector, frames: Vec<Frame>) -> Vec<String> {
