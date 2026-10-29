@@ -6,14 +6,18 @@
 pub mod build_info;
 pub mod check;
 pub mod config;
+pub mod controller;
+pub mod daemon;
 pub mod deciders;
 pub mod dictation;
 pub mod hooks_listener;
 pub mod latency;
 pub mod passwords;
 pub mod phone;
+pub mod phone_host;
 pub mod push;
 pub mod routes;
+pub mod session;
 pub mod wake;
 
 pub use config::GhostdSettings;
