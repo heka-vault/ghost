@@ -52,6 +52,8 @@ cargo deny check
 
 All four clean before a commit.
 
+Any Python you add (a fixture recorder, an automated far end under `scripts/`) is linted by CI's python job over the whole repo: `~/projects/active/ghost/.venv/bin/ruff check <path>` and `ruff format <path>` clean too, lines at most 100 columns.
+
 ## Branch protocol
 
 Work in your own worktree on a branch from `rust-daemon`:
