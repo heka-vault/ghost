@@ -54,7 +54,7 @@ jobs:
   # outside deny.toml's allowlist.
   rust:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: system libraries
@@ -74,6 +74,20 @@ jobs:
       - run: cargo nextest run --workspace --locked
       - uses: EmbarkStudios/cargo-deny-action@v2
         with: { command: check }
+      # The bundle (ADR 0038): the daemon and the app's two binaries in release, then one
+      # .deb and one AppImage with them inside, proven on every push.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: the bundle
+        run: pnpm tauri build --ci
+      - name: the bundle carries the daemon and the app binaries
+        run: |
+          ls -la target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage
+          for b in ghostd ghost-mock-github ghost-scripts heka-ghost-desktop; do
+            dpkg-deb -c target/release/bundle/deb/*.deb | grep -q "usr/bin/$b\$" || { echo "missing: $b"; exit 1; }
+          done
 
   # The one check main's ruleset requires, so adding or renaming a job above needs no
   # settings change.

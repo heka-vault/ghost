@@ -1,205 +1,133 @@
-//! The Rust side of the Ghost desktop app: owns the connection to ghostd's Unix socket.
+//! The Rust side of the Ghost desktop app: the process that runs Ghost (ADR 0038).
 //!
-//! The WebView cannot open a Unix socket, so two commands bridge it: `api_request`
-//! forwards one HTTP call, and `events_start` keeps a WebSocket to `/events` open and
-//! re-emits every message as a Tauri event. The tray shows the daemon's phase.
+//! It supervises `ghostd` (adopting one already on the socket), bridges the window to the
+//! daemon's Unix socket, keeps a tray, starts at login, and stops everything on Quit.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+mod autostart;
+mod bridge;
+mod supervisor;
+mod tray;
 
-use futures_util::StreamExt;
-use http_body_util::{BodyExt, Full};
-use hyper::body::Bytes;
-use hyper_util::client::legacy::Client;
-use hyperlocal::{UnixClientExt, UnixConnector, Uri};
-use serde::Serialize;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, State};
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 
-fn socket_path() -> PathBuf {
-    if let Ok(p) = std::env::var("GHOST_API_SOCKET") {
-        return PathBuf::from(p);
-    }
-    let rt = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(rt).join("ghost").join("api.sock")
+use tauri::{Emitter, Manager, RunEvent};
+
+use supervisor::system::System;
+use supervisor::{DaemonEvent, Handle, Supervisor};
+
+/// The supervisor's handle and its last word, for a window that opens after the fact.
+struct Daemon {
+    handle: Mutex<Option<Handle>>,
+    last: Mutex<Option<DaemonEvent>>,
 }
 
-#[derive(Serialize)]
-struct ApiResponse {
-    status: u16,
-    body: String,
-}
-
-/// One HTTP request to the daemon over the socket. Errors are strings for the frontend.
+/// The supervisor's last event, so a freshly loaded window knows where things stand.
 #[tauri::command]
-async fn api_request(
-    method: String,
-    path: String,
-    body: Option<String>,
-) -> Result<ApiResponse, String> {
-    let client: Client<UnixConnector, Full<Bytes>> = Client::unix();
-    let uri: hyper::Uri = Uri::new(socket_path(), &path).into();
-    let mut req = hyper::Request::builder()
-        .method(method.as_str())
-        .uri(uri)
-        .header("content-type", "application/json");
-    if body.is_some() {
-        req = req.header("content-type", "application/json");
-    }
-    let req = req
-        .body(Full::new(Bytes::from(body.unwrap_or_default())))
-        .map_err(|e| e.to_string())?;
-    let res = client.request(req).await.map_err(|e| {
-        eprintln!("ghost: {method} {path}: {e}");
-        format!("ghostd not reachable: {e}")
-    })?;
-    let status = res.status().as_u16();
-    let bytes = res
-        .into_body()
-        .collect()
-        .await
-        .map_err(|e| e.to_string())?
-        .to_bytes();
-    Ok(ApiResponse {
-        status,
-        body: String::from_utf8_lossy(&bytes).into_owned(),
-    })
+fn daemon_state(daemon: tauri::State<'_, Daemon>) -> Option<DaemonEvent> {
+    daemon.last.lock().unwrap().clone()
 }
 
-/// First run: enable and start the per-user service. Returns systemctl's combined output.
+/// The window's Start button: skip the rest of a restart delay.
 #[tauri::command]
-async fn start_daemon() -> Result<String, String> {
-    let out = tokio::process::Command::new("systemctl")
-        .args(["--user", "enable", "--now", "ghostd"])
-        .output()
-        .await
-        .map_err(|e| format!("systemctl: {e}"))?;
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    if out.status.success() {
-        Ok(text)
-    } else {
-        Err(text)
+fn daemon_start(daemon: tauri::State<'_, Daemon>) -> Result<(), String> {
+    match daemon.handle.lock().unwrap().as_ref() {
+        Some(h) => h.start_now(),
+        None => Err("Ghost is quitting.".into()),
     }
 }
 
-struct EventsRunning(Arc<AtomicBool>);
+/// `GHOST_SHELL_ADOPT_ONLY=1`: never spawn a daemon, only adopt the one on the socket.
+/// `scripts/dev.sh` sets it, since it runs the daemon itself.
+fn adopt_only() -> bool {
+    std::env::var("GHOST_SHELL_ADOPT_ONLY")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
 
-/// Keep the /events WebSocket open; emit `ghost://event` per message, `ghost://closed` on
-/// disconnect, and retry until the app exits. Idempotent: a second call is a no-op.
-#[tauri::command]
-async fn events_start(app: AppHandle, running: State<'_, EventsRunning>) -> Result<(), String> {
-    if running.0.swap(true, Ordering::SeqCst) {
-        return Ok(());
-    }
-    let flag = running.0.clone();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            match tokio::net::UnixStream::connect(socket_path()).await {
-                Ok(stream) => {
-                    eprintln!("ghost: connected to {}", socket_path().display());
-                    let req = hyper::Request::builder()
-                        .uri("ws://ghost/events")
-                        .header("Host", "ghost")
-                        .header("Connection", "Upgrade")
-                        .header("Upgrade", "websocket")
-                        .header("Sec-WebSocket-Version", "13")
-                        .header(
-                            "Sec-WebSocket-Key",
-                            tokio_tungstenite::tungstenite::handshake::client::generate_key(),
-                        )
-                        .body(())
-                        .unwrap();
-                    match tokio_tungstenite::client_async(req, stream).await {
-                        Ok((mut ws, _)) => {
-                            while let Some(Ok(msg)) = ws.next().await {
-                                if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
-                                    let _ = app.emit("ghost://event", t.to_string());
-                                    update_tray(&app, &t);
-                                }
-                            }
-                            eprintln!("ghost: event stream closed");
-                        }
-                        Err(e) => eprintln!("ghost: websocket handshake failed: {e}"),
-                    }
-                }
-                Err(e) => eprintln!("ghost: cannot reach {}: {e}", socket_path().display()),
-            }
-            let _ = app.emit("ghost://closed", ());
-            if !flag.load(Ordering::SeqCst) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(1500)).await;
+fn start_supervisor(app: &tauri::AppHandle) -> Handle {
+    let system = System::from_env();
+    eprintln!(
+        "ghost: daemon {}; socket {}; output {}",
+        system.ghostd.display(),
+        system.socket.display(),
+        match &system.output {
+            supervisor::system::Output::Journal => "journal (systemd-cat -t ghostd)".to_string(),
+            supervisor::system::Output::File(p) => p.display().to_string(),
         }
+    );
+    let emitter = app.clone();
+    let sup = Supervisor::new(system, adopt_only(), move |e| {
+        eprintln!("ghost: daemon {e:?}");
+        if let Some(d) = emitter.try_state::<Daemon>() {
+            *d.last.lock().unwrap() = Some(e.clone());
+        }
+        let _ = emitter.emit("ghost://daemon", e);
     });
-    Ok(())
+    supervisor::spawn_thread(sup)
 }
 
-/// Tray tooltip follows the daemon's phase; cheap to parse here rather than round-trip.
-fn update_tray(app: &AppHandle, payload: &str) {
-    let v: serde_json::Value = match serde_json::from_str(payload) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let phase = v
-        .get("phase")
-        .or_else(|| v.get("status").and_then(|s| s.get("phase")))
-        .and_then(|p| p.as_str());
-    if let (Some(phase), Some(tray)) = (phase, app.tray_by_id("main")) {
-        let label = match phase {
-            "passive" => "Ghost: waiting for \"Hey Ghost\"",
-            "listening" => "Ghost: listening",
-            "thinking" => "Ghost: thinking",
-            "speaking" => "Ghost: speaking",
-            "starting" => "Ghost: starting",
-            other => other,
-        };
-        let _ = tray.set_tooltip(Some(label));
+/// Stop the daemon the shell runs; idempotent, so both exit events may call it.
+fn stop_daemon(app: &tauri::AppHandle) {
+    if let Some(d) = app.try_state::<Daemon>()
+        && let Some(h) = d.handle.lock().unwrap().take()
+    {
+        h.stop();
     }
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        // First, so a second launch hands off and exits before anything else starts.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
-        .manage(EventsRunning(Arc::new(AtomicBool::new(false))))
+        // At login the app starts in the tray; Open Ghost shows the window.
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg("--hidden")
+                .build(),
+        )
+        .manage(bridge::EventsRunning(std::sync::Arc::new(AtomicBool::new(
+            false,
+        ))))
+        .manage(Daemon {
+            handle: Mutex::new(None),
+            last: Mutex::new(None),
+        })
         .invoke_handler(tauri::generate_handler![
-            api_request,
-            events_start,
-            start_daemon
+            bridge::api_request,
+            bridge::events_start,
+            daemon_state,
+            daemon_start
         ])
         .setup(|app| {
-            let show = MenuItem::with_id(app, "show", "Open Ghost", true, None::<&str>)?;
-            let wake = MenuItem::with_id(app, "wake", "Wake", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &wake, &quit])?;
-            TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .tooltip("Ghost")
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                    "wake" => {
-                        let app = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = api_request("POST".into(), "/wake".into(), None).await;
-                            let _ = app.emit("ghost://woke", ());
-                        });
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .build(app)?;
+            tray::build(app)?;
+            if std::env::args().any(|a| a == "--hidden")
+                && let Some(w) = app.get_webview_window("main")
+            {
+                let _ = w.hide();
+            }
+            autostart::apply(app.handle());
+            let handle = start_supervisor(app.handle());
+            *app.state::<Daemon>().handle.lock().unwrap() = Some(handle);
+            // Logout or a terminal's Ctrl+C: the same clean stop as Quit.
+            let signalled = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use tokio::signal::unix::{SignalKind, signal};
+                let (Ok(mut term), Ok(mut int)) = (
+                    signal(SignalKind::terminate()),
+                    signal(SignalKind::interrupt()),
+                ) else {
+                    return;
+                };
+                tokio::select! {
+                    _ = term.recv() => eprintln!("ghost: SIGTERM"),
+                    _ = int.recv() => eprintln!("ghost: SIGINT"),
+                }
+                signalled.exit(0);
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -209,6 +137,11 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Ghost");
+        .build(tauri::generate_context!())
+        .expect("error while building Ghost");
+    app.run(|app, event| match event {
+        // Quit: the daemon goes down with the shell, before the process ends.
+        RunEvent::ExitRequested { .. } | RunEvent::Exit => stop_daemon(app),
+        _ => {}
+    });
 }

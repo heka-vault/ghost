@@ -38,7 +38,8 @@ percent-encoding.workspace = true
 async-trait.workspace = true
 nix.workspace = true
 # termios: `ghostd passwords set` reads the value from the terminal without echo.
-rustix = { workspace = true, features = ["termios"] }
+# process: `run` stops when the shell that started it is gone (ADR 0038).
+rustix = { workspace = true, features = ["termios", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true

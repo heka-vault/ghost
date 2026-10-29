@@ -1,11 +1,14 @@
 //! `ghostd run`: the daemon. `ghostd status|wake|say|sleep`: clients of its socket.
 //! `ghostd passwords`: the vault from the command line. `ghostd api-schema`: the control
-//! API's document. `ghostd version`: what this build is.
+//! API's document. `ghostd version`: what this build is. `ghostd restore-volumes`: what
+//! the shell runs before a start and after a stop (ADR 0038).
 //!
 //! W1 of heka-vault/ghost#39: the daemon starts, opens the control socket and answers
 //! `/status` with `starting`. W3 gave it the whole control API over a `Deps` with nothing
 //! behind it yet; W8 the foundations in the library (`ghostd::*`); the pipeline, the apps
 //! and the folder arrive package by package.
+
+mod parent;
 
 use std::sync::Arc;
 
@@ -17,12 +20,17 @@ use ghost_core::store::Store;
 use ghostd::GhostdSettings;
 use ghostd::build_info;
 use ghostd::passwords::{Cli, Redacting, operator_keyring, passwords_cli};
+use tokio::sync::Notify;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Set when the parent the shell named is gone: one more way to stop.
+static PARENT_GONE: Notify = Notify::const_new();
+
 fn main() -> anyhow::Result<()> {
+    use std::io::IsTerminal;
     // No log line carries a password: every line is redacted against the vault's values
     // before it is written (ADR 0036).
     tracing_subscriber::fmt()
@@ -31,6 +39,9 @@ fn main() -> anyhow::Result<()> {
         )
         .with_writer(Redacting(std::io::stderr))
         .with_target(false)
+        // Colour for a terminal only: the journal (through the shell's systemd-cat, or the
+        // unit) and a log file get plain lines.
+        .with_ansi(std::io::stderr().is_terminal())
         .init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -40,6 +51,7 @@ fn main() -> anyhow::Result<()> {
         Some("wake") => client("wake", &args[1..]),
         Some("say") => client("say", &args[1..]),
         Some("sleep") => client("sleep", &args[1..]),
+        Some("restore-volumes") => restore_volumes(),
         Some("passwords") => {
             let cfg = GhostdSettings::load()?;
             let stdin = std::io::stdin();
@@ -71,7 +83,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, passwords, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, restore-volumes, passwords, api-schema, version"
         ),
     }
 }
@@ -85,12 +97,14 @@ async fn run() -> anyhow::Result<()> {
     let gate = Arc::new(WriteGate::new(store.clone()));
     let deps = Arc::new(Deps::minimal(state, Arc::new(Unavailable), store, gate));
     info!("{} starting", build_info::describe(VERSION, &build));
+    parent::watch(&PARENT_GONE);
     serve(&default_socket_path(), router(deps), shutdown_signal()).await?;
     info!("ghostd stopped");
     Ok(())
 }
 
-/// SIGINT or SIGTERM, the two ways systemd, the shell and a terminal stop the daemon.
+/// SIGINT or SIGTERM, the two ways systemd, the shell and a terminal stop the daemon; or
+/// the parent the shell named going away.
 async fn shutdown_signal() {
     use tokio::signal::unix::{SignalKind, signal};
     let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
@@ -98,7 +112,16 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = term.recv() => info!("SIGTERM"),
         _ = int.recv() => info!("SIGINT"),
+        _ = PARENT_GONE.notified() => info!("parent gone"),
     }
+}
+
+/// Music a crash left ducked comes back. W4 brings the ducking and what it saves; until
+/// then there is nothing to restore, and the shell's call before a start and after a stop
+/// succeeds all the same.
+fn restore_volumes() -> anyhow::Result<()> {
+    info!("restore-volumes: nothing to restore");
+    Ok(())
 }
 
 /// One call over the socket, the body printed as the daemon sent it.

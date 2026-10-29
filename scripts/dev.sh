@@ -7,23 +7,33 @@
 #   scripts/dev.sh reload     restart the daemon a running one started (make reload)
 #   scripts/dev.sh preflight  stop the service, refuse if a ghostd runs (make start uses it)
 #
-# The daemon runs the working tree's .venv. Only one Ghost may have the microphone, so
-# starting it stops the ghostd user service first (the always-on Ghost, a `make deploy`
-# build); `make service-on` starts that again. The desktop app is `tauri dev`: Vite reloads
-# the UI on save and a Rust change rebuilds the window. A Python change needs the daemon
-# restarted, which `make reload` does from another terminal without touching the desktop.
-# If the daemon exits on its own (a crash, `make stop`) it stays down until `make reload`.
-# Ctrl+C stops everything this script started.
+# GHOST_DAEMON_IMPL=rust runs the Rust daemon (ADR 0039; `cargo build -p ghostd`,
+# target/debug/ghostd) instead of the Python one, on the same socket: `make dev-rust`.
+#
+# The daemon runs the working tree's .venv (or its target/debug). Only one Ghost may have
+# the microphone, so starting it stops the ghostd user service first (the headless Ghost,
+# a `make deploy` build); `make service-on` starts that again. The desktop app is `tauri
+# dev`: Vite reloads the UI on save and a Rust change rebuilds the window. The app adopts
+# the daemon this script runs rather than starting its own (ADR 0038; GHOST_SHELL_ADOPT_ONLY).
+# A Python change needs the daemon restarted, which `make reload` does from another
+# terminal without touching the desktop. If the daemon exits on its own (a crash, `make
+# stop`) it stays down until `make reload`. Ctrl+C stops everything this script started.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 UV="${UV:-uv}"
+IMPL="${GHOST_DAEMON_IMPL:-python}"
 # Settings only: passwords are in Ghost's vault, which the daemon opens itself (ADR 0036).
 ENV_FILE="${ENV_FILE:-$HOME/.config/ghost/settings.env}"
 RUN_DIR="${XDG_RUNTIME_DIR:-/tmp}/ghost"
 RELOAD="$RUN_DIR/dev-reload"
-MINE="$ROOT/.venv/bin/ghostd run$"  # this checkout's daemon, and no other
+MINE="$ROOT/(.venv/bin|target/debug)/ghostd run$"  # this checkout's daemon, and no other
+case "$IMPL" in
+  python) GHOSTD="$ROOT/.venv/bin/ghostd" ;;
+  rust) GHOSTD="$ROOT/target/debug/ghostd" ;;
+  *) echo "dev: GHOST_DAEMON_IMPL must be python or rust, not '$IMPL'" >&2; exit 2 ;;
+esac
 
 if [[ -t 1 ]]; then bold=$'\e[1m' off=$'\e[0m'; else bold='' off=''; fi
 say() { echo "${bold}dev:${off} $*"; }
@@ -42,7 +52,7 @@ preflight() {
   fi
   local pids
   if pids="$(pgrep -f 'ghostd run$')"; then
-    say "a ghostd is already running (pid ${pids//$'\n'/ }); make stop, then try again"
+    say "a ghostd is already running (pid ${pids//$'\n'/ }); make stop, or Quit Ghost in its tray, then try again"
     return 1
   fi
 }
@@ -54,14 +64,23 @@ DAEMON_PID='' DESKTOP_PID='' STOPPING=0
 
 # GHOST_LAUNCHER tells the daemon it was started here, so the desktop says make reload.
 start_daemon() {
-  setsid env GHOST_LAUNCHER=make-dev bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$ROOT/.venv/bin/ghostd" \
+  setsid env GHOST_LAUNCHER=make-dev bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$GHOSTD" \
     </dev/null > >(prefix "ghostd " 36) 2>&1 &
   DAEMON_PID=$!
 }
 
+# The app only adopts the daemon on the socket here; this script is what starts it.
 start_desktop() {
-  setsid pnpm -s tauri dev </dev/null > >(prefix "desktop" 35) 2>&1 &
+  setsid env GHOST_SHELL_ADOPT_ONLY=1 pnpm -s tauri dev </dev/null > >(prefix "desktop" 35) 2>&1 &
   DESKTOP_PID=$!
+}
+
+# The daemon's build: the Python workspace synced, or the Rust daemon compiled.
+build_daemon() {
+  case "$IMPL" in
+    python) "$UV" sync --all-packages -q || say "uv sync failed; starting with the environment as it is" ;;
+    rust) cargo build -q -p ghostd || { say "cargo build -p ghostd failed"; return 1; } ;;
+  esac
 }
 
 stop_all() {
@@ -77,7 +96,7 @@ daemon_loop() {
   while :; do
     rm -f "$RELOAD"
     preflight || return 1
-    "$UV" sync --all-packages -q || say "uv sync failed; starting with the environment as it is"
+    build_daemon || return 1
     ((STOPPING)) && return 0
     start_daemon
     wait_for "$DAEMON_PID"
