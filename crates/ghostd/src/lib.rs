@@ -4,6 +4,7 @@
 //! command line's `check`, `push` and `latency`.
 
 pub mod build_info;
+pub mod check;
 pub mod config;
 pub mod deciders;
 pub mod dictation;
