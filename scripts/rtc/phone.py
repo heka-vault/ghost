@@ -28,7 +28,6 @@ import argparse
 import asyncio
 import fractions
 import json
-import math
 import re
 import sys
 import time
@@ -166,10 +165,16 @@ class Phone:
         def on_open() -> None:
             self.channel_opens.append(time.time())
             opened.set()
-            channel.send(json.dumps({
-                "label": "rtvi-ai", "type": "client-ready", "id": f"r{len(self.channel_opens)}",
-                "data": {"version": "2.1.0", "about": {"library": "ghost-mobile"}},
-            }))
+            channel.send(
+                json.dumps(
+                    {
+                        "label": "rtvi-ai",
+                        "type": "client-ready",
+                        "id": f"r{len(self.channel_opens)}",
+                        "data": {"version": "2.1.0", "about": {"library": "ghost-mobile"}},
+                    }
+                )
+            )
 
         @channel.on("message")
         def on_message(message: Any) -> None:
@@ -217,13 +222,18 @@ class Phone:
         m = re.search(r"^a=fingerprint:(\S+)\s+(\S+)", sdp, re.M)
         if m:
             fingerprint = f"{m.group(1).lower()} {m.group(2).upper()}"
-        self.answers.append({
-            "at": t0, "took": took, "restart": restart, "fingerprint": fingerprint,
-            "sha256": bool(fingerprint and fingerprint.startswith("sha-256 ")),
-            "setup": (re.search(r"^a=setup:(\S+)", sdp, re.M) or [None, None])[1],
-            "candidates": len(re.findall(r"^a=candidate:", sdp, re.M)),
-            "ice_lite": bool(re.search(r"^a=ice-lite", sdp, re.M)),
-        })
+        self.answers.append(
+            {
+                "at": t0,
+                "took": took,
+                "restart": restart,
+                "fingerprint": fingerprint,
+                "sha256": bool(fingerprint and fingerprint.startswith("sha-256 ")),
+                "setup": (re.search(r"^a=setup:(\S+)", sdp, re.M) or [None, None])[1],
+                "candidates": len(re.findall(r"^a=candidate:", sdp, re.M)),
+                "ice_lite": bool(re.search(r"^a=ice-lite", sdp, re.M)),
+            }
+        )
         if not fingerprint:
             raise RuntimeError("the answer has no fingerprint")
         await pc.setRemoteDescription(RTCSessionDescription(sdp, answer["type"]))
@@ -267,19 +277,23 @@ class Phone:
         for s in report.values():
             if s.type == "inbound-rtp" and getattr(s, "kind", "") == "audio":
                 out["inbound"] = {
-                    "packets_received": s.packetsReceived, "packets_lost": s.packetsLost,
+                    "packets_received": s.packetsReceived,
+                    "packets_lost": s.packetsLost,
                     "jitter": s.jitter,
                 }
             elif s.type == "outbound-rtp" and getattr(s, "kind", "") == "audio":
                 out["outbound"] = {"packets_sent": s.packetsSent, "bytes_sent": s.bytesSent}
             elif s.type == "remote-inbound-rtp":
                 out["remote_inbound"] = {
-                    "packets_lost": s.packetsLost, "jitter": s.jitter,
-                    "round_trip_time": s.roundTripTime, "fraction_lost": s.fractionLost,
+                    "packets_lost": s.packetsLost,
+                    "jitter": s.jitter,
+                    "round_trip_time": s.roundTripTime,
+                    "fraction_lost": s.fractionLost,
                 }
             elif s.type == "transport":
                 out["transport"] = {
-                    "packets_sent": s.packetsSent, "packets_received": s.packetsReceived,
+                    "packets_sent": s.packetsSent,
+                    "packets_received": s.packetsReceived,
                     "dtls_state": s.dtlsState,
                 }
         return out
@@ -314,7 +328,9 @@ class Phone:
         stats = await self._stats()
         ch = self.channel
         if ch is not None and ch.readyState == "open":
-            ch.send(json.dumps({"label": "rtvi-ai", "type": "disconnect-bot", "id": "bye", "data": {}}))
+            ch.send(
+                json.dumps({"label": "rtvi-ai", "type": "disconnect-bot", "id": "bye", "data": {}})
+            )
             await asyncio.sleep(0.3)
         if self._ping_task:
             self._ping_task.cancel()
@@ -342,7 +358,12 @@ def main() -> int:
     group.add_argument("--url", help="the probe's address, http://127.0.0.1:PORT")
     group.add_argument("--stdio", action="store_true", help="offer on stdout, answer on stdin")
     parser.add_argument("--seconds", type=float, default=10.0)
-    parser.add_argument("--restart-at", type=float, default=0.0, help="restart_pc after this many seconds (0: never)")
+    parser.add_argument(
+        "--restart-at",
+        type=float,
+        default=0.0,
+        help="restart_pc after this many seconds (0: never)",
+    )
     parser.add_argument("--report", help="write the JSON report here (else the last stdout line)")
     args = parser.parse_args()
     phone = Phone(args)
@@ -353,7 +374,10 @@ def main() -> int:
             f.write(text)
     else:
         print(json.dumps({"type": "report", **report}), flush=True)
-    log(f"done: {len(phone.sent)} bursts sent, {len(phone.received)} heard, bot-ready x{len(phone.bot_ready)}, errors {phone.errors}")
+    log(
+        f"done: {len(phone.sent)} bursts sent, {len(phone.received)} heard, "
+        f"bot-ready x{len(phone.bot_ready)}, errors {phone.errors}"
+    )
     return 1 if phone.errors else 0
 
 

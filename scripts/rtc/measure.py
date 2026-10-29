@@ -26,9 +26,14 @@ ROOT = Path(__file__).resolve().parents[2]
 PHONE = Path(__file__).resolve().parent / "phone.py"
 
 
+CLOCK_TICKS = os.sysconf("SC_CLK_TCK")
+
+
 def cpu_seconds(pid: int) -> float:
-    with open(f"/proc/{pid}/schedstat", encoding="ascii") as f:
-        return int(f.read().split()[0]) / 1e9
+    """User plus system time of the whole process, every thread (``/proc/<pid>/stat``)."""
+    with open(f"/proc/{pid}/stat", encoding="ascii") as f:
+        fields = f.read().rsplit(")", 1)[1].split()
+    return (int(fields[11]) + int(fields[12])) / CLOCK_TICKS
 
 
 def pair(sent: list[float], received: list[float]) -> list[float]:
@@ -69,24 +74,57 @@ def main() -> int:
     ap.add_argument("--restart-at", type=float, default=150.0)
     ap.add_argument("--out", default=str(ROOT / "crates/ghost-rtc/measurements"))
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--date", default=time.strftime("%Y-%m-%d"), help="the reports' date tag")
+    ap.add_argument(
+        "--rejoin", action="store_true", help="summarize the reports of that date again, no call"
+    )
     args = ap.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y-%m-%d")
+    stamp = args.date
     tag = f"{stamp}-{args.backend}"
+    probe_report = out_dir / f"{tag}-desk.json"
+    phone_report = out_dir / f"{tag}-phone.json"
+    if args.rejoin:
+        previous = json.loads((out_dir / f"{tag}.json").read_text())
+        return summarize(
+            args,
+            tag,
+            out_dir,
+            probe_report,
+            phone_report,
+            previous["seconds"],
+            previous["desk"].get("cpu_seconds"),
+            previous["phone"]["exit"],
+        )
 
     if not args.no_build:
         subprocess.run(
-            ["cargo", "build", "--release", "-p", "ghost-rtc", "--example", "rtc-probe",
-             "--features", args.backend],
-            cwd=ROOT, check=True,
+            [
+                "cargo",
+                "build",
+                "--release",
+                "-p",
+                "ghost-rtc",
+                "--example",
+                "rtc-probe",
+                "--features",
+                args.backend,
+            ],
+            cwd=ROOT,
+            check=True,
         )
-    probe_report = out_dir / f"{tag}-desk.json"
-    phone_report = out_dir / f"{tag}-phone.json"
     probe = subprocess.Popen(
-        [str(ROOT / "target/release/examples/rtc-probe"), "--listen", "127.0.0.1:0",
-         "--report", str(probe_report)],
-        cwd=ROOT, stdout=subprocess.PIPE, text=True,
+        [
+            str(ROOT / "target/release/examples/rtc-probe"),
+            "--listen",
+            "127.0.0.1:0",
+            "--report",
+            str(probe_report),
+        ],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        text=True,
     )
     assert probe.stdout is not None
     line = probe.stdout.readline()
@@ -95,12 +133,27 @@ def main() -> int:
         print(f"probe did not start: {line!r}", file=sys.stderr)
         return 1
     url = line.split("listening on ")[1].split()[0]
-    print(f"measure: {args.backend} at {url}, {args.seconds:.0f} s, restart at {args.restart_at:.0f} s", file=sys.stderr)
+    print(
+        f"measure: {args.backend} at {url}, {args.seconds:.0f} s, "
+        f"restart at {args.restart_at:.0f} s",
+        file=sys.stderr,
+    )
     probe_cpu0 = cpu_seconds(probe.pid)
     t0 = time.time()
     phone = subprocess.Popen(
-        [sys.executable, "-I", str(PHONE), "--url", url, "--seconds", str(args.seconds),
-         "--restart-at", str(args.restart_at), "--report", str(phone_report)],
+        [
+            sys.executable,
+            "-I",
+            str(PHONE),
+            "--url",
+            url,
+            "--seconds",
+            str(args.seconds),
+            "--restart-at",
+            str(args.restart_at),
+            "--report",
+            str(phone_report),
+        ],
         cwd=ROOT,
     )
     # Sample the desk's CPU while the call is still up: just before the phone's end.
@@ -117,6 +170,19 @@ def main() -> int:
         probe.wait(timeout=20)
     except subprocess.TimeoutExpired:
         probe.kill()
+    return summarize(args, tag, out_dir, probe_report, phone_report, wall, probe_cpu, phone_rc)
+
+
+def summarize(
+    args: argparse.Namespace,
+    tag: str,
+    out_dir: Path,
+    probe_report: Path,
+    phone_report: Path,
+    wall: float,
+    probe_cpu: float | None,
+    phone_rc: int,
+) -> int:
     desk = json.loads(probe_report.read_text())
     ph = json.loads(phone_report.read_text())
 
@@ -128,7 +194,8 @@ def main() -> int:
     answers_phone = ph["answers"]
     answers_desk = desk.get("answers", [])
     fingerprints_match = len(answers_phone) == len(answers_desk) and all(
-        a["fingerprint"] == b["fingerprint"] and a["sha256"] for a, b in zip(answers_phone, answers_desk)
+        a["fingerprint"] == b["fingerprint"] and a["sha256"]
+        for a, b in zip(answers_phone, answers_desk, strict=True)
     )
     restart_ok = (
         args.restart_at > 0
@@ -140,7 +207,7 @@ def main() -> int:
     )
     result = {
         "backend": args.backend,
-        "date": stamp,
+        "date": args.date,
         "seconds": wall,
         "uplink_phone_to_desk": summary(up),
         "downlink_desk_to_phone": summary(down),
@@ -155,15 +222,21 @@ def main() -> int:
             "frames_dropped": desk_stats["frames_dropped"],
             "jitter_ms": desk_stats["jitter_ms"],
             "packets_sent": desk_stats["packets_sent"],
-            "cpu_percent_of_one_core": (probe_cpu / wall * 100) if probe_cpu is not None and wall else None,
+            "cpu_seconds": probe_cpu,
+            "cpu_percent_of_one_core": (probe_cpu / wall * 100)
+            if probe_cpu is not None and wall
+            else None,
             "cpu_percent_self_reported": desk.get("cpu_percent"),
         },
         "phone": {
             "packets_received": ph_in.get("packets_received"),
             "packets_lost": ph_in.get("packets_lost"),
-            "jitter_ms": (ph_in.get("jitter") or 0) * 1000 if ph_in else None,
+            # aiortc reports jitter in RTP clock units (48 kHz)
+            "jitter_ms": (ph_in.get("jitter") or 0) / 48 if ph_in else None,
             "remote_inbound_packets_lost": ph_remote.get("packets_lost"),
-            "remote_round_trip_ms": (ph_remote.get("round_trip_time") or 0) * 1000 if ph_remote else None,
+            "remote_round_trip_ms": (ph_remote.get("round_trip_time") or 0) * 1000
+            if ph_remote
+            else None,
             "bot_ready": len(ph["bot_ready"]),
             "server_messages": ph["server_messages"],
             "other_messages": ph["other_messages"],
@@ -171,8 +244,14 @@ def main() -> int:
             "exit": phone_rc,
         },
         "answers": [
-            {"restart": a["restart"], "took_ms": a["took"] * 1000, "fingerprint": a["fingerprint"],
-             "setup": a["setup"], "candidates": a["candidates"], "ice_lite": a["ice_lite"]}
+            {
+                "restart": a["restart"],
+                "took_ms": a["took"] * 1000,
+                "fingerprint": a["fingerprint"],
+                "setup": a["setup"],
+                "candidates": a["candidates"],
+                "ice_lite": a["ice_lite"],
+            }
             for a in answers_phone
         ],
         "restart_ok": restart_ok,
@@ -182,13 +261,32 @@ def main() -> int:
     (out_dir / f"{tag}.json").write_text(json.dumps(result, indent=2))
     u, d = result["uplink_phone_to_desk"], result["downlink_desk_to_phone"]
     print(f"\n{args.backend}: {wall:.0f} s on loopback")
-    print(f"  uplink   phone -> desk: p50 {u['p50_ms']:.1f} ms, p95 {u['p95_ms']:.1f} ms, max {u['max_ms']:.1f} ms ({u['count']} bursts)")
-    print(f"  downlink desk -> phone: p50 {d['p50_ms']:.1f} ms, p95 {d['p95_ms']:.1f} ms, max {d['max_ms']:.1f} ms ({d['count']} bursts)")
-    print(f"  desk: {desk_stats['packets_received']} packets in, {desk_stats['packets_lost']} lost, {desk_stats['concealed']} concealed, jitter {desk_stats['jitter_ms']:.2f} ms, {desk_stats['packets_sent']} out, {desk_stats['frames_dropped']} frames dropped")
-    print(f"  phone: {ph_in.get('packets_received')} packets in, {ph_in.get('packets_lost')} lost, jitter {result['phone']['jitter_ms']:.2f} ms; remote-inbound lost {ph_remote.get('packets_lost')}")
+    print(
+        f"  uplink   phone -> desk: p50 {u['p50_ms']:.1f} ms, p95 {u['p95_ms']:.1f} ms, "
+        f"max {u['max_ms']:.1f} ms ({u['count']} bursts)"
+    )
+    print(
+        f"  downlink desk -> phone: p50 {d['p50_ms']:.1f} ms, p95 {d['p95_ms']:.1f} ms, "
+        f"max {d['max_ms']:.1f} ms ({d['count']} bursts)"
+    )
+    print(
+        f"  desk: {desk_stats['packets_received']} packets in, {desk_stats['packets_lost']} lost, "
+        f"{desk_stats['concealed']} concealed, jitter {desk_stats['jitter_ms']:.2f} ms, "
+        f"{desk_stats['packets_sent']} out, {desk_stats['frames_dropped']} frames dropped"
+    )
+    print(
+        f"  phone: {ph_in.get('packets_received')} packets in, {ph_in.get('packets_lost')} lost, "
+        f"jitter {result['phone']['jitter_ms']:.2f} ms; "
+        f"remote-inbound lost {ph_remote.get('packets_lost')}"
+    )
     cpu = result["desk"]["cpu_percent_of_one_core"]
     print(f"  desk CPU: {cpu:.1f}% of one core" if cpu is not None else "  desk CPU: n/a")
-    print(f"  restart_pc: {'ok' if restart_ok else 'FAILED'}; fingerprints: {'match' if fingerprints_match else 'MISMATCH'}; answers {[round(a['took_ms']) for a in result['answers']]} ms; phone errors {ph['errors']}")
+    print(
+        f"  restart_pc: {'ok' if restart_ok else 'FAILED'}; "
+        f"fingerprints: {'match' if fingerprints_match else 'MISMATCH'}; "
+        f"answers {[round(a['took_ms']) for a in result['answers']]} ms; "
+        f"phone errors {ph['errors']}"
+    )
     return 0 if phone_rc == 0 and fingerprints_match else 1
 
 
