@@ -127,6 +127,7 @@ fn world_with(tmp: &std::path::Path, wake_mode: &str, tweak: impl FnOnce(&mut Po
                 turn: Arc::new(Mutex::new(Complete)),
                 silero: s.silero_model.clone(),
                 voices: vec!["af_heart".into(), "am_adam".into()],
+                acks: ghost_voice::acks::Acks::new(None),
             })
         })
     };

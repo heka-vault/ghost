@@ -108,31 +108,39 @@ pub fn ensure_thinking_sound(cache_dir: &Path, rate: u32) -> Result<PathBuf, Sou
     if path.exists() {
         return Ok(path);
     }
-    std::fs::create_dir_all(cache_dir).map_err(|source| SoundError::Io {
-        path: cache_dir.to_path_buf(),
-        source,
-    })?;
+    write_wav(&path, rate, &thinking_loop(rate, THINKING_SECONDS))?;
+    Ok(path)
+}
+
+/// `samples` as a mono 16-bit WAV at `rate`, its folder made if missing. Written beside
+/// and renamed into place, so a reader never sees half a file.
+pub fn write_wav(path: &Path, rate: u32, samples: &[i16]) -> Result<(), SoundError> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|source| SoundError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+    }
+    let partial = path.with_extension("wav.partial");
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut writer = hound::WavWriter::create(&path, spec).map_err(|source| SoundError::Wav {
-        path: path.clone(),
+    let wav = |source| SoundError::Wav {
+        path: partial.clone(),
         source,
-    })?;
-    for s in thinking_loop(rate, THINKING_SECONDS) {
-        writer.write_sample(s).map_err(|source| SoundError::Wav {
-            path: path.clone(),
-            source,
-        })?;
+    };
+    let mut writer = hound::WavWriter::create(&partial, spec).map_err(wav)?;
+    for s in samples {
+        writer.write_sample(*s).map_err(wav)?;
     }
-    writer.finalize().map_err(|source| SoundError::Wav {
-        path: path.clone(),
+    writer.finalize().map_err(wav)?;
+    std::fs::rename(&partial, path).map_err(|source| SoundError::Io {
+        path: path.to_path_buf(),
         source,
-    })?;
-    Ok(path)
+    })
 }
 
 /// A mono 16-bit WAV at `rate`, as samples. Anything else is an error that names the file.

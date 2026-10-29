@@ -19,6 +19,12 @@
 //! the TTS stage as it renders), not only the finished replies (`spoke`, fed by the
 //! assistant tap at the reply's end), and that Ghost is speaking from the output stage's
 //! shared flag (`crate::speaking`) as much as from the frames, which reach it late.
+//!
+//! An acknowledgment (`crate::acks`, "Sure.", "On it.") is a short clip after silence, the
+//! moment the canceller leaks most, and a leaked "sure" heard once it has played would read
+//! as a one-word answer and cut off the tool call Ghost just started. For `window_secs`
+//! after one, a transcript made only of acknowledgment words is dropped, whatever its
+//! length.
 
 use std::collections::VecDeque;
 use std::sync::LazyLock;
@@ -95,6 +101,9 @@ pub struct EchoFilter {
     speaking: bool,
     speaking_now: Speaking,
     stopped_at: f64,
+    /// When Ghost last acknowledged a request, and every word an acknowledgment can say.
+    acked_at: f64,
+    ack_words: std::collections::HashSet<String>,
 }
 
 impl EchoFilter {
@@ -114,7 +123,22 @@ impl EchoFilter {
             speaking: false,
             speaking_now: Speaking::new(),
             stopped_at: f64::NEG_INFINITY,
+            acked_at: f64::NEG_INFINITY,
+            ack_words: crate::acks::words(),
         }
+    }
+
+    /// Ghost is saying an acknowledgment now.
+    pub fn acked(&mut self, _text: &str) {
+        self.acked_at = (self.clock)();
+    }
+
+    /// Only acknowledgment words, soon after one: its echo.
+    fn is_ack_echo(&self, text: &str) -> bool {
+        let heard = words(text);
+        !heard.is_empty()
+            && (self.clock)() - self.acked_at <= self.window
+            && heard.iter().all(|w| self.ack_words.contains(w))
     }
 
     pub fn with_speaking(mut self, speaking: Speaking) -> Self {
@@ -160,6 +184,9 @@ impl EchoFilter {
     }
 
     pub fn is_echo(&self, text: &str, min_words: Option<usize>) -> bool {
+        if self.is_ack_echo(text) {
+            return true;
+        }
         let speaking = self.speaking();
         let least = min_words.unwrap_or(if speaking {
             INTERIM_MIN_WORDS
@@ -266,6 +293,22 @@ mod tests {
         assert!(!f.is_echo("yes", None));
         assert!(!f.is_echo("close it", None)); // the answer to the question
         assert!(f.is_echo("close it with a note", None));
+    }
+
+    #[test]
+    fn test_an_acknowledgments_echo_is_dropped_for_the_window_after_it() {
+        let (mut f, clock) = filter(3.0);
+        assert!(!f.is_echo("sure", None)); // no acknowledgment yet: an answer
+        *clock.lock().unwrap() = 200.0;
+        f.acked("Sure.");
+        *clock.lock().unwrap() = 200.9; // the clip has played; its tail is transcribed
+        assert!(f.is_echo("Sure.", None));
+        assert!(f.is_echo("sure sure", Some(INTERIM_MIN_WORDS)));
+        assert!(f.is_echo("okay", None)); // any acknowledgment's words
+        assert!(!f.is_echo("sure but skip the closed ones", None)); // the operator's own
+        assert!(!f.is_echo("wait", None));
+        *clock.lock().unwrap() = 203.5;
+        assert!(!f.is_echo("okay", None)); // past the window: the operator
     }
 
     #[test]

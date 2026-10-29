@@ -164,6 +164,7 @@ pub fn source_of(app: &Arc<App>) -> ToolSource {
         read_tools: app.read_tools(),
         operations: app.operations(),
         title: app.spec.shown(),
+        app: true,
         ..Default::default()
     }
 }

@@ -210,6 +210,10 @@ pub struct ToolSource {
     pub interceptors: Vec<Arc<dyn TurnInterceptor>>,
     pub listeners: Vec<EventListener>,
     pub title: String,
+    /// A connected app (`apps.json`), not one of Ghost's in-tree sources: a call to it
+    /// leaves the machine or runs a program, and is what Ghost acknowledges aloud before
+    /// the answer (`ghost_voice::acks`).
+    pub app: bool,
 }
 
 impl ToolSource {
