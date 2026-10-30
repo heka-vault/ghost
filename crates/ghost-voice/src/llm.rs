@@ -284,6 +284,16 @@ impl LlmStage {
     /// The calls of a whole reply, in the Python's order: the calls announced, each one
     /// in progress, the response's end, then the results. True when the model runs again.
     async fn after_reply(&mut self, reply: Reply, out: &Out) -> bool {
+        if !reply.calls.is_empty() && !self.turns.acting() {
+            // The operator went on before Ghost answered: the turn is reopened, and nothing
+            // is done for half of it. What was said of the reply goes too (`take_back`).
+            self.context
+                .lock()
+                .unwrap()
+                .push_reply(reply.text.clone(), Vec::new());
+            out.push(Frame::LlmEnd).await;
+            return false;
+        }
         let names: Vec<String> = reply.calls.iter().map(|c| c.name.clone()).collect();
         if !names.is_empty() {
             out.push(Frame::FunctionCallsStarted(names)).await;
@@ -393,6 +403,33 @@ impl LlmStage {
     fn drop_speculation(&mut self) {
         if let Some(s) = self.speculation.take() {
             s.task.abort();
+        }
+    }
+
+    /// The operator went on before any of the answer to `text` was heard or done
+    /// (`TurnControl::reopen`): the turn and what was made of its answer leave the context,
+    /// and the aggregator hands over the whole turn when it ends. The run it interrupted has
+    /// already returned: frames reach this stage one at a time.
+    fn take_back(&mut self, text: &str) {
+        self.drop_speculation();
+        self.turns.settle_reopened();
+        let mut ctx = self.context.lock().unwrap();
+        let Some(at) = ctx
+            .messages
+            .iter()
+            .rposition(|m| matches!(m, Message::User(t) if t == text))
+        else {
+            return;
+        };
+        let unanswered = ctx.messages[at + 1..].iter().all(|m| match m {
+            Message::Assistant { tool_calls, .. } => tool_calls.is_empty(),
+            Message::User(t) => t == CUT_OFF_NOTE,
+            _ => false,
+        });
+        if unanswered {
+            ctx.messages.truncate(at);
+        } else {
+            warn!("a reopened turn had an answer that acted; it stays in the context");
         }
     }
 
@@ -562,6 +599,7 @@ impl Stage for LlmStage {
             Frame::Speculate(text) => self.speculate(text, out).await,
             Frame::SpeculationConfirmed => self.confirm_speculation(out).await,
             Frame::SpeculationCancelled => self.drop_speculation(),
+            Frame::ReopenTurn(text) => self.take_back(&text),
             Frame::Interruption => {
                 self.drop_speculation();
                 out.forward(Frame::Interruption, direction).await;

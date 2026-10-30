@@ -234,7 +234,7 @@ impl VoiceSettings {
             barge_in_min_words: usize_or("GHOST_BARGE_IN_MIN_WORDS", 2)?,
             barge_in_interim_secs: f64_or("GHOST_BARGE_IN_INTERIM_SECS", 0.3)?,
             echo_window_secs: f64_or("GHOST_ECHO_WINDOW_SECS", 3.0)?,
-            turn_grace_secs: f64_or("GHOST_TURN_GRACE_SECS", 0.8)?,
+            turn_grace_secs: f64_or("GHOST_TURN_GRACE_SECS", 1.2)?,
             turn_speculate: flag("GHOST_TURN_SPECULATE", true),
             turn_stop_secs: f64_or("GHOST_TURN_STOP_SECS", 1.6)?,
             idle_timeout_secs: f64_or("GHOST_IDLE_TIMEOUT_SECS", 45.0)?,
@@ -349,7 +349,7 @@ mod tests {
         let s = VoiceSettings::default();
         assert_eq!(s.tts_engine, "kokoro");
         assert_eq!(s.tts_voice, "af_heart");
-        assert_eq!(s.turn_grace_secs, 0.8);
+        assert_eq!(s.turn_grace_secs, 1.2);
         assert!(s.turn_speculate);
         assert_eq!(s.turn_stop_secs, 1.6);
         assert_eq!(s.barge_in_min_words, 2);

@@ -11,7 +11,7 @@ use ghost_infer::TurnVerdict;
 use ghost_voice::acks::{Acks, CHANGE, Clip, READ, Voiced};
 use ghost_voice::config::VoiceSettings;
 use ghost_voice::frames::{Audio, Frame};
-use ghost_voice::llm::{ScriptedModel, ScriptedReply};
+use ghost_voice::llm::{ModelPort, ScriptedModel, ScriptedReply};
 use ghost_voice::pipeline::{Greeting, Models, SessionHooks, SessionParams, build_session};
 use ghost_voice::stt::{Recognizer, SharedRecognizer};
 use ghost_voice::tap::OnTurn;
@@ -63,6 +63,45 @@ impl TurnModel for Complete {
     }
 }
 
+/// The scripted model, keeping the operator's turns of every context it is sent.
+struct Asked {
+    model: Arc<ScriptedModel>,
+    asked: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+impl ModelPort for Asked {
+    fn stream(
+        &self,
+        context: ghost_llm::Context,
+        tools: &ghost_llm::Tools,
+        options: &ghost_llm::Options,
+    ) -> futures::stream::BoxStream<'static, Result<ghost_llm::Event, ghost_llm::LlmError>> {
+        let users = context
+            .messages
+            .iter()
+            .filter_map(|m| match m {
+                ghost_llm::Message::User(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        self.asked.lock().unwrap().push(users);
+        self.model.stream(context, tools, options)
+    }
+
+    fn complete(
+        &self,
+        system: String,
+        user: String,
+        max_tokens: u32,
+    ) -> ghost_core::source::BoxFuture<'_, Result<String, ghost_llm::LlmError>> {
+        self.model.complete(system, user, max_tokens)
+    }
+
+    fn model_name(&self) -> String {
+        self.model.model_name()
+    }
+}
+
 struct World {
     session: ghost_voice::pipeline::GhostSession,
     mouth: Mouth,
@@ -70,6 +109,8 @@ struct World {
     records: Arc<Mutex<Vec<Value>>>,
     turns: Arc<Mutex<Vec<(String, String)>>>,
     spoken: Arc<Mutex<Vec<String>>>,
+    /// The operator's turns in each context the model was sent.
+    asked: Arc<Mutex<Vec<Vec<String>>>>,
 }
 
 fn world(
@@ -184,10 +225,14 @@ fn world_with(
             t.lock().unwrap().push((role.to_string(), text));
         })
     });
+    let asked = Arc::new(Mutex::new(Vec::new()));
     let session = build_session(SessionParams {
         settings: Arc::new(settings),
         models,
-        model: ScriptedModel::new(replies, Duration::from_millis(50)),
+        model: Arc::new(Asked {
+            model: ScriptedModel::new(replies, Duration::from_millis(50)),
+            asked: asked.clone(),
+        }),
         sources,
         gate,
         events: None,
@@ -216,6 +261,7 @@ fn world_with(
         records,
         turns,
         spoken,
+        asked,
     }
 }
 
@@ -559,4 +605,36 @@ async fn a_goodbye_ends_the_session_without_the_model() {
         .expect("intercepted");
     assert!(goodbye["llm"].is_null());
     assert!(w.spoken.lock().unwrap().len() >= 2); // the greeting and the goodbye
+}
+
+#[tokio::test]
+async fn going_on_before_ghost_answers_is_one_turn() {
+    // Smart Turn takes the pause in "can you count ... to three" for an end, and the
+    // operator goes on while the answer is still being voiced: the model gets one turn,
+    // not two halves.
+    let w = world(
+        &["Can you count", "to three"],
+        vec![vec![ScriptedModel::say("One, two, three.")]],
+        0.3,
+        0.1,
+        800, // the voice takes its time, so nothing of the first answer is heard
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    tokio::time::sleep(Duration::from_millis(400)).await; // the turn is handed over
+    assert_eq!(
+        w.asked.lock().unwrap().last().cloned(),
+        Some(vec!["Can you count".to_string()])
+    );
+    say(&w, 0.3).await;
+    let turn = wait_for(&w.records, "voice", Duration::from_secs(10)).await;
+    assert!(turn.is_some(), "records: {:#?}", w.records.lock().unwrap());
+    assert_eq!(
+        w.asked.lock().unwrap().last().cloned(),
+        Some(vec!["Can you count to three".to_string()])
+    );
+    w.session.end().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = (&w.mouth, &w.ear);
 }
