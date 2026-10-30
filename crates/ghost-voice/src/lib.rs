@@ -16,6 +16,7 @@
 //! change goes through the gate, confirmation is observed in the pipeline's own transcript,
 //! and the latency timeline keeps timings, never words.
 
+pub mod acks;
 pub mod config;
 pub mod confirmation;
 pub mod conversation;

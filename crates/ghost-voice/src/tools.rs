@@ -157,6 +157,21 @@ impl ToolDispatcher {
     }
 
     /// The tools the session starts with.
+    /// Whether the tool the model called by `name` goes to a connected app, as a read or a
+    /// change: what Ghost acknowledges aloud (`crate::acks`). Ghost's own tools (the agents,
+    /// the rules, the outputs, the skills, the waiting list, `change`, the session's) are
+    /// None.
+    pub fn outside(&self, name: &str) -> Option<crate::acks::AckKind> {
+        let sources = self.active_sources();
+        match self.offering.lookup(&sources, name)? {
+            Offered::Read { source, .. } => source.app.then_some(crate::acks::AckKind::Read),
+            Offered::Change { source, .. } => sources
+                .iter()
+                .any(|s| s.name == source && s.app)
+                .then_some(crate::acks::AckKind::Change),
+        }
+    }
+
     pub fn schemas(&self) -> Tools {
         self.schemas_for(&self.active_sources())
     }

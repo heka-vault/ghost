@@ -98,6 +98,8 @@ pub struct VoiceSettings {
     pub compact_summary_tokens: u32,
 
     pub quick_intents: bool,
+    /// `GHOST_ACK`: a one- or two-word acknowledgment as Ghost goes to an app (`acks`).
+    pub ack: bool,
     pub thinking_sound: bool,
     pub thinking_volume: f64,
     pub thinking_delay_secs: f64,
@@ -244,6 +246,7 @@ impl VoiceSettings {
             compact_keep_messages: usize_or("GHOST_COMPACT_KEEP_MESSAGES", 20)?,
             compact_summary_tokens: f64_or("GHOST_COMPACT_SUMMARY_TOKENS", 3000.0)? as u32,
             quick_intents: flag("GHOST_QUICK_INTENTS", true),
+            ack: flag("GHOST_ACK", true),
             thinking_sound: flag("GHOST_THINKING_SOUND", true),
             thinking_volume: f64_or("GHOST_THINKING_VOLUME", 0.12)?,
             thinking_delay_secs: f64_or("GHOST_THINKING_DELAY_SECS", 0.5)?,
