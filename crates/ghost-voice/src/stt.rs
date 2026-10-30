@@ -288,6 +288,7 @@ impl ParakeetStt {
         if segment.is_empty() {
             return;
         }
+        let secs = segment.len() as f64 / f64::from(SAMPLE_RATE);
         segment.extend(std::iter::repeat_n(
             0i16,
             (TRAILING_SECS * f64::from(SAMPLE_RATE)) as usize,
@@ -305,7 +306,11 @@ impl ParakeetStt {
             model: None,
         }))
         .await;
-        if !text.is_empty() {
+        if text.is_empty() {
+            // 2026-10-30 19:28: a 2 s segment Smart Turn judged done (0.98) left no
+            // line at all, and the turn closed on the words before it.
+            debug::audio(|| format!("heard nothing in a {secs:.1}s segment"));
+        } else {
             debug::audio(|| format!("heard: {text:?}"));
             out.push(Frame::Transcript(text)).await;
         }

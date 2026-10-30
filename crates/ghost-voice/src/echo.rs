@@ -13,7 +13,8 @@
 //! path. While Ghost speaks a transcript, interim or final, serves nothing but barge-in
 //! (the confirmation processor ignores it), so two of Ghost's own words are enough to drop
 //! one: the first half second of a reply leaks past the echo canceller while it converges,
-//! and reads as a word or two of what Ghost just started saying.
+//! and reads as a word or two of what Ghost just started saying. A segment that began
+//! while Ghost spoke keeps that floor at its final, which lands after a short reply ends.
 //!
 //! The filter knows the reply in progress a clause ahead of the speaker (`saying`, fed by
 //! the TTS stage as it renders), not only the finished replies (`spoke`, fed by the
@@ -181,6 +182,8 @@ pub struct EchoFilter {
     ack_words: std::collections::HashSet<String>,
     /// When the operator's current segment began (the VAD's start), on `clock`.
     vad_started_at: f64,
+    /// Ghost was speaking when that segment began: its final is judged like an interim.
+    vad_began_over_ghost: bool,
 }
 
 /// How long after Ghost's voice (re)starts the canceller is taken to be leaking: a
@@ -210,6 +213,7 @@ impl EchoFilter {
             acked_at: f64::NEG_INFINITY,
             ack_words: crate::acks::words(),
             vad_started_at: f64::NEG_INFINITY,
+            vad_began_over_ghost: false,
         }
     }
 
@@ -287,7 +291,11 @@ impl EchoFilter {
             return true;
         }
         let speaking = self.speaking();
-        let least = min_words.unwrap_or(if speaking {
+        // A segment that began over Ghost's voice is judged as its final arrives, often
+        // just after the voice stopped (2026-10-30 19:27: "Go ahead." opened the session,
+        // its interim was dropped, its 2-word final 0.6 s after the voice ended was not,
+        // and the operator's turn began "Go ahead. Yeah, ...").
+        let least = min_words.unwrap_or(if speaking || self.vad_began_over_ghost {
             INTERIM_MIN_WORDS
         } else {
             self.min_words
@@ -317,7 +325,10 @@ impl Stage for EchoFilter {
         match &frame {
             Frame::BotStarted => self.bot_speaking(true),
             Frame::BotStopped => self.bot_speaking(false),
-            Frame::VadStarted { .. } => self.vad_started_at = (self.clock)(),
+            Frame::VadStarted { .. } => {
+                self.vad_started_at = (self.clock)();
+                self.vad_began_over_ghost = self.speaking();
+            }
             Frame::Transcript(text) | Frame::Interim(text) if self.in_warmup() => {
                 debug::audio(|| {
                     format!(
@@ -414,6 +425,44 @@ mod tests {
         assert!(f.is_echo("Issue four hundred and", Some(INTERIM_MIN_WORDS)));
         assert!(f.is_echo("Issue four hundred and nine", None));
         assert!(!f.is_echo("wait stop", Some(INTERIM_MIN_WORDS)));
+    }
+
+    #[tokio::test]
+    async fn test_a_short_final_of_a_segment_that_began_over_ghost_is_its_echo() {
+        // 2026-10-30 19:27: the session opened with "Go ahead."; the interim was dropped,
+        // the 2-word final landed 0.6 s after the voice stopped and passed as the
+        // operator's, so their turn read "Go ahead. Yeah, I don't like ...".
+        use crate::frames::drain;
+        let (mut f, clock) = filter(3.0);
+        let (out, mut rx) = Out::capture();
+        f.saying("Go ahead.");
+        f.bot_speaking(true);
+        *clock.lock().unwrap() = 100.0;
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 100.5;
+        f.process(Frame::BotStopped, Direction::Down, &out).await;
+        *clock.lock().unwrap() = 101.1;
+        f.process(Frame::Transcript("Go ahead.".into()), Direction::Down, &out)
+            .await;
+        // the operator's short answer in the next segment, after the voice, still passes
+        f.process(Frame::VadStopped { stop_secs: 0.5 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 101.5;
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 102.0;
+        f.process(Frame::Transcript("Go on.".into()), Direction::Down, &out)
+            .await;
+        let passed: Vec<String> = drain(&mut rx)
+            .await
+            .into_iter()
+            .filter_map(|p| match p {
+                Frame::Transcript(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(passed, vec!["Go on.".to_string()]);
     }
 
     #[tokio::test]
