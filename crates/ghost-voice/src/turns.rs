@@ -345,15 +345,19 @@ struct StopInner {
 pub type TurnText = Arc<dyn Fn() -> String + Send + Sync>;
 
 /// Last words nobody ends a request on, even with Parakeet's full stop after them:
-/// fillers, conjunctions, prepositions, articles.
+/// fillers, conjunctions, articles.
 const UNFINISHED: &[&str] = &[
     "um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "hmm", "mm", //
     "and", "but", "or", "so", "because", "cause", "if", "then", "than", "that", "which", "who",
     "whose", "where", "when", "while", "whether", "although", "though", "unless", "until", //
-    "about", "to", "for", "of", "with", "from", "in", "on", "at", "by", "into", "onto", "like",
-    "as", "over", "under", "after", "before", "between", "through", "without", //
     "the", "a", "an", "my", "your", "our", "their", "his", "her", "its", "some", "any", "every",
     "each",
+];
+/// A preposition still waiting for its object, unless a full stop says it was a particle
+/// ("turn my music back on.", "pick it up.").
+const UNFINISHED_PREPOSITIONS: &[&str] = &[
+    "about", "to", "for", "of", "with", "from", "in", "on", "at", "by", "into", "onto", "like",
+    "as", "over", "under", "after", "before", "between", "through", "without",
 ];
 /// A subject or an auxiliary still waiting for its verb, unless a full stop says the short
 /// answer was the whole of it ("Right, I did.", "Yes, I can.").
@@ -406,7 +410,10 @@ pub fn sounds_unfinished(text: &str) -> bool {
     if UNFINISHED.contains(&last.as_str()) {
         return true;
     }
-    if !stopped && UNFINISHED_UNLESS_STOPPED.contains(&last.as_str()) {
+    if !stopped
+        && (UNFINISHED_UNLESS_STOPPED.contains(&last.as_str())
+            || UNFINISHED_PREPOSITIONS.contains(&last.as_str()))
+    {
         return true;
     }
     if WANTS_ARGUMENT.contains(&last.as_str()) {
@@ -1996,7 +2003,9 @@ mod tests {
             ("Read me issue.", true),
             ("Number", true),
             ("Issue number.", true),
-            ("Tell me about.", true),
+            ("Tell me about", true),
+            ("Turn my music back on.", false),
+            ("Can you tell me about", true),
             ("Close the issue.", false),
             ("What's the number?", false),
             ("What's the issue number.", false),
