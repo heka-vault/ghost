@@ -6,6 +6,7 @@
  * line remembers word for word and what it only remembers as a summary.
  */
 import type { TurnView } from "@ghost/client-ts";
+import { joinSpoken } from "@ghost/ui";
 import { ArrowDown, ArrowLeftRight, ChevronDown, ChevronUp, MessagesSquare, Wrench } from "lucide-react";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 
@@ -69,8 +70,9 @@ export function Transcript({ turns, lineName, limit, total }: TranscriptProps) {
       />
     );
   }
-  const folded = turns.filter((t) => t.compacted);
-  const fresh = turns.filter((t) => !t.compacted);
+  // A sentence heard in pieces is one message, as the model was handed it.
+  const folded = joinSpoken(turns.filter((t) => t.compacted));
+  const fresh = joinSpoken(turns.filter((t) => !t.compacted));
   const capped = isLong(turns, limit);
   const n = folded.length;
   const turnWord = n === 1 ? "turn" : "turns";

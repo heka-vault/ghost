@@ -4,6 +4,7 @@
  * consecutive turns grouped under one name and time, and quiet centered captions for the
  * session start, transfers between lines, settled changes and system notes.
  */
+import { joinSpoken } from "@ghost/ui";
 import { Check, Clock, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
@@ -87,7 +88,7 @@ export function Transcript({ items, nameOf, thinkingAs }: TranscriptProps) {
             return (
               <div key={it.key} className="session-you">
                 <span className="sr-only">You {it.typed ? "typed" : "said"}:</span>
-                {it.turns.map((t, i) => (
+                {joinSpoken(it.turns).map((t, i) => (
                   <p key={i} className="session-bubble" data-user-content>
                     {t.text}
                   </p>
