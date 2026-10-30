@@ -141,6 +141,9 @@ pub struct GhostdSettings {
     /// the detector alone decides, and the chime plays the moment it fires.
     pub wake_verify: bool,
     pub wake_cooldown_secs: f64,
+    /// A near miss at this score opens a window in which a repeat at it wakes; None: off.
+    pub wake_retry_threshold: Option<f64>,
+    pub wake_retry_window_secs: f64,
 
     /// Models for addressing Ghost by name with a request ("Ghost, let's work on …"): this
     /// file, or None for every ghost_*.onnx beside hey_ghost.onnx (one per opener).
@@ -201,6 +204,8 @@ impl Default for GhostdSettings {
             wake_threshold: None,
             wake_verify: true,
             wake_cooldown_secs: 2.0,
+            wake_retry_threshold: Some(0.3),
+            wake_retry_window_secs: 6.0,
             wake_address_model_path: None,
             wake_address_verify: None,
             wake_address_threshold: None,
@@ -383,6 +388,11 @@ impl GhostdSettings {
         env.opt_float("GHOST_WAKE_THRESHOLD", &mut s.wake_threshold)?;
         env.bool("GHOST_WAKE_VERIFY", &mut s.wake_verify)?;
         env.float("GHOST_WAKE_COOLDOWN_SECS", &mut s.wake_cooldown_secs)?;
+        env.opt_float("GHOST_WAKE_RETRY_THRESHOLD", &mut s.wake_retry_threshold)?;
+        env.float(
+            "GHOST_WAKE_RETRY_WINDOW_SECS",
+            &mut s.wake_retry_window_secs,
+        )?;
         env.opt_path(
             "GHOST_WAKE_ADDRESS_MODEL_PATH",
             &mut s.wake_address_model_path,

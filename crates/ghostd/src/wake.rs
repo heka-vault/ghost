@@ -426,6 +426,7 @@ pub struct DetectorSpec {
     pub models: Vec<ghost_infer::WakeModel>,
     pub verify: bool,
     pub cooldown_secs: f64,
+    pub second_chance: Option<ghost_voice::wakeword::SecondChance>,
 }
 
 /// The listener's view of a shared scorer.
@@ -445,6 +446,7 @@ impl DetectorSpec {
             models: self.models.clone(),
             verify: self.verify,
             cooldown_secs: self.cooldown_secs,
+            second_chance: self.second_chance,
         }
     }
 }
@@ -985,6 +987,7 @@ mod tests {
             )],
             verify: true,
             cooldown_secs: 2.0,
+            second_chance: None,
         };
         let l = WakeListener::new(
             settings(|_| None),

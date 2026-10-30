@@ -69,6 +69,50 @@ pub struct Detector {
     pub models: Vec<WakeModel>,
     pub verify: bool,
     pub cooldown_secs: f64,
+    /// A second chance for a call the music drowned (None: off).
+    pub second_chance: Option<SecondChance>,
+}
+
+/// Apple's second-chance threshold: a near miss opens a window in which a repeat needs
+/// less. 2026-10-30: the operator's "Hey Ghost" over Spotify scored 0.31-0.44 against the
+/// 0.7 threshold, three times in 25 s, while the music alone peaked at 0.26; the
+/// canceller leaves the music in on the reSpeaker's beam. Two scores at `threshold` or
+/// over, from separate utterances, within `window_secs`, wake.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SecondChance {
+    pub threshold: f32,
+    pub window_secs: f64,
+}
+
+/// The window's state: when the last near miss was, in samples.
+#[derive(Default, Debug)]
+pub struct SecondChanceState {
+    near_miss_at: Option<usize>,
+}
+
+impl SecondChanceState {
+    /// Least between two scores for them to be separate utterances, not one scored twice.
+    const SEPARATE_SECS: f64 = 1.0;
+
+    /// `score` at `end`: a hit on the second try, or a near miss remembered.
+    pub fn offer(&mut self, score: f32, end: usize, sc: SecondChance) -> bool {
+        if score < sc.threshold {
+            return false;
+        }
+        let separate = (Self::SEPARATE_SECS * SAMPLE_RATE as f64) as usize;
+        let window = (sc.window_secs * SAMPLE_RATE as f64) as usize;
+        match self.near_miss_at {
+            Some(at) if end.saturating_sub(at) < separate => false, // the same call, scored again
+            Some(at) if end.saturating_sub(at) <= window => {
+                self.near_miss_at = None;
+                true
+            }
+            _ => {
+                self.near_miss_at = Some(end);
+                false
+            }
+        }
+    }
 }
 
 /// Last stage of the passive pipeline in detector mode, after the VAD.
@@ -98,6 +142,7 @@ pub struct DetectorWakeProcessor {
     last_hit: i64,
     /// Where the last "best score under its threshold" was logged (GHOST_DEBUG_AUDIO).
     last_best_log: usize,
+    second_chance: SecondChanceState,
     woken: bool,
     done: bool,
 }
@@ -130,6 +175,7 @@ impl DetectorWakeProcessor {
             model: 0,
             last_hit: -(1i64 << 40),
             last_best_log: 0,
+            second_chance: SecondChanceState::default(),
             woken: false,
             done: false,
         }
@@ -220,7 +266,25 @@ impl DetectorWakeProcessor {
         let Ok(scores) = self.d.scorer.score(window) else {
             return;
         };
-        let Some((score, model)) = pick_hit(&scores, &self.d.models) else {
+        let hit = pick_hit(&scores, &self.d.models).or_else(|| {
+            let sc = self.d.second_chance?;
+            let (i, score) = self
+                .d
+                .models
+                .iter()
+                .enumerate()
+                .filter_map(|(i, m)| {
+                    scores
+                        .iter()
+                        .find(|(n, _)| *n == m.name)
+                        .map(|(_, s)| (i, *s))
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1))?;
+            self.second_chance
+                .offer(score, end, sc)
+                .then_some((score, i))
+        });
+        let Some((score, model)) = hit else {
             // A near miss, for the operator tuning the detector against the room: the best
             // score of this stretch, at most twice a second.
             if let Some((name, best)) = scores.iter().max_by(|a, b| a.1.total_cmp(&b.1))
@@ -496,6 +560,7 @@ mod tests {
             models: vec![hey(), address()],
             verify,
             cooldown_secs: 2.0,
+            second_chance: None,
         }
     }
 
@@ -767,6 +832,7 @@ mod tests {
                 models: vec![hey()],
                 verify: true,
                 cooldown_secs: 2.0,
+                second_chance: None,
             },
             frames(vec![
                 vec![started()],
@@ -909,6 +975,7 @@ mod tests {
                 ],
                 verify: true,
                 cooldown_secs: 2.0,
+                second_chance: None,
             },
             frames(vec![
                 vec![started()],
@@ -939,6 +1006,7 @@ mod tests {
                 ],
                 verify: false,
                 cooldown_secs: 2.0,
+                second_chance: None,
             },
             frames(vec![
                 vec![started()],
@@ -955,5 +1023,28 @@ mod tests {
     #[test]
     fn the_first_score_completes_the_window() {
         assert_eq!(FIRST_SCORE, 25);
+    }
+}
+
+#[cfg(test)]
+mod second_chance_tests {
+    use super::*;
+
+    #[test]
+    fn test_two_near_misses_from_separate_calls_in_the_window_wake() {
+        let sc = SecondChance {
+            threshold: 0.3,
+            window_secs: 6.0,
+        };
+        let s = |secs: f64| (secs * SAMPLE_RATE as f64) as usize;
+        let mut st = SecondChanceState::default();
+        assert!(!st.offer(0.26, s(0.0), sc)); // the music alone: nothing remembered
+        assert!(!st.offer(0.31, s(1.0), sc)); // the first call: remembered
+        assert!(!st.offer(0.33, s(1.3), sc)); // the same call, scored again
+        assert!(st.offer(0.31, s(5.0), sc)); // the second call, 4 s later
+        assert!(!st.offer(0.31, s(6.0), sc)); // the window closed with the wake
+        assert!(!st.offer(0.31, s(20.0), sc)); // a lone call much later: remembered
+        assert!(!st.offer(0.31, s(28.0), sc)); // 8 s on: outside the window, remembered anew
+        assert!(st.offer(0.40, s(30.0), sc));
     }
 }

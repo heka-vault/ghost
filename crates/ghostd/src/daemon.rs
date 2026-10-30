@@ -962,6 +962,12 @@ impl Daemon {
             models: wake_models,
             verify: cfg.wake_verify,
             cooldown_secs: cfg.wake_cooldown_secs,
+            second_chance: cfg
+                .wake_retry_threshold
+                .map(|t| ghost_voice::wakeword::SecondChance {
+                    threshold: t as f32,
+                    window_secs: cfg.wake_retry_window_secs,
+                }),
         };
         let listener = Arc::new(WakeListener::new(
             voice,
