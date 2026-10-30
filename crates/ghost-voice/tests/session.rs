@@ -402,6 +402,22 @@ async fn a_barge_in_stops_playback_within_100ms() {
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    // the model is told the turn was said over its reply, whose opening words the
+    // canceller loses
+    say(&w, 0.3).await; // the segment ends; its final is the second transcript
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let noted = w.asked.lock().unwrap().iter().any(|users| {
+            users.last().is_some_and(|u| {
+                u.starts_with("stop that now") && u.contains("Said over your reply")
+            })
+        });
+        if noted {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{:?}", w.asked.lock().unwrap());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     w.session.cancel().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
     let _ = &w.mouth;

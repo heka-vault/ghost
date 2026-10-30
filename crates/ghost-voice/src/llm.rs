@@ -28,6 +28,11 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use ghost_core::conversations::SUMMARY_TEMPLATE;
 use ghost_core::source::BoxFuture;
+/// Appended to a turn the operator said over Ghost's reply, for the model.
+pub const BARGED_IN_NOTE: &str = "\n\n(Said over your reply, which stopped there. The first \
+word or two of anything said over your voice is lost to the echo canceller: if the request \
+is unclear, ask in a few words instead of guessing.)";
+
 use ghost_llm::{CUT_OFF_NOTE, Context, Event, LlmError, Message, Model, Options, ToolCall, Tools};
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -369,10 +374,22 @@ impl LlmStage {
 
     // --- speculation --------------------------------------------------------------------
 
+    /// The operator's turn as the model sees it. Said over Ghost's reply, it carries a
+    /// note: the echo canceller loses the first word or two of what is said over the
+    /// voice (2026-10-30 19:57: "Can you close that one for me" reached the model as
+    /// "Oh, you that one for me?", and it guessed).
+    fn user_turn(&self, text: &str) -> Message {
+        if self.turns.barged_in() {
+            Message::user(format!("{text}{BARGED_IN_NOTE}"))
+        } else {
+            Message::user(text)
+        }
+    }
+
     async fn speculate(&mut self, text: String, out: &Out) {
         self.drop_speculation();
         let mut context = self.snapshot();
-        context.push(Message::user(text.clone()));
+        context.push(self.user_turn(&text));
         let stream = self.model.stream(context, &self.tools, &self.options);
         let (tx, rx) = mpsc::unbounded_channel();
         let state = Arc::new(std::sync::atomic::AtomicU8::new(held::STREAMING));
@@ -458,10 +475,8 @@ impl LlmStage {
             // Nothing held (withdrawn, or none): the turn's own run.
             return;
         };
-        self.context
-            .lock()
-            .unwrap()
-            .push(Message::user(s.text.clone()));
+        let turn = self.user_turn(&s.text);
+        self.context.lock().unwrap().push(turn);
         {
             use std::sync::atomic::Ordering::SeqCst;
             if s.state
