@@ -163,6 +163,18 @@ pub fn echo_share(heard: &str, spoken: &str) -> f64 {
     if h.is_empty() || s.is_empty() {
         return 0.0;
     }
+    let mut h = h;
+    // The last heard word may be cut short: an interim is read mid-word, and the
+    // canceller chops a segment mid-word (2026-10-30 20:34: the interim "I do." of Ghost's
+    // own "I don't have ..." shared one word of two and cut Ghost off). A stem of two
+    // letters or more that opens one of Ghost's words is taken for that word.
+    if let Some(last) = h.last().cloned()
+        && last.chars().count() >= 2
+        && !s.contains(&last)
+        && let Some(whole) = s.iter().find(|w| w.starts_with(&last))
+    {
+        *h.last_mut().expect("a last word") = whole.clone();
+    }
     matching(&h, &s) as f64 / h.len() as f64
 }
 
@@ -450,6 +462,8 @@ mod tests {
             ),
             1.0
         );
+        assert!(echo_share("I do.", "I don't have a note on that.") >= 0.8); // cut mid-word
+        assert!(echo_share("no stop", "nothing stops you") < 0.8); // only the last word
         assert_eq!(stem("stopped"), stem("stopping"));
         assert_eq!(stem("issues"), stem("issue"));
         assert_ne!(stem("read"), stem("ready"));
