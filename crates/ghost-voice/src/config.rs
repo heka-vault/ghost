@@ -82,6 +82,7 @@ pub struct VoiceSettings {
     pub turn_grace_secs: f64,
     pub turn_speculate: bool,
     pub turn_stop_secs: f64,
+    pub turn_unfinished_secs: f64,
     pub idle_timeout_secs: f64,
     pub hold_timeout_secs: f64,
     pub smart_turn_threads: usize,
@@ -237,6 +238,7 @@ impl VoiceSettings {
             turn_grace_secs: f64_or("GHOST_TURN_GRACE_SECS", 1.2)?,
             turn_speculate: flag("GHOST_TURN_SPECULATE", true),
             turn_stop_secs: f64_or("GHOST_TURN_STOP_SECS", 1.6)?,
+            turn_unfinished_secs: f64_or("GHOST_TURN_UNFINISHED_SECS", 3.0)?,
             idle_timeout_secs: f64_or("GHOST_IDLE_TIMEOUT_SECS", 45.0)?,
             hold_timeout_secs: f64_or("GHOST_HOLD_TIMEOUT_SECS", 1800.0)?,
             smart_turn_threads: usize_or("GHOST_SMART_TURN_THREADS", 2)?,
@@ -352,6 +354,7 @@ mod tests {
         assert_eq!(s.turn_grace_secs, 1.2);
         assert!(s.turn_speculate);
         assert_eq!(s.turn_stop_secs, 1.6);
+        assert_eq!(s.turn_unfinished_secs, 3.0);
         assert_eq!(s.barge_in_min_words, 2);
         assert_eq!(s.barge_in_interim_secs, 0.3);
         assert_eq!(s.vad_stop_secs, 0.2);

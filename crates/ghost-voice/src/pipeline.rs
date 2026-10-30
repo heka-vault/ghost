@@ -801,6 +801,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         p.models.turn.clone(),
         SmartTurnParams {
             stop_secs: settings.turn_stop_secs,
+            unfinished_secs: settings.turn_unfinished_secs,
             ..SmartTurnParams::default()
         },
     );
