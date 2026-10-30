@@ -15,6 +15,8 @@ what is said is the **conversation**. The phone metaphor of the first increment 
 | **Rule** | A line of Ghost's `AGENTS.md`, in every agent's prompt. "Add a rule" appends the operator's words verbatim through the gate. | A persona, which is one agent's. |
 | **Checked out (hold)** | "Hang on, Ghost": the session stays, Ghost stops listening until addressed by name at the start of an utterance; nothing heard meanwhile is kept (ADR 0021). | Hung up. |
 | **Hang up** | A goodbye ends the session; Ghost says a short goodbye and the desk returns to passive (ADR 0021). The End button on the phone ends it silently. | "Go to sleep" (gone). |
+| **Meeting** | A stretch where Ghost takes notes on people who aren't talking to it: the operator's mic and the meeting app's output, transcribed locally, no audio kept, summarized into meeting notes at the end (ADR 0040). Started only by the operator, through the gate. Shown as "Taking notes". | *Recording*: no audio is kept. A session. |
+| **Briefing** | What the operator says after a meeting starts and before the call opens its mic: who is in it, what it's for. Heads the notes verbatim as Context (ADR 0040). | |
 | **Passive** | The desk listening locally for the wake phrase only; nothing leaves the machine (ADR 0010). | |
 | **Gate** | The one path for every change: the permissions' level, bounds, the yes when it asks, the call, the audit (ADR 0007, 0011, 0034). | |
 | **Skill** | A `SKILL.md` folder: instructions the model reads on demand through `read_skill`, never a source of permission. Ghost's own `skills/`, then the operator's `~/.agents/skills`. Scripts in it run only through the scripts app, a change through the gate (ADR 0023). | |
