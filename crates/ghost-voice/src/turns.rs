@@ -202,6 +202,9 @@ pub struct SmartTurnParams {
     /// ends nearly every segment with one ("Can you read me issue."), and the model at 0.04
     /// was right that the operator was going on; at 0.15 ("Yeah.") and 0.27 it was wrong.
     pub sentence_min_prob: f32,
+    /// Added to the grace when the words end on a number ("four one five"): people pause
+    /// after reading one out and often go on ("… from quotient").
+    pub number_secs: f64,
     /// Audio before the speech started that is kept for the model.
     pub pre_speech_secs: f64,
     pub max_duration_secs: f64,
@@ -213,7 +216,8 @@ impl Default for SmartTurnParams {
             stop_secs: 1.6,
             unfinished_secs: 3.0,
             sentence_min_prob: 0.1,
-            pre_speech_secs: 0.0,
+            number_secs: 0.5,
+            pre_speech_secs: 1.0,
             max_duration_secs: 8.0,
         }
     }
@@ -333,12 +337,15 @@ struct StopInner {
     fallback_began: Option<Instant>,
     /// Smart Turn's probability that the turn was done when the fallback began.
     fallback_prob: f32,
+    /// When the segment's silence began: the pause's length, for the record, when the
+    /// operator goes on or the turn closes.
+    silence_began: Option<Instant>,
 }
 
 pub type TurnText = Arc<dyn Fn() -> String + Send + Sync>;
 
-/// Last words nobody ends a request on: fillers, conjunctions, prepositions, articles, a
-/// subject or an auxiliary still waiting for its verb.
+/// Last words nobody ends a request on, even with Parakeet's full stop after them:
+/// fillers, conjunctions, prepositions, articles.
 const UNFINISHED: &[&str] = &[
     "um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "hmm", "mm", //
     "and", "but", "or", "so", "because", "cause", "if", "then", "than", "that", "which", "who",
@@ -346,31 +353,117 @@ const UNFINISHED: &[&str] = &[
     "about", "to", "for", "of", "with", "from", "in", "on", "at", "by", "into", "onto", "like",
     "as", "over", "under", "after", "before", "between", "through", "without", //
     "the", "a", "an", "my", "your", "our", "their", "his", "her", "its", "some", "any", "every",
-    "each", //
+    "each",
+];
+/// A subject or an auxiliary still waiting for its verb, unless a full stop says the short
+/// answer was the whole of it ("Right, I did.", "Yes, I can.").
+const UNFINISHED_UNLESS_STOPPED: &[&str] = &[
     "i", "i'm", "we", "we're", "is", "are", "was", "were", "am", "be", "been", "have", "has",
     "had", "do", "does", "did", "don't", "doesn't", "didn't", "can", "can't", "could", "would",
     "should", "will", "won't", "might", "must", "gonna", "wanna",
 ];
 
-/// The transcript stops mid-thought: a trailing comma or an ellipsis, or a last word from
-/// [`UNFINISHED`] with no full stop or question mark after it. Smart Turn hears the voice;
+/// Words that take something after them, a number or a name, and got nothing: "read me
+/// issue" wants its number. Whole with a determiner within the two words before them
+/// ("close the issue", "what's the issue number"). Only words that nearly always take
+/// one: "the app repo" and "open the file" are ends.
+const WANTS_ARGUMENT: &[&str] = &[
+    "issue", "number", "pr", "ticket", "line", "item", "step", "page", "version", "build",
+    "commit", "called", "named", "titled",
+];
+const DETERMINERS: &[&str] = &[
+    "the", "a", "an", "this", "that", "my", "your", "our", "their", "his", "her", "its", "each",
+    "every", "any", "some", "no", "which", "one", "same", "first", "last", "next", "previous",
+    "other", "another",
+];
+
+fn last_words(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split_whitespace().rev().map(|w| {
+        w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’')
+            .replace('’', "'")
+            .to_lowercase()
+    })
+}
+
+/// The transcript stops mid-thought: a trailing comma or an ellipsis, a last word from
+/// [`UNFINISHED`], or one from [`WANTS_ARGUMENT`] with no determiner before it. A full stop
+/// is read past: Parakeet writes one at nearly every segment's end ("Read me issue."), so
+/// the words decide; a question or exclamation mark is an end. Smart Turn hears the voice;
 /// this reads the words, so "can you count, um" isn't an end however it sounded.
 pub fn sounds_unfinished(text: &str) -> bool {
     let text = text.trim_end();
     if text.ends_with("...") || text.ends_with('…') || text.ends_with(',') {
         return true;
     }
-    if text.ends_with(['.', '?', '!']) {
+    if text.ends_with(['?', '!']) {
         return false;
     }
-    let Some(last) = text.split_whitespace().last() else {
+    let stopped = text.ends_with('.');
+    let mut words = last_words(text.trim_end_matches('.'));
+    let Some(last) = words.next() else {
         return false;
     };
-    let word = last
-        .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’')
-        .replace('’', "'")
-        .to_lowercase();
-    UNFINISHED.contains(&word.as_str())
+    if UNFINISHED.contains(&last.as_str()) {
+        return true;
+    }
+    if !stopped && UNFINISHED_UNLESS_STOPPED.contains(&last.as_str()) {
+        return true;
+    }
+    if WANTS_ARGUMENT.contains(&last.as_str()) {
+        return !words
+            .take(2)
+            .any(|before| DETERMINERS.contains(&before.as_str()));
+    }
+    false
+}
+
+const NUMBER_WORDS: &[&str] = &[
+    "zero",
+    "oh",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+    "thousand",
+];
+
+/// The words end on a number, spoken or in digits ("four one five", "issue 415."), and
+/// not on a question ("Can you count to three?" is whole).
+pub fn ends_with_number(text: &str) -> bool {
+    let text = text.trim_end();
+    if text.ends_with(['?', '!']) {
+        return false;
+    }
+    let text = text.trim_end_matches(['.', ',']);
+    last_words(text).next().is_some_and(|last| {
+        !last.is_empty()
+            && (last.chars().all(|c| c.is_ascii_digit() || c == '-')
+                || NUMBER_WORDS.contains(&last.as_str()))
+    })
 }
 
 /// The words end a sentence: a full stop, a question mark or an exclamation mark, which
@@ -417,6 +510,7 @@ pub struct PatientTurnStopStrategy {
     turn_text: TurnText,
     text: Arc<Mutex<String>>,
     speaking: bool,
+    shared: Speaking,
 }
 
 impl PatientTurnStopStrategy {
@@ -438,6 +532,7 @@ impl PatientTurnStopStrategy {
             turn_text: Arc::new(move || t.lock().unwrap().clone()),
             text,
             speaking: false,
+            shared: Speaking::new(),
         }
     }
 
@@ -480,6 +575,9 @@ impl PatientTurnStopStrategy {
         // An unfinished end waits as long as Smart Turn's "not done" does, counted from the
         // same silence.
         let rest = Duration::from_secs_f64((self.unfinished_secs() - self.grace).max(0.0));
+        let number = Duration::from_secs_f64(self.number_secs());
+        let shared = self.shared.clone();
+        shared.set_closing(true);
         let task = tokio::spawn(async move {
             let began = Instant::now();
             tokio::time::sleep(grace).await;
@@ -491,12 +589,34 @@ impl PatientTurnStopStrategy {
                     sink.speculation_cancelled().await;
                 }
                 tokio::time::sleep(rest).await;
+            } else if ends_with_number(&words) && !number.is_zero() {
+                // The answer started on the words stays; the close just waits a little.
+                debug::audio(|| {
+                    format!(
+                        "turn: {words:?} ends on a number; waiting {:.1}s more",
+                        number.as_secs_f64()
+                    )
+                });
+                tokio::time::sleep(number).await;
             }
             inner.lock().unwrap().held = None;
+            shared.set_closing(false);
             probe.held(began.elapsed().as_secs_f64());
             Self::close(&inner, &sink, &probe, &turn_text).await;
         });
         self.inner.lock().unwrap().held = Some(task);
+    }
+
+    fn number_secs(&self) -> f64 {
+        self.analyzer
+            .as_ref()
+            .map_or(0.0, |a| a.params().number_secs)
+    }
+
+    /// The output stage's shared flags: `closing` is raised while a close waits, so the
+    /// VAD can re-arm quicker for the operator going on.
+    pub fn set_speaking(&mut self, shared: Speaking) {
+        self.shared = shared;
     }
 
     /// The wait is over: the answer started on these words is the answer, or the turn runs.
@@ -506,7 +626,13 @@ impl PatientTurnStopStrategy {
         probe: &Arc<dyn LatencyProbe>,
         turn_text: &TurnText,
     ) {
-        let speculation = inner.lock().unwrap().speculation.take();
+        let (speculation, pause) = {
+            let mut i = inner.lock().unwrap();
+            (i.speculation.take(), i.silence_began.take())
+        };
+        if let Some(began) = pause {
+            probe.pause(began.elapsed().as_secs_f64(), false);
+        }
         if let Some(s) = speculation {
             if s == turn_text() {
                 probe.speculation("kept");
@@ -547,6 +673,7 @@ impl PatientTurnStopStrategy {
         if let Some(h) = self.inner.lock().unwrap().held.take() {
             h.abort();
         }
+        self.shared.set_closing(false);
         self.withdraw().await;
     }
 
@@ -558,6 +685,7 @@ impl PatientTurnStopStrategy {
         let mut i = self.inner.lock().unwrap();
         if let Some(f) = i.fallback.take() {
             f.abort();
+            self.shared.set_closing(false);
         }
         i.fallback_began = None;
     }
@@ -604,7 +732,17 @@ impl PatientTurnStopStrategy {
         match frame {
             Frame::VadStarted { .. } => {
                 self.speaking = true;
+                let waiting = self.holding() || self.in_fallback();
                 self.cancel_fallback();
+                if waiting {
+                    // The pause's length, for the record: what this operator's breaths are.
+                    let pause = self.inner.lock().unwrap().silence_began.take();
+                    if let Some(began) = pause {
+                        let secs = began.elapsed().as_secs_f64();
+                        self.probe.pause(secs, true);
+                        debug::audio(|| format!("turn: went on after a {secs:.2}s pause"));
+                    }
+                }
                 if self.holding() {
                     debug::audio(|| "turn: kept open, the operator went on".into());
                     self.probe.kept_open();
@@ -633,6 +771,7 @@ impl PatientTurnStopStrategy {
             }
             Frame::VadStopped { .. } => {
                 self.speaking = false;
+                self.inner.lock().unwrap().silence_began = Some(Instant::now());
                 let verdict = match &mut self.analyzer {
                     Some(a) => {
                         let verdict = a.analyze_end_of_turn().await;
@@ -685,6 +824,7 @@ impl PatientTurnStopStrategy {
     fn start_fallback(&mut self, prob: f32) {
         self.cancel_fallback();
         self.inner.lock().unwrap().fallback_prob = prob;
+        self.shared.set_closing(true);
         self.run_fallback(self.unfinished_secs(), Instant::now());
     }
 
@@ -704,6 +844,7 @@ impl PatientTurnStopStrategy {
         let sink = self.sink.clone();
         let probe = self.probe.clone();
         let turn_text = self.turn_text.clone();
+        let shared = self.shared.clone();
         let task = tokio::spawn(async move {
             tokio::time::sleep(wait).await;
             {
@@ -711,6 +852,7 @@ impl PatientTurnStopStrategy {
                 i.fallback = None;
                 i.fallback_began = None;
             }
+            shared.set_closing(false);
             Self::close(&inner, &sink, &probe, &turn_text).await;
         });
         let mut i = self.inner.lock().unwrap();
@@ -1008,6 +1150,7 @@ impl UserAggregator {
     /// idle timeout does not fire while Ghost is still talking.
     pub fn with_speaking(mut self, speaking: Speaking) -> Self {
         self.start.set_speaking(speaking.clone());
+        self.stop.set_speaking(speaking.clone());
         self.speaking = speaking;
         self
     }
@@ -1843,13 +1986,39 @@ mod tests {
             ("Let me think...", true),
             ("and then I", true),
             ("Can you count", false),
-            ("Number", false),
             ("Thank you.", false),
             ("Who is it for?", false),
             ("Right, I did.", false),
+            ("Yes, I can.", false),
             ("", false),
+            // 2026-10-30: a full stop is Parakeet's at nearly every segment's end, and a
+            // word that wants a number or a name got none.
+            ("Read me issue.", true),
+            ("Number", true),
+            ("Issue number.", true),
+            ("Tell me about.", true),
+            ("Close the issue.", false),
+            ("What's the number?", false),
+            ("What's the issue number.", false),
+            ("In the app repo.", false),
+            ("Open the file.", false),
         ] {
             assert_eq!(sounds_unfinished(text), unfinished, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn test_words_that_end_on_a_number() {
+        for (text, number) in [
+            ("four one five", true),
+            ("issue 415.", true),
+            ("Read me issue four one five,", true),
+            ("four one five from", false),
+            ("one two three?", false),
+            ("", false),
+            ("about forty", true),
+        ] {
+            assert_eq!(ends_with_number(text), number, "{text:?}");
         }
     }
 
@@ -1957,6 +2126,25 @@ mod tests {
         assert_eq!(
             seen(&t.events),
             vec!["answer:I will talk to you later.", "confirmed"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_words_that_end_on_a_number_wait_a_little_longer() {
+        // "four one five [pause] from quotient": people pause after reading a number out.
+        let mut t = with_model(FakeModel, 0.05, 0.1, 0.4); // number_secs stays 0.5
+        segment_ends(&mut t.s).await;
+        t.hears("Read me issue four one five").await;
+        sleep(0.3).await; // past the grace, inside the number's extra half second
+        assert_eq!(
+            seen(&t.events),
+            vec!["answer:Read me issue four one five"],
+            "the answer started, the close waits"
+        );
+        sleep(0.4).await;
+        assert_eq!(
+            seen(&t.events),
+            vec!["answer:Read me issue four one five", "confirmed"]
         );
     }
 

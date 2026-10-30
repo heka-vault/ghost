@@ -29,6 +29,9 @@ struct Inner {
     on: AtomicBool,
     last_audio: Mutex<Option<Instant>>,
     onset: Mutex<Option<Instant>>,
+    /// A turn's close is waiting (the grace, or the longer silence): the VAD re-arms
+    /// quicker for the operator going on (`stt`).
+    closing: AtomicBool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -60,6 +63,14 @@ impl Speaking {
     /// When Ghost's voice last (re)started after a gap, if ever.
     pub fn onset(&self) -> Option<Instant> {
         *self.0.onset.lock().unwrap()
+    }
+
+    pub fn set_closing(&self, on: bool) {
+        self.0.closing.store(on, Ordering::SeqCst);
+    }
+
+    pub fn is_closing(&self) -> bool {
+        self.0.closing.load(Ordering::SeqCst)
     }
 
     /// Tests: an onset at a chosen time.

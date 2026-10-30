@@ -111,8 +111,19 @@ pub struct ParakeetStt {
     /// the canceller passes the operator in 150–350 ms pieces under Ghost's audio. Swapped
     /// in and out between segments only, never under one.
     over_ghost: Option<VadParams>,
-    on_over_ghost: bool,
-    pending_over_ghost: Option<bool>,
+    /// The VAD's settings while a close waits (`Speaking::is_closing`): the room's, but
+    /// starting quicker, so the operator going on after a breath counts 100 ms sooner.
+    closing: Option<VadParams>,
+    mode: VadMode,
+    pending_mode: Option<VadMode>,
+}
+
+/// Which of the VAD's settings are in force.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VadMode {
+    Room,
+    OverGhost,
+    Closing,
 }
 
 impl ParakeetStt {
@@ -138,8 +149,9 @@ impl ParakeetStt {
             interim_task: None,
             zero: Instant::now(),
             over_ghost: None,
-            on_over_ghost: false,
-            pending_over_ghost: None,
+            closing: None,
+            mode: VadMode::Room,
+            pending_mode: None,
         }
     }
 
@@ -150,6 +162,15 @@ impl ParakeetStt {
 
     pub fn with_params_over_ghost(mut self, params: VadParams) -> Self {
         self.over_ghost = Some(params);
+        self
+    }
+
+    /// While a close waits, the VAD starts after `secs` of speech instead of the room's.
+    pub fn with_closing_start_secs(mut self, secs: f32) -> Self {
+        self.closing = Some(VadParams {
+            start_secs: secs,
+            ..self.params
+        });
         self
     }
 
@@ -166,35 +187,51 @@ impl ParakeetStt {
                 schedule.bot_stopped();
             }
         }
-        self.switch_vad(on);
+        let mode = if on {
+            VadMode::OverGhost
+        } else if self.speaking.is_closing() {
+            VadMode::Closing
+        } else {
+            VadMode::Room
+        };
+        self.switch_vad(mode);
     }
 
-    /// The VAD's settings for now: the room's, or the ones for over Ghost's voice.
+    /// The VAD's settings for now: the room's, the ones for over Ghost's voice, or the
+    /// ones for while a close waits (each only when it was given).
     pub fn active_params(&self) -> VadParams {
-        match self.over_ghost {
-            Some(p) if self.on_over_ghost => p,
-            _ => self.params,
+        match self.mode {
+            VadMode::OverGhost => self.over_ghost.unwrap_or(self.params),
+            VadMode::Closing => self.closing.unwrap_or(self.params),
+            VadMode::Room => self.params,
         }
     }
 
-    fn switch_vad(&mut self, over_ghost: bool) {
-        if self.over_ghost.is_none() || over_ghost == self.on_over_ghost {
-            self.pending_over_ghost = None;
+    pub fn vad_mode(&self) -> VadMode {
+        self.mode
+    }
+
+    fn switch_vad(&mut self, mode: VadMode) {
+        if mode == self.mode {
+            self.pending_mode = None;
             return;
         }
         if self.user_speaking {
             // `set_params` resets the VAD; a segment under way finishes on its settings.
-            self.pending_over_ghost = Some(over_ghost);
+            self.pending_mode = Some(mode);
             return;
         }
-        self.apply_vad(over_ghost);
+        self.apply_vad(mode);
     }
 
-    fn apply_vad(&mut self, over_ghost: bool) {
-        self.on_over_ghost = over_ghost;
-        self.pending_over_ghost = None;
+    fn apply_vad(&mut self, mode: VadMode) {
+        let before = self.active_params();
+        self.mode = mode;
+        self.pending_mode = None;
         let params = self.active_params();
-        if let Some(vad) = &mut self.vad {
+        if params != before
+            && let Some(vad) = &mut self.vad
+        {
             vad.set_params(params);
         }
     }
@@ -202,8 +239,8 @@ impl ParakeetStt {
     /// A segment ended: a switch that waited for it happens now.
     fn segment_ended(&mut self) {
         self.user_speaking = false;
-        if let Some(over_ghost) = self.pending_over_ghost.take() {
-            self.apply_vad(over_ghost);
+        if let Some(mode) = self.pending_mode.take() {
+            self.apply_vad(mode);
         }
     }
 
@@ -434,6 +471,7 @@ mod tests {
         let speaking = Speaking::new();
         let mut stt = ParakeetStt::new(model, None, room, 0.0)
             .with_params_over_ghost(over)
+            .with_closing_start_secs(0.1)
             .with_speaking(speaking.clone());
         let (out, _rx) = Out::capture();
         let audio = || Frame::AudioIn(Audio::new(vec![0; 320], RATE));
@@ -459,6 +497,15 @@ mod tests {
             room,
             "the segment ended: the room's again"
         );
+        // while a close waits, the VAD re-arms quicker for the operator going on
+        speaking.set_closing(true);
+        stt.process(audio(), Direction::Down, &out).await;
+        assert_eq!(stt.vad_mode(), VadMode::Closing);
+        assert_eq!(stt.active_params().start_secs, 0.1);
+        assert_eq!(stt.active_params().min_volume, room.min_volume);
+        speaking.set_closing(false);
+        stt.process(audio(), Direction::Down, &out).await;
+        assert_eq!(stt.vad_mode(), VadMode::Room);
     }
 
     /// `recognize` with a delay, counting calls that overlap.

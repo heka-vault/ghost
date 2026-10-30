@@ -646,11 +646,11 @@ async fn a_call_the_held_answer_reaches_after_the_close_is_still_made() {
     // withdrew itself as if the turn hadn't ended, the confirmed stream ended with nothing,
     // and Ghost sat silent after every request that needed an app.
     let w = world_with(
-        &["read me issue four one three"],
+        &["read me the redis issue"],
         vec![vec![
             ScriptedModel::call("", "github_search_issues", Map::new())
                 .after(Duration::from_millis(400)), // past the 0.1 s grace
-            ScriptedModel::say("Issue four one three is open."),
+            ScriptedModel::say("The redis issue is open."),
         ]],
         0.2,
         0.1,
@@ -676,7 +676,7 @@ async fn a_call_the_held_answer_reaches_after_the_close_is_still_made() {
         .map(|(r, t)| format!("{r}:{t}"))
         .collect();
     assert!(
-        said.contains(&"assistant:Issue four one three is open.".to_string()),
+        said.contains(&"assistant:The redis issue is open.".to_string()),
         "{said:?}"
     );
     w.session.end().await;

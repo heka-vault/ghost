@@ -80,6 +80,8 @@ pub struct VoiceSettings {
     pub vad_over_ghost_start_secs: f32,
     pub vad_over_ghost_min_volume: f32,
     pub vad_over_ghost_stop_secs: f32,
+    /// The VAD's start while a turn's close waits.
+    pub vad_closing_start_secs: f32,
     pub wake_vad_stop_secs: f32,
     pub barge_in_min_words: usize,
     pub barge_in_interim_secs: f64,
@@ -90,6 +92,10 @@ pub struct VoiceSettings {
     pub turn_unfinished_secs: f64,
     /// A full stop shortens the wait only when Smart Turn is at least this unsure.
     pub turn_sentence_min_prob: f32,
+    /// Added to the grace when the words end on a number.
+    pub turn_number_secs: f64,
+    /// Audio before the speech that Smart Turn also hears.
+    pub turn_pre_speech_secs: f64,
     pub idle_timeout_secs: f64,
     pub hold_timeout_secs: f64,
     pub smart_turn_threads: usize,
@@ -242,6 +248,7 @@ impl VoiceSettings {
             vad_over_ghost_start_secs: f64_or("GHOST_VAD_OVER_GHOST_START_SECS", 0.1)? as f32,
             vad_over_ghost_min_volume: f64_or("GHOST_VAD_OVER_GHOST_MIN_VOLUME", 0.3)? as f32,
             vad_over_ghost_stop_secs: f64_or("GHOST_VAD_OVER_GHOST_STOP_SECS", 0.6)? as f32,
+            vad_closing_start_secs: f64_or("GHOST_VAD_CLOSING_START_SECS", 0.1)? as f32,
             wake_vad_stop_secs: f64_or("GHOST_WAKE_VAD_STOP_SECS", 0.5)? as f32,
             // 2 again (2026-10-30 evening, operator's call): the warm-up guard and the echo
             // filter carry the leak risk that 3 carried; "okay, okay" alone must cut.
@@ -253,6 +260,8 @@ impl VoiceSettings {
             turn_stop_secs: f64_or("GHOST_TURN_STOP_SECS", 1.6)?,
             turn_unfinished_secs: f64_or("GHOST_TURN_UNFINISHED_SECS", 3.0)?,
             turn_sentence_min_prob: f64_or("GHOST_TURN_SENTENCE_MIN_PROB", 0.1)? as f32,
+            turn_number_secs: f64_or("GHOST_TURN_NUMBER_SECS", 0.5)?,
+            turn_pre_speech_secs: f64_or("GHOST_TURN_PRE_SPEECH_SECS", 1.0)?,
             idle_timeout_secs: f64_or("GHOST_IDLE_TIMEOUT_SECS", 45.0)?,
             hold_timeout_secs: f64_or("GHOST_HOLD_TIMEOUT_SECS", 1800.0)?,
             smart_turn_threads: usize_or("GHOST_SMART_TURN_THREADS", 2)?,
@@ -391,6 +400,9 @@ mod tests {
         assert_eq!(s.turn_stop_secs, 1.6);
         assert_eq!(s.turn_unfinished_secs, 3.0);
         assert_eq!(s.turn_sentence_min_prob, 0.1);
+        assert_eq!(s.turn_number_secs, 0.5);
+        assert_eq!(s.turn_pre_speech_secs, 1.0);
+        assert_eq!(s.vad_closing_start_secs, 0.1);
         assert_eq!(s.barge_in_min_words, 2);
         assert_eq!(s.barge_in_interim_secs, 0.3);
         assert_eq!(s.vad_stop_secs, 0.2);

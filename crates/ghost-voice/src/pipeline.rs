@@ -757,6 +757,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 interim,
             )
             .with_params_over_ghost(settings.vad_params_over_ghost())
+            .with_closing_start_secs(settings.vad_closing_start_secs)
             .with_speaking(speaking.clone()),
         ),
     ));
@@ -806,6 +807,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             stop_secs: settings.turn_stop_secs,
             unfinished_secs: settings.turn_unfinished_secs,
             sentence_min_prob: settings.turn_sentence_min_prob,
+            number_secs: settings.turn_number_secs,
+            pre_speech_secs: settings.turn_pre_speech_secs,
             ..SmartTurnParams::default()
         },
     );
