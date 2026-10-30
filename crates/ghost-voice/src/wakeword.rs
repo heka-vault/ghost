@@ -13,6 +13,8 @@
 //!
 //! A model's score at or above its threshold is a hit, decided the moment its phrase ends:
 //!
+//! - a weak hit, a score under the threshold but at the model's `checked_from` (the
+//!   operator's "Hey Ghost" under music), is checked by Parakeet whatever the rule below;
 //! - with the check on (`GHOST_WAKE_VERIFY`, the default), Parakeet transcribes from where
 //!   the operator started talking (at least from just before the phrase) to their first
 //!   pause, or 1 s after the hit if they keep talking, and the model's phrase must be in it:
@@ -69,50 +71,6 @@ pub struct Detector {
     pub models: Vec<WakeModel>,
     pub verify: bool,
     pub cooldown_secs: f64,
-    /// A second chance for a call the music drowned (None: off).
-    pub second_chance: Option<SecondChance>,
-}
-
-/// Apple's second-chance threshold: a near miss opens a window in which a repeat needs
-/// less. 2026-10-30: the operator's "Hey Ghost" over Spotify scored 0.31-0.44 against the
-/// 0.7 threshold, three times in 25 s, while the music alone peaked at 0.26; the
-/// canceller leaves the music in on the reSpeaker's beam. Two scores at `threshold` or
-/// over, from separate utterances, within `window_secs`, wake.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SecondChance {
-    pub threshold: f32,
-    pub window_secs: f64,
-}
-
-/// The window's state: when the last near miss was, in samples.
-#[derive(Default, Debug)]
-pub struct SecondChanceState {
-    near_miss_at: Option<usize>,
-}
-
-impl SecondChanceState {
-    /// Least between two scores for them to be separate utterances, not one scored twice.
-    const SEPARATE_SECS: f64 = 1.0;
-
-    /// `score` at `end`: a hit on the second try, or a near miss remembered.
-    pub fn offer(&mut self, score: f32, end: usize, sc: SecondChance) -> bool {
-        if score < sc.threshold {
-            return false;
-        }
-        let separate = (Self::SEPARATE_SECS * SAMPLE_RATE as f64) as usize;
-        let window = (sc.window_secs * SAMPLE_RATE as f64) as usize;
-        match self.near_miss_at {
-            Some(at) if end.saturating_sub(at) < separate => false, // the same call, scored again
-            Some(at) if end.saturating_sub(at) <= window => {
-                self.near_miss_at = None;
-                true
-            }
-            _ => {
-                self.near_miss_at = Some(end);
-                false
-            }
-        }
-    }
 }
 
 /// Last stage of the passive pipeline in detector mode, after the VAD.
@@ -142,7 +100,6 @@ pub struct DetectorWakeProcessor {
     last_hit: i64,
     /// Where the last "best score under its threshold" was logged (GHOST_DEBUG_AUDIO).
     last_best_log: usize,
-    second_chance: SecondChanceState,
     woken: bool,
     done: bool,
 }
@@ -175,7 +132,6 @@ impl DetectorWakeProcessor {
             model: 0,
             last_hit: -(1i64 << 40),
             last_best_log: 0,
-            second_chance: SecondChanceState::default(),
             woken: false,
             done: false,
         }
@@ -266,24 +222,7 @@ impl DetectorWakeProcessor {
         let Ok(scores) = self.d.scorer.score(window) else {
             return;
         };
-        let hit = pick_hit(&scores, &self.d.models).or_else(|| {
-            let sc = self.d.second_chance?;
-            let (i, score) = self
-                .d
-                .models
-                .iter()
-                .enumerate()
-                .filter_map(|(i, m)| {
-                    scores
-                        .iter()
-                        .find(|(n, _)| *n == m.name)
-                        .map(|(_, s)| (i, *s))
-                })
-                .max_by(|a, b| a.1.total_cmp(&b.1))?;
-            self.second_chance
-                .offer(score, end, sc)
-                .then_some((score, i))
-        });
+        let hit = pick_hit(&scores, &self.d.models);
         let Some((score, model)) = hit else {
             // A near miss, for the operator tuning the detector against the room: the best
             // score of this stretch, at most twice a second.
@@ -302,12 +241,16 @@ impl DetectorWakeProcessor {
         self.hit = Some(end);
         self.last_hit = end as i64;
         self.model = model;
-        info!(
-            "wake: detector heard {} ({score:.2})",
-            self.d.models[model].name
-        );
-        let verify = self.d.models[model].verify.unwrap_or(self.d.verify);
-        if !verify {
+        let m = &self.d.models[model];
+        if score < m.threshold {
+            info!(
+                "wake: detector heard {} ({score:.2}), under {:.2}: Parakeet checks it",
+                m.name, m.threshold
+            );
+        } else {
+            info!("wake: detector heard {} ({score:.2})", m.name);
+        }
+        if !m.needs_check(score, self.d.verify) {
             self.wake().await;
         }
     }
@@ -453,6 +396,7 @@ mod tests {
             threshold: 0.5,
             opening: false,
             verify: None,
+            checked_from: None,
         }
     }
 
@@ -463,6 +407,7 @@ mod tests {
             threshold: 0.5,
             opening: true,
             verify: None,
+            checked_from: None,
         }
     }
 
@@ -560,7 +505,6 @@ mod tests {
             models: vec![hey(), address()],
             verify,
             cooldown_secs: 2.0,
-            second_chance: None,
         }
     }
 
@@ -823,6 +767,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_a_weak_hit_wakes_only_when_parakeet_reads_the_phrase() {
+        // 2026-10-30: "Hey Ghost" over Spotify scored 0.25-0.62 against 0.7. A score at
+        // the checked floor is read back, with the check off for the model.
+        let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
+        let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+        d.models[0].checked_from = Some(0.3);
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        assert_eq!(
+            events,
+            vec!["heard", "match:hey ghost|what needs my sign-off?"]
+        );
+        // the music alone at the same score: read, not confirmed, dropped
+        let recognize = Recognizer::new(&["He goes to the gym every morning."]);
+        let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+        d.models[0].checked_from = Some(0.3);
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ]),
+        )
+        .await;
+        assert!(events.is_empty());
+        assert_eq!(recognize.calls(), 2);
+        // without the floor the same score is no hit at all
+        let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
+        let events = run(
+            detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false),
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ]),
+        )
+        .await;
+        assert!(events.is_empty());
+        assert_eq!(recognize.calls(), 0);
+    }
+
+    #[tokio::test]
     async fn test_a_low_score_is_not_a_hit() {
         let recognize = Recognizer::new(&["Hey Ghost."]);
         let events = run(
@@ -832,7 +829,6 @@ mod tests {
                 models: vec![hey()],
                 verify: true,
                 cooldown_secs: 2.0,
-                second_chance: None,
             },
             frames(vec![
                 vec![started()],
@@ -975,7 +971,6 @@ mod tests {
                 ],
                 verify: true,
                 cooldown_secs: 2.0,
-                second_chance: None,
             },
             frames(vec![
                 vec![started()],
@@ -1006,7 +1001,6 @@ mod tests {
                 ],
                 verify: false,
                 cooldown_secs: 2.0,
-                second_chance: None,
             },
             frames(vec![
                 vec![started()],
@@ -1023,28 +1017,5 @@ mod tests {
     #[test]
     fn the_first_score_completes_the_window() {
         assert_eq!(FIRST_SCORE, 25);
-    }
-}
-
-#[cfg(test)]
-mod second_chance_tests {
-    use super::*;
-
-    #[test]
-    fn test_two_near_misses_from_separate_calls_in_the_window_wake() {
-        let sc = SecondChance {
-            threshold: 0.3,
-            window_secs: 6.0,
-        };
-        let s = |secs: f64| (secs * SAMPLE_RATE as f64) as usize;
-        let mut st = SecondChanceState::default();
-        assert!(!st.offer(0.26, s(0.0), sc)); // the music alone: nothing remembered
-        assert!(!st.offer(0.31, s(1.0), sc)); // the first call: remembered
-        assert!(!st.offer(0.33, s(1.3), sc)); // the same call, scored again
-        assert!(st.offer(0.31, s(5.0), sc)); // the second call, 4 s later
-        assert!(!st.offer(0.31, s(6.0), sc)); // the window closed with the wake
-        assert!(!st.offer(0.31, s(20.0), sc)); // a lone call much later: remembered
-        assert!(!st.offer(0.31, s(28.0), sc)); // 8 s on: outside the window, remembered anew
-        assert!(st.offer(0.40, s(30.0), sc));
     }
 }

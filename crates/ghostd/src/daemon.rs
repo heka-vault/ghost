@@ -931,11 +931,10 @@ impl Daemon {
             Ok(s) => s,
             Err(e) => return fall_back(format!("the wake models did not load: {e}")),
         };
-        let mut wake_models = vec![WakeModel::known(
-            &path,
-            cfg.detector_threshold() as f32,
-            None,
-        )];
+        let mut wake_models = vec![
+            WakeModel::known(&path, cfg.detector_threshold() as f32, None)
+                .checked_from(cfg.wake_check_threshold.map(|t| t as f32)),
+        ];
         wake_models.extend(address.iter().map(|p| {
             WakeModel::known(
                 p,
@@ -950,8 +949,14 @@ impl Daemon {
             } else {
                 "no check"
             };
+            let weak = match m.checked_from {
+                Some(from) if from < m.threshold => {
+                    format!(", Parakeet checks a score from {from}")
+                }
+                _ => String::new(),
+            };
             info!(
-                "wake: trained detector {}, threshold {}, {check}",
+                "wake: trained detector {}, threshold {}, {check}{weak}",
                 m.name, m.threshold
             );
         }
@@ -962,12 +967,6 @@ impl Daemon {
             models: wake_models,
             verify: cfg.wake_verify,
             cooldown_secs: cfg.wake_cooldown_secs,
-            second_chance: cfg
-                .wake_retry_threshold
-                .map(|t| ghost_voice::wakeword::SecondChance {
-                    threshold: t as f32,
-                    window_secs: cfg.wake_retry_window_secs,
-                }),
         };
         let listener = Arc::new(WakeListener::new(
             voice,

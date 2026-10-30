@@ -91,6 +91,11 @@ pub struct WakeModel {
     pub opening: bool,
     /// Parakeet checks this model's hits; `None`: the detector's rule.
     pub verify: Option<bool>,
+    /// A score from here, under `threshold`, is a weak hit: one Parakeet must confirm,
+    /// whatever `verify` says. For a call the music drowned (2026-10-30: the operator's
+    /// "Hey Ghost" over Spotify scored 0.25-0.62 against the 0.7 threshold; the
+    /// canceller leaves the music in on the reSpeaker's beam). `None`: `threshold` only.
+    pub checked_from: Option<f32>,
 }
 
 impl WakeModel {
@@ -106,7 +111,24 @@ impl WakeModel {
             threshold,
             opening,
             verify,
+            checked_from: None,
         }
+    }
+
+    pub fn checked_from(mut self, from: Option<f32>) -> Self {
+        self.checked_from = from;
+        self
+    }
+
+    /// The least score that is a hit at all.
+    pub fn floor(&self) -> f32 {
+        self.checked_from
+            .map_or(self.threshold, |c| c.min(self.threshold))
+    }
+
+    /// A hit at `score` waits for Parakeet: the model is checked, or the hit is weak.
+    pub fn needs_check(&self, score: f32, detector_verify: bool) -> bool {
+        score < self.threshold || self.verify.unwrap_or(detector_verify)
     }
 
     /// The model's phrase in `text`: `match_opening` for a name that must open what was
@@ -262,7 +284,7 @@ pub fn pick_hit(scores: &[(String, f32)], models: &[WakeModel]) -> Option<(f32, 
             .find(|(n, _)| *n == m.name)
             .map(|(_, s)| *s)
             .unwrap_or(0.0);
-        if score >= m.threshold && best.is_none_or(|(b, _)| score > b) {
+        if score >= m.floor() && best.is_none_or(|(b, _)| score > b) {
             best = Some((score, i));
         }
     }
@@ -389,6 +411,23 @@ mod tests {
         assert_eq!(model_meaning("ghost_need"), ("ghost", true));
         let m = model("ghost_work", 0.3);
         assert!(m.opening && m.phrase == "ghost" && m.name == "ghost_work");
+    }
+
+    #[test]
+    fn a_weak_score_is_a_hit_only_with_a_checked_floor_and_then_waits_for_parakeet() {
+        let plain = model("hey_ghost", 0.7);
+        let scores = vec![("hey_ghost".to_string(), 0.4)];
+        assert_eq!(pick_hit(&scores, std::slice::from_ref(&plain)), None);
+        let tiered = plain.checked_from(Some(0.3));
+        assert_eq!(
+            pick_hit(&scores, std::slice::from_ref(&tiered)),
+            Some((0.4, 0))
+        );
+        assert!(tiered.needs_check(0.4, false)); // weak: checked whatever the rule
+        assert!(!tiered.needs_check(0.8, false)); // strong: the detector's rule
+        assert!(tiered.needs_check(0.8, true));
+        // a floor above the threshold changes nothing
+        assert_eq!(model("hey_ghost", 0.3).checked_from(Some(0.5)).floor(), 0.3);
     }
 
     #[test]
