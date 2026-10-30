@@ -141,10 +141,24 @@ pub(crate) fn matching(a: &[String], b: &[String]) -> usize {
     k + matching(&a[..i], &b[..j]) + matching(&a[i + k..], &b[j + k..])
 }
 
+/// A word down to its stem, so an inflection the transcriber chose doesn't break a run:
+/// "stopped" and "stopping" are one word here (2026-10-30: "Agreed, fully stopped." came
+/// back for "Agreed, fully stopping the music", two of three words matched, and Ghost cut
+/// itself off). Crude on purpose: the suffixes English puts on verbs and nouns, taken off
+/// when enough of the word is left.
+pub(crate) fn stem(word: &str) -> String {
+    let base = ["ing", "ed", "es", "s", "ly", "er"]
+        .iter()
+        .find_map(|suffix| word.strip_suffix(suffix).filter(|rest| rest.len() >= 3))
+        .unwrap_or(word);
+    base.trim_end_matches('e').to_string()
+}
+
 /// How much of `heard` is a run of `spoken`, word by word, from 0 to 1. `spoken` is
 /// Ghost's text, its numbers in digits; `heard` is the transcript, its numbers in words.
 pub fn echo_share(heard: &str, spoken: &str) -> f64 {
-    let (h, s) = (words(heard), spoken_words(spoken));
+    let stems = |ws: Vec<String>| -> Vec<String> { ws.iter().map(|w| stem(w)).collect() };
+    let (h, s) = (stems(words(heard)), stems(spoken_words(spoken)));
     if h.is_empty() || s.is_empty() {
         return 0.0;
     }
@@ -374,6 +388,17 @@ mod tests {
             1.0
         );
         assert_eq!(echo_share("count to five", "count to 5"), 1.0);
+        // an inflection the transcriber chose is the same word
+        assert_eq!(
+            echo_share(
+                "Agreed, fully stopped.",
+                "Agreed, fully stopping the music while we talk"
+            ),
+            1.0
+        );
+        assert_eq!(stem("stopped"), stem("stopping"));
+        assert_eq!(stem("issues"), stem("issue"));
+        assert_ne!(stem("read"), stem("ready"));
         assert!(echo_share("issue four twelve", "Issue 409 is open") < 0.8);
         assert_eq!(
             spoken_words("the 1st and 20th"),
