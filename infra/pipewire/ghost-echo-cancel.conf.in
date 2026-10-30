@@ -28,6 +28,9 @@ context.modules = [
         webrtc.voice_detection = false
       }
       monitor.mode = true
+      # The canceller's own rate: the microphone's, so a 16 kHz array is not upsampled
+      # into the canceller and down again for ghostd (install.sh, GHOST_AEC_RATE).
+      audio.rate = @RATE@
       # The capture position is MONO (every channel of the mic mixed down) or one
       # channel of a multichannel mic taken alone (stream.dont-remix), e.g. FL of an
       # array's processed beam (install.sh, GHOST_MIC_CHANNEL).

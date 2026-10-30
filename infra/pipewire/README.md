@@ -28,6 +28,24 @@ changing microphone or speakers.
 Requires `libspa-aec-webrtc` (package `pipewire-audio` or `libspa-0.2-modules`
 depending on the distribution).
 
+## One rate
+
+PipeWire runs its graph at one sample rate, 48 kHz unless told otherwise, and puts a
+resampler on every node that differs. A 16 kHz array was upsampled into the canceller,
+cancelled at 48 kHz, published as a 48 kHz `ghost.mic`, and downsampled again for
+`ghostd`, which asks for 16 kHz: three resamplers around a signal with nothing above
+8 kHz. The installer now renders the canceller at the microphone's own rate
+(`audio.rate`, `GHOST_AEC_RATE` to override) and allows that rate on the graph, live
+through `pw-metadata` and for the next start through
+`~/.config/pipewire/pipewire.conf.d/50-ghost-allowed-rates.conf`. PipeWire switches the
+graph to it when the microphone's device keeps time and the graph's devices are idle, so
+with the array as both mic and speakers nothing on Ghost's path is resampled. To see the
+rate each node runs at while Ghost listens:
+
+```bash
+pw-top -b -n 3 | grep -E 'RATE|ghost|alsa_'   # RATE is the graph rate; FORMAT the node's own
+```
+
 ## Two clocks
 
 The echo canceller reads the microphone and the sink's monitor in one PipeWire
