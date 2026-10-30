@@ -706,6 +706,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         session_id: session_id.clone(),
         on_hang_up: hang_up.clone(),
         on_hold: Some(hold_action.clone()),
+        turns: Some(turns.clone()),
         events: Some(events.clone()),
         conversations: runtime.clone(),
         on_call: record,
@@ -755,6 +756,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 settings.vad_params(),
                 interim,
             )
+            .with_params_over_ghost(settings.vad_params_over_ghost())
+            .with_closing_start_secs(settings.vad_closing_start_secs)
             .with_speaking(speaking.clone()),
         ),
     ));
@@ -785,7 +788,9 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 .with_last_assistant(last_assistant.clone())
                 .with_probe(probe.clone())
                 .with_events(events.clone())
-                .with_speaking(speaking.clone()),
+                .with_speaking(speaking.clone())
+                .with_barge_in_min_words(settings.barge_in_min_words)
+                .with_turns(turns.clone()),
         ),
     ));
     stages.push((
@@ -801,6 +806,10 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         p.models.turn.clone(),
         SmartTurnParams {
             stop_secs: settings.turn_stop_secs,
+            unfinished_secs: settings.turn_unfinished_secs,
+            sentence_min_prob: settings.turn_sentence_min_prob,
+            number_secs: settings.turn_number_secs,
+            pre_speech_secs: settings.turn_pre_speech_secs,
             ..SmartTurnParams::default()
         },
     );
@@ -864,7 +873,10 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             speed: settings.tts_speed,
         },
     };
-    stages.push((None, Box::new(NarrationCut::default())));
+    stages.push((
+        None,
+        Box::new(NarrationCut::default().with_turns(turns.clone())),
+    ));
     // At the turn's first call to an app, a word or two before the tools run (#43). Kokoro
     // only: an ElevenLabs reply would answer in another voice than the acknowledgment.
     if settings.ack && settings.tts_engine != "elevenlabs" {
@@ -921,7 +933,11 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     stages.push((None, Box::new(ThinkingSoundCut)));
     stages.push((
         None,
-        Box::new(AudioOutput::new(output).with_speaking(speaking)),
+        Box::new(
+            AudioOutput::new(output)
+                .with_speaking(speaking)
+                .with_turns(turns.clone()),
+        ),
     ));
 
     let stages = assemble(stages, Vec::new());
@@ -983,26 +999,10 @@ impl Stage for SharedEcho {
     }
 
     async fn process(&mut self, frame: Frame, direction: Direction, out: &Out) {
-        let drop = {
-            let mut e = self.0.lock().unwrap();
-            match &frame {
-                Frame::BotStarted => {
-                    e.bot_speaking(true);
-                    false
-                }
-                Frame::BotStopped => {
-                    e.bot_speaking(false);
-                    false
-                }
-                Frame::Transcript(text) => e.is_echo(text, None),
-                Frame::Interim(text) => e.is_echo(text, Some(crate::echo::INTERIM_MIN_WORDS)),
-                _ => false,
-            }
-        };
+        // The filter's own rule, under the lock and without an await: the lock is a
+        // std mutex the taps also take.
+        let drop = self.0.lock().unwrap().drops(&frame);
         if drop {
-            if let Frame::Transcript(t) | Frame::Interim(t) = &frame {
-                crate::debug::audio(|| format!("echo: dropped {t:?}"));
-            }
             return;
         }
         out.forward(frame, direction).await;

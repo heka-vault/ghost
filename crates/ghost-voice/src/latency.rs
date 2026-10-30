@@ -56,6 +56,8 @@ pub trait LatencyProbe: Send + Sync {
     fn held(&self, _secs: f64) {}
     /// The operator went on during the grace hold; the turn stayed open.
     fn kept_open(&self) {}
+    /// A pause at a segment's end lasted `secs`; the operator went on, or the turn closed.
+    fn pause(&self, _secs: f64, _went_on: bool) {}
     /// An answer started during the grace hold: `started`, then `kept` (it was the
     /// answer), `withdrawn` (the operator went on), `missed` (the words changed) or
     /// `tool` (it reached a tool call and the confirmed turn ran again).
@@ -143,6 +145,8 @@ pub struct Turn {
     // From the probe
     hold: f64,
     kept_open: u64,
+    /// Each pause at a segment's end: its seconds and whether the operator went on.
+    pauses: Vec<Value>,
     speculation: IndexMap<String, u64>,
     early_ttfb: Option<f64>,
     pre: f64,
@@ -181,6 +185,7 @@ impl Turn {
             flags: BTreeSet::new(),
             hold: 0.0,
             kept_open: 0,
+            pauses: Vec::new(),
             speculation: IndexMap::new(),
             early_ttfb: None,
             pre: 0.0,
@@ -683,6 +688,13 @@ impl LatencyProbe for LatencyObserver {
         }
     }
 
+    fn pause(&self, secs: f64, went_on: bool) {
+        if let Some(turn) = &mut self.lock().turn {
+            turn.pauses
+                .push(json!({"secs": round(secs, 2), "went_on": went_on}));
+        }
+    }
+
     fn speculation(&self, outcome: &str) {
         if let Some(turn) = &mut self.lock().turn {
             *turn.speculation.entry(outcome.to_string()).or_insert(0) += 1;
@@ -858,6 +870,9 @@ pub fn build_record(
         hear.insert("hold".into(), r(Some(turn.hold)));
         hear.insert("segments".into(), json!(turn.segments));
         hear.insert("kept_open".into(), json!(turn.kept_open));
+        if !turn.pauses.is_empty() {
+            hear.insert("pauses".into(), json!(turn.pauses));
+        }
         if !turn.speculation.is_empty() {
             hear.insert("speculation".into(), json!(turn.speculation));
         }

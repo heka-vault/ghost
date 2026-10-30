@@ -15,6 +15,8 @@ pub mod latency;
 pub mod passwords;
 pub mod phone;
 pub mod phone_host;
+/// Pausing the players for a session (MPRIS).
+pub mod players;
 pub mod push;
 pub mod routes;
 pub mod session;

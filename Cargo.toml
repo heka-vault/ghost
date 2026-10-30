@@ -62,6 +62,8 @@ aes-gcm = "0.11"
 base64 = "0.22"
 rustix = { version = "1", features = ["fs"] }
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
+# Pausing the music for a session: MPRIS over the session bus (crates/ghostd/src/players.rs).
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 schemars = "1"
 rand = "0.9"
 # The phone listener's networks (ADR 0020): which interface holds an address, from getifaddrs.

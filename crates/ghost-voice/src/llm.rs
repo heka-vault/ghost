@@ -12,8 +12,9 @@
 //! A speculative answer ([`Frame::Speculate`]) starts the stream at Smart Turn's verdict
 //! with the turn so far; its frames wait in the stage until the grace confirms the turn
 //! ([`Frame::SpeculationConfirmed`]) and are thrown away if the operator goes on. One that
-//! reaches a tool call withdraws itself ([`Frame::EagerCancel`] back up), so nothing is
-//! written for a turn that hadn't ended.
+//! reaches a tool call before the turn ends withdraws itself ([`Frame::EagerCancel`] back
+//! up), so nothing is written for a turn that hadn't ended; one that reaches it once the
+//! turn is confirmed makes the call as the turn's own (`held`).
 //!
 //! Every lesson the Python daemon learned about the model is in `ghost_llm` (every tool
 //! call of a reply, the cut-off redo); the turn's token ends a stream the operator talked
@@ -27,6 +28,11 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use ghost_core::conversations::SUMMARY_TEMPLATE;
 use ghost_core::source::BoxFuture;
+/// Appended to a turn the operator said over Ghost's reply, for the model.
+pub const BARGED_IN_NOTE: &str = "\n\n(Said over your reply, which stopped there. The first \
+word or two of anything said over your voice is lost to the echo canceller: if the request \
+is unclear, ask in a few words instead of guessing.)";
+
 use ghost_llm::{CUT_OFF_NOTE, Context, Event, LlmError, Message, Model, Options, ToolCall, Tools};
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -101,12 +107,26 @@ pub struct Compaction {
     pub summary_tokens: u32,
 }
 
+/// Where a held answer stands, shared by the stage and the task streaming it. The two
+/// race: the grace can end while the stream is still on its way to a tool call. Each
+/// side moves on from `STREAMING` with a compare-exchange, so exactly one wins: a tool
+/// call reached while streaming withdraws the answer and the confirmed turn runs its
+/// own; one reached once confirmed is the turn's own call and streams on. Live, 2026-10-30,
+/// a 1.5 s first token against a 1.2 s grace met the old rule, which withdrew whatever
+/// the state, and the confirmed turn's stream ended with no call, no text and no run:
+/// Ghost sat silent after every request that needed an app.
+mod held {
+    pub const STREAMING: u8 = 0;
+    pub const CONFIRMED: u8 = 1;
+    pub const WITHDRAWN: u8 = 2;
+}
+
 struct Speculation {
     text: String,
     events: mpsc::UnboundedReceiver<Event>,
     task: JoinHandle<()>,
-    /// The answer reached a tool call: withdrawn; the confirmed turn runs its own.
-    withdrawn: Arc<std::sync::atomic::AtomicBool>,
+    /// One of `held::*`.
+    state: Arc<std::sync::atomic::AtomicU8>,
 }
 
 pub struct LlmStage {
@@ -284,6 +304,16 @@ impl LlmStage {
     /// The calls of a whole reply, in the Python's order: the calls announced, each one
     /// in progress, the response's end, then the results. True when the model runs again.
     async fn after_reply(&mut self, reply: Reply, out: &Out) -> bool {
+        if !reply.calls.is_empty() && !self.turns.acting() {
+            // The operator went on before Ghost answered: the turn is reopened, and nothing
+            // is done for half of it. What was said of the reply goes too (`take_back`).
+            self.context
+                .lock()
+                .unwrap()
+                .push_reply(reply.text.clone(), Vec::new());
+            out.push(Frame::LlmEnd).await;
+            return false;
+        }
         let names: Vec<String> = reply.calls.iter().map(|c| c.name.clone()).collect();
         if !names.is_empty() {
             out.push(Frame::FunctionCallsStarted(names)).await;
@@ -344,17 +374,30 @@ impl LlmStage {
 
     // --- speculation --------------------------------------------------------------------
 
+    /// The operator's turn as the model sees it. Said over Ghost's reply, it carries a
+    /// note: the echo canceller loses the first word or two of what is said over the
+    /// voice (2026-10-30 19:57: "Can you close that one for me" reached the model as
+    /// "Oh, you that one for me?", and it guessed).
+    fn user_turn(&self, text: &str) -> Message {
+        if self.turns.barged_in() {
+            Message::user(format!("{text}{BARGED_IN_NOTE}"))
+        } else {
+            Message::user(text)
+        }
+    }
+
     async fn speculate(&mut self, text: String, out: &Out) {
         self.drop_speculation();
         let mut context = self.snapshot();
-        context.push(Message::user(text.clone()));
+        context.push(self.user_turn(&text));
         let stream = self.model.stream(context, &self.tools, &self.options);
         let (tx, rx) = mpsc::unbounded_channel();
-        let withdrawn = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let w = withdrawn.clone();
+        let state = Arc::new(std::sync::atomic::AtomicU8::new(held::STREAMING));
+        let s = state.clone();
         let out = out.clone();
         let model_name = self.model.model_name();
         let task = tokio::spawn(async move {
+            use std::sync::atomic::Ordering::SeqCst;
             let mut stream = stream;
             let began = Instant::now();
             let mut first = true;
@@ -368,10 +411,13 @@ impl LlmStage {
                     }))
                     .await;
                 }
-                if matches!(ev, Ok(Event::ToolCall(_))) {
-                    // The answer reached a tool call: no tool runs for a turn that hadn't
-                    // ended. The confirmed turn makes the call.
-                    w.store(true, std::sync::atomic::Ordering::SeqCst);
+                if matches!(ev, Ok(Event::ToolCall(_)))
+                    && s.compare_exchange(held::STREAMING, held::WITHDRAWN, SeqCst, SeqCst)
+                        .is_ok()
+                {
+                    // The answer reached a tool call before the turn ended: no tool runs
+                    // for a turn that hadn't ended. The confirmed turn makes the call.
+                    // Once confirmed, the call is the turn's own and streams on below.
                     out.push_up(Frame::EagerCancel).await;
                     return;
                 }
@@ -386,7 +432,7 @@ impl LlmStage {
             text,
             events: rx,
             task,
-            withdrawn,
+            state,
         });
     }
 
@@ -396,20 +442,52 @@ impl LlmStage {
         }
     }
 
+    /// The operator went on before any of the answer to `text` was heard or done
+    /// (`TurnControl::reopen`): the turn and what was made of its answer leave the context,
+    /// and the aggregator hands over the whole turn when it ends. The run it interrupted has
+    /// already returned: frames reach this stage one at a time.
+    fn take_back(&mut self, text: &str) {
+        self.drop_speculation();
+        self.turns.settle_reopened();
+        let mut ctx = self.context.lock().unwrap();
+        let Some(at) = ctx
+            .messages
+            .iter()
+            .rposition(|m| matches!(m, Message::User(t) if t == text))
+        else {
+            return;
+        };
+        let unanswered = ctx.messages[at + 1..].iter().all(|m| match m {
+            Message::Assistant { tool_calls, .. } => tool_calls.is_empty(),
+            Message::User(t) => t == CUT_OFF_NOTE,
+            _ => false,
+        });
+        if unanswered {
+            ctx.messages.truncate(at);
+        } else {
+            warn!("a reopened turn had an answer that acted; it stays in the context");
+        }
+    }
+
     /// The grace ended with the same words: the held answer is the answer, spoken now.
     async fn confirm_speculation(&mut self, out: &Out) {
         let Some(mut s) = self.speculation.take() else {
             // Nothing held (withdrawn, or none): the turn's own run.
             return;
         };
-        self.context
-            .lock()
-            .unwrap()
-            .push(Message::user(s.text.clone()));
-        if s.withdrawn.load(std::sync::atomic::Ordering::SeqCst) {
-            s.task.abort();
-            self.run(out).await;
-            return;
+        let turn = self.user_turn(&s.text);
+        self.context.lock().unwrap().push(turn);
+        {
+            use std::sync::atomic::Ordering::SeqCst;
+            if s.state
+                .compare_exchange(held::STREAMING, held::CONFIRMED, SeqCst, SeqCst)
+                .is_err()
+            {
+                // Withdrawn first: the turn's own run.
+                s.task.abort();
+                self.run(out).await;
+                return;
+            }
         }
         let turn = self.turns.current();
         // Replay what was held, then follow the rest live; an empty stream of a finished
@@ -562,6 +640,7 @@ impl Stage for LlmStage {
             Frame::Speculate(text) => self.speculate(text, out).await,
             Frame::SpeculationConfirmed => self.confirm_speculation(out).await,
             Frame::SpeculationCancelled => self.drop_speculation(),
+            Frame::ReopenTurn(text) => self.take_back(&text),
             Frame::Interruption => {
                 self.drop_speculation();
                 out.forward(Frame::Interruption, direction).await;
@@ -596,6 +675,16 @@ pub struct ScriptedModel {
 pub struct ScriptedReply {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
+    /// This reply's first byte comes after this instead of the model's `ttfb`.
+    pub ttfb: Option<std::time::Duration>,
+}
+
+impl ScriptedReply {
+    /// A slow first byte for this reply alone: past the grace, to meet the close.
+    pub fn after(mut self, ttfb: std::time::Duration) -> Self {
+        self.ttfb = Some(ttfb);
+        self
+    }
 }
 
 impl ScriptedModel {
@@ -613,7 +702,7 @@ impl ScriptedModel {
     pub fn say(text: &str) -> ScriptedReply {
         ScriptedReply {
             text: text.into(),
-            tool_calls: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -621,6 +710,7 @@ impl ScriptedModel {
         ScriptedReply {
             text: text.into(),
             tool_calls: vec![ToolCall::new(format!("call_{name}"), name, args)],
+            ..Default::default()
         }
     }
 
@@ -668,7 +758,8 @@ impl ModelPort for ScriptedModel {
                 }
             }
         };
-        Box::pin(async_stream_words(words, reply.tool_calls, self.ttfb, done))
+        let ttfb = reply.ttfb.unwrap_or(self.ttfb);
+        Box::pin(async_stream_words(words, reply.tool_calls, ttfb, done))
     }
 
     fn complete(

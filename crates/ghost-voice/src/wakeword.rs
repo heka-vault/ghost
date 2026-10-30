@@ -13,6 +13,8 @@
 //!
 //! A model's score at or above its threshold is a hit, decided the moment its phrase ends:
 //!
+//! - a weak hit, a score under the threshold but at the model's `checked_from` (the
+//!   operator's "Hey Ghost" under music), is checked by Parakeet whatever the rule below;
 //! - with the check on (`GHOST_WAKE_VERIFY`, the default), Parakeet transcribes from where
 //!   the operator started talking (at least from just before the phrase) to their first
 //!   pause, or 1 s after the hit if they keep talking, and the model's phrase must be in it:
@@ -77,6 +79,12 @@ pub struct Detector {
 /// utterance once Ghost is woken: short pauses (a comma after "hey ghost") don't end it.
 /// Positions are counted in samples received, not wall time, so a slow check never
 /// shortens what is heard.
+/// How loosely Parakeet's reading of a weak hit must spell the phrase: the detector has
+/// already voted for it, and under music Parakeet writes "Hey Ghost" as "Hey guys" or "He
+/// goes" (2026-10-30 19:56: 0.45 read back as "Hey guys." and was turned down; the 0.9
+/// match that keeps room talk out of transcript wake takes neither).
+pub const WEAK_FUZZY: f64 = 0.8;
+
 pub struct DetectorWakeProcessor {
     d: Detector,
     on_match: OnMatch,
@@ -94,8 +102,12 @@ pub struct DetectorWakeProcessor {
     heard_from_at: usize,
     checked: bool,
     hit: Option<usize>,
+    /// The hit was under its model's threshold: Parakeet's reading is matched looser.
+    weak: bool,
     model: usize,
     last_hit: i64,
+    /// Where the last "best score under its threshold" was logged (GHOST_DEBUG_AUDIO).
+    last_best_log: usize,
     woken: bool,
     done: bool,
 }
@@ -125,8 +137,10 @@ impl DetectorWakeProcessor {
             heard_from_at: 0,
             checked: false,
             hit: None,
+            weak: false,
             model: 0,
             last_hit: -(1i64 << 40),
+            last_best_log: 0,
             woken: false,
             done: false,
         }
@@ -201,7 +215,14 @@ impl DetectorWakeProcessor {
         let level = 20.0 * rms.max(1e-9).log10();
         let before = hit.saturating_sub(self.heard_from_at) as f64 / SAMPLE_RATE as f64;
         let secs = audio.len() as f64 / SAMPLE_RATE as f64;
-        format!("{secs:.1}s from {before:.1}s before the hit, {level:.0} dBFS")
+        // A sum of the samples' magnitudes, so two readings of "the same" stretch can be
+        // told apart (2026-10-30 19:51: a 7.0 s check read a sentence, the final check of
+        // 7.0 s at the same level read nothing).
+        let sum: f64 = audio.iter().map(|x| f64::from(x.abs())).sum();
+        format!(
+            "{secs:.1}s from {before:.1}s before the hit, {level:.0} dBFS, {} samples, sum {sum:.0}",
+            audio.len()
+        )
     }
 
     // --- decisions ------------------------------------------------------------------
@@ -217,21 +238,36 @@ impl DetectorWakeProcessor {
         let Ok(scores) = self.d.scorer.score(window) else {
             return;
         };
-        let Some((score, model)) = pick_hit(&scores, &self.d.models) else {
+        let hit = pick_hit(&scores, &self.d.models);
+        let Some((score, model)) = hit else {
+            // A near miss, for the operator tuning the detector against the room: the best
+            // score of this stretch, at most twice a second.
+            if let Some((name, best)) = scores.iter().max_by(|a, b| a.1.total_cmp(&b.1))
+                && *best >= 0.2
+                && end.saturating_sub(self.last_best_log) >= SAMPLE_RATE / 2
+            {
+                self.last_best_log = end;
+                debug::audio(|| format!("wake: best {name} {best:.2}, under its threshold"));
+            }
             return;
         };
         if (end as i64 - self.last_hit) < (self.d.cooldown_secs * SAMPLE_RATE as f64) as i64 {
             return;
         }
         self.hit = Some(end);
+        self.weak = score < self.d.models[model].threshold;
         self.last_hit = end as i64;
         self.model = model;
-        info!(
-            "wake: detector heard {} ({score:.2})",
-            self.d.models[model].name
-        );
-        let verify = self.d.models[model].verify.unwrap_or(self.d.verify);
-        if !verify {
+        let m = &self.d.models[model];
+        if score < m.threshold {
+            info!(
+                "wake: detector heard {} ({score:.2}), under {:.2}: Parakeet checks it",
+                m.name, m.threshold
+            );
+        } else {
+            info!("wake: detector heard {} ({score:.2})", m.name);
+        }
+        if !m.needs_check(score, self.d.verify) {
             self.wake().await;
         }
     }
@@ -254,7 +290,14 @@ impl DetectorWakeProcessor {
             )
         });
         if self.d.models[self.model]
-            .matches(&text, self.fuzzy)
+            .matches(
+                &text,
+                if self.weak {
+                    self.fuzzy.min(WEAK_FUZZY)
+                } else {
+                    self.fuzzy
+                },
+            )
             .is_some()
         {
             info!(
@@ -377,6 +420,7 @@ mod tests {
             threshold: 0.5,
             opening: false,
             verify: None,
+            checked_from: None,
         }
     }
 
@@ -387,6 +431,7 @@ mod tests {
             threshold: 0.5,
             opening: true,
             verify: None,
+            checked_from: None,
         }
     }
 
@@ -743,6 +788,91 @@ mod tests {
         .await;
         assert_eq!(events, vec!["heard"]);
         assert_eq!(recognize.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_a_weak_hit_wakes_only_when_parakeet_reads_the_phrase() {
+        // 2026-10-30: "Hey Ghost" over Spotify scored 0.25-0.62 against 0.7. A score at
+        // the checked floor is read back, with the check off for the model.
+        let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
+        let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+        d.models[0].checked_from = Some(0.3);
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        assert_eq!(
+            events,
+            vec!["heard", "match:hey ghost|what needs my sign-off?"]
+        );
+        // the music alone at the same score: read, not confirmed, dropped ("There you
+        // go." is what tonight's first drowned call read as; "He goes" would pass at 0.8)
+        let recognize = Recognizer::new(&["There you go, to the gym every morning."]);
+        let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+        d.models[0].checked_from = Some(0.3);
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ]),
+        )
+        .await;
+        assert!(events.is_empty());
+        assert_eq!(recognize.calls(), 2);
+        // under music Parakeet writes "Hey guys": a weak hit takes that spelling ...
+        let recognize = Recognizer::new(&["Hey guys.", "Hey guys, what needs my sign-off?"]);
+        let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+        d.models[0].checked_from = Some(0.3);
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        assert_eq!(
+            events,
+            vec!["heard", "match:hey ghost|what needs my sign-off?"]
+        );
+        // ... a checked strong hit does not (the 0.9 match keeps room talk out)
+        let recognize = Recognizer::new(&["Hey guys.", "Hey guys."]);
+        let events = run(
+            detector(FakeScorer::with(&[3], 0.9, "hey_ghost"), &recognize, true),
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ]),
+        )
+        .await;
+        assert!(events.is_empty());
+        // without the floor the same score is no hit at all
+        let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
+        let events = run(
+            detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false),
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ]),
+        )
+        .await;
+        assert!(events.is_empty());
+        assert_eq!(recognize.calls(), 0);
     }
 
     #[tokio::test]

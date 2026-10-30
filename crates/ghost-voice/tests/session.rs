@@ -11,7 +11,7 @@ use ghost_infer::TurnVerdict;
 use ghost_voice::acks::{Acks, CHANGE, Clip, READ, Voiced};
 use ghost_voice::config::VoiceSettings;
 use ghost_voice::frames::{Audio, Frame};
-use ghost_voice::llm::{ScriptedModel, ScriptedReply};
+use ghost_voice::llm::{ModelPort, ScriptedModel, ScriptedReply};
 use ghost_voice::pipeline::{Greeting, Models, SessionHooks, SessionParams, build_session};
 use ghost_voice::stt::{Recognizer, SharedRecognizer};
 use ghost_voice::tap::OnTurn;
@@ -63,6 +63,45 @@ impl TurnModel for Complete {
     }
 }
 
+/// The scripted model, keeping the operator's turns of every context it is sent.
+struct Asked {
+    model: Arc<ScriptedModel>,
+    asked: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+impl ModelPort for Asked {
+    fn stream(
+        &self,
+        context: ghost_llm::Context,
+        tools: &ghost_llm::Tools,
+        options: &ghost_llm::Options,
+    ) -> futures::stream::BoxStream<'static, Result<ghost_llm::Event, ghost_llm::LlmError>> {
+        let users = context
+            .messages
+            .iter()
+            .filter_map(|m| match m {
+                ghost_llm::Message::User(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        self.asked.lock().unwrap().push(users);
+        self.model.stream(context, tools, options)
+    }
+
+    fn complete(
+        &self,
+        system: String,
+        user: String,
+        max_tokens: u32,
+    ) -> ghost_core::source::BoxFuture<'_, Result<String, ghost_llm::LlmError>> {
+        self.model.complete(system, user, max_tokens)
+    }
+
+    fn model_name(&self) -> String {
+        self.model.model_name()
+    }
+}
+
 struct World {
     session: ghost_voice::pipeline::GhostSession,
     mouth: Mouth,
@@ -70,6 +109,8 @@ struct World {
     records: Arc<Mutex<Vec<Value>>>,
     turns: Arc<Mutex<Vec<(String, String)>>>,
     spoken: Arc<Mutex<Vec<String>>>,
+    /// The operator's turns in each context the model was sent.
+    asked: Arc<Mutex<Vec<Vec<String>>>>,
 }
 
 fn world(
@@ -184,10 +225,14 @@ fn world_with(
             t.lock().unwrap().push((role.to_string(), text));
         })
     });
+    let asked = Arc::new(Mutex::new(Vec::new()));
     let session = build_session(SessionParams {
         settings: Arc::new(settings),
         models,
-        model: ScriptedModel::new(replies, Duration::from_millis(50)),
+        model: Arc::new(Asked {
+            model: ScriptedModel::new(replies, Duration::from_millis(50)),
+            asked: asked.clone(),
+        }),
         sources,
         gate,
         events: None,
@@ -216,6 +261,7 @@ fn world_with(
         records,
         turns,
         spoken,
+        asked,
     }
 }
 
@@ -313,9 +359,9 @@ async fn a_voice_turn_runs_through_every_stage() {
 
 #[tokio::test]
 async fn a_barge_in_stops_playback_within_100ms() {
-    // A long reply (3 s a clause); two heard words while Ghost speaks cut it off.
+    // A long reply (3 s a clause); three heard words while Ghost speaks (GHOST_BARGE_IN_MIN_WORDS) cut it off.
     let w = world(
-        &["tell me everything", "stop that"],
+        &["tell me everything", "stop that now"],
         vec![vec![ScriptedModel::say(
             "Here is everything, in great detail, for a long while.",
         )]],
@@ -337,7 +383,7 @@ async fn a_barge_in_stops_playback_within_100ms() {
         .inject(vec![Frame::VadStarted { start_secs: 0.2 }])
         .await;
     w.session
-        .inject(vec![Frame::Interim("stop that".into())])
+        .inject(vec![Frame::Interim("stop that now".into())])
         .await;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -355,6 +401,22 @@ async fn a_barge_in_stops_playback_within_100ms() {
             "the barge-in never cleared the speaker"
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // the model is told the turn was said over its reply, whose opening words the
+    // canceller loses
+    say(&w, 0.3).await; // the segment ends; its final is the second transcript
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let noted = w.asked.lock().unwrap().iter().any(|users| {
+            users.last().is_some_and(|u| {
+                u.starts_with("stop that now") && u.contains("Said over your reply")
+            })
+        });
+        if noted {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{:?}", w.asked.lock().unwrap());
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
     w.session.cancel().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
@@ -559,4 +621,81 @@ async fn a_goodbye_ends_the_session_without_the_model() {
         .expect("intercepted");
     assert!(goodbye["llm"].is_null());
     assert!(w.spoken.lock().unwrap().len() >= 2); // the greeting and the goodbye
+}
+
+#[tokio::test]
+async fn going_on_before_ghost_answers_is_one_turn() {
+    // Smart Turn takes the pause in "can you count ... to three" for an end, and the
+    // operator goes on while the answer is still being voiced: the model gets one turn,
+    // not two halves.
+    let w = world(
+        &["Can you count", "to three"],
+        vec![vec![ScriptedModel::say("One, two, three.")]],
+        0.3,
+        0.1,
+        800, // the voice takes its time, so nothing of the first answer is heard
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    tokio::time::sleep(Duration::from_millis(400)).await; // the turn is handed over
+    assert_eq!(
+        w.asked.lock().unwrap().last().cloned(),
+        Some(vec!["Can you count".to_string()])
+    );
+    say(&w, 0.3).await;
+    let turn = wait_for(&w.records, "voice", Duration::from_secs(10)).await;
+    assert!(turn.is_some(), "records: {:#?}", w.records.lock().unwrap());
+    assert_eq!(
+        w.asked.lock().unwrap().last().cloned(),
+        Some(vec!["Can you count to three".to_string()])
+    );
+    w.session.end().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = (&w.mouth, &w.ear);
+}
+
+#[tokio::test]
+async fn a_call_the_held_answer_reaches_after_the_close_is_still_made() {
+    // Live, 2026-10-30: a 1.5 s first token against a 1.2 s grace. The close confirmed
+    // the held answer while it was still streaming; when it then reached its tool call it
+    // withdrew itself as if the turn hadn't ended, the confirmed stream ended with nothing,
+    // and Ghost sat silent after every request that needed an app.
+    let w = world_with(
+        &["read me the redis issue"],
+        vec![vec![
+            ScriptedModel::call("", "github_search_issues", Map::new())
+                .after(Duration::from_millis(400)), // past the 0.1 s grace
+            ScriptedModel::say("The redis issue is open."),
+        ]],
+        0.2,
+        0.1,
+        40,
+        vec![github_app()],
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let recs = voice_records(&w, 1).await;
+    let rec = &recs[0];
+    assert_eq!(
+        rec["hear"]["speculation"]["kept"],
+        json!(1),
+        "the close confirmed the held answer: {rec}"
+    );
+    assert!(rec["ack"].is_number(), "the call was acknowledged: {rec}");
+    let said: Vec<String> = w
+        .turns
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(r, t)| format!("{r}:{t}"))
+        .collect();
+    assert!(
+        said.contains(&"assistant:The redis issue is open.".to_string()),
+        "{said:?}"
+    );
+    w.session.end().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = (&w.mouth, &w.ear, &w.spoken, &w.asked);
 }

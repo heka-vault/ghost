@@ -8,6 +8,11 @@
 //! (`ResetAggregation`), and the model never sees any of it. Interceptors can speak a line,
 //! cancel a pending change, put the session on hold, or end it. Anything they do goes
 //! through the same gate as everything else.
+//!
+//! While Ghost speaks, a transcript is offered only when it is a barge-in by the
+//! aggregator's own rule (`GHOST_BARGE_IN_MIN_WORDS` words at least), and marked so
+//! (`UserTurn::barged_in`): shorter ones are most likely Ghost's own voice past the echo
+//! canceller, and a leaked "that's all" must not end the session.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -43,6 +48,12 @@ pub struct InterceptorProcessor {
     turn_pieces: Vec<String>,
     bot_speaking: bool,
     speaking: Speaking,
+    /// The aggregator's barge-in rule, applied here to a transcript heard over Ghost.
+    barge_in_min_words: usize,
+    /// The turn's own state: a turn whose interim cut Ghost off is still an interruption
+    /// when its final arrives after the cut (2026-10-30: "Okay, that's good. Stop." went to
+    /// the model because Ghost had already stopped).
+    turns: Option<Arc<crate::turns::TurnControl>>,
 }
 
 impl InterceptorProcessor {
@@ -64,6 +75,8 @@ impl InterceptorProcessor {
             turn_pieces: Vec::new(),
             bot_speaking: false,
             speaking: Speaking::new(),
+            barge_in_min_words: 2,
+            turns: None,
         }
     }
 
@@ -73,8 +86,33 @@ impl InterceptorProcessor {
         self
     }
 
+    /// GHOST_BARGE_IN_MIN_WORDS, as the aggregator has it; 0 means nothing interrupts.
+    pub fn with_barge_in_min_words(mut self, words: usize) -> Self {
+        self.barge_in_min_words = words;
+        self
+    }
+
+    pub fn with_turns(mut self, turns: Arc<crate::turns::TurnControl>) -> Self {
+        self.turns = Some(turns);
+        self
+    }
+
     fn bot_speaking(&self) -> bool {
         self.bot_speaking || self.speaking.is_on()
+    }
+
+    /// This transcript interrupts Ghost: it is speaking now, or the turn it belongs to cut
+    /// it off already (an interim did, and this is the final).
+    fn barged_in(&self) -> bool {
+        self.bot_speaking() || self.turns.as_ref().is_some_and(|t| t.barged_in())
+    }
+
+    /// A transcript the interceptors should see: any while Ghost is quiet, a barge-in's
+    /// while it speaks.
+    fn offered(&self, text: &str) -> bool {
+        !self.bot_speaking()
+            || (self.barge_in_min_words > 0
+                && text.split_whitespace().count() >= self.barge_in_min_words)
     }
 
     pub fn with_hold(mut self, on_hold: SessionAction) -> Self {
@@ -151,7 +189,8 @@ impl Stage for InterceptorProcessor {
             Frame::BotStopped => self.bot_speaking = false,
             // a new turn, or this one has gone to the model
             Frame::UserStarted | Frame::UserStopped => self.turn_pieces.clear(),
-            Frame::Transcript(text) if !self.bot_speaking() && !self.interceptors.is_empty() => {
+            Frame::Transcript(text) if !self.interceptors.is_empty() && self.offered(text) => {
+                let barged_in = self.barged_in();
                 let pending = self.gate.pending(&self.session_id);
                 let last = (self.last_assistant)();
                 let began = Instant::now();
@@ -169,6 +208,7 @@ impl Stage for InterceptorProcessor {
                         text: t.clone(),
                         pending,
                         last_assistant: last.clone(),
+                        barged_in,
                     };
                     for interceptor in self.interceptors.clone() {
                         // An interceptor that panics must not eat the turn.
@@ -272,6 +312,48 @@ mod tests {
         frames.iter().any(|f| matches!(f, Frame::ResetAggregation))
     }
 
+    /// Keeps every turn it was offered, with its `barged_in`.
+    struct Offered(Arc<Mutex<Vec<(String, bool)>>>);
+
+    #[async_trait]
+    impl TurnInterceptor for Offered {
+        fn name(&self) -> &str {
+            "offered"
+        }
+        async fn on_user_turn(&self, turn: &UserTurn) -> Option<Handled> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((turn.text.clone(), turn.barged_in));
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn test_over_ghost_only_a_barge_in_is_offered_and_marked() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let speaking = Speaking::new();
+        let (p, _) = make(vec![Arc::new(Offered(seen.clone()))], FakeGate::new(false));
+        let mut p = p.with_speaking(speaking.clone()).with_barge_in_min_words(3);
+        let (out, mut rx) = Out::capture();
+        speaking.set(true);
+        p.process(said("that's all"), Direction::Down, &out).await; // a leak's size
+        p.process(said("hang on a sec"), Direction::Down, &out)
+            .await; // a barge-in
+        speaking.set(false);
+        p.process(said("that's all"), Direction::Down, &out).await;
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                ("hang on a sec".to_string(), true),
+                ("that's all".to_string(), false),
+                // the piece joined with the earlier one of the turn, as always
+                ("hang on a sec that's all".to_string(), false),
+            ]
+        );
+        assert!(has_transcript(&drain(&mut rx).await));
+    }
+
     #[tokio::test]
     async fn test_pass_through_when_nobody_handles() {
         let (mut p, _) = make(vec![Arc::new(Always(None))], FakeGate::new(false));
@@ -343,7 +425,8 @@ mod tests {
         );
         let (out, mut rx) = Out::capture();
         p.process(Frame::BotStarted, Direction::Down, &out).await;
-        p.process(said("go to sleep"), Direction::Down, &out).await;
+        // Under the barge-in's size: most likely Ghost's own voice past the canceller.
+        p.process(said("sleep"), Direction::Down, &out).await;
         assert!(slept.lock().unwrap().is_empty());
         assert!(has_transcript(&drain(&mut rx).await));
     }

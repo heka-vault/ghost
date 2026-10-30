@@ -9,7 +9,10 @@
 //! speaking is known first: it raises the shared flag (`crate::speaking`) as it writes a
 //! reply's first sample and lowers it when the last has played or the turn was cut, so
 //! the stages that must not mistake Ghost's voice for the operator's learn it then and
-//! not when the `BotStarted` frame has worked its way up behind a busy TTS stage.
+//! not when the `BotStarted` frame has worked its way up behind a busy TTS stage. The
+//! same first sample settles the turn's answer as heard (`crate::turns::TurnControl`):
+//! live, the frame was still on its way 1.3 s after a one-word reply had played, and a
+//! leak of that reply reopened the turn as if nothing of the answer had been heard.
 
 use std::collections::VecDeque;
 use std::path::Path;
@@ -25,6 +28,7 @@ use tracing::{info, warn};
 
 use crate::frames::{Audio, Direction, Frame, Out, Stage};
 use crate::speaking::Speaking;
+use crate::turns::TurnControl;
 
 pub const IN_RATE: u32 = 16_000;
 pub const OUT_RATE: u32 = 24_000;
@@ -134,6 +138,8 @@ pub struct AudioOutput {
     speaking: bool,
     /// Shared with the stages that must know at once.
     speaking_now: Speaking,
+    /// The turn's answer is heard the moment its first sample is written.
+    turns: Option<Arc<TurnControl>>,
 }
 
 impl AudioOutput {
@@ -142,11 +148,17 @@ impl AudioOutput {
             media,
             speaking: false,
             speaking_now: Speaking::new(),
+            turns: None,
         }
     }
 
     pub fn with_speaking(mut self, speaking: Speaking) -> Self {
         self.speaking_now = speaking;
+        self
+    }
+
+    pub fn with_turns(mut self, turns: Arc<TurnControl>) -> Self {
+        self.turns = Some(turns);
         self
     }
 
@@ -174,7 +186,7 @@ impl AudioOutput {
                     warn!("audio out: {e}");
                     return false;
                 }
-                Some(Ok(())) => {}
+                Some(Ok(())) => self.speaking_now.audio(),
             }
         }
         true
@@ -185,6 +197,9 @@ impl AudioOutput {
             return; // a stale frame: never reaches the speaker
         }
         self.speaking_now.set(true);
+        if let Some(turns) = &self.turns {
+            turns.heard();
+        }
         if !self.speaking {
             self.speaking = true;
             out.push_up(Frame::BotStarted).await;
@@ -714,6 +729,36 @@ mod tests {
         assert!(took < Duration::from_millis(200), "{took:?}");
         let pushed = drain(&mut rx).await;
         assert!(pushed.iter().any(|f| matches!(f, Frame::BotStarted)));
+    }
+
+    #[tokio::test]
+    async fn a_replys_first_sample_settles_its_turn_as_heard() {
+        // Live, 2026-10-30: "Okay." played whole, its BotStarted was still climbing the
+        // pipeline 1.3 s later, and the leak of it reopened the turn it answered.
+        let (media, _mouth, _ear) = scripted_media();
+        let turns = TurnControl::new(CancellationToken::new());
+        let mut out_stage = AudioOutput::new(media.output).with_turns(turns.clone());
+        let (out, _rx) = Out::capture();
+        turns.answering("all right");
+        assert!(
+            turns.reopen().is_some(),
+            "nothing played yet: the turn is the operator's"
+        );
+        turns.answering("all right");
+        out_stage
+            .process(
+                Frame::TtsAudio {
+                    audio: Audio::new(vec![20000; OUT_RATE as usize / 10], OUT_RATE),
+                    turn: CancellationToken::new(),
+                },
+                Direction::Down,
+                &out,
+            )
+            .await;
+        assert!(
+            turns.reopen().is_none(),
+            "the answer reached the speaker: the turn stands"
+        );
     }
 
     #[tokio::test]

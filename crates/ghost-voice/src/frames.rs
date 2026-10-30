@@ -113,6 +113,10 @@ pub enum Frame {
     SpeculationConfirmed,
     /// The operator went on, or the words changed: the held answer is thrown away.
     SpeculationCancelled,
+    /// The operator went on before any of the answer to this turn was heard or done: the
+    /// model's stage takes the turn and the unheard answer out of the context, and the
+    /// aggregator hands it the whole turn when it ends.
+    ReopenTurn(String),
     /// The model withdrew a speculative answer that reached a tool call; the confirmed
     /// turn runs its own inference.
     EagerCancel,
@@ -216,6 +220,7 @@ impl Frame {
             Frame::Speculate(_) => "Speculate",
             Frame::SpeculationConfirmed => "SpeculationConfirmed",
             Frame::SpeculationCancelled => "SpeculationCancelled",
+            Frame::ReopenTurn(_) => "ReopenTurn",
             Frame::EagerCancel => "EagerCancel",
             Frame::LlmStart => "LlmStart",
             Frame::ReplyTurn(_) => "ReplyTurn",

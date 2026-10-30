@@ -10,7 +10,7 @@
  * the phone is trying (and, after 20 seconds, for how long).
  */
 import type { OutcomeView, PendingProposal, Turn } from "@ghost/client-ts";
-import { errorText, lineName, pastTense, phaseText, quoted, splitSummary } from "@ghost/ui";
+import { errorText, joinSpoken, lineName, pastTense, phaseText, quoted, splitSummary } from "@ghost/ui";
 import * as Haptics from "expo-haptics";
 import { useKeepAwake } from "expo-keep-awake";
 import { useRouter } from "expo-router";
@@ -383,5 +383,5 @@ function MuteButton({ muted, disabled, onToggle }: { muted: boolean; disabled: b
 }
 
 function captionTurns(turns: Turn[]): Turn[] {
-  return turns.filter((t) => t.role !== "system" && t.text.trim()).slice(-2);
+  return joinSpoken(turns.filter((t) => t.role !== "system" && t.text.trim())).slice(-2);
 }

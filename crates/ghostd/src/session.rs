@@ -107,6 +107,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         None => {
             if !already_chimed && let Some(du) = &ducker {
                 du.duck();
+                if cfg.pause_players {
+                    d.ports.players.pause_playing().await;
+                }
             }
             let opened = (d.ports.desk_media)(DeskMediaRequest {
                 audio: d.audio_settings(false), // ducked here, not by the devices
@@ -121,6 +124,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
                     if let Some(du) = &ducker {
                         du.restore();
                     }
+                    d.ports.players.resume().await;
                     return;
                 }
             }
@@ -251,6 +255,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             if let Some(du) = &ducker {
                 du.restore();
             }
+            d.ports.players.resume().await;
             if let Some(p) = phone {
                 p.media.close().await;
             }
@@ -262,6 +267,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         if let Some(du) = &ducker {
             du.restore();
         }
+        d.ports.players.resume().await;
         if let Some(p) = phone {
             p.media.close().await;
         }
@@ -440,6 +446,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     if let Some(du) = &ducker {
         du.restore();
     }
+    d.ports.players.resume().await;
     // A change the session was still waiting on stays on the waiting list (ADR 0030).
     if gate
         .set_aside(&session_id, "session ended")

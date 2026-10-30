@@ -13,7 +13,8 @@
 //! path. While Ghost speaks a transcript, interim or final, serves nothing but barge-in
 //! (the confirmation processor ignores it), so two of Ghost's own words are enough to drop
 //! one: the first half second of a reply leaks past the echo canceller while it converges,
-//! and reads as a word or two of what Ghost just started saying.
+//! and reads as a word or two of what Ghost just started saying. A segment that began
+//! while Ghost spoke keeps that floor at its final, which lands after a short reply ends.
 //!
 //! The filter knows the reply in progress a clause ahead of the speaker (`saying`, fed by
 //! the TTS stage as it renders), not only the finished replies (`spoke`, fed by the
@@ -25,12 +26,19 @@
 //! as a one-word answer and cut off the tool call Ghost just started. For `window_secs`
 //! after one, a transcript made only of acknowledgment words is dropped, whatever its
 //! length.
+//!
+//! The reply is text with digits in it ("Issue 409", "October 29th") and the transcript is
+//! what the voice made of them ("issue four hundred and nine", "october twenty ninth"), so
+//! the reply's side of the comparison spells every number out (`spoken_words`); live,
+//! "Issue 409" came back as "Issue four hundred and", shared one word in four with the
+//! reply, and cut Ghost off as a barge-in, after which Ghost answered its own echo.
 
 use std::collections::VecDeque;
 use std::sync::LazyLock;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use ghost_core::request::number_mentions;
 use regex::Regex;
 
 use crate::debug;
@@ -38,7 +46,8 @@ use crate::frames::{Direction, Frame, Out, Stage};
 use crate::speaking::Speaking;
 
 static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-z0-9']+").unwrap());
-/// An interim this long cuts Ghost off (GHOST_BARGE_IN_MIN_WORDS default).
+/// Two of Ghost's own words in an interim are enough to call it echo while Ghost speaks
+/// (fewer than the barge-in needs, GHOST_BARGE_IN_MIN_WORDS, on purpose).
 pub const INTERIM_MIN_WORDS: usize = 2;
 
 pub fn words(text: &str) -> Vec<String> {
@@ -46,6 +55,58 @@ pub fn words(text: &str) -> Vec<String> {
     WORD.find_iter(&lower)
         .map(|m| m.as_str().to_string())
         .collect()
+}
+
+/// The words of what Ghost said, with every number also as the voice says it: "409" is
+/// followed by "four hundred nine", "four hundred and nine", "four oh nine" and the rest
+/// of `number_mentions`, "29th" by "twenty ninth". The transcript's run of words then
+/// finds its match whichever form the voice and the ear agreed on; the extra forms only
+/// lengthen this side, which the share is not measured against.
+pub(crate) fn spoken_words(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for w in words(text) {
+        let digits = w.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+        let suffix = &w[digits.len()..];
+        let n = match digits.parse::<i64>() {
+            Ok(n) if !digits.is_empty() && digits.len() <= 4 => n,
+            _ => {
+                out.push(w);
+                continue;
+            }
+        };
+        let ordinal_ = matches!(suffix, "st" | "nd" | "rd" | "th");
+        out.push(w.clone());
+        for form in number_mentions(n) {
+            if form == digits {
+                continue;
+            }
+            let form = if ordinal_ { ordinal(&form) } else { form };
+            out.extend(form.split_whitespace().map(str::to_string));
+        }
+    }
+    out
+}
+
+/// "twenty nine" as the voice says "29th": the last word made ordinal.
+fn ordinal(cardinal: &str) -> String {
+    let mut parts: Vec<&str> = cardinal.split_whitespace().collect();
+    let last = match parts.pop() {
+        Some(w) => w,
+        None => return String::new(),
+    };
+    let ord = match last {
+        "one" => "first".to_string(),
+        "two" => "second".to_string(),
+        "three" => "third".to_string(),
+        "five" => "fifth".to_string(),
+        "eight" => "eighth".to_string(),
+        "nine" => "ninth".to_string(),
+        "twelve" => "twelfth".to_string(),
+        w if w.ends_with('y') => format!("{}ieth", &w[..w.len() - 1]),
+        w => format!("{w}th"),
+    };
+    parts.push(&ord);
+    parts.join(" ")
 }
 
 /// `difflib.SequenceMatcher.get_matching_blocks` over words, summed: the longest common
@@ -81,14 +142,66 @@ pub(crate) fn matching(a: &[String], b: &[String]) -> usize {
     k + matching(&a[..i], &b[..j]) + matching(&a[i + k..], &b[j + k..])
 }
 
-/// How much of `heard` is a run of `spoken`, word by word, from 0 to 1.
+/// A word down to its stem, so an inflection the transcriber chose doesn't break a run:
+/// "stopped" and "stopping" are one word here (2026-10-30: "Agreed, fully stopped." came
+/// back for "Agreed, fully stopping the music", two of three words matched, and Ghost cut
+/// itself off). Crude on purpose: the suffixes English puts on verbs and nouns, taken off
+/// when enough of the word is left.
+pub(crate) fn stem(word: &str) -> String {
+    let base = ["ing", "ed", "es", "s", "ly", "er"]
+        .iter()
+        .find_map(|suffix| word.strip_suffix(suffix).filter(|rest| rest.len() >= 3))
+        .unwrap_or(word);
+    base.trim_end_matches('e').to_string()
+}
+
+/// How much of `heard` is a run of `spoken`, word by word, from 0 to 1. `spoken` is
+/// Ghost's text, its numbers in digits; `heard` is the transcript, its numbers in words.
 pub fn echo_share(heard: &str, spoken: &str) -> f64 {
-    let (h, s) = (words(heard), words(spoken));
+    let stems = |ws: Vec<String>| -> Vec<String> { ws.iter().map(|w| stem(w)).collect() };
+    let (mut h, s) = (stems(words(heard)), stems(spoken_words(spoken)));
     if h.is_empty() || s.is_empty() {
         return 0.0;
     }
-    matching(&h, &s) as f64 / h.len() as f64
+    // The last heard word may be cut short: an interim is read mid-word, and the
+    // canceller chops a segment mid-word (2026-10-30 20:34: the interim "I do." of Ghost's
+    // own "I don't have ..." shared one word of two and cut Ghost off). A stem of two
+    // letters or more that opens one of Ghost's words is taken for that word.
+    if let Some(last) = h.last().cloned()
+        && last.chars().count() >= 2
+        && !s.contains(&last)
+        && let Some(whole) = s.iter().find(|w| w.starts_with(&last))
+    {
+        *h.last_mut().expect("a last word") = whole.clone();
+    }
+    // A function word weighs a quarter of a content word: the leak garbles the small
+    // words (21:06: "is closed as completed" came back as "It's closed. It's complete.",
+    // two of four words Ghost's, and cut it off), while the operator's own "yes" before
+    // Ghost's "close it" still counts in full. Function words alone are judged whole.
+    let content: Vec<String> = h
+        .iter()
+        .filter(|w| !FUNCTION_WORDS.iter().any(|f| stem(f) == **w)) // both sides stemmed
+        .cloned()
+        .collect();
+    if content.is_empty() || content.len() == h.len() {
+        return matching(&h, &s) as f64 / h.len() as f64;
+    }
+    let all = matching(&h, &s) as f64;
+    let of_content = matching(&content, &s) as f64;
+    let of_function = (all - of_content).max(0.0);
+    let functions = (h.len() - content.len()) as f64;
+    (of_content + FUNCTION_WEIGHT * of_function)
+        / (content.len() as f64 + FUNCTION_WEIGHT * functions)
 }
+
+/// Words that carry no content, left out of the share (stemmed, as `stem` writes them).
+const FUNCTION_WORDS: &[&str] = &[
+    "a", "an", "the", "it", "it's", "its", "is", "are", "was", "were", "be", "been", "as", "at",
+    "in", "on", "of", "to", "and", "or", "but", "so", "that", "this", "these", "those", "i", "i'm",
+    "you", "we", "he", "she", "they", "my", "your", "our", "with", "for", "from", "by", "do",
+    "did", "ha", "have", "had", "oh", "um", "uh",
+];
+const FUNCTION_WEIGHT: f64 = 0.25;
 
 pub struct EchoFilter {
     window: f64,
@@ -104,7 +217,28 @@ pub struct EchoFilter {
     /// When Ghost last acknowledged a request, and every word an acknowledgment can say.
     acked_at: f64,
     ack_words: std::collections::HashSet<String>,
+    /// When the operator's current segment began (the VAD's start), on `clock`.
+    vad_started_at: f64,
+    /// Ghost was speaking when that segment began: its final is judged like an interim.
+    vad_began_over_ghost: bool,
+    /// ... and inside the canceller's warm-up after its voice (re)started.
+    vad_in_warmup: bool,
 }
+
+/// How long after Ghost's voice (re)starts the canceller is taken to be leaking: a
+/// segment that begins and is transcribed inside this window, while Ghost speaks, is its
+/// voice, whatever the words. LiveKit ignores interruptions for 3 s after its agent
+/// starts speaking; Ghost's canceller leaks about half a second, and the VAD's start lags
+/// the leak by 0.2 s.
+pub const WARMUP_SECS: f64 = 0.8;
+
+/// Inside the warm-up a transcript this long, or one with a word that stops Ghost, is the
+/// operator after all: the leak reads as a word or two of Ghost's own, never as "stop
+/// that now" (the barge-in test, once the warm-up rule first ran live).
+const WARMUP_KEEP_WORDS: usize = 3;
+const INTERRUPT_WORDS: &[&str] = &[
+    "stop", "wait", "hold", "hang", "no", "enough", "quiet", "pause", "shut",
+];
 
 impl EchoFilter {
     pub fn new(window_secs: f64) -> Self {
@@ -125,7 +259,29 @@ impl EchoFilter {
             stopped_at: f64::NEG_INFINITY,
             acked_at: f64::NEG_INFINITY,
             ack_words: crate::acks::words(),
+            vad_started_at: f64::NEG_INFINITY,
+            vad_began_over_ghost: false,
+            vad_in_warmup: false,
         }
+    }
+
+    fn clearly_the_operator(text: &str) -> bool {
+        let heard = words(text);
+        heard.len() >= WARMUP_KEEP_WORDS
+            || heard.iter().any(|w| INTERRUPT_WORDS.contains(&w.as_str()))
+    }
+
+    /// The current segment began inside the canceller's warm-up after Ghost's voice
+    /// (re)started, and is still inside it: Ghost hearing itself, whatever the words.
+    fn in_warmup(&self) -> bool {
+        // Decided when the segment began (`drops`, at the VAD's start), and held for the
+        // segment: its final lands after the window ("Get", 1.0 s after the opening's
+        // onset, 2026-10-30 19:58) and is the same leak. Not only while Ghost speaks: a
+        // reply shorter than the window ("I'm here.") has ended by the time its leak is
+        // transcribed (18:12: "I'm" counted toward a barge-in after the reply had
+        // stopped). Only a segment that began while the voice was playing: a short
+        // greeting ("Yeah?") answered the moment it ends is the operator.
+        self.vad_in_warmup
     }
 
     /// Ghost is saying an acknowledgment now.
@@ -188,23 +344,76 @@ impl EchoFilter {
             return true;
         }
         let speaking = self.speaking();
-        let least = min_words.unwrap_or(if speaking {
+        // A segment that began over Ghost's voice is judged as its final arrives, often
+        // just after the voice stopped (2026-10-30 19:27: "Go ahead." opened the session,
+        // its interim was dropped, its 2-word final 0.6 s after the voice ended was not,
+        // and the operator's turn began "Go ahead. Yeah, ...").
+        let least = min_words.unwrap_or(if speaking || self.vad_began_over_ghost {
             INTERIM_MIN_WORDS
         } else {
             self.min_words
         });
-        if words(text).len() < least {
+        let heard = words(text);
+        if heard.is_empty() || !(speaking || (self.clock)() - self.stopped_at <= self.window) {
             return false;
         }
-        if !(speaking || (self.clock)() - self.stopped_at <= self.window) {
-            return false;
-        }
-        self.spoken
+        let share = self
+            .spoken
             .iter()
             .chain((!self.current.is_empty()).then_some(&self.current))
             .map(|s| echo_share(text, s))
-            .fold(0.0, f64::max)
-            >= self.threshold
+            .fold(0.0, f64::max);
+        if heard.len() >= least {
+            return share >= self.threshold;
+        }
+        // Under the floor: a segment that began over Ghost's voice and is nothing but its
+        // words (2026-10-30 19:52: the one-word opening "Listening." reached the operator's
+        // turn as its final, 1.3 s after the voice began).
+        self.vad_began_over_ghost && share >= 1.0
+    }
+}
+
+impl EchoFilter {
+    /// Every frame of the session passes here, in order: Ghost's voice starting and
+    /// stopping and the operator's segments are noted, and a transcript that is Ghost
+    /// hearing itself is dropped (true). The one path for the stage and for the desk
+    /// pipeline's shared filter (`pipeline::SharedEcho`): until 2026-10-30 the latter
+    /// judged the words alone and never saw a VAD start, so the warm-up rule and the
+    /// segment's start never applied live ("I'm here." opened the operator's turn twice).
+    pub fn drops(&mut self, frame: &Frame) -> bool {
+        match frame {
+            Frame::BotStarted => self.bot_speaking(true),
+            Frame::BotStopped => self.bot_speaking(false),
+            Frame::VadStarted { .. } => {
+                self.vad_started_at = (self.clock)();
+                self.vad_began_over_ghost = self.speaking();
+                self.vad_in_warmup = self.vad_began_over_ghost
+                    && self
+                        .speaking_now
+                        .onset()
+                        .is_some_and(|onset| onset.elapsed().as_secs_f64() <= WARMUP_SECS);
+            }
+            Frame::Transcript(text) | Frame::Interim(text)
+                if self.in_warmup() && !Self::clearly_the_operator(text) =>
+            {
+                debug::audio(|| {
+                    format!(
+                        "echo: dropped {text:?} (inside the canceller's warm-up after Ghost's voice resumed)"
+                    )
+                });
+                return true;
+            }
+            Frame::Transcript(text) if self.is_echo(text, None) => {
+                debug::audio(|| format!("echo: dropped {text:?}"));
+                return true;
+            }
+            Frame::Interim(text) if self.is_echo(text, Some(INTERIM_MIN_WORDS)) => {
+                debug::audio(|| format!("echo: dropped {text:?}"));
+                return true;
+            }
+            _ => {}
+        }
+        false
     }
 }
 
@@ -215,18 +424,8 @@ impl Stage for EchoFilter {
     }
 
     async fn process(&mut self, frame: Frame, direction: Direction, out: &Out) {
-        match &frame {
-            Frame::BotStarted => self.bot_speaking(true),
-            Frame::BotStopped => self.bot_speaking(false),
-            Frame::Transcript(text) if self.is_echo(text, None) => {
-                debug::audio(|| format!("echo: dropped {text:?}"));
-                return;
-            }
-            Frame::Interim(text) if self.is_echo(text, Some(INTERIM_MIN_WORDS)) => {
-                debug::audio(|| format!("echo: dropped {text:?}"));
-                return;
-            }
-            _ => {}
+        if self.drops(&frame) {
+            return;
         }
         out.forward(frame, direction).await;
     }
@@ -260,6 +459,190 @@ mod tests {
         );
         assert!(echo_share("yes close it", "Close it with a note saying so?") < 0.8);
         assert_eq!(echo_share("anything", ""), 0.0);
+    }
+
+    #[test]
+    fn test_numbers_are_heard_as_the_voice_says_them() {
+        // Live, 2026-10-30: the leak of "Issue 409 is open" read as "Issue four hundred
+        // and", one word in four, and cut Ghost off; the next reading was answered as the
+        // operator's turn.
+        assert_eq!(echo_share("Issue four hundred and nine", "Issue 409"), 1.0);
+        assert_eq!(
+            echo_share("issue four oh nine is open", "Issue 409 is open"),
+            1.0
+        );
+        assert_eq!(
+            echo_share(
+                "last updated october twenty ninth",
+                "last updated October 29th."
+            ),
+            1.0
+        );
+        assert_eq!(echo_share("count to five", "count to 5"), 1.0);
+        // an inflection the transcriber chose is the same word
+        assert_eq!(
+            echo_share(
+                "Agreed, fully stopped.",
+                "Agreed, fully stopping the music while we talk"
+            ),
+            1.0
+        );
+        assert!(echo_share("I do.", "I don't have a note on that.") >= 0.8); // cut mid-word
+        assert!(
+            echo_share(
+                "It's closed. It's complete.",
+                "Issue 107 is closed as completed: a bug."
+            ) >= 0.8
+        );
+        assert!(echo_share("no not that one", "Issue 107 is closed as completed.") < 0.8);
+        assert!(echo_share("it is", "it is closed") >= 0.8); // function words alone: whole
+        assert!(echo_share("no stop", "nothing stops you") < 0.8); // only the last word
+        assert_eq!(stem("stopped"), stem("stopping"));
+        assert_eq!(stem("issues"), stem("issue"));
+        assert_ne!(stem("read"), stem("ready"));
+        assert!(echo_share("issue four twelve", "Issue 409 is open") < 0.8);
+        assert_eq!(
+            spoken_words("the 1st and 20th"),
+            ["the", "1st", "first", "and", "20th", "twentieth"]
+        );
+        assert_eq!(spoken_words("in 2026"), ["in", "2026"]); // beyond the forms: digits only
+
+        let speaking = Speaking::new();
+        let (f, _clock) = filter(3.0);
+        let mut f = f.with_speaking(speaking.clone());
+        speaking.set(true);
+        f.saying("Issue 409 is open, last updated October 29th.");
+        assert!(f.is_echo("Issue four hundred and", Some(INTERIM_MIN_WORDS)));
+        assert!(f.is_echo("Issue four hundred and nine", None));
+        assert!(!f.is_echo("wait stop", Some(INTERIM_MIN_WORDS)));
+    }
+
+    #[tokio::test]
+    async fn test_a_short_final_of_a_segment_that_began_over_ghost_is_its_echo() {
+        // 2026-10-30 19:27: the session opened with "Go ahead."; the interim was dropped,
+        // the 2-word final landed 0.6 s after the voice stopped and passed as the
+        // operator's, so their turn read "Go ahead. Yeah, I don't like ...".
+        use crate::frames::drain;
+        let (mut f, clock) = filter(3.0);
+        let (out, mut rx) = Out::capture();
+        f.saying("Go ahead.");
+        f.bot_speaking(true);
+        *clock.lock().unwrap() = 100.0;
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 100.5;
+        f.process(Frame::BotStopped, Direction::Down, &out).await;
+        *clock.lock().unwrap() = 101.1;
+        f.process(Frame::Transcript("Go ahead.".into()), Direction::Down, &out)
+            .await;
+        // a one-word opening ("Listening.") in a segment that began over the voice: its own
+        f.saying("Listening.");
+        f.bot_speaking(true);
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 101.2;
+        f.process(Frame::BotStopped, Direction::Down, &out).await;
+        *clock.lock().unwrap() = 101.4;
+        f.process(
+            Frame::Transcript("Listening.".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        // the operator's short answer in the next segment, after the voice, still passes
+        f.process(Frame::VadStopped { stop_secs: 0.5 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 101.5;
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 102.0;
+        f.process(Frame::Transcript("Go on.".into()), Direction::Down, &out)
+            .await;
+        let passed: Vec<String> = drain(&mut rx)
+            .await
+            .into_iter()
+            .filter_map(|p| match p {
+                Frame::Transcript(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(passed, vec!["Go on.".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_a_segment_inside_the_warmup_after_ghosts_voice_resumes_is_dropped() {
+        // 2026-10-30: "I think." and "Issue four.", garbled residuals of the first half
+        // second after a clause gap, matched none of Ghost's words and cut it off.
+        use crate::frames::drain;
+        let speaking = Speaking::new();
+        let (f, clock) = filter(3.0);
+        let mut f = f.with_speaking(speaking.clone());
+        speaking.set(true);
+        let (out, mut rx) = Out::capture();
+        // the voice resumed 0.4 s ago; the VAD fired 0.2 s after it; the words arrive now
+        speaking.mark_onset_at(Instant::now() - std::time::Duration::from_millis(400));
+        *clock.lock().unwrap() = 100.2;
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 100.4;
+        f.process(Frame::Interim("I think".into()), Direction::Down, &out)
+            .await;
+        f.process(Frame::Transcript("I think.".into()), Direction::Down, &out)
+            .await;
+        let passed = drain(&mut rx).await;
+        assert!(
+            !passed
+                .iter()
+                .any(|p| matches!(p, Frame::Interim(_) | Frame::Transcript(_))),
+            "{passed:?}"
+        );
+        // inside the same window, a stop or three words is the operator
+        f.process(Frame::Interim("wait".into()), Direction::Down, &out)
+            .await;
+        f.process(Frame::Interim("no not that".into()), Direction::Down, &out)
+            .await;
+        let passed = drain(&mut rx).await;
+        assert_eq!(
+            passed
+                .iter()
+                .filter(|p| matches!(p, Frame::Interim(_)))
+                .count(),
+            2,
+            "{passed:?}"
+        );
+        // a short reply ends right after the VAD fires on its leak; the leak's transcript
+        // lands inside the window, after the voice
+        speaking.mark_onset_at(Instant::now() - std::time::Duration::from_millis(300));
+        *clock.lock().unwrap() = 101.5;
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        speaking.set(false);
+        *clock.lock().unwrap() = 101.8;
+        f.process(Frame::Transcript("I'm".into()), Direction::Down, &out)
+            .await;
+        assert!(
+            !drain(&mut rx)
+                .await
+                .iter()
+                .any(|p| matches!(p, Frame::Transcript(_)))
+        );
+        // a segment that began well after the onset is the operator's
+        speaking.mark_onset_at(Instant::now() - std::time::Duration::from_secs(3));
+        *clock.lock().unwrap() = 103.5;
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 103.9;
+        f.process(
+            Frame::Transcript("wait stop that".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        let passed = drain(&mut rx).await;
+        assert!(
+            passed.iter().any(|p| matches!(p, Frame::Transcript(_))),
+            "{passed:?}"
+        );
     }
 
     #[test]

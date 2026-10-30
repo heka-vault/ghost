@@ -200,6 +200,8 @@ pub struct Ports {
     pub passive_media: Option<MediaFactory>,
     pub play: Play,
     pub ducker: DuckFactory,
+    /// The players paused for a session and resumed after (`players`).
+    pub players: Arc<dyn crate::players::PlayersPort>,
     pub sessions: Arc<dyn SessionRunner>,
     pub devices: Arc<dyn DevicesPort>,
 }
@@ -235,6 +237,7 @@ impl Ports {
             }),
             sessions: Arc::new(LiveSessions),
             devices: Arc::new(PwDevices),
+            players: Arc::new(crate::players::MprisPlayers::default()),
         }
     }
 
@@ -256,6 +259,7 @@ impl Ports {
             ducker: Arc::new(|_, _| Arc::new(NoDuck)),
             sessions: Arc::new(LiveSessions),
             devices: Arc::new(ghost_api::deps::NoDevices),
+            players: Arc::new(crate::players::NoPlayers),
         }
     }
 }
@@ -927,11 +931,10 @@ impl Daemon {
             Ok(s) => s,
             Err(e) => return fall_back(format!("the wake models did not load: {e}")),
         };
-        let mut wake_models = vec![WakeModel::known(
-            &path,
-            cfg.detector_threshold() as f32,
-            None,
-        )];
+        let mut wake_models = vec![
+            WakeModel::known(&path, cfg.detector_threshold() as f32, None)
+                .checked_from(cfg.wake_check_threshold.map(|t| t as f32)),
+        ];
         wake_models.extend(address.iter().map(|p| {
             WakeModel::known(
                 p,
@@ -946,8 +949,14 @@ impl Daemon {
             } else {
                 "no check"
             };
+            let weak = match m.checked_from {
+                Some(from) if from < m.threshold => {
+                    format!(", Parakeet checks a score from {from}")
+                }
+                _ => String::new(),
+            };
             info!(
-                "wake: trained detector {}, threshold {}, {check}",
+                "wake: trained detector {}, threshold {}, {check}{weak}",
                 m.name, m.threshold
             );
         }
@@ -989,6 +998,9 @@ impl Daemon {
             return;
         }
         ducker.duck();
+        if self.cfg().pause_players {
+            self.ports.players.pause_playing().await;
+        }
         if self.cfg().chime {
             let play = self.ports.play.clone();
             let device = self.voice().output_device.clone();
@@ -1007,6 +1019,8 @@ impl Daemon {
             && let Some(d) = lock(&self.ducker).clone()
         {
             d.restore();
+            let players = self.ports.players.clone();
+            tokio::spawn(async move { players.resume().await });
         }
     }
 

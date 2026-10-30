@@ -59,6 +59,33 @@ pub type SharedRecognizer = Arc<Mutex<dyn Recognizer>>;
 
 /// Transcribe in the calling thread (off the async runtime), taking a turn on the shared
 /// model. With `wait` off, None without running when the model is busy.
+/// The noise floor laid under every recognition, in dBFS. Parakeet reads nothing from a
+/// stretch that ends in about a second of exact digital silence: with Ghost's audio
+/// through the reSpeaker, the array's own canceller leaves −99 dBFS between words, so a
+/// segment's closing half second of silence plus `TRAILING_SECS` was enough (2026-10-30
+/// 21:34: "what part of your source code is the speech to text" came through as three
+/// words and three empty segments at −25 dBFS; the oracle read the same audio whole once
+/// −70 dBFS of noise was added, and nothing with a second of zeros appended).
+pub const DITHER_DBFS: f32 = -72.0;
+
+/// `audio` with [`DITHER_DBFS`] of deterministic noise under it: the same samples give the
+/// same transcript, and nothing audible changes (the old chain's noise floor sat higher).
+pub fn dithered(audio: &[f32]) -> Vec<f32> {
+    let amplitude = 10f32.powf(DITHER_DBFS / 20.0) * 3.0_f32.sqrt(); // uniform noise's rms
+    let mut state: u32 = 0x9E37_79B9;
+    audio
+        .iter()
+        .map(|&x| {
+            // xorshift32: cheap, deterministic, good enough for a noise floor
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let unit = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
+            x + unit * amplitude
+        })
+        .collect()
+}
+
 pub fn recognize(model: &SharedRecognizer, audio: &[f32], wait: bool) -> Option<String> {
     let mut guard = if wait {
         model.lock().unwrap_or_else(|e| e.into_inner())
@@ -69,7 +96,8 @@ pub fn recognize(model: &SharedRecognizer, audio: &[f32], wait: bool) -> Option<
             Err(std::sync::TryLockError::WouldBlock) => return None,
         }
     };
-    match guard.transcribe(audio) {
+    let audio = dithered(audio);
+    match guard.transcribe(&audio) {
         Ok(text) => Some(text.trim().to_string()),
         Err(e) => {
             warn!("Parakeet failed: {e}");
@@ -107,6 +135,23 @@ pub struct ParakeetStt {
     speaking: Speaking,
     interim_task: Option<JoinHandle<()>>,
     zero: Instant,
+    /// The VAD's settings while Ghost speaks (`VoiceSettings::vad_params_over_ghost`):
+    /// the canceller passes the operator in 150–350 ms pieces under Ghost's audio. Swapped
+    /// in and out between segments only, never under one.
+    over_ghost: Option<VadParams>,
+    /// The VAD's settings while a close waits (`Speaking::is_closing`): the room's, but
+    /// starting quicker, so the operator going on after a breath counts 100 ms sooner.
+    closing: Option<VadParams>,
+    mode: VadMode,
+    pending_mode: Option<VadMode>,
+}
+
+/// Which of the VAD's settings are in force.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VadMode {
+    Room,
+    OverGhost,
+    Closing,
 }
 
 impl ParakeetStt {
@@ -131,6 +176,10 @@ impl ParakeetStt {
             speaking: Speaking::new(),
             interim_task: None,
             zero: Instant::now(),
+            over_ghost: None,
+            closing: None,
+            mode: VadMode::Room,
+            pending_mode: None,
         }
     }
 
@@ -139,15 +188,87 @@ impl ParakeetStt {
         self
     }
 
-    /// The interim schedule follows Ghost's voice as the output stage reports it, not only
-    /// the frames, which reach this stage late behind a busy TTS stage.
+    pub fn with_params_over_ghost(mut self, params: VadParams) -> Self {
+        self.over_ghost = Some(params);
+        self
+    }
+
+    /// While a close waits, the VAD starts after `secs` of speech instead of the room's.
+    pub fn with_closing_start_secs(mut self, secs: f32) -> Self {
+        self.closing = Some(VadParams {
+            start_secs: secs,
+            ..self.params
+        });
+        self
+    }
+
+    /// The interim schedule and the VAD's settings follow Ghost's voice as the output
+    /// stage reports it, not only the frames, which reach this stage late behind a busy
+    /// TTS stage.
     fn sync_speaking(&mut self) {
         let on = self.bot_speaking || self.speaking.is_on();
-        let mut schedule = self.schedule.lock().unwrap();
-        if on {
-            schedule.bot_started();
+        {
+            let mut schedule = self.schedule.lock().unwrap();
+            if on {
+                schedule.bot_started();
+            } else {
+                schedule.bot_stopped();
+            }
+        }
+        let mode = if on {
+            VadMode::OverGhost
+        } else if self.speaking.is_closing() {
+            VadMode::Closing
         } else {
-            schedule.bot_stopped();
+            VadMode::Room
+        };
+        self.switch_vad(mode);
+    }
+
+    /// The VAD's settings for now: the room's, the ones for over Ghost's voice, or the
+    /// ones for while a close waits (each only when it was given).
+    pub fn active_params(&self) -> VadParams {
+        match self.mode {
+            VadMode::OverGhost => self.over_ghost.unwrap_or(self.params),
+            VadMode::Closing => self.closing.unwrap_or(self.params),
+            VadMode::Room => self.params,
+        }
+    }
+
+    pub fn vad_mode(&self) -> VadMode {
+        self.mode
+    }
+
+    fn switch_vad(&mut self, mode: VadMode) {
+        if mode == self.mode {
+            self.pending_mode = None;
+            return;
+        }
+        if self.user_speaking {
+            // `set_params` resets the VAD; a segment under way finishes on its settings.
+            self.pending_mode = Some(mode);
+            return;
+        }
+        self.apply_vad(mode);
+    }
+
+    fn apply_vad(&mut self, mode: VadMode) {
+        let before = self.active_params();
+        self.mode = mode;
+        self.pending_mode = None;
+        let params = self.active_params();
+        if params != before
+            && let Some(vad) = &mut self.vad
+        {
+            vad.set_params(params);
+        }
+    }
+
+    /// A segment ended: a switch that waited for it happens now.
+    fn segment_ended(&mut self) {
+        self.user_speaking = false;
+        if let Some(mode) = self.pending_mode.take() {
+            self.apply_vad(mode);
         }
     }
 
@@ -174,20 +295,18 @@ impl ParakeetStt {
     async fn vad_started(&mut self, out: &Out) {
         self.schedule.lock().unwrap().vad_started();
         self.user_speaking = true;
-        self.segment = self.pre_roll.iter().copied().collect();
+        self.segment = self.pre_roll.drain(..).collect(); // only audio since the last segment seeds the next
         out.push(Frame::VadStarted {
-            start_secs: self.params.start_secs,
+            start_secs: self.active_params().start_secs,
         })
         .await;
     }
 
     async fn vad_stopped(&mut self, out: &Out) {
         self.schedule.lock().unwrap().vad_stopped();
-        self.user_speaking = false;
-        out.push(Frame::VadStopped {
-            stop_secs: self.params.stop_secs,
-        })
-        .await;
+        let stop_secs = self.active_params().stop_secs;
+        self.segment_ended();
+        out.push(Frame::VadStopped { stop_secs }).await;
         self.final_(out).await;
     }
 
@@ -197,6 +316,15 @@ impl ParakeetStt {
         if segment.is_empty() {
             return;
         }
+        let secs = segment.len() as f64 / f64::from(SAMPLE_RATE);
+        let level = {
+            let power = segment
+                .iter()
+                .map(|&x| f64::from(x) * f64::from(x))
+                .sum::<f64>()
+                / segment.len().max(1) as f64;
+            20.0 * (power.sqrt() / 32768.0).max(1e-9).log10()
+        };
         segment.extend(std::iter::repeat_n(
             0i16,
             (TRAILING_SECS * f64::from(SAMPLE_RATE)) as usize,
@@ -214,7 +342,11 @@ impl ParakeetStt {
             model: None,
         }))
         .await;
-        if !text.is_empty() {
+        if text.is_empty() {
+            // 2026-10-30 19:28: a 2 s segment Smart Turn judged done (0.98) left no
+            // line at all, and the turn closed on the words before it.
+            debug::audio(|| format!("heard nothing in a {secs:.1}s segment at {level:.0} dBFS"));
+        } else {
             debug::audio(|| format!("heard: {text:?}"));
             out.push(Frame::Transcript(text)).await;
         }
@@ -311,13 +443,13 @@ impl Stage for ParakeetStt {
             Frame::VadStarted { .. } if self.vad.is_none() => {
                 self.schedule.lock().unwrap().vad_started();
                 self.user_speaking = true;
-                self.segment = self.pre_roll.iter().copied().collect();
+                self.segment = self.pre_roll.drain(..).collect(); // only audio since the last segment seeds the next
                 out.forward(frame, direction).await;
                 return;
             }
             Frame::VadStopped { .. } if self.vad.is_none() => {
                 self.schedule.lock().unwrap().vad_stopped();
-                self.user_speaking = false;
+                self.segment_ended();
                 out.forward(frame, direction).await;
                 self.final_(out).await;
                 return;
@@ -344,6 +476,23 @@ impl Stage for ParakeetStt {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_the_dither_is_a_quiet_deterministic_floor() {
+        let silence = vec![0.0f32; 16000];
+        let a = super::dithered(&silence);
+        let b = super::dithered(&silence);
+        assert_eq!(a, b);
+        let rms = (a.iter().map(|x| x * x).sum::<f32>() / a.len() as f32).sqrt();
+        let db = 20.0 * rms.log10();
+        assert!(
+            (super::DITHER_DBFS - 2.0..=super::DITHER_DBFS + 2.0).contains(&db),
+            "{db}"
+        );
+        let speech = vec![0.1f32; 100];
+        let d = super::dithered(&speech);
+        assert!(d.iter().all(|x| (x - 0.1).abs() < 0.001));
+    }
+
     use std::sync::Mutex;
     use std::time::Duration;
 
@@ -360,6 +509,62 @@ mod tests {
     use tokio::sync::mpsc::Receiver;
 
     const RATE: u32 = 16000;
+
+    #[tokio::test]
+    async fn test_the_vad_settings_follow_ghosts_voice_between_segments() {
+        // 2026-10-30: under a reading the operator came through in 150–350 ms pieces the
+        // room's VAD settings never started on.
+        let room = VadParams::default();
+        let over = VadParams {
+            start_secs: 0.1,
+            min_volume: 0.3,
+            confidence: 0.5,
+            ..room
+        };
+        let model: SharedRecognizer = Arc::new(Mutex::new(FakeModel {
+            text: "stop".into(),
+            delay: Duration::ZERO,
+            calls: Arc::new(Mutex::new((0, 0, 0))),
+        }));
+        let speaking = Speaking::new();
+        let mut stt = ParakeetStt::new(model, None, room, 0.0)
+            .with_params_over_ghost(over)
+            .with_closing_start_secs(0.1)
+            .with_speaking(speaking.clone());
+        let (out, _rx) = Out::capture();
+        let audio = || Frame::AudioIn(Audio::new(vec![0; 320], RATE));
+        stt.process(audio(), Direction::Down, &out).await;
+        assert_eq!(stt.active_params(), room);
+        speaking.set(true);
+        stt.process(audio(), Direction::Down, &out).await;
+        assert_eq!(
+            stt.active_params(),
+            over,
+            "Ghost speaks: the quicker settings"
+        );
+        // a segment under way keeps its settings until it ends
+        stt.process(Frame::VadStarted { start_secs: 0.1 }, Direction::Down, &out)
+            .await;
+        speaking.set(false);
+        stt.process(audio(), Direction::Down, &out).await;
+        assert_eq!(stt.active_params(), over, "not under a segment");
+        stt.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        assert_eq!(
+            stt.active_params(),
+            room,
+            "the segment ended: the room's again"
+        );
+        // while a close waits, the VAD re-arms quicker for the operator going on
+        speaking.set_closing(true);
+        stt.process(audio(), Direction::Down, &out).await;
+        assert_eq!(stt.vad_mode(), VadMode::Closing);
+        assert_eq!(stt.active_params().start_secs, 0.1);
+        assert_eq!(stt.active_params().min_volume, room.min_volume);
+        speaking.set_closing(false);
+        stt.process(audio(), Direction::Down, &out).await;
+        assert_eq!(stt.vad_mode(), VadMode::Room);
+    }
 
     /// `recognize` with a delay, counting calls that overlap.
     struct FakeModel {

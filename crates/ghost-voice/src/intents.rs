@@ -5,7 +5,8 @@
 //!
 //! Hold (ADR 0021): "hang on, Ghost" keeps the session but Ghost stops listening until it is
 //! addressed by name again; the room can talk. There is no "go to sleep" any more: a
-//! goodbye hangs up, a wait holds.
+//! goodbye hangs up, a wait holds. Said over Ghost, cutting its reply off, a wait only
+//! stops it: the operator is about to speak, not turning away (`UserTurn::barged_in`).
 
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
@@ -15,6 +16,13 @@ use ghost_core::source::{Action, Handled, TurnInterceptor, UserTurn};
 use rand::seq::IndexedRandom;
 
 const FILLERS: &[&str] = &["ghost", "okay", "ok", "hey", "oh", "um", "so", "please"];
+/// What an interruption is made of when it only means "stop" (2026-10-30: "Okay," over a
+/// reading waited 3 s and got an answer).
+const STOP_WORDS: &[&str] = &[
+    "okay", "ok", "stop", "wait", "alright", "all", "right", "yeah", "yes", "no", "enough",
+    "sorry", "ghost", "hey", "oh", "um", "uh", "so", "please", "that's", "fine", "good", "got",
+    "it", "thanks", "thank", "you",
+];
 
 pub const HANG_UP: &[&str] = &[
     "that's all",
@@ -222,7 +230,17 @@ impl TurnInterceptor for QuickIntents {
                 until: None,
             });
         }
+        // "Okay", "stop", "wait" over Ghost's reply: a stop, not a question. It has stopped;
+        // keep listening, say nothing, and run no model on it. Not with a change waiting for
+        // a yes: "yes" and "no" over the question are the confirmation path's.
+        if turn.barged_in && !turn.pending && words.iter().all(|w| STOP_WORDS.contains(w)) {
+            return Some(Handled::default());
+        }
         if any_in(HOLD) && !has_negation(&norm) {
+            if turn.barged_in {
+                // "Hold on" over Ghost's reply: it has stopped; keep listening, say nothing.
+                return Some(Handled::default());
+            }
             return Some(Handled {
                 say: Some(pick(HOLD_ACKS)),
                 action: Some(Action::Hold),
@@ -365,10 +383,78 @@ mod tests {
                     text: text.into(),
                     pending,
                     last_assistant: String::new(),
+                    barged_in: false,
                 })
                 .await;
             assert_eq!(h.and_then(|h| h.action), expect, "{text:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_a_wait_said_over_ghost_stops_it_and_does_not_hold() {
+        // 2026-10-30: the operator said "hang on, Ghost" to interrupt a reading, not to
+        // turn away; a hold would have dropped their next words.
+        for text in ["hang on, Ghost", "hold on", "one sec"] {
+            let h = QuickIntents
+                .on_user_turn(&UserTurn {
+                    text: text.into(),
+                    pending: false,
+                    last_assistant: String::new(),
+                    barged_in: true,
+                })
+                .await
+                .expect("taken: the model never sees it");
+            assert_eq!(h.action, None, "{text:?}");
+            assert_eq!(h.say, None, "{text:?}");
+        }
+        // over Ghost, a goodbye still hangs up
+        let h = QuickIntents
+            .on_user_turn(&UserTurn {
+                text: "okay that's all thanks".into(),
+                pending: false,
+                last_assistant: String::new(),
+                barged_in: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(h.action, Some(Action::HangUp));
+        // "okay", "stop" over Ghost: a stop, nothing to answer
+        for text in ["Okay,", "okay stop", "Stop, stop, stop.", "yeah okay"] {
+            let h = QuickIntents
+                .on_user_turn(&UserTurn {
+                    text: text.into(),
+                    pending: false,
+                    last_assistant: String::new(),
+                    barged_in: true,
+                })
+                .await
+                .expect("taken");
+            assert_eq!((h.say, h.action), (None, None), "{text:?}");
+        }
+        // with a change waiting for a yes, "yes"/"no" over the question are the gate's
+        assert!(
+            QuickIntents
+                .on_user_turn(&UserTurn {
+                    text: "yes".into(),
+                    pending: true,
+                    last_assistant: String::new(),
+                    barged_in: true,
+                })
+                .await
+                .is_none()
+        );
+        // a real question over Ghost goes to the model
+        assert!(
+            QuickIntents
+                .on_user_turn(&UserTurn {
+                    text: "okay what about four one three".into(),
+                    pending: false,
+                    last_assistant: String::new(),
+                    barged_in: true,
+                })
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -378,6 +464,7 @@ mod tests {
                 text: "I'll talk to you later. Hang up.".into(),
                 pending: false,
                 last_assistant: String::new(),
+                barged_in: false,
             })
             .await
             .unwrap();
@@ -393,6 +480,7 @@ mod tests {
                 text: "Ghost, nothing for an hour".into(),
                 pending: false,
                 last_assistant: String::new(),
+                barged_in: false,
             })
             .await
             .unwrap();
@@ -405,6 +493,7 @@ mod tests {
                     text: "nothing until later".into(),
                     pending: false,
                     last_assistant: String::new(),
+                    barged_in: false,
                 })
                 .await
                 .is_none()
@@ -419,6 +508,7 @@ mod tests {
                     text: said.into(),
                     pending: false,
                     last_assistant: String::new(),
+                    barged_in: false,
                 })
                 .await
                 .unwrap();

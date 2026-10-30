@@ -141,6 +141,9 @@ pub struct GhostdSettings {
     /// the detector alone decides, and the chime plays the moment it fires.
     pub wake_verify: bool,
     pub wake_cooldown_secs: f64,
+    /// A "hey ghost" score from here, under the threshold, is a weak hit that wakes when
+    /// Parakeet reads the phrase (a call the music drowned); None: the threshold only.
+    pub wake_check_threshold: Option<f64>,
 
     /// Models for addressing Ghost by name with a request ("Ghost, let's work on …"): this
     /// file, or None for every ghost_*.onnx beside hey_ghost.onnx (one per opener).
@@ -157,6 +160,9 @@ pub struct GhostdSettings {
     /// Matched against sink-input application names.
     pub duck_apps: Vec<String>,
     pub duck_level: f64,
+    /// Pause the players (MPRIS) for a session, not only duck them: the echo canceller
+    /// suppresses the operator against music it is cancelling.
+    pub pause_players: bool,
     pub chime: bool,
 
     /// Coexist with nerd-dictation (F9): its toggle script writes this file while active.
@@ -198,11 +204,13 @@ impl Default for GhostdSettings {
             wake_threshold: None,
             wake_verify: true,
             wake_cooldown_secs: 2.0,
+            wake_check_threshold: Some(0.3),
             wake_address_model_path: None,
             wake_address_verify: None,
             wake_address_threshold: None,
             duck_apps: vec!["spotify".into()],
             duck_level: 0.25,
+            pause_players: true,
             chime: true,
             dictation_flag: runtime.join("dictation-audio-duck.state"),
         }
@@ -379,6 +387,7 @@ impl GhostdSettings {
         env.opt_float("GHOST_WAKE_THRESHOLD", &mut s.wake_threshold)?;
         env.bool("GHOST_WAKE_VERIFY", &mut s.wake_verify)?;
         env.float("GHOST_WAKE_COOLDOWN_SECS", &mut s.wake_cooldown_secs)?;
+        env.opt_float("GHOST_WAKE_CHECK_THRESHOLD", &mut s.wake_check_threshold)?;
         env.opt_path(
             "GHOST_WAKE_ADDRESS_MODEL_PATH",
             &mut s.wake_address_model_path,
@@ -390,6 +399,7 @@ impl GhostdSettings {
         )?;
         env.list("GHOST_DUCK_APPS", &mut s.duck_apps)?;
         env.float("GHOST_DUCK_LEVEL", &mut s.duck_level)?;
+        env.bool("GHOST_PAUSE_PLAYERS", &mut s.pause_players)?;
         env.bool("GHOST_CHIME", &mut s.chime)?;
         env.path("GHOST_DICTATION_FLAG", &mut s.dictation_flag);
         Ok(s)
