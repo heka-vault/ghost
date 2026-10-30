@@ -159,11 +159,10 @@ pub(crate) fn stem(word: &str) -> String {
 /// Ghost's text, its numbers in digits; `heard` is the transcript, its numbers in words.
 pub fn echo_share(heard: &str, spoken: &str) -> f64 {
     let stems = |ws: Vec<String>| -> Vec<String> { ws.iter().map(|w| stem(w)).collect() };
-    let (h, s) = (stems(words(heard)), stems(spoken_words(spoken)));
+    let (mut h, s) = (stems(words(heard)), stems(spoken_words(spoken)));
     if h.is_empty() || s.is_empty() {
         return 0.0;
     }
-    let mut h = h;
     // The last heard word may be cut short: an interim is read mid-word, and the
     // canceller chops a segment mid-word (2026-10-30 20:34: the interim "I do." of Ghost's
     // own "I don't have ..." shared one word of two and cut Ghost off). A stem of two
@@ -175,8 +174,34 @@ pub fn echo_share(heard: &str, spoken: &str) -> f64 {
     {
         *h.last_mut().expect("a last word") = whole.clone();
     }
-    matching(&h, &s) as f64 / h.len() as f64
+    // A function word weighs a quarter of a content word: the leak garbles the small
+    // words (21:06: "is closed as completed" came back as "It's closed. It's complete.",
+    // two of four words Ghost's, and cut it off), while the operator's own "yes" before
+    // Ghost's "close it" still counts in full. Function words alone are judged whole.
+    let content: Vec<String> = h
+        .iter()
+        .filter(|w| !FUNCTION_WORDS.iter().any(|f| stem(f) == **w)) // both sides stemmed
+        .cloned()
+        .collect();
+    if content.is_empty() || content.len() == h.len() {
+        return matching(&h, &s) as f64 / h.len() as f64;
+    }
+    let all = matching(&h, &s) as f64;
+    let of_content = matching(&content, &s) as f64;
+    let of_function = (all - of_content).max(0.0);
+    let functions = (h.len() - content.len()) as f64;
+    (of_content + FUNCTION_WEIGHT * of_function)
+        / (content.len() as f64 + FUNCTION_WEIGHT * functions)
 }
+
+/// Words that carry no content, left out of the share (stemmed, as `stem` writes them).
+const FUNCTION_WORDS: &[&str] = &[
+    "a", "an", "the", "it", "it's", "its", "is", "are", "was", "were", "be", "been", "as", "at",
+    "in", "on", "of", "to", "and", "or", "but", "so", "that", "this", "these", "those", "i", "i'm",
+    "you", "we", "he", "she", "they", "my", "your", "our", "with", "for", "from", "by", "do",
+    "did", "ha", "have", "had", "oh", "um", "uh",
+];
+const FUNCTION_WEIGHT: f64 = 0.25;
 
 pub struct EchoFilter {
     window: f64,
@@ -463,6 +488,14 @@ mod tests {
             1.0
         );
         assert!(echo_share("I do.", "I don't have a note on that.") >= 0.8); // cut mid-word
+        assert!(
+            echo_share(
+                "It's closed. It's complete.",
+                "Issue 107 is closed as completed: a bug."
+            ) >= 0.8
+        );
+        assert!(echo_share("no not that one", "Issue 107 is closed as completed.") < 0.8);
+        assert!(echo_share("it is", "it is closed") >= 0.8); // function words alone: whole
         assert!(echo_share("no stop", "nothing stops you") < 0.8); // only the last word
         assert_eq!(stem("stopped"), stem("stopping"));
         assert_eq!(stem("issues"), stem("issue"));
