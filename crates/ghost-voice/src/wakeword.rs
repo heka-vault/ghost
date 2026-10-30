@@ -79,6 +79,12 @@ pub struct Detector {
 /// utterance once Ghost is woken: short pauses (a comma after "hey ghost") don't end it.
 /// Positions are counted in samples received, not wall time, so a slow check never
 /// shortens what is heard.
+/// How loosely Parakeet's reading of a weak hit must spell the phrase: the detector has
+/// already voted for it, and under music Parakeet writes "Hey Ghost" as "Hey guys" or "He
+/// goes" (2026-10-30 19:56: 0.45 read back as "Hey guys." and was turned down; the 0.9
+/// match that keeps room talk out of transcript wake takes neither).
+pub const WEAK_FUZZY: f64 = 0.8;
+
 pub struct DetectorWakeProcessor {
     d: Detector,
     on_match: OnMatch,
@@ -96,6 +102,8 @@ pub struct DetectorWakeProcessor {
     heard_from_at: usize,
     checked: bool,
     hit: Option<usize>,
+    /// The hit was under its model's threshold: Parakeet's reading is matched looser.
+    weak: bool,
     model: usize,
     last_hit: i64,
     /// Where the last "best score under its threshold" was logged (GHOST_DEBUG_AUDIO).
@@ -129,6 +137,7 @@ impl DetectorWakeProcessor {
             heard_from_at: 0,
             checked: false,
             hit: None,
+            weak: false,
             model: 0,
             last_hit: -(1i64 << 40),
             last_best_log: 0,
@@ -246,6 +255,7 @@ impl DetectorWakeProcessor {
             return;
         }
         self.hit = Some(end);
+        self.weak = score < self.d.models[model].threshold;
         self.last_hit = end as i64;
         self.model = model;
         let m = &self.d.models[model];
@@ -280,7 +290,14 @@ impl DetectorWakeProcessor {
             )
         });
         if self.d.models[self.model]
-            .matches(&text, self.fuzzy)
+            .matches(
+                &text,
+                if self.weak {
+                    self.fuzzy.min(WEAK_FUZZY)
+                } else {
+                    self.fuzzy
+                },
+            )
             .is_some()
         {
             info!(
@@ -794,8 +811,9 @@ mod tests {
             events,
             vec!["heard", "match:hey ghost|what needs my sign-off?"]
         );
-        // the music alone at the same score: read, not confirmed, dropped
-        let recognize = Recognizer::new(&["He goes to the gym every morning."]);
+        // the music alone at the same score: read, not confirmed, dropped ("There you
+        // go." is what tonight's first drowned call read as; "He goes" would pass at 0.8)
+        let recognize = Recognizer::new(&["There you go, to the gym every morning."]);
         let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
         d.models[0].checked_from = Some(0.3);
         let events = run(
@@ -810,6 +828,37 @@ mod tests {
         .await;
         assert!(events.is_empty());
         assert_eq!(recognize.calls(), 2);
+        // under music Parakeet writes "Hey guys": a weak hit takes that spelling ...
+        let recognize = Recognizer::new(&["Hey guys.", "Hey guys, what needs my sign-off?"]);
+        let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+        d.models[0].checked_from = Some(0.3);
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        assert_eq!(
+            events,
+            vec!["heard", "match:hey ghost|what needs my sign-off?"]
+        );
+        // ... a checked strong hit does not (the 0.9 match keeps room talk out)
+        let recognize = Recognizer::new(&["Hey guys.", "Hey guys."]);
+        let events = run(
+            detector(FakeScorer::with(&[3], 0.9, "hey_ghost"), &recognize, true),
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ]),
+        )
+        .await;
+        assert!(events.is_empty());
         // without the floor the same score is no hit at all
         let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
         let events = run(

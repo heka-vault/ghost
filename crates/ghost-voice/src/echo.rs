@@ -184,6 +184,8 @@ pub struct EchoFilter {
     vad_started_at: f64,
     /// Ghost was speaking when that segment began: its final is judged like an interim.
     vad_began_over_ghost: bool,
+    /// ... and inside the canceller's warm-up after its voice (re)started.
+    vad_in_warmup: bool,
 }
 
 /// How long after Ghost's voice (re)starts the canceller is taken to be leaking: a
@@ -222,6 +224,7 @@ impl EchoFilter {
             ack_words: crate::acks::words(),
             vad_started_at: f64::NEG_INFINITY,
             vad_began_over_ghost: false,
+            vad_in_warmup: false,
         }
     }
 
@@ -234,21 +237,14 @@ impl EchoFilter {
     /// The current segment began inside the canceller's warm-up after Ghost's voice
     /// (re)started, and is still inside it: Ghost hearing itself, whatever the words.
     fn in_warmup(&self) -> bool {
-        // Not only while Ghost speaks: a reply shorter than the window ("I'm here.") has
-        // ended by the time its leak is transcribed (2026-10-30 18:12: "I'm" counted
-        // toward a barge-in after the reply had stopped).
-        // Only a segment that began while the voice was playing: the leak is the voice
-        // through the canceller, and a short greeting ("Yeah?") answered the moment it
-        // ends is the operator (the goodbye test, once this rule first ran live).
-        if !self.vad_began_over_ghost {
-            return false;
-        }
-        let Some(onset) = self.speaking_now.onset() else {
-            return false;
-        };
-        let since_onset = onset.elapsed().as_secs_f64();
-        let since_vad = (self.clock)() - self.vad_started_at;
-        since_onset <= WARMUP_SECS && since_vad <= since_onset + 0.05
+        // Decided when the segment began (`drops`, at the VAD's start), and held for the
+        // segment: its final lands after the window ("Get", 1.0 s after the opening's
+        // onset, 2026-10-30 19:58) and is the same leak. Not only while Ghost speaks: a
+        // reply shorter than the window ("I'm here.") has ended by the time its leak is
+        // transcribed (18:12: "I'm" counted toward a barge-in after the reply had
+        // stopped). Only a segment that began while the voice was playing: a short
+        // greeting ("Yeah?") answered the moment it ends is the operator.
+        self.vad_in_warmup
     }
 
     /// Ghost is saying an acknowledgment now.
@@ -354,6 +350,11 @@ impl EchoFilter {
             Frame::VadStarted { .. } => {
                 self.vad_started_at = (self.clock)();
                 self.vad_began_over_ghost = self.speaking();
+                self.vad_in_warmup = self.vad_began_over_ghost
+                    && self
+                        .speaking_now
+                        .onset()
+                        .is_some_and(|onset| onset.elapsed().as_secs_f64() <= WARMUP_SECS);
             }
             Frame::Transcript(text) | Frame::Interim(text)
                 if self.in_warmup() && !Self::clearly_the_operator(text) =>

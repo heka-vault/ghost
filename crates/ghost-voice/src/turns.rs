@@ -392,21 +392,31 @@ fn last_words(text: &str) -> impl Iterator<Item = String> + '_ {
 /// The transcript stops mid-thought: a trailing comma or an ellipsis, a last word from
 /// [`UNFINISHED`], or one from [`WANTS_ARGUMENT`] with no determiner before it. A full stop
 /// is read past: Parakeet writes one at nearly every segment's end ("Read me issue."), so
-/// the words decide; a question or exclamation mark is an end. Smart Turn hears the voice;
+/// the words decide; a question or exclamation mark is an end unless the last word wants
+/// an argument. Smart Turn hears the voice;
 /// this reads the words, so "can you count, um" isn't an end however it sounded.
 pub fn sounds_unfinished(text: &str) -> bool {
     let text = text.trim_end();
     if text.ends_with("...") || text.ends_with('…') || text.ends_with(',') {
         return true;
     }
-    if text.ends_with(['?', '!']) {
-        return false;
-    }
+    let asked = text.ends_with(['?', '!']);
     let stopped = text.ends_with('.');
-    let mut words = last_words(text.trim_end_matches('.'));
+    let mut words = last_words(text.trim_end_matches(['.', '?', '!']));
     let Some(last) = words.next() else {
         return false;
     };
+    // A word that wants an argument wants it under a question mark too: Parakeet writes
+    // "Can you pull up issue?" for the question form (2026-10-30 19:56, closed in 1.6 s
+    // with the number still to come).
+    if WANTS_ARGUMENT.contains(&last.as_str()) {
+        return !words
+            .take(2)
+            .any(|before| DETERMINERS.contains(&before.as_str()));
+    }
+    if asked {
+        return false;
+    }
     if UNFINISHED.contains(&last.as_str()) {
         return true;
     }
@@ -415,11 +425,6 @@ pub fn sounds_unfinished(text: &str) -> bool {
             || UNFINISHED_PREPOSITIONS.contains(&last.as_str()))
     {
         return true;
-    }
-    if WANTS_ARGUMENT.contains(&last.as_str()) {
-        return !words
-            .take(2)
-            .any(|before| DETERMINERS.contains(&before.as_str()));
     }
     false
 }

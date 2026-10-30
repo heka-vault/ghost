@@ -267,7 +267,7 @@ impl ParakeetStt {
     async fn vad_started(&mut self, out: &Out) {
         self.schedule.lock().unwrap().vad_started();
         self.user_speaking = true;
-        self.segment = self.pre_roll.iter().copied().collect();
+        self.segment = self.pre_roll.drain(..).collect(); // only audio since the last segment seeds the next
         out.push(Frame::VadStarted {
             start_secs: self.active_params().start_secs,
         })
@@ -407,7 +407,7 @@ impl Stage for ParakeetStt {
             Frame::VadStarted { .. } if self.vad.is_none() => {
                 self.schedule.lock().unwrap().vad_started();
                 self.user_speaking = true;
-                self.segment = self.pre_roll.iter().copied().collect();
+                self.segment = self.pre_roll.drain(..).collect(); // only audio since the last segment seeds the next
                 out.forward(frame, direction).await;
                 return;
             }
