@@ -59,6 +59,33 @@ pub type SharedRecognizer = Arc<Mutex<dyn Recognizer>>;
 
 /// Transcribe in the calling thread (off the async runtime), taking a turn on the shared
 /// model. With `wait` off, None without running when the model is busy.
+/// The noise floor laid under every recognition, in dBFS. Parakeet reads nothing from a
+/// stretch that ends in about a second of exact digital silence: with Ghost's audio
+/// through the reSpeaker, the array's own canceller leaves −99 dBFS between words, so a
+/// segment's closing half second of silence plus `TRAILING_SECS` was enough (2026-10-30
+/// 21:34: "what part of your source code is the speech to text" came through as three
+/// words and three empty segments at −25 dBFS; the oracle read the same audio whole once
+/// −70 dBFS of noise was added, and nothing with a second of zeros appended).
+pub const DITHER_DBFS: f32 = -72.0;
+
+/// `audio` with [`DITHER_DBFS`] of deterministic noise under it: the same samples give the
+/// same transcript, and nothing audible changes (the old chain's noise floor sat higher).
+pub fn dithered(audio: &[f32]) -> Vec<f32> {
+    let amplitude = 10f32.powf(DITHER_DBFS / 20.0) * 3.0_f32.sqrt(); // uniform noise's rms
+    let mut state: u32 = 0x9E37_79B9;
+    audio
+        .iter()
+        .map(|&x| {
+            // xorshift32: cheap, deterministic, good enough for a noise floor
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let unit = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
+            x + unit * amplitude
+        })
+        .collect()
+}
+
 pub fn recognize(model: &SharedRecognizer, audio: &[f32], wait: bool) -> Option<String> {
     let mut guard = if wait {
         model.lock().unwrap_or_else(|e| e.into_inner())
@@ -69,7 +96,8 @@ pub fn recognize(model: &SharedRecognizer, audio: &[f32], wait: bool) -> Option<
             Err(std::sync::TryLockError::WouldBlock) => return None,
         }
     };
-    match guard.transcribe(audio) {
+    let audio = dithered(audio);
+    match guard.transcribe(&audio) {
         Ok(text) => Some(text.trim().to_string()),
         Err(e) => {
             warn!("Parakeet failed: {e}");
@@ -448,6 +476,23 @@ impl Stage for ParakeetStt {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_the_dither_is_a_quiet_deterministic_floor() {
+        let silence = vec![0.0f32; 16000];
+        let a = super::dithered(&silence);
+        let b = super::dithered(&silence);
+        assert_eq!(a, b);
+        let rms = (a.iter().map(|x| x * x).sum::<f32>() / a.len() as f32).sqrt();
+        let db = 20.0 * rms.log10();
+        assert!(
+            (super::DITHER_DBFS - 2.0..=super::DITHER_DBFS + 2.0).contains(&db),
+            "{db}"
+        );
+        let speech = vec![0.1f32; 100];
+        let d = super::dithered(&speech);
+        assert!(d.iter().all(|x| (x - 0.1).abs() < 0.001));
+    }
+
     use std::sync::Mutex;
     use std::time::Duration;
 
