@@ -999,26 +999,10 @@ impl Stage for SharedEcho {
     }
 
     async fn process(&mut self, frame: Frame, direction: Direction, out: &Out) {
-        let drop = {
-            let mut e = self.0.lock().unwrap();
-            match &frame {
-                Frame::BotStarted => {
-                    e.bot_speaking(true);
-                    false
-                }
-                Frame::BotStopped => {
-                    e.bot_speaking(false);
-                    false
-                }
-                Frame::Transcript(text) => e.is_echo(text, None),
-                Frame::Interim(text) => e.is_echo(text, Some(crate::echo::INTERIM_MIN_WORDS)),
-                _ => false,
-            }
-        };
+        // The filter's own rule, under the lock and without an await: the lock is a
+        // std mutex the taps also take.
+        let drop = self.0.lock().unwrap().drops(&frame);
         if drop {
-            if let Frame::Transcript(t) | Frame::Interim(t) = &frame {
-                crate::debug::audio(|| format!("echo: dropped {t:?}"));
-            }
             return;
         }
         out.forward(frame, direction).await;

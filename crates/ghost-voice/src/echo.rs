@@ -193,6 +193,14 @@ pub struct EchoFilter {
 /// the leak by 0.2 s.
 pub const WARMUP_SECS: f64 = 0.8;
 
+/// Inside the warm-up a transcript this long, or one with a word that stops Ghost, is the
+/// operator after all: the leak reads as a word or two of Ghost's own, never as "stop
+/// that now" (the barge-in test, once the warm-up rule first ran live).
+const WARMUP_KEEP_WORDS: usize = 3;
+const INTERRUPT_WORDS: &[&str] = &[
+    "stop", "wait", "hold", "hang", "no", "enough", "quiet", "pause", "shut",
+];
+
 impl EchoFilter {
     pub fn new(window_secs: f64) -> Self {
         let zero = Instant::now();
@@ -217,12 +225,24 @@ impl EchoFilter {
         }
     }
 
+    fn clearly_the_operator(text: &str) -> bool {
+        let heard = words(text);
+        heard.len() >= WARMUP_KEEP_WORDS
+            || heard.iter().any(|w| INTERRUPT_WORDS.contains(&w.as_str()))
+    }
+
     /// The current segment began inside the canceller's warm-up after Ghost's voice
     /// (re)started, and is still inside it: Ghost hearing itself, whatever the words.
     fn in_warmup(&self) -> bool {
         // Not only while Ghost speaks: a reply shorter than the window ("I'm here.") has
         // ended by the time its leak is transcribed (2026-10-30 18:12: "I'm" counted
         // toward a barge-in after the reply had stopped).
+        // Only a segment that began while the voice was playing: the leak is the voice
+        // through the canceller, and a short greeting ("Yeah?") answered the moment it
+        // ends is the operator (the goodbye test, once this rule first ran live).
+        if !self.vad_began_over_ghost {
+            return false;
+        }
         let Some(onset) = self.speaking_now.onset() else {
             return false;
         };
@@ -315,6 +335,45 @@ impl EchoFilter {
     }
 }
 
+impl EchoFilter {
+    /// Every frame of the session passes here, in order: Ghost's voice starting and
+    /// stopping and the operator's segments are noted, and a transcript that is Ghost
+    /// hearing itself is dropped (true). The one path for the stage and for the desk
+    /// pipeline's shared filter (`pipeline::SharedEcho`): until 2026-10-30 the latter
+    /// judged the words alone and never saw a VAD start, so the warm-up rule and the
+    /// segment's start never applied live ("I'm here." opened the operator's turn twice).
+    pub fn drops(&mut self, frame: &Frame) -> bool {
+        match frame {
+            Frame::BotStarted => self.bot_speaking(true),
+            Frame::BotStopped => self.bot_speaking(false),
+            Frame::VadStarted { .. } => {
+                self.vad_started_at = (self.clock)();
+                self.vad_began_over_ghost = self.speaking();
+            }
+            Frame::Transcript(text) | Frame::Interim(text)
+                if self.in_warmup() && !Self::clearly_the_operator(text) =>
+            {
+                debug::audio(|| {
+                    format!(
+                        "echo: dropped {text:?} (inside the canceller's warm-up after Ghost's voice resumed)"
+                    )
+                });
+                return true;
+            }
+            Frame::Transcript(text) if self.is_echo(text, None) => {
+                debug::audio(|| format!("echo: dropped {text:?}"));
+                return true;
+            }
+            Frame::Interim(text) if self.is_echo(text, Some(INTERIM_MIN_WORDS)) => {
+                debug::audio(|| format!("echo: dropped {text:?}"));
+                return true;
+            }
+            _ => {}
+        }
+        false
+    }
+}
+
 #[async_trait]
 impl Stage for EchoFilter {
     fn name(&self) -> &'static str {
@@ -322,30 +381,8 @@ impl Stage for EchoFilter {
     }
 
     async fn process(&mut self, frame: Frame, direction: Direction, out: &Out) {
-        match &frame {
-            Frame::BotStarted => self.bot_speaking(true),
-            Frame::BotStopped => self.bot_speaking(false),
-            Frame::VadStarted { .. } => {
-                self.vad_started_at = (self.clock)();
-                self.vad_began_over_ghost = self.speaking();
-            }
-            Frame::Transcript(text) | Frame::Interim(text) if self.in_warmup() => {
-                debug::audio(|| {
-                    format!(
-                        "echo: dropped {text:?} (inside the canceller's warm-up after Ghost's voice resumed)"
-                    )
-                });
-                return;
-            }
-            Frame::Transcript(text) if self.is_echo(text, None) => {
-                debug::audio(|| format!("echo: dropped {text:?}"));
-                return;
-            }
-            Frame::Interim(text) if self.is_echo(text, Some(INTERIM_MIN_WORDS)) => {
-                debug::audio(|| format!("echo: dropped {text:?}"));
-                return;
-            }
-            _ => {}
+        if self.drops(&frame) {
+            return;
         }
         out.forward(frame, direction).await;
     }
@@ -492,12 +529,27 @@ mod tests {
                 .any(|p| matches!(p, Frame::Interim(_) | Frame::Transcript(_))),
             "{passed:?}"
         );
-        // a short reply has already ended; its leak is still inside the window
-        speaking.set(false);
-        speaking.mark_onset_at(Instant::now() - std::time::Duration::from_millis(600));
+        // inside the same window, a stop or three words is the operator
+        f.process(Frame::Interim("wait".into()), Direction::Down, &out)
+            .await;
+        f.process(Frame::Interim("no not that".into()), Direction::Down, &out)
+            .await;
+        let passed = drain(&mut rx).await;
+        assert_eq!(
+            passed
+                .iter()
+                .filter(|p| matches!(p, Frame::Interim(_)))
+                .count(),
+            2,
+            "{passed:?}"
+        );
+        // a short reply ends right after the VAD fires on its leak; the leak's transcript
+        // lands inside the window, after the voice
+        speaking.mark_onset_at(Instant::now() - std::time::Duration::from_millis(300));
         *clock.lock().unwrap() = 101.5;
         f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
             .await;
+        speaking.set(false);
         *clock.lock().unwrap() = 101.8;
         f.process(Frame::Transcript("I'm".into()), Direction::Down, &out)
             .await;
