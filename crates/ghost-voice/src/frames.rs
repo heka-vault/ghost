@@ -168,6 +168,16 @@ pub enum Frame {
         audio: Audio,
         turn: CancellationToken,
     },
+    /// Ghost's one- or two-word acknowledgment as it goes to an app (`crate::acks`): 24 kHz,
+    /// rendered ahead. Played without `BotStarted`/`BotStopped`, so it is not the reply
+    /// to the timeline, the phase or the phone; the shared speaking flag covers it.
+    Ack {
+        text: String,
+        audio: Audio,
+        turn: CancellationToken,
+    },
+    /// Up from the output stage: the acknowledgment's first sample is at the speaker.
+    AckPlayed,
     BotStarted,
     BotStopped,
 
@@ -228,6 +238,8 @@ impl Frame {
             Frame::TtsAudio { .. } => "TtsAudio",
             Frame::TtsStopped => "TtsStopped",
             Frame::AudioOut { .. } => "AudioOut",
+            Frame::Ack { .. } => "Ack",
+            Frame::AckPlayed => "AckPlayed",
             Frame::BotStarted => "BotStarted",
             Frame::BotStopped => "BotStopped",
             Frame::Interruption => "Interruption",

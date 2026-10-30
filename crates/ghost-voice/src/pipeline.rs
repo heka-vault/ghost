@@ -23,6 +23,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use crate::acks::{AckStage, Acks, Outside};
 use crate::config::VoiceSettings;
 use crate::confirmation::{ConfirmationProcessor, last_assistant_text};
 use crate::conversation::{ConversationRuntime, OnSwitch, Reach};
@@ -78,6 +79,8 @@ pub struct Models {
     /// Silero is small: loaded per session from here.
     pub silero: PathBuf,
     pub voices: Vec<String>,
+    /// The acknowledgments, rendered per voice from `tts` (`crate::acks`).
+    pub acks: Arc<Acks>,
 }
 
 impl Models {
@@ -100,6 +103,7 @@ impl Models {
             turn: Arc::new(Mutex::new(turn)),
             silero: s.silero_model.clone(),
             voices,
+            acks: Acks::new(Some(&s.cache_dir)),
         })
     }
 
@@ -839,28 +843,13 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 context.clone(),
                 tools,
                 options,
-                dispatcher,
+                dispatcher.clone(),
                 turns.clone(),
                 inject,
                 runtime.clone(),
             )
             .with_compaction(compaction),
         ),
-    ));
-    stages.push((None, Box::new(NarrationCut::default())));
-    stages.push((
-        None,
-        Box::new(ThinkingSoundProcessor::new(
-            settings.thinking_delay_secs,
-            Some(held.clone()),
-        )),
-    ));
-    let on_marker: Option<crate::tap::OnMarker> = runtime
-        .clone()
-        .map(|rt| Arc::new(move |slug: &str| rt.on_marker(slug)) as crate::tap::OnMarker);
-    stages.push((
-        Some(Slot::BeforeTts),
-        Box::new(AssistantTap::new(on_turn.clone(), on_marker)),
     ));
     let tts_settings = match &runtime {
         Some(rt) => match rt.conversations().voice_for(&rt.active()) {
@@ -875,6 +864,47 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             speed: settings.tts_speed,
         },
     };
+    stages.push((None, Box::new(NarrationCut::default())));
+    // At the turn's first call to an app, a word or two before the tools run (#43). Kokoro
+    // only: an ElevenLabs reply would answer in another voice than the acknowledgment.
+    if settings.ack && settings.tts_engine != "elevenlabs" {
+        let outside: Outside = {
+            let d = dispatcher.clone();
+            Arc::new(move |name: &str| d.outside(name))
+        };
+        let on_ack: crate::tts::OnSay = {
+            let echo = echo.clone();
+            Arc::new(move |text: &str| echo.lock().unwrap().acked(text))
+        };
+        stages.push((
+            None,
+            Box::new(
+                AckStage::new(
+                    p.models.acks.clone(),
+                    p.models.tts.clone(),
+                    outside,
+                    &tts_settings.voice,
+                    tts_settings.speed,
+                    turns.clone(),
+                )
+                .with_on_ack(on_ack),
+            ),
+        ));
+    }
+    stages.push((
+        None,
+        Box::new(ThinkingSoundProcessor::new(
+            settings.thinking_delay_secs,
+            Some(held.clone()),
+        )),
+    ));
+    let on_marker: Option<crate::tap::OnMarker> = runtime
+        .clone()
+        .map(|rt| Arc::new(move |slug: &str| rt.on_marker(slug)) as crate::tap::OnMarker);
+    stages.push((
+        Some(Slot::BeforeTts),
+        Box::new(AssistantTap::new(on_turn.clone(), on_marker)),
+    ));
     let line: Option<Arc<dyn Fn() -> Option<String> + Send + Sync>> = runtime.clone().map(|rt| {
         Arc::new(move || Some(rt.active().slug)) as Arc<dyn Fn() -> Option<String> + Send + Sync>
     });

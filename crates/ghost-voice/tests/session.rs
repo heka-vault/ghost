@@ -5,8 +5,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ghost_core::source::{ReadTool, ToolSource};
 use ghost_core::{AutonomyPolicy, Store, WriteGate};
 use ghost_infer::TurnVerdict;
+use ghost_voice::acks::{Acks, CHANGE, Clip, READ, Voiced};
 use ghost_voice::config::VoiceSettings;
 use ghost_voice::frames::{Audio, Frame};
 use ghost_voice::llm::{ScriptedModel, ScriptedReply};
@@ -16,7 +18,7 @@ use ghost_voice::tap::OnTurn;
 use ghost_voice::transport::{Ear, Mouth, scripted_media};
 use ghost_voice::tts::{SharedSynth, Synth};
 use ghost_voice::turns::TurnModel;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 
 struct FakeParakeet(Arc<Mutex<Vec<String>>>);
 
@@ -77,6 +79,72 @@ fn world(
     grace: f64,
     render_ms: u64,
 ) -> World {
+    world_with(
+        transcripts,
+        replies,
+        clause_secs,
+        grace,
+        render_ms,
+        Vec::new(),
+    )
+}
+
+/// The acknowledgments, rendered ahead as the daemon does at load: short and loud.
+fn rendered_acks() -> Arc<Acks> {
+    let clips = |lines: &[&'static str]| -> Vec<Clip> {
+        lines
+            .iter()
+            .map(|text| Clip {
+                text,
+                pcm: Arc::new(vec![20000; 24000 / 5]),
+            })
+            .collect()
+    };
+    let acks = Acks::new(None);
+    acks.insert(
+        "af_heart",
+        1.0,
+        Voiced {
+            read: clips(READ),
+            change: clips(CHANGE),
+        },
+    );
+    acks
+}
+
+/// A connected app with one read tool.
+fn github_app() -> ToolSource {
+    ToolSource {
+        name: "github".into(),
+        title: "GitHub".into(),
+        app: true,
+        read_tools: vec![ReadTool {
+            name: "github_search_issues".into(),
+            description: "Search issues.".into(),
+            properties: json!({}),
+            required: Vec::new(),
+            handler: Arc::new(|_| {
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(300)).await; // the app, away
+                    let mut m = Map::new();
+                    m.insert("issues".into(), json!([{"number": 3, "title": "Redis"}]));
+                    Ok(m)
+                })
+            }),
+            operation: String::new(),
+        }],
+        ..Default::default()
+    }
+}
+
+fn world_with(
+    transcripts: &[&str],
+    replies: Vec<Vec<ScriptedReply>>,
+    clause_secs: f64,
+    grace: f64,
+    render_ms: u64,
+    sources: Vec<ToolSource>,
+) -> World {
     let settings = VoiceSettings::from_vars(|name| match name {
         "GHOST_TURN_GRACE_SECS" => Some(grace.to_string()),
         "GHOST_THINKING_DELAY_SECS" => Some("0.1".into()),
@@ -99,6 +167,7 @@ fn world(
         turn: Arc::new(Mutex::new(Complete)),
         silero: "/nonexistent/silero.onnx".into(),
         voices: vec!["af_heart".into()],
+        acks: rendered_acks(),
     });
     let gate = Arc::new(
         WriteGate::new(Arc::new(Store::in_memory().unwrap()))
@@ -119,7 +188,7 @@ fn world(
         settings: Arc::new(settings),
         models,
         model: ScriptedModel::new(replies, Duration::from_millis(50)),
-        sources: Vec::new(),
+        sources,
         gate,
         events: None,
         media,
@@ -369,6 +438,109 @@ async fn the_replys_own_words_heard_while_it_plays_do_not_cut_it_off() {
     w.session.cancel().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
     let _ = &w.mouth;
+}
+
+/// The voice turns' latency records, once `n` of them have been spoken.
+async fn voice_records(w: &World, n: usize) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let recs: Vec<Value> = w
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r["kind"] == "voice" && r["spoke"] == true)
+            .cloned()
+            .collect();
+        if recs.len() >= n {
+            return recs;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{} voice turn(s) spoken, wanted {n}: {:#?}",
+            recs.len(),
+            w.records.lock().unwrap()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_request_that_goes_to_an_app_is_acknowledged_before_the_answer() {
+    let w = world_with(
+        &["any critical issues in quotient", "read out number three"],
+        vec![
+            vec![
+                ScriptedModel::call("Let me check.", "github_search_issues", Map::new()),
+                ScriptedModel::say("Two are critical."),
+            ],
+            vec![
+                ScriptedModel::call("", "github_search_issues", Map::new()),
+                ScriptedModel::say("Number three is the Redis timeout."),
+            ],
+        ],
+        0.2,
+        0.1,
+        40,
+        vec![github_app()],
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let first = voice_records(&w, 1).await;
+    say(&w, 0.3).await;
+    let recs = voice_records(&w, 2).await;
+    let _ = first;
+    for rec in &recs {
+        let ack = rec["ack"].as_f64().expect("acknowledged");
+        let reply = rec["reply"].as_f64().unwrap();
+        assert!(
+            ack < reply,
+            "the acknowledgment {ack} s came after the answer {reply} s"
+        );
+    }
+    // Not a turn: no acknowledgment in the transcript, and the model's narration dropped.
+    let said: Vec<String> = w
+        .turns
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(r, t)| format!("{r}:{t}"))
+        .collect();
+    for line in READ.iter().chain(CHANGE) {
+        assert!(
+            !said.iter().any(|s| s.ends_with(line)),
+            "{line} reached the transcript: {said:?}"
+        );
+    }
+    assert!(
+        said.contains(&"assistant:Two are critical.".to_string()),
+        "{said:?}"
+    );
+    assert!(!said.iter().any(|s| s.contains("Let me check")), "{said:?}");
+    w.session.end().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = (&w.mouth, &w.ear, &w.spoken);
+}
+
+#[tokio::test]
+async fn an_answer_ghost_already_has_is_not_acknowledged() {
+    let w = world_with(
+        &["what was the first one"],
+        vec![vec![ScriptedModel::say("The Redis timeout.")]],
+        0.2,
+        0.1,
+        40,
+        vec![github_app()],
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let recs = voice_records(&w, 1).await;
+    assert!(recs[0].get("ack").is_none(), "{:#?}", recs[0]);
+    w.session.end().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = (&w.mouth, &w.ear);
 }
 
 #[tokio::test]

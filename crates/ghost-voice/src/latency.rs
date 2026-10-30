@@ -133,6 +133,8 @@ pub struct Turn {
     first_audio: Option<f64>,
     bot_started: Option<f64>,
     bot_stopped: Option<f64>,
+    /// The acknowledgment's first sample at the speaker (`crate::acks`).
+    ack: Option<f64>,
     spoken_direct: bool,
     over_at: Option<f64>,
     barge_in: Option<f64>,
@@ -171,6 +173,7 @@ impl Turn {
             first_audio: None,
             bot_started: None,
             bot_stopped: None,
+            ack: None,
             spoken_direct: false,
             over_at: None,
             barge_in: None,
@@ -473,6 +476,13 @@ impl LatencyObserver {
                     && turn.bot_started.is_none()
                 {
                     turn.bot_started = Some(t);
+                }
+            }
+            Frame::AckPlayed => {
+                if let Some(turn) = &mut s.turn
+                    && turn.ack.is_none()
+                {
+                    turn.ack = Some(t);
                 }
             }
             Frame::BotStopped => {
@@ -809,6 +819,9 @@ pub fn build_record(
     );
     rec.insert("reply".into(), r(end.map(|e| e - anchor)));
     rec.insert("spoke".into(), json!(end.is_some()));
+    if let Some(a) = turn.ack {
+        rec.insert("ack".into(), r(Some(a - anchor)));
+    }
     if let Some(b) = build_secs {
         rec.insert("build".into(), r(Some(b)));
     }
@@ -1195,8 +1208,9 @@ pub fn percentile(values: &[f64], q: f64) -> Option<f64> {
     Some(xs[lo] + (xs[hi] - xs[lo]) * (k - lo as f64))
 }
 
-pub const STAGES: [&str; 15] = [
+pub const STAGES: [&str; 16] = [
     "reply",
+    "ack",
     "hear",
     "stt",
     "turn",
@@ -1219,6 +1233,7 @@ pub fn stage_values(rec: &Value) -> IndexMap<&'static str, Option<f64>> {
     let calls = calls_of(rec);
     let mut out = IndexMap::new();
     out.insert("reply", num(rec.get("reply")));
+    out.insert("ack", num(rec.get("ack")));
     out.insert("hear", get("hear", "total"));
     out.insert("stt", get("hear", "stt"));
     out.insert("turn", get("hear", "turn"));
