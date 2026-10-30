@@ -75,6 +75,11 @@ pub struct VoiceSettings {
     pub vad_start_secs: f32,
     pub vad_stop_secs: f32,
     pub vad_min_volume: f32,
+    /// The VAD while Ghost speaks (`vad_params_over_ghost`).
+    pub vad_over_ghost_confidence: f32,
+    pub vad_over_ghost_start_secs: f32,
+    pub vad_over_ghost_min_volume: f32,
+    pub vad_over_ghost_stop_secs: f32,
     pub wake_vad_stop_secs: f32,
     pub barge_in_min_words: usize,
     pub barge_in_interim_secs: f64,
@@ -83,6 +88,8 @@ pub struct VoiceSettings {
     pub turn_speculate: bool,
     pub turn_stop_secs: f64,
     pub turn_unfinished_secs: f64,
+    /// A full stop shortens the wait only when Smart Turn is at least this unsure.
+    pub turn_sentence_min_prob: f32,
     pub idle_timeout_secs: f64,
     pub hold_timeout_secs: f64,
     pub smart_turn_threads: usize,
@@ -231,7 +238,13 @@ impl VoiceSettings {
             vad_start_secs: f64_or("GHOST_VAD_START_SECS", 0.2)? as f32,
             vad_stop_secs: f64_or("GHOST_VAD_STOP_SECS", 0.2)? as f32,
             vad_min_volume: f64_or("GHOST_VAD_MIN_VOLUME", 0.6)? as f32,
+            vad_over_ghost_confidence: f64_or("GHOST_VAD_OVER_GHOST_CONFIDENCE", 0.5)? as f32,
+            vad_over_ghost_start_secs: f64_or("GHOST_VAD_OVER_GHOST_START_SECS", 0.1)? as f32,
+            vad_over_ghost_min_volume: f64_or("GHOST_VAD_OVER_GHOST_MIN_VOLUME", 0.3)? as f32,
+            vad_over_ghost_stop_secs: f64_or("GHOST_VAD_OVER_GHOST_STOP_SECS", 0.6)? as f32,
             wake_vad_stop_secs: f64_or("GHOST_WAKE_VAD_STOP_SECS", 0.5)? as f32,
+            // 2 again (2026-10-30 evening, operator's call): the warm-up guard and the echo
+            // filter carry the leak risk that 3 carried; "okay, okay" alone must cut.
             barge_in_min_words: usize_or("GHOST_BARGE_IN_MIN_WORDS", 2)?,
             barge_in_interim_secs: f64_or("GHOST_BARGE_IN_INTERIM_SECS", 0.3)?,
             echo_window_secs: f64_or("GHOST_ECHO_WINDOW_SECS", 3.0)?,
@@ -239,6 +252,7 @@ impl VoiceSettings {
             turn_speculate: flag("GHOST_TURN_SPECULATE", true),
             turn_stop_secs: f64_or("GHOST_TURN_STOP_SECS", 1.6)?,
             turn_unfinished_secs: f64_or("GHOST_TURN_UNFINISHED_SECS", 3.0)?,
+            turn_sentence_min_prob: f64_or("GHOST_TURN_SENTENCE_MIN_PROB", 0.1)? as f32,
             idle_timeout_secs: f64_or("GHOST_IDLE_TIMEOUT_SECS", 45.0)?,
             hold_timeout_secs: f64_or("GHOST_HOLD_TIMEOUT_SECS", 1800.0)?,
             smart_turn_threads: usize_or("GHOST_SMART_TURN_THREADS", 2)?,
@@ -249,7 +263,10 @@ impl VoiceSettings {
             compact_summary_tokens: f64_or("GHOST_COMPACT_SUMMARY_TOKENS", 3000.0)? as u32,
             quick_intents: flag("GHOST_QUICK_INTENTS", true),
             ack: flag("GHOST_ACK", true),
-            thinking_sound: flag("GHOST_THINKING_SOUND", true),
+            // Off (2026-10-30): the pulses leak through the echo canceller, the VAD takes the
+            // residual for a voice, and the operator finds it unpleasant; how Ghost shows it
+            // is working is to be rethought.
+            thinking_sound: flag("GHOST_THINKING_SOUND", false),
             thinking_volume: f64_or("GHOST_THINKING_VOLUME", 0.12)?,
             thinking_delay_secs: f64_or("GHOST_THINKING_DELAY_SECS", 0.5)?,
             input_device: text("GHOST_INPUT_DEVICE"),
@@ -322,6 +339,24 @@ impl VoiceSettings {
             min_volume: self.vad_min_volume,
         }
     }
+
+    /// The VAD while Ghost speaks: the echo canceller passes the operator's voice under
+    /// Ghost's audio in 150–350 ms pieces (measured 2026-10-30), which the room's
+    /// settings never start on. Quicker to start, and easier on the residual-mixed signal;
+    /// what it starts on is judged by the warm-up guard, the echo filter and the barge-in
+    /// rule, not by the VAD.
+    pub fn vad_params_over_ghost(&self) -> ghost_infer::VadParams {
+        ghost_infer::VadParams {
+            confidence: self.vad_over_ghost_confidence,
+            start_secs: self.vad_over_ghost_start_secs,
+            // Longer than the room's: "okay, okay [0.4 s] stop" is one segment, and the
+            // interim re-reads see all three words while it is open (2026-10-30, take 7:
+            // the segment closed in the gap and the two 150 ms pieces of "stop" started
+            // nothing).
+            stop_secs: self.vad_over_ghost_stop_secs,
+            min_volume: self.vad_over_ghost_min_volume,
+        }
+    }
 }
 
 fn process_env() -> HashMap<String, String> {
@@ -355,9 +390,13 @@ mod tests {
         assert!(s.turn_speculate);
         assert_eq!(s.turn_stop_secs, 1.6);
         assert_eq!(s.turn_unfinished_secs, 3.0);
+        assert_eq!(s.turn_sentence_min_prob, 0.1);
         assert_eq!(s.barge_in_min_words, 2);
         assert_eq!(s.barge_in_interim_secs, 0.3);
         assert_eq!(s.vad_stop_secs, 0.2);
+        assert_eq!(s.vad_over_ghost_start_secs, 0.1);
+        assert_eq!(s.vad_over_ghost_min_volume, 0.3);
+        assert_eq!(s.vad_over_ghost_stop_secs, 0.6);
         assert_eq!(s.hold_timeout_secs, 1800.0);
         assert_eq!(s.compact_trigger_tokens, 24000);
         assert_eq!(s.stt_quantization.as_deref(), Some("int8"));

@@ -18,6 +18,8 @@ back" and the like, as a whole turn, put the session on hold: Ghost says a few w
 any question Ghost had asked all keep. The model has a `hold` tool for the same thing, and
 uses it when two turns in a row are people talking to each other rather than to Ghost.
 Hold works for the desk and the phone alike; it is the pipeline's, not a transport's.
+Said over Ghost, cutting its reply off, the same phrase only stops it and Ghost keeps
+listening: the operator is about to speak, not turning away (amended 2026-10-30).
 
 **On hold, the rule is the desk's passive rule, inside a session.** Local STT keeps
 running so the name can be heard; every transcript that does not address Ghost is dropped

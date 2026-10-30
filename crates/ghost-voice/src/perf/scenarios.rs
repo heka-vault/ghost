@@ -214,6 +214,7 @@ pub fn scenarios() -> Vec<Scenario> {
                                 read_issue(142, "get").tool_calls.remove(0),
                                 read_issue(142, "get_comments").tool_calls.remove(0),
                             ],
+                            ttfb: None,
                         },
                         ScriptedModel::say("Issue one forty two is Redis versus Postgres for the session cache; two people lean toward Postgres."),
                     ],

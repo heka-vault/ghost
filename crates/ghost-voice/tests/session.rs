@@ -359,9 +359,9 @@ async fn a_voice_turn_runs_through_every_stage() {
 
 #[tokio::test]
 async fn a_barge_in_stops_playback_within_100ms() {
-    // A long reply (3 s a clause); two heard words while Ghost speaks cut it off.
+    // A long reply (3 s a clause); three heard words while Ghost speaks (GHOST_BARGE_IN_MIN_WORDS) cut it off.
     let w = world(
-        &["tell me everything", "stop that"],
+        &["tell me everything", "stop that now"],
         vec![vec![ScriptedModel::say(
             "Here is everything, in great detail, for a long while.",
         )]],
@@ -383,7 +383,7 @@ async fn a_barge_in_stops_playback_within_100ms() {
         .inject(vec![Frame::VadStarted { start_secs: 0.2 }])
         .await;
     w.session
-        .inject(vec![Frame::Interim("stop that".into())])
+        .inject(vec![Frame::Interim("stop that now".into())])
         .await;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -637,4 +637,49 @@ async fn going_on_before_ghost_answers_is_one_turn() {
     w.session.end().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
     let _ = (&w.mouth, &w.ear);
+}
+
+#[tokio::test]
+async fn a_call_the_held_answer_reaches_after_the_close_is_still_made() {
+    // Live, 2026-10-30: a 1.5 s first token against a 1.2 s grace. The close confirmed
+    // the held answer while it was still streaming; when it then reached its tool call it
+    // withdrew itself as if the turn hadn't ended, the confirmed stream ended with nothing,
+    // and Ghost sat silent after every request that needed an app.
+    let w = world_with(
+        &["read me issue four one three"],
+        vec![vec![
+            ScriptedModel::call("", "github_search_issues", Map::new())
+                .after(Duration::from_millis(400)), // past the 0.1 s grace
+            ScriptedModel::say("Issue four one three is open."),
+        ]],
+        0.2,
+        0.1,
+        40,
+        vec![github_app()],
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let recs = voice_records(&w, 1).await;
+    let rec = &recs[0];
+    assert_eq!(
+        rec["hear"]["speculation"]["kept"],
+        json!(1),
+        "the close confirmed the held answer: {rec}"
+    );
+    assert!(rec["ack"].is_number(), "the call was acknowledged: {rec}");
+    let said: Vec<String> = w
+        .turns
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(r, t)| format!("{r}:{t}"))
+        .collect();
+    assert!(
+        said.contains(&"assistant:Issue four one three is open.".to_string()),
+        "{said:?}"
+    );
+    w.session.end().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = (&w.mouth, &w.ear, &w.spoken, &w.asked);
 }

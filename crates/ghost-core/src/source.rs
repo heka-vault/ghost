@@ -128,6 +128,9 @@ pub struct UserTurn {
     pub pending: bool,
     /// Ghost's previous reply.
     pub last_assistant: String,
+    /// Said over Ghost: the turn cut its reply off. A hold phrase then means "stop
+    /// talking", not "I'm turning away" (ADR 0021).
+    pub barged_in: bool,
 }
 
 /// What an interceptor does with the turn. `HangUp` ends the session; `Hold` keeps it

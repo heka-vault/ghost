@@ -34,6 +34,8 @@ pub struct NarrationCut {
     closed: bool,   // going to sleep: say nothing more
     closing: bool,  // say nothing after the current response
     saw_text: bool, // this response produced words
+    /// A `hold` in a turn that cut Ghost off is declined (`tools`): its words go unsaid.
+    turns: Option<std::sync::Arc<crate::turns::TurnControl>>,
 }
 
 impl Default for NarrationCut {
@@ -52,7 +54,22 @@ impl NarrationCut {
             closed: false,
             closing: false,
             saw_text: false,
+            turns: None,
         }
+    }
+
+    pub fn with_turns(mut self, turns: std::sync::Arc<crate::turns::TurnControl>) -> Self {
+        self.turns = Some(turns);
+        self
+    }
+
+    /// The words with these calls are spoken: a goodbye, or a hold the operator asked for
+    /// rather than an interruption's.
+    fn spoken_with(&self, names: &[String]) -> bool {
+        !names.is_empty()
+            && names.iter().all(|n| SPOKEN_WITH.contains(&n.as_str()))
+            && !(names.iter().any(|n| n == "hold")
+                && self.turns.as_ref().is_some_and(|t| t.barged_in()))
     }
 
     pub fn close(&mut self, keep_current: bool) {
@@ -97,9 +114,7 @@ impl Stage for NarrationCut {
                     self.closed = true;
                 }
             }
-            Frame::FunctionCallsStarted(names)
-                if !names.is_empty() && names.iter().all(|n| SPOKEN_WITH.contains(&n.as_str())) =>
-            {
+            Frame::FunctionCallsStarted(names) if self.spoken_with(names) => {
                 self.released = true; // the goodbye: speak what was held and what follows
                 self.release(out).await;
                 if !self.saw_text && names.iter().all(|n| n == "hang_up") {

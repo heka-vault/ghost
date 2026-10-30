@@ -87,6 +87,8 @@ pub struct ToolDispatcher {
     session_id: String,
     on_hang_up: SessionAction,
     on_hold: Option<SessionAction>,
+    /// The turn's state: a `hold` asked for in a turn that cut Ghost off is declined.
+    turns: Option<Arc<crate::turns::TurnControl>>,
     events: Arc<Events>,
     conversations: Option<Arc<ConversationRuntime>>,
     record: OnCall,
@@ -101,6 +103,7 @@ pub struct ToolsParams {
     pub session_id: String,
     pub on_hang_up: SessionAction,
     pub on_hold: Option<SessionAction>,
+    pub turns: Option<Arc<crate::turns::TurnControl>>,
     pub events: Option<Arc<Events>>,
     pub conversations: Option<Arc<ConversationRuntime>>,
     pub on_call: Option<OnCall>,
@@ -125,6 +128,7 @@ impl ToolDispatcher {
             session_id: p.session_id,
             on_hang_up: p.on_hang_up,
             on_hold: p.on_hold,
+            turns: p.turns,
             events: p.events.unwrap_or_default(),
             conversations: p.conversations,
             record: p.on_call.unwrap_or_else(|| Arc::new(|_, _| {})),
@@ -197,12 +201,27 @@ impl ToolDispatcher {
                 }
             }
             HOLD_TOOL if self.on_hold.is_some() => {
+                let mut m = Map::new();
+                if self.turns.as_ref().is_some_and(|t| t.barged_in()) {
+                    // The operator cut Ghost off to speak, not to turn away (ADR 0021):
+                    // Ghost has stopped and keeps listening; the narration cut drops the
+                    // words that came with the call.
+                    m.insert("ok".into(), json!(false));
+                    m.insert(
+                        "note".into(),
+                        json!("the operator interrupted you to speak: stopped and listening, not on hold"),
+                    );
+                    return CallResult {
+                        result: m,
+                        run_llm: false,
+                        after: Vec::new(),
+                    };
+                }
                 // No follow-up completion: the words in this response are all Ghost says
                 // before it goes quiet.
                 if let Some(h) = &self.on_hold {
                     h().await;
                 }
-                let mut m = Map::new();
                 m.insert("ok".into(), json!(true));
                 CallResult {
                     result: m,

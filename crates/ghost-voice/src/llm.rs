@@ -12,8 +12,9 @@
 //! A speculative answer ([`Frame::Speculate`]) starts the stream at Smart Turn's verdict
 //! with the turn so far; its frames wait in the stage until the grace confirms the turn
 //! ([`Frame::SpeculationConfirmed`]) and are thrown away if the operator goes on. One that
-//! reaches a tool call withdraws itself ([`Frame::EagerCancel`] back up), so nothing is
-//! written for a turn that hadn't ended.
+//! reaches a tool call before the turn ends withdraws itself ([`Frame::EagerCancel`] back
+//! up), so nothing is written for a turn that hadn't ended; one that reaches it once the
+//! turn is confirmed makes the call as the turn's own (`held`).
 //!
 //! Every lesson the Python daemon learned about the model is in `ghost_llm` (every tool
 //! call of a reply, the cut-off redo); the turn's token ends a stream the operator talked
@@ -101,12 +102,26 @@ pub struct Compaction {
     pub summary_tokens: u32,
 }
 
+/// Where a held answer stands, shared by the stage and the task streaming it. The two
+/// race: the grace can end while the stream is still on its way to a tool call. Each
+/// side moves on from `STREAMING` with a compare-exchange, so exactly one wins: a tool
+/// call reached while streaming withdraws the answer and the confirmed turn runs its
+/// own; one reached once confirmed is the turn's own call and streams on. Live, 2026-10-30,
+/// a 1.5 s first token against a 1.2 s grace met the old rule, which withdrew whatever
+/// the state, and the confirmed turn's stream ended with no call, no text and no run:
+/// Ghost sat silent after every request that needed an app.
+mod held {
+    pub const STREAMING: u8 = 0;
+    pub const CONFIRMED: u8 = 1;
+    pub const WITHDRAWN: u8 = 2;
+}
+
 struct Speculation {
     text: String,
     events: mpsc::UnboundedReceiver<Event>,
     task: JoinHandle<()>,
-    /// The answer reached a tool call: withdrawn; the confirmed turn runs its own.
-    withdrawn: Arc<std::sync::atomic::AtomicBool>,
+    /// One of `held::*`.
+    state: Arc<std::sync::atomic::AtomicU8>,
 }
 
 pub struct LlmStage {
@@ -360,11 +375,12 @@ impl LlmStage {
         context.push(Message::user(text.clone()));
         let stream = self.model.stream(context, &self.tools, &self.options);
         let (tx, rx) = mpsc::unbounded_channel();
-        let withdrawn = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let w = withdrawn.clone();
+        let state = Arc::new(std::sync::atomic::AtomicU8::new(held::STREAMING));
+        let s = state.clone();
         let out = out.clone();
         let model_name = self.model.model_name();
         let task = tokio::spawn(async move {
+            use std::sync::atomic::Ordering::SeqCst;
             let mut stream = stream;
             let began = Instant::now();
             let mut first = true;
@@ -378,10 +394,13 @@ impl LlmStage {
                     }))
                     .await;
                 }
-                if matches!(ev, Ok(Event::ToolCall(_))) {
-                    // The answer reached a tool call: no tool runs for a turn that hadn't
-                    // ended. The confirmed turn makes the call.
-                    w.store(true, std::sync::atomic::Ordering::SeqCst);
+                if matches!(ev, Ok(Event::ToolCall(_)))
+                    && s.compare_exchange(held::STREAMING, held::WITHDRAWN, SeqCst, SeqCst)
+                        .is_ok()
+                {
+                    // The answer reached a tool call before the turn ended: no tool runs
+                    // for a turn that hadn't ended. The confirmed turn makes the call.
+                    // Once confirmed, the call is the turn's own and streams on below.
                     out.push_up(Frame::EagerCancel).await;
                     return;
                 }
@@ -396,7 +415,7 @@ impl LlmStage {
             text,
             events: rx,
             task,
-            withdrawn,
+            state,
         });
     }
 
@@ -443,10 +462,17 @@ impl LlmStage {
             .lock()
             .unwrap()
             .push(Message::user(s.text.clone()));
-        if s.withdrawn.load(std::sync::atomic::Ordering::SeqCst) {
-            s.task.abort();
-            self.run(out).await;
-            return;
+        {
+            use std::sync::atomic::Ordering::SeqCst;
+            if s.state
+                .compare_exchange(held::STREAMING, held::CONFIRMED, SeqCst, SeqCst)
+                .is_err()
+            {
+                // Withdrawn first: the turn's own run.
+                s.task.abort();
+                self.run(out).await;
+                return;
+            }
         }
         let turn = self.turns.current();
         // Replay what was held, then follow the rest live; an empty stream of a finished
@@ -634,6 +660,16 @@ pub struct ScriptedModel {
 pub struct ScriptedReply {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
+    /// This reply's first byte comes after this instead of the model's `ttfb`.
+    pub ttfb: Option<std::time::Duration>,
+}
+
+impl ScriptedReply {
+    /// A slow first byte for this reply alone: past the grace, to meet the close.
+    pub fn after(mut self, ttfb: std::time::Duration) -> Self {
+        self.ttfb = Some(ttfb);
+        self
+    }
 }
 
 impl ScriptedModel {
@@ -651,7 +687,7 @@ impl ScriptedModel {
     pub fn say(text: &str) -> ScriptedReply {
         ScriptedReply {
             text: text.into(),
-            tool_calls: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -659,6 +695,7 @@ impl ScriptedModel {
         ScriptedReply {
             text: text.into(),
             tool_calls: vec![ToolCall::new(format!("call_{name}"), name, args)],
+            ..Default::default()
         }
     }
 
@@ -706,7 +743,8 @@ impl ModelPort for ScriptedModel {
                 }
             }
         };
-        Box::pin(async_stream_words(words, reply.tool_calls, self.ttfb, done))
+        let ttfb = reply.ttfb.unwrap_or(self.ttfb);
+        Box::pin(async_stream_words(words, reply.tool_calls, ttfb, done))
     }
 
     fn complete(

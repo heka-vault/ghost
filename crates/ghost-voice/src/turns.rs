@@ -55,11 +55,19 @@ pub enum StartEvent {
     Reset,
 }
 
+/// How long a short transcript heard over Ghost counts toward a barge-in. The echo
+/// canceller passes the operator's voice under Ghost's audio in 150–250 ms pieces with
+/// holes between (measured 2026-10-30), one word each, so "stop… stop… stop" and "Ghost"
+/// + "hold on" arrive as separate finals that never make `min_words` alone.
+const BURST_WINDOW: Duration = Duration::from_secs(2);
+
 pub struct BargeInUserTurnStartStrategy {
     min_words: usize,
     bot_speaking: bool,
     speaking: Speaking,
     events: Vec<StartEvent>,
+    /// Finals too short to interrupt on their own, heard over the reply being spoken.
+    bursts: Vec<(Instant, usize)>,
 }
 
 impl BargeInUserTurnStartStrategy {
@@ -69,6 +77,7 @@ impl BargeInUserTurnStartStrategy {
             bot_speaking: false,
             speaking: Speaking::new(),
             events: Vec::new(),
+            bursts: Vec::new(),
         }
     }
 
@@ -95,12 +104,19 @@ impl BargeInUserTurnStartStrategy {
     /// fragments belong to the operator.
     pub fn handle_user_turn_started(&mut self) {
         self.bot_speaking = false;
+        self.bursts.clear();
     }
 
     pub fn process_frame(&mut self, frame: &Frame) -> ProcessFrameResult {
         match frame {
-            Frame::BotStarted => self.bot_speaking = true,
-            Frame::BotStopped => self.bot_speaking = false,
+            Frame::BotStarted => {
+                self.bot_speaking = true;
+                self.bursts.clear(); // a new reply: what was heard over the last one is spent
+            }
+            Frame::BotStopped => {
+                self.bot_speaking = false;
+                self.bursts.clear();
+            }
             Frame::VadStarted { .. } => {
                 if !self.bot_speaking() {
                     debug::audio(|| "turn: started by VAD".into());
@@ -125,22 +141,36 @@ impl BargeInUserTurnStartStrategy {
             }
             return ProcessFrameResult::Continue;
         }
-        if self.min_words > 0 && words >= self.min_words {
-            debug::audio(|| {
-                format!(
-                    "turn: barge-in on {}{text:?}",
-                    if interim { "interim " } else { "" }
-                )
-            });
-            self.events.push(StartEvent::Started);
-            return ProcessFrameResult::Stop;
+        if self.min_words > 0 {
+            let now = Instant::now();
+            self.bursts
+                .retain(|(at, _)| now.duration_since(*at) <= BURST_WINDOW);
+            let earlier: usize = self.bursts.iter().map(|(_, n)| n).sum();
+            if words + earlier >= self.min_words {
+                debug::audio(|| {
+                    format!(
+                        "turn: barge-in on {}{text:?}{}",
+                        if interim { "interim " } else { "" },
+                        if earlier > 0 {
+                            format!(", with {earlier} word(s) heard over Ghost just before")
+                        } else {
+                            String::new()
+                        }
+                    )
+                });
+                self.bursts.clear();
+                self.events.push(StartEvent::Started);
+                return ProcessFrameResult::Stop;
+            }
         }
         if interim {
             return ProcessFrameResult::Continue; // nothing was aggregated; the next may say more
         }
-        // Too short to be a deliberate interruption while the bot talks: most likely the
-        // bot's own voice. Drop it rather than queue it.
+        // Too short to be a deliberate interruption on its own: most likely the bot's own
+        // voice. Drop it rather than queue it, but count it for `BURST_WINDOW` in case it
+        // is the operator coming through in pieces.
         debug::audio(|| format!("turn: dropped {text:?} while Ghost speaks"));
+        self.bursts.push((Instant::now(), words));
         self.events.push(StartEvent::Reset);
         ProcessFrameResult::Continue
     }
@@ -168,6 +198,10 @@ pub struct SmartTurnParams {
     /// When the words don't end a sentence (the model says incomplete and there is no full
     /// stop, or the words stop mid-thought whatever the model says), this much.
     pub unfinished_secs: f64,
+    /// A full stop shortens the wait only when the model is this unsure at least. Parakeet
+    /// ends nearly every segment with one ("Can you read me issue."), and the model at 0.04
+    /// was right that the operator was going on; at 0.15 ("Yeah.") and 0.27 it was wrong.
+    pub sentence_min_prob: f32,
     /// Audio before the speech started that is kept for the model.
     pub pre_speech_secs: f64,
     pub max_duration_secs: f64,
@@ -178,6 +212,7 @@ impl Default for SmartTurnParams {
         Self {
             stop_secs: 1.6,
             unfinished_secs: 3.0,
+            sentence_min_prob: 0.1,
             pre_speech_secs: 0.0,
             max_duration_secs: 8.0,
         }
@@ -296,6 +331,8 @@ struct StopInner {
     fallback: Option<JoinHandle<()>>,
     /// When the incomplete turn's silence began, so the words can shorten it.
     fallback_began: Option<Instant>,
+    /// Smart Turn's probability that the turn was done when the fallback began.
+    fallback_prob: f32,
 }
 
 pub type TurnText = Arc<dyn Fn() -> String + Send + Sync>;
@@ -537,8 +574,17 @@ impl PatientTurnStopStrategy {
                 self.speculate_on(heard).await;
             }
         } else if self.in_fallback() && ends_a_sentence(&heard) {
-            let began = self.inner.lock().unwrap().fallback_began;
-            if let Some(began) = began {
+            let (began, prob) = {
+                let i = self.inner.lock().unwrap();
+                (i.fallback_began, i.fallback_prob)
+            };
+            if prob < self.sentence_min_prob() {
+                debug::audio(|| {
+                    format!(
+                        "turn: {heard:?} ends a sentence, but Smart Turn is sure it's not done ({prob:.2}); waiting"
+                    )
+                });
+            } else if let Some(began) = began {
                 let stop = self.stop_secs();
                 debug::audio(|| {
                     format!(
@@ -611,7 +657,7 @@ impl PatientTurnStopStrategy {
                 };
                 match verdict {
                     Some((v, _)) if v.complete => self.trigger_user_turn_stopped().await,
-                    Some(_) => self.start_fallback(),
+                    Some((v, _)) => self.start_fallback(v.probability),
                     None => {}
                 }
                 return verdict;
@@ -633,11 +679,19 @@ impl PatientTurnStopStrategy {
             .map_or(0.0, |a| a.params().unfinished_secs)
     }
 
-    /// Smart Turn said incomplete: the turn still closes after a silence, `unfinished_secs`
-    /// unless the words that follow end a sentence (`words_arrived`).
-    fn start_fallback(&mut self) {
+    /// Smart Turn said incomplete, with `prob` that it was complete: the turn still closes
+    /// after a silence, `unfinished_secs` unless the words that follow end a sentence and
+    /// the model wasn't sure (`words_arrived`).
+    fn start_fallback(&mut self, prob: f32) {
         self.cancel_fallback();
+        self.inner.lock().unwrap().fallback_prob = prob;
         self.run_fallback(self.unfinished_secs(), Instant::now());
+    }
+
+    fn sentence_min_prob(&self) -> f32 {
+        self.analyzer
+            .as_ref()
+            .map_or(0.0, |a| a.params().sentence_min_prob)
     }
 
     /// Close the turn `secs` after `began`, the answer under way being the answer.
@@ -725,6 +779,9 @@ pub struct TurnControl {
     session: CancellationToken,
     turn: Mutex<CancellationToken>,
     answer: Mutex<Answer>,
+    /// The current turn cut Ghost's reply off. A hold asked for in it, by phrase or by the
+    /// model's tool, only stops Ghost: the operator is about to speak (ADR 0021).
+    barged_in: std::sync::atomic::AtomicBool,
 }
 
 impl TurnControl {
@@ -734,7 +791,18 @@ impl TurnControl {
             session,
             turn: Mutex::new(turn),
             answer: Mutex::new(Answer::Settled),
+            barged_in: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// A turn began; `barged_in` when Ghost was speaking and it cut the reply off.
+    pub fn began(&self, barged_in: bool) {
+        self.barged_in
+            .store(barged_in, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn barged_in(&self) -> bool {
+        self.barged_in.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// The aggregator handed the model a turn: until it is heard or acts, it can be reopened.
@@ -742,7 +810,10 @@ impl TurnControl {
         *self.answer.lock().unwrap() = Answer::Unheard(text.to_string());
     }
 
-    /// Ghost's voice reached the operator: the turn stands.
+    /// Ghost's voice reached the operator: the turn stands. The output stage says so at
+    /// the reply's first sample, by handle; the aggregator says so again on `BotStarted`,
+    /// which climbs the pipeline behind the TTS stage's rendering and can arrive after
+    /// the reply has played.
     pub fn heard(&self) {
         let mut a = self.answer.lock().unwrap();
         if matches!(*a, Answer::Unheard(_)) {
@@ -835,10 +906,16 @@ impl TurnStopSink for AggregatorSink {
         let text = self.take_text();
         out.push_up(Frame::UserStopped).await;
         out.push(Frame::UserStopped).await;
-        if !text.trim().is_empty() {
-            self.turns.answering(&text);
-            out.push(Frame::user_text(text, true)).await;
+        if text.trim().is_empty() {
+            // Speech the STT made nothing of (a 0.7 s answer, 2026-10-30): no model run,
+            // so no thinking sound for it, which `UserStopped` would otherwise start and
+            // nothing would stop.
+            debug::audio(|| "turn: closed with no words; nothing to answer".into());
+            out.push(Frame::ThinkingStop).await;
+            return;
         }
+        self.turns.answering(&text);
+        out.push(Frame::user_text(text, true)).await;
     }
 
     async fn inference_triggered(&self, speculation: Option<String>) {
@@ -881,6 +958,10 @@ pub struct UserAggregator {
     on_idle: Option<OnIdle>,
     idle: Option<JoinHandle<()>>,
     held: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// The VAD's state, and the last stop's `stop_secs`: a turn a final transcript opens
+    /// after the VAD stopped (a barge-in on a final) is judged on the spot.
+    vad_on: bool,
+    vad_stop_secs: f32,
 }
 
 impl UserAggregator {
@@ -913,6 +994,8 @@ impl UserAggregator {
             on_idle: None,
             idle: None,
             held: Arc::new(|| false),
+            vad_on: false,
+            vad_stop_secs: 0.2,
         }
     }
 
@@ -982,11 +1065,9 @@ impl UserAggregator {
         // Going on before any of the answer was heard or done is the same turn: its words
         // come back, and the model's stage takes them and the unheard answer out of the
         // context. Talking over Ghost is a barge-in, and the turn it answered stands.
-        let reopened = if self.start.bot_speaking() {
-            None
-        } else {
-            self.turns.reopen()
-        };
+        let barged_in = self.start.bot_speaking();
+        self.turns.began(barged_in);
+        let reopened = if barged_in { None } else { self.turns.reopen() };
         self.start.handle_user_turn_started();
         self.stop.handle_user_turn_started().await;
         {
@@ -1051,13 +1132,40 @@ impl Stage for UserAggregator {
             }
             Frame::Transcript(text) => {
                 // The start strategies run while no turn is open; the stop strategy while one is.
-                if !self.turn_open() {
+                let was_open = self.turn_open();
+                if !was_open {
                     self.start.process_frame(&frame);
                     self.apply_start_events(out).await;
                 }
                 if self.turn_open() {
                     self.state.lock().unwrap().pieces.push(text.clone());
                     self.stop.process_frame(&frame).await;
+                    let words = text.split_whitespace().count();
+                    if !was_open && !self.vad_on && (self.turns.barged_in() || words >= 3) {
+                        // A turn opened by a final whose segment has already ended: its
+                        // VadStopped went by while no turn was open, so the stop strategy
+                        // never judged it, and no end is coming. Judge it now, on the audio
+                        // it buffered. A barge-in on a final ("Go with that." cut the
+                        // reading and hung open 45 s), or an utterance that began over the
+                        // greeting and ended after it ("Read me issue four one five from
+                        // quotient", 16 s of silence). A short tail after Ghost stopped
+                        // ("What's up?", "One five.") is left to the next segment: most
+                        // likely Ghost's own last words past the canceller.
+                        debug::audio(|| {
+                            "turn: a barge-in on a final: its end has passed, judging it now".into()
+                        });
+                        let stop = Frame::VadStopped {
+                            stop_secs: self.vad_stop_secs,
+                        };
+                        if let Some((verdict, ms)) = self.stop.process_frame(&stop).await {
+                            out.push(Frame::Metrics(Metric::Turn {
+                                complete: verdict.complete,
+                                probability: f64::from(verdict.probability),
+                                ms,
+                            }))
+                            .await;
+                        }
+                    }
                 }
                 out.forward(frame, direction).await;
                 return;
@@ -1070,6 +1178,7 @@ impl Stage for UserAggregator {
                 return; // only the barge-in rule reads an interim
             }
             Frame::VadStarted { .. } => {
+                self.vad_on = true;
                 if !self.turn_open() {
                     self.start.process_frame(&frame);
                     self.apply_start_events(out).await;
@@ -1078,7 +1187,9 @@ impl Stage for UserAggregator {
                 out.forward(frame, direction).await;
                 return;
             }
-            Frame::VadStopped { .. } => {
+            Frame::VadStopped { stop_secs } => {
+                self.vad_on = false;
+                self.vad_stop_secs = *stop_secs;
                 if self.turn_open()
                     && let Some((verdict, ms)) = self.stop.process_frame(&frame).await
                 {
@@ -1188,6 +1299,31 @@ mod tests {
             ProcessFrameResult::Stop
         );
         assert_eq!(s.take_events(), vec![StartEvent::Started]);
+    }
+
+    #[test]
+    fn test_short_bursts_over_ghost_add_up_to_a_barge_in() {
+        // 2026-10-30: the canceller chops the operator into one-word pieces under a
+        // reading; "stop" three times over had to cut the reply.
+        let mut s = strategy(3);
+        s.process_frame(&Frame::BotStarted);
+        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Continue);
+        assert_eq!(s.take_events(), vec![StartEvent::Reset]);
+        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Continue);
+        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Stop);
+        assert_eq!(
+            s.take_events(),
+            vec![StartEvent::Reset, StartEvent::Started]
+        );
+        // What was heard over one reply does not count toward the next.
+        let mut s = strategy(3);
+        s.process_frame(&Frame::BotStarted);
+        s.process_frame(&said("stop"));
+        s.process_frame(&said("stop"));
+        s.process_frame(&Frame::BotStopped);
+        s.process_frame(&Frame::BotStarted);
+        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Continue);
+        assert!(!s.take_events().contains(&StartEvent::Started));
     }
 
     #[test]
@@ -1503,6 +1639,18 @@ mod tests {
         }
     }
 
+    /// Smart Turn leaning to "not done" without conviction, as on "Yeah." (0.15 live).
+    struct Unsure;
+
+    impl TurnModel for Unsure {
+        fn predict(&mut self, _audio: &[f32]) -> ghost_infer::Result<TurnVerdict> {
+            Ok(TurnVerdict {
+                probability: 0.15,
+                complete: false,
+            })
+        }
+    }
+
     #[test]
     fn test_smart_turn_fork_shares_the_model_but_not_the_audio() {
         let model: Arc<Mutex<dyn TurnModel>> = Arc::new(Mutex::new(FakeModel));
@@ -1552,6 +1700,92 @@ mod tests {
                     .any(|f| matches!(f, Frame::ContextAppend { .. }))
             ); // no final yet
         }
+    }
+
+    #[tokio::test]
+    async fn test_a_turn_with_no_words_stops_the_thinking_sound_it_started() {
+        // 2026-10-30: a 0.7 s answer Parakeet wrote nothing for closed the turn, the
+        // thinking sound came on, and nothing answered for 20 s.
+        let mut agg = aggregator(3);
+        let (out, mut rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        let pushed = drain(&mut rx).await;
+        let stopped = pushed
+            .iter()
+            .position(|f| matches!(f, Frame::UserStopped))
+            .expect("the turn closed");
+        let quiet = pushed
+            .iter()
+            .position(|f| matches!(f, Frame::ThinkingStop))
+            .expect("the thinking sound is told to stop");
+        assert!(quiet > stopped, "{pushed:?}");
+        assert!(
+            !pushed
+                .iter()
+                .any(|f| matches!(f, Frame::ContextAppend { .. })),
+            "no model run for nothing: {pushed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a_barge_in_on_a_final_closes_without_another_vad_stop() {
+        // 2026-10-30: the VAD had stopped before the final "Go with that." opened the
+        // turn; nothing judged its end, and the turn hung until the idle timer hung up.
+        let mut agg = aggregator(3);
+        let (out, mut rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(Frame::BotStarted, Direction::Up, &out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await; // no turn open yet: the stop strategy is not consulted
+        agg.process(said("hang on a sec now"), Direction::Down, &out)
+            .await;
+        let pushed = drain(&mut rx).await;
+        assert!(pushed.iter().any(|f| matches!(f, Frame::UserStarted)));
+        assert!(
+            pushed.iter().any(|f| matches!(f, Frame::UserStopped)),
+            "the turn closed on its own: {pushed:?}"
+        );
+
+        // A short final after Ghost stopped, with no VAD of its own (a leak of its last
+        // words), still waits for the next segment's end.
+        let mut agg = aggregator(3);
+        let (out, mut rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(Frame::BotStarted, Direction::Up, &out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        agg.process(Frame::BotStopped, Direction::Up, &out).await;
+        agg.process(said("what's up"), Direction::Down, &out).await;
+        let pushed = drain(&mut rx).await;
+        assert!(pushed.iter().any(|f| matches!(f, Frame::UserStarted)));
+        assert!(!pushed.iter().any(|f| matches!(f, Frame::UserStopped)));
+
+        // An utterance that began over the greeting and ended after it (2026-10-30 18:12:
+        // "Read me issue four one five from quotient", 16 s of silence) closes on its own.
+        let mut agg = aggregator(3);
+        let (out, mut rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(Frame::BotStarted, Direction::Up, &out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(Frame::BotStopped, Direction::Up, &out).await;
+        agg.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        agg.process(
+            said("read me issue four one five from quotient"),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        let pushed = drain(&mut rx).await;
+        assert!(
+            pushed.iter().any(|f| matches!(f, Frame::UserStopped)),
+            "{pushed:?}"
+        );
     }
 
     #[tokio::test]
@@ -1715,7 +1949,7 @@ mod tests {
     async fn test_not_done_on_a_full_stop_closes_after_stop_secs_with_the_answer_started() {
         // "I will talk to you later." judged incomplete used to wait the whole fallback
         // and only then start the model.
-        let mut t = with_model(NotDone, 0.05, 0.1, 1.0);
+        let mut t = with_model(Unsure, 0.05, 0.1, 1.0);
         segment_ends(&mut t.s).await;
         t.hears("I will talk to you later.").await;
         assert_eq!(seen(&t.events), vec!["answer:I will talk to you later."]);
@@ -1724,6 +1958,24 @@ mod tests {
             seen(&t.events),
             vec!["answer:I will talk to you later.", "confirmed"]
         );
+    }
+
+    #[tokio::test]
+    async fn test_a_full_stop_does_not_override_a_sure_not_done() {
+        // 2026-10-30: "Can you read me issue." (Parakeet's full stop, Smart Turn 0.04) closed
+        // after the short silence while the operator was saying the number.
+        let mut t = with_model(NotDone, 0.05, 0.1, 0.4);
+        segment_ends(&mut t.s).await;
+        t.hears("Can you read me issue.").await;
+        let closed = |t: &Speculating| {
+            seen(&t.events)
+                .iter()
+                .any(|e| e == "rerun" || e == "confirmed")
+        };
+        sleep(0.25).await; // past stop_secs: still open (the answer may have started)
+        assert!(!closed(&t), "{:?}", seen(&t.events));
+        sleep(0.3).await; // the longer silence
+        assert!(closed(&t), "{:?}", seen(&t.events));
     }
 
     #[tokio::test]

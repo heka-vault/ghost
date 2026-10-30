@@ -145,6 +145,7 @@ fn wired() -> Wired {
         session_id: "s".into(),
         on_hang_up: on_sleep,
         on_hold: None,
+        turns: None,
         events: None,
         conversations: None,
         on_call: None,
@@ -340,6 +341,7 @@ async fn test_the_tool_list_never_names_a_tool_twice_or_badly() {
         session_id: "s".into(),
         on_hang_up: no_action(),
         on_hold: None,
+        turns: None,
         events: None,
         conversations: None,
         on_call: None,
@@ -420,6 +422,7 @@ fn world(tmp: &Path) -> World {
         session_id: "s1".into(),
         on_hang_up: no_action(),
         on_hold: None,
+        turns: None,
         events: None,
         conversations: Some(rt.clone()),
         on_call: Some(record_call(&rt)),
@@ -907,6 +910,7 @@ fn agents(tmp: &Path) -> Agents {
         session_id: "s1".into(),
         on_hang_up: no_action(),
         on_hold: None,
+        turns: None,
         events: None,
         conversations: Some(rt.clone()),
         on_call: Some(record_call(&rt)),
@@ -1162,6 +1166,7 @@ async fn test_tools_connected_after_the_session_was_built_are_dispatched() {
         session_id: "s".into(),
         on_hang_up: no_action(),
         on_hold: None,
+        turns: None,
         events: None,
         conversations: Some(rt.clone()),
         on_call: None,
@@ -1194,4 +1199,36 @@ async fn test_tools_connected_after_the_session_was_built_are_dispatched() {
     assert!(!advertised.contains(&"figma_get_file".to_string()));
     let r = tools.call("figma_get_file", Map::new(), "c").await;
     assert!(r.error_text().unwrap().contains("not available here"));
+}
+
+#[tokio::test]
+async fn a_hold_the_model_asks_for_in_a_barge_in_only_stops_ghost() {
+    // 2026-10-30: the operator cut a reading off with "stop that for a second"; the model
+    // called `hold`, Ghost said "Take your time." and dropped their next words.
+    use ghost_voice::turns::TurnControl;
+    let gate = Arc::new(WriteGate::new(Arc::new(Store::in_memory().unwrap())));
+    let (on_hang_up, _) = sleeper();
+    let (on_hold, held) = sleeper();
+    let turns = TurnControl::new(tokio_util::sync::CancellationToken::new());
+    let tools = ToolDispatcher::new(ToolsParams {
+        sources: Vec::new(),
+        gate,
+        session_id: "s".into(),
+        on_hang_up,
+        on_hold: Some(on_hold),
+        turns: Some(turns.clone()),
+        events: None,
+        conversations: None,
+        on_call: None,
+        last_request: None,
+        probe: None,
+    });
+    turns.began(true); // the turn cut Ghost off
+    let r = tools.call("hold", Map::new(), "c1").await;
+    assert_eq!(r.result["ok"], json!(false), "{:?}", r.result);
+    assert!(held.lock().unwrap().is_empty(), "no hold for a barge-in");
+    turns.began(false); // an ordinary turn: the hold is the hold
+    let r = tools.call("hold", Map::new(), "c2").await;
+    assert_eq!(r.result["ok"], json!(true));
+    assert_eq!(held.lock().unwrap().len(), 1);
 }
