@@ -320,18 +320,23 @@ impl EchoFilter {
         } else {
             self.min_words
         });
-        if words(text).len() < least {
+        let heard = words(text);
+        if heard.is_empty() || !(speaking || (self.clock)() - self.stopped_at <= self.window) {
             return false;
         }
-        if !(speaking || (self.clock)() - self.stopped_at <= self.window) {
-            return false;
-        }
-        self.spoken
+        let share = self
+            .spoken
             .iter()
             .chain((!self.current.is_empty()).then_some(&self.current))
             .map(|s| echo_share(text, s))
-            .fold(0.0, f64::max)
-            >= self.threshold
+            .fold(0.0, f64::max);
+        if heard.len() >= least {
+            return share >= self.threshold;
+        }
+        // Under the floor: a segment that began over Ghost's voice and is nothing but its
+        // words (2026-10-30 19:52: the one-word opening "Listening." reached the operator's
+        // turn as its final, 1.3 s after the voice began).
+        self.vad_began_over_ghost && share >= 1.0
     }
 }
 
@@ -482,6 +487,20 @@ mod tests {
         *clock.lock().unwrap() = 101.1;
         f.process(Frame::Transcript("Go ahead.".into()), Direction::Down, &out)
             .await;
+        // a one-word opening ("Listening.") in a segment that began over the voice: its own
+        f.saying("Listening.");
+        f.bot_speaking(true);
+        f.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 101.2;
+        f.process(Frame::BotStopped, Direction::Down, &out).await;
+        *clock.lock().unwrap() = 101.4;
+        f.process(
+            Frame::Transcript("Listening.".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
         // the operator's short answer in the next segment, after the voice, still passes
         f.process(Frame::VadStopped { stop_secs: 0.5 }, Direction::Down, &out)
             .await;

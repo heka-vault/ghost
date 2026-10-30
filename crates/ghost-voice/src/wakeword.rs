@@ -206,7 +206,14 @@ impl DetectorWakeProcessor {
         let level = 20.0 * rms.max(1e-9).log10();
         let before = hit.saturating_sub(self.heard_from_at) as f64 / SAMPLE_RATE as f64;
         let secs = audio.len() as f64 / SAMPLE_RATE as f64;
-        format!("{secs:.1}s from {before:.1}s before the hit, {level:.0} dBFS")
+        // A sum of the samples' magnitudes, so two readings of "the same" stretch can be
+        // told apart (2026-10-30 19:51: a 7.0 s check read a sentence, the final check of
+        // 7.0 s at the same level read nothing).
+        let sum: f64 = audio.iter().map(|x| f64::from(x.abs())).sum();
+        format!(
+            "{secs:.1}s from {before:.1}s before the hit, {level:.0} dBFS, {} samples, sum {sum:.0}",
+            audio.len()
+        )
     }
 
     // --- decisions ------------------------------------------------------------------
