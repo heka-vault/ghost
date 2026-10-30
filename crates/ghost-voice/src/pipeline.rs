@@ -789,7 +789,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 .with_probe(probe.clone())
                 .with_events(events.clone())
                 .with_speaking(speaking.clone())
-                .with_barge_in_min_words(settings.barge_in_min_words),
+                .with_barge_in_min_words(settings.barge_in_min_words)
+                .with_turns(turns.clone()),
         ),
     ));
     stages.push((

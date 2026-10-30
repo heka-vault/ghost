@@ -50,6 +50,10 @@ pub struct InterceptorProcessor {
     speaking: Speaking,
     /// The aggregator's barge-in rule, applied here to a transcript heard over Ghost.
     barge_in_min_words: usize,
+    /// The turn's own state: a turn whose interim cut Ghost off is still an interruption
+    /// when its final arrives after the cut (2026-10-30: "Okay, that's good. Stop." went to
+    /// the model because Ghost had already stopped).
+    turns: Option<Arc<crate::turns::TurnControl>>,
 }
 
 impl InterceptorProcessor {
@@ -72,6 +76,7 @@ impl InterceptorProcessor {
             bot_speaking: false,
             speaking: Speaking::new(),
             barge_in_min_words: 2,
+            turns: None,
         }
     }
 
@@ -87,8 +92,19 @@ impl InterceptorProcessor {
         self
     }
 
+    pub fn with_turns(mut self, turns: Arc<crate::turns::TurnControl>) -> Self {
+        self.turns = Some(turns);
+        self
+    }
+
     fn bot_speaking(&self) -> bool {
         self.bot_speaking || self.speaking.is_on()
+    }
+
+    /// This transcript interrupts Ghost: it is speaking now, or the turn it belongs to cut
+    /// it off already (an interim did, and this is the final).
+    fn barged_in(&self) -> bool {
+        self.bot_speaking() || self.turns.as_ref().is_some_and(|t| t.barged_in())
     }
 
     /// A transcript the interceptors should see: any while Ghost is quiet, a barge-in's
@@ -174,7 +190,7 @@ impl Stage for InterceptorProcessor {
             // a new turn, or this one has gone to the model
             Frame::UserStarted | Frame::UserStopped => self.turn_pieces.clear(),
             Frame::Transcript(text) if !self.interceptors.is_empty() && self.offered(text) => {
-                let barged_in = self.bot_speaking();
+                let barged_in = self.barged_in();
                 let pending = self.gate.pending(&self.session_id);
                 let last = (self.last_assistant)();
                 let began = Instant::now();
