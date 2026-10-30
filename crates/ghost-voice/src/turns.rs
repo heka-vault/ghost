@@ -713,7 +713,9 @@ impl PatientTurnStopStrategy {
             if !sounds_unfinished(&heard) {
                 self.speculate_on(heard).await;
             }
-        } else if self.in_fallback() && ends_a_sentence(&heard) {
+        } else if self.in_fallback() && ends_a_sentence(&heard) && !sounds_unfinished(&heard) {
+            // Punctuation alone: "Can you read issue?" ends with a question mark and wants
+            // its number (20:59, saved only by Smart Turn's 0.01 under the floor).
             let (began, prob) = {
                 let i = self.inner.lock().unwrap();
                 (i.fallback_began, i.fallback_prob)
@@ -2114,6 +2116,15 @@ mod tests {
             ("", false),
         ] {
             assert_eq!(ends_a_sentence(text), ends, "{text:?}");
+        }
+        // a question mark on a word that wants an argument is not an end
+        for (text, unfinished) in [
+            ("Can you pull up issue?", true),
+            ("Can you read issue?", true),
+            ("Which issue?", false),
+            ("Can you read issue? Four oh three.", false),
+        ] {
+            assert_eq!(sounds_unfinished(text), unfinished, "{text:?}");
         }
     }
 
