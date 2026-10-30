@@ -96,6 +96,8 @@ pub struct DetectorWakeProcessor {
     hit: Option<usize>,
     model: usize,
     last_hit: i64,
+    /// Where the last "best score under its threshold" was logged (GHOST_DEBUG_AUDIO).
+    last_best_log: usize,
     woken: bool,
     done: bool,
 }
@@ -127,6 +129,7 @@ impl DetectorWakeProcessor {
             hit: None,
             model: 0,
             last_hit: -(1i64 << 40),
+            last_best_log: 0,
             woken: false,
             done: false,
         }
@@ -218,6 +221,15 @@ impl DetectorWakeProcessor {
             return;
         };
         let Some((score, model)) = pick_hit(&scores, &self.d.models) else {
+            // A near miss, for the operator tuning the detector against the room: the best
+            // score of this stretch, at most twice a second.
+            if let Some((name, best)) = scores.iter().max_by(|a, b| a.1.total_cmp(&b.1))
+                && *best >= 0.2
+                && end.saturating_sub(self.last_best_log) >= SAMPLE_RATE / 2
+            {
+                self.last_best_log = end;
+                debug::audio(|| format!("wake: best {name} {best:.2}, under its threshold"));
+            }
             return;
         };
         if (end as i64 - self.last_hit) < (self.d.cooldown_secs * SAMPLE_RATE as f64) as i64 {

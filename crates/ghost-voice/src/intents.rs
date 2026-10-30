@@ -16,6 +16,13 @@ use ghost_core::source::{Action, Handled, TurnInterceptor, UserTurn};
 use rand::seq::IndexedRandom;
 
 const FILLERS: &[&str] = &["ghost", "okay", "ok", "hey", "oh", "um", "so", "please"];
+/// What an interruption is made of when it only means "stop" (2026-10-30: "Okay," over a
+/// reading waited 3 s and got an answer).
+const STOP_WORDS: &[&str] = &[
+    "okay", "ok", "stop", "wait", "alright", "all", "right", "yeah", "yes", "no", "enough",
+    "sorry", "ghost", "hey", "oh", "um", "uh", "so", "please", "that's", "fine", "good", "got",
+    "it", "thanks", "thank", "you",
+];
 
 pub const HANG_UP: &[&str] = &[
     "that's all",
@@ -223,6 +230,12 @@ impl TurnInterceptor for QuickIntents {
                 until: None,
             });
         }
+        // "Okay", "stop", "wait" over Ghost's reply: a stop, not a question. It has stopped;
+        // keep listening, say nothing, and run no model on it. Not with a change waiting for
+        // a yes: "yes" and "no" over the question are the confirmation path's.
+        if turn.barged_in && !turn.pending && words.iter().all(|w| STOP_WORDS.contains(w)) {
+            return Some(Handled::default());
+        }
         if any_in(HOLD) && !has_negation(&norm) {
             if turn.barged_in {
                 // "Hold on" over Ghost's reply: it has stopped; keep listening, say nothing.
@@ -405,6 +418,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(h.action, Some(Action::HangUp));
+        // "okay", "stop" over Ghost: a stop, nothing to answer
+        for text in ["Okay,", "okay stop", "Stop, stop, stop.", "yeah okay"] {
+            let h = QuickIntents
+                .on_user_turn(&UserTurn {
+                    text: text.into(),
+                    pending: false,
+                    last_assistant: String::new(),
+                    barged_in: true,
+                })
+                .await
+                .expect("taken");
+            assert_eq!((h.say, h.action), (None, None), "{text:?}");
+        }
+        // with a change waiting for a yes, "yes"/"no" over the question are the gate's
+        assert!(
+            QuickIntents
+                .on_user_turn(&UserTurn {
+                    text: "yes".into(),
+                    pending: true,
+                    last_assistant: String::new(),
+                    barged_in: true,
+                })
+                .await
+                .is_none()
+        );
+        // a real question over Ghost goes to the model
+        assert!(
+            QuickIntents
+                .on_user_turn(&UserTurn {
+                    text: "okay what about four one three".into(),
+                    pending: false,
+                    last_assistant: String::new(),
+                    barged_in: true,
+                })
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
