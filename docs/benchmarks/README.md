@@ -39,3 +39,10 @@ its packages and the Rust harness measures what they measured:
   latency): `ghostd perf micro --only jev` times the classifier; the accuracy study is the
   2026-10-17 report, made once, and the classifier's own tests in `ghost_core::jev` and
   `ghost_core::confirmation` keep its verdicts.
+
+## The live rubric
+
+[../voice-rubric.md](../voice-rubric.md) is the scripted conversation the operator has
+with Ghost after a change to the voice path, with the debug lines that mark each item
+passed; `scripts/voice-rubric-check.sh` reads a run out of the log and the latency
+records. Each run's results go at the end of that file.
