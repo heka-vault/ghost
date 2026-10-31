@@ -139,5 +139,5 @@ item and the time of day; the log has everything around it.
 | H | partial | wakes under music took two to four tries; Parakeet's check read "There it goes", "A ghost. A ghost." (#13); `heard nothing` segments at -14 to -22 dBFS while music was audible |
 
 Also seen: Ghost said goodbye twice after a model `hang_up` (#56); the echo canceller's
-`ghost.mic` node accumulated 111 xruns over 30 minutes and a canceller restart moved the
+`ghost.mic` node accumulated 111 xruns over 30 minutes while the wake scores fell (#58), and a canceller restart moved the
 graph to 48 kHz until `clock.force-rate 16000` brought it back (output silent meanwhile).
