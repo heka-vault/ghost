@@ -8,7 +8,7 @@ import { joinSpoken } from "@ghost/ui";
 import { Check, Clock, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
-import { formatTime, LineGlyph } from "../../ui";
+import { formatDateTime, formatTime, LineGlyph } from "../../ui";
 import type { Decision, Item } from "./transcript";
 
 export interface TranscriptProps {
@@ -48,7 +48,7 @@ export function Transcript({ items, nameOf, thinkingAs }: TranscriptProps) {
           case "started":
             return (
               <Caption key={it.key}>
-                Session started <time dateTime={it.at}>{formatTime(it.at)}</time>
+                Session started <time dateTime={it.at}>{it.dated && !sameDay(it.at) ? formatDateTime(it.at) : formatTime(it.at)}</time>
               </Caption>
             );
           case "transfer":
@@ -109,6 +109,11 @@ export function Transcript({ items, nameOf, thinkingAs }: TranscriptProps) {
       )}
     </div>
   );
+}
+
+/** True when an instant falls on today's date, here. */
+function sameDay(iso: string): boolean {
+  return new Date(iso).toDateString() === new Date().toDateString();
 }
 
 function Speaker({ slug, name, at, named, children }: { slug: string; name: string; at?: string; named: boolean; children: ReactNode }) {

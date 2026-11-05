@@ -38,7 +38,7 @@ import { LineStateText, lineState } from "./lineState";
 import { NewAgentDialog } from "./NewAgentDialog";
 import { personaCache } from "./personaCache";
 import { isRetired, retiredAt } from "./threads";
-import { designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
+import { agentPath, designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
 import { parseVoice, voiceKind } from "./voices";
 import { GhostFolder } from "./GhostFolder";
 
@@ -154,7 +154,7 @@ export function AgentsIndex() {
     return (
       <ListRow
         key={l.slug}
-        href={hrefFor(`/agents/${l.slug}`)}
+        href={hrefFor(agentPath(l.slug))}
         leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
         title={name}
         description={
@@ -318,7 +318,7 @@ export function AgentsIndex() {
                   return (
                     <ListRow
                       key={l.slug}
-                      href={hrefFor(`/agents/${l.slug}`)}
+                      href={hrefFor(agentPath(l.slug))}
                       leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
                       title={name}
                       description={

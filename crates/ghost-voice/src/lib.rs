@@ -28,6 +28,7 @@ pub mod hold;
 pub mod intents;
 pub mod intercept;
 pub mod latency;
+pub mod level;
 pub mod llm;
 pub mod narration;
 pub mod perf;

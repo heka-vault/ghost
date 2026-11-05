@@ -110,7 +110,9 @@ export type GhostEvent =
   | Schemas["LogEvent"]
   | Schemas["ConversationEvent"]
   | Schemas["WaitingEvent"]
-  | Schemas["AppsEvent"];
+  | Schemas["AppsEvent"]
+  /** Ghost's own voice at the speaker, 0..1, ~20/s while it speaks, then one 0. */
+  | Schemas["VoiceEvent"];
 
 export type Unsubscribe = () => void;
 

@@ -363,6 +363,8 @@ pub struct SessionHooks {
     pub on_hang_up: Option<SessionAction>,
     pub on_conversation: Option<OnSwitch>,
     pub on_latency: Option<crate::latency::Sink>,
+    /// The loudness of Ghost's own voice as it plays (`crate::level`); never the microphone.
+    pub on_level: Option<crate::level::OnLevel>,
 }
 
 /// How a session opens.
@@ -554,6 +556,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         .collect();
     let on_turn_outer = p.hooks.on_turn.unwrap_or_else(no_turn);
     let on_phase = p.hooks.on_phase.unwrap_or_else(no_phase);
+    let on_level = p.hooks.on_level;
 
     let runtime = p.conversations.map(|convs| {
         sources.push(ghost_core::conversations::conversations_source(&convs));
@@ -931,14 +934,13 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     );
     stages.push((Some(Slot::AudioOut), tts));
     stages.push((None, Box::new(ThinkingSoundCut)));
-    stages.push((
-        None,
-        Box::new(
-            AudioOutput::new(output)
-                .with_speaking(speaking)
-                .with_turns(turns.clone()),
-        ),
-    ));
+    let mut audio_out = AudioOutput::new(output)
+        .with_speaking(speaking)
+        .with_turns(turns.clone());
+    if let Some(on) = on_level {
+        audio_out = audio_out.with_level(on);
+    }
+    stages.push((None, Box::new(audio_out)));
 
     let stages = assemble(stages, Vec::new());
     let mut pipeline = Pipeline::new(stages, observer);

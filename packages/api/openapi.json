@@ -3321,6 +3321,23 @@
         ],
         "type": "object"
       },
+      "VoiceEvent": {
+        "description": "How loud Ghost's own voice is at the speaker, 0.0 to 1.0: the RMS of 50 ms of what is\nplaying, in dBFS, mapped linearly from -50 dBFS (0.0) to 0 dBFS (1.0). About twenty a\nsecond while Ghost speaks, timed to when the audio is heard, then one `0.0` when the\nvoice stops; nothing at all while Ghost is silent. Ghost's output only: never the\nmicrophone, never passive audio.",
+        "properties": {
+          "level": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": {
+            "default": "voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "type": "object"
+      },
       "VoiceInfo": {
         "properties": {
           "id": {
@@ -4599,6 +4616,7 @@
                       "pending": "#/components/schemas/PendingEvent",
                       "status": "#/components/schemas/StatusEvent",
                       "turn": "#/components/schemas/TurnEvent",
+                      "voice": "#/components/schemas/VoiceEvent",
                       "waiting": "#/components/schemas/WaitingEvent"
                     },
                     "propertyName": "type"
@@ -4627,6 +4645,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/AppsEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/VoiceEvent"
                     }
                   ]
                 }

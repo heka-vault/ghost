@@ -8,6 +8,11 @@
  * a `/:slug/:tab` route segment would make this unnecessary).
  */
 const PAGE_PARAMS = ["tab", "open"];
+
+/** Where an agent's conversation is: Ghost's is the home screen, every other agent's is its page. */
+export function agentPath(slug: string): string {
+  return slug === "ghost" ? "/" : `/agents/${slug}`;
+}
 let owner: string | null = null;
 
 export function readParam(name: string, forSlug?: string): string | null {

@@ -10,7 +10,7 @@ import type { DevicesView, ModelConnectionView, SettingsView } from "@ghost/clie
  * section's page. `apps` and `skills` were sections of the one long page; they are pages of
  * their own now, and their old links land there.
  */
-export type SectionId = "setup" | "about" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds";
+export type SectionId = "setup" | "about" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds" | "wave";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
@@ -25,6 +25,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   phone: "Phone",
   privacy: "Privacy",
   sounds: "Sounds",
+  wave: "While Ghost speaks",
 };
 
 /** The pages this screen draws (SETTINGS_SCREEN_PAGES in app/routes.tsx). */
@@ -43,6 +44,7 @@ export const SECTION_PAGE: Record<SectionId, string> = {
   audio: "sound",
   models: "sound",
   sounds: "sound",
+  wave: "sound",
   phone: "phone",
 };
 export const isSectionId = (v: string | null): v is SectionId => !!v && v in SECTION_PAGE;

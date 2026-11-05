@@ -456,6 +456,14 @@ impl Playback {
         self.producer.buffer().capacity() - self.producer.slots()
     }
 
+    /// How long until the last sample written is heard: what is queued in the ring plus the
+    /// device's reported delay.
+    pub fn lead(&self) -> Duration {
+        let delay = self.shared.delay.load(Relaxed).max(0) as u64;
+        let samples = self.queued() as u64 + delay;
+        Duration::from_micros(samples * 1_000_000 / u64::from(self.rate.max(1)))
+    }
+
     /// Write what fits now; returns how many samples were taken.
     pub fn try_write(&mut self, samples: &[i16]) -> usize {
         let (written, _) = ring::push_samples(&mut self.producer, samples);

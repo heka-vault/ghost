@@ -2098,6 +2098,22 @@ export interface components {
             /** @enum {string} */
             state: "open" | "locked" | "unavailable" | "broken";
         };
+        /**
+         * @description How loud Ghost's own voice is at the speaker, 0.0 to 1.0: the RMS of 50 ms of what is
+         *     playing, in dBFS, mapped linearly from -50 dBFS (0.0) to 0 dBFS (1.0). About twenty a
+         *     second while Ghost speaks, timed to when the audio is heard, then one `0.0` when the
+         *     voice stops; nothing at all while Ghost is silent. Ghost's output only: never the
+         *     microphone, never passive audio.
+         */
+        VoiceEvent: {
+            /** Format: float */
+            level: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "voice";
+        };
         VoiceInfo: {
             id: string;
             /** @description "American female: Heart" */
@@ -2289,6 +2305,7 @@ export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
 export type SchemaVaultView = components['schemas']['VaultView'];
+export type SchemaVoiceEvent = components['schemas']['VoiceEvent'];
 export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
 export type SchemaWaitingEvent = components['schemas']['WaitingEvent'];
 export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
@@ -2995,7 +3012,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"];
                 };
             };
         };

@@ -1,5 +1,8 @@
 /**
- * Owner: session. The session view, `#/`.
+ * Owner: session. The session view, `#/`, which is also Ghost's page: Ghost is conversation
+ * zero and every wake lands in it (ADR 0014), so its conversation lives here and not at
+ * `#/agents/ghost`, which comes here (its persona, memory and history are this page's ⋯
+ * menu). Ghost's earlier sessions, from its stored transcript, sit above the live one.
  *
  * Before the first turn the page has one focal point and no header to compete with it:
  * Ghost's presence, one line at display size saying what to do, and the composer right under
@@ -15,17 +18,18 @@
  * isn’t running” is the shell's (src/app/Offline.tsx).
  */
 import { useGhost } from "@ghost/ui";
-import { ArrowDown, ArrowRight, AudioLines, Mic, PhoneOff, TriangleAlert, X } from "lucide-react";
+import { ArrowDown, ArrowRight, AudioLines, Brain, Clock, Mic, MoreHorizontal, PhoneOff, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
-import { Link } from "../../app/router";
+import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, Notice, Page, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
-import { type OwnSettle, useDecisions, useLastSession, useLines, useObservedSwitches } from "./hooks";
+import { writeParam } from "../conversations/url";
+import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
 import { Transcript } from "./Transcript";
-import { buildTranscript } from "./transcript";
+import { buildHistory, buildTranscript } from "./transcript";
 import "./session.css";
 
 /**
@@ -71,7 +75,13 @@ export default function SessionScreen(_: RouteProps) {
   const lineLabel = nameOf(line);
   const switches = useObservedSwitches(sessionId, inSession ? line : null, turns);
   const decisions = useDecisions(sessionId, pending, turns, own);
-  const items = useMemo(() => buildTranscript(turns, line, lines, switches, decisions), [turns, line, lines, switches, decisions]);
+  // Home is Ghost's page (conversation zero, where every wake lands): Ghost's earlier sessions,
+  // then the live one. #/agents/ghost comes here; Ghost's persona and memory are its ⋯ menu.
+  const history = useGhostHistory(sessionId);
+  const items = useMemo(
+    () => [...buildHistory(history.turns, lines), ...buildTranscript(turns, line, lines, switches, decisions)],
+    [history.turns, turns, line, lines, switches, decisions],
+  );
   const seenLast = useLastSession(sessionId, inSession ? line : null, turns.length ? turns[turns.length - 1].at : null);
   // What this window saw end, or else the line used most recently (survives a reload).
   const lastSession = useMemo(() => {
@@ -80,7 +90,7 @@ export default function SessionScreen(_: RouteProps) {
     return used ? { slug: used.slug, at: used.lastActive! } : null;
   }, [seenLast, lines]);
 
-  const hasTranscript = turns.length > 0;
+  const hasTranscript = turns.length > 0 || history.turns.length > 0;
   // Before the first turn the start state is the focal point; when Ghost can't answer yet it
   // says so itself and the shell's setup banner steps aside (one signal per place).
   const needsSetup = online && !loading && setupNeeded && !inSession && !hasTranscript;
@@ -94,7 +104,8 @@ export default function SessionScreen(_: RouteProps) {
   const pinned = useRef(true);
   const follow = useRef(false);
   const [unseen, setUnseen] = useState(false);
-  const seen = useRef({ turns: turns.length, pending: pending?.id ?? null });
+  const shownTurns = turns.length + history.turns.length;
+  const seen = useRef({ turns: shownTurns, pending: pending?.id ?? null });
 
   useEffect(() => {
     const panel = document.getElementById("main");
@@ -113,7 +124,7 @@ export default function SessionScreen(_: RouteProps) {
 
   useEffect(() => {
     const was = seen.current;
-    seen.current = { turns: turns.length, pending: pending?.id ?? null };
+    seen.current = { turns: shownTurns, pending: pending?.id ?? null };
     if (!hasTranscript) {
       pinned.current = true;
       setUnseen(false);
@@ -121,7 +132,7 @@ export default function SessionScreen(_: RouteProps) {
     }
     const arrived = !!pending && pending.id !== was.pending;
     if (!pinned.current && !follow.current && !arrived) {
-      if (turns.length > was.turns) setUnseen(true);
+      if (shownTurns > was.turns) setUnseen(true);
       return;
     }
     follow.current = false;
@@ -133,7 +144,7 @@ export default function SessionScreen(_: RouteProps) {
     if (panel && panel.scrollHeight - panel.clientHeight < MIN_SCROLL_PX && !underFade(end.current, dock.current)) return;
     pinned.current = true;
     scrollIntoPanel(end.current, { block: "panel-end" });
-  }, [hasTranscript, turns.length, thinking, pending, decisions.length]);
+  }, [hasTranscript, shownTurns, thinking, pending, decisions.length]);
 
   const toLatest = () => {
     pinned.current = true;
@@ -271,8 +282,27 @@ export default function SessionScreen(_: RouteProps) {
     ));
 
   const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone });
-  const showLast = startOnly && online && !loading && !needsSetup && lastSession;
-  const newest = turns[turns.length - 1];
+  // The way back to the last agent used; Ghost's own sessions are this page.
+  const showLast = startOnly && online && !loading && !needsSetup && lastSession && lastSession.slug !== "ghost";
+  const newest = turns[turns.length - 1] ?? history.turns[history.turns.length - 1];
+
+  // Ghost's own settings, from its page: they open in the agent editor and come back here.
+  const openGhost = (tab: "persona" | "memory" | "history") => {
+    writeParam("tab", tab, "ghost");
+    navigate("/agents/ghost");
+  };
+  const ghostMenu = line === "ghost" && (
+    <Menu
+      align="end"
+      trigger={<IconButton label="More for Ghost" icon={<MoreHorizontal />} variant="secondary" disabled={!online} />}
+      items={[
+        { heading: "Settings" },
+        { label: "Voice and persona", icon: <SlidersHorizontal />, onSelect: () => openGhost("persona") },
+        { label: "Memory", icon: <Brain />, onSelect: () => openGhost("memory") },
+        { label: "History", icon: <Clock />, onSelect: () => openGhost("history") },
+      ]}
+    />
+  );
 
   return (
     <Page
@@ -281,6 +311,7 @@ export default function SessionScreen(_: RouteProps) {
       title={inSession ? lineLabel : "Ghost"}
       leading={<LineGlyph slug={line} name={lineLabel} size="lg" />}
       status={onPhone ? "On your phone" : undefined}
+      actions={ghostMenu || undefined}
       dock={
         showDock ? (
           <div className="session-dock" ref={dock}>
@@ -321,7 +352,7 @@ export default function SessionScreen(_: RouteProps) {
         <div className={cx("session-start page-fill", !startOnly && "session-start--live")}>
           <div className="session-start__stack">
             {/* Presence only: it shows Ghost's state and is never a button, so a stray click can't open the mic. */}
-            <VoicePresence size={96} phase={presencePhase} label="" />
+            {presencePhase === "speaking" ? <SpeakingWave size={96} /> : <VoicePresence size={96} phase={presencePhase} label="" />}
             <h2 className="session-start__title t-display">{start.title}</h2>
             {start.text && <p className="session-start__text">{start.text}</p>}
             {needsSetup ? (

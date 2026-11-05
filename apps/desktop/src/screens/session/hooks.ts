@@ -5,6 +5,38 @@ import { type MutableRefObject, useEffect, useRef, useState } from "react";
 
 import type { Decision, LineInfo, ObservedSwitch } from "./transcript";
 
+/** How many of Ghost's stored turns the home screen shows above the live session. */
+const HISTORY_TURNS = 80;
+
+/**
+ * Ghost's stored transcript (ADR 0014: conversation zero, where every wake lands), minus the
+ * live session's turns, which come from the event stream. Re-read when a session starts or
+ * ends and when a conversation changes, so a session that just ended joins the history.
+ * The store has no `via`: a stored turn reads as spoken, and tool calls are left out.
+ */
+export function useGhostHistory(sessionId: string | null): { turns: Turn[]; loaded: boolean } {
+  const { client, connected, conversationsVersion } = useGhost();
+  const [state, setState] = useState<{ turns: Turn[]; loaded: boolean }>({ turns: [], loaded: false });
+  useEffect(() => {
+    if (!connected) return;
+    let live = true;
+    client
+      .conversationTurns("ghost", HISTORY_TURNS)
+      .then((list) => {
+        if (!live) return;
+        const turns: Turn[] = list
+          .filter((t) => t.role !== "call" && t.text.trim())
+          .map((t) => ({ at: t.at, role: t.role as Turn["role"], session_id: t.session_id, text: t.text, via: "voice" }));
+        setState({ turns, loaded: true });
+      })
+      .catch(() => live && setState((s) => ({ ...s, loaded: true })));
+    return () => {
+      live = false;
+    };
+  }, [client, connected, conversationsVersion, sessionId]);
+  return { turns: sessionId ? state.turns.filter((t) => t.session_id !== sessionId) : state.turns, loaded: state.loaded };
+}
+
 /** Every line's name and aliases, re-read whenever a conversation changes. Empty until it loads. */
 export function useLines(): LineInfo[] {
   const { client, conversationsVersion } = useGhost();
