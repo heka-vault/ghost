@@ -86,7 +86,9 @@ pub trait PhoneEvents: Send + Sync {
 /// Forward the desk's events to the phone once its data channel says client-ready
 /// (`ready`): first what happened before the channel opened, minus log lines and stale
 /// statuses, then a fresh `status`, then live events, never a log line. The same JSON the
-/// control API's WebSocket sends. Returns when the bus closes.
+/// control API's WebSocket sends, less the voice level (twenty a second for the desktop's
+/// waveform; nothing on the phone draws it, and the data channel shares the call).
+/// Returns when the bus closes.
 pub async fn forward_events(
     mut events: broadcast::Receiver<String>,
     ready: impl Future<Output = ()>,
@@ -99,7 +101,7 @@ pub async fn forward_events(
         match events.try_recv() {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(kind(&data), Some("log" | "status"))
+                    && !matches!(kind(&data), Some("log" | "status" | "voice"))
                 {
                     backlog.push(data);
                 }
@@ -118,7 +120,7 @@ pub async fn forward_events(
         match events.recv().await {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && kind(&data) != Some("log")
+                    && !matches!(kind(&data), Some("log" | "voice"))
                 {
                     sink.send_server_message(&data).await;
                 }
@@ -1181,13 +1183,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn events_reach_the_phone_after_client_ready_without_logs_or_stale_statuses() {
+    async fn events_reach_the_phone_after_client_ready_without_logs_levels_or_stale_statuses() {
         let (tx, rx) = broadcast::channel::<String>(16);
         for e in [
             json!({"type": "status", "status": {"old": true}}),
             json!({"type": "turn", "turn": {"n": 1}}),
             json!({"type": "log", "level": "info", "message": "x", "at": "2026-10-28T00:00:00Z"}),
             json!({"type": "pending", "pending": null}),
+            json!({"type": "voice", "level": 0.4}),
         ] {
             tx.send(e.to_string()).unwrap();
         }
@@ -1197,6 +1200,8 @@ mod tests {
         let live = async {
             tokio::time::sleep(Duration::from_millis(50)).await;
             tx.send(json!({"type": "log", "level": "info", "message": "y", "at": "2026-10-28T00:00:00Z"}).to_string()).unwrap();
+            tx.send(json!({"type": "voice", "level": 0.6}).to_string())
+                .unwrap();
             tx.send(json!({"type": "waiting", "count": 2}).to_string())
                 .unwrap();
             tokio::time::sleep(Duration::from_millis(50)).await;

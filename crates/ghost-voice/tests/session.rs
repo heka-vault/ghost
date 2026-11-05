@@ -245,6 +245,7 @@ fn world_with(
             on_hang_up: None,
             on_conversation: None,
             on_latency: Some(Arc::new(move |rec| r.lock().unwrap().push(rec.clone()))),
+            on_level: None,
         },
         wake_phrases: None,
         wake_fuzzy: 0.0,

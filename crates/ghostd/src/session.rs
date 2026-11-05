@@ -24,6 +24,7 @@ use ghost_infer::wake::parse_phrases;
 use ghost_rtc::{ClientMessage, Link, Media as RtcMedia, Outbound};
 use ghost_voice::conversation::OnSwitch;
 use ghost_voice::intercept::SessionAction;
+use ghost_voice::level::OnLevel;
 use ghost_voice::pipeline::{GhostSession, Greeting, SessionHooks, SessionParams, build_session};
 use ghost_voice::tap::{OnPhase, OnTurn, SessionPhase};
 use serde_json::{Map, Value, json};
@@ -225,6 +226,15 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             })
         })
     };
+    // Ghost's own voice as it plays: the desktop's waveform. Never the microphone.
+    let on_level: OnLevel = {
+        let d = Arc::downgrade(d);
+        Arc::new(move |level| {
+            if let Some(d) = d.upgrade() {
+                d.state.publish_voice(level);
+            }
+        })
+    };
     let on_conversation: OnSwitch = {
         let d = Arc::downgrade(d);
         Arc::new(move |p: Profile| {
@@ -294,6 +304,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             on_hang_up: Some(on_hang_up),
             on_conversation: Some(on_conversation),
             on_latency: None,
+            on_level: Some(on_level),
         },
         wake_phrases: Some(parse_phrases(Some(&cfg.wake_phrases))),
         wake_fuzzy: cfg.wake_fuzzy,

@@ -397,6 +397,7 @@ impl Bench {
                 on_hang_up: None,
                 on_conversation: None,
                 on_latency: Some(sink),
+                on_level: None,
             },
             wake_phrases: None,
             wake_fuzzy: 0.0,

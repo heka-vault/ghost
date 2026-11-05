@@ -27,6 +27,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::frames::{Audio, Direction, Frame, Out, Stage};
+use crate::level::{OnLevel, VoiceMeter};
 use crate::speaking::Speaking;
 use crate::turns::TurnControl;
 
@@ -53,6 +54,10 @@ pub trait MediaOut: Send {
     async fn drain(&mut self);
     /// The thinking sound under speech, on or off.
     fn set_thinking(&self, on: bool);
+    /// How long until what was written last is heard: the queue ahead of the speaker.
+    fn lead(&self) -> Duration {
+        Duration::ZERO
+    }
     /// A message to the far end's data channel (the phone); nothing at the desk.
     async fn send_message(&self, _message: Value) {}
     fn close(&mut self) {}
@@ -140,6 +145,8 @@ pub struct AudioOutput {
     speaking_now: Speaking,
     /// The turn's answer is heard the moment its first sample is written.
     turns: Option<Arc<TurnControl>>,
+    /// The loudness of Ghost's voice as it plays, for the desktop's waveform.
+    meter: Option<VoiceMeter>,
 }
 
 impl AudioOutput {
@@ -149,6 +156,7 @@ impl AudioOutput {
             speaking: false,
             speaking_now: Speaking::new(),
             turns: None,
+            meter: None,
         }
     }
 
@@ -162,6 +170,19 @@ impl AudioOutput {
         self
     }
 
+    /// Report the level of Ghost's voice (`crate::level`) as it is heard.
+    pub fn with_level(mut self, on: OnLevel) -> Self {
+        self.meter = Some(VoiceMeter::new(on));
+        self
+    }
+
+    /// The voice stopped at the speaker: played out, or cut.
+    fn silence(&mut self) {
+        if let Some(m) = &mut self.meter {
+            m.silence();
+        }
+    }
+
     /// Write in frames, stopping the moment the turn is cancelled.
     async fn play(&mut self, audio: &Audio, turn: &CancellationToken) -> bool {
         let step = (f64::from(audio.rate) * FRAME_SECS) as usize;
@@ -169,6 +190,7 @@ impl AudioOutput {
             if turn.is_cancelled() {
                 self.speaking_now.set(false);
                 self.media.clear().await;
+                self.silence();
                 return false;
             }
             let wrote = tokio::select! {
@@ -180,13 +202,19 @@ impl AudioOutput {
                 None => {
                     self.speaking_now.set(false);
                     self.media.clear().await;
+                    self.silence();
                     return false;
                 }
                 Some(Err(e)) => {
                     warn!("audio out: {e}");
                     return false;
                 }
-                Some(Ok(())) => self.speaking_now.audio(),
+                Some(Ok(())) => {
+                    self.speaking_now.audio();
+                    if let Some(m) = &mut self.meter {
+                        m.written(chunk, audio.rate, self.media.lead());
+                    }
+                }
             }
         }
         true
@@ -224,6 +252,7 @@ impl AudioOutput {
             }
         }
         self.speaking_now.set(false);
+        self.silence();
     }
 
     async fn stopped_speaking(&mut self, turn: Option<CancellationToken>, out: &Out) {
@@ -241,6 +270,7 @@ impl AudioOutput {
             None => self.media.drain().await,
         }
         self.speaking_now.set(false);
+        self.silence();
         self.speaking = false;
         out.push_up(Frame::BotStopped).await;
     }
@@ -284,6 +314,7 @@ impl Stage for AudioOutput {
             Frame::Interruption => {
                 self.speaking_now.set(false);
                 self.media.clear().await;
+                self.silence();
                 if self.speaking {
                     self.speaking = false;
                     out.push_up(Frame::BotStopped).await;
@@ -297,6 +328,7 @@ impl Stage for AudioOutput {
             Frame::Cancel => {
                 self.speaking_now.set(false);
                 self.media.clear().await;
+                self.silence();
                 self.media.set_thinking(false);
             }
             _ => {}
@@ -306,6 +338,7 @@ impl Stage for AudioOutput {
 
     async fn stopped(&mut self) {
         self.speaking_now.set(false);
+        self.silence();
         self.media.set_thinking(false);
         self.media.close();
     }
@@ -351,6 +384,10 @@ impl MediaOut for DeskOut {
 
     fn set_thinking(&self, on: bool) {
         self.mixer.set_enabled(on);
+    }
+
+    fn lead(&self) -> Duration {
+        self.playback.lead()
     }
 
     fn close(&mut self) {
@@ -620,6 +657,13 @@ impl MediaOut for ScriptedOut {
     }
 
     fn set_thinking(&self, _on: bool) {}
+
+    fn lead(&self) -> Duration {
+        let until = self.ear.0.lock().unwrap().until;
+        until.map_or(Duration::ZERO, |u| {
+            u.saturating_duration_since(Instant::now())
+        })
+    }
 }
 
 /// The replay harness's devices: a `Mouth` to speak into the session and an `Ear` that
@@ -802,6 +846,95 @@ mod tests {
             )
             .await;
         assert!((ear.seconds_played() - 0.2).abs() < 1e-6);
+    }
+
+    type Levels = Arc<Mutex<Vec<(Instant, f32)>>>;
+
+    fn levels() -> (crate::level::OnLevel, Levels) {
+        let heard: Levels = Arc::default();
+        let h = heard.clone();
+        (
+            Arc::new(move |l| h.lock().unwrap().push((Instant::now(), l))),
+            heard,
+        )
+    }
+
+    #[tokio::test]
+    async fn the_voice_level_follows_playback_then_ends_with_one_zero() {
+        let (media, _mouth, _ear) = scripted_media();
+        let (on, heard) = levels();
+        let mut out_stage = AudioOutput::new(media.output).with_level(on);
+        let (out, _rx) = Out::capture();
+        let turn = CancellationToken::new();
+        // nothing playing: nothing sent
+        out_stage
+            .process(Frame::MixerEnable(true), Direction::Down, &out)
+            .await;
+        out_stage
+            .process(Frame::Interruption, Direction::Down, &out)
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(heard.lock().unwrap().is_empty());
+
+        let began = Instant::now();
+        out_stage
+            .process(
+                Frame::TtsAudio {
+                    audio: Audio::new(vec![20000; OUT_RATE as usize * 3 / 10], OUT_RATE), // 0.3 s
+                    turn: turn.clone(),
+                },
+                Direction::Down,
+                &out,
+            )
+            .await;
+        out_stage
+            .process(Frame::TtsStopped, Direction::Down, &out)
+            .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let got = heard.lock().unwrap().clone();
+        let (last, rest) = got.split_last().unwrap();
+        assert_eq!(last.1, 0.0, "{got:?}");
+        assert_eq!(rest.len(), 6, "one level per 50 ms: {got:?}");
+        let want = crate::level::level_of(&[20000; 1200]);
+        assert!(
+            rest.iter().all(|(_, l)| (*l - want).abs() < 1e-6),
+            "{got:?}"
+        );
+        // paced at playback, not in one burst when the clause was written
+        let span = rest[5].0.duration_since(rest[0].0);
+        assert!(
+            span >= Duration::from_millis(200) && span <= Duration::from_millis(300),
+            "{span:?}"
+        );
+        assert!(last.0.duration_since(began) >= Duration::from_millis(280));
+
+        // a barge-in: one 0 at the cut, nothing after
+        heard.lock().unwrap().clear();
+        let live = CancellationToken::new();
+        let cancel = live.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            cancel.cancel();
+        });
+        out_stage
+            .process(
+                Frame::TtsAudio {
+                    audio: Audio::new(vec![20000; OUT_RATE as usize * 2], OUT_RATE), // 2 s
+                    turn: live,
+                },
+                Direction::Down,
+                &out,
+            )
+            .await;
+        out_stage
+            .process(Frame::Interruption, Direction::Down, &out)
+            .await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let got: Vec<f32> = heard.lock().unwrap().iter().map(|(_, l)| *l).collect();
+        let (last, rest) = got.split_last().unwrap();
+        assert_eq!(*last, 0.0, "{got:?}");
+        assert!((2..=4).contains(&rest.len()), "{got:?}");
+        assert!(rest.iter().all(|l| *l > 0.0), "one 0 only: {got:?}");
     }
 
     #[tokio::test]

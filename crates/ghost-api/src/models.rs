@@ -278,6 +278,14 @@ pub enum Event {
         #[serde(default)]
         sign_in_url: Option<String>,
     },
+    /// How loud Ghost's own voice is at the speaker, 0.0 to 1.0: the RMS of 50 ms of what
+    /// is playing, in dBFS, mapped linearly from -50 dBFS (0.0) to 0 dBFS (1.0). About
+    /// twenty a second while Ghost speaks, timed to when the audio is heard, then one `0.0`
+    /// when the voice stops; nothing at all while Ghost is silent. Ghost's output only:
+    /// never the microphone, never passive audio.
+    Voice {
+        level: f32,
+    },
 }
 
 // --- the waiting list (ADR 0029, ADR 0030) ----------------------------------------------
@@ -1728,6 +1736,13 @@ mod tests {
             serde_json::to_value(&e).unwrap(),
             json!({"type": "waiting", "count": 3})
         );
+        let e = Event::Voice { level: 0.5 };
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            json!({"type": "voice", "level": 0.5})
+        );
+        let back: Event = serde_json::from_value(json!({"type": "voice", "level": 0.5})).unwrap();
+        assert_eq!(back, e);
         let e: Event = serde_json::from_value(
             json!({"type": "apps", "changed": "github", "sign_in_url": null}),
         )

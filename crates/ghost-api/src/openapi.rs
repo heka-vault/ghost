@@ -96,6 +96,19 @@ pub struct AppsEvent {
     pub sign_in_url: Option<String>,
 }
 
+/// How loud Ghost's own voice is at the speaker, 0.0 to 1.0: the RMS of 50 ms of what is
+/// playing, in dBFS, mapped linearly from -50 dBFS (0.0) to 0 dBFS (1.0). About twenty a
+/// second while Ghost speaks, timed to when the audio is heard, then one `0.0` when the
+/// voice stops; nothing at all while Ghost is silent. Ghost's output only: never the
+/// microphone, never passive audio.
+#[derive(ToSchema)]
+pub struct VoiceEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "voice")]
+    pub r#type: String,
+    pub level: f32,
+}
+
 /// What the event stream carries, discriminated by `type`.
 #[derive(ToSchema)]
 #[serde(untagged)]
@@ -108,6 +121,7 @@ pub struct AppsEvent {
     ("conversation" = "#/components/schemas/ConversationEvent"),
     ("waiting" = "#/components/schemas/WaitingEvent"),
     ("apps" = "#/components/schemas/AppsEvent"),
+    ("voice" = "#/components/schemas/VoiceEvent"),
 )))]
 pub enum Event {
     Status(StatusEvent),
@@ -118,6 +132,7 @@ pub enum Event {
     Conversation(ConversationEvent),
     Waiting(WaitingEvent),
     Apps(AppsEvent),
+    Voice(VoiceEvent),
 }
 
 /// `POST /conversations/{slug}/notes` takes a free object with `text` in it.
@@ -151,6 +166,7 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("ConversationEvent", ConversationEvent::schema()),
         ("WaitingEvent", WaitingEvent::schema()),
         ("AppsEvent", AppsEvent::schema()),
+        ("VoiceEvent", VoiceEvent::schema()),
     ] {
         components.schemas.entry(name.to_string()).or_insert(schema);
     }

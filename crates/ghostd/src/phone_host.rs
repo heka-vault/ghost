@@ -126,6 +126,10 @@ impl MediaOut for PhoneOut {
         self.thinking.store(on, Ordering::SeqCst);
     }
 
+    fn lead(&self) -> Duration {
+        Duration::from_millis(u64::from(self.sink.queued_ms()))
+    }
+
     async fn send_message(&self, message: Value) {
         if let Some(out) = Outbound::server_message(message) {
             let _ = self.media.send(&out);

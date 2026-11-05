@@ -302,6 +302,11 @@ impl DaemonState {
         });
     }
 
+    /// The loudness of Ghost's own voice as it plays (`Event::Voice`); never the microphone.
+    pub fn publish_voice(&self, level: f32) {
+        self.bus.publish(&Event::Voice { level });
+    }
+
     pub fn set_pending(&self, pending: Option<PendingProposal>) {
         self.lock().pending = pending.clone();
         self.bus.publish(&Event::Pending { pending });
