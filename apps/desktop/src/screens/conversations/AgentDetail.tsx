@@ -121,6 +121,12 @@ export function AgentDetail({ slug }: { slug: string }) {
   const readOnly = retired !== null;
 
   const setTab = (t: TabId) => {
+    // Ghost's conversation is the home screen; its other views are here.
+    if (t === "transcript" && slug === "ghost") {
+      writeParam("tab", null, slug);
+      navigate("/");
+      return;
+    }
     setTabState(t);
     writeParam("tab", t === "transcript" ? null : t, slug);
   };
@@ -733,11 +739,14 @@ export function AgentDetail({ slug }: { slug: string }) {
       className="conv-page"
       title={name}
       leading={<LineGlyph slug={slug} name={name} size="xl" />}
+      // Ghost's page here is only its settings views; their bar's “← Conversation” goes home.
       crumb={
-        <Link to="/agents">
-          <ChevronLeft size={14} aria-hidden />
-          Agents
-        </Link>
+        isGhost ? undefined : (
+          <Link to="/agents">
+            <ChevronLeft size={14} aria-hidden />
+            Agents
+          </Link>
+        )
       }
       status={pageStatus}
       description={description}

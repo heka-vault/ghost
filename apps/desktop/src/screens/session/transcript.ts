@@ -42,7 +42,7 @@ export interface Decision {
 }
 
 export type Item =
-  | { kind: "started"; key: string; at: string }
+  | { kind: "started"; key: string; at: string; dated?: boolean }
   | { kind: "transfer"; key: string; to: string; text: string; at: string | null }
   | { kind: "note"; key: string; text: string; at: string }
   | { kind: "decision"; key: string; decision: Decision }
@@ -121,6 +121,39 @@ export function buildTranscript(turns: Turn[], current: string, lines: LineInfo[
       else items.push({ kind: "you", key, typed, turns: [t] });
     }
     switchAfter(t.at);
+  });
+  return items;
+}
+
+/**
+ * Ghost's earlier sessions, from its stored transcript (GET /conversations/ghost/turns), as
+ * the same items the live transcript shows: one “Session started” caption per session, then
+ * its turns. These are Ghost's own turns only (an agent's replies after a transfer live in
+ * that agent's transcript), so a transfer sentence is a caption and every reply stays Ghost's.
+ * Each caption carries the day, since the history spans days. Keys are prefixed so they
+ * never meet the live session's.
+ */
+export function buildHistory(turns: Turn[], lines: LineInfo[]): Item[] {
+  const items: Item[] = [];
+  let session: string | null = null;
+  turns.forEach((t, i) => {
+    const key = `h${i}-${t.at}`;
+    if (t.session_id !== session) {
+      session = t.session_id;
+      items.push({ kind: "started", key: `${key}-s`, at: t.at, dated: true });
+    }
+    const last = items[items.length - 1];
+    const to = t.role === "assistant" ? transferTarget(t.text, lines) : null;
+    if (to != null) items.push({ kind: "transfer", key, to, text: t.text.trim().replace(/[.!]$/, ""), at: t.at });
+    else if (t.role === "system") items.push({ kind: "note", key, text: t.text, at: t.at });
+    else if (t.role === "assistant") {
+      if (last?.kind === "ghost") last.turns.push(t);
+      else items.push({ kind: "ghost", key, slug: "ghost", turns: [t] });
+    } else {
+      const typed = t.via === "text";
+      if (last?.kind === "you" && last.typed === typed) last.turns.push(t);
+      else items.push({ kind: "you", key, typed, turns: [t] });
+    }
   });
   return items;
 }

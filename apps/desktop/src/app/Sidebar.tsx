@@ -6,7 +6,7 @@ import { type ReactElement, type ReactNode, Suspense, lazy, useCallback, useEffe
 import { useDesign } from "../design/context";
 import { GhostMark, type GhostPhase, IconButton, LineGlyph, StatusDot, Tooltip, agentName, cx, liveLabel, phaseText, relativeTime, useLive, versionLine } from "../ui";
 import { isRetired } from "../screens/conversations/threads";
-import { newAgentSeed } from "../screens/conversations/url";
+import { agentPath, newAgentSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
 import { difference } from "./version";
@@ -172,7 +172,9 @@ export function Sidebar() {
   // Every working agent, right here: the sidebar is the list, not a preview of one (the operator's call, 2026-10-20).
   const shownAgents = state !== "offline" ? sortedAgents : [];
   const retiredCount = agents.filter(isRetired).length;
-  const agentIsCurrent = shownAgents.some((l) => path === `/agents/${l.slug}`);
+  // Ghost's row is home, and its settings views under #/agents/ghost.
+  const isAt = (slug: string) => path === agentPath(slug) || path === `/agents/${slug}`;
+  const agentIsCurrent = shownAgents.some((l) => isAt(l.slug));
 
   return (
     <aside className={cx("sidebar", rail && "is-rail")}>
@@ -212,7 +214,8 @@ export function Sidebar() {
             </a>
             <ul className="sidebar__group" role="list" aria-labelledby="sidebar-agents">
               {shownAgents.map((l) => {
-                const to = `/agents/${l.slug}`;
+                const to = agentPath(l.slug);
+                const here = isAt(l.slug);
                 const live = inSession && l.slug === active;
                 const waiting = live && !!pending;
                 const sub = waiting
@@ -227,9 +230,9 @@ export function Sidebar() {
                   <li key={l.slug}>
                     <RailTip rail={rail} content={`${name} · ${sub}`}>
                     <a
-                      className={cx("sidebar__item sidebar__item--line", path === to && "is-current")}
+                      className={cx("sidebar__item sidebar__item--line", here && "is-current")}
                       href={hrefFor(to)}
-                      aria-current={path === to ? "page" : undefined}
+                      aria-current={here ? "page" : undefined}
                       aria-label={rail ? `${name}, ${sub}` : undefined}
                       title={rail ? undefined : l.job || undefined}
                     >
