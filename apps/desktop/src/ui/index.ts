@@ -17,6 +17,8 @@ export { Tabs } from "./Tabs";
 export type { TabsProps, TabItem } from "./Tabs";
 export { VoicePresence } from "./VoicePresence";
 export type { VoicePresenceProps } from "./VoicePresence";
+export { SpeakingWave, VoiceWave, WAVE_VARIANTS, setWaveVariant, speechEnvelope, useWaveVariant } from "./VoiceWave";
+export type { VoiceWaveProps, WaveVariant } from "./VoiceWave";
 export {
   Badge,
   StatusDot,

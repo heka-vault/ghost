@@ -15,7 +15,7 @@
 import { ArrowUp } from "lucide-react";
 import { forwardRef, type ReactElement, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 
-import { IconButton, VoicePresence, cx, type GhostPhase } from "../../ui";
+import { IconButton, SpeakingWave, VoicePresence, cx, type GhostPhase } from "../../ui";
 
 export interface VoiceControl {
   /** The accessible name and tooltip: “Wake Ghost”, “Hang up”, or why it’s off. */
@@ -88,7 +88,12 @@ export const Composer = forwardRef<HTMLTextAreaElement | null, ComposerProps>(fu
         onSubmit();
       }}
     >
-      {presence && <VoicePresence size={48} phase={presence} label="" className="session-composer__presence" />}
+      {presence &&
+        (presence === "speaking" ? (
+          <SpeakingWave size={48} className="session-composer__presence" />
+        ) : (
+          <VoicePresence size={48} phase={presence} label="" className="session-composer__presence" />
+        ))}
       <textarea
         ref={field}
         rows={1}

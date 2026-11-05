@@ -5,6 +5,8 @@ export { phaseLabel, autonomyLabel, permissionLabel, permissionOf } from "./labe
 export { phaseOf, phaseText, agentName, lineName, relativeTime, formatTime, formatDateTime, errorText, quoted, statusLabel, statusTone, buildText, versionLine } from "./format";
 export type { GhostPhase, Tone } from "./format";
 export { joinSpoken } from "./turns";
+export { createVoiceLevel } from "./voiceLevel";
+export type { VoiceLevel } from "./voiceLevel";
 export { splitSummary, neverHappened, didNotHappen, pastTense, shortTarget } from "./audit";
 export type { Summarized } from "./audit";
 export { GHOST_PATH, GHOST_PATH_SMALL, lineHue } from "./brand";

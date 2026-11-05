@@ -211,3 +211,6 @@
 .set-model-legacy { margin: 0 0 var(--space-3); }
 .set-model-test { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .set-model-test__main { min-width: 0; display: grid; gap: var(--space-0_5); }
+
+/* While Ghost speaks: each design's live preview at the top of its card. */
+.set-wave__preview { display: flex; align-items: center; justify-content: center; height: 56px; margin-block: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--bg-sunken); }

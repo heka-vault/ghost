@@ -784,6 +784,25 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
   .g-voice__bar { transform: none !important; }
 }
 
+/* ======================================================================== VoiceWave */
+/* Ghost speaking as a waveform (a test of three designs, VoiceWave.tsx). The canvas draws in
+   its CSS color; the capsule grows out of the presence's circle when the voice starts. */
+.g-wave { display: block; color: var(--phase-speaking); }
+.g-wave-pill {
+  --c: var(--phase-speaking);
+  display: inline-grid; place-items: center; flex: none;
+  height: var(--wp-size); padding-inline: calc(var(--wp-size) * 0.18);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--c) 12%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--c) 36%, transparent);
+  box-shadow: var(--shadow-sm), 0 0 calc(var(--wp-size) * 0.5) color-mix(in srgb, var(--c) 14%, transparent);
+  overflow: hidden;
+  animation: g-wave-grow var(--duration-slow) var(--ease-out) both;
+}
+.g-wave-pill--48 { height: 40px; margin: 4px; }
+@keyframes g-wave-grow { from { max-width: var(--wp-size); opacity: 0.6; } to { max-width: calc(var(--wp-size) * 6); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .g-wave-pill { animation: none; } }
+
 /* ===================================================================== PendingChange */
 /* A change waiting for the operator's okay. Opaque (warn mixed into the canvas, not a
    translucent tint) because it usually sits in a dock with the transcript scrolling under it. */

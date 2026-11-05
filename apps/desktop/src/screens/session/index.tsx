@@ -24,7 +24,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, Menu, Notice, Page, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
@@ -352,7 +352,7 @@ export default function SessionScreen(_: RouteProps) {
         <div className={cx("session-start page-fill", !startOnly && "session-start--live")}>
           <div className="session-start__stack">
             {/* Presence only: it shows Ghost's state and is never a button, so a stray click can't open the mic. */}
-            <VoicePresence size={96} phase={presencePhase} label="" />
+            {presencePhase === "speaking" ? <SpeakingWave size={96} /> : <VoicePresence size={96} phase={presencePhase} label="" />}
             <h2 className="session-start__title t-display">{start.title}</h2>
             {start.text && <p className="session-start__text">{start.text}</p>}
             {needsSetup ? (

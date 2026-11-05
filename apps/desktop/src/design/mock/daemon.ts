@@ -3,6 +3,7 @@
  * update this state and emit the same events the real daemon would, so screens behave
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
+import { speechEnvelope } from "../../ui/VoiceWave";
 import type {
   Ack,
   AppConnect,
@@ -286,7 +287,25 @@ export class MockDaemon {
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
     queueMicrotask(() => l(this.snapshot()));
+    this.startVoice();
     return () => this.listeners.delete(l);
+  }
+  /**
+   * Ghost's voice loudness, as the daemon sends it: a level every 50 ms while the phase is
+   * speaking, from the stand-in voice the previews use, then one 0 when it stops.
+   */
+  private voiceTimer: ReturnType<typeof setInterval> | null = null;
+  private startVoice() {
+    if (this.voiceTimer) return;
+    let speaking = false;
+    let from = 0;
+    this.voiceTimer = setInterval(() => {
+      const now = this.status.phase === "speaking";
+      if (now && !speaking) from = performance.now();
+      if (now) this.emit({ type: "voice", level: Math.round(speechEnvelope((performance.now() - from) / 1000) * 1000) / 1000 });
+      else if (speaking) this.emit({ type: "voice", level: 0 });
+      speaking = now;
+    }, 50);
   }
   private emit(e: GhostEvent) {
     for (const l of this.listeners) l(e);

@@ -8,6 +8,8 @@ import {
 } from "@ghost/client-ts";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
+import { createVoiceLevel, type VoiceLevel } from "./voiceLevel";
+
 export interface GhostState {
   client: GhostClient;
   status: Status | null;
@@ -22,6 +24,8 @@ export interface GhostState {
   waitingVersion: number;
   /** Bumps whenever an app is connected, disconnected or changes state, or the permissions change (ADR 0034); re-read GET /apps. */
   appsVersion: number;
+  /** Ghost's voice loudness while it speaks, outside React state (see voiceLevel.ts). Stable for the provider's life. */
+  voice: VoiceLevel;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -37,6 +41,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [conversationsVersion, setConversationsVersion] = useState(0);
   const [waitingVersion, setWaitingVersion] = useState(0);
   const [appsVersion, setAppsVersion] = useState(0);
+  const [voice] = useState(createVoiceLevel);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -53,12 +58,19 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
             client.turns().then(setTurns).catch(() => {});
             return;
           }
+          // Twenty a second while Ghost speaks: into the store, never into React state.
+          if (m.type === "voice") {
+            voice.set(m.level);
+            return;
+          }
           setLastEvent(m);
           switch (m.type) {
             case "status":
               setStatus(m.status);
               setPending(m.status.pending ?? null);
               if (m.status.phase === "passive" || m.status.phase === "starting") setTurns([]);
+              // The voice's last 0 can be lost with a dropped stream; the phase is the backstop.
+              if (m.status.phase !== "speaking" && voice.get().level > 0) voice.set(0);
               break;
             case "turn":
               setTurns((t) => [...t.slice(-199), m.turn]);
@@ -84,6 +96,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
         },
         () => {
           setConnected(false);
+          voice.set(0);
           // Tear this subscription down before the next one, or its listeners keep
           // firing alongside the new ones and every event shows up twice.
           const s = stop;
@@ -110,11 +123,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
       if (timer) clearTimeout(timer);
       stop?.();
     };
-  }, [client]);
+  }, [client, voice]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion }),
-    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion],
+    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice }),
+    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

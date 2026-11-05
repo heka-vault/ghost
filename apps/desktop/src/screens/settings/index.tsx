@@ -124,6 +124,7 @@ import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep,
 import { PasswordsSection } from "./Passwords";
 import { PhoneSection } from "./Phone";
 import { WakePhrasesField, wakeHelp } from "./WakePhrases";
+import { WavePicker } from "./WavePicker";
 import "./settings.css";
 
 // Charter sections with no API yet. Compiled only in development; rendered only under the mock layer.
@@ -1195,6 +1196,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
 
         {s && page === "sound" && (
           <>
+            <WavePicker />
             {/* ------------------------------------------------------ Voice models */}
             <Section
               id={sectionDomId("models")}
