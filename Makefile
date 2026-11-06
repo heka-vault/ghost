@@ -56,7 +56,7 @@ endef
         wake say status check latency restore-volumes \
         lint fmt test deny typecheck ci api-schema version release \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
-        perf perf-micro perf-llm perf-hear record-hear record wake-eval record-takes wake-takes-eval \
+        perf perf-micro perf-llm perf-hear record wake-eval record-takes wake-takes-eval \
         android android-apk android-install mobile-web \
         bundle sidecars onnxruntime models
 
@@ -259,9 +259,6 @@ perf-hear: ## how well Ghost hears (docs/benchmarks/hear-harness.md): make perf-
 	@cargo build --release -q -p ghostd --bin ghostd
 	@$(load_env) target/release/ghostd perf hear $(if $(TAKES),--takes $(TAKES)) \
 	  $(if $(BASELINE),--baseline $(BASELINE)) $(ARGS)
-
-record-hear: ## guided recording of the hear test set (docs/hear-recording.md): make record-hear [BLOCKS=A,B] [ARGS=--dry-run]
-	@$(ORACLE) python -I scripts/record-hear-takes.py $(if $(BLOCKS),--blocks $(BLOCKS)) $(ARGS)
 
 record: ## record a 4 s wake-phrase clip from ghost.mic and the raw mic: make record NAME=hey-ghost-1
 	@scripts/record-clip.sh "$(NAME)" $(or $(SECS),4)

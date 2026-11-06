@@ -245,6 +245,18 @@ fn overrides(args: &Args) -> Result<BTreeMap<String, String>, String> {
     Ok(out)
 }
 
+/// Of sessions, the one whose manifest changed last.
+fn newest(dirs: &[Option<PathBuf>]) -> Option<PathBuf> {
+    dirs.iter()
+        .flatten()
+        .max_by_key(|d| {
+            std::fs::metadata(d.join(super::hear::plan::MANIFEST))
+                .and_then(|m| m.modified())
+                .ok()
+        })
+        .cloned()
+}
+
 fn hear_args(
     args: &Args,
     out: &Path,
@@ -252,15 +264,23 @@ fn hear_args(
     root: &Path,
 ) -> Result<super::hear::HearArgs, String> {
     use super::hear::plan::{Channel, latest_session};
-    let sessions = root.join(".scratch/hear-takes");
+    // The Hearing test's sessions (ADR 0042), and the terminal recorder's before it.
+    let data = std::env::var_os("GHOST_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share/ghost")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let app = super::hear::store::Store::under(&data).sessions_dir();
+    let older = root.join(".scratch/hear-takes");
     let takes = match args.one("takes").map(String::as_str) {
         None | Some("") | Some("kokoro") => None,
-        Some("latest") => Some(latest_session(&sessions).ok_or_else(|| {
-            format!(
-                "no recorded session under {}; record one with make record-hear",
-                sessions.display()
-            )
-        })?),
+        Some("latest") => Some(
+            newest(&[latest_session(&app), latest_session(&older)]).ok_or_else(|| {
+                format!(
+                    "no recorded session under {}; record one in Ghost's Hearing test",
+                    app.display()
+                )
+            })?,
+        ),
         Some(dir) => Some(PathBuf::from(dir)),
     };
     let voices = match csv(args.one("voices")) {

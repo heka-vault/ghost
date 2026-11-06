@@ -22,7 +22,8 @@ it does live. Each take is heard three ways:
 The takes come from one of two places:
 
 - **Recorded** (`TAKES=latest` or a session directory): the operator's own voice through
-  `ghost.mic`, recorded with `make record-hear` ([../hear-recording.md](../hear-recording.md)).
+  `ghost.mic`, recorded in the desktop app's Hearing test ([../hear-recording.md](../hear-recording.md),
+  ADR 0042). The app scores a session too (Runs), and compares two runs with the same pass rule.
   `ARGS="--channel raw"` scores the raw array under `ghost.mic` instead (#52 item 2).
 - **Rendered** (no `TAKES`): the plan's desk blocks spoken by Kokoro over −60 dBFS of
   room noise, in `ARGS="--voices am_michael,af_heart,bm_george"`. Distance and music are

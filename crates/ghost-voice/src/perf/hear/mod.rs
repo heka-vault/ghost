@@ -1,6 +1,6 @@
 //! `ghost-perf hear`: how well Ghost hears the operator, measured (issue #60, #52).
 //!
-//! Each take, a recording of the operator from `make record-hear` or a line of the plan
+//! Each take, a recording of the operator from the Hearing test (ADR 0042) or a line of the plan
 //! rendered by Kokoro, goes through the real speech-in stage (`stt::ParakeetStt`, the real
 //! Silero and Parakeet, the session's VAD settings), fed as fast as the models go on the
 //! audio's own clock. It is heard three ways:
@@ -18,7 +18,7 @@
 //! run, by a paired bootstrap, and states the pass rule (`report`). Results hold numbers,
 //! never transcripts; `--show-text` prints the transcripts to the terminal only.
 //!
-//! The takes are recorded on purpose and kept under `.scratch/hear-takes/` (git-ignored);
+//! The takes are recorded on purpose and kept under `~/.local/share/ghost/hear/` (older ones in `.scratch/hear-takes/`);
 //! nothing here reads Ghost's passive audio.
 
 pub mod plan;

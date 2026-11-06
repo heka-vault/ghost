@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "The hear test set: what the operator says, block by block, for `make record-hear` (scripts/record-hear-takes.py) and `make perf-hear` (crates/ghost-voice/src/perf/hear). A take's id never changes once recorded; add new takes with new ids. ' ... ' in a line is a pause of about a second, mid-sentence. Kinds: speech (a request), reply (a word or two Ghost must not drop), silence (nothing said; any word heard is made up). The how-to is docs/hear-recording.md.",
+  "about": "The hear test set: what the operator says, block by block, for the Hearing test in the desktop app (ADR 0042) and `make perf-hear` (crates/ghost-voice/src/perf/hear). A take's id never changes once recorded; add new takes with new ids. ' ... ' in a line is a pause of about a second, mid-sentence. Kinds: speech (a request), reply (a word or two Ghost must not drop), silence (nothing said; any word heard is made up). The how-to is docs/hear-recording.md.",
   "blocks": [
     {
       "block": "A",
@@ -83,7 +83,7 @@
       "block": "F",
       "condition": "across-room",
       "title": "Across the room, 3 m or more",
-      "instruction": "Press Enter, then walk to a spot 3 m or more from the mic and face it. The countdown is longer so you have time; count it in your head if you can't read the screen. Normal voice, no shouting.",
+      "instruction": "Press Space, then walk to a spot 3 m or more from the mic and face it. The countdown is longer so you have time; count it in your head if you can't read the screen. Normal voice, no shouting.",
       "away": true,
       "takes": [
         {"id": "F01", "kind": "speech", "text": "What needs my sign-off today?", "tags": ["far"]},

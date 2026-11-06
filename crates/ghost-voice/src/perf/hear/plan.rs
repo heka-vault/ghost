@@ -1,6 +1,6 @@
 //! The hear test set (`docs/benchmarks/hear-plan.json`) and the takes recorded from it.
 //!
-//! The plan is the list of lines, block by block; `scripts/record-hear-takes.py` records
+//! The plan is the list of lines, block by block; the Hearing test in the desktop app records
 //! the operator saying them into a session directory with a `takes.jsonl` manifest, and
 //! the same plan rendered by Kokoro is the set the harness runs without the operator.
 //! Every take carries its own reference text and terms in the manifest, so a session
@@ -354,7 +354,7 @@ pub fn recorded(
     Ok((items, missing))
 }
 
-/// The newest session under `root` (`.scratch/hear-takes/<date>`), for `--takes latest`.
+/// The newest session under `root` (`<data>/hear/sessions/<date>`), for `--takes latest`.
 pub fn latest_session(root: &Path) -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)
         .ok()?
