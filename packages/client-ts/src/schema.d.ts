@@ -1789,7 +1789,9 @@ export interface components {
             note: string;
         };
         HearOpenRequest: {
-            /** @description Carry this session on; a new one when unset. */
+            /** @description Start a new session, even if there is one from today. */
+            new?: boolean;
+            /** @description Carry this session on. Unset: today's newest session, or a new one. */
             session?: string | null;
         };
         /** @description A part of a report section, in order. Text may hold `code` in backticks. */
@@ -1962,6 +1964,8 @@ export interface components {
         HearVerdict: "better" | "same" | "worse";
         /** @description The recorder now. Also the `hear` event's body, with the level. */
         HearView: {
+            /** @description The take the last check is for (`GET /hear/check`), while the recorder is open. */
+            checked: string | null;
             /**
              * Format: int32
              * @description Seconds left in a countdown.

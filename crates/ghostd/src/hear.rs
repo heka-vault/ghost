@@ -608,6 +608,7 @@ impl HearPort for HearDesk {
         v.scoring = inner.scoring.clone();
         v.playing = inner.playing.as_ref().is_some_and(|h| !h.is_finished());
         v.problem = inner.problem.clone();
+        v.checked = inner.last_check.as_ref().map(|c| c.take.clone());
         if inner.opening {
             v.state = HearState::Opening;
         }
@@ -632,7 +633,7 @@ impl HearPort for HearDesk {
         v
     }
 
-    async fn open(&self, session: Option<String>) -> HearResult<HearView> {
+    async fn open(&self, session: Option<String>, new: bool) -> HearResult<HearView> {
         let d = self.daemon()?;
         if let Some(s) = &session {
             let dir = self
@@ -646,18 +647,30 @@ impl HearPort for HearDesk {
         {
             let mut inner = lock(&self.inner);
             if let Some(open) = &mut inner.open {
-                // open already: carry another session on, between takes
-                if let Some(s) = session
-                    && s != open.session
-                {
+                // open already: carry another session on, or start one, between takes
+                let switch = match &session {
+                    Some(s) => s != &open.session,
+                    None => new,
+                };
+                let mut old = None;
+                if switch {
                     if lock(&open.rec).busy() {
                         return Err(conflict("a take is going"));
                     }
-                    let old = std::mem::replace(&mut open.session, s);
-                    drop(inner);
+                    let next = match session {
+                        Some(s) => s,
+                        None => self
+                            .store
+                            .new_session(chrono::Local::now().date_naive())
+                            .map_err(failed)?,
+                    };
+                    old = Some(std::mem::replace(&mut open.session, next));
+                    inner.last_check = None;
+                }
+                drop(inner); // before anything below locks it again
+                if let Some(old) = old {
                     self.drop_empty_session(&old);
                 }
-                drop(lock(&self.inner));
                 self.publish();
                 return Ok(self.view());
             }
@@ -678,7 +691,7 @@ impl HearPort for HearDesk {
             inner.opening = true;
         }
         self.publish();
-        let result = self.take_mic_and_open(&d, session).await;
+        let result = self.take_mic_and_open(&d, session, new).await;
         lock(&self.inner).opening = false;
         if let Err(e) = &result {
             self.give_mic_back();
@@ -1122,7 +1135,12 @@ impl HearPort for HearDesk {
 
 impl HearDesk {
     /// Ask the passive loop for the mic, then open the captures on it.
-    async fn take_mic_and_open(&self, d: &Arc<Daemon>, session: Option<String>) -> HearResult<()> {
+    async fn take_mic_and_open(
+        &self,
+        d: &Arc<Daemon>,
+        session: Option<String>,
+        new: bool,
+    ) -> HearResult<()> {
         let (granted_tx, granted_rx) = oneshot::channel();
         let (release_tx, release_rx) = oneshot::channel();
         *lock(&self.lease_q) = Some(Lease {
@@ -1165,12 +1183,11 @@ impl HearDesk {
             },
             None => None,
         };
-        let session = match session {
+        let today = chrono::Local::now().date_naive();
+        let todays = (!new).then(|| self.store.todays_session(today)).flatten();
+        let session = match session.or(todays) {
             Some(s) => s,
-            None => self
-                .store
-                .new_session(chrono::Local::now().date_naive())
-                .map_err(failed)?,
+            None => self.store.new_session(today).map_err(failed)?,
         };
         let rec = Arc::new(Mutex::new(Rec::new(raw.is_some())));
         let me = d

@@ -1262,8 +1262,12 @@
       },
       "HearOpenRequest": {
         "properties": {
+          "new": {
+            "description": "Start a new session, even if there is one from today.",
+            "type": "boolean"
+          },
           "session": {
-            "description": "Carry this session on; a new one when unset.",
+            "description": "Carry this session on. Unset: today's newest session, or a new one.",
             "type": [
               "string",
               "null"
@@ -1931,6 +1935,13 @@
       "HearView": {
         "description": "The recorder now. Also the `hear` event's body, with the level.",
         "properties": {
+          "checked": {
+            "description": "The take the last check is for (`GET /hear/check`), while the recorder is open.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "countdown": {
             "description": "Seconds left in a countdown.",
             "format": "int32",
@@ -2017,6 +2028,7 @@
           "raw_device",
           "unavailable",
           "scoring",
+          "checked",
           "problem"
         ],
         "type": "object"

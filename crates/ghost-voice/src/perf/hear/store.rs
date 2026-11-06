@@ -191,6 +191,21 @@ impl Store {
         anyhow::bail!("no free session name for {base}")
     }
 
+    /// The newest session from `today`, to carry on.
+    pub fn todays_session(&self, today: chrono::NaiveDate) -> Option<String> {
+        let day = today.format("%Y-%m-%d").to_string();
+        self.sessions()
+            .into_iter()
+            .map(|s| s.name)
+            .filter(|n| n == &day || n.starts_with(&format!("{day}-")))
+            .max_by_key(|n| {
+                n.strip_prefix(&day)
+                    .and_then(|r| r.strip_prefix('-'))
+                    .and_then(|r| r.parse::<u32>().ok())
+                    .unwrap_or(1)
+            })
+    }
+
     /// The manifest's entries, a take's last line winning.
     pub fn entries(&self, name: &str) -> anyhow::Result<Vec<Entry>> {
         let dir = self.session_dir(name)?;
@@ -485,6 +500,7 @@ mod tests {
         let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 6).unwrap();
         let name = store.new_session(day).unwrap();
         assert_eq!(name, "2026-11-06");
+        assert_eq!(store.todays_session(day).as_deref(), Some("2026-11-06"));
         assert_eq!(store.new_session(day).unwrap(), "2026-11-06-2");
         let (b, t) = plan_take("A02");
         let pcm = vec![1000i16; 16_000];
@@ -565,6 +581,24 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn opening_carries_on_todays_newest_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 6).unwrap();
+        assert_eq!(store.todays_session(day), None);
+        for n in 1..=10 {
+            store.new_session(day).unwrap();
+            let want = if n == 1 {
+                "2026-11-06".to_string()
+            } else {
+                format!("2026-11-06-{n}")
+            };
+            assert_eq!(store.todays_session(day), Some(want));
+        }
+        assert_eq!(store.todays_session(day.succ_opt().unwrap()), None);
     }
 
     #[test]

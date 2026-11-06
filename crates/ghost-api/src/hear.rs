@@ -93,6 +93,9 @@ pub struct HearView {
     /// Whether a take is playing back.
     #[serde(default)]
     pub playing: bool,
+    /// The take the last check is for (`GET /hear/check`), while the recorder is open.
+    #[schema(required)]
+    pub checked: Option<String>,
     /// The last thing that went wrong (a take that could not be checked, a run that
     /// failed), for the operator; cleared by the next success.
     #[schema(required)]
@@ -112,6 +115,7 @@ impl HearView {
             unavailable,
             scoring: None,
             playing: false,
+            checked: None,
             problem: None,
         }
     }
@@ -424,8 +428,9 @@ pub type HearResult<T> = Result<T, HearError>;
 #[async_trait]
 pub trait HearPort: Send + Sync {
     fn view(&self) -> HearView;
-    /// Take the mic from the passive loop; `session`: carry one on, or a new one.
-    async fn open(&self, session: Option<String>) -> HearResult<HearView>;
+    /// Take the mic from the passive loop; `session`: carry one on. Unset: today's
+    /// newest session, or a new one; `new`: a new one.
+    async fn open(&self, session: Option<String>, new: bool) -> HearResult<HearView>;
     /// Give the mic back.
     async fn close(&self) -> HearView;
     async fn start_take(&self, take: &str, ending: TakeEnding) -> HearResult<HearView>;
@@ -466,9 +471,12 @@ fn port(deps: &SharedDeps) -> ApiResult<&dyn HearPort> {
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct HearOpenRequest {
-    /// Carry this session on; a new one when unset.
+    /// Carry this session on. Unset: today's newest session, or a new one.
     #[serde(default)]
     pub session: Option<String>,
+    /// Start a new session, even if there is one from today.
+    #[serde(default)]
+    pub new: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -538,11 +546,14 @@ async fn hear_open(
     State(deps): State<SharedDeps>,
     OptionalBody(req): OptionalBody<HearOpenRequest>,
 ) -> ApiResult<Json<HearView>> {
-    let session = req.and_then(|r| r.session);
+    let (session, new) = req.map_or((None, false), |r| (r.session, r.new));
     if let Some(s) = &session {
         check_len(&["body", "session"], s, 1, 64)?;
     }
-    Ok(Json(port(&deps)?.open(session).await?))
+    if new && session.is_some() {
+        return Err(ApiError::unprocessable("new or session, not both"));
+    }
+    Ok(Json(port(&deps)?.open(session, new).await?))
 }
 
 /// Close the recorder: Ghost has the mic again.
