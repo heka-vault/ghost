@@ -92,6 +92,9 @@ pub struct VoiceSettings {
     pub echo_window_secs: f64,
     pub turn_grace_secs: f64,
     pub turn_speculate: bool,
+    /// `GHOST_TURN_REREAD`: a second and later segment replaces the turn's pieces with the
+    /// whole turn read once (ADR 0044); off, the pieces as they came.
+    pub turn_reread: bool,
     pub turn_stop_secs: f64,
     pub turn_unfinished_secs: f64,
     /// A full stop shortens the wait only when Smart Turn is at least this unsure.
@@ -142,6 +145,7 @@ impl fmt::Debug for VoiceSettings {
             .field("elevenlabs_model", &self.elevenlabs_model)
             .field("stt_model", &self.stt_model)
             .field("turn_grace_secs", &self.turn_grace_secs)
+            .field("turn_reread", &self.turn_reread)
             .finish_non_exhaustive()
     }
 }
@@ -259,6 +263,7 @@ impl VoiceSettings {
             echo_window_secs: f64_or("GHOST_ECHO_WINDOW_SECS", 3.0)?,
             turn_grace_secs: f64_or("GHOST_TURN_GRACE_SECS", 1.2)?,
             turn_speculate: flag("GHOST_TURN_SPECULATE", true),
+            turn_reread: flag("GHOST_TURN_REREAD", true),
             turn_stop_secs: f64_or("GHOST_TURN_STOP_SECS", 1.6)?,
             turn_unfinished_secs: f64_or("GHOST_TURN_UNFINISHED_SECS", 3.0)?,
             turn_sentence_min_prob: f64_or("GHOST_TURN_SENTENCE_MIN_PROB", 0.1)? as f32,
@@ -403,6 +408,7 @@ mod tests {
         assert_eq!(s.tts_voice, "af_heart");
         assert_eq!(s.turn_grace_secs, 1.2);
         assert!(s.turn_speculate);
+        assert!(s.turn_reread);
         assert_eq!(s.turn_stop_secs, 1.6);
         assert_eq!(s.turn_unfinished_secs, 3.0);
         assert_eq!(s.turn_sentence_min_prob, 0.1);

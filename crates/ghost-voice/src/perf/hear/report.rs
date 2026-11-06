@@ -430,10 +430,11 @@ pub fn build(results: &Results, baseline: Option<&Results>, budget: f64) -> Repo
         .map(|(k, v)| (k.clone(), meta_value(v)))
         .collect();
     meta.push(("takes".into(), takes.len().to_string()));
-    let intro = "`stage` is what the speech-in stage hands the aggregator (today each VAD segment \
-         read alone, the finals joined); `turn` is the turn's audio read once at the close (#52 \
-         item 1); `file` is the whole take read once with no VAD. Fillers are left out of \
-         every count; numbers are compared as digits."
+    let intro = "`stage` is what the speech-in stage hands the aggregator (each VAD segment read \
+         alone, the finals joined); `turn` is the turn's audio read once, what the aggregator \
+         hands the model for a turn of two segments or more (ADR 0044, `GHOST_TURN_REREAD`); \
+         `file` is the whole take read once with no VAD. Fillers are left out of every count; \
+         numbers are compared as digits."
         .to_string();
     let mut sections = Vec::new();
 
@@ -582,7 +583,7 @@ pub fn build(results: &Results, baseline: Option<&Results>, budget: f64) -> Repo
         (
             "stage",
             "turn",
-            "what reading the whole turn would change (#52 item 1, #60 item 1)",
+            "what reading the whole turn changes (#52 item 1, #60 item 1; ADR 0044)",
         ),
         (
             "stage",
