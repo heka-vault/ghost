@@ -12,12 +12,14 @@ the record of how they were measured.
 | [2026-10-20-remote-cellular.md](2026-10-20-remote-cellular.md) | The phone over cellular through the tunnel (ADR 0020) |
 | [2026-10-21-wake.md](2026-10-21-wake.md), [2026-10-22-wake-detector.md](2026-10-22-wake-detector.md), [2026-10-23-ghost-openers.md](2026-10-23-ghost-openers.md) | The wake phrase: the transcript matcher, the trained detector, "Ghost, <opener>" (ADR 0025) |
 | [2026-10-22-cloud-speech.md](2026-10-22-cloud-speech.md) | A cloud voice and interim barge-in (ADR 0026) |
+| [2026-10-30-stt-review.md](2026-10-30-stt-review.md) | Where the operator's words go between the mic and Parakeet (#52) |
 | [latency-harness.md](latency-harness.md) | How the live timeline and `make perf` work |
+| [hear-harness.md](hear-harness.md), [hear/](hear/) | How well Ghost hears: `make perf-hear` over the operator's takes or Kokoro's, the pass rule for a speech-in change (#60) |
 | [perf/](perf/) | Every release's `make perf` report |
 
 ## The scripts
 
-`make perf`, `make perf-micro` and `make perf-llm` are `ghostd perf run|micro|llm`, in
+`make perf`, `make perf-micro`, `make perf-llm` and `make perf-hear` are `ghostd perf run|micro|llm|hear`, in
 the daemon (`crates/ghost-voice/src/perf/`, ADR 0039). The Python under
 [scripts/](scripts/) is what the reports above were made with; each says what it needs:
 

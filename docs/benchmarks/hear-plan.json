@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "about": "The hear test set: what the operator says, block by block, for `make record-hear` (scripts/record-hear-takes.py) and `make perf-hear` (crates/ghost-voice/src/perf/hear). A take's id never changes once recorded; add new takes with new ids. ' ... ' in a line is a pause of about a second, mid-sentence. Kinds: speech (a request), reply (a word or two Ghost must not drop), silence (nothing said; any word heard is made up). The how-to is docs/hear-recording.md.",
+  "blocks": [
+    {
+      "block": "A",
+      "condition": "desk",
+      "title": "At the desk, normal voice",
+      "instruction": "Sit where you usually sit and speak the way you talk to Ghost on an ordinary day. Say each line once, as a request.",
+      "takes": [
+        {"id": "A01", "kind": "speech", "text": "What needs my sign-off today?"},
+        {"id": "A02", "kind": "speech", "text": "Read me issue four oh three.", "tags": ["numbers"]},
+        {"id": "A03", "kind": "speech", "text": "Close issue one forty two in the app repo.", "tags": ["numbers"]},
+        {"id": "A04", "kind": "speech", "text": "Any new issues on heka vault ghost since yesterday?", "tags": ["terms"], "terms": ["heka vault", "Ghost"]},
+        {"id": "A05", "kind": "speech", "text": "Label issue twenty seven as a bug and assign it to me.", "tags": ["numbers"]},
+        {"id": "A06", "kind": "speech", "text": "What did people say in the comments on issue fifty two?", "tags": ["numbers"]},
+        {"id": "A07", "kind": "speech", "text": "Search Mobbin for onboarding screens with a progress bar.", "tags": ["terms"], "terms": ["Mobbin"]},
+        {"id": "A08", "kind": "speech", "text": "Open a new issue: the waveform freezes when Ghost stops talking.", "tags": ["terms"], "terms": ["Ghost"]},
+        {"id": "A09", "kind": "speech", "text": "Move the meeting notes issue to ready for agent."},
+        {"id": "A10", "kind": "speech", "text": "How many pull requests are waiting for review on GitHub?", "tags": ["terms"], "terms": ["GitHub"]}
+      ]
+    },
+    {
+      "block": "B",
+      "condition": "desk-pause",
+      "title": "At the desk, a pause mid-sentence",
+      "instruction": "Where the line shows '...', stop for about a second, the way you do when you're thinking of the next word, then carry on. Don't rush the pause and don't stretch it.",
+      "takes": [
+        {"id": "B01", "kind": "speech", "text": "Read me issue four one three ... from the quotient research project.", "tags": ["pause", "numbers", "terms"], "terms": ["quotient"]},
+        {"id": "B02", "kind": "speech", "text": "What's waiting for triage ... in the app repo?", "tags": ["pause"]},
+        {"id": "B03", "kind": "speech", "text": "Can you read issue ... four oh three?", "tags": ["pause", "numbers"]},
+        {"id": "B04", "kind": "speech", "text": "I noticed that when I pause ... in the middle of a sentence ... you cut me off.", "tags": ["pause"]},
+        {"id": "B05", "kind": "speech", "text": "Close issue sixty ... and leave a comment saying it's done.", "tags": ["pause", "numbers"]},
+        {"id": "B06", "kind": "speech", "text": "Tell the design agent ... to look at the home page again.", "tags": ["pause"]},
+        {"id": "B07", "kind": "speech", "text": "Remind me tomorrow morning ... to review the Phonon notes.", "tags": ["pause", "terms"], "terms": ["Phonon"]},
+        {"id": "B08", "kind": "speech", "text": "What's the status of ... the speech to text review?", "tags": ["pause"]}
+      ]
+    },
+    {
+      "block": "C",
+      "condition": "desk-fillers",
+      "title": "At the desk, fillers and changes of mind",
+      "instruction": "Say the 'um' and 'uh' and the restarts as written, as naturally as you can: these are the hesitations people really make.",
+      "takes": [
+        {"id": "C01", "kind": "speech", "text": "Um, what's waiting for, uh, triage today?", "tags": ["fillers"]},
+        {"id": "C02", "kind": "speech", "text": "Close issue twelve, no wait, thirteen.", "tags": ["correction", "numbers"]},
+        {"id": "C03", "kind": "speech", "text": "Can you, uh, can you read me the latest bug?", "tags": ["fillers", "restart"]},
+        {"id": "C04", "kind": "speech", "text": "Label it, um, label it ready for human.", "tags": ["fillers", "restart"]},
+        {"id": "C05", "kind": "speech", "text": "Assign issue forty, sorry, forty one, to me.", "tags": ["correction", "numbers"]},
+        {"id": "C06", "kind": "speech", "text": "So, uh, what did we decide about the wake word?", "tags": ["fillers"]}
+      ]
+    },
+    {
+      "block": "D",
+      "condition": "desk-replies",
+      "title": "At the desk, short replies",
+      "instruction": "The one- and two-word answers you give Ghost. Say each the way you would answer a question Ghost just asked.",
+      "takes": [
+        {"id": "D01", "kind": "reply", "text": "Yes."},
+        {"id": "D02", "kind": "reply", "text": "No."},
+        {"id": "D03", "kind": "reply", "text": "Stop."},
+        {"id": "D04", "kind": "reply", "text": "Go ahead."},
+        {"id": "D05", "kind": "reply", "text": "Do it."},
+        {"id": "D06", "kind": "reply", "text": "Wait."},
+        {"id": "D07", "kind": "reply", "text": "Okay."},
+        {"id": "D08", "kind": "reply", "text": "Not yet."}
+      ]
+    },
+    {
+      "block": "E",
+      "condition": "desk-soft",
+      "title": "At the desk, soft or tired voice",
+      "instruction": "Still at the desk. Speak softly, the way you might at the end of a long day. Not a whisper.",
+      "takes": [
+        {"id": "E01", "kind": "speech", "text": "Read me issue four oh three.", "tags": ["numbers", "soft"]},
+        {"id": "E02", "kind": "reply", "text": "Yes, go ahead.", "tags": ["soft"]},
+        {"id": "E03", "kind": "speech", "text": "What needs my sign-off today?", "tags": ["soft"]},
+        {"id": "E04", "kind": "speech", "text": "Close issue one forty two.", "tags": ["numbers", "soft"]},
+        {"id": "E05", "kind": "reply", "text": "No, leave it open.", "tags": ["soft"]}
+      ]
+    },
+    {
+      "block": "F",
+      "condition": "across-room",
+      "title": "Across the room, 3 m or more",
+      "instruction": "Press Enter, then walk to a spot 3 m or more from the mic and face it. The countdown is longer so you have time; count it in your head if you can't read the screen. Normal voice, no shouting.",
+      "away": true,
+      "takes": [
+        {"id": "F01", "kind": "speech", "text": "What needs my sign-off today?", "tags": ["far"]},
+        {"id": "F02", "kind": "speech", "text": "Read me issue four oh three.", "tags": ["far", "numbers"]},
+        {"id": "F03", "kind": "speech", "text": "What's on my plate ... for this afternoon?", "tags": ["far", "pause"]},
+        {"id": "F04", "kind": "reply", "text": "Yes.", "tags": ["far"]},
+        {"id": "F05", "kind": "reply", "text": "Stop.", "tags": ["far"]},
+        {"id": "F06", "kind": "speech", "text": "Any new issues on GitHub?", "tags": ["far", "terms"], "terms": ["GitHub"]}
+      ]
+    },
+    {
+      "block": "G",
+      "condition": "music",
+      "title": "At the desk, with music playing",
+      "instruction": "Start some music yourself on the desk speakers, at the level you usually listen at (the recorder plays nothing). Stay at the desk, normal voice. The last three takes are silent: keep the music on and say nothing. Stop the music when the block ends.",
+      "music": true,
+      "takes": [
+        {"id": "G01", "kind": "speech", "text": "What's waiting for triage ... in the app repo?", "tags": ["music", "pause"]},
+        {"id": "G02", "kind": "speech", "text": "Close issue one forty two.", "tags": ["music", "numbers"]},
+        {"id": "G03", "kind": "reply", "text": "Yes, do it.", "tags": ["music"]},
+        {"id": "G04", "kind": "reply", "text": "Stop.", "tags": ["music"]},
+        {"id": "G05", "kind": "speech", "text": "Read me issue fifty two.", "tags": ["music", "numbers"]},
+        {"id": "G06", "kind": "speech", "text": "Search Mobbin for settings pages.", "tags": ["music", "terms"], "terms": ["Mobbin"]},
+        {"id": "G07", "kind": "silence", "text": "", "say": "(say nothing; music on)", "seconds": 6, "tags": ["music"]},
+        {"id": "G08", "kind": "silence", "text": "", "say": "(say nothing; music on)", "seconds": 6, "tags": ["music"]},
+        {"id": "G09", "kind": "silence", "text": "", "say": "(say nothing; music on)", "seconds": 6, "tags": ["music"]}
+      ]
+    },
+    {
+      "block": "H",
+      "condition": "desk-silence",
+      "title": "At the desk, saying nothing",
+      "instruction": "Music off. Say nothing in these takes. Each line says what to do instead: sit still, type, or move about the way you do at the desk. Any word Ghost hears in them is made up.",
+      "takes": [
+        {"id": "H01", "kind": "silence", "text": "", "say": "(sit still, say nothing)", "seconds": 6},
+        {"id": "H02", "kind": "silence", "text": "", "say": "(sit still, say nothing)", "seconds": 6},
+        {"id": "H03", "kind": "silence", "text": "", "say": "(sit still, say nothing)", "seconds": 6},
+        {"id": "H04", "kind": "silence", "text": "", "say": "(type on the keyboard, say nothing)", "seconds": 6, "tags": ["typing"]},
+        {"id": "H05", "kind": "silence", "text": "", "say": "(type on the keyboard, say nothing)", "seconds": 6, "tags": ["typing"]},
+        {"id": "H06", "kind": "silence", "text": "", "say": "(type on the keyboard, say nothing)", "seconds": 6, "tags": ["typing"]},
+        {"id": "H07", "kind": "silence", "text": "", "say": "(move about: the chair, a cup, a drawer; say nothing)", "seconds": 6, "tags": ["moving"]},
+        {"id": "H08", "kind": "silence", "text": "", "say": "(move about: the chair, a cup, a drawer; say nothing)", "seconds": 6, "tags": ["moving"]},
+        {"id": "H09", "kind": "silence", "text": "", "say": "(breathe, clear your throat or sigh once; no words)", "seconds": 6, "tags": ["breath"]},
+        {"id": "H10", "kind": "silence", "text": "", "say": "(breathe, clear your throat or sigh once; no words)", "seconds": 6, "tags": ["breath"]}
+      ]
+    }
+  ]
+}

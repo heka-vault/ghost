@@ -144,7 +144,13 @@ pub struct ParakeetStt {
     closing: Option<VadParams>,
     mode: VadMode,
     pending_mode: Option<VadMode>,
+    /// The VAD's clock (it resets Silero's state every few seconds of it): epoch seconds
+    /// live, the audio's own time when a harness feeds a file faster than real time.
+    vad_clock: Option<VadClock>,
 }
+
+/// Seconds, for the VAD (`ParakeetStt::with_vad_clock`).
+pub type VadClock = Arc<dyn Fn() -> f64 + Send + Sync>;
 
 /// Which of the VAD's settings are in force.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,7 +186,16 @@ impl ParakeetStt {
             closing: None,
             mode: VadMode::Room,
             pending_mode: None,
+            vad_clock: None,
         }
+    }
+
+    /// The VAD reads `clock` instead of the wall clock: the `hear` harness feeds a take
+    /// faster than real time, and Silero's state resets every 5 s of this clock, as it
+    /// would live every 5 s of audio.
+    pub fn with_vad_clock(mut self, clock: VadClock) -> Self {
+        self.vad_clock = Some(clock);
+        self
     }
 
     pub fn with_speaking(mut self, speaking: Speaking) -> Self {
@@ -409,7 +424,8 @@ impl Stage for ParakeetStt {
                 if let Some(vad) = &mut self.vad {
                     // Pipecat's rule: only Speaking and Quiet are states the pipeline sees;
                     // a dip through Stopping and back is the same segment.
-                    let after = vad.analyze(&audio.samples, epoch()).unwrap_or(vad.state());
+                    let now = self.vad_clock.as_ref().map_or_else(epoch, |c| c());
+                    let after = vad.analyze(&audio.samples, now).unwrap_or(vad.state());
                     if !self.user_speaking && after == VadState::Speaking {
                         self.vad_started(out).await;
                     }

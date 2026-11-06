@@ -40,6 +40,11 @@ fixtures the models are checked against come from the oracle (`tools/oracle`,
 `scripts/fixtures/record.py`; `crates/ghost-infer/tests/parity.rs`), the Python wrappers the
 Rust was measured against (ADR 0039).
 
+How well Ghost hears is measured the same way: `make perf-hear` runs the operator's
+recorded takes, or Kokoro's, through the real speech-in stage and scores the words
+([benchmarks/hear-harness.md](benchmarks/hear-harness.md)). A change made to hear better
+passes its rule; a change made for speed shows there that it heard no worse.
+
 ## Budgets
 
 These are the starting targets for p50 / p95 on the workstation over home Wi-Fi. The first
