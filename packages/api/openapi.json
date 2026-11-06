@@ -1088,6 +1088,1006 @@
         },
         "type": "object"
       },
+      "HearBlock": {
+        "properties": {
+          "away": {
+            "description": "Across the room: takes start after a countdown and end on silence.",
+            "type": "boolean"
+          },
+          "block": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "music": {
+            "description": "Music on the desk speakers.",
+            "type": "boolean"
+          },
+          "takes": {
+            "items": {
+              "$ref": "#/components/schemas/HearPlanTake"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "block",
+          "condition",
+          "takes"
+        ],
+        "type": "object"
+      },
+      "HearCheck": {
+        "description": "A take's check: shown once, never kept.",
+        "properties": {
+          "heard": {
+            "description": "What Ghost heard, as the score compares it: lowercase, numbers as digits.",
+            "type": "string"
+          },
+          "matched": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "peak": {
+            "format": "double",
+            "type": "number"
+          },
+          "rms": {
+            "format": "double",
+            "type": "number"
+          },
+          "said": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "session": {
+            "type": "string"
+          },
+          "speech_end": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "speech_start": {
+            "description": "Where the VAD hears speech, seconds into the take.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "take": {
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/HearWarning"
+            },
+            "type": "array"
+          },
+          "words": {
+            "items": {
+              "$ref": "#/components/schemas/HearWord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "session",
+          "take",
+          "seconds",
+          "rms",
+          "peak",
+          "speech_start",
+          "speech_end",
+          "heard",
+          "words",
+          "matched",
+          "said",
+          "warnings"
+        ],
+        "type": "object"
+      },
+      "HearEvent": {
+        "description": "The Hearing test's recorder (ADR 0042), about twenty a second while it is open: what\nit is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to\n0 dBFS) and whether the VAD hears speech; then one with the state `closed`. Only while\nthe operator has the recorder open; never passive audio.",
+        "properties": {
+          "hear": {
+            "$ref": "#/components/schemas/HearView"
+          },
+          "level": {
+            "format": "float",
+            "type": "number"
+          },
+          "speaking": {
+            "type": "boolean"
+          },
+          "type": {
+            "default": "hear",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hear",
+          "level",
+          "speaking"
+        ],
+        "type": "object"
+      },
+      "HearFact": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "HearKind": {
+        "enum": [
+          "speech",
+          "reply",
+          "silence"
+        ],
+        "type": "string"
+      },
+      "HearNoteRequest": {
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "type": "object"
+      },
+      "HearOpenRequest": {
+        "properties": {
+          "new": {
+            "description": "Start a new session, even if there is one from today.",
+            "type": "boolean"
+          },
+          "session": {
+            "description": "Carry this session on. Unset: today's newest session, or a new one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "HearPart": {
+        "description": "A part of a report section, in order. Text may hold `code` in backticks.",
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "text"
+                ],
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HearTable"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "table"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          {
+            "properties": {
+              "facts": {
+                "items": {
+                  "$ref": "#/components/schemas/HearFact"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "enum": [
+                  "facts"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "facts",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The pass rule's verdict for `stage` against the baseline.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "pass"
+                ],
+                "type": "string"
+              },
+              "pass": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pass",
+              "text",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "HearPlan": {
+        "properties": {
+          "about": {
+            "type": "string"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/HearBlock"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "blocks"
+        ],
+        "type": "object"
+      },
+      "HearPlanTake": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/HearKind"
+          },
+          "say": {
+            "description": "A silent take's instruction.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seconds": {
+            "description": "A silent take's length.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "terms": {
+            "description": "Names Ghost must hear, each in the line.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "text": {
+            "description": "The line; \" ... \" is a pause of about a second.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "HearPlanView": {
+        "properties": {
+          "edited": {
+            "description": "The operator's own plan; false: the one Ghost ships.",
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/HearPlan"
+          }
+        },
+        "required": [
+          "plan",
+          "edited"
+        ],
+        "type": "object"
+      },
+      "HearPlayRequest": {
+        "properties": {
+          "channel": {
+            "description": "`aec` (the default) or `raw`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "take"
+        ],
+        "type": "object"
+      },
+      "HearReport": {
+        "properties": {
+          "intro": {
+            "type": "string"
+          },
+          "meta": {
+            "items": {
+              "$ref": "#/components/schemas/HearFact"
+            },
+            "type": "array"
+          },
+          "pass": {
+            "description": "The pass rule, when compared against a baseline.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/HearSection"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "meta",
+          "intro",
+          "sections",
+          "pass"
+        ],
+        "type": "object"
+      },
+      "HearRow": {
+        "properties": {
+          "cells": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "take": {
+            "description": "The take a row is about, `<id>|<source>`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verdict": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HearVerdict",
+                "description": "A comparison row's verdict."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cells",
+          "verdict",
+          "take"
+        ],
+        "type": "object"
+      },
+      "HearRun": {
+        "properties": {
+          "baseline": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HearRunInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "info": {
+            "$ref": "#/components/schemas/HearRunInfo"
+          },
+          "report": {
+            "$ref": "#/components/schemas/HearReport"
+          }
+        },
+        "required": [
+          "info",
+          "baseline",
+          "report"
+        ],
+        "type": "object"
+      },
+      "HearRunInfo": {
+        "properties": {
+          "channel": {
+            "description": "`aec` (`ghost.mic`) or `raw` (the array under it).",
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "description": "The operator's note: what this run was for.",
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "takes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wer": {
+            "$ref": "#/components/schemas/HearRunWer"
+          }
+        },
+        "required": [
+          "id",
+          "session",
+          "channel",
+          "created",
+          "commit",
+          "takes",
+          "wer"
+        ],
+        "type": "object"
+      },
+      "HearRunRequest": {
+        "properties": {
+          "channel": {
+            "description": "`aec` (the default) or `raw`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "HearRunWer": {
+        "properties": {
+          "file": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "stage": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "turn": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "stage",
+          "turn",
+          "file"
+        ],
+        "type": "object"
+      },
+      "HearScoring": {
+        "description": "A score run in progress.",
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "done": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "session",
+          "channel",
+          "done",
+          "total"
+        ],
+        "type": "object"
+      },
+      "HearSection": {
+        "properties": {
+          "level": {
+            "description": "2 for a section, 3 for one inside the section before.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/HearPart"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "title",
+          "parts"
+        ],
+        "type": "object"
+      },
+      "HearSession": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "takes": {
+            "items": {
+              "$ref": "#/components/schemas/HearTake"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "takes"
+        ],
+        "type": "object"
+      },
+      "HearSessionSummary": {
+        "properties": {
+          "flagged": {
+            "description": "Takes whose check asked for a redo.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "raw": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recorded": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "skipped": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "recorded",
+          "skipped",
+          "raw",
+          "flagged",
+          "seconds",
+          "updated"
+        ],
+        "type": "object"
+      },
+      "HearSkipRequest": {
+        "properties": {
+          "take": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "take"
+        ],
+        "type": "object"
+      },
+      "HearState": {
+        "enum": [
+          "closed",
+          "opening",
+          "ready",
+          "countdown",
+          "recording",
+          "stopping",
+          "checking"
+        ],
+        "type": "string"
+      },
+      "HearTable": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/HearRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "columns",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "HearTake": {
+        "description": "A take in a session, as its manifest line says: the line asked for, never what was\nheard.",
+        "properties": {
+          "block": {
+            "type": "string"
+          },
+          "ending": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/HearKind"
+          },
+          "peak": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "raw": {
+            "description": "The take has a raw-array file.",
+            "type": "boolean"
+          },
+          "seconds": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "speech_end": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "speech_start": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/HearTakeState"
+          },
+          "text": {
+            "type": "string"
+          },
+          "time": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "warnings": {
+            "description": "The check's warnings by kind.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "block",
+          "kind",
+          "text",
+          "state",
+          "seconds",
+          "peak",
+          "speech_start",
+          "speech_end",
+          "ending",
+          "raw",
+          "time"
+        ],
+        "type": "object"
+      },
+      "HearTakeRequest": {
+        "properties": {
+          "ending": {
+            "$ref": "#/components/schemas/TakeEnding"
+          },
+          "take": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "take",
+          "ending"
+        ],
+        "type": "object"
+      },
+      "HearTakeState": {
+        "enum": [
+          "recorded",
+          "skipped"
+        ],
+        "type": "string"
+      },
+      "HearVerdict": {
+        "enum": [
+          "better",
+          "same",
+          "worse"
+        ],
+        "type": "string"
+      },
+      "HearView": {
+        "description": "The recorder now. Also the `hear` event's body, with the level.",
+        "properties": {
+          "checked": {
+            "description": "The take the last check is for (`GET /hear/check`), while the recorder is open.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "countdown": {
+            "description": "Seconds left in a countdown.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "elapsed": {
+            "description": "Seconds into the take.",
+            "format": "double",
+            "type": "number"
+          },
+          "ending": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TakeEnding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "playing": {
+            "description": "Whether a take is playing back.",
+            "type": "boolean"
+          },
+          "problem": {
+            "description": "The last thing that went wrong (a take that could not be checked, a run that\nfailed), for the operator; cleared by the next success.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "raw_device": {
+            "description": "The raw array recorded beside `ghost.mic`, by node name; None when there is none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scoring": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HearScoring",
+                "description": "A run being scored."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/HearState"
+          },
+          "take": {
+            "description": "The take being recorded or checked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unavailable": {
+            "description": "Why the recorder can't open now, for the operator (\"Ghost is in a session\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "session",
+          "take",
+          "ending",
+          "countdown",
+          "raw_device",
+          "unavailable",
+          "scoring",
+          "checked",
+          "problem"
+        ],
+        "type": "object"
+      },
+      "HearWarning": {
+        "properties": {
+          "kind": {
+            "description": "`too_quiet`, `clipping`, `no_speech`, `speech_in_silence`, `started_early`,\n`cut_off`, `missed_end`.",
+            "type": "string"
+          },
+          "redo": {
+            "description": "The take is wrong, not just worth a look: redo it.",
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text",
+          "redo"
+        ],
+        "type": "object"
+      },
+      "HearWord": {
+        "properties": {
+          "heard": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "op": {
+            "$ref": "#/components/schemas/HearWordOp"
+          },
+          "said": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "op",
+          "said",
+          "heard"
+        ],
+        "type": "object"
+      },
+      "HearWordOp": {
+        "enum": [
+          "same",
+          "misheard",
+          "missed",
+          "extra"
+        ],
+        "type": "string"
+      },
       "HookInfo": {
         "description": "A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of deliveries\nsince the daemon started. Counts only; never a body.",
         "properties": {
@@ -2058,7 +3058,8 @@
           "thinking",
           "speaking",
           "hold",
-          "asking"
+          "asking",
+          "recording"
         ],
         "type": "string"
       },
@@ -3164,6 +4165,15 @@
           "status"
         ],
         "type": "object"
+      },
+      "TakeEnding": {
+        "description": "How a take ends.",
+        "enum": [
+          "hold",
+          "quiet",
+          "timed"
+        ],
+        "type": "string"
       },
       "Turn": {
         "properties": {
@@ -4611,6 +5621,7 @@
                     "mapping": {
                       "apps": "#/components/schemas/AppsEvent",
                       "conversation": "#/components/schemas/ConversationEvent",
+                      "hear": "#/components/schemas/HearEvent",
                       "log": "#/components/schemas/LogEvent",
                       "outcome": "#/components/schemas/OutcomeEvent",
                       "pending": "#/components/schemas/PendingEvent",
@@ -4648,6 +5659,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/VoiceEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HearEvent"
                     }
                   ]
                 }
@@ -4659,6 +5673,702 @@
         "summary": "Events Schema",
         "tags": [
           "events"
+        ]
+      }
+    },
+    "/hear": {
+      "get": {
+        "operationId": "hear_view_hear_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Hearing test",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/check": {
+      "get": {
+        "operationId": "hear_check_hear_check_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearCheck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No check"
+          }
+        },
+        "summary": "The last check",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/close": {
+      "post": {
+        "operationId": "hear_close_hear_close_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Close the recorder",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/open": {
+      "post": {
+        "operationId": "hear_open_hear_open_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/HearOpenRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Busy"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open the recorder",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/plan": {
+      "delete": {
+        "operationId": "hear_reset_plan_hear_plan_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearPlanView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset the take list",
+        "tags": [
+          "hear"
+        ]
+      },
+      "get": {
+        "operationId": "hear_plan_hear_plan_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearPlanView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "The take list",
+        "tags": [
+          "hear"
+        ]
+      },
+      "put": {
+        "operationId": "hear_save_plan_hear_plan_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HearPlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearPlanView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save the take list",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/play": {
+      "post": {
+        "operationId": "hear_play_hear_play_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HearPlayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such take"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Play a take",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/play/stop": {
+      "post": {
+        "operationId": "hear_stop_playing_hear_play_stop_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Stop playing",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/runs": {
+      "get": {
+        "operationId": "hear_runs_hear_runs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HearRunInfo"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Score runs",
+        "tags": [
+          "hear"
+        ]
+      },
+      "post": {
+        "operationId": "hear_start_run_hear_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HearRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearRunInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such session"
+          },
+          "409": {
+            "description": "A run is going"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Not now"
+          }
+        },
+        "summary": "Score a session",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/runs/{id}": {
+      "delete": {
+        "operationId": "hear_delete_run_hear_runs__id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such run"
+          }
+        },
+        "summary": "Delete a run",
+        "tags": [
+          "hear"
+        ]
+      },
+      "get": {
+        "operationId": "hear_run_hear_runs__id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Another run's id to compare against.",
+            "in": "query",
+            "name": "baseline",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such run"
+          }
+        },
+        "summary": "A run's report",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/runs/{id}/note": {
+      "put": {
+        "operationId": "hear_note_run_hear_runs__id__note_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HearNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearRunInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such run"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Note a run",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/sessions": {
+      "get": {
+        "operationId": "hear_sessions_hear_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HearSessionSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sessions",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/sessions/{name}": {
+      "delete": {
+        "operationId": "hear_delete_session_hear_sessions__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such session"
+          },
+          "409": {
+            "description": "Open in the recorder"
+          }
+        },
+        "summary": "Delete a session",
+        "tags": [
+          "hear"
+        ]
+      },
+      "get": {
+        "operationId": "hear_session_hear_sessions__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such session"
+          }
+        },
+        "summary": "A session",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/take/cancel": {
+      "post": {
+        "operationId": "hear_cancel_take_hear_take_cancel_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "No take is going"
+          }
+        },
+        "summary": "Cancel a take",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/take/skip": {
+      "post": {
+        "operationId": "hear_skip_take_hear_take_skip_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HearSkipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such take"
+          },
+          "409": {
+            "description": "Not open"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skip a take",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/take/start": {
+      "post": {
+        "operationId": "hear_start_take_hear_take_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HearTakeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such take"
+          },
+          "409": {
+            "description": "Not open, or a take is going"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start a take",
+        "tags": [
+          "hear"
+        ]
+      }
+    },
+    "/hear/take/stop": {
+      "post": {
+        "operationId": "hear_stop_take_hear_take_stop_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HearCheck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "No take is going"
+          }
+        },
+        "summary": "End a take",
+        "tags": [
+          "hear"
         ]
       }
     },

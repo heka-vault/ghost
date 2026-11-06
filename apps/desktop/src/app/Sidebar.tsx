@@ -158,7 +158,9 @@ export function Sidebar() {
         ? "Trying again now"
         : phase === "starting"
           ? "Loading voice models"
-          : inSession
+          : phase === "recording"
+            ? "Not listening for its name"
+            : inSession
             ? status?.session_origin === "phone"
               ? "On your phone"
               : active && active !== "ghost" ? `With ${agentName(active, activeAgent?.name)}` : "With Ghost"

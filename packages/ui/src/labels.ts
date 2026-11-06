@@ -9,6 +9,7 @@ export function phaseLabel(phase: Phase): string {
     speaking: "Speaking",
     hold: "Checked out",  // of this conversation, until addressed by name (ADR 0021)
     asking: "Asking you",  // Ghost greeted first and waits for a reply (ADR 0032)
+    recording: "Hearing test",  // the recorder has the mic; Ghost isn't listening for its name (ADR 0042)
   }[phase];
 }
 

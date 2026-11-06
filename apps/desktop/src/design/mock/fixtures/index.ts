@@ -7,6 +7,7 @@ import apps, { CATALOG } from "./apps";
 import audit from "./audit";
 import conversations from "./conversations";
 import { outputs, rules, watching } from "./folder";
+import hear from "./hear";
 import mobile from "./mobile";
 import onboarding from "./onboarding";
 import policy from "./policy";
@@ -41,6 +42,8 @@ export function composeFixtures(s: Scenario) {
     skills: skillList,
     /** What needs the operator (GET /waiting), ADR 0029. */
     waiting: waiting(s),
+    /** The Hearing test (ADR 0042): the take list, sessions and score runs. */
+    hear: hear(s),
     /** Data with no API behind it yet, exposed to prototypes through useFixture(owner). */
     prototypes: {
       onboarding: onboarding(s),

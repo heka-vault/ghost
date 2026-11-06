@@ -1,0 +1,218 @@
+/* Owner: hear. Every class is prefixed hear-. Tokens only. */
+
+.hear-tabs > [role="tabpanel"] { padding-top: var(--space-6); }
+
+/* ------------------------------------------------------------------ Record */
+/* The take on the left, the take strip beside it; picking a take brings its card into view. */
+.hear-record { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); gap: var(--space-8); align-items: start; }
+.hear-record__main { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.hear-session-line { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.hear-session-line p { margin: 0; }
+
+.hear-block-line { margin: 0; }
+.hear-block__head { display: flex; align-items: flex-start; gap: var(--space-3); }
+.hear-block__head h2, .hear-block__head p { margin: 0; }
+.hear-block__icon { display: inline-flex; flex: none; padding-top: var(--space-1); color: var(--warn); }
+.hear-block__icon > svg { width: var(--icon-lg); height: var(--icon-lg); }
+.hear-block__text { margin: var(--space-2) 0 0; max-width: 72ch; }
+.hear-block.is-special .hear-block__text { color: var(--text-1); }
+
+.hear-take { display: flex; flex-direction: column; gap: var(--space-5); scroll-margin-top: calc(var(--page-sticky-top, var(--page-bar-height)) + var(--space-4)); }
+.hear-take__over { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.hear-take__terms { margin: calc(-1 * var(--space-2)) 0 0; }
+
+/* The line to say: the page's focal point, with each pause where it goes. */
+.hear-line { margin: 0; max-width: 32ch; text-wrap: balance; color: var(--text-1); }
+.hear-line--silent { max-width: none; }
+.hear-line--silent p { margin: 0; }
+.hear-line--silent p + p { margin-top: var(--space-1); }
+.hear-pause {
+  display: inline-block; vertical-align: middle; margin: 0 var(--space-1);
+  padding: 0 var(--space-2); border-radius: var(--radius-full);
+  background: var(--bg-sunken); border: 1px solid var(--border);
+  color: var(--text-2); font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-medium); letter-spacing: 0;
+}
+
+.hear-control { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
+.hear-control__meter { display: flex; align-items: center; gap: var(--space-3); min-height: var(--control-sm); }
+.hear-ready { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+.hear-ready p { margin: 0; max-width: 64ch; }
+
+/* The hold button: big enough to hold with a thumb, the one primary control here. */
+.hear-hold {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  min-height: var(--space-16); padding: 0 var(--space-8);
+  border: 0; border-radius: var(--radius-full);
+  background: var(--accent); color: var(--on-accent);
+  font: inherit; font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold);
+  cursor: pointer; user-select: none; touch-action: none;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+.hear-hold:hover:not(:disabled) { background: var(--accent-hover); }
+.hear-hold.is-held { background: var(--accent-active); transform: scale(0.98); box-shadow: 0 0 0 var(--space-1) var(--accent-soft); }
+.hear-hold:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.hear-hold > svg { width: var(--icon-lg); height: var(--icon-lg); }
+.hear-hold .hear-rec-dot { background: var(--on-accent); }
+
+.hear-rec-dot { display: inline-block; flex: none; width: var(--space-2_5); height: var(--space-2_5); border-radius: 50%; background: var(--danger); }
+.hear-state { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); min-height: var(--space-16); }
+
+/* A countdown, readable from across the room. */
+.hear-count { display: flex; align-items: baseline; gap: var(--space-4); }
+.hear-count__n { font-size: calc(var(--text-4xl) * 2.5); line-height: 1; font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tighter); color: var(--text-1); }
+
+/* The mic's level and whether the VAD hears speech. */
+.hear-meter { display: flex; align-items: center; gap: var(--space-3); flex: 1; min-width: 0; }
+.hear-meter__vad { display: inline-flex; align-items: center; gap: var(--space-1_5); flex: none; width: 108px; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.hear-meter__dot { width: var(--space-2); height: var(--space-2); border-radius: 50%; background: var(--control-track); transition: background var(--duration-instant) linear; }
+.hear-meter__dot.is-on { background: var(--phase-listening); }
+.hear-meter__track { position: relative; flex: 1; height: var(--space-2); border-radius: var(--radius-full); background: var(--bg-sunken); box-shadow: inset 0 0 0 1px var(--border); overflow: hidden; max-width: 420px; }
+.hear-meter__fill { position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0); background: var(--phase-listening); border-radius: inherit; }
+.hear-meter__peak { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--text-2); }
+
+.hear-hint { margin: 0; display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-2); }
+.hear-keys { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); }
+.hear-keys > span { display: inline-flex; align-items: center; gap: var(--space-1_5); }
+
+/* ------------------------------------------------------------------ the check */
+.hear-check { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
+.hear-check__head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.hear-check__head h3 { margin: 0; }
+.hear-check__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.hear-warnings { margin: 0; padding-left: var(--space-4); }
+.hear-notes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
+.hear-notes li { display: flex; align-items: flex-start; gap: var(--space-1_5); }
+.hear-notes svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); margin-top: var(--space-0_5); color: var(--warn); }
+
+.hear-words { margin: 0; font-size: var(--text-xl); line-height: var(--leading-xl); color: var(--text-1); }
+.hear-w { white-space: nowrap; }
+.hear-w.is-misheard s { color: var(--text-2); text-decoration-color: var(--text-3); }
+.hear-w.is-misheard { color: var(--warn); }
+.hear-w.is-missed s { color: var(--danger); text-decoration-thickness: 2px; }
+.hear-w.is-extra { color: var(--warn); font-style: italic; }
+
+/* The take's length with the speech in it: a cut-off shows at the edge it hit. */
+.hear-span { display: flex; flex-direction: column; gap: var(--space-1); }
+.hear-span__track { position: relative; height: var(--space-2); border-radius: var(--radius-full); background: var(--bg-sunken); box-shadow: inset 0 0 0 1px var(--border); }
+.hear-span__speech {
+  position: absolute; top: 0; bottom: 0;
+  left: calc(var(--from) * 100%); width: calc((var(--to) - var(--from)) * 100%);
+  min-width: 2px; border-radius: var(--radius-full); background: var(--phase-listening);
+}
+.hear-span__speech.cut-end { border-top-right-radius: 0; border-bottom-right-radius: 0; box-shadow: inset -3px 0 0 var(--danger); }
+.hear-span__speech.cut-start { border-top-left-radius: 0; border-bottom-left-radius: 0; box-shadow: inset 3px 0 0 var(--danger); }
+.hear-span__speech.cut-start.cut-end { box-shadow: inset 3px 0 0 var(--danger), inset -3px 0 0 var(--danger); }
+.hear-span__labels { display: flex; justify-content: space-between; }
+
+/* ------------------------------------------------------------------ the take strip */
+.hear-strip { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; padding: var(--space-1); margin: calc(-1 * var(--space-1)); }
+.hear-strip__block ul { margin: 0; padding: 0; list-style: none; }
+.hear-strip__title { display: flex; align-items: center; gap: var(--space-1_5); margin: 0 0 var(--space-1); padding: 0 var(--space-2); }
+.hear-strip__title > span { font-weight: var(--weight-semibold); }
+.hear-strip__title > svg { width: var(--icon-xs); height: var(--icon-xs); color: var(--warn); }
+.hear-strip__take {
+  display: grid; grid-template-columns: var(--icon-md) 3.25em minmax(0, 1fr); align-items: center; gap: var(--space-2);
+  width: 100%; height: var(--nav-item-height); padding: 0 var(--space-2);
+  border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2);
+  font: inherit; font-size: var(--text-sm); line-height: var(--leading-sm); text-align: left; cursor: pointer;
+}
+.hear-strip__take:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-1); }
+.hear-strip__take:active:not(:disabled) { background: var(--bg-active); }
+.hear-strip__take:disabled { cursor: default; opacity: var(--opacity-disabled); }
+.hear-strip__take.is-current { background: var(--bg-selected); box-shadow: inset 2px 0 0 var(--accent); color: var(--text-1); opacity: 1; }
+.hear-strip__take:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
+.hear-strip__icon { display: inline-flex; color: var(--text-3); }
+.hear-strip__icon > svg { width: var(--icon-sm); height: var(--icon-sm); }
+.hear-strip__take.is-recorded .hear-strip__icon { color: var(--ok); }
+.hear-strip__take.is-flagged .hear-strip__icon { color: var(--warn); }
+.hear-strip__id { font-size: var(--text-xs); color: var(--text-2); }
+.hear-strip__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ------------------------------------------------------------------ Sessions */
+.hear-skel-row { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4); }
+.hear-session-row { cursor: pointer; }
+.hear-session-name { display: inline-flex; align-items: center; gap: var(--space-2); }
+.hear-chevron { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-3); transition: transform var(--duration-fast) var(--ease-out); }
+.hear-session-row.is-open .hear-chevron { transform: rotate(90deg); }
+.hear-session-detail > td { background: var(--bg-sunken); padding: var(--space-3) var(--space-4) var(--space-4); }
+.hear-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.hear-takes-table__line { min-width: 220px; }
+.hear-takes-table__warn { color: var(--text-2); }
+.hear-foot { margin: var(--space-3) 0 0; }
+
+/* ------------------------------------------------------------------ Runs */
+.hear-score { display: flex; flex-direction: column; gap: var(--space-5); }
+.hear-score__head h2, .hear-score__head p { margin: 0; }
+.hear-score__head p { margin-top: var(--space-1); }
+.hear-score__form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--space-4) var(--space-6); }
+.hear-score__field { min-width: 220px; }
+.hear-score__progress { display: flex; flex-direction: column; gap: var(--space-2); max-width: 520px; }
+.hear-score__progress p { margin: 0; }
+
+.hear-note { min-width: 200px; max-width: 320px; }
+.hear-note__btn {
+  display: inline-flex; align-items: center; gap: var(--space-1_5); max-width: 100%;
+  padding: var(--space-0_5) var(--space-1_5); margin: 0 calc(-1 * var(--space-1_5));
+  border: 0; border-radius: var(--radius-sm); background: none; font: inherit; text-align: left; cursor: text;
+}
+.hear-note__btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hear-note__btn > svg { flex: none; width: var(--icon-xs); height: var(--icon-xs); color: var(--text-3); opacity: 0; }
+.hear-note__btn:hover { background: var(--bg-hover); }
+.hear-note__btn:hover > svg, .hear-note__btn:focus-visible > svg { opacity: 1; }
+.hear-note__btn:disabled { cursor: default; }
+
+.hear-back { display: inline-flex; align-items: center; gap: var(--space-1); align-self: flex-start; color: var(--text-2); text-decoration: none; }
+.hear-back:hover { color: var(--text-1); }
+.hear-back > svg { width: var(--icon-sm); height: var(--icon-sm); }
+.hear-run__head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4) var(--space-8); }
+.hear-run__head h2, .hear-run__head p { margin: 0; }
+.hear-run__head p { margin-top: var(--space-1); }
+.hear-run__baseline { width: 360px; max-width: 100%; }
+.hear-run__hint { margin: 0 0 var(--space-5); }
+
+/* A run's report, drawn from its data. */
+.hear-report { display: flex; flex-direction: column; }
+.hear-report__intro { margin: var(--space-4) 0 0; max-width: 80ch; }
+.hear-report__section { margin-top: var(--space-8); display: flex; flex-direction: column; gap: var(--space-3); }
+.hear-report__section.is-sub { margin-top: var(--space-5); }
+.hear-report__section > h3, .hear-report__section > h4 { margin: 0; }
+.hear-report__text { margin: 0; max-width: 80ch; color: var(--text-2); }
+.hear-report__table { overflow-x: auto; }
+.hear-code { font-family: var(--font-mono); font-size: 0.92em; padding: 0 var(--space-1); border-radius: var(--radius-xs); background: var(--bg-sunken); font-variant-ligatures: none; }
+.hear-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-6); margin: 0; }
+.hear-facts__row { display: contents; }
+.hear-facts dd { margin: 0; overflow-wrap: anywhere; }
+
+.hear-pass { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-4) var(--space-5); border-radius: var(--radius-lg); border: 1px solid; }
+.hear-pass p { margin: 0; }
+.hear-pass.is-pass { background: var(--ok-soft); border-color: var(--ok-border); }
+.hear-pass.is-fail { background: var(--danger-soft); border-color: var(--danger-border); }
+.hear-pass__badge { flex: none; font-size: var(--text-3xl); line-height: var(--leading-3xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.hear-pass.is-pass .hear-pass__badge { color: var(--ok); }
+.hear-pass.is-fail .hear-pass__badge { color: var(--danger); }
+
+/* ------------------------------------------------------------------ the take list */
+.hear-plan__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6); }
+.hear-plan__head p { margin: 0; max-width: 80ch; }
+.hear-plan__block { display: flex; flex-direction: column; gap: var(--space-5); }
+.hear-plan__block-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.hear-plan__block-head h2 { margin: 0; }
+.hear-plan__tools { display: flex; align-items: center; gap: var(--space-1); flex: none; }
+.hear-plan__block-fields { display: grid; grid-template-columns: 120px 220px minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.hear-plan__full { grid-column: 1 / -1; }
+.hear-plan__checks { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-8); }
+.hear-plan__takes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border-top: 1px solid var(--border-subtle); }
+.hear-plan__take { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) 0; border-bottom: 1px solid var(--border-subtle); }
+.hear-plan__take-row { display: flex; align-items: center; gap: var(--space-2); }
+.hear-plan__take-row--meta { padding-left: calc(88px + 132px + 2 * var(--space-2)); }
+.hear-plan__id { width: 88px; flex: none; }
+.hear-plan__kind { width: 132px; flex: none; }
+.hear-plan__text { flex: 1; min-width: 0; }
+.hear-plan__secs { width: 96px; flex: none; }
+.hear-plan__list { flex: 1; min-width: 0; }
+
+@media (max-width: 1360px) {
+  .hear-record { grid-template-columns: minmax(0, 1fr) 240px; gap: var(--space-6); }
+  .hear-plan__block-fields { grid-template-columns: 100px 180px minmax(0, 1fr); }
+}

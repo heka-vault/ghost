@@ -17,6 +17,7 @@ pub mod controller;
 pub mod conversations;
 pub mod deps;
 pub mod error;
+pub mod hear;
 pub mod model;
 pub mod models;
 pub mod openapi;
@@ -34,6 +35,7 @@ pub use controller::{Controller, PhoneConnection, Probe, Refusal, Unavailable};
 pub use conversations::{conversation_detail, conversation_view};
 pub use deps::{AppsPort, Deps, DevicesPort, ModelNet, SharedDeps, SignInPort, UI_SESSION};
 pub use error::{ApiError, ApiResult, HTTPValidationError, ValidationError};
+pub use hear::{HearPort, HearView};
 pub use models::{
     AuditPage, Build, Phase, PhoneAddress, PhoneDevice, PhonePairing, PhoneView, Status,
     WaitingView,

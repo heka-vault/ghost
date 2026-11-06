@@ -21,6 +21,10 @@
  *                    (docs/releasing.md); start is make start's, checkout one started some
  *                    other way; behind is last month's deploy, so this window and Ghost differ
  *   ...&skillsearch=down skills.sh doesn't answer: a skills search says so (#35)
+ *   ...&hear=recording|countdown|check|problem|scoring   the Hearing test's recorder in that
+ *                    state as it opens (ADR 0042): a held take going, a take across the room
+ *                    counting down, a check with a cut-off, a take that couldn't be checked,
+ *                    a run being scored
  */
 import type { Transport } from "@ghost/client-ts";
 
@@ -49,6 +53,7 @@ export function createMock(name: string): { transport: Transport; design: Design
     build: (["dev", "dirty", "start", "checkout", "deploy", "release", "behind"] as const).find((b) => b === params.get("build")) ?? null,
     skillSearch: params.get("skillsearch") === "down" ? "down" : null,
     vault: (["locked", "import", "broken"] as const).find((v) => v === params.get("vault")) ?? null,
+    hear: (["recording", "countdown", "check", "problem", "scoring"] as const).find((v) => v === params.get("hear")) ?? null,
   });
   const latency = Number(params.get("latency") ?? 140);
 

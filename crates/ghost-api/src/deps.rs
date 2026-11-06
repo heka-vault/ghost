@@ -287,6 +287,8 @@ pub struct Deps {
     pub devices: Arc<dyn DevicesPort>,
     pub model_net: Arc<dyn ModelNet>,
     pub model_sign_in: ModelSignIn,
+    /// The Hearing test (ADR 0042); None in a daemon without the desk's models.
+    pub hear: Option<Arc<dyn crate::hear::HearPort>>,
 }
 
 impl Deps {
@@ -331,6 +333,7 @@ impl Deps {
             devices: Arc::new(NoDevices),
             model_net: Arc::new(LiveModelNet),
             model_sign_in: ModelSignIn::default(),
+            hear: None,
         }
     }
 

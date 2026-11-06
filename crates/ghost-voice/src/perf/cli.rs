@@ -8,10 +8,15 @@
 //! ghost-perf llm    [--model a,b] [--endpoint current,proxy,openrouter+sysbp,<provider>]
 //!                   [--openrouter-models a,b] [--thinking between_tools] [--n N] [--out DIR]
 //! ghost-perf report DIR/records.json
+//! ghost-perf hear   [--takes DIR|latest] [--channel aec|raw] [--voices am_michael,bf_emma]
+//!                   [--blocks A,B] [--set vad_stop_secs=0.4] [--baseline DIR/results.json]
+//!                   [--close-budget-ms 150] [--out DIR] [--show-text]
+//! ghost-perf hear-report DIR/results.json [--baseline DIR/results.json]
 //! ```
 //!
 //! Output goes to `.scratch/perf/<timestamp>/` (report.md, records.json, latency.jsonl;
-//! micro.txt and micro.json; llm.md and llm.json). Keys are read from the environment and
+//! micro.txt and micro.json; llm.md and llm.json; `hear` to `<timestamp>-hear/`, results.json
+//! and report.md, see `hear`). Keys are read from the environment and
 //! never printed.
 
 use std::collections::BTreeMap;
@@ -25,7 +30,8 @@ use super::harness::{Bench, RunConfig, parse_ablations};
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
-pub const USAGE: &str = "usage: ghost-perf run|micro|llm|report [options]";
+pub const USAGE: &str =
+    "usage: ghost-perf run|micro|llm|report|hear|hear-report|hear-check [options]";
 
 fn csv(s: Option<&String>) -> Vec<String> {
     s.map(|s| {
@@ -126,10 +132,37 @@ pub fn main(argv: &[String]) -> i32 {
         print!("{}", render(&runs, &meta));
         return 0;
     }
-    let out = args
-        .one("out")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| scratch.join(chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()));
+    if args.cmd == "hear-report" {
+        return hear_report(&args);
+    }
+    if args.cmd == "hear-check" {
+        let Some(dir) = args.positional.first() else {
+            eprintln!("usage: ghost-perf hear-check SESSION_DIR [--show-text]");
+            return 2;
+        };
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        return match rt.block_on(super::hear::run_check(
+            Path::new(dir),
+            args.has("show-text"),
+        )) {
+            Ok(code) => code,
+            Err(e) => {
+                eprintln!("{e}");
+                2
+            }
+        };
+    }
+    let out = args.one("out").map(PathBuf::from).unwrap_or_else(|| {
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+        scratch.join(if args.cmd == "hear" {
+            format!("{stamp}-hear")
+        } else {
+            stamp
+        })
+    });
     if let Err(e) = std::fs::create_dir_all(&out) {
         eprintln!("{}: {e}", out.display());
         return 2;
@@ -181,10 +214,136 @@ pub fn main(argv: &[String]) -> i32 {
                 }
             }
         }
+        "hear" => match hear_args(&args, &out, &scratch, &root) {
+            Ok(a) => match rt.block_on(super::hear::run_hear(&a)) {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("hear: {e}");
+                    1
+                }
+            },
+            Err(e) => {
+                eprintln!("{e}");
+                2
+            }
+        },
         other => {
             eprintln!("unknown command {other:?}; {USAGE}");
             2
         }
+    }
+}
+
+fn overrides(args: &Args) -> Result<BTreeMap<String, String>, String> {
+    let mut out = BTreeMap::new();
+    for kv in args.flags.get("set").cloned().unwrap_or_default() {
+        let (k, v) = kv
+            .split_once('=')
+            .ok_or_else(|| format!("--set wants field=value, got {kv:?}"))?;
+        out.insert(k.to_string(), v.to_string());
+    }
+    Ok(out)
+}
+
+/// Of sessions, the one whose manifest changed last.
+fn newest(dirs: &[Option<PathBuf>]) -> Option<PathBuf> {
+    dirs.iter()
+        .flatten()
+        .max_by_key(|d| {
+            std::fs::metadata(d.join(super::hear::plan::MANIFEST))
+                .and_then(|m| m.modified())
+                .ok()
+        })
+        .cloned()
+}
+
+fn hear_args(
+    args: &Args,
+    out: &Path,
+    scratch: &Path,
+    root: &Path,
+) -> Result<super::hear::HearArgs, String> {
+    use super::hear::plan::{Channel, latest_session};
+    // The Hearing test's sessions (ADR 0042), and the terminal recorder's before it.
+    let data = std::env::var_os("GHOST_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share/ghost")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let app = super::hear::store::Store::under(&data).sessions_dir();
+    let older = root.join(".scratch/hear-takes");
+    let takes = match args.one("takes").map(String::as_str) {
+        None | Some("") | Some("kokoro") => None,
+        Some("latest") => Some(
+            newest(&[latest_session(&app), latest_session(&older)]).ok_or_else(|| {
+                format!(
+                    "no recorded session under {}; record one in Ghost's Hearing test",
+                    app.display()
+                )
+            })?,
+        ),
+        Some(dir) => Some(PathBuf::from(dir)),
+    };
+    let voices = match csv(args.one("voices")) {
+        v if v.is_empty() => vec!["am_michael".to_string()],
+        v => v,
+    };
+    let budget_ms: f64 = args
+        .one("close-budget-ms")
+        .map(|v| {
+            v.parse()
+                .map_err(|_| format!("--close-budget-ms wants a number, got {v:?}"))
+        })
+        .transpose()?
+        .unwrap_or(150.0);
+    Ok(super::hear::HearArgs {
+        takes,
+        channel: Channel::parse(args.one("channel").map_or("aec", String::as_str))?,
+        voices,
+        blocks: csv(args.one("blocks"))
+            .into_iter()
+            .map(|b| b.to_uppercase())
+            .collect(),
+        overrides: overrides(args)?,
+        baseline: args.one("baseline").map(PathBuf::from),
+        out: out.to_path_buf(),
+        cache: scratch.to_path_buf(),
+        root: root.to_path_buf(),
+        show_text: args.has("show-text"),
+        close_budget_secs: budget_ms / 1000.0,
+    })
+}
+
+/// A hear report again from its results, against another run's if given.
+fn hear_report(args: &Args) -> i32 {
+    let Some(path) = args.positional.first() else {
+        eprintln!("usage: ghost-perf hear-report DIR/results.json [--baseline DIR/results.json]");
+        return 2;
+    };
+    let load = |p: &str| super::hear::read_results(Path::new(p));
+    let results = match load(path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let baseline = match args.one("baseline").map(|b| load(b)).transpose() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let budget = args
+        .one("close-budget-ms")
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(150.0)
+        / 1000.0;
+    let (text, verdict) = super::hear::report::render(&results, baseline.as_ref(), budget);
+    print!("{text}");
+    match verdict {
+        Some(false) => 1,
+        _ => 0,
     }
 }
 

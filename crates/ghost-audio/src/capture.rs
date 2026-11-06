@@ -20,7 +20,7 @@ use rtrb::{Consumer, Producer};
 use tracing::{info, warn};
 
 use crate::frame::{CAPTURE_RATE, Frame, frame_samples};
-use crate::pw::{Session, s16_mono_format_pod};
+use crate::pw::{Session, s16_format_pod};
 use crate::wake::{Waiter, Wake};
 use crate::{AudioError, ring};
 
@@ -35,10 +35,15 @@ pub struct CaptureConfig {
     /// microphone has no echo cancellation, and Ghost would hear itself.
     pub fallback_to_default: bool,
     pub rate: u32,
+    /// Channels to capture: 1 (the default), or the node's own for a recording of every
+    /// channel (the Hearing test's raw array, ADR 0042). Frames are interleaved.
+    pub channels: u16,
     /// How much audio the ring holds before the oldest is dropped.
     pub ring_seconds: f32,
     /// The stream's `node.name`.
     pub name: String,
+    /// The stream's `node.description`, as PipeWire's tools show it.
+    pub description: String,
 }
 
 impl Default for CaptureConfig {
@@ -47,8 +52,10 @@ impl Default for CaptureConfig {
             node: Some("ghost.mic".into()),
             fallback_to_default: false,
             rate: CAPTURE_RATE,
+            channels: 1,
             ring_seconds: 1.0,
             name: "ghost-capture".into(),
+            description: "Ghost (listening)".into(),
         }
     }
 }
@@ -184,7 +191,7 @@ fn run(
         *keys::MEDIA_ROLE => "Production",
         *keys::APP_NAME => "ghost",
         *keys::NODE_NAME => config.name.as_str(),
-        *keys::NODE_DESCRIPTION => "Ghost (listening)",
+        *keys::NODE_DESCRIPTION => config.description.as_str(),
         *keys::NODE_LATENCY => latency.as_str(),
         *keys::NODE_RATE => rate.as_str(),
     };
@@ -221,7 +228,7 @@ fn run(
             return;
         }
     };
-    let format = s16_mono_format_pod(config.rate);
+    let format = s16_format_pod(config.rate, config.channels);
     let mut params = [Pod::from_bytes(&format).expect("a format pod")];
     if let Err(e) = stream.connect(
         Direction::Input,
@@ -237,7 +244,10 @@ fn run(
         let mainloop = mainloop.clone();
         move |()| mainloop.quit()
     });
-    info!("audio in: {source} @ {} (20 ms frames)", config.rate);
+    info!(
+        "audio in: {source} @ {}, {} channel(s) (20 ms frames)",
+        config.rate, config.channels
+    );
     let _ = ready.send(Ok(source));
     mainloop.run();
     let _ = stream.disconnect();
@@ -254,19 +264,22 @@ pub struct Capture {
     thread: Option<JoinHandle<()>>,
     frame: usize,
     rate: u32,
+    channels: u16,
     source: String,
 }
 
 impl Capture {
     /// Open the stream; returns once it is connected, or with the error that stopped it.
     pub fn open(config: CaptureConfig) -> Result<Capture, AudioError> {
-        let (producer, consumer) = ring::ring(config.rate, config.ring_seconds);
+        let channels = config.channels.max(1);
+        let (producer, consumer) =
+            ring::ring(config.rate * u32::from(channels), config.ring_seconds);
         let (wake, waiter) =
             Wake::pair().map_err(|e| AudioError::Stream(format!("cannot make an eventfd: {e}")))?;
         let shared = Arc::new(Shared::new(wake));
         let (ready_tx, ready_rx) = mpsc::channel();
         let (quit_tx, quit_rx) = pipewire::channel::channel();
-        let frame = frame_samples(config.rate);
+        let frame = frame_samples(config.rate) * usize::from(channels);
         let rate = config.rate;
         let thread = std::thread::Builder::new()
             .name("ghost-capture".into())
@@ -284,6 +297,7 @@ impl Capture {
                 thread: Some(thread),
                 frame,
                 rate,
+                channels,
                 source,
             }),
             Ok(Err(e)) => {
@@ -306,9 +320,13 @@ impl Capture {
         self.rate
     }
 
-    /// Samples per frame (320 at 16 kHz).
+    /// Samples per frame, every channel's (320 at 16 kHz mono).
     pub fn frame_samples(&self) -> usize {
         self.frame
+    }
+
+    pub fn channels(&self) -> u16 {
+        self.channels
     }
 
     pub fn counters(&self) -> CaptureCounters {

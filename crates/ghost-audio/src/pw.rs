@@ -368,12 +368,28 @@ fn dict_to_map(d: &DictRef) -> BTreeMap<String, String> {
 /// The `EnumFormat` pod for s16 at `rate`, mono (`MONO` position, which PipeWire mixes
 /// down from or up to whatever the device has).
 pub fn s16_mono_format_pod(rate: u32) -> Vec<u8> {
+    s16_format_pod(rate, 1)
+}
+
+/// s16 at `rate` in `channels`: mono, or front left and right then aux for more.
+pub fn s16_format_pod(rate: u32, channels: u16) -> Vec<u8> {
+    let channels = channels.max(1);
     let mut info = AudioInfoRaw::new();
     info.set_format(AudioFormat::S16LE);
     info.set_rate(rate);
-    info.set_channels(1);
+    info.set_channels(u32::from(channels));
     let mut position = [0u32; spa_sys::SPA_AUDIO_MAX_CHANNELS as usize];
-    position[0] = spa_sys::SPA_AUDIO_CHANNEL_MONO;
+    if channels == 1 {
+        position[0] = spa_sys::SPA_AUDIO_CHANNEL_MONO;
+    } else {
+        for (i, p) in position.iter_mut().take(usize::from(channels)).enumerate() {
+            *p = match i {
+                0 => spa_sys::SPA_AUDIO_CHANNEL_FL,
+                1 => spa_sys::SPA_AUDIO_CHANNEL_FR,
+                n => spa_sys::SPA_AUDIO_CHANNEL_AUX0 + (n as u32 - 2),
+            };
+        }
+    }
     info.set_position(position);
     let obj = Object {
         type_: spa_sys::SPA_TYPE_OBJECT_Format,

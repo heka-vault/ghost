@@ -167,9 +167,11 @@ export default function SessionScreen(_: RouteProps) {
   };
 
   const modelsReady = !!status?.models_ready && !loading;
+  // The Hearing test has the mic (ADR 0042): no session opens until it closes.
+  const recording = phase === "recording";
   const canWrite = online && busy === null;
-  const canType = online && modelsReady;
-  const canWake = canWrite && modelsReady;
+  const canType = online && modelsReady && !recording;
+  const canWake = canWrite && modelsReady && !recording;
 
   const send = async () => {
     const t = text.trim();
@@ -234,7 +236,7 @@ export default function SessionScreen(_: RouteProps) {
   // where space is tight, is it the Session icon alone, with its label as the tooltip.
   const sleepOff = !online || (busy !== null && busy !== "sleep");
   const wakeOff = !canWake && busy !== "wake";
-  const wakeWhy = !online ? "Ghost is reconnecting" : !modelsReady ? "Ghost is still loading its voice models" : "Wake Ghost";
+  const wakeWhy = !online ? "Ghost is reconnecting" : !modelsReady ? "Ghost is still loading its voice models" : recording ? "The Hearing test has the mic" : "Wake Ghost";
   const voice: VoiceControl | undefined = inSession
     ? onPhone
       ? { label: "End the phone session", icon: <PhoneOff />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
@@ -281,7 +283,7 @@ export default function SessionScreen(_: RouteProps) {
       </Notice>
     ));
 
-  const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone });
+  const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone, recording });
   // The way back to the last agent used; Ghost's own sessions are this page.
   const showLast = startOnly && online && !loading && !needsSetup && lastSession && lastSession.slug !== "ghost";
   const newest = turns[turns.length - 1] ?? history.turns[history.turns.length - 1];
@@ -397,7 +399,7 @@ export default function SessionScreen(_: RouteProps) {
 }
 
 /** The start state before the first turn: one presence, one line, one hint. Never promises what can’t happen yet. */
-function startCopy({ online, loading, needsSetup, locked, inSession, onPhone }: { online: boolean; loading: boolean; needsSetup: boolean; locked: boolean; inSession: boolean; onPhone: boolean }): { title: string; text?: string } {
+function startCopy({ online, loading, needsSetup, locked, inSession, onPhone, recording }: { online: boolean; loading: boolean; needsSetup: boolean; locked: boolean; inSession: boolean; onPhone: boolean; recording: boolean }): { title: string; text?: string } {
   if (!online) return { title: "Reconnecting", text: "This picks up again as soon as Ghost is back." };
   // The shell's banner and the status card already say the models are loading; this says
   // the next thing instead of repeating it.
@@ -408,6 +410,8 @@ function startCopy({ online, loading, needsSetup, locked, inSession, onPhone }: 
   // The header already says “Listening”; this says what to do with it.
   if (onPhone) return { title: "On your phone", text: "Ghost hears you through your phone. You can end the session here." };
   if (inSession) return { title: "Go ahead", text: "Ask what’s waiting on you." };
+  // The Hearing test holds the mic (ADR 0042); closing it gives the mic back.
+  if (recording) return { title: "The Hearing test has the mic", text: "Ghost isn’t listening for its name until you close it." };
   // The field under it reads the same in every state; this line carries “or type”.
   return { title: `Say ${quoted("Hey Ghost")}`, text: "or type below" };
 }

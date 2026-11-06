@@ -323,6 +323,8 @@ pub struct Late {
     pub deps: OnceLock<Arc<Deps>>,
     pub models: OnceLock<Arc<Models>>,
     pub desktop_route: OnceLock<Arc<DesktopRoute>>,
+    /// The Hearing test's recorder (ADR 0042).
+    pub hear: OnceLock<Arc<crate::hear::HearDesk>>,
 }
 
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
@@ -491,6 +493,19 @@ impl Daemon {
 
     pub fn models(&self) -> Option<Arc<Models>> {
         self.late.models.get().cloned()
+    }
+
+    /// The Hearing test's recorder (ADR 0042).
+    pub fn hear(&self) -> Option<Arc<crate::hear::HearDesk>> {
+        self.late.hear.get().cloned()
+    }
+
+    /// The recorder asking for the mic; never, without one.
+    async fn next_hear(&self) -> crate::hear::Lease {
+        match self.hear() {
+            Some(h) => h.next_lease().await,
+            None => std::future::pending().await,
+        }
     }
 
     pub fn gate(&self) -> Option<Arc<WriteGate>> {
@@ -1552,13 +1567,15 @@ impl Daemon {
                 _ = d.rearm.wait() => Won::Rearm,
                 p = d.next_phone() => Won::Phone(p),
                 r = d.next_raised() => match r { Some(r) => Won::Raised(r), None => Won::Rearm },
+                l = d.next_hear() => Won::Hear(l),
             };
             d.waiting_flag.store(false, Ordering::SeqCst);
-            let (mut woke, mut phone, mut raised) = (None, None, None);
+            let (mut woke, mut phone, mut raised, mut hear) = (None, None, None, None);
             match won {
                 Won::Wake(r) => woke = Some(r),
                 Won::Phone(p) => phone = Some(p),
                 Won::Raised(r) => raised = Some(r),
+                Won::Hear(l) => hear = Some(l),
                 Won::Stop | Won::Rearm => {}
             }
             if woke.is_none() {
@@ -1593,6 +1610,23 @@ impl Daemon {
                     p.media.close().await;
                 }
                 break;
+            }
+            if let Some(lease) = hear.take() {
+                // The Hearing test (ADR 0042): a wake or a phone in the same tick came first,
+                // and dropping the lease tells the recorder so.
+                if woke.is_none()
+                    && phone.is_none()
+                    && raised.is_none()
+                    && lease.granted.send(()).is_ok()
+                {
+                    info!("passive: the Hearing test has the mic; Ghost is not listening");
+                    d.state.set_phase(Phase::Recording, None, None);
+                    tokio::select! {
+                        _ = lease.release => {}
+                        _ = d.stop.cancelled() => {}
+                    }
+                    continue;
+                }
             }
             if let Some(raised) = raised {
                 // ADR 0032: Ghost greets at the desk and waits
@@ -1685,6 +1719,21 @@ impl Daemon {
         }
     }
 
+    /// The recorder, made once, before the API that serves it.
+    fn hear_desk(self: &Arc<Self>) -> Arc<dyn ghost_api::HearPort> {
+        let cfg = self.cfg();
+        self.late
+            .hear
+            .get_or_init(|| {
+                Arc::new(crate::hear::HearDesk::new(
+                    Arc::downgrade(self),
+                    &cfg.data_dir,
+                    &cfg.config_dir,
+                ))
+            })
+            .clone()
+    }
+
     async fn start_api(self: &Arc<Self>, p: StartApi) -> Option<ApiHandle> {
         let cfg = self.cfg();
         let voice = self.voice();
@@ -1722,6 +1771,7 @@ impl Daemon {
             devices: self.ports.devices.clone(),
             model_net: Arc::new(LiveModelNet),
             model_sign_in: ghost_api::deps::ModelSignIn::default(),
+            hear: Some(self.hear_desk()),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {
@@ -1828,6 +1878,8 @@ enum Won {
     Rearm,
     Phone(PendingPhone),
     Raised(Raised),
+    /// The Hearing test's recorder wants the mic (ADR 0042).
+    Hear(crate::hear::Lease),
 }
 
 struct StartApi {

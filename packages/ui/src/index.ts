@@ -7,6 +7,8 @@ export type { GhostPhase, Tone } from "./format";
 export { joinSpoken } from "./turns";
 export { createVoiceLevel } from "./voiceLevel";
 export type { VoiceLevel } from "./voiceLevel";
+export { createHearLive } from "./hearLive";
+export type { HearLevel, HearLive } from "./hearLive";
 export { splitSummary, neverHappened, didNotHappen, pastTense, shortTarget } from "./audit";
 export type { Summarized } from "./audit";
 export { GHOST_PATH, GHOST_PATH_SMALL, lineHue } from "./brand";

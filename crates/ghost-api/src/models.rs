@@ -68,6 +68,9 @@ pub enum Phase {
     Hold,
     /// Ghost greeted the operator itself and waits for a reply (ADR 0032).
     Asking,
+    /// The Hearing test's recorder holds the mic (ADR 0042): Ghost is not listening for its
+    /// name.
+    Recording,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -285,6 +288,15 @@ pub enum Event {
     /// never the microphone, never passive audio.
     Voice {
         level: f32,
+    },
+    /// The Hearing test's recorder (ADR 0042), about twenty a second while it is open:
+    /// what it is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms,
+    /// -50 dBFS to 0 dBFS) and whether the VAD hears speech; then one with the state
+    /// `closed`. Only while the operator has the recorder open; never passive audio.
+    Hear {
+        hear: crate::hear::HearView,
+        level: f32,
+        speaking: bool,
     },
 }
 

@@ -17,7 +17,7 @@ export interface DeskView extends DeskState {
   loadingModels: boolean;
   /** This phone is in a session. */
   inSession: boolean;
-  /** A session is running at the desk itself; the phone can't start one until it ends. */
+  /** A session is running at the desk itself, or the Hearing test has its mic (ADR 0042); the phone can't start one until it ends. */
   deskBusy: boolean;
 }
 
@@ -33,6 +33,6 @@ export function useDesk(): DeskView {
     online,
     loadingModels: online && !!s.status && (!s.status.models_ready || s.status.phase === "starting"),
     inSession: !!s.status?.session_id && s.status.session_origin !== "desk",
-    deskBusy: !!s.status?.session_id && s.status.session_origin === "desk",
+    deskBusy: (!!s.status?.session_id && s.status.session_origin === "desk") || s.status?.phase === "recording",
   };
 }

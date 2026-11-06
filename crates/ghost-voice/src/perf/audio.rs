@@ -53,6 +53,21 @@ impl Voice {
         }
     }
 
+    /// The same renderer in another Kokoro voice (`ghost-perf hear --voices`).
+    pub fn with_voice(&self, voice: &str) -> Self {
+        Self {
+            synth: self.synth.clone(),
+            cache: self.cache.clone(),
+            voice: voice.into(),
+            speed: self.speed,
+            pause_secs: self.pause_secs,
+        }
+    }
+
+    pub fn voice(&self) -> &str {
+        &self.voice
+    }
+
     fn key(&self, text: &str) -> String {
         // The Python's f-string: floats as Python prints them ("1.0", "0.7").
         let spec = format!(

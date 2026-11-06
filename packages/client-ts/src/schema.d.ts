@@ -349,6 +349,283 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/hear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Hearing test */
+        get: operations["hear_view_hear_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The last check */
+        get: operations["hear_check_hear_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close the recorder */
+        post: operations["hear_close_hear_close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open the recorder */
+        post: operations["hear_open_hear_open_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The take list */
+        get: operations["hear_plan_hear_plan_get"];
+        /** Save the take list */
+        put: operations["hear_save_plan_hear_plan_put"];
+        post?: never;
+        /** Reset the take list */
+        delete: operations["hear_reset_plan_hear_plan_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Play a take */
+        post: operations["hear_play_hear_play_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/play/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop playing */
+        post: operations["hear_stop_playing_hear_play_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Score runs */
+        get: operations["hear_runs_hear_runs_get"];
+        put?: never;
+        /** Score a session */
+        post: operations["hear_start_run_hear_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A run's report */
+        get: operations["hear_run_hear_runs__id__get"];
+        put?: never;
+        post?: never;
+        /** Delete a run */
+        delete: operations["hear_delete_run_hear_runs__id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/runs/{id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Note a run */
+        put: operations["hear_note_run_hear_runs__id__note_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sessions */
+        get: operations["hear_sessions_hear_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/sessions/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A session */
+        get: operations["hear_session_hear_sessions__name__get"];
+        put?: never;
+        post?: never;
+        /** Delete a session */
+        delete: operations["hear_delete_session_hear_sessions__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/take/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a take */
+        post: operations["hear_cancel_take_hear_take_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/take/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Skip a take */
+        post: operations["hear_skip_take_hear_take_skip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/take/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a take */
+        post: operations["hear_start_take_hear_take_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hear/take/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End a take */
+        post: operations["hear_stop_take_hear_take_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model": {
         parameters: {
             query?: never;
@@ -1450,6 +1727,290 @@ export interface components {
             input_device: string | null;
             output_device: string | null;
         };
+        HearBlock: {
+            /** @description Across the room: takes start after a countdown and end on silence. */
+            away?: boolean;
+            block: string;
+            condition: string;
+            instruction?: string;
+            /** @description Music on the desk speakers. */
+            music?: boolean;
+            takes: components["schemas"]["HearPlanTake"][];
+            title?: string;
+        };
+        /** @description A take's check: shown once, never kept. */
+        HearCheck: {
+            /** @description What Ghost heard, as the score compares it: lowercase, numbers as digits. */
+            heard: string;
+            matched: number;
+            /** Format: double */
+            peak: number;
+            /** Format: double */
+            rms: number;
+            said: number;
+            /** Format: double */
+            seconds: number;
+            session: string;
+            /** Format: double */
+            speech_end: number | null;
+            /**
+             * Format: double
+             * @description Where the VAD hears speech, seconds into the take.
+             */
+            speech_start: number | null;
+            take: string;
+            warnings: components["schemas"]["HearWarning"][];
+            words: components["schemas"]["HearWord"][];
+        };
+        /**
+         * @description The Hearing test's recorder (ADR 0042), about twenty a second while it is open: what
+         *     it is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to
+         *     0 dBFS) and whether the VAD hears speech; then one with the state `closed`. Only while
+         *     the operator has the recorder open; never passive audio.
+         */
+        HearEvent: {
+            hear: components["schemas"]["HearView"];
+            /** Format: float */
+            level: number;
+            speaking: boolean;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "hear";
+        };
+        HearFact: {
+            name: string;
+            value: string;
+        };
+        /** @enum {string} */
+        HearKind: "speech" | "reply" | "silence";
+        HearNoteRequest: {
+            note: string;
+        };
+        HearOpenRequest: {
+            /** @description Start a new session, even if there is one from today. */
+            new?: boolean;
+            /** @description Carry this session on. Unset: today's newest session, or a new one. */
+            session?: string | null;
+        };
+        /** @description A part of a report section, in order. Text may hold `code` in backticks. */
+        HearPart: {
+            /** @enum {string} */
+            kind: "text";
+            text: string;
+        } | (components["schemas"]["HearTable"] & {
+            /** @enum {string} */
+            kind: "table";
+        }) | {
+            facts: components["schemas"]["HearFact"][];
+            /** @enum {string} */
+            kind: "facts";
+        } | {
+            /** @enum {string} */
+            kind: "pass";
+            pass: boolean;
+            text: string;
+        };
+        HearPlan: {
+            about?: string;
+            blocks: components["schemas"]["HearBlock"][];
+            /** Format: int32 */
+            version: number;
+        };
+        HearPlanTake: {
+            id: string;
+            kind: components["schemas"]["HearKind"];
+            /** @description A silent take's instruction. */
+            say?: string | null;
+            /**
+             * Format: double
+             * @description A silent take's length.
+             */
+            seconds?: number | null;
+            tags?: string[];
+            /** @description Names Ghost must hear, each in the line. */
+            terms?: string[];
+            /** @description The line; " ... " is a pause of about a second. */
+            text?: string;
+        };
+        HearPlanView: {
+            /** @description The operator's own plan; false: the one Ghost ships. */
+            edited: boolean;
+            plan: components["schemas"]["HearPlan"];
+        };
+        HearPlayRequest: {
+            /** @description `aec` (the default) or `raw`. */
+            channel?: string | null;
+            session: string;
+            take: string;
+        };
+        HearReport: {
+            intro: string;
+            meta: components["schemas"]["HearFact"][];
+            /** @description The pass rule, when compared against a baseline. */
+            pass: boolean | null;
+            sections: components["schemas"]["HearSection"][];
+        };
+        HearRow: {
+            cells: string[];
+            /** @description The take a row is about, `<id>|<source>`. */
+            take: string | null;
+            verdict: components["schemas"]["HearVerdict"] | null;
+        };
+        HearRun: {
+            baseline: components["schemas"]["HearRunInfo"] | null;
+            info: components["schemas"]["HearRunInfo"];
+            report: components["schemas"]["HearReport"];
+        };
+        HearRunInfo: {
+            /** @description `aec` (`ghost.mic`) or `raw` (the array under it). */
+            channel: string;
+            commit: string;
+            created: string;
+            id: string;
+            /** @description The operator's note: what this run was for. */
+            note?: string;
+            session: string;
+            takes: number;
+            wer: components["schemas"]["HearRunWer"];
+        };
+        HearRunRequest: {
+            /** @description `aec` (the default) or `raw`. */
+            channel?: string | null;
+            session: string;
+        };
+        HearRunWer: {
+            /** Format: double */
+            file: number | null;
+            /** Format: double */
+            stage: number | null;
+            /** Format: double */
+            turn: number | null;
+        };
+        /** @description A score run in progress. */
+        HearScoring: {
+            channel: string;
+            done: number;
+            id: string;
+            session: string;
+            total: number;
+        };
+        HearSection: {
+            /**
+             * Format: int32
+             * @description 2 for a section, 3 for one inside the section before.
+             */
+            level: number;
+            parts: components["schemas"]["HearPart"][];
+            title: string;
+        };
+        HearSession: {
+            name: string;
+            takes: components["schemas"]["HearTake"][];
+        };
+        HearSessionSummary: {
+            /** @description Takes whose check asked for a redo. */
+            flagged: number;
+            name: string;
+            raw: number;
+            recorded: number;
+            /** Format: double */
+            seconds: number;
+            skipped: number;
+            updated: string | null;
+        };
+        HearSkipRequest: {
+            take: string;
+        };
+        /** @enum {string} */
+        HearState: "closed" | "opening" | "ready" | "countdown" | "recording" | "stopping" | "checking";
+        HearTable: {
+            columns: string[];
+            rows: components["schemas"]["HearRow"][];
+        };
+        /**
+         * @description A take in a session, as its manifest line says: the line asked for, never what was
+         *     heard.
+         */
+        HearTake: {
+            block: string;
+            ending: string | null;
+            id: string;
+            kind: components["schemas"]["HearKind"];
+            /** Format: double */
+            peak: number | null;
+            /** @description The take has a raw-array file. */
+            raw: boolean;
+            /** Format: double */
+            seconds: number | null;
+            /** Format: double */
+            speech_end: number | null;
+            /** Format: double */
+            speech_start: number | null;
+            state: components["schemas"]["HearTakeState"];
+            text: string;
+            time: string | null;
+            /** @description The check's warnings by kind. */
+            warnings?: string[];
+        };
+        HearTakeRequest: {
+            ending: components["schemas"]["TakeEnding"];
+            take: string;
+        };
+        /** @enum {string} */
+        HearTakeState: "recorded" | "skipped";
+        /** @enum {string} */
+        HearVerdict: "better" | "same" | "worse";
+        /** @description The recorder now. Also the `hear` event's body, with the level. */
+        HearView: {
+            /** @description The take the last check is for (`GET /hear/check`), while the recorder is open. */
+            checked: string | null;
+            /**
+             * Format: int32
+             * @description Seconds left in a countdown.
+             */
+            countdown: number | null;
+            /**
+             * Format: double
+             * @description Seconds into the take.
+             */
+            elapsed?: number;
+            ending: components["schemas"]["TakeEnding"] | null;
+            /** @description Whether a take is playing back. */
+            playing?: boolean;
+            /**
+             * @description The last thing that went wrong (a take that could not be checked, a run that
+             *     failed), for the operator; cleared by the next success.
+             */
+            problem: string | null;
+            /** @description The raw array recorded beside `ghost.mic`, by node name; None when there is none. */
+            raw_device: string | null;
+            scoring: components["schemas"]["HearScoring"] | null;
+            session: string | null;
+            state: components["schemas"]["HearState"];
+            /** @description The take being recorded or checked. */
+            take: string | null;
+            /** @description Why the recorder can't open now, for the operator ("Ghost is in a session"). */
+            unavailable: string | null;
+        };
+        HearWarning: {
+            /**
+             * @description `too_quiet`, `clipping`, `no_speech`, `speech_in_silence`, `started_early`,
+             *     `cut_off`, `missed_end`.
+             */
+            kind: string;
+            /** @description The take is wrong, not just worth a look: redo it. */
+            redo: boolean;
+            text: string;
+        };
+        HearWord: {
+            heard: string | null;
+            op: components["schemas"]["HearWordOp"];
+            said: string | null;
+        };
+        /** @enum {string} */
+        HearWordOp: "same" | "misheard" | "missed" | "extra";
         /**
          * @description A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of deliveries
          *     since the daemon started. Counts only; never a body.
@@ -1736,7 +2297,7 @@ export interface components {
          * @description Where the daemon is. The tray tooltip and the phone's Home read it.
          * @enum {string}
          */
-        Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking";
+        Phase: "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking" | "recording";
         /** @description One `GHOST_PHONE_LISTEN` address and the network it is on. */
         PhoneAddress: {
             address: string;
@@ -2050,6 +2611,11 @@ export interface components {
              */
             type: "status";
         };
+        /**
+         * @description How a take ends.
+         * @enum {string}
+         */
+        TakeEnding: "hold" | "quiet" | "timed";
         Turn: {
             /** Format: date-time */
             at: string;
@@ -2240,6 +2806,39 @@ export type SchemaConversationUpdate = components['schemas']['ConversationUpdate
 export type SchemaConversationView = components['schemas']['ConversationView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
+export type SchemaHearBlock = components['schemas']['HearBlock'];
+export type SchemaHearCheck = components['schemas']['HearCheck'];
+export type SchemaHearEvent = components['schemas']['HearEvent'];
+export type SchemaHearFact = components['schemas']['HearFact'];
+export type SchemaHearKind = components['schemas']['HearKind'];
+export type SchemaHearNoteRequest = components['schemas']['HearNoteRequest'];
+export type SchemaHearOpenRequest = components['schemas']['HearOpenRequest'];
+export type SchemaHearPart = components['schemas']['HearPart'];
+export type SchemaHearPlan = components['schemas']['HearPlan'];
+export type SchemaHearPlanTake = components['schemas']['HearPlanTake'];
+export type SchemaHearPlanView = components['schemas']['HearPlanView'];
+export type SchemaHearPlayRequest = components['schemas']['HearPlayRequest'];
+export type SchemaHearReport = components['schemas']['HearReport'];
+export type SchemaHearRow = components['schemas']['HearRow'];
+export type SchemaHearRun = components['schemas']['HearRun'];
+export type SchemaHearRunInfo = components['schemas']['HearRunInfo'];
+export type SchemaHearRunRequest = components['schemas']['HearRunRequest'];
+export type SchemaHearRunWer = components['schemas']['HearRunWer'];
+export type SchemaHearScoring = components['schemas']['HearScoring'];
+export type SchemaHearSection = components['schemas']['HearSection'];
+export type SchemaHearSession = components['schemas']['HearSession'];
+export type SchemaHearSessionSummary = components['schemas']['HearSessionSummary'];
+export type SchemaHearSkipRequest = components['schemas']['HearSkipRequest'];
+export type SchemaHearState = components['schemas']['HearState'];
+export type SchemaHearTable = components['schemas']['HearTable'];
+export type SchemaHearTake = components['schemas']['HearTake'];
+export type SchemaHearTakeRequest = components['schemas']['HearTakeRequest'];
+export type SchemaHearTakeState = components['schemas']['HearTakeState'];
+export type SchemaHearVerdict = components['schemas']['HearVerdict'];
+export type SchemaHearView = components['schemas']['HearView'];
+export type SchemaHearWarning = components['schemas']['HearWarning'];
+export type SchemaHearWord = components['schemas']['HearWord'];
+export type SchemaHearWordOp = components['schemas']['HearWordOp'];
 export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
@@ -2300,6 +2899,7 @@ export type SchemaSnoozeRequest = components['schemas']['SnoozeRequest'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
+export type SchemaTakeEnding = components['schemas']['TakeEnding'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
@@ -3012,8 +3612,658 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["HearEvent"];
                 };
+            };
+        };
+    };
+    hear_view_hear_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearView"];
+                };
+            };
+        };
+    };
+    hear_check_hear_check_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearCheck"];
+                };
+            };
+            /** @description No check */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hear_close_hear_close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearView"];
+                };
+            };
+        };
+    };
+    hear_open_hear_open_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["HearOpenRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearView"];
+                };
+            };
+            /** @description Busy */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hear_plan_hear_plan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearPlanView"];
+                };
+            };
+        };
+    };
+    hear_save_plan_hear_plan_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HearPlan"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearPlanView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hear_reset_plan_hear_plan_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearPlanView"];
+                };
+            };
+        };
+    };
+    hear_play_hear_play_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HearPlayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such take */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hear_stop_playing_hear_play_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    hear_runs_hear_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearRunInfo"][];
+                };
+            };
+        };
+    };
+    hear_start_run_hear_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HearRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearRunInfo"];
+                };
+            };
+            /** @description No such session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A run is going */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not now */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hear_run_hear_runs__id__get: {
+        parameters: {
+            query?: {
+                /** @description Another run's id to compare against. */
+                baseline?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearRun"];
+                };
+            };
+            /** @description No such run */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hear_delete_run_hear_runs__id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such run */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hear_note_run_hear_runs__id__note_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HearNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearRunInfo"];
+                };
+            };
+            /** @description No such run */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hear_sessions_hear_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearSessionSummary"][];
+                };
+            };
+        };
+    };
+    hear_session_hear_sessions__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearSession"];
+                };
+            };
+            /** @description No such session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hear_delete_session_hear_sessions__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Open in the recorder */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hear_cancel_take_hear_take_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearView"];
+                };
+            };
+            /** @description No take is going */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hear_skip_take_hear_take_skip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HearSkipRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearSession"];
+                };
+            };
+            /** @description No such take */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not open */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hear_start_take_hear_take_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HearTakeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearView"];
+                };
+            };
+            /** @description No such take */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not open, or a take is going */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hear_stop_take_hear_take_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HearCheck"];
+                };
+            };
+            /** @description No take is going */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
