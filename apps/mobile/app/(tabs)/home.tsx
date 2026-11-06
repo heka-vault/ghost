@@ -113,6 +113,8 @@ export default function Home() {
     hero = { presence: phase, title: "Ghost is waiting on you", body: splitSummary(pending).text, question: true };
   } else if (inSession) {
     hero = { presence: phase, title: "You’re in a session", body: `With ${line}. The mic is open on this phone.` };
+  } else if (deskBusy && phase === "recording") {
+    hero = { presence: phase, title: "Ghost is busy at your desk", body: `The Hearing test has the mic at ${workstation}. Start here once it closes.` };
   } else if (deskBusy) {
     hero = { presence: phase, title: "Ghost is busy at your desk", body: `A session is running with ${line} at ${workstation}. Start here once it ends.` };
   } else if (link === "reconnecting") {

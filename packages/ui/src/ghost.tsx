@@ -8,6 +8,7 @@ import {
 } from "@ghost/client-ts";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
+import { createHearLive, type HearLive } from "./hearLive";
 import { createVoiceLevel, type VoiceLevel } from "./voiceLevel";
 
 export interface GhostState {
@@ -26,6 +27,8 @@ export interface GhostState {
   appsVersion: number;
   /** Ghost's voice loudness while it speaks, outside React state (see voiceLevel.ts). Stable for the provider's life. */
   voice: VoiceLevel;
+  /** The Hearing test's recorder and the mic's level while it is open, outside React state (see hearLive.ts). Stable for the provider's life. */
+  hear: HearLive;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -42,6 +45,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [waitingVersion, setWaitingVersion] = useState(0);
   const [appsVersion, setAppsVersion] = useState(0);
   const [voice] = useState(createVoiceLevel);
+  const [hear] = useState(createHearLive);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -61,6 +65,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
           // Twenty a second while Ghost speaks: into the store, never into React state.
           if (m.type === "voice") {
             voice.set(m.level);
+            return;
+          }
+          // The recorder's level, twenty a second while it is open: into its store as well.
+          if (m.type === "hear") {
+            hear.set(m.hear, m.level, m.speaking);
             return;
           }
           setLastEvent(m);
@@ -97,6 +106,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
         () => {
           setConnected(false);
           voice.set(0);
+          hear.reset();
           // Tear this subscription down before the next one, or its listeners keep
           // firing alongside the new ones and every event shows up twice.
           const s = stop;
@@ -123,11 +133,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
       if (timer) clearTimeout(timer);
       stop?.();
     };
-  }, [client, voice]);
+  }, [client, voice, hear]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice }),
-    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice],
+    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear }),
+    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -48,6 +48,7 @@ import { pairLink } from "@ghost/client-ts";
 
 import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
+import { type HearDesign, MockHear } from "./hear";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
@@ -162,6 +163,12 @@ export interface MockOptions {
    * keyring doesn't open the vault.
    */
   vault?: "locked" | "import" | "broken" | null;
+  /**
+   * The Hearing test's recorder (?hear=…, ADR 0042): `recording` a held take going when it
+   * opens, `countdown` a take across the room counting down, `check` a check with a cut-off
+   * waiting, `problem` a take that couldn't be checked, `scoring` a run being scored.
+   */
+  hear?: HearDesign;
 }
 
 export class MockDaemon {
@@ -206,6 +213,8 @@ export class MockDaemon {
   /** What needs the operator (ADR 0029). */
   private waitingItems: WaitingItemView[];
   private timers = new Set<ReturnType<typeof setTimeout>>();
+  /** The Hearing test (ADR 0042): the recorder, its takes, sessions and runs. */
+  private hear: MockHear;
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
@@ -281,6 +290,16 @@ export class MockDaemon {
         conversation: this.status.conversation ?? null,
       });
     }
+    this.hear = new MockHear(
+      f.hear,
+      {
+        emit: (e) => this.emit(e),
+        setPhase: (phase) => this.pushStatus({ phase }),
+        unavailable: () =>
+          !this.status.models_ready ? "Ghost is still loading its models." : this.status.session_id || this.status.phase !== "passive" ? "Ghost is in a session: end it first." : null,
+      },
+      options.hear ?? null,
+    );
   }
 
   // ------------------------------------------------------------------ events
@@ -351,6 +370,7 @@ export class MockDaemon {
   /** A session opens with Ghost, or with the agent a Call names; a retired or unknown agent is refused, as the daemon does. */
   private wake(conversation?: string | null) {
     this.requireReady();
+    if (this.status.phase === "recording") throw new HttpError(409, "The Hearing test has the mic: close it first.");
     if (this.status.session_id) return;
     const slug = conversation || "ghost";
     const target = this.agents.get(slug)?.detail;
@@ -1035,6 +1055,10 @@ export class MockDaemon {
     let r: RegExpExecArray | null;
 
     if (method === "GET" && path === "/status") return this.snapshot();
+    if (path.startsWith("/hear")) {
+      const answer = await this.hear.handle(method, path, query, b);
+      if (answer !== undefined) return answer;
+    }
     if (method === "POST" && path === "/wake") {
       this.wake(typeof b.conversation === "string" ? b.conversation : null);
       if (typeof b.text === "string" && b.text) this.say(b.text);
@@ -1332,6 +1356,7 @@ export class MockDaemon {
   }
 
   dispose() {
+    this.hear.dispose();
     for (const t of this.timers) clearTimeout(t);
     this.listeners.clear();
   }

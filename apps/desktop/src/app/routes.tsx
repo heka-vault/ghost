@@ -6,6 +6,7 @@
  * Owned by the foundation. To add a route, follow docs/design-system.md#adding-a-route.
  */
 import {
+  AudioWaveform,
   BellRing,
   Blocks,
   BookOpen,
@@ -174,6 +175,20 @@ export const ROUTES: RouteDef[] = [
     needsDaemon: true,
     area: "settings",
     component: lazy(() => import("../screens/audit")),
+  },
+  {
+    // The Hearing test (ADR 0042): record takes, check each, score how well Ghost hears.
+    id: "hear",
+    patterns: ["/hear/:tab?/:id?"],
+    path: "/hear",
+    owner: "hear",
+    title: "Hearing test",
+    kind: "screen",
+    chrome: "app",
+    needsDaemon: true,
+    nav: { label: "Hearing test", icon: AudioWaveform, group: "main" },
+    accept: (p) => !p.tab || (["sessions", "runs", "plan"].includes(p.tab) && (!p.id || p.tab === "runs")),
+    component: lazy(() => import("../screens/hear")),
   },
   {
     // General, Model, Passwords, Sound and Phone: one screen, so moving between them keeps

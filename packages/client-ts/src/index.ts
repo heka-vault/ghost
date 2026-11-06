@@ -100,6 +100,33 @@ export type WatchInfo = Schemas["WatchInfo"];
 export type HookInfo = Schemas["HookInfo"];
 export type RoutesView = Schemas["RoutesView"];
 export type OutputInfo = Schemas["OutputInfo"];
+/** The Hearing test (ADR 0042): the recorder, a take's check, the take list, sessions and score runs. */
+export type HearView = Schemas["HearView"];
+export type HearState = Schemas["HearState"];
+export type HearScoring = Schemas["HearScoring"];
+export type TakeEnding = Schemas["TakeEnding"];
+export type HearCheck = Schemas["HearCheck"];
+export type HearWord = Schemas["HearWord"];
+export type HearWarning = Schemas["HearWarning"];
+export type HearKind = Schemas["HearKind"];
+export type HearPlan = Schemas["HearPlan"];
+export type HearBlock = Schemas["HearBlock"];
+export type HearPlanTake = Schemas["HearPlanTake"];
+export type HearPlanView = Schemas["HearPlanView"];
+export type HearSession = Schemas["HearSession"];
+export type HearSessionSummary = Schemas["HearSessionSummary"];
+export type HearTake = Schemas["HearTake"];
+export type HearRunInfo = Schemas["HearRunInfo"];
+export type HearRun = Schemas["HearRun"];
+export type HearReport = Schemas["HearReport"];
+export type HearSection = Schemas["HearSection"];
+export type HearPart = Schemas["HearPart"];
+export type HearTable = Schemas["HearTable"];
+export type HearRow = Schemas["HearRow"];
+export type HearFact = Schemas["HearFact"];
+export type HearVerdict = Schemas["HearVerdict"];
+/** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
+export type HearChannel = "aec" | "raw";
 
 /** Payloads on the /events WebSocket (first message is a plain Status snapshot). */
 export type GhostEvent =
@@ -112,7 +139,9 @@ export type GhostEvent =
   | Schemas["WaitingEvent"]
   | Schemas["AppsEvent"]
   /** Ghost's own voice at the speaker, 0..1, ~20/s while it speaks, then one 0. */
-  | Schemas["VoiceEvent"];
+  | Schemas["VoiceEvent"]
+  /** The Hearing test's recorder, ~20/s while it is open: its view, the mic's level 0..1, whether the VAD hears speech; then one `closed`. */
+  | Schemas["HearEvent"];
 
 export type Unsubscribe = () => void;
 
@@ -438,6 +467,87 @@ export class GhostClient {
   /** Stage the newer version of an installed skill; install it with `replace` to update. */
   previewSkillUpdate(name: string) {
     return unwrap(this.api.POST("/skill-catalog/updates/{name}", { params: { path: { name } } }));
+  }
+
+  // --- the Hearing test (ADR 0042) ----------------------------------------------------------
+  /** The recorder now: closed, or open on a session, and what it is doing. */
+  hear() {
+    return unwrap(this.api.GET("/hear"));
+  }
+  /** Take the mic from the passive loop: Ghost stops listening for its name until it closes.
+   *  `session` carries one on (or switches to it, between takes); none carries on today's
+   *  newest session, or starts one; `fresh` starts a new one. */
+  hearOpen(session?: string | null, fresh = false) {
+    return unwrap(
+      this.api.POST("/hear/open", { body: session ? { session } : fresh ? { new: true } : {} }),
+    );
+  }
+  /** Give the mic back to Ghost. */
+  hearClose() {
+    return unwrap(this.api.POST("/hear/close"));
+  }
+  hearStart(take: string, ending: TakeEnding) {
+    return unwrap(this.api.POST("/hear/take/start", { body: { take, ending } }));
+  }
+  /** End a held take: waits for the half second after it, then answers its check. */
+  hearStop() {
+    return unwrap(this.api.POST("/hear/take/stop"));
+  }
+  hearCancel() {
+    return unwrap(this.api.POST("/hear/take/cancel"));
+  }
+  /** The last take's check, while the recorder is open (404 when there is none). */
+  hearCheck() {
+    return unwrap(this.api.GET("/hear/check"));
+  }
+  /** Skip a take in the open session; answers the session. */
+  hearSkip(take: string) {
+    return unwrap(this.api.POST("/hear/take/skip", { body: { take } }));
+  }
+  hearPlan() {
+    return unwrap(this.api.GET("/hear/plan"));
+  }
+  /** Save the operator's take list; 422 with why when it doesn't hold together. */
+  saveHearPlan(plan: HearPlan) {
+    return unwrap(this.api.PUT("/hear/plan", { body: plan }));
+  }
+  /** Back to the take list Ghost ships. */
+  resetHearPlan() {
+    return unwrap(this.api.DELETE("/hear/plan"));
+  }
+  hearSessions() {
+    return unwrap(this.api.GET("/hear/sessions"));
+  }
+  hearSession(name: string) {
+    return unwrap(this.api.GET("/hear/sessions/{name}", { params: { path: { name } } }));
+  }
+  /** Delete a session and its audio; 409 while it is open in the recorder. */
+  deleteHearSession(name: string) {
+    return unwrap(this.api.DELETE("/hear/sessions/{name}", { params: { path: { name } } }));
+  }
+  /** Play a take through Ghost's own speaker; refused while a take is going. */
+  hearPlay(session: string, take: string, channel: HearChannel = "aec") {
+    return unwrap(this.api.POST("/hear/play", { body: { session, take, channel } }));
+  }
+  hearStopPlaying() {
+    return unwrap(this.api.POST("/hear/play/stop"));
+  }
+  hearRuns() {
+    return unwrap(this.api.GET("/hear/runs"));
+  }
+  /** Score a session; the recorder must be open (a run holds the mic). Progress is on the `hear` event. */
+  startHearRun(session: string, channel: HearChannel = "aec") {
+    return unwrap(this.api.POST("/hear/runs", { body: { session, channel } }));
+  }
+  /** A run's report, against `baseline` (another run's id) when given. */
+  hearRun(id: string, baseline?: string | null) {
+    return unwrap(this.api.GET("/hear/runs/{id}", { params: { path: { id }, query: baseline ? { baseline } : {} } }));
+  }
+  noteHearRun(id: string, note: string) {
+    return unwrap(this.api.PUT("/hear/runs/{id}/note", { params: { path: { id } }, body: { note } }));
+  }
+  deleteHearRun(id: string) {
+    return unwrap(this.api.DELETE("/hear/runs/{id}", { params: { path: { id } } }));
   }
 }
 

@@ -253,6 +253,7 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
 .g-status-dot.is-starting { --c: var(--phase-starting); animation: g-breathe 1.6s var(--ease-in-out) infinite; }
 .g-status-dot.is-passive { --c: var(--phase-passive); }
 .g-status-dot.is-hold { --c: var(--phase-passive); }
+.g-status-dot.is-recording { --c: var(--phase-passive); }
 .g-status-dot.is-listening { --c: var(--phase-listening); }
 .g-status-dot.is-asking { --c: var(--phase-listening); }
 .g-status-dot.is-thinking { --c: var(--phase-thinking); animation: g-breathe 0.9s var(--ease-in-out) infinite; }
@@ -759,6 +760,9 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
 
 .g-voice.is-listening { --c: var(--phase-listening); }
 .g-voice.is-asking { --c: var(--phase-listening); }
+/* The Hearing test has the mic (ADR 0042): Ghost isn't listening, so it reads as passive. */
+.g-voice.is-recording .g-voice__ring { border-color: var(--border); }
+.g-voice.is-recording .g-voice__core { color: var(--text-2); background: var(--bg-surface); border-color: var(--border-strong); }
 .g-voice.is-listening .g-voice__halo { opacity: 1; }
 .g-voice.is-listening .g-voice__ripple { animation: g-voice-ripple 2.4s var(--ease-out) infinite; }
 .g-voice.is-listening.has-level .g-voice__ripple { animation: none; }

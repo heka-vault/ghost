@@ -9,7 +9,7 @@ import { phaseLabel } from "./labels";
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
 
 /** Ghost's phase as the apps show it: the daemon's phases plus offline and starting. */
-export type GhostPhase = "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking" | "offline";
+export type GhostPhase = "starting" | "passive" | "listening" | "thinking" | "speaking" | "hold" | "asking" | "recording" | "offline";
 
 /**
  * How the daemon was built (docs/releasing.md): "dev a1b2c3d", "deploy a1b2c3d", "release
