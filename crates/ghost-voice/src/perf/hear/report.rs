@@ -10,6 +10,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::Serialize;
+
 use super::plan::Kind;
 use super::score::{Class, Delta, Verdict, paired_delta};
 use super::{MODES, Read, Results, TakeResult};
@@ -175,43 +177,52 @@ fn close_p95(takes: &[&TakeResult], mode: &str) -> Option<f64> {
     quantile(&xs, 0.95)
 }
 
-fn comparison_table(out: &mut Vec<String>, rows: &[Compared], wtl: (usize, usize, usize)) {
-    out.push("| Measure | Takes | Before | After | Change | 95% interval | Verdict |".into());
-    out.push("|---|---|---|---|---|---|---|".into());
+fn signed(name: &str, x: f64) -> String {
+    let s = fmt_rate(name, x.abs());
+    if x > 0.0 {
+        format!("+{s}")
+    } else if x < 0.0 {
+        format!("−{s}")
+    } else {
+        s
+    }
+}
+
+fn comparison_parts(parts: &mut Vec<Part>, rows: &[Compared], wtl: (usize, usize, usize)) {
+    let mut table = Table::new(&[
+        "Measure",
+        "Takes",
+        "Before",
+        "After",
+        "Change",
+        "95% interval",
+        "Verdict",
+    ]);
     for c in rows {
         let d = &c.delta;
-        let signed = |x: f64| {
-            let s = fmt_rate(c.name, x.abs());
-            if x > 0.0 {
-                format!("+{s}")
-            } else if x < 0.0 {
-                format!("−{s}")
-            } else {
-                s
-            }
-        };
-        out.push(format!(
-            "| {} | {} | {} | {} | {} | {} to {} | {} |",
-            c.name,
-            c.n,
-            fmt_rate(c.name, d.a),
-            fmt_rate(c.name, d.b),
-            signed(d.delta),
-            signed(d.low),
-            signed(d.high),
-            d.verdict().word()
-        ));
+        table.rows.push(Row {
+            cells: vec![
+                c.name.to_string(),
+                c.n.to_string(),
+                fmt_rate(c.name, d.a),
+                fmt_rate(c.name, d.b),
+                signed(c.name, d.delta),
+                format!("{} to {}", signed(c.name, d.low), signed(c.name, d.high)),
+                d.verdict().word().to_string(),
+            ],
+            verdict: Some(d.verdict()),
+            take: None,
+        });
     }
-    out.push(String::new());
-    out.push(format!(
+    parts.push(Part::Table(table));
+    parts.push(Part::Text(format!(
         "Per take, fewer errors after / the same / more: {} / {} / {} (damage: {} of {}).",
         wtl.0,
         wtl.1,
         wtl.2,
         wtl.2,
         wtl.0 + wtl.1 + wtl.2
-    ));
-    out.push(String::new());
+    )));
 }
 
 struct Summary {
@@ -313,83 +324,163 @@ fn ratio(a: usize, b: usize) -> String {
     }
 }
 
-/// The report, and the pass rule's verdict for the `stage` read when there is a baseline.
-pub fn render(
-    results: &Results,
-    baseline: Option<&Results>,
-    budget: f64,
-) -> (String, Option<bool>) {
-    let takes: Vec<&TakeResult> = results.takes.iter().collect();
-    let mut out = vec![
-        "# How Ghost hears: the hear harness".to_string(),
-        String::new(),
-    ];
-    for (k, v) in &results.meta {
-        out.push(format!(
-            "- **{k}:** {}",
-            v.as_str().map_or_else(|| v.to_string(), String::from)
-        ));
+// --- the report as data: what the markdown and the desktop's Hearing test both show ----------
+
+/// One row of a table. `verdict`: a comparison row's; `take`: the take a row is about
+/// (`TakeResult::key`), so the desktop can play it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Row {
+    pub cells: Vec<String>,
+    pub verdict: Option<Verdict>,
+    pub take: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Table {
+    pub columns: Vec<String>,
+    pub rows: Vec<Row>,
+}
+
+impl Table {
+    fn new(columns: &[&str]) -> Self {
+        Self {
+            columns: columns.iter().map(|c| (*c).to_string()).collect(),
+            rows: Vec::new(),
+        }
     }
-    out.push(format!("- **takes:** {}", takes.len()));
-    out.push(String::new());
-    out.push(
-        "`stage` is what the speech-in stage hands the aggregator (today each VAD segment read \
-         alone, the finals joined); `turn` is the turn's audio read once at the close (#52 \
+
+    fn with(columns: Vec<String>) -> Self {
+        Self {
+            columns,
+            rows: Vec::new(),
+        }
+    }
+
+    fn row(&mut self, cells: Vec<String>) {
+        self.rows.push(Row {
+            cells,
+            verdict: None,
+            take: None,
+        });
+    }
+}
+
+/// A section's content, in order. Text may hold `code` in backticks.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Part {
+    Text {
+        text: String,
+    },
+    Table(Table),
+    /// Name and value pairs.
+    Facts {
+        facts: Vec<(String, String)>,
+    },
+    /// The pass rule's line: `pass`, and why.
+    Pass {
+        pass: bool,
+        text: String,
+    },
+}
+
+#[allow(non_snake_case)]
+impl Part {
+    fn Text(text: impl Into<String>) -> Self {
+        Part::Text { text: text.into() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Section {
+    /// 2 for a section, 3 for one inside the one before.
+    pub level: u8,
+    pub title: String,
+    pub parts: Vec<Part>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Report {
+    pub meta: Vec<(String, String)>,
+    pub intro: String,
+    pub sections: Vec<Section>,
+    /// The pass rule for `stage`, when there is a baseline.
+    pub pass: Option<bool>,
+}
+
+fn meta_value(v: &serde_json::Value) -> String {
+    v.as_str().map_or_else(|| v.to_string(), String::from)
+}
+
+fn section(level: u8, title: impl Into<String>) -> Section {
+    Section {
+        level,
+        title: title.into(),
+        parts: Vec::new(),
+    }
+}
+
+/// The report as data, and the pass rule's verdict for the `stage` read when there is a
+/// baseline.
+pub fn build(results: &Results, baseline: Option<&Results>, budget: f64) -> Report {
+    let takes: Vec<&TakeResult> = results.takes.iter().collect();
+    let mut meta: Vec<(String, String)> = results
+        .meta
+        .iter()
+        .map(|(k, v)| (k.clone(), meta_value(v)))
+        .collect();
+    meta.push(("takes".into(), takes.len().to_string()));
+    let intro = "`stage` is what the speech-in stage hands the aggregator (today each VAD segment \
+         read alone, the finals joined); `turn` is the turn's audio read once at the close (#52 \
          item 1); `file` is the whole take read once with no VAD. Fillers are left out of \
          every count; numbers are compared as digits."
-            .into(),
-    );
-    out.push(String::new());
+        .to_string();
+    let mut sections = Vec::new();
 
-    out.push("## Summary".into());
-    out.push(String::new());
-    out.push(format!("| | {} |", MODES.join(" | ")));
-    out.push(format!("|---|{}", "---|".repeat(MODES.len())));
+    // the summary
+    let mut s = section(2, "Summary");
+    let mut header = vec![String::new()];
+    header.extend(MODES.iter().map(|m| (*m).to_string()));
+    let mut table = Table::with(header);
     let sums: Vec<Summary> = MODES.iter().map(|m| summarize(&takes, m)).collect();
-    let row = |label: &str, f: &dyn Fn(&Summary) -> String| {
-        format!(
-            "| {label} | {} |",
-            sums.iter().map(f).collect::<Vec<_>>().join(" | ")
-        )
+    let mut row = |label: &str, f: &dyn Fn(&Summary) -> String| {
+        let mut cells = vec![label.to_string()];
+        cells.extend(sums.iter().map(f));
+        table.row(cells);
     };
-    out.push(row("word error rate (requests and replies)", &|s| {
+    row("word error rate (requests and replies)", &|s| {
         s.wer.map_or("-".into(), pct)
-    }));
-    out.push(row("word error rate (requests)", &|s| {
+    });
+    row("word error rate (requests)", &|s| {
         s.requests_wer.map_or("-".into(), pct)
-    }));
-    out.push(row("number errors", &|s| ratio(s.numbers.0, s.numbers.1)));
-    out.push(row("terms heard", &|s| ratio(s.terms.0, s.terms.1)));
-    out.push(row("terms made up", &|s| s.terms.2.to_string()));
-    out.push(row("empty reads (requests and replies)", &|s| {
+    });
+    row("number errors", &|s| ratio(s.numbers.0, s.numbers.1));
+    row("terms heard", &|s| ratio(s.terms.0, s.terms.1));
+    row("terms made up", &|s| s.terms.2.to_string());
+    row("empty reads (requests and replies)", &|s| {
         ratio(s.empty, s.spoken)
-    }));
-    out.push(row("replies dropped", &|s| {
-        ratio(s.replies_empty, s.replies)
-    }));
-    out.push(row("silent takes with words", &|s| {
+    });
+    row("replies dropped", &|s| ratio(s.replies_empty, s.replies));
+    row("silent takes with words", &|s| {
         ratio(s.silent_with_words, s.silent)
-    }));
-    out.push(row("made-up words in silent takes", &|s| {
-        s.made_up.to_string()
-    }));
-    out.push(row("segments per take", &|s| format!("{:.2}", s.segments)));
-    out.push(row("takes split in pieces", &|s| ratio(s.split, s.spoken)));
-    out.push(row("read at the close, p50", &|s| secs(s.close_p50)));
-    out.push(row("read at the close, p95", &|s| secs(s.close_p95)));
-    out.push(row("model time per second of audio", &|s| {
-        secs(s.cost_per_sec)
-    }));
-    out.push(String::new());
+    });
+    row("made-up words in silent takes", &|s| s.made_up.to_string());
+    row("segments per take", &|s| format!("{:.2}", s.segments));
+    row("takes split in pieces", &|s| ratio(s.split, s.spoken));
+    row("read at the close, p50", &|s| secs(s.close_p50));
+    row("read at the close, p95", &|s| secs(s.close_p95));
+    row("model time per second of audio", &|s| secs(s.cost_per_sec));
+    s.parts.push(Part::Table(table));
+    sections.push(s);
 
     // by block
-    out.push("## By block".into());
-    out.push(String::new());
-    out.push(format!(
-        "| Block | Condition | Takes | {} |",
-        MODES.join(" | ")
-    ));
-    out.push(format!("|---|---|---|{}", "---|".repeat(MODES.len())));
+    let mut s = section(2, "By block");
+    let mut header: Vec<String> = ["Block", "Condition", "Takes"]
+        .iter()
+        .map(|c| (*c).to_string())
+        .collect();
+    header.extend(MODES.iter().map(|m| (*m).to_string()));
+    let mut table = Table::with(header);
     let mut blocks: BTreeMap<(String, String), Vec<&TakeResult>> = BTreeMap::new();
     for t in &takes {
         blocks
@@ -398,29 +489,22 @@ pub fn render(
             .push(t);
     }
     for ((b, c), ts) in &blocks {
-        let cells: Vec<String> = MODES
-            .iter()
-            .map(|m| {
-                let s = summarize(ts, m);
-                if s.spoken == 0 {
-                    format!("{} made up", s.made_up)
-                } else {
-                    s.wer.map_or("-".into(), pct)
-                }
-            })
-            .collect();
-        out.push(format!(
-            "| {b} | {c} | {} | {} |",
-            ts.len(),
-            cells.join(" | ")
-        ));
+        let mut cells = vec![b.clone(), c.clone(), ts.len().to_string()];
+        cells.extend(MODES.iter().map(|m| {
+            let s = summarize(ts, m);
+            if s.spoken == 0 {
+                format!("{} made up", s.made_up)
+            } else {
+                s.wer.map_or("-".into(), pct)
+            }
+        }));
+        table.row(cells);
     }
-    out.push(String::new());
-    out.push(
-        "A speech block's cell is its word error rate; a silent block's is the words made up."
-            .into(),
-    );
-    out.push(String::new());
+    s.parts.push(Part::Table(table));
+    s.parts.push(Part::Text(
+        "A speech block's cell is its word error rate; a silent block's is the words made up.",
+    ));
+    sections.push(s);
 
     // by tag
     let mut tags: BTreeMap<&str, Vec<&TakeResult>> = BTreeMap::new();
@@ -429,37 +513,41 @@ pub fn render(
             tags.entry(tag.as_str()).or_default().push(t);
         }
     }
-    let tag_rows: Vec<String> = tags
-        .iter()
-        .filter(|(_, ts)| ts.iter().any(|t| spoken(t)))
-        .map(|(tag, ts)| {
-            let cells: Vec<String> = MODES
+    let mut header: Vec<String> = vec!["Tag".into(), "Takes".into()];
+    header.extend(MODES.iter().map(|m| (*m).to_string()));
+    let mut table = Table::with(header);
+    for (tag, ts) in tags.iter().filter(|(_, ts)| ts.iter().any(|t| spoken(t))) {
+        let mut cells = vec![
+            (*tag).to_string(),
+            ts.iter().filter(|t| spoken(t)).count().to_string(),
+        ];
+        cells.extend(
+            MODES
                 .iter()
-                .map(|m| summarize(ts, m).wer.map_or("-".into(), pct))
-                .collect();
-            format!(
-                "| {tag} | {} | {} |",
-                ts.iter().filter(|t| spoken(t)).count(),
-                cells.join(" | ")
-            )
-        })
-        .collect();
-    if !tag_rows.is_empty() {
-        out.push("## By tag (word error rate)".into());
-        out.push(String::new());
-        out.push(format!("| Tag | Takes | {} |", MODES.join(" | ")));
-        out.push(format!("|---|---|{}", "---|".repeat(MODES.len())));
-        out.extend(tag_rows);
-        out.push(String::new());
+                .map(|m| summarize(ts, m).wer.map_or("-".into(), pct)),
+        );
+        table.row(cells);
+    }
+    if !table.rows.is_empty() {
+        let mut s = section(2, "By tag (word error rate)");
+        s.parts.push(Part::Table(table));
+        sections.push(s);
     }
 
     // by class
-    out.push("## Errors by class".into());
-    out.push(String::new());
-    out.push("Substitutions and deletions count against the word said; insertions against the word heard.".into());
-    out.push(String::new());
-    out.push("| Read | Class | Words said | Substituted | Dropped | Inserted | Rate |".into());
-    out.push("|---|---|---|---|---|---|---|".into());
+    let mut s = section(2, "Errors by class");
+    s.parts.push(Part::Text(
+        "Substitutions and deletions count against the word said; insertions against the word heard.",
+    ));
+    let mut table = Table::new(&[
+        "Read",
+        "Class",
+        "Words said",
+        "Substituted",
+        "Dropped",
+        "Inserted",
+        "Rate",
+    ]);
     for m in MODES {
         for c in Class::ALL {
             let k = takes
@@ -474,17 +562,19 @@ pub fn render(
             } else {
                 "-".into()
             };
-            out.push(format!(
-                "| {m} | {} | {} | {} | {} | {} | {rate} |",
-                c.name(),
-                k[0],
-                k[1],
-                k[2],
-                k[3]
-            ));
+            table.row(vec![
+                m.to_string(),
+                c.name().to_string(),
+                k[0].to_string(),
+                k[1].to_string(),
+                k[2].to_string(),
+                k[3].to_string(),
+                rate,
+            ]);
         }
     }
-    out.push(String::new());
+    s.parts.push(Part::Table(table));
+    sections.push(s);
 
     // within the run
     let same: Vec<(&TakeResult, &TakeResult)> = takes.iter().map(|t| (*t, *t)).collect();
@@ -500,51 +590,51 @@ pub fn render(
             "how far today's read is from the whole take read once",
         ),
     ] {
-        out.push(format!("## `{a}` against `{b}`: {why}"));
-        out.push(String::new());
-        comparison_table(&mut out, &compare(&same, a, b), win_tie_loss(&same, a, b));
+        let mut s = section(2, format!("`{a}` against `{b}`: {why}"));
+        comparison_parts(
+            &mut s.parts,
+            &compare(&same, a, b),
+            win_tie_loss(&same, a, b),
+        );
         let (pa, pb) = (close_p95(&takes, a), close_p95(&takes, b));
-        out.push(format!(
+        s.parts.push(Part::Text(format!(
             "Read at the close, p95: {} against {}.",
             secs(pa),
             secs(pb)
-        ));
-        out.push(String::new());
+        )));
+        sections.push(s);
     }
 
     // against the baseline
     let mut verdict = None;
     if let Some(base) = baseline {
         let paired = pairs(&base.takes, &results.takes);
-        out.push("## Against the baseline".into());
-        out.push(String::new());
-        for (k, v) in &base.meta {
-            if [
-                "date",
-                "commit",
-                "source",
-                "settings overrides",
-                "speech to text",
-            ]
-            .contains(&k.as_str())
-            {
-                out.push(format!(
-                    "- **baseline {k}:** {}",
-                    v.as_str().map_or_else(|| v.to_string(), String::from)
-                ));
-            }
-        }
-        out.push(format!(
-            "- **takes in both:** {} of {}",
-            paired.len(),
-            results.takes.len()
+        let mut s = section(2, "Against the baseline");
+        let mut facts: Vec<(String, String)> = base
+            .meta
+            .iter()
+            .filter(|(k, _)| {
+                [
+                    "date",
+                    "commit",
+                    "source",
+                    "settings overrides",
+                    "speech to text",
+                ]
+                .contains(&k.as_str())
+            })
+            .map(|(k, v)| (format!("baseline {k}"), meta_value(v)))
+            .collect();
+        facts.push((
+            "takes in both".into(),
+            format!("{} of {}", paired.len(), results.takes.len()),
         ));
-        out.push(String::new());
+        s.parts.push(Part::Facts { facts });
+        sections.push(s);
         for m in MODES {
             let rows = compare(&paired, m, m);
-            out.push(format!("### `{m}`, baseline → this run"));
-            out.push(String::new());
-            comparison_table(&mut out, &rows, win_tie_loss(&paired, m, m));
+            let mut s = section(3, format!("`{m}`, baseline → this run"));
+            comparison_parts(&mut s.parts, &rows, win_tie_loss(&paired, m, m));
             let before: Vec<&TakeResult> = paired.iter().map(|(x, _)| *x).collect();
             let after: Vec<&TakeResult> = paired.iter().map(|(_, y)| *y).collect();
             let (p0, p1) = (close_p95(&before, m), close_p95(&after, m));
@@ -552,14 +642,13 @@ pub fn render(
                 (Some(a), Some(b)) => b - a,
                 _ => 0.0,
             };
-            out.push(format!(
+            s.parts.push(Part::Text(format!(
                 "Read at the close, p95: {} → {} ({:+.2} s; the budget is +{:.2} s).",
                 secs(p0),
                 secs(p1),
                 grew,
                 budget
-            ));
-            out.push(String::new());
+            )));
             if m == "stage" {
                 let worse: Vec<&str> = rows
                     .iter()
@@ -574,27 +663,29 @@ pub fn render(
                 let slow = grew > budget;
                 let pass = worse.is_empty() && !slow && !paired.is_empty();
                 verdict = Some(pass);
-                out.push(format!(
-                    "**Pass rule for `stage`: {}.** {}{}{}",
-                    if pass { "PASS" } else { "FAIL" },
-                    if worse.is_empty() {
-                        "Nothing is worse beyond noise".to_string()
-                    } else {
-                        format!("Worse beyond noise: {}", worse.join(", "))
-                    },
-                    if slow {
-                        format!("; the close's p95 grew {grew:.2} s, over the budget")
-                    } else {
-                        String::new()
-                    },
-                    if better.is_empty() {
-                        ".".to_string()
-                    } else {
-                        format!("; better: {}.", better.join(", "))
-                    },
-                ));
-                out.push(String::new());
+                s.parts.push(Part::Pass {
+                    pass,
+                    text: format!(
+                        "{}{}{}",
+                        if worse.is_empty() {
+                            "Nothing is worse beyond noise".to_string()
+                        } else {
+                            format!("Worse beyond noise: {}", worse.join(", "))
+                        },
+                        if slow {
+                            format!("; the close's p95 grew {grew:.2} s, over the budget")
+                        } else {
+                            String::new()
+                        },
+                        if better.is_empty() {
+                            ".".to_string()
+                        } else {
+                            format!("; better: {}.", better.join(", "))
+                        },
+                    ),
+                });
             }
+            sections.push(s);
         }
     }
 
@@ -607,36 +698,114 @@ pub fn render(
         .take(10)
         .collect();
     if !worst.is_empty() {
-        out.push("## The takes to listen to".into());
-        out.push(String::new());
-        out.push("The most errors in `stage`; `--show-text` prints what each read heard.".into());
-        out.push(String::new());
-        out.push(format!(
-            "| Take | Source | Words said | Segments | {} |",
-            MODES.join(" | ")
+        let mut s = section(2, "The takes to listen to");
+        s.parts.push(Part::Text(
+            "The most errors in `stage`; `--show-text` prints what each read heard.",
         ));
-        out.push(format!("|---|---|---|---|{}", "---|".repeat(MODES.len())));
+        let mut header: Vec<String> = ["Take", "Source", "Words said", "Segments"]
+            .iter()
+            .map(|c| (*c).to_string())
+            .collect();
+        header.extend(MODES.iter().map(|m| (*m).to_string()));
+        let mut table = Table::with(header);
         for t in worst {
-            let cells: Vec<String> = MODES
-                .iter()
-                .map(|m| {
-                    t.modes
-                        .get(*m)
-                        .map_or("-".into(), |r| r.errors().to_string())
-                })
-                .collect();
-            out.push(format!(
-                "| {} | {} | {} | {} | {} |",
-                t.id,
-                t.source,
-                t.ref_words,
-                t.modes.get("stage").map_or(0, |r| r.segments),
-                cells.join(" | ")
-            ));
+            let mut cells = vec![
+                t.id.clone(),
+                t.source.clone(),
+                t.ref_words.to_string(),
+                t.modes.get("stage").map_or(0, |r| r.segments).to_string(),
+            ];
+            cells.extend(MODES.iter().map(|m| {
+                t.modes
+                    .get(*m)
+                    .map_or("-".into(), |r| r.errors().to_string())
+            }));
+            table.rows.push(Row {
+                cells,
+                verdict: None,
+                take: Some(t.key()),
+            });
         }
-        out.push(String::new());
+        s.parts.push(Part::Table(table));
+        sections.push(s);
     }
-    (out.join("\n"), verdict)
+    Report {
+        meta,
+        intro,
+        sections,
+        pass: verdict,
+    }
+}
+
+fn markdown_table(out: &mut Vec<String>, t: &Table) {
+    let head: Vec<String> = t
+        .columns
+        .iter()
+        .map(|c| {
+            if c.is_empty() {
+                " ".into()
+            } else {
+                format!(" {c} ")
+            }
+        })
+        .collect();
+    out.push(format!("|{}|", head.join("|")));
+    out.push(format!("|{}", "---|".repeat(t.columns.len())));
+    for r in &t.rows {
+        out.push(format!("| {} |", r.cells.join(" | ")));
+    }
+}
+
+/// The report as markdown (`report.md`).
+pub fn markdown(report: &Report) -> String {
+    let mut out = vec![
+        "# How Ghost hears: the hear harness".to_string(),
+        String::new(),
+    ];
+    for (k, v) in &report.meta {
+        out.push(format!("- **{k}:** {v}"));
+    }
+    out.push(String::new());
+    out.push(report.intro.clone());
+    out.push(String::new());
+    for s in &report.sections {
+        out.push(format!("{} {}", "#".repeat(s.level as usize), s.title));
+        out.push(String::new());
+        for p in &s.parts {
+            match p {
+                Part::Text { text } => out.push(text.clone()),
+                Part::Facts { facts } => {
+                    for (k, v) in facts {
+                        out.push(format!("- **{k}:** {v}"));
+                    }
+                }
+                Part::Table(t) => markdown_table(&mut out, t),
+                Part::Pass { pass, text } => out.push(format!(
+                    "**Pass rule for `stage`: {}.** {text}",
+                    if *pass { "PASS" } else { "FAIL" }
+                )),
+            }
+            out.push(String::new());
+        }
+    }
+    out.join("\n")
+}
+
+/// The report as markdown, and the pass rule's verdict for the `stage` read when there is
+/// a baseline.
+pub fn render(
+    results: &Results,
+    baseline: Option<&Results>,
+    budget: f64,
+) -> (String, Option<bool>) {
+    let report = build(results, baseline, budget);
+    (markdown(&report), report.pass)
+}
+
+/// The word error rate of one read over a run's spoken takes.
+pub fn wer(results: &Results, mode: &str) -> Option<f64> {
+    let takes: Vec<&TakeResult> = results.takes.iter().collect();
+    summarize(&takes, mode).wer
 }
 
 /// A few lines for the terminal.

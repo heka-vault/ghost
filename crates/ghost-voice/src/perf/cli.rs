@@ -30,7 +30,8 @@ use super::harness::{Bench, RunConfig, parse_ablations};
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
-pub const USAGE: &str = "usage: ghost-perf run|micro|llm|report|hear|hear-report [options]";
+pub const USAGE: &str =
+    "usage: ghost-perf run|micro|llm|report|hear|hear-report|hear-check [options]";
 
 fn csv(s: Option<&String>) -> Vec<String> {
     s.map(|s| {
@@ -133,6 +134,26 @@ pub fn main(argv: &[String]) -> i32 {
     }
     if args.cmd == "hear-report" {
         return hear_report(&args);
+    }
+    if args.cmd == "hear-check" {
+        let Some(dir) = args.positional.first() else {
+            eprintln!("usage: ghost-perf hear-check SESSION_DIR [--show-text]");
+            return 2;
+        };
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        return match rt.block_on(super::hear::run_check(
+            Path::new(dir),
+            args.has("show-text"),
+        )) {
+            Ok(code) => code,
+            Err(e) => {
+                eprintln!("{e}");
+                2
+            }
+        };
     }
     let out = args.one("out").map(PathBuf::from).unwrap_or_else(|| {
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();

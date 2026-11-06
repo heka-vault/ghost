@@ -24,6 +24,8 @@
 pub mod plan;
 pub mod report;
 pub mod score;
+pub mod store;
+pub mod take;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -350,6 +352,170 @@ fn git_commit(root: &Path) -> String {
     }
 }
 
+/// The check after a take (ADR 0042): where the VAD hears speech, and what one read of
+/// the whole take heard, against the line. For the screen; nothing is written.
+pub async fn check_take(
+    models: &Models,
+    settings: &VoiceSettings,
+    kind: Kind,
+    line: &str,
+    pcm: &[i16],
+) -> anyhow::Result<take::Check> {
+    let params = settings.vad_params();
+    let silero = models.silero.clone();
+    let audio = pcm.to_vec();
+    let speech = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<(f64, f64)>> {
+        let mut vad = take::Vad::load(&silero, params)?;
+        Ok(take::speech_span(&mut vad, &audio, params))
+    })
+    .await??;
+    let (heard, _) = read_once(models, pcm).await;
+    Ok(take::check(kind, line, pcm, speech, &heard))
+}
+
+/// `ghost-perf hear-check DIR`: every take of a session checked as the Hearing test checks
+/// a new one, to find the takes to redo. What was heard is printed only with `show_text`.
+pub async fn run_check(dir: &Path, show_text: bool) -> anyhow::Result<i32> {
+    let settings = VoiceSettings::from_env()?;
+    let models = Models::load(&settings)?;
+    let text = std::fs::read_to_string(dir.join(plan::MANIFEST))
+        .map_err(|e| anyhow::anyhow!("{}: {e}", dir.join(plan::MANIFEST).display()))?;
+    let mut flagged = 0;
+    let entries = plan::read_manifest(&text);
+    for e in &entries {
+        let Some(file) = e.file.as_ref().filter(|_| !e.skipped) else {
+            continue;
+        };
+        let pcm = plan::read_mono(&dir.join(file))?;
+        let c = check_take(&models, &settings, e.kind, &e.text, &pcm).await?;
+        let redo = c.warnings.iter().any(take::Warning::redo);
+        flagged += usize::from(redo);
+        println!(
+            "{} {:<7} {:>4.1}s  speech {}  words {}/{}{}",
+            e.id,
+            e.kind.name(),
+            c.seconds,
+            c.speech
+                .map_or_else(|| "none".into(), |(a, b)| format!("{a:.2}-{b:.2}s")),
+            c.matched,
+            c.said,
+            if redo { "  REDO" } else { "" }
+        );
+        for w in &c.warnings {
+            println!("    {}", w.text());
+        }
+        if show_text {
+            println!("    said:  {:?}", e.text);
+            println!("    heard: {:?}", c.heard);
+        }
+    }
+    println!(
+        "\n{flagged} of {} takes to redo.",
+        entries.iter().filter(|e| !e.skipped).count()
+    );
+    Ok(0)
+}
+
+/// What a run was: when, on what code and models, with which settings.
+pub fn run_meta(
+    settings: &VoiceSettings,
+    overrides: &BTreeMap<String, String>,
+    source: &str,
+    channel: &str,
+    commit: &str,
+    wall_secs: f64,
+) -> BTreeMap<String, Value> {
+    let mut meta: BTreeMap<String, Value> = BTreeMap::new();
+    meta.insert(
+        "date".into(),
+        json!(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()),
+    );
+    meta.insert("commit".into(), json!(commit));
+    meta.insert("source".into(), json!(source));
+    meta.insert("channel".into(), json!(channel));
+    meta.insert(
+        "speech to text".into(),
+        json!(format!(
+            "{} ({}), {} threads",
+            settings
+                .stt_dir
+                .as_ref()
+                .map_or_else(|| settings.stt_model.clone(), |d| d.display().to_string()),
+            settings.stt_quantization.as_deref().unwrap_or("fp32"),
+            settings.stt_threads
+        )),
+    );
+    let v = settings.vad_params();
+    meta.insert(
+        "vad".into(),
+        json!(format!(
+            "confidence {}, start {} s, stop {} s, min volume {}",
+            v.confidence, v.start_secs, v.stop_secs, v.min_volume
+        )),
+    );
+    meta.insert(
+        "settings overrides".into(),
+        json!(if overrides.is_empty() {
+            "none".to_string()
+        } else {
+            overrides
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }),
+    );
+    meta.insert(
+        "host".into(),
+        json!(format!(
+            "{} CPUs",
+            std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(1)
+        )),
+    );
+    meta.insert("wall".into(), json!(format!("{wall_secs:.0}s")));
+    meta
+}
+
+/// A recorded session scored on models already loaded: the daemon's Hearing test (ADR
+/// 0042). `progress(done, total)` after each take. No text leaves here.
+pub async fn score_session(
+    models: &Models,
+    settings: &VoiceSettings,
+    dir: &Path,
+    channel: Channel,
+    commit: &str,
+    mut progress: impl FnMut(usize, usize),
+) -> anyhow::Result<Results> {
+    let t = Instant::now();
+    let (items, _missing) = plan::recorded(dir, channel, &[])?;
+    anyhow::ensure!(
+        !items.is_empty(),
+        "the session has no takes on {}",
+        channel.name()
+    );
+    let mut takes = Vec::with_capacity(items.len());
+    progress(0, items.len());
+    for (i, item) in items.iter().enumerate() {
+        let (result, _texts) = hear(models, settings, item).await?;
+        takes.push(result);
+        progress(i + 1, items.len());
+    }
+    let name = dir
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let meta = run_meta(
+        settings,
+        &BTreeMap::new(),
+        &format!("recorded takes, session {name}"),
+        channel.name(),
+        commit,
+        t.elapsed().as_secs_f64(),
+    );
+    Ok(Results { meta, takes })
+}
+
 pub fn read_results(path: &Path) -> anyhow::Result<Results> {
     let text =
         std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
@@ -439,65 +605,18 @@ pub async fn run_hear(a: &HearArgs) -> anyhow::Result<i32> {
         takes.push(result);
     }
 
-    let mut meta: BTreeMap<String, Value> = BTreeMap::new();
-    meta.insert(
-        "date".into(),
-        json!(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()),
-    );
-    meta.insert("commit".into(), json!(git_commit(&a.root)));
-    meta.insert("source".into(), json!(source));
-    meta.insert(
-        "channel".into(),
-        json!(if a.takes.is_some() {
-            a.channel.name()
-        } else {
-            "rendered"
-        }),
-    );
-    meta.insert(
-        "speech to text".into(),
-        json!(format!(
-            "{} ({}), {} threads",
-            settings
-                .stt_dir
-                .as_ref()
-                .map_or_else(|| settings.stt_model.clone(), |d| d.display().to_string()),
-            settings.stt_quantization.as_deref().unwrap_or("fp32"),
-            settings.stt_threads
-        )),
-    );
-    let v = settings.vad_params();
-    meta.insert(
-        "vad".into(),
-        json!(format!(
-            "confidence {}, start {} s, stop {} s, min volume {}",
-            v.confidence, v.start_secs, v.stop_secs, v.min_volume
-        )),
-    );
-    meta.insert(
-        "settings overrides".into(),
-        json!(if a.overrides.is_empty() {
-            "none".to_string()
-        } else {
-            a.overrides
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        }),
-    );
-    meta.insert(
-        "host".into(),
-        json!(format!(
-            "{} CPUs",
-            std::thread::available_parallelism()
-                .map(|p| p.get())
-                .unwrap_or(1)
-        )),
-    );
-    meta.insert(
-        "wall".into(),
-        json!(format!("{:.0}s", t.elapsed().as_secs_f64())),
+    let channel = if a.takes.is_some() {
+        a.channel.name()
+    } else {
+        "rendered"
+    };
+    let meta = run_meta(
+        &settings,
+        &a.overrides,
+        &source,
+        channel,
+        &git_commit(&a.root),
+        t.elapsed().as_secs_f64(),
     );
     let results = Results { meta, takes };
     std::fs::write(

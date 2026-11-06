@@ -10,6 +10,7 @@ pub mod controller;
 pub mod daemon;
 pub mod deciders;
 pub mod dictation;
+pub mod hear;
 pub mod hooks_listener;
 pub mod latency;
 pub mod passwords;

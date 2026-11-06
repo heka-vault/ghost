@@ -8,12 +8,12 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const PLAN_JSON: &str = include_str!("../../../../../docs/benchmarks/hear-plan.json");
 pub const MANIFEST: &str = "takes.jsonl";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     /// A request, scored by its word error rate.
@@ -34,37 +34,162 @@ impl Kind {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// The pause in a line: about a second, mid-sentence.
+pub const PAUSE: &str = " ... ";
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PlanTake {
     pub id: String,
     pub kind: Kind,
     #[serde(default)]
     pub text: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terms: Vec<String>,
+    /// A silent take's instruction ("(sit still, say nothing)").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub say: Option<String>,
+    /// A silent take's length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<f64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl PlanTake {
+    /// What the screen shows: the line with its pauses marked, or a silent take's
+    /// instruction.
+    pub fn shown(&self) -> String {
+        if self.kind == Kind::Silence {
+            return self
+                .say
+                .clone()
+                .unwrap_or_else(|| "(say nothing)".to_string());
+        }
+        self.text.replace(PAUSE, " ... (pause) ... ")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Block {
     pub block: String,
     pub condition: String,
     #[serde(default)]
-    pub away: bool,
+    pub title: String,
     #[serde(default)]
+    pub instruction: String,
+    /// Across the room: the operator can't reach the key, so a take starts after a
+    /// countdown and ends on silence.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub away: bool,
+    /// Music plays on the desk speakers, which the operator starts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub music: bool,
     pub takes: Vec<PlanTake>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Plan {
     pub version: u32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub about: String,
     pub blocks: Vec<Block>,
 }
 
+/// The plan Ghost ships (`docs/benchmarks/hear-plan.json`).
 pub fn plan() -> anyhow::Result<Plan> {
     Ok(serde_json::from_str(PLAN_JSON)?)
+}
+
+/// The longest a silent take may run, and the most a plan may hold.
+pub const MAX_SILENT_SECS: f64 = 60.0;
+pub const MAX_TAKES: usize = 500;
+
+/// What is wrong with a plan, for the operator: the first problem found.
+pub fn validate(plan: &Plan) -> Result<(), String> {
+    if plan.blocks.is_empty() {
+        return Err("the plan has no blocks".into());
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    let mut blocks = std::collections::BTreeSet::new();
+    let mut count = 0;
+    for b in &plan.blocks {
+        let name = b.block.trim();
+        if name.is_empty() || name.len() > 8 || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(format!(
+                "block {:?}: a block's name is letters or digits, 8 at most",
+                b.block
+            ));
+        }
+        if !blocks.insert(name.to_string()) {
+            return Err(format!("block {name} is in the plan twice"));
+        }
+        if b.condition.trim().is_empty() {
+            return Err(format!("block {name} has no condition"));
+        }
+        if b.takes.is_empty() {
+            return Err(format!("block {name} has no takes"));
+        }
+        for t in &b.takes {
+            count += 1;
+            let id = t.id.trim();
+            if id.is_empty()
+                || id.len() > 16
+                || !id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                return Err(format!(
+                    "take {:?}: an id is letters, digits, - or _, 16 at most",
+                    t.id
+                ));
+            }
+            if !id.starts_with(name) {
+                return Err(format!(
+                    "take {id} is in block {name}: its id starts with {name}"
+                ));
+            }
+            if !ids.insert(id.to_string()) {
+                return Err(format!("take {id} is in the plan twice"));
+            }
+            match t.kind {
+                Kind::Silence => {
+                    let secs = t.seconds.unwrap_or(0.0);
+                    if !(1.0..=MAX_SILENT_SECS).contains(&secs) {
+                        return Err(format!(
+                            "take {id} is silent: it runs 1 to {MAX_SILENT_SECS} s, not {secs}"
+                        ));
+                    }
+                    if !t.text.trim().is_empty() {
+                        return Err(format!("take {id} is silent and has a line to say"));
+                    }
+                }
+                Kind::Speech | Kind::Reply => {
+                    if t.text.trim().is_empty() {
+                        return Err(format!("take {id} has no line to say"));
+                    }
+                    if super::score::normalize(&t.text).is_empty() {
+                        return Err(format!("take {id}: its line has no words to score"));
+                    }
+                }
+            }
+            for term in &t.terms {
+                if !t.text.to_lowercase().contains(&term.to_lowercase()) {
+                    return Err(format!("take {id}: the term {term:?} is not in its line"));
+                }
+            }
+        }
+    }
+    if count > MAX_TAKES {
+        return Err(format!("{count} takes; the plan holds {MAX_TAKES} at most"));
+    }
+    Ok(())
+}
+
+/// Every take with its block, in plan order.
+pub fn takes(plan: &Plan) -> impl Iterator<Item = (&Block, &PlanTake)> {
+    plan.blocks
+        .iter()
+        .flat_map(|b| b.takes.iter().map(move |t| (b, t)))
 }
 
 /// One take to score: where it came from, what was said, and its audio.
@@ -94,8 +219,9 @@ impl Item {
     }
 }
 
-/// A line of `takes.jsonl` (the recorder's manifest).
-#[derive(Debug, Clone, Deserialize)]
+/// A line of `takes.jsonl` (the recorder's manifest). The terminal recorder wrote the
+/// first fields; the Hearing test adds how the take ended and where its speech lay.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Entry {
     pub id: String,
     #[serde(default)]
@@ -111,8 +237,27 @@ pub struct Entry {
     pub tags: Vec<String>,
     #[serde(default)]
     pub terms: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub skipped: bool,
+    /// The take's length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<f64>,
+    /// `ghost.mic`'s levels, dBFS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak: Option<f64>,
+    /// Where the VAD heard speech, seconds into the take.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech: Option<(f64, f64)>,
+    /// hold, quiet or timed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ending: Option<String>,
+    /// The check's warnings, by kind (`cut_off`): no text of what was heard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
 }
 
 /// The manifest's entries, the last line for a take winning; a torn line is skipped.

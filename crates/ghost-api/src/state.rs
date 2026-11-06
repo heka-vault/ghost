@@ -302,6 +302,16 @@ impl DaemonState {
         });
     }
 
+    /// The Hearing test's recorder (`Event::Hear`, ADR 0042): only while the operator has it
+    /// open.
+    pub fn publish_hear(&self, hear: crate::hear::HearView, level: f32, speaking: bool) {
+        self.bus.publish(&Event::Hear {
+            hear,
+            level,
+            speaking,
+        });
+    }
+
     /// The loudness of Ghost's own voice as it plays (`Event::Voice`); never the microphone.
     pub fn publish_voice(&self, level: f32) {
         self.bus.publish(&Event::Voice { level });

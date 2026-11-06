@@ -109,6 +109,20 @@ pub struct VoiceEvent {
     pub level: f32,
 }
 
+/// The Hearing test's recorder (ADR 0042), about twenty a second while it is open: what
+/// it is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to
+/// 0 dBFS) and whether the VAD hears speech; then one with the state `closed`. Only while
+/// the operator has the recorder open; never passive audio.
+#[derive(ToSchema)]
+pub struct HearEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "hear")]
+    pub r#type: String,
+    pub hear: crate::hear::HearView,
+    pub level: f32,
+    pub speaking: bool,
+}
+
 /// What the event stream carries, discriminated by `type`.
 #[derive(ToSchema)]
 #[serde(untagged)]
@@ -122,6 +136,7 @@ pub struct VoiceEvent {
     ("waiting" = "#/components/schemas/WaitingEvent"),
     ("apps" = "#/components/schemas/AppsEvent"),
     ("voice" = "#/components/schemas/VoiceEvent"),
+    ("hear" = "#/components/schemas/HearEvent"),
 )))]
 pub enum Event {
     Status(StatusEvent),
@@ -133,6 +148,7 @@ pub enum Event {
     Waiting(WaitingEvent),
     Apps(AppsEvent),
     Voice(VoiceEvent),
+    Hear(HearEvent),
 }
 
 /// `POST /conversations/{slug}/notes` takes a free object with `text` in it.
@@ -167,6 +183,8 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("WaitingEvent", WaitingEvent::schema()),
         ("AppsEvent", AppsEvent::schema()),
         ("VoiceEvent", VoiceEvent::schema()),
+        ("HearEvent", HearEvent::schema()),
+        ("HearView", crate::hear::HearView::schema()),
     ] {
         components.schemas.entry(name.to_string()).or_insert(schema);
     }
