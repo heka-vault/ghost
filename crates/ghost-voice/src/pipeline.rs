@@ -85,9 +85,7 @@ pub struct Models {
 
 impl Models {
     pub fn load(s: &VoiceSettings) -> anyhow::Result<Self> {
-        let paths = s.parakeet_paths().ok_or_else(|| {
-            anyhow::anyhow!("Parakeet's files are not in the Hugging Face cache; set GHOST_STT_DIR")
-        })?;
+        let paths = s.parakeet_paths();
         info!(
             "Loading {} ({})",
             s.stt_model,

@@ -103,7 +103,8 @@ pub async fn run_micro(only: &[String], n: usize, out: &Path, cache: &Path) -> a
         && let (Some(m), Some(v)) = (&models, &voice)
     {
         lines.push(format!(
-            "STT (Parakeet v3 int8, {} threads): seconds per utterance",
+            "STT (Parakeet v3 {}, {} threads): seconds per utterance",
+            settings.stt_quantization.as_deref().unwrap_or("fp32"),
             settings.stt_threads
         ));
         let mut stt = Map::new();

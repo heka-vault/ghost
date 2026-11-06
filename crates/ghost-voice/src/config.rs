@@ -50,9 +50,13 @@ pub struct VoiceSettings {
 
     // STT
     pub stt_model: String,
+    /// `GHOST_STT_QUANTIZATION`: unset or `none`, the full-precision files (ADR 0043);
+    /// `int8`, the quantized ones the parity fixtures were recorded with.
     pub stt_quantization: Option<String>,
     pub stt_threads: usize,
-    /// `GHOST_STT_DIR`: where Parakeet's files are; unset, the Hugging Face cache.
+    /// `GHOST_STT_DIR`: where Parakeet's files are; unset, Ghost's cache
+    /// (`models/parakeet-tdt-0.6b-v3/`, `scripts/models.sh parakeet`), and for int8 the
+    /// Hugging Face cache.
     pub stt_dir: Option<PathBuf>,
 
     // TTS
@@ -222,11 +226,9 @@ impl VoiceSettings {
             llm_thinking: string("GHOST_LLM_THINKING", ghost_llm::DEFAULT_THINKING),
             llm_max_tokens: number("GHOST_LLM_MAX_TOKENS")?.map_or(LLM_MAX_TOKENS, |v| v as u32),
             stt_model: string("GHOST_STT_MODEL", "nemo-parakeet-tdt-0.6b-v3"),
-            stt_quantization: match get("GHOST_STT_QUANTIZATION") {
-                None => Some("int8".into()),
-                Some(v) if v.trim().is_empty() || v.trim() == "none" => None,
-                Some(v) => Some(v.trim().to_string()),
-            },
+            stt_quantization: get("GHOST_STT_QUANTIZATION")
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty() && v != "none"),
             stt_threads: usize_or("GHOST_STT_THREADS", 4)?,
             stt_dir: path("GHOST_STT_DIR"),
             tts_voice: string("GHOST_TTS_VOICE", "af_heart"),
@@ -329,15 +331,19 @@ impl VoiceSettings {
         }
     }
 
-    /// Parakeet's files: `GHOST_STT_DIR`, else the Hugging Face cache.
-    pub fn parakeet_paths(&self) -> Option<ghost_infer::ParakeetPaths> {
-        match &self.stt_dir {
-            Some(dir) => Some(ghost_infer::ParakeetPaths::in_dir(
-                Path::new(dir),
-                self.stt_quantization.as_deref(),
-            )),
-            None => ghost_infer::ParakeetPaths::huggingface_cache(),
+    /// Parakeet's files: `GHOST_STT_DIR`; else Ghost's cache (`scripts/models.sh parakeet`);
+    /// for int8 only, else the Hugging Face cache's snapshot. A folder with nothing in it
+    /// is still named, so `ghostd check` can say what is missing and where.
+    pub fn parakeet_paths(&self) -> ghost_infer::ParakeetPaths {
+        let quantization = self.stt_quantization.as_deref();
+        if let Some(dir) = &self.stt_dir {
+            return ghost_infer::ParakeetPaths::in_dir(Path::new(dir), quantization);
         }
+        let cached = ghost_infer::ParakeetPaths::ghost_cache(&self.cache_dir, quantization);
+        if cached.encoder.is_file() || quantization != Some("int8") {
+            return cached;
+        }
+        ghost_infer::ParakeetPaths::huggingface_cache().unwrap_or(cached)
     }
 
     pub fn vad_params(&self) -> ghost_infer::VadParams {
@@ -411,11 +417,30 @@ mod tests {
         assert_eq!(s.vad_over_ghost_stop_secs, 0.6);
         assert_eq!(s.hold_timeout_secs, 1800.0);
         assert_eq!(s.compact_trigger_tokens, 24000);
-        assert_eq!(s.stt_quantization.as_deref(), Some("int8"));
+        assert_eq!(s.stt_quantization, None);
         assert!(s.latency);
         assert!(!s.debug_audio);
         assert_eq!(s.llm_thinking, "between_tools");
         assert_eq!(s.llm_max_tokens, 2000);
+    }
+
+    #[test]
+    fn parakeet_is_read_from_the_folder_named_else_ghosts_cache() {
+        let s = VoiceSettings::from_vars(vars(&[("GHOST_CACHE_DIR", "/c")])).unwrap();
+        assert_eq!(
+            s.parakeet_paths().encoder,
+            PathBuf::from("/c/models/parakeet-tdt-0.6b-v3/encoder-model.onnx")
+        );
+        let s = VoiceSettings::from_vars(vars(&[
+            ("GHOST_CACHE_DIR", "/c"),
+            ("GHOST_STT_DIR", "/elsewhere"),
+            ("GHOST_STT_QUANTIZATION", "int8"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            s.parakeet_paths().encoder,
+            PathBuf::from("/elsewhere/encoder-model.int8.onnx")
+        );
     }
 
     #[test]
@@ -425,13 +450,13 @@ mod tests {
             ("ELEVENLABS_API_KEY", "sk_secret_value_0000"),
             ("GHOST_TURN_GRACE_SECS", "0.4"),
             ("GHOST_TURN_SPECULATE", "no"),
-            ("GHOST_STT_QUANTIZATION", "none"),
+            ("GHOST_STT_QUANTIZATION", "int8"),
         ]))
         .unwrap();
         assert_eq!(s.tts_engine, "elevenlabs");
         assert_eq!(s.turn_grace_secs, 0.4);
         assert!(!s.turn_speculate);
-        assert_eq!(s.stt_quantization, None);
+        assert_eq!(s.stt_quantization.as_deref(), Some("int8"));
         let shown = format!("{s:?}");
         assert!(!shown.contains("sk_secret"), "{shown}");
         assert_eq!(

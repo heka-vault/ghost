@@ -1,6 +1,6 @@
 # 0042: The operator records takes to test how Ghost hears, in Ghost's own app
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-11-06
 - **Amends:** ADR 0013 (the control API carries levels and what Ghost heard of a take the operator
   recorded on purpose, never of passive audio), ADR 0040 (meeting notes keep no audio; takes are
