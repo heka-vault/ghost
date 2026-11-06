@@ -351,6 +351,81 @@ mod tests {
         assert!(e[1].skipped);
     }
 
+    fn wav(path: &Path, channels: u16, frames: &[i16]) {
+        let spec = hound::WavSpec {
+            channels,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(path, spec).unwrap();
+        for &s in frames {
+            for c in 0..channels {
+                w.write_sample(if c == 0 { s } else { -s }).unwrap();
+            }
+        }
+        w.finalize().unwrap();
+    }
+
+    #[test]
+    fn a_recorded_session_reads_either_channel_and_names_what_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let tone: Vec<i16> = (0..1600).map(|i| (i % 100) as i16).collect();
+        wav(&dir.path().join("A01-speech.aec.wav"), 1, &tone);
+        wav(&dir.path().join("A01-speech.raw.wav"), 2, &tone);
+        wav(&dir.path().join("D01-reply.aec.wav"), 1, &tone[..800]);
+        let manifest = [
+            r#"{"id":"A01","file":"A01-speech.aec.wav","raw":"A01-speech.raw.wav","block":"A","condition":"desk","kind":"speech","text":"Read me issue four oh three.","tags":["numbers"],"terms":[],"seconds":4.5}"#,
+            r#"{"id":"D01","file":"D01-reply.aec.wav","raw":null,"block":"D","condition":"desk-replies","kind":"reply","text":"Yes."}"#,
+            r#"{"id":"D02","file":null,"raw":null,"block":"D","condition":"desk-replies","kind":"reply","text":"No.","skipped":true}"#,
+        ]
+        .join("\n");
+        std::fs::write(dir.path().join(MANIFEST), manifest + "\n").unwrap();
+
+        let (items, missing) = recorded(dir.path(), Channel::Aec, &[]).unwrap();
+        assert_eq!(
+            items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["A01", "D01"]
+        );
+        assert!(missing.is_empty());
+        assert_eq!(items[0].pcm, tone);
+        assert_eq!(items[0].source, "take");
+        assert_eq!(items[0].tags, ["numbers"]);
+        assert_eq!(items[1].kind, Kind::Reply);
+
+        let (items, missing) = recorded(dir.path(), Channel::Raw, &[]).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].pcm, tone, "the raw file's first channel");
+        assert_eq!(missing, ["D01"]);
+
+        let (items, _) = recorded(dir.path(), Channel::Aec, &["D".to_string()]).unwrap();
+        assert_eq!(
+            items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["D01"]
+        );
+    }
+
+    #[test]
+    fn the_latest_session_is_the_newest_with_a_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        for (day, manifest) in [
+            ("2026-11-05", true),
+            ("2026-11-06", true),
+            ("2026-11-07", false),
+        ] {
+            let d = root.path().join(day);
+            std::fs::create_dir_all(&d).unwrap();
+            if manifest {
+                std::fs::write(d.join(MANIFEST), "").unwrap();
+            }
+        }
+        assert_eq!(
+            latest_session(root.path()),
+            Some(root.path().join("2026-11-06"))
+        );
+        assert_eq!(latest_session(&root.path().join("nowhere")), None);
+    }
+
     #[test]
     fn rendered_takes_leave_out_distance_and_music() {
         let p = plan().unwrap();
