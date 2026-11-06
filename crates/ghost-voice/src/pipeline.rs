@@ -837,6 +837,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             )
             .with_probe(probe.clone())
             .with_idle(settings.idle_timeout_secs, on_idle, held.clone())
+            .with_reader(settings.turn_reread.then(|| p.models.stt.clone()))
             .with_speaking(speaking.clone()),
         ),
     ));

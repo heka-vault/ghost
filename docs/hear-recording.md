@@ -59,7 +59,7 @@ right to go to it; a warning sign marks the ones worth a redo.
 | Block | What it asks | Takes | Why |
 |---|---|---|---|
 | A | At the desk, normal voice: everyday requests with issue numbers and names | 10 | The baseline |
-| B | A pause of about a second mid-sentence, where the line shows "... (pause) ..." | 8 | Today each piece is read alone (#52 item 1) |
+| B | A pause of about a second mid-sentence, where the line shows "... (pause) ..." | 8 | Each piece used to be read alone (#52 item 1); the whole turn is read once since ADR 0044 |
 | C | "Um", "uh", restarts and changes of mind, said as written | 6 | Fillers (#55) and corrections ("twelve, no wait, thirteen") |
 | D | One- and two-word replies: "Yes.", "Stop.", "Not yet." | 8 | Short answers Ghost must not drop |
 | E | Soft or tired voice | 5 | Less signal for the VAD and the model |

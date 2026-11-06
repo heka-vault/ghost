@@ -6,9 +6,10 @@
 //! audio's own clock. It is heard three ways:
 //!
 //! - `stage`: what the stage hands the aggregator, every final of the take joined with a
-//!   space as `turns` joins them. Today that is each VAD segment read alone.
+//!   space: each VAD segment read alone.
 //! - `turn`: the turn's audio, from the first segment's pre-roll to the last segment's
-//!   end, read once at the close: the whole-turn re-read of #52 item 1, before it exists.
+//!   end, read once: what the aggregator hands the model for a turn of two segments or
+//!   more (ADR 0044, `GHOST_TURN_REREAD`; the harness reads the span itself).
 //! - `file`: the whole take read once with no VAD: what Parakeet can do with the audio.
 //!
 //! Every read is scored against what was said (`score`): word error rate, errors by

@@ -16,7 +16,7 @@ it does live. Each take is heard three ways:
 | Read | What it is |
 |---|---|
 | `stage` | What the stage hands the aggregator: every final of the take joined with a space, as `turns` joins them. Today each VAD segment is read alone. When the stage changes, this is the column that moves. |
-| `turn` | The turn's audio, from the first segment's pre-roll to the last segment's end, read once: the whole-turn re-read of #52 item 1, measured before it is built. |
+| `turn` | The turn's audio, from the first segment's pre-roll to the last segment's end, read once: what the aggregator hands the model for a turn of two segments or more (ADR 0044, `GHOST_TURN_REREAD`; the harness reads the span itself, so `stage` against `turn` is that change's measure). |
 | `file` | The whole take read once, no VAD: what Parakeet can do with the audio. |
 
 The takes come from one of two places:

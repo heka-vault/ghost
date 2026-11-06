@@ -25,6 +25,7 @@
 //! keeps the turn's pieces, and hands the model the whole turn; when the operator goes on
 //! before any of the answer was heard or done, it reopens that turn ([`TurnControl`]).
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -38,6 +39,7 @@ use crate::debug;
 use crate::frames::{Direction, Frame, Metric, Out, Stage};
 use crate::latency::{LatencyProbe, null_probe};
 use crate::speaking::Speaking;
+use crate::stt::{PRE_ROLL_SECS, SAMPLE_RATE, SharedRecognizer, TRAILING_SECS, recognize};
 
 // --- the start -------------------------------------------------------------------------
 
@@ -1098,6 +1100,119 @@ impl TurnStopSink for AggregatorSink {
     }
 }
 
+// --- the turn, read whole --------------------------------------------------------------
+
+/// A turn longer than this is handed over in pieces, as before: the tape stops growing.
+pub const TAPE_MAX_SECS: f64 = 30.0;
+
+/// The turn's audio, for one read of the whole turn (ADR 0044). Parakeet reads a sentence
+/// cut at a pause as two sentences and loses words at the cut (#52 item 1: on the
+/// operator's session of 2026-11-06 the pieces scored 8.4%, the whole turn read once
+/// 4.2%). So when a second or later segment's transcript arrives, the aggregator reads the
+/// tape instead, from the first segment's pre-roll to the last segment's end, pauses
+/// included, and that one text replaces the pieces. A single-segment turn is read once
+/// already. While no turn is open the tape is a ring of `PRE_ROLL_SECS`, as the speech
+/// stage keeps; it is emptied at the turn's end.
+#[derive(Default)]
+struct TurnTape {
+    pre: VecDeque<i16>,
+    audio: Vec<i16>,
+    /// Samples up to the last VAD stop: a read ends there, not at the close.
+    end: usize,
+    open: bool,
+    segments: usize,
+    /// Pieces that stood before the tape's first segment (a reopened turn's words, or a
+    /// segment whose audio went by before the turn opened): they stay in front.
+    base: usize,
+    full: bool,
+}
+
+impl TurnTape {
+    fn push(&mut self, samples: &[i16]) {
+        if !self.open {
+            self.pre.extend(samples.iter().copied());
+            let keep = (PRE_ROLL_SECS * f64::from(SAMPLE_RATE)) as usize;
+            while self.pre.len() > keep {
+                self.pre.pop_front();
+            }
+        } else if !self.full {
+            self.audio.extend_from_slice(samples);
+            if self.audio.len() > (TAPE_MAX_SECS * f64::from(SAMPLE_RATE)) as usize {
+                self.full = true;
+            }
+        }
+    }
+
+    /// The turn opened: the ring becomes the tape's start.
+    fn begin(&mut self) {
+        self.audio = self.pre.drain(..).collect();
+        self.end = 0;
+        self.open = true;
+        self.segments = 0;
+        self.base = 0;
+        self.full = false;
+    }
+
+    /// A segment started with `pieces` already in the turn.
+    fn started(&mut self, pieces: usize) {
+        if self.open {
+            self.segments += 1;
+            if self.segments == 1 {
+                self.base = pieces;
+            }
+        }
+    }
+
+    fn stopped(&mut self) {
+        if self.open {
+            self.end = self.audio.len();
+        }
+    }
+
+    fn clear(&mut self) {
+        self.audio.clear();
+        self.end = 0;
+        self.open = false;
+        self.segments = 0;
+        self.full = false;
+    }
+
+    /// The whole turn so far, with the trailing silence a segment gets, when reading it
+    /// would say more than the pieces: a second or later segment, under the cap.
+    fn whole(&self) -> Option<Vec<i16>> {
+        if !self.open || self.segments < 2 || self.full || self.end == 0 {
+            return None;
+        }
+        let mut audio = self.audio[..self.end].to_vec();
+        audio.extend(std::iter::repeat_n(
+            0i16,
+            (TRAILING_SECS * f64::from(SAMPLE_RATE)) as usize,
+        ));
+        Some(audio)
+    }
+}
+
+/// One read of the tape, off the runtime; None when the model heard nothing in it.
+async fn read_whole(model: &SharedRecognizer, audio: Vec<i16>) -> Option<String> {
+    let secs = audio.len() as f64 / f64::from(SAMPLE_RATE);
+    let pcm = ghost_infer::audio::to_f32(&audio);
+    let model = model.clone();
+    let began = Instant::now();
+    let text = tokio::task::spawn_blocking(move || recognize(&model, &pcm, true))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let took = began.elapsed().as_secs_f64();
+    if text.is_empty() {
+        debug::audio(|| format!("turn: read whole ({secs:.1}s) in {took:.2}s: nothing"));
+        None
+    } else {
+        debug::audio(|| format!("turn: read whole ({secs:.1}s) in {took:.2}s: {text:?}"));
+        Some(text)
+    }
+}
+
 pub type OnIdle = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// Pipecat's user aggregator with Ghost's strategies: the VAD's segments, the barge-in
@@ -1118,6 +1233,9 @@ pub struct UserAggregator {
     /// after the VAD stopped (a barge-in on a final) is judged on the spot.
     vad_on: bool,
     vad_stop_secs: f32,
+    /// The turn's audio, and the model that reads it whole (`with_reader`).
+    tape: TurnTape,
+    reader: Option<SharedRecognizer>,
 }
 
 impl UserAggregator {
@@ -1152,11 +1270,20 @@ impl UserAggregator {
             held: Arc::new(|| false),
             vad_on: false,
             vad_stop_secs: 0.2,
+            tape: TurnTape::default(),
+            reader: None,
         }
     }
 
     pub fn with_probe(mut self, probe: Arc<dyn LatencyProbe>) -> Self {
         self.stop = self.stop.with_probe(probe);
+        self
+    }
+
+    /// The model that reads the whole turn once a second segment ends (`TurnTape`,
+    /// `GHOST_TURN_REREAD`); None hands the model the pieces as they came.
+    pub fn with_reader(mut self, model: Option<SharedRecognizer>) -> Self {
+        self.reader = model;
         self
     }
 
@@ -1234,6 +1361,7 @@ impl UserAggregator {
                 s.pieces = vec![text.clone()];
             }
         }
+        self.tape.begin();
         // A new turn interrupts whatever Ghost was doing for the last one, spoken or still
         // being made (Pipecat's interruption): the reply's token is cancelled first, so the
         // voice stops within the frame and the model's stream ends, then the stages are told.
@@ -1295,7 +1423,20 @@ impl Stage for UserAggregator {
                     self.apply_start_events(out).await;
                 }
                 if self.turn_open() {
-                    self.state.lock().unwrap().pieces.push(text.clone());
+                    let whole = match (&self.reader, self.tape.whole()) {
+                        (Some(model), Some(audio)) => read_whole(model, audio).await,
+                        _ => None,
+                    };
+                    {
+                        let mut s = self.state.lock().unwrap();
+                        match whole {
+                            Some(whole) => {
+                                s.pieces.truncate(self.tape.base);
+                                s.pieces.push(whole);
+                            }
+                            None => s.pieces.push(text.clone()),
+                        }
+                    }
                     self.stop.process_frame(&frame).await;
                     let words = text.split_whitespace().count();
                     if !was_open && !self.vad_on && (self.turns.barged_in() || words >= 3) {
@@ -1340,6 +1481,10 @@ impl Stage for UserAggregator {
                     self.start.process_frame(&frame);
                     self.apply_start_events(out).await;
                 }
+                if self.turn_open() {
+                    let pieces = self.state.lock().unwrap().pieces.len();
+                    self.tape.started(pieces);
+                }
                 self.stop.process_frame(&frame).await;
                 out.forward(frame, direction).await;
                 return;
@@ -1347,6 +1492,7 @@ impl Stage for UserAggregator {
             Frame::VadStopped { stop_secs } => {
                 self.vad_on = false;
                 self.vad_stop_secs = *stop_secs;
+                self.tape.stopped();
                 if self.turn_open()
                     && let Some((verdict, ms)) = self.stop.process_frame(&frame).await
                 {
@@ -1360,7 +1506,8 @@ impl Stage for UserAggregator {
                 out.forward(frame, direction).await;
                 return;
             }
-            Frame::AudioIn(_) => {
+            Frame::AudioIn(audio) => {
+                self.tape.push(&audio.samples);
                 self.stop.process_frame(&frame).await;
                 return; // audio ends here: the model and the voice take text
             }
@@ -1370,6 +1517,7 @@ impl Stage for UserAggregator {
             }
             Frame::UserStopped if direction == Direction::Down => {
                 self.stop.handle_user_turn_stopped().await;
+                self.tape.clear();
                 self.arm_idle();
             }
             Frame::End | Frame::Cancel => {
@@ -1830,6 +1978,128 @@ mod tests {
             false,
             TurnControl::new(CancellationToken::new()),
         )
+    }
+
+    // --- the turn, read whole ------------------------------------------------------
+
+    /// A model that says `text` to any audio and keeps each read's length.
+    struct WholeReader {
+        text: &'static str,
+        reads: Arc<Mutex<Vec<usize>>>,
+    }
+
+    impl crate::stt::Recognizer for WholeReader {
+        fn transcribe(&mut self, audio: &[f32]) -> ghost_infer::Result<String> {
+            self.reads.lock().unwrap().push(audio.len());
+            Ok(self.text.to_string())
+        }
+    }
+
+    fn room(secs: f64) -> Frame {
+        Frame::AudioIn(Audio::new(vec![7i16; (secs * 16_000.0) as usize], 16_000))
+    }
+
+    fn vad_stop() -> Frame {
+        Frame::VadStopped { stop_secs: 0.2 }
+    }
+
+    #[tokio::test]
+    async fn test_a_second_segment_replaces_the_pieces_with_the_whole_turn_read_once() {
+        let reads = Arc::new(Mutex::new(Vec::new()));
+        let model: SharedRecognizer = Arc::new(Mutex::new(WholeReader {
+            text: "read me issue four oh three",
+            reads: reads.clone(),
+        }));
+        // No Smart Turn: a VAD stop is the verdict, and the close waits half a second.
+        let mut agg = UserAggregator::new(
+            0,
+            None,
+            0.5,
+            false,
+            TurnControl::new(CancellationToken::new()),
+        )
+        .with_reader(Some(model));
+        let (out, _rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(room(2.0), Direction::Down, &out).await; // the room before: one second is kept
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(room(1.0), Direction::Down, &out).await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        agg.process(
+            Frame::Transcript("Read me issue.".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        assert_eq!(agg.aggregation(), "Read me issue.");
+        assert!(
+            reads.lock().unwrap().is_empty(),
+            "one segment was read once already"
+        );
+        // the operator goes on inside the grace: the same turn
+        agg.process(room(0.3), Direction::Down, &out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(room(0.8), Direction::Down, &out).await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        agg.process(
+            Frame::Transcript("Four oh three.".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        assert_eq!(agg.aggregation(), "read me issue four oh three");
+        let reads = reads.lock().unwrap().clone();
+        assert_eq!(reads.len(), 1);
+        // the pre-roll, both segments, the pause between them, the trailing silence
+        let expected = ((1.0 + 1.0 + 0.3 + 0.8 + 0.2) * 16_000.0) as usize;
+        assert_eq!(reads[0], expected);
+    }
+
+    #[tokio::test]
+    async fn test_without_a_reader_the_pieces_stand() {
+        let mut agg = UserAggregator::new(
+            0,
+            None,
+            0.5,
+            false,
+            TurnControl::new(CancellationToken::new()),
+        );
+        let (out, _rx) = Out::capture();
+        agg.started(&out).await;
+        for text in ["Read me issue.", "Four oh three."] {
+            agg.process(vad_start(), Direction::Down, &out).await;
+            agg.process(room(0.5), Direction::Down, &out).await;
+            agg.process(vad_stop(), Direction::Down, &out).await;
+            agg.process(Frame::Transcript(text.into()), Direction::Down, &out)
+                .await;
+        }
+        assert_eq!(agg.aggregation(), "Read me issue. Four oh three.");
+    }
+
+    #[test]
+    fn test_the_tape_keeps_earlier_words_in_front_and_stops_at_the_cap() {
+        let mut tape = TurnTape::default();
+        tape.push(&[1; 16_000 * 3]);
+        tape.begin();
+        assert_eq!(tape.audio.len(), 16_000, "a pre-roll of one second");
+        tape.started(1); // a reopened turn's words stand in front
+        tape.push(&[1; 8_000]);
+        tape.stopped();
+        assert!(
+            tape.whole().is_none(),
+            "the first segment was read once already"
+        );
+        tape.started(2);
+        tape.push(&[1; 8_000]);
+        tape.stopped();
+        assert_eq!(tape.base, 1);
+        assert_eq!(tape.whole().map(|a| a.len()), Some(16_000 + 16_000 + 3_200));
+        tape.push(&[1; (TAPE_MAX_SECS as usize + 1) * 16_000]);
+        tape.started(2);
+        tape.stopped();
+        assert!(tape.whole().is_none(), "over the cap the pieces stand");
+        tape.clear();
+        assert!(!tape.open);
     }
 
     fn interim(text: &str) -> Frame {
