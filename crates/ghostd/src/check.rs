@@ -142,8 +142,8 @@ pub async fn check_folder(
 /// `ghostd check` for the model files `ghostd run` would load, or the script or the step
 /// that gets each one there (docs/releasing.md, "The speech models"): the four the bundle
 /// carries, through `resolve` (`ghost_infer::models`; `GHOST_SILERO_MODEL` and
-/// `GHOST_SMART_TURN_MODEL` name their own), Parakeet in the Hugging Face cache (or
-/// `GHOST_STT_DIR`), Kokoro in Ghost's cache (or `GHOST_TTS_MODEL_PATH` and
+/// `GHOST_SMART_TURN_MODEL` name their own), Parakeet in Ghost's cache (or `GHOST_STT_DIR`;
+/// the Hugging Face cache for int8), Kokoro in Ghost's cache (or `GHOST_TTS_MODEL_PATH` and
 /// `GHOST_TTS_VOICES_PATH`), and in onnx wake mode the trained "hey ghost" classifier.
 /// Prints the lines; returns the problems.
 pub fn check_models(
@@ -196,21 +196,16 @@ pub fn check_models(
         let _ = writeln!(out, "models: {}", shown.join(", "));
     }
 
-    match voice.parakeet_paths() {
-        Some(paths) if paths.encoder.is_file() => {
-            let dir = paths.encoder.parent().unwrap_or(&paths.encoder);
-            let _ = writeln!(out, "parakeet: {}", dir.display());
-        }
-        Some(paths) => problems.push(format!(
-            "Parakeet: {} is not there (GHOST_STT_DIR names its folder)",
+    let paths = voice.parakeet_paths();
+    if paths.encoder.is_file() {
+        let dir = paths.encoder.parent().unwrap_or(&paths.encoder);
+        let _ = writeln!(out, "parakeet: {}", dir.display());
+    } else {
+        problems.push(format!(
+            "Parakeet: {} is not there (make models fetches it, docs/releasing.md under \
+             \"The speech models\"; GHOST_STT_DIR names its folder)",
             paths.encoder.display()
-        )),
-        None => problems.push(
-            "Parakeet's files are not in the Hugging Face cache \
-             (models--istupakov--parakeet-tdt-0.6b-v3-onnx); fetch them as docs/releasing.md \
-             says under \"The speech models\", or set GHOST_STT_DIR"
-                .to_string(),
-        ),
+        ));
     }
 
     let kokoro = voice.kokoro_paths();
@@ -681,7 +676,7 @@ mod tests {
     }
 
     /// A temp home with every model where `ghostd run` would read it: the four small files
-    /// in the cache, Parakeet's int8 snapshot in `GHOST_STT_DIR`, Kokoro in the cache's
+    /// in the cache, Parakeet's files in `GHOST_STT_DIR`, Kokoro in the cache's
     /// `kokoro/`, the trained classifier in `wake/`.
     fn models_home() -> (tempfile::TempDir, HashMap<String, String>) {
         let dir = tempfile::tempdir().unwrap();
@@ -694,7 +689,7 @@ mod tests {
         }
         let stt = home.join("stt");
         std::fs::create_dir_all(&stt).unwrap();
-        std::fs::write(stt.join("encoder-model.int8.onnx"), b"m").unwrap();
+        std::fs::write(stt.join("encoder-model.onnx"), b"m").unwrap();
         let kokoro = cache.join("kokoro");
         std::fs::create_dir_all(&kokoro).unwrap();
         std::fs::write(kokoro.join("kokoro-v1.0.onnx"), b"m").unwrap();

@@ -14,10 +14,7 @@ async fn main() -> anyhow::Result<()> {
     let wav = std::env::args().nth(1).expect("a WAV path");
     let s = VoiceSettings::from_env()?;
     let pcm = ghost_voice::perf::audio::read_wav(std::path::Path::new(&wav))?;
-    let mut parakeet = Parakeet::load(
-        &s.parakeet_paths().expect("Parakeet's files"),
-        s.stt_threads,
-    )?;
+    let mut parakeet = Parakeet::load(&s.parakeet_paths(), s.stt_threads)?;
     let whole = parakeet.transcribe(&ghost_infer::audio::to_f32(&pcm))?;
     println!(
         "whole file ({:.2} s): {whole:?}",

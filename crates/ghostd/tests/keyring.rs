@@ -30,11 +30,13 @@ fn seal_a_vault(dir: &Path) {
     assert!(dir.join(VAULT_FILE).exists());
 }
 
-/// Ghost's folders in `dir`, the socket there, and no bus to a keyring.
+/// Ghost's folders in `dir`, the socket there, no bus to a keyring, and no Parakeet (the
+/// full-precision model takes 2.4 GB and ten seconds to load, which this test doesn't need).
 fn isolated(cmd: &mut Command, dir: &Path, socket: &Path) {
     std::fs::create_dir_all(dir.join("config")).unwrap();
     cmd.env("GHOST_API_SOCKET", socket)
         .env("GHOST_DATA_DIR", dir)
+        .env("GHOST_STT_DIR", dir.join("no-stt"))
         .env("GHOST_CONFIG_DIR", dir.join("config"))
         .env("DBUS_SESSION_BUS_ADDRESS", NO_BUS)
         .env_remove("GHOST_PARENT_PID");

@@ -271,7 +271,7 @@ export function reportFor(info: HearRunInfo, baseline: HearRunInfo | null): Hear
       { name: "commit", value: info.commit },
       { name: "date", value: info.created },
       { name: "session", value: info.session },
-      { name: "speech to text", value: "nemo-parakeet-tdt-0.6b-v3 (int8), 4 threads" },
+      { name: "speech to text", value: "nemo-parakeet-tdt-0.6b-v3 (fp32), 4 threads" },
       { name: "vad", value: "confidence 0.7, start 0.2 s, stop 0.2 s, min volume 0.6" },
       { name: "takes", value: String(info.takes) },
     ],

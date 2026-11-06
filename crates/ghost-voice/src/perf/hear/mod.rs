@@ -437,10 +437,7 @@ pub fn run_meta(
         "speech to text".into(),
         json!(format!(
             "{} ({}), {} threads",
-            settings
-                .stt_dir
-                .as_ref()
-                .map_or_else(|| settings.stt_model.clone(), |d| d.display().to_string()),
+            settings.stt_model,
             settings.stt_quantization.as_deref().unwrap_or("fp32"),
             settings.stt_threads
         )),

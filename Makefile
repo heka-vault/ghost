@@ -86,8 +86,9 @@ sync: ## install or refresh the Python tools: the root workspace and the oracle
 onnxruntime: ## fetch ONNX Runtime 1.24.4 into ~/.cache/ghost/onnxruntime/ once, where the daemon loads it from (the bundle carries its own)
 	@scripts/onnxruntime.sh >/dev/null
 
-models: ## fetch Silero, Smart Turn and the wake front end's model files into ~/.cache/ghost/models/ once, pinned (the bundle carries its own)
+models: ## fetch the model files into ~/.cache/ghost/models/ once, pinned: Silero, Smart Turn, the wake front end (the bundle carries these) and Parakeet (2.5 GB, not in the bundle)
 	@scripts/models.sh >/dev/null
+	@scripts/models.sh parakeet >/dev/null
 
 env: ## seed settings.env, policy.toml and Ghost's folder on first run (passwords: make passwords)
 	@if [[ ! -e "$(SETTINGS)" ]]; then \

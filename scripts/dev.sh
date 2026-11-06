@@ -68,7 +68,8 @@ start_desktop() {
 }
 
 # The daemon compiled from the working tree, and in the cache the ONNX Runtime it loads
-# and the four small model files (scripts/onnxruntime.sh and scripts/models.sh, each once).
+# and the model files (scripts/onnxruntime.sh and scripts/models.sh, each once; Parakeet's
+# 2.5 GB the first time).
 build_daemon() {
   cargo build -q -p ghostd || { say "cargo build -p ghostd failed"; return 1; }
   if [[ -x scripts/onnxruntime.sh ]]; then
@@ -76,6 +77,7 @@ build_daemon() {
   fi
   if [[ -x scripts/models.sh ]]; then
     scripts/models.sh >/dev/null || { say "scripts/models.sh failed"; return 1; }
+    scripts/models.sh parakeet >/dev/null || { say "scripts/models.sh parakeet failed"; return 1; }
   fi
 }
 

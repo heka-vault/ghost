@@ -18,6 +18,8 @@ fn isolated(cmd: &mut Command, dir: &Path, socket: &Path) {
     std::fs::create_dir_all(dir.join("config")).unwrap();
     cmd.env("GHOST_API_SOCKET", socket)
         .env("GHOST_DATA_DIR", dir)
+        // No Parakeet: the full-precision model takes ten seconds to load, not needed here.
+        .env("GHOST_STT_DIR", dir.join("no-stt"))
         .env("GHOST_CONFIG_DIR", dir.join("config"))
         .env("DBUS_SESSION_BUS_ADDRESS", NO_BUS);
 }

@@ -1,4 +1,4 @@
-//! Parakeet TDT 0.6B v3 (int8) as `onnx_asr` runs it for `ghost_voice.parakeet`: NeMo's
+//! Parakeet TDT 0.6B v3 as `onnx_asr` runs it for `ghost_voice.parakeet`: NeMo's
 //! log-mel front end (the NumPy preprocessor `onnx_asr` picks on CPU), the encoder, the
 //! decoder-joint, and the TDT greedy decode of `onnx_asr.models.nemo` and `onnx_asr.asr`.
 //!
@@ -10,8 +10,13 @@
 //! `sum(axis=1)` on a `(1, T, 128)` array). What is left is the log: NumPy's float32 `log`
 //! (Intel SVML) differs from a correctly rounded one by an ulp on a few per cent of values.
 //!
-//! Measured on the target CPU: about 0.16 s per command, 1.7 GB RAM, 10 s to load
-//! (docs/benchmarks/2026-10-16-speech-cpu.md). Four `intra_op` threads, one `inter_op`.
+//! Ghost reads at full precision (ADR 0043): the int8 encoder returns nothing for a clip
+//! that ends in more than about half a second of quiet, which fp32 reads whole. The parity
+//! fixtures were recorded with int8, which `GHOST_STT_QUANTIZATION=int8` still selects.
+//!
+//! Measured on the target CPU (docs/benchmarks/2026-10-16-speech-cpu.md, ADR 0043): int8
+//! about 0.16 s per command and 1.3 GB; fp32 1.6 to 2.5 times the time and 3.0 GB. Four
+//! `intra_op` threads, one `inter_op`.
 //!
 //! One recognition runs at a time on the loaded model (`&mut self`): the pipeline's final
 //! waits for an interim in flight, and an interim tick that finds the model busy is skipped
@@ -42,6 +47,9 @@ pub const INTERIM_WINDOW_SECS: f32 = 4.0;
 
 const SAMPLE_RATE: usize = 16_000;
 
+/// The files' folder under Ghost's cache's `models/` (`scripts/models.sh parakeet`).
+pub const FOLDER: &str = "parakeet-tdt-0.6b-v3";
+
 /// The model files, as `onnx_asr` names them in the Hugging Face snapshot.
 #[derive(Debug, Clone)]
 pub struct ParakeetPaths {
@@ -63,7 +71,19 @@ impl ParakeetPaths {
         }
     }
 
-    /// The int8 snapshot `onnx_asr` downloaded into the Hugging Face cache, if any.
+    /// The plain copies `scripts/models.sh parakeet` puts in Ghost's cache (`cache` is its
+    /// root): `models/parakeet-tdt-0.6b-v3/`, at the `quantization` asked for. ONNX Runtime
+    /// refuses the Hugging Face cache's symlinked external data (`encoder-model.onnx.data`),
+    /// so the fp32 files live here, not there.
+    pub fn ghost_cache(cache: &Path, quantization: Option<&str>) -> Self {
+        Self::in_dir(
+            &cache.join(crate::models::FOLDER).join(FOLDER),
+            quantization,
+        )
+    }
+
+    /// The int8 snapshot `onnx_asr` downloaded into the Hugging Face cache, if any: the one
+    /// quantization that loads from there (the int8 encoder has no external data).
     pub fn huggingface_cache() -> Option<Self> {
         let home = std::env::var_os("HOME")?;
         let snapshots = PathBuf::from(home)

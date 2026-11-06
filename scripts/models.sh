@@ -1,25 +1,36 @@
 #!/usr/bin/env bash
-# The four small model files the Python wheels used to ship (heka-vault/ghost#39, W10):
-# Silero VAD and Smart Turn v3.2 (pipecat-ai 1.12.0), and openWakeWord's melspectrogram and
-# embedding graphs, the wake front end (livekit-wakeword 0.3.0). Each is fetched once from
-# its upstream release, pinned by SHA-256, into Ghost's cache, where `ghost_infer::models`
-# finds it for `cargo nextest`, `make dev` and `ghostd` outside the bundle. The pins are the
-# hashes of the files the Python daemon ran (the wheels' copies); on 2026-10-29 every
-# upstream file matched its wheel's byte for byte, so the parity fixtures stand as recorded.
-# Each file's licence comes with it: MIT (Silero), BSD-2-Clause (Smart Turn), Apache-2.0
-# (openWakeWord).
+# The model files the daemon loads outside the bundle, each fetched once into Ghost's cache
+# and pinned by SHA-256.
 #
-#   scripts/models.sh          ensure the files; print the folder's absolute path on stdout
-#   scripts/models.sh stage    also copy them (and the licences) under apps/desktop/src-tauri/
-#                              resources/models/ for the bundle (scripts/sidecars.sh runs
-#                              this; the folder is not committed)
+# The four small files the Python wheels used to ship (heka-vault/ghost#39, W10): Silero VAD
+# and Smart Turn v3.2 (pipecat-ai 1.12.0), and openWakeWord's melspectrogram and embedding
+# graphs, the wake front end (livekit-wakeword 0.3.0). Each comes from its upstream release;
+# the pins are the hashes of the files the Python daemon ran (the wheels' copies), and on
+# 2026-10-29 every upstream file matched its wheel's byte for byte, so the parity fixtures
+# stand as recorded. Each file's licence comes with it: MIT (Silero), BSD-2-Clause (Smart
+# Turn), Apache-2.0 (openWakeWord). `ghost_infer::models` finds them for `cargo nextest`,
+# `make dev` and `ghostd` outside the bundle; the bundle carries its own copies.
+#
+# And Parakeet TDT 0.6B v3 at full precision (ADR 0043): the five files of the
+# istupakov/parakeet-tdt-0.6b-v3-onnx repository at the revision the oracle's onnx-asr
+# snapshot carries, 2.5 GB, into models/parakeet-tdt-0.6b-v3/ as plain files, since ONNX
+# Runtime refuses the Hugging Face cache's symlinked external data. A file the oracle's
+# snapshot already holds is copied from there when it matches its pin. Never staged: the
+# bundle doesn't carry it (docs/releasing.md). CC-BY-4.0, as NVIDIA's model card says.
+#
+#   scripts/models.sh          ensure the four small files; print their folder on stdout
+#   scripts/models.sh parakeet ensure Parakeet's files; print their folder on stdout
+#                              (scripts/dev.sh and make models run both)
+#   scripts/models.sh stage    the four, also copied (with the licences) under apps/desktop/
+#                              src-tauri/resources/models/ for the bundle (scripts/sidecars.sh
+#                              runs this; the folder is not committed)
 #   scripts/models.sh --help   this
 #
 # Cache: ${GHOST_CACHE_DIR:-$HOME/.cache/ghost}/models/{silero_vad.onnx, smart-turn-v3.2-cpu.onnx,
 # melspectrogram.onnx, embedding_model.onnx, LICENSE.silero-vad, LICENSE.smart-turn,
-# LICENSE.openwakeword}. Nothing is fetched for a file that is there. A file that does not
-# match its pin is refused, both hashes printed, and nothing of it is kept.
-# `GHOST_MODELS_DIR` still wins at run time (crates/ghost-infer/src/models.rs). Parakeet,
+# LICENSE.openwakeword, parakeet-tdt-0.6b-v3/}. Nothing is fetched for a file that is there.
+# A file that does not match its pin is refused, both hashes printed, and nothing of it is
+# kept. `GHOST_MODELS_DIR` and `GHOST_STT_DIR` still win at run time (crates/ghost-infer).
 # Kokoro and the operator's trained wake classifiers are not here (docs/releasing.md).
 set -euo pipefail
 
@@ -49,52 +60,88 @@ FILES=(
   "LICENSE.openwakeword|https://raw.githubusercontent.com/dscripka/openWakeWord/$OPENWAKEWORD_TAG/LICENSE|c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4|11357|644"
 )
 
+# Parakeet: the revision is the snapshot onnx-asr 0.12 fetched for the oracle on 2026-10-30,
+# the pins the hashes of its files. The encoder's weights are the one large file.
+PARAKEET_REV=8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce
+PARAKEET_FOLDER=parakeet-tdt-0.6b-v3
+PARAKEET_URL="https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/$PARAKEET_REV"
+PARAKEET_SNAPSHOT="${HF_HOME:-$HOME/.cache/huggingface}/hub/models--istupakov--parakeet-tdt-0.6b-v3-onnx/snapshots/$PARAKEET_REV"
+PARAKEET_FILES=(
+  "encoder-model.onnx|$PARAKEET_URL/encoder-model.onnx|98a74b21b4cc0017c1e7030319a4a96f4a9506e50f0708f3a516d02a77c96bb1|41770866|644"
+  "encoder-model.onnx.data|$PARAKEET_URL/encoder-model.onnx.data|9a22d372c51455c34f13405da2520baefb7125bd16981397561423ed32d24f36|2435420160|644"
+  "decoder_joint-model.onnx|$PARAKEET_URL/decoder_joint-model.onnx|e978ddf6688527182c10fde2eb4b83068421648985ef23f7a86be732be8706c1|72520893|644"
+  "vocab.txt|$PARAKEET_URL/vocab.txt|d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d|93939|644"
+  "config.json|$PARAKEET_URL/config.json|666903c76b9798caf2c210afd4f6cd60b08a8dbf9800ec8d7a3bc0d2148ac466|97|644"
+)
+
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '/^# The model files/,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
-case "${1:-}" in
-  "" | stage) ;;
+mode="${1:-}"
+case "$mode" in
+  "" | stage | parakeet) ;;
   -h | --help | help) usage; exit 0 ;;
-  *) echo "usage: $0 [stage|--help]" >&2; exit 2 ;;
+  *) echo "usage: $0 [stage|parakeet|--help]" >&2; exit 2 ;;
 esac
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/ghost-models.XXXXXX")
+# The temp folder is inside the cache, so a finished file moves into place by one rename
+# (the encoder's weights are 2.4 GB; /tmp may be memory).
+mkdir -p "$CACHE"
+TMP=$(mktemp -d "$CACHE/.fetch.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
-# One file: fetched to a temp folder, hashed, refused on a mismatch, moved into the cache
-# whole (a .part is never read as a model).
-fetch() {
-  local name=$1 url=$2 sha256=$3 size=$4 mode=$5
-  echo "models: fetching $url" >&2
-  curl -fsSL --retry 3 -o "$TMP/$name" "$url"
-  local got
-  got=$(sha256sum "$TMP/$name" | cut -d' ' -f1)
-  if [ "$got" != "$sha256" ]; then
+matches() { [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" ]; }
+
+# One file into $dir: copied from $snapshot when its copy matches the pin, else fetched to
+# the temp folder, hashed, refused on a mismatch, and moved into place whole (nothing half
+# written is ever read as a model).
+place() {
+  local name=$1 url=$2 sha256=$3 size=$4 mode=$5 dir=$6 snapshot=${7:-}
+  if [ -n "$snapshot" ] && [ -e "$snapshot/$name" ] && matches "$snapshot/$name" "$sha256"; then
+    echo "models: copying $snapshot/$name" >&2
+    cp -L "$snapshot/$name" "$TMP/$name"
+  else
+    echo "models: fetching $url" >&2
+    curl -fsSL --retry 3 -o "$TMP/$name" "$url"
+  fi
+  if ! matches "$TMP/$name" "$sha256"; then
     echo "models: $name does not match the pinned SHA-256" >&2
     echo "  expected $sha256" >&2
-    echo "  got      $got ($(stat -c %s "$TMP/$name") bytes; $size expected)" >&2
+    echo "  got      $(sha256sum "$TMP/$name" | cut -d' ' -f1) ($(stat -c %s "$TMP/$name") bytes; $size expected)" >&2
     echo "  the file is not used; check the release and the pin in $0" >&2
     exit 1
   fi
-  mkdir -p "$CACHE"
-  install -m "$mode" "$TMP/$name" "$CACHE/$name.part"
-  mv "$CACHE/$name.part" "$CACHE/$name"
-  echo "models: $CACHE/$name ($(du -h "$CACHE/$name" | cut -f1))" >&2
+  mkdir -p "$dir"
+  chmod "$mode" "$TMP/$name"
+  mv "$TMP/$name" "$dir/$name"
+  echo "models: $dir/$name ($(du -h "$dir/$name" | cut -f1))" >&2
 }
 
+if [ "$mode" = parakeet ]; then
+  dir="$CACHE/$PARAKEET_FOLDER"
+  for entry in "${PARAKEET_FILES[@]}"; do
+    IFS='|' read -r name url sha256 size perm <<<"$entry"
+    if [ ! -f "$dir/$name" ]; then
+      place "$name" "$url" "$sha256" "$size" "$perm" "$dir" "$PARAKEET_SNAPSHOT"
+    fi
+  done
+  echo "$dir"
+  exit 0
+fi
+
 for entry in "${FILES[@]}"; do
-  IFS='|' read -r name url sha256 size mode <<<"$entry"
+  IFS='|' read -r name url sha256 size perm <<<"$entry"
   if [ ! -f "$CACHE/$name" ]; then
-    fetch "$name" "$url" "$sha256" "$size" "$mode"
+    place "$name" "$url" "$sha256" "$size" "$perm" "$CACHE"
   fi
 done
 
-if [ "${1:-}" = stage ]; then
+if [ "$mode" = stage ]; then
   mkdir -p "$STAGE"
   for entry in "${FILES[@]}"; do
-    IFS='|' read -r name _ _ _ mode <<<"$entry"
-    install -m "$mode" "$CACHE/$name" "$STAGE/$name"
+    IFS='|' read -r name _ _ _ perm <<<"$entry"
+    install -m "$perm" "$CACHE/$name" "$STAGE/$name"
   done
   echo "models: staged ${#FILES[@]} files under $STAGE for the bundle" >&2
 fi
