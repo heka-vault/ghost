@@ -44,7 +44,9 @@ export function createMock(name: string): { transport: Transport; design: Design
     phone === "off" || phone === "unpaired" || phone === "paired" || phone === "tunnel" || phone === "tunnel-down" ? phone
     : phone === "pairs" || phone === "expires" ? "unpaired"
     : base.phone;
-  const scenario: Scenario = { ...base, phone: listener };
+  const listening = params.get("listening");
+  const notListening: Scenario["notListening"] = listening === "off" ? true : listening && Number(listening) > 0 ? Number(listening) : base.notListening;
+  const scenario: Scenario = { ...base, phone: listener, notListening };
   const fixtures = composeFixtures(scenario);
   const daemon = new MockDaemon(scenario, fixtures, {
     pairsAfterMs: phone === "pairs" ? 5000 : 0,

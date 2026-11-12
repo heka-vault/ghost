@@ -44,6 +44,7 @@ use ghost_core::ghost_app::outside::Outside;
 use ghost_core::ghost_app::{self, GhostServer};
 use ghost_core::hooks::{HookIntake, Secrets};
 use ghost_core::jev::{JevClassifier, JevClient, JevOptions, WatchDecider, watch_decider};
+use ghost_core::listening::{Listening, Mic};
 use ghost_core::outputs::{Outputs, SOURCE as OUTPUTS};
 use ghost_core::passwords::{Keyring, Passwords, SharedEnviron};
 use ghost_core::policy::AutonomyPolicy;
@@ -179,6 +180,9 @@ pub struct DeskMediaRequest {
     pub audio: AudioSettings,
     pub thinking_sound: bool,
     pub chime: bool,
+    /// Open the microphone; `false` while not listening (ADR 0057): a typed turn's
+    /// session, its input silent and no capture stream opened.
+    pub mic: bool,
 }
 
 pub type LoadModels = Arc<dyn Fn(&VoiceSettings) -> anyhow::Result<Models> + Send + Sync>;
@@ -240,7 +244,7 @@ impl Ports {
             }),
             desk_media: Arc::new(|req: DeskMediaRequest| {
                 Box::pin(async move {
-                    desk_media(&req.audio, req.thinking_sound, req.chime)
+                    desk_media(&req.audio, req.thinking_sound, req.chime, req.mic)
                         .await
                         .map_err(|e| e.to_string())
                 })
@@ -411,6 +415,8 @@ pub struct Daemon {
     pub(crate) origin: Mutex<Option<SessionOrigin>>,
     route_names: Mutex<Vec<RouteName>>,
     log_mirror: LogMirror,
+    /// Not listening (ADR 0057): the operator's switch for the microphone, kept in the store.
+    pub mic: Arc<Mic>,
 }
 
 /// A model that won't load is tried again this often (ADR 0038: under the app's
@@ -471,6 +477,7 @@ impl Daemon {
             origin: Mutex::new(None),
             route_names: Mutex::new(Vec::new()),
             log_mirror: LogMirror::default(),
+            mic: Arc::new(Mic::new()),
         }
     }
 
@@ -540,7 +547,7 @@ impl Daemon {
     }
 
     /// The recorder asking for the mic; never, without one.
-    async fn next_hear(&self) -> crate::hear::Lease {
+    pub(crate) async fn next_hear(&self) -> crate::hear::Lease {
         match self.hear() {
             Some(h) => h.next_lease().await,
             None => std::future::pending().await,
@@ -609,7 +616,7 @@ impl Daemon {
         lock(&self.phone_q).take()
     }
 
-    async fn next_phone(&self) -> PendingPhone {
+    pub(crate) async fn next_phone(&self) -> PendingPhone {
         loop {
             let notified = self.phone_notify.notified();
             tokio::pin!(notified);
@@ -633,7 +640,7 @@ impl Daemon {
         self.raise_tx.send(raised).is_ok()
     }
 
-    async fn next_raised(&self) -> Option<Raised> {
+    pub(crate) async fn next_raised(&self) -> Option<Raised> {
         std::future::poll_fn(|cx| lock(&self.raise_rx).poll_recv(cx)).await
     }
 
@@ -742,7 +749,8 @@ impl Daemon {
     /// Desk voice may start (ADR 0032): the desk is idle, nothing else is about to
     /// start, and dictation is off.
     pub(crate) fn can_raise(&self) -> bool {
-        self.state.models_ready()
+        !self.mic.is_off() // ADR 0057: no voice at the desk that would open the microphone
+            && self.state.models_ready()
             && self.waiting_flag.load(Ordering::SeqCst)
             && self.session().is_none()
             && self.state.phase() == Phase::Passive
@@ -1138,6 +1146,13 @@ impl Daemon {
             std::fs::create_dir_all(parent)?;
         }
         let store = Arc::new(Store::open(&cfg.db_path)?);
+        // ADR 0057: an operator who turned listening off and restarted is still not heard.
+        match d.mic.attach(Items::new(store.clone())) {
+            Ok(Listening::On) => {}
+            Ok(_) => info!("listening: off, as the operator left it"),
+            Err(e) => warn!("listening: the switch could not be read ({e}); listening"),
+        }
+        d.follow_mic();
         let autonomy = AutonomyPolicy::load(&cfg.policy_path)?;
         // ADR 0035: one folder, Ghost's. ADR 0034: the apps are Ghost's, connected now, and
         // every agent reaches them.
@@ -1637,6 +1652,22 @@ impl Daemon {
                 })
             })
         });
+        events.add({
+            let mic = d.mic.clone();
+            Arc::new(move |event| {
+                let mic = mic.clone();
+                Box::pin(async move {
+                    // ADR 0057: the operator's words in a session; the interceptor ends it
+                    // once its line is said, and the passive loop opens no capture after.
+                    if event.kind == EventKind::StopListening {
+                        match mic.off(None) {
+                            Ok(_) => info!("listening: off, as the operator said"),
+                            Err(e) => warn!("listening: could not keep the switch: {e}"),
+                        }
+                    }
+                })
+            })
+        });
         d.late.events.set(Arc::new(events)).ok();
         // ADR 0048: the same app for the outside tools the operator connected, on its own
         // listener. Made now (the API lists the clients), started after the phone's.
@@ -1862,18 +1893,28 @@ impl Daemon {
             d.state.set_phase(Phase::Passive, None, None);
             d.rearm.clear();
             *lock(&d.start_in) = GHOST.to_string(); // a spoken wake lands in Ghost; a Call sets it
-            let mut wake_task: JoinHandle<Option<String>> = {
-                let w = wake.clone();
-                tokio::spawn(async move { w.wait().await })
-            };
-            d.waiting_flag.store(true, Ordering::SeqCst);
-            let won = tokio::select! {
-                r = &mut wake_task => Won::Wake(r.unwrap_or(None)),
-                _ = d.stop.cancelled() => Won::Stop,
-                _ = d.rearm.wait() => Won::Rearm,
-                p = d.next_phone() => Won::Phone(p),
-                r = d.next_raised() => match r { Some(r) => Won::Raised(r), None => Won::Rearm },
-                l = d.next_hear() => Won::Hear(l),
+            let mut mic = d.mic.watch();
+            mic.borrow_and_update();
+            // ADR 0057: with listening off no wake listener is built, so no capture is open.
+            let (won, mut wake_task) = if let Listening::Off { until } = d.mic.now() {
+                d.waiting_flag.store(true, Ordering::SeqCst);
+                (d.wait_not_listening(until).await, None)
+            } else {
+                let mut wake_task: JoinHandle<Option<String>> = {
+                    let w = wake.clone();
+                    tokio::spawn(async move { w.wait().await })
+                };
+                d.waiting_flag.store(true, Ordering::SeqCst);
+                let won = tokio::select! {
+                    r = &mut wake_task => Won::Wake(r.unwrap_or(None)),
+                    _ = d.stop.cancelled() => Won::Stop,
+                    _ = d.rearm.wait() => Won::Rearm,
+                    _ = mic.changed() => Won::Rearm, // turned off: the listener stops below
+                    p = d.next_phone() => Won::Phone(p),
+                    r = d.next_raised() => match r { Some(r) => Won::Raised(r), None => Won::Rearm },
+                    l = d.next_hear() => Won::Hear(l),
+                };
+                (won, Some(wake_task))
             };
             d.waiting_flag.store(false, Ordering::SeqCst);
             let (mut woke, mut phone, mut raised, mut hear) = (None, None, None, None);
@@ -1886,11 +1927,13 @@ impl Daemon {
             }
             if woke.is_none() {
                 // Decided before the cancel below, which makes a pending task done too.
-                if wake_task.is_finished() {
-                    woke = Some(wake_task.await.unwrap_or(None));
-                } else {
-                    wake_task.abort();
-                    let _ = wake_task.await;
+                if let Some(task) = wake_task.take() {
+                    if task.is_finished() {
+                        woke = Some(task.await.unwrap_or(None));
+                    } else {
+                        task.abort();
+                        let _ = task.await;
+                    }
                 }
                 wake.stop().await; // releases the mic
             }
@@ -2189,7 +2232,7 @@ impl Daemon {
     }
 }
 
-enum Won {
+pub(crate) enum Won {
     Wake(Option<String>),
     Stop,
     Rearm,

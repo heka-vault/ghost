@@ -462,6 +462,14 @@ pub trait PhoneHost: Send + Sync {
         conversation: Option<&str>,
         item: Option<&str>,
     ) -> Result<Answer, OfferError>;
+    /// The desk's microphone off or on, from the paired phone (ADR 0057): what holds after.
+    async fn set_listening(
+        &self,
+        _listening: bool,
+        _minutes: Option<u32>,
+    ) -> Result<Option<ghost_api::models::NotListening>, String> {
+        Err("not here".into())
+    }
     /// The questions, as the phone may see them (ADR 0051): an answer given by voice is
     /// shown by its choice only, never its words.
     fn questions(&self) -> QuestionsView {

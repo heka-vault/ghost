@@ -12,7 +12,7 @@
  */
 import { errorText, lineHue, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
-import { AudioLines } from "lucide-react-native";
+import { AudioLines, Mic } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 
@@ -58,6 +58,17 @@ export default function Home() {
   const rows = waitingRows(waiting ?? [], questions, live.sending, live.errors);
   const stale = staleLine(live);
   const ready = online && !loadingModels && !deskBusy && !inSession;
+  const [micBusy, setMicBusy] = useState(false);
+  const deskListening = async () => {
+    setMicBusy(true);
+    try {
+      await desk.setDeskListening(true);
+    } catch {
+      // the status still says it is off; the button stays for another try
+    } finally {
+      setMicBusy(false);
+    }
+  };
 
   const start = async (conversation?: string) => {
     if (!ready || starting) return;
@@ -167,6 +178,17 @@ export default function Home() {
               <Text size="lg" color={hero.question ? "text1" : "text2"} align="center" numberOfLines={hero.question ? 3 : undefined} style={{ marginTop: space[2], maxWidth: 320 }}>
                 {hero.body}
               </Text>
+            ) : null}
+            {/* ADR 0057: the desk's mic is off. A call from here uses this phone's mic, so it still works. */}
+            {status?.not_listening && link === "online" && !inSession ? (
+              <View style={{ marginTop: space[4], alignItems: "center", gap: space[2], maxWidth: 320 }}>
+                <Text size="md" color="text2" align="center">
+                  Your desk isn’t listening. Calls from here still work.
+                </Text>
+                <TouchButton size="md" loading={micBusy} icon={(col) => <Mic size={18} color={col} />} onPress={() => void deskListening()}>
+                  Turn the desk’s mic on
+                </TouchButton>
+              </View>
             ) : null}
             {hero.question && pending ? (
               <View style={{ marginTop: space[2] }}>

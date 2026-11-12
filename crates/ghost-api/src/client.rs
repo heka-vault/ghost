@@ -146,6 +146,16 @@ impl GhostClient {
         self.expect_ok(Method::POST, "/wake", body.as_ref()).await
     }
 
+    /// Close or open Ghost's microphone (ADR 0057); `minutes` with `false` only.
+    pub async fn set_listening(
+        &self,
+        listening: bool,
+        minutes: Option<u32>,
+    ) -> Result<Value, ClientError> {
+        let body = serde_json::json!({"listening": listening, "minutes": minutes});
+        self.expect_ok(Method::PUT, "/listening", Some(&body)).await
+    }
+
     pub async fn sleep(&self) -> Result<Value, ClientError> {
         self.expect_ok(Method::POST, "/sleep", None).await
     }

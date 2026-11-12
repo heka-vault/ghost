@@ -2486,6 +2486,48 @@
         ],
         "type": "object"
       },
+      "ListeningRequest": {
+        "description": "`PUT /listening`: turn Ghost's microphone on or off (ADR 0057).",
+        "properties": {
+          "listening": {
+            "description": "`false` closes the microphone; `true` opens it again.",
+            "type": "boolean"
+          },
+          "minutes": {
+            "description": "With `listening: false`, for how long (1 to 1440); unset: until turned back on.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "listening"
+        ],
+        "type": "object"
+      },
+      "ListeningView": {
+        "description": "What `GET` and `PUT /listening` answer.",
+        "properties": {
+          "listening": {
+            "type": "boolean"
+          },
+          "until": {
+            "description": "When listening comes back by itself (RFC 3339), while not listening.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "listening",
+          "until"
+        ],
+        "type": "object"
+      },
       "LogEvent": {
         "properties": {
           "at": {
@@ -2978,6 +3020,22 @@
           "cache_dir",
           "kokoro_present",
           "stt_model"
+        ],
+        "type": "object"
+      },
+      "NotListening": {
+        "description": "Ghost's microphone is closed (ADR 0057): no capture stream is open, nothing is heard,\nnot even its name. Typed turns, the phone's own calls, schedules and watches go on.",
+        "properties": {
+          "until": {
+            "description": "When listening comes back by itself (RFC 3339); null: when the operator turns it on.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "until"
         ],
         "type": "object"
       },
@@ -5251,6 +5309,17 @@
           "models_ready": {
             "type": "boolean"
           },
+          "not_listening": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotListening",
+                "description": "Set while Ghost is not listening (ADR 0057): the microphone is closed. Orthogonal to\n`phase`: a typed turn or the phone's call can run meanwhile."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pending": {
             "oneOf": [
               {
@@ -5314,7 +5383,8 @@
           "wake_mode",
           "apps",
           "ending",
-          "waiting"
+          "waiting",
+          "not_listening"
         ],
         "type": "object"
       },
@@ -7731,6 +7801,69 @@
         "summary": "End a take",
         "tags": [
           "hear"
+        ]
+      }
+    },
+    "/listening": {
+      "get": {
+        "operationId": "get_listening_listening_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListeningView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Whether Ghost is listening (ADR 0057)",
+        "tags": [
+          "session"
+        ]
+      },
+      "put": {
+        "operationId": "put_listening_listening_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListeningRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListeningView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Ghost could not keep the switch"
+          }
+        },
+        "summary": "Turn listening on or off",
+        "tags": [
+          "session"
         ]
       }
     },

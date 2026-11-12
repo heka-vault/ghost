@@ -294,6 +294,7 @@ export class MockDaemon {
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
       ending: false,
       waiting: this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length,
+      not_listening: scenario.notListening === undefined ? null : { until: scenario.notListening === true ? null : new Date(Date.now() + scenario.notListening * 60_000).toISOString() },
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;
@@ -557,6 +558,26 @@ export class MockDaemon {
       if (this.status.session_id) this.reply("I didn’t hear a yes, so I left it alone.");
     });
   }
+  private listeningView() {
+    return { listening: !this.status.not_listening, until: this.status.not_listening?.until ?? null };
+  }
+
+  /** PUT /listening, with the daemon's own checks: a time goes with off, 1 to 1440 minutes. */
+  private setListening(b: Record<string, unknown>) {
+    const listening = b.listening === true;
+    const minutes = typeof b.minutes === "number" ? b.minutes : null;
+    if (minutes !== null && (listening || minutes < 1 || minutes > 1440)) throw new HttpError(422, "minutes is 1 to 1440, with listening false");
+    if (listening) {
+      this.pushStatus({ not_listening: null });
+    } else {
+      // Turning it off ends a session at the desk; the phone's own call goes on.
+      if (this.status.session_id && this.status.session_origin !== "phone") this.sleepNow();
+      const until = minutes ? new Date(Math.floor((Date.now() + minutes * 60_000) / 1000) * 1000).toISOString() : null;
+      this.pushStatus({ not_listening: { until } });
+    }
+    return this.listeningView();
+  }
+
   private sleepNow() {
     if (this.pending) this.settlePending("cancelled", { reason: "session ended" });
     this.setActive(null);
@@ -1194,7 +1215,11 @@ export class MockDaemon {
       const answer = await this.hear.handle(method, path, query, b);
       if (answer !== undefined) return answer;
     }
+    if (method === "GET" && path === "/listening") return this.listeningView();
+    if (method === "PUT" && path === "/listening") return this.setListening(b);
     if (method === "POST" && path === "/wake") {
+      // ADR 0057: a voice session would open the microphone; typed words still open one.
+      if (this.status.not_listening && !(typeof b.text === "string" && b.text)) throw new HttpError(409, "Ghost isn’t listening. Turn listening on to talk to it.");
       this.wake(typeof b.conversation === "string" ? b.conversation : null);
       if (typeof b.text === "string" && b.text) this.say(b.text);
       return { ok: true };

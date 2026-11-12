@@ -400,19 +400,26 @@ impl MediaOut for DeskOut {
 }
 
 /// Open the desk's devices for a session. `chime` plays the wake chime first and waits for
-/// it, so the greeting follows it.
+/// it, so the greeting follows it. Without `mic` (not listening, ADR 0057) no capture
+/// stream is opened: the input is silent and only typed turns reach the session.
 pub async fn desk_media(
     settings: &AudioSettings,
     thinking_sound: bool,
     chime: bool,
+    mic: bool,
 ) -> Result<Media, ghost_audio::AudioError> {
-    let capture = Capture::open(CaptureConfig {
-        node: settings
-            .input_device
-            .clone()
-            .or_else(|| Some("ghost.mic".into())),
-        ..CaptureConfig::default()
-    })?;
+    let input: Box<dyn MediaIn> = if mic {
+        let capture = Capture::open(CaptureConfig {
+            node: settings
+                .input_device
+                .clone()
+                .or_else(|| Some("ghost.mic".into())),
+            ..CaptureConfig::default()
+        })?;
+        Box::new(DeskIn { capture })
+    } else {
+        Box::new(Silent)
+    };
     let sound = if thinking_sound {
         match ghost_audio::sounds::thinking_sound(Path::new(&settings.cache_dir), OUT_RATE) {
             Ok(s) => Some(s),
@@ -450,7 +457,7 @@ pub async fn desk_media(
         playback.drain().await?;
     }
     Ok(Media {
-        input: Box::new(DeskIn { capture }),
+        input,
         output: Box::new(DeskOut {
             playback,
             mixer,

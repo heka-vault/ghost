@@ -118,8 +118,16 @@ fn update_tray(app: &AppHandle, payload: &str) {
         .get("phase")
         .or_else(|| v.get("status").and_then(|s| s.get("phase")))
         .and_then(|p| p.as_str());
+    // ADR 0057: a status says whether the microphone is open; the tray shows it.
+    // The first message is a bare Status; later ones are `{type: "status", status}`.
+    let status = v.get("status").unwrap_or(&v);
+    if let Some(off) = status.get("not_listening") {
+        crate::tray::show_listening(app, !off.is_null());
+    }
+    let quiet = crate::tray::NOT_LISTENING.load(std::sync::atomic::Ordering::SeqCst);
     if let (Some(phase), Some(tray)) = (phase, app.tray_by_id("main")) {
         let label = match phase {
+            "passive" if quiet => "Ghost: not listening (mic off)",
             "passive" => "Ghost: waiting for \"Hey Ghost\"",
             "listening" => "Ghost: listening",
             "thinking" => "Ghost: thinking",

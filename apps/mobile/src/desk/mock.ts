@@ -116,6 +116,7 @@ export class MockDesk implements Desk {
       session_origin: null,
       ending: false,
       waiting: 0,
+      not_listening: null,
       uptime_secs: 0,
       version: "2026.10.0",
       build: { kind: "dev", commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", dirty: false },
@@ -185,6 +186,11 @@ export class MockDesk implements Desk {
   async acknowledge(key: string) {
     await sleep(150);
     this.set({ waiting: (this.state.waiting ?? []).map((i) => (i.key === key ? { ...i, state: "acknowledged", acknowledged_at: new Date().toISOString() } : i)) });
+  }
+
+  async setDeskListening(listening: boolean) {
+    await sleep(150);
+    this.set({ status: this.status({ not_listening: listening ? null : { until: null } }) });
   }
 
   async snooze(key: string, minutes: number) {

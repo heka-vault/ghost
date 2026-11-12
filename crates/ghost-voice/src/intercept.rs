@@ -169,6 +169,13 @@ impl InterceptorProcessor {
         out.push(Frame::ThinkingStop).await;
         match h.action {
             Some(Action::Cancel) => self.gate.cancel(&self.session_id, "operator cancelled"),
+            Some(Action::StopListening) => {
+                // As a hang up: the change it was waiting on stays on the waiting list, and
+                // the line is the last thing said. The daemon closes the microphone.
+                self.gate.set_aside(&self.session_id, "stopped listening");
+                out.push(Frame::Interruption).await;
+                self.events.emit(EventKind::StopListening, Map::new()).await;
+            }
             Some(Action::HangUp) => {
                 // The change it was waiting on stays on the waiting list (ADR 0030).
                 self.gate.set_aside(&self.session_id, "hung up");
@@ -193,6 +200,10 @@ impl InterceptorProcessor {
         match h.action {
             Some(Action::HangUp) => {
                 info!("interceptor: hang up");
+                (self.on_hang_up)().await;
+            }
+            Some(Action::StopListening) => {
+                info!("interceptor: stop listening");
                 (self.on_hang_up)().await;
             }
             Some(Action::Hold) => {
@@ -452,6 +463,33 @@ mod tests {
         let pushed = drain(&mut rx).await;
         assert!(!has_transcript(&pushed));
         assert_eq!(spoken(&pushed), vec!["Okay.".to_string()]);
+        assert_eq!(*slept.lock().unwrap(), vec![true]);
+    }
+
+    #[tokio::test]
+    async fn test_stop_listening_says_the_way_back_tells_the_daemon_and_ends_the_session() {
+        // ADR 0057: the operator's words close the microphone; no model runs on them.
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mut events = Events::default();
+        events.add({
+            let heard = heard.clone();
+            Arc::new(move |e: ghost_core::Event| {
+                let heard = heard.clone();
+                Box::pin(async move { heard.lock().unwrap().push(e.kind) })
+            })
+        });
+        let (p, slept) = make(vec![Arc::new(QuickIntents)], FakeGate::new(false));
+        let mut p = p.with_events(Arc::new(events));
+        let (out, mut rx) = Out::capture();
+        p.process(said("Ghost, stop listening."), Direction::Down, &out)
+            .await;
+        let pushed = drain(&mut rx).await;
+        assert!(!has_transcript(&pushed));
+        assert_eq!(
+            spoken(&pushed),
+            vec![crate::intents::STOPPED_LISTENING.to_string()]
+        );
+        assert_eq!(*heard.lock().unwrap(), vec![EventKind::StopListening]);
         assert_eq!(*slept.lock().unwrap(), vec![true]);
     }
 
