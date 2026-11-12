@@ -302,6 +302,7 @@ impl VoiceSettings {
             {
                 None => crate::stt::EarlyReadMode::Off,
                 Some("verify") => crate::stt::EarlyReadMode::Verify,
+                Some("speculate") => crate::stt::EarlyReadMode::Speculate,
                 Some(v) => match parse_bool(v) {
                     Some(true) => crate::stt::EarlyReadMode::On,
                     _ => crate::stt::EarlyReadMode::Off,

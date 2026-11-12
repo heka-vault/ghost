@@ -153,6 +153,9 @@ impl Stage for ConfirmationProcessor {
         match &frame {
             Frame::BotStarted => self.bot_speaking = true,
             Frame::BotStopped => self.bot_speaking = false,
+            // A change is waiting for its yes: no answer starts early, whatever the words
+            // (ADR 0054). The stop's transcript is what this stage judges.
+            Frame::EarlyTranscript(_) if self.gate.pending(&self.session_id) => return,
             Frame::Transcript(text)
                 if self.bot_speaking() && self.gate.pending(&self.session_id) =>
             {
@@ -306,6 +309,18 @@ mod tests {
                 .any(|f| matches!(f, Frame::ContextAppend { .. }))
         );
         assert!(pushed.iter().any(|f| matches!(f, Frame::Transcript(_)))); // still passed downstream
+    }
+
+    #[tokio::test]
+    async fn test_early_words_never_reach_the_gate_or_start_an_answer_while_a_change_waits() {
+        // ADR 0054: with a change waiting for its yes, early words go nowhere; the stop's
+        // transcript is what the gate judges.
+        let (mut p, gate) = processor();
+        let (out, mut rx) = Out::capture();
+        p.process(Frame::EarlyTranscript("yes".into()), Direction::Down, &out)
+            .await;
+        assert!(gate.turns.lock().unwrap().is_empty());
+        assert!(drain(&mut rx).await.is_empty());
     }
 
     #[tokio::test]

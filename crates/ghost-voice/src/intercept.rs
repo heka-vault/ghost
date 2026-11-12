@@ -189,6 +189,11 @@ impl Stage for InterceptorProcessor {
             Frame::BotStopped => self.bot_speaking = false,
             // a new turn, or this one has gone to the model
             Frame::UserStarted | Frame::UserStopped => self.turn_pieces.clear(),
+            // Words an interceptor might take never start an answer early: they wait for
+            // the stop's transcript, which the interceptors see (ADR 0054).
+            Frame::EarlyTranscript(text) if !self.interceptors.is_empty() && self.offered(text) => {
+                return;
+            }
             Frame::Transcript(text) if !self.interceptors.is_empty() && self.offered(text) => {
                 let barged_in = self.barged_in();
                 let pending = self.gate.pending(&self.session_id);

@@ -178,7 +178,9 @@ impl Stage for HoldGate {
                     (self.on_resume)(remainder).await;
                 }
             },
+            // On hold nothing is answered, early words least of all (ADR 0054).
             Frame::Interim(_)
+            | Frame::EarlyTranscript(_)
             | Frame::UserStarted
             | Frame::UserStopped
             | Frame::VadStarted { .. }
@@ -274,6 +276,16 @@ mod tests {
             .await;
         gate.process(
             Frame::Transcript("what about the ghost repo".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        assert!(drain(&mut rx).await.is_empty());
+        assert!(resumed.lock().unwrap().is_empty());
+        // Early words (ADR 0054) never pass on hold, even with the name in them: only the
+        // stop's transcript resumes.
+        gate.process(
+            Frame::EarlyTranscript("ghost what's up".into()),
             Direction::Down,
             &out,
         )
