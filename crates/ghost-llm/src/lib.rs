@@ -51,7 +51,8 @@ pub use context::{
 };
 pub use model::{
     ANTHROPIC_BETA, CUT_OFF_LINE, CUT_OFF_NOTE, DEFAULT_THINKING, Event, FinishReason,
-    LLM_MAX_TOKENS, LlmError, Model, Options, Probe, Usage, prefill_supported, shared,
+    LLM_MAX_TOKENS, LlmError, Model, Options, Probe, Usage, WARM_PLACEHOLDER, prefill_supported,
+    shared,
 };
 pub use tools::{
     BRING_UP_TOOL, CHANGE_TOOL, HANG_UP_TOOL, HOLD_TOOL, OfferAll, Offered, Offering, Offers,

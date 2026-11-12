@@ -549,3 +549,127 @@ async fn test_complete_returns_the_text() {
     assert!(sent[0].get("stream").is_none());
     assert_eq!(m.protocol(), Protocol::Anthropic);
 }
+
+// --- a call announced as it starts, and the cache warmed before a session's first turn ----
+
+#[tokio::test]
+async fn a_tool_call_is_announced_as_its_block_opens_with_the_words_before_it() {
+    // 2026-11-12: Ghost said nothing for five seconds while the model wrote a call, read
+    // the result and answered. The block's start is the first sign a turn needs a tool:
+    // its name is known before the arguments are written, so the voice can say it heard.
+    let server = serving([reply(
+        &[
+            text_block("Checking."),
+            tool("list_issues", &[r#"{"repo": "#, r#""ghost"}"#], "t1"),
+            tool("issue_read", &[], "t2"),
+        ],
+        "tool_use",
+    )])
+    .await;
+    let evs =
+        events(model(anthropic_target(&server.uri())).stream(context(), &tools(), &options()))
+            .await;
+    let starting: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match e {
+            Event::ToolStarting(n) => Some(n.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(starting, vec!["list_issues", "issue_read"]);
+    let first_start = evs
+        .iter()
+        .position(|e| matches!(e, Event::ToolStarting(_)))
+        .unwrap();
+    let first_call = evs
+        .iter()
+        .position(|e| matches!(e, Event::ToolCall(_)))
+        .unwrap();
+    let text_at = evs.iter().position(|e| matches!(e, Event::Text(_))).unwrap();
+    assert!(text_at < first_start && first_start < first_call, "{:?}", kinds(&evs));
+    // The calls themselves are unchanged.
+    assert_eq!(tool_calls(&evs).len(), 2);
+}
+
+#[tokio::test]
+async fn the_cache_is_warmed_with_the_turns_own_prefix_and_no_output() {
+    // A session's first turn found its prompt cold (cache_read 0, 10,000 to 13,000 tokens
+    // written, first byte 1.9 to 2.7 s). At wake Ghost sends the same tools, system prompt
+    // and thinking setting with `max_tokens: 0`, not streamed: the provider writes the cache
+    // and answers nothing.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "message", "content": [], "stop_reason": "max_tokens",
+            "usage": {"input_tokens": 3, "output_tokens": 0,
+                      "cache_creation_input_tokens": 9000, "cache_read_input_tokens": 0}
+        })))
+        .mount(&server)
+        .await;
+    let m = model(anthropic_target(&server.uri()));
+    let opts = Options {
+        thinking: Some("between_tools".into()),
+        cache_system: true,
+        ..Options::default()
+    };
+    let usage = m.warm(&context(), &tools(), &opts).await.unwrap();
+    assert_eq!(usage.cache_write_tokens, Some(9000));
+    let sent = bodies(&server).await;
+    assert_eq!(sent.len(), 1);
+    let body = &sent[0];
+    let turn = m.body(&context(), &tools(), &opts);
+    assert_eq!(body["max_tokens"], 0);
+    assert_eq!(body["stream"], false);
+    // The prefix is the turn's own, byte for byte: tools, system with its marker, thinking.
+    assert_eq!(body["tools"], turn["tools"]);
+    assert_eq!(body["system"], turn["system"]);
+    assert_eq!(body["thinking"], turn["thinking"]);
+    // The history is the turn's; the placeholder after it carries no marker of its own.
+    let msgs = body["messages"].as_array().unwrap();
+    let last = msgs.last().unwrap();
+    assert_eq!(last["role"], "user");
+    assert!(
+        last["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b.get("cache_control").is_none()),
+        "{last}"
+    );
+}
+
+#[tokio::test]
+async fn a_provider_that_refuses_no_output_is_warmed_with_one_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(Replies0Then1)
+        .mount(&server)
+        .await;
+    let m = model(anthropic_target(&server.uri()));
+    let usage = m.warm(&context(), &tools(), &options()).await.unwrap();
+    assert_eq!(usage.cache_write_tokens, Some(10));
+    let sent = bodies(&server).await;
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0]["max_tokens"], 0);
+    assert_eq!(sent[1]["max_tokens"], 1);
+}
+
+struct Replies0Then1;
+
+impl wiremock::Respond for Replies0Then1 {
+    fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        if body["max_tokens"] == 0 {
+            ResponseTemplate::new(400).set_body_json(json!({
+                "error": {"type": "invalid_request_error", "message": "max_tokens: must be at least 1"}
+            }))
+        } else {
+            ResponseTemplate::new(200).set_body_json(json!({
+                "type": "message", "content": [{"type": "text", "text": "."}],
+                "stop_reason": "max_tokens",
+                "usage": {"input_tokens": 3, "output_tokens": 1,
+                          "cache_creation_input_tokens": 10, "cache_read_input_tokens": 0}
+            }))
+        }
+    }
+}

@@ -129,6 +129,10 @@ pub enum Event {
     Text(String),
     /// A piece of the model's thinking, when the API shows it.
     Thought(String),
+    /// A tool call has begun: its name is known, its arguments are still being written.
+    /// The first sign a reply needs a tool, a second or more before the call is whole
+    /// (`ToolCall`), so the voice can say it heard. Nothing runs on it.
+    ToolStarting(String),
     /// One complete tool call. Every call of a reply is delivered, after the reply's text
     /// and only when the reply is whole; none when it was cut.
     ToolCall(ToolCall),
@@ -511,6 +515,58 @@ impl Model {
         })
     }
 
+    /// Write the prompt cache for a turn on `context` before the turn comes (a session's
+    /// opening, while the greeting is spoken): the turn's own tools, system prompt, history
+    /// and thinking setting, with a placeholder user turn after the history that carries no
+    /// cache marker, `max_tokens: 0` and not streamed, so the provider writes the cache and
+    /// answers nothing. A provider that refuses no output (a 400) is asked again for one
+    /// token. The Messages API only: Chat Completions providers cache by themselves.
+    pub async fn warm(
+        &self,
+        context: &Context,
+        tools: &Tools,
+        options: &Options,
+    ) -> Result<Usage, LlmError> {
+        if self.target.protocol != Protocol::Anthropic {
+            return Ok(Usage::default());
+        }
+        let mut ctx = context.clone();
+        ctx.push(Message::user(WARM_PLACEHOLDER));
+        let mut body = self.turn_body(&ctx, &self.wire_tools(tools), options);
+        body["stream"] = json!(false);
+        if let Some(last) = body["messages"]
+            .as_array_mut()
+            .and_then(|m| m.last_mut())
+            .and_then(|m| m["content"].as_array_mut())
+            .and_then(|b| b.last_mut())
+            .and_then(|b| b.as_object_mut())
+        {
+            last.remove("cache_control"); // the placeholder is never read back
+        }
+        let mut sent = None;
+        for cap in [0u32, 1] {
+            body["max_tokens"] = json!(cap);
+            match self.send(&body).await {
+                Ok(resp) => {
+                    sent = Some(resp);
+                    break;
+                }
+                Err(LlmError::Status { status: 400, .. }) if cap == 0 => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        let Some(resp) = sent else {
+            return Err(LlmError::Stream("no answer".into()));
+        };
+        let v: Value = resp
+            .json()
+            .await
+            .map_err(|_| LlmError::Stream("an answer that isn't JSON".into()))?;
+        let mut usage = Usage::default();
+        crate::reply::note_anthropic_usage(&v["usage"], &mut usage);
+        Ok(usage)
+    }
+
     /// Stream one tiny request and time its first token. The probe reports, it doesn't
     /// fail: an error is in `Probe::error`, in a few words and never a header or a key.
     pub async fn probe(&self, prompt: &str, max_tokens: u32, thinking: Option<&str>) -> Probe {
@@ -701,6 +757,9 @@ impl Turn {
         self.phase = Phase::Start;
     }
 }
+
+/// The user turn a warm-up ends on: read during prefill, never answered.
+pub const WARM_PLACEHOLDER: &str = "(warming up)";
 
 static CLIENTS: LazyLock<Mutex<HashMap<String, Arc<Model>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
