@@ -111,7 +111,27 @@ on an interval itself; nothing about noticing needs a model.
   that dropped results (one broke a constraint, or there were more than 100) resolves
   nothing, since a dropped result may be the open one; a failed read resolves nothing.
 - **`response`**: `tell` puts the item on the waiting list, `record` keeps it without
-  alerting. `urgency` (`digest`, `notify`, `call`) is for the route policy (ADR 0031).
+  alerting, `act` has an agent look into it (below). `urgency` (`digest`, `notify`,
+  `call`) is for the route policy (ADR 0031).
+- **`act`** (optional, ADR 0047): each new item starts a run of an agent, with nobody
+  there, on an instruction the operator wrote:
+
+  ```json
+  "response": "act",
+  "act": {"agent": "ghost", "instruction": "Read the failed run's log and say what broke."}
+  ```
+
+  The run is given the item's typed fields as data (the watch's name, the item's key,
+  title and link, and the fields the watch keeps), never anything else the app sent. Its
+  answer goes to the waiting list under the agent, as loud as the watch's `urgency`. With
+  `"response": "act"` the item itself is only kept, so the answer is the one thing told;
+  `"response": "tell"` with an `act` block does both. `agent` is a slug (`ghost` when left
+  out), `skills` names up to eight skills the run starts with. A watch acts once per item
+  (`"once_per_item": false` lets an item that resolved and came back start another) and
+  twelve times an hour at the most (`per_hour`, 1 to 60); past either, the item is still
+  kept or told and no run starts. What a run may do is what the agent may do in a
+  session: every change goes through the gate, and one that would ask waits on the
+  waiting list. The operator declares `act`; no Jev or model step can choose it.
 - **`jev` and `model`** (optional): where the check can't decide, a typed question:
 
   ```json
@@ -135,7 +155,43 @@ fails; so does a look that breaks for any other reason, with the error on the wa
 `ghostd check` lists the watches, `GET /watches` and the desktop's Watching screen show each
 one's last look, error and open items, and a watch that doesn't read is a problem and stays
 off. A watch's items are keyed `<watch>:<key>` (`ci:123`), and `[routes.urgency]` names it
-bare (`ci = "call"`).
+bare (`ci = "call"`). A watch that acts through an agent Ghost doesn't have, or one that is
+retired, is a problem too: `ghostd check` and the waiting list name it.
+
+## Schedules
+
+A schedule is something an agent does on its own, at a time (ADR 0047): "check the build
+every morning at nine and tell me if it is red". Schedules are not a file in this folder.
+They are rows in Ghost's database, because agents make them too: tell an agent and it sets
+one up with `ghost_schedule_manage`, a change through the gate; the operator adds, pauses
+and removes them on the desktop's Watching screen. `ghostd check` lists them.
+
+A schedule has a name, the agent that does it, an instruction, and when, which is exactly
+one of:
+
+| Kind | Written as | Runs |
+|---|---|---|
+| `at` | `2026-11-12T09:00` in the schedule's time zone, a time with an offset, or a delay (`20m`) | once; it is removed after it has run |
+| `every` | `30m`, `2h`, `1d` | every interval, counted from when it was made |
+| `cron` | five fields, `0 9 * * 1-5` | when the expression matches, in a named time zone (the machine's when left out) |
+
+It may also have active hours (`08:00` to `18:00`; a run outside them moves to the next one
+inside), how loud its answer may get (`digest`, `notify`, `call`), skills to start with,
+and a **check**: one of a connected app's read-only tools that is called first, with no
+model. The agent runs only when what the check returned has changed since last time, and is
+told what changed.
+
+A **run** is one execution: the agent's own prompt written for reading rather than
+speaking, its memory and notes, the same tools through the same gate, no microphone and no
+speaker. It ends when the agent stops calling tools, after 30 model calls, or after ten
+minutes. Its answer goes to the waiting list under `agent:<slug>` and into the agent's
+transcript, marked `[scheduled run: <name>]`, so the agent has it when you ask later. An
+answer of exactly `[SILENT]` tells you nothing. A change that needs your yes is not made:
+it waits on the waiting list, as one you left unanswered in a session does (ADR 0030).
+
+When Ghost was not running at a schedule's time, it runs once when Ghost is back if that is
+within two hours (the grace window), however many times were missed, and not at all after
+that. A run that was going when Ghost stopped is not run again; Ghost says it was cut short.
 
 ## Webhooks
 

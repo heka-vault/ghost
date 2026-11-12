@@ -1,6 +1,6 @@
 # 0029: A watch's response records, tells or acts; what needs the operator is one list
 
-- **Status:** proposed
+- **Status:** proposed; its `act` response is settled by ADR 0047 (built 2026-11-11: a run of a named agent, with nobody there)
 - **Date:** 2026-10-27
 
 An observation (ADR 0028) has to lead somewhere, and "Ghost, what needs me?" should be

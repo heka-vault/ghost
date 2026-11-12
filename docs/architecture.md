@@ -84,6 +84,8 @@ a change goes through the gate, and the operator's `ghost.*` rules apply.
 | `ghost_notify`, `ghost_resolve` | change | An item from the calling agent on the waiting list, under `agent:<slug>`, and its clearing; an agent clears only its own |
 | `ghost_waiting_ack`, `ghost_waiting_snooze` | change | What `POST /waiting/ack` and `/waiting/snooze` do |
 | `ghost_tools_search` | read | The connected apps' tools that match a few words, with the name to call each by; offered only past the limits on how many tools a turn carries (ADR 0046) |
+| `ghost_schedules_list` | read | The schedules: each one's agent, when it runs next and how the last run ended; with an id or a name, its instruction and what its last runs said (ADR 0047) |
+| `ghost_schedule_manage` | change | Create, update, pause, resume, remove or run a schedule now. When is one of `at`, `every` or `cron`. An agent manages its own; Ghost manages all |
 
 Three things differ from an app the operator connected. Its text is Ghost's own, so
 descriptions reach the model whole and results are not cut on the way out (the tools cap
@@ -91,7 +93,8 @@ themselves: a section at 8,000 characters, said when cut; the tool search at an 
 result budget, since what it returns is the apps' text). The calling agent is never an argument the
 model writes: the session's dispatcher sets `_agent` to the agent the session is with.
 And where no rule names a `ghost.*` change and the mode is `open`, it runs at `quiet`,
-since an item on the waiting list is its own announcement. Nothing listens for outside
+since an item on the waiting list is its own announcement; `ask = ["ghost.schedule_manage"]`
+has Ghost ask before an agent sets up a schedule. Nothing listens for outside
 clients yet; the handler keeps nothing per connection, so the same one can be served
 over HTTP with a token later.
 
@@ -130,17 +133,17 @@ One Cargo workspace (ADR 0039): the crates under `crates/` and the desktop app's
 
 | Crate | Responsibility |
 |---|---|
-| `ghostd` | The daemon (`crates/ghostd`). Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010, or the trained detectors, ADR 0025), and on wake runs a session over the desk's audio; ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021). Serves the control API, the phone listener and the webhook listener, runs the watches and the routes, and is the desktop's `Controller`. `ghostd check`, `passwords`, `latency`, `perf`, `push`, `restore-volumes` and `api-schema` are its subcommands |
-| `ghost-voice` | Ghost's own pipeline, written for one session and one transport at a time (ADR 0039; Pipecat's ideas, not its code): typed frames over bounded channels, one task per stage, a cancellation token per session and per turn. The speech-in stage (Silero VAD, Parakeet with interim re-reads), the user's turn (Smart Turn, the patient stop with the grace, the speculative answer, barge-in), the interceptors and the confirmation processor, the model stage with compaction, the narration cut and the spoken filter, Kokoro a clause at a time or ElevenLabs with failover, the echo filter, hold, the latency timeline, and the harness behind `make perf` |
+| `ghostd` | The daemon (`crates/ghostd`). Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010, or the trained detectors, ADR 0025), and on wake runs a session over the desk's audio; ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021). Serves the control API, the phone listener and the webhook listener, runs the watches, the routes and the schedules (ADR 0047: an agent's run with nobody there, beside any session), and is the desktop's `Controller`. `ghostd check`, `passwords`, `latency`, `perf`, `push`, `restore-volumes` and `api-schema` are its subcommands |
+| `ghost-voice` | Ghost's own pipeline, written for one session and one transport at a time (ADR 0039; Pipecat's ideas, not its code): typed frames over bounded channels, one task per stage, a cancellation token per session and per turn. The speech-in stage (Silero VAD, Parakeet with interim re-reads), the user's turn (Smart Turn, the patient stop with the grace, the speculative answer, barge-in), the interceptors and the confirmation processor, the model stage with compaction, the narration cut and the spoken filter, Kokoro a clause at a time or ElevenLabs with failover, the echo filter, hold, the latency timeline, and the harness behind `make perf`. Also the one thing with no audio in it: `ghost_voice::headless`, an agent's run with nobody there, over the same model port and tool dispatcher (ADR 0047) |
 | `ghost-llm` | The one model client (ADR 0037): the session's streamed reply, a one-shot completion and a first-token probe, for the Anthropic Messages API and for OpenAI-compatible Chat Completions. Every tool call of a reply is delivered; a reply cut at the output cap is redone once in smaller steps and flagged `cut_off` |
 | `ghost-infer` | The local models on ONNX Runtime (ADR 0004): Parakeet TDT v3 for speech to text, Silero for voice activity, Smart Turn v3 for the end of a turn, the trained wake detectors with the transcript matcher behind them, and Kokoro for speech. The runtime is loaded at start (ONNX Runtime 1.24.4, the one the parity fixtures were recorded on: in the bundle, or `~/.cache/ghost/onnxruntime/`, or `ORT_DYLIB_PATH`), and the four small model files are found the same way (`GHOST_MODELS_DIR`, the bundle, `~/.cache/ghost/models/`, where `scripts/models.sh` puts them) |
 | `ghost-audio` | The audio engine: PipeWire through the project's own binding (one clock domain), a realtime-safe ring between its thread and tokio, ducking, the chime and the thinking sound |
 | `ghost-rtc` | The phone's WebRTC audio behind one `Media` trait (ADR 0016, ADR 0020): str0m by default, Opus through the system libopus, the resampling either side of the codec, the RTVI subset |
-| `ghost-api` | The control API (ADR 0013): axum on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending change with Confirm and Cancel, audit, the apps (connect, disconnect, sign in) and the catalog, the permissions and the policy file, the passwords (names and metadata out, values only in, ADR 0036), the model connection (`/model`: its view, the provider's models, Test connection, OpenRouter's sign-in; ADR 0037), devices and setup. `packages/api/openapi.json` is generated from its types (`make api-schema`) and `packages/client-ts` from that. Nothing passive crosses it |
-| `ghost-core` | The write gate and what feeds it (ADR 0007, 0011, 0034, 0035): tool sources (`ghost_core::source::ToolSource`), the apps (`ghost_core::apps`), their catalog and sign-in (`ghost_core::catalog`, `ghost_core::signin`), the model connection (`ghost_core::connection`: the providers, which password holds the key, the settings from before it, ADR 0037), Ghost's folder and its rules (`ghost_core::folder`, `ghost_core::rules`), the operator's permissions (`ghost_core::permissions`, `ghost_core::policy`), proposals over typed targets and change sets, the confirmation classifier and Jev, the audit store, the vault (`ghost_core::passwords`) and redaction, the waiting list, watches, webhooks, routes, skills and outputs, the agents (ADR 0014), and Ghost's own app (`ghost_core::ghost_app`, ADR 0045). Depends on no other crate of the workspace. Its two binaries, `ghost-mock-github` and `ghost-scripts`, are the two apps `infra/example/apps.json` names |
+| `ghost-api` | The control API (ADR 0013): axum on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending change with Confirm and Cancel, audit, the apps (connect, disconnect, sign in) and the catalog, the permissions and the policy file, the passwords (names and metadata out, values only in, ADR 0036), the model connection (`/model`: its view, the provider's models, Test connection, OpenRouter's sign-in; ADR 0037), the schedules and their runs (`/schedules`, `/runs`; ADR 0047), devices and setup. `packages/api/openapi.json` is generated from its types (`make api-schema`) and `packages/client-ts` from that. Nothing passive crosses it |
+| `ghost-core` | The write gate and what feeds it (ADR 0007, 0011, 0034, 0035): tool sources (`ghost_core::source::ToolSource`), the apps (`ghost_core::apps`), their catalog and sign-in (`ghost_core::catalog`, `ghost_core::signin`), the model connection (`ghost_core::connection`: the providers, which password holds the key, the settings from before it, ADR 0037), Ghost's folder and its rules (`ghost_core::folder`, `ghost_core::rules`), the operator's permissions (`ghost_core::permissions`, `ghost_core::policy`), proposals over typed targets and change sets, the confirmation classifier and Jev, the audit store, the vault (`ghost_core::passwords`) and redaction, the waiting list, watches, webhooks, routes, skills and outputs, the agents (ADR 0014), the schedules and their scheduler (`ghost_core::schedules`, ADR 0047), and Ghost's own app (`ghost_core::ghost_app`, ADR 0045). Depends on no other crate of the workspace. Its two binaries, `ghost-mock-github` and `ghost-scripts`, are the two apps `infra/example/apps.json` names |
 | `ghost-core::conversations` | The agents (ADR 0014, ADR 0035): the registry mirrored from the folders, the transcript, every compaction version, and the files per agent under `~/.config/ghost/agents/<slug>/` (`agent.json`, `persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | `heka-ghost-desktop` | The shell (`apps/desktop/src-tauri`): the window, the tray, autostart, and the daemon's supervision (above); the window's bridge to the socket is typed by the same structs the daemon serializes |
-| SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
+| SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions, the items, the webhook deliveries, the schedules and their runs |
 
 ## Conversation flow
 
@@ -163,7 +166,8 @@ What needs the operator is one list (`ghost_core::waiting`): items with stable k
 `items` table, from watches, from Ghost itself (a change waiting for a yes, an app that
 isn't connected or wants a new sign-in, a file in Ghost's folder with a problem) and from
 the agents (`ghost_notify`, ADR 0045: one item at a time under `agent:<slug>`, cleared by
-that agent's `ghost_resolve`, as loud as the urgency it was given). A watch or Ghost syncs the whole set it
+that agent's `ghost_resolve`, as loud as the urgency it was given; and what a scheduled
+run answered, ADR 0047, one item per schedule). A watch or Ghost syncs the whole set it
 sees; a new key is news, a key that is gone is resolved. An item is delivered when a route
 passed it on and acknowledged when the operator heard it; only acknowledged or snoozed stops
 the alerting, and a changed item alerts again. `GET /waiting`, `POST /waiting/ack` and
@@ -196,6 +200,51 @@ within 15 seconds acknowledges those five; "not now" snoozes them for 30 minutes
 ends the session with nothing kept, and the engine hands the items to the next route at
 once. A desktop notification's button acknowledges what it showed, unless the item changed
 after.
+
+### Schedules and runs (ADR 0047)
+
+An agent can work with nobody there. A **schedule** is one job in SQLite (`schedules`,
+`ghost_core::schedules`): a name, the agent, an instruction, and when, which is `at` a
+time, `every` interval (`30m`, `2h`, `1d`) or a `cron` expression of five fields in a named
+time zone (`croner` over `chrono-tz`; the machine's zone by default). It may have active
+hours, a grace window, limits, skills to start with, an urgency, and a check. The operator
+adds one on the desktop's Watching screen (`/schedules`); an agent told "check the build
+every morning at nine" adds its own with `ghost_schedule_manage`, through the gate.
+
+A **run** is one execution (`ghost_voice::headless::HeadlessRunner`): the agent's prompt
+written for reading (`ghost_voice::prompt::SYSTEM_ALONE`: the same identity, rules, persona
+and apps' paragraphs as a session's), its memory, notes and recent turns, the model
+through `ghost-llm`, and the session's own `ToolDispatcher` built with
+`ToolDispatcher::alone`, so every read and every change takes the path a session's does.
+No audio stage exists in it, and the session's own tools (hang up, hold, transfer, bring
+up a change) are neither offered nor callable. It loops until a reply has no tool call,
+for 30 model calls (the last is offered no tools) and ten minutes at the most, stops when
+cancelled, and tries a model it cannot reach again after 30, 60 and 120 seconds. A change
+that resolves to `ask` is set aside on the waiting list at once (ADR 0030): nobody is
+there, and the instruction is never taken for the operator's yes.
+
+The scheduler (`ghost_core::schedules::Scheduler`, started by `ghostd::schedules`) looks
+every 15 seconds and when something is queued: it claims what is due, writes the run's row
+(`schedule_runs`) before the run starts, and runs one job at a time per agent. With a
+check, it first calls the app's read-only tool through the watches' read path
+(`AppReader`, the permissions' `block` rules apply), hashes the result with its keys in
+order, and runs the agent only when the hash changed, telling it which lines did. After
+Ghost was off, a schedule missed by less than its grace window (two hours) runs once,
+however many times it missed; later than that it is recorded as missed. A run that was
+going when Ghost stopped is marked interrupted and is not run again.
+
+The answer is an item on the waiting list under `agent:<slug>`, one per schedule, the
+answer as its detail and as loud as the schedule says, so the routes deliver it. Exactly
+`[SILENT]`, or nothing, delivers nothing. A failed run delivers a failure item unless the
+schedule says not to. When the agent called `ghost_notify` itself, the answer is not a
+second item. The run's turns go into the agent's transcript under its own session id
+(`run-<id>`), marked `[scheduled run: <name>]`; one with nothing to tell is a single line
+the model's context does not carry.
+
+A watch may act (ADR 0029): `"response": "act"` with an `act` block starts a run of the
+named agent for each new item, given the item's typed fields and nothing else, once per
+item and twelve times an hour at the most. A run happens beside an open session and
+shares nothing mutable with it: no microphone, no speaker, no listener on the event bus.
 
 ### Memory and compaction
 
