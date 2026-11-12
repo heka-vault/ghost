@@ -88,6 +88,10 @@ pub enum ConversationError {
     PersonaTooLong,
     #[error("keep the job to a line")]
     JobTooLong,
+    #[error(
+        "{0:?} is not a look: a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7"
+    )]
+    BadLook(String),
     #[error("that memory is too long")]
     MemoryTooLong,
     #[error("aliases must be a list")]
@@ -365,6 +369,11 @@ impl Conversations {
                     .collect(),
                 voice: data.get("voice").filter(|v| truthy(v)).map(py_str),
                 speed: data.get("speed").filter(|v| !v.is_null()).and_then(as_f64),
+                // A look the file got wrong is dropped, never refused: the agent still loads.
+                look: data
+                    .get("look")
+                    .and_then(Value::as_str)
+                    .and_then(super::models::parse_look),
                 created_at: existing.as_ref().map_or(now, |e| e.created_at),
                 updated_at: existing.as_ref().map_or(now, |e| e.updated_at),
                 last_active_at: existing.as_ref().and_then(|e| e.last_active_at),
@@ -880,6 +889,7 @@ Keeps the name, job and voice.",
                 speed: speed_arg(args.get("speed"), None)?,
                 persona,
                 memory,
+                look: look_arg(args.get("look"))?,
             })),
             rationale: format!("hire {name}"),
             asked_by: Vec::new(),
@@ -924,9 +934,18 @@ Keeps the name, job and voice.",
         {
             return Err(ConversationError::JobTooLong);
         }
+        let look = match args.get("look") {
+            Some(v) if !v.is_null() => Some(look_arg(Some(v))?.unwrap_or_default()),
+            _ => None,
+        };
         Ok(prepared(
             &p.slug,
-            Change::Rename(Rename { name, aliases, job }),
+            Change::Rename(Rename {
+                name,
+                aliases,
+                job,
+                look,
+            }),
             "",
         ))
     }
@@ -1257,6 +1276,17 @@ pub fn names_arg(value: &Value) -> Result<Vec<String>> {
             .collect()),
         _ => Err(ConversationError::ExpectedNames),
     }
+}
+
+/// A look from the operator: `"<shape>:<colour>"`, empty for the one Ghost picks.
+fn look_arg(v: Option<&Value>) -> Result<Option<String>> {
+    let text = v.map(py_str_or_empty).unwrap_or_default();
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    super::models::parse_look(&text)
+        .map(Some)
+        .ok_or(ConversationError::BadLook(text))
 }
 
 #[cfg(test)]

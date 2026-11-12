@@ -1,4 +1,5 @@
 import type { ReachCall, ScheduleInfo, ScheduleRunInfo } from "@ghost/client-ts";
+import { AGENT_SHAPES, lookOf, parseLook } from "@ghost/ui";
 import { describe, expect, it } from "vitest";
 
 import { briefOf } from "../src/screens/conversations/brief";
@@ -33,5 +34,17 @@ describe("an agent's brief", () => {
     expect(v.total.calls).toBe(5);
     expect(v.by_session[0].key).toBe("run-r1");
     expect(v.recent.length).toBe(5);
+  });
+});
+
+describe("an agent's look", () => {
+  it("reads as the daemon checks it, falls back to Wisp in its slug's colour, and Ghost is Wisp", () => {
+    expect(parseLook("lantern:3")).toEqual({ shape: "lantern", hue: 3 });
+    expect(parseLook("dragon:1")).toBeNull();
+    expect(parseLook("moth:8")).toBeNull();
+    expect(lookOf("ghost", "moth:2")).toEqual({ shape: "wisp", hue: 0 });
+    expect(lookOf("ledger", null).shape).toBe("wisp");
+    expect(lookOf("ledger", "star:5")).toEqual({ shape: "star", hue: 5 });
+    expect(AGENT_SHAPES.length).toBe(8);
   });
 });

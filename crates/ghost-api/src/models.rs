@@ -1833,6 +1833,11 @@ pub struct ConversationView {
     /// The running session is with it.
     pub active: bool,
     pub is_ghost: bool,
+    /// How it is drawn, `"<shape>:<colour>"` (shapes: wisp, drop, bell, hood, cloud,
+    /// lantern, star, moth; colours 0 to 7). Null: the one the desktop picks from its slug.
+    #[serde(default)]
+    #[schema(required)]
+    pub look: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -1869,6 +1874,9 @@ pub struct ConversationCreate {
     /// handoff. Never Ghost.
     #[serde(default)]
     pub seed_from: Option<String>,
+    /// How it is drawn, `"<shape>:<colour>"`; empty or left out for the one picked from its slug.
+    #[serde(default)]
+    pub look: Option<String>,
 }
 
 /// Each field present is applied as its own audited write. `voice` "" means back to
@@ -1893,6 +1901,9 @@ pub struct ConversationUpdate {
     pub notes: Option<Vec<String>>,
     #[serde(default)]
     pub seed_from: Option<String>,
+    /// `"<shape>:<colour>"`, or "" for the one picked from its slug. Not Ghost's: Ghost is Wisp.
+    #[serde(default)]
+    pub look: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -2310,6 +2321,7 @@ mod tests {
             retired_at: None,
             active: false,
             is_ghost: false,
+            look: None,
         };
         let detail = ConversationDetail {
             view,

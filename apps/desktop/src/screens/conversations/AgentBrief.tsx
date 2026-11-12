@@ -7,11 +7,12 @@
  */
 import type { ConversationDetail } from "@ghost/client-ts";
 import { Brain, CalendarClock, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { useGhost } from "@ghost/ui";
 import { useEffect, useState } from "react";
 
 import { Link } from "../../app/router";
 import { useToday } from "../../app/today";
-import { Button, cx, formatTime, relativeTime } from "../../ui";
+import { Button, cx, formatTime, relativeTime, useLive } from "../../ui";
 import { clock, type Moment } from "../today/model";
 import { bytes, count, reachSentence } from "../today/telemetry";
 import { whenWords } from "../watching/model";
@@ -23,6 +24,9 @@ const TODAY_SHOWN = 6;
 
 export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory }: { slug: string; name: string; detail: ConversationDetail; voiceTitle: string; onPersona: () => void; onMemory: () => void }) {
   const today = useToday();
+  const { status } = useGhost();
+  const { phase } = useLive();
+  const talking = !!status?.session_id && status.conversation === slug;
   const b = briefOf(slug, today);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -38,7 +42,11 @@ export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory
   return (
     <section className="conv-brief" aria-label={`${name} at a glance`}>
       <div className={cx("conv-brief__now", b.running && "is-working")}>
-        {b.running ? (
+        {talking && !b.running ? (
+          <p className="conv-brief__line">
+            In the conversation with you <span className="t-3">· {phase === "speaking" ? "speaking" : phase === "thinking" ? "working on your words" : "listening"}</span>
+          </p>
+        ) : b.running ? (
           <>
             <span className="conv-brief__pulse" aria-hidden />
             <p className="conv-brief__line">
@@ -162,7 +170,7 @@ export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory
             Every connected app ({reachApps} now) and Ghost’s own tools, under your permissions. Nothing narrows them per agent.
           </p>
           <span className="conv-brief__links">
-            <Link to="/settings/apps">Apps</Link>
+            <Link to="/apps">Apps</Link>
             <Link to="/settings/permissions">
               <ShieldCheck aria-hidden /> Permissions
             </Link>

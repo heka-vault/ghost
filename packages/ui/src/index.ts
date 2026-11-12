@@ -15,6 +15,8 @@ export type { HearLevel, HearLive } from "./hearLive";
 export { splitSummary, neverHappened, didNotHappen, pastTense, shortTarget } from "./audit";
 export type { Summarized } from "./audit";
 export { GHOST_PATH, GHOST_PATH_SMALL, lineHue } from "./brand";
+export { AGENT_HUES, AGENT_SHAPES, HUE_NAMES, SHAPE_NAMES, SHAPES, lookOf, lookText, parseLook } from "./agentShapes";
+export type { AgentLook, AgentShape, ShapeDrawing } from "./agentShapes";
 export { createMotion, detailFor, stillPose, LOOK_AT_YOU } from "./mascot";
 export type { Attrs as MascotAttrs, Character, Ctx as MascotCtx, Detail as MascotDetail, El as MascotEl, Frame as MascotFrame, Look, Mood as MascotMood, Motion as MascotMotion, Scene as MascotScene } from "./mascot";
 export { WISP, wavePose, wispGlyph } from "./wisp";
