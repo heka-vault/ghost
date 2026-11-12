@@ -39,3 +39,5 @@ For a weak "hey ghost" hit, the check now also accepts a sentence of the reading
 - It added no false wake on any negative set ([2026-11-12 wake check](../benchmarks/2026-11-12-wake-check.md)).
 
 The first frame at the floor still decides, though the score may still be rising, so a near miss that climbs past the threshold is checked. Waiting for the peak heard more takes, but it let confusables wake unchecked (issue #13).
+
+Waking on the bare name wherever Parakeet reads it was measured as well and not taken. In the operator's speech, half the times "ghost" was said were product talk, sign-offs ("Later, ghost") or session commands ("Hang on, ghost"), so the name must open what was said. Inside the detector's hits, accepting it anywhere heard nothing more and woke on "Hang on, Ghost" and "Hang up ghost".

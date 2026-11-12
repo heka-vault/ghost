@@ -25,7 +25,8 @@ reads a weak hit twice as the processor does, to just after it and again 0.8 s l
 2 s before it, and the rule checks each reading: ``match_wake`` "hey ghost" at 0.8, and
 after the fix also ``match_heys_spelling``. A hit holds the detector for the 2 s cooldown.
 
-Each row is one setup: before the fix, after it, and the two rejected hold variants.
+Each row is one setup: before the fix, after it, the two rejected hold variants, and the
+rejected "the name anywhere in the reading".
 Nothing is written but the score cache (numbers only). Transcripts are printed only with
 ``--show-text`` and only to the terminal, so keep that output local (CLAUDE.md).
 """
@@ -52,6 +53,7 @@ NEAR = 1.2  # a hit this close to a labelled "ghost" is that take
 CACHE = Path.home() / ".cache" / "ghost"
 MODEL = CACHE / "wake" / "hey_ghost.onnx"
 PARAKEET = CACHE / "models" / "parakeet-tdt-0.6b-v3"
+NAME = re.compile(r"\bghost\b", re.IGNORECASE)
 HOLD_FRAMES = 3  # the rejected alternative: wait for the peak (2026-11-12)
 
 Span = tuple[float, float]
@@ -62,6 +64,7 @@ class Setup:
     name: str
     hold: int
     heys_spelling: bool
+    name_anywhere: bool = False  # the word "ghost" anywhere in the reading
 
 
 SETUPS = (
@@ -69,6 +72,7 @@ SETUPS = (
     Setup("after: or match_heys_spelling (shipped)", 0, True),
     Setup("rejected: hold for the peak", HOLD_FRAMES, False),
     Setup("rejected: hold, and heys spelling", HOLD_FRAMES, True),
+    Setup("rejected: the name anywhere in the reading", 0, True, True),
 )
 
 
@@ -207,8 +211,10 @@ def main() -> None:
                             for x in READS_AFTER
                         ]
                     texts = readings[at]
-                    woke = any(match_wake(x, ("hey ghost",), fuzzy=a.fuzzy) for x in texts) or (
-                        setup.heys_spelling and any(match_heys_spelling(x) for x in texts)
+                    woke = (
+                        any(match_wake(x, ("hey ghost",), fuzzy=a.fuzzy) for x in texts)
+                        or (setup.heys_spelling and any(match_heys_spelling(x) for x in texts))
+                        or (setup.name_anywhere and any(NAME.search(x) for x in texts))
                     )
                     if a.show_text:
                         print(

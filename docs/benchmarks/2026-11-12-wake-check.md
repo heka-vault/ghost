@@ -82,6 +82,31 @@ The rule adds no false wake in any set. Every hit it flips is a real call to Gho
 - The rule is a word scan of a reading Parakeet already made, microseconds, and Parakeet runs exactly as often as before.
 - The chime comes no later: a weak hit already waited for its reading.
 
+## 2b. Waking on the name alone
+
+The idea: "Ghost" is rare enough in ordinary speech to wake on whenever it is heard for sure. It does not hold as well for the operator, who builds Ghost and says its name about the product and in session commands. Every speech segment with the word "ghost" in 6.2 min of the operator's recorded speech (the 2026-11-06 Hearing session and the 2026-10-30 clips, `ghost.mic`):
+
+| what was said | segments | hey_ghost score |
+|---|---|---|
+| a call: "Hey ghost.", "Ghost.", "A ghost." | 8 | 0.87–0.97; one bare "Ghost." 0.07 |
+| the product, mid-sentence | 2 | 0.01, 0.04 |
+| a sign-off: "Later ghost.", "Talk to you later, ghost. Bye." | 2 | 0.01, 0.01 |
+| a session command: "Hang on, ghost.", "Hang up ghost.", "… stop ghost …" | 3 | 0.27, 0.78, 0.02 |
+
+Half the times the word was said were not calls. A sign-off is said just as passive listening resumes, so "the word anywhere" would wake Ghost again right after the operator hangs up.
+
+**Inside the detector's hits** (a weak hit whose reading has the word anywhere, the "name anywhere" row of `make wake-check-replay`):
+- It hears no more of the operator's takes than the shipped rule: 16/21 on `ghost.mic`, 20/21 raw.
+- It adds false wakes on "Hang on, Ghost" and "Hang up ghost" at 0.32–0.59: 1 more on `ghost.mic`, and 1 more each among the operator's takes and negatives on raw.
+- On the Kokoro sets it adds none.
+
+The shipped rule is this idea with the guard the data asks for. It accepts the name when it opens a sentence, bare ("Ghost.") or after one short sound for "hey", and when the detector already scored it. Every call above passes; none of the other seven does.
+
+**Without the detector** (transcript wake, Parakeet reading every utterance, the name opening it):
+- On the same speech it would have heard all 8 calls, the bare "Ghost." at 0.07 among them, with no false wake.
+- That is one call more, at the cost ADR 0025 moved away from: Parakeet on every utterance in the room, and the chime after the operator stops rather than as "ghost" ends.
+- 6 minutes is too little to measure false wakes an hour, and the LibriSpeech stream that measured them in October is no longer on disk. So it is not built; it needs an hour of the room recorded on purpose first.
+
 ## 3. Not built
 
 - **Level normalisation before the detector:** see §1. The level was not the problem.
