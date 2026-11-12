@@ -32,6 +32,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer};
 use serde_json::{Map, Value, json};
+use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use super::clients::{CLIENT_SOURCE, ClientId, client_source, shown};
@@ -360,7 +361,9 @@ impl Feed {
 // --- what the daemon plugs in -----------------------------------------------------------------
 
 /// Runs one written turn with an agent, with no audio: what `agent_ask` needs. The daemon
-/// plugs in its headless run when it has one; until then [`NoRunner`] says so.
+/// plugs in its headless run (ADR 0047: `ghostd::outside::AskRunner`); without one
+/// [`NoRunner`] says so. The turn stops when the request it was made for does
+/// (`crate::apps::current_cancel`).
 #[async_trait]
 pub trait AgentRunner: Send + Sync {
     /// `text` as a turn for `agent`, from `from` (`client:<name>`); the agent's written
@@ -509,6 +512,9 @@ impl GhostServer {
     pub fn for_outside(&self, outside: Outside) -> Self {
         let mut tool_router = self.tool_router.clone();
         tool_router.merge(Self::outside_router());
+        // Finding a connected app's tool (ADR 0046) is for an agent, which can call it. An
+        // outside tool cannot, and what the search returns is the apps' own text.
+        tool_router.remove_route("tools_search");
         let server = Self {
             tool_router,
             outside: Some(Arc::new(outside)),
@@ -647,7 +653,28 @@ impl GhostServer {
                 .call(ToolCallContext::new(&named, request, context))
                 .await;
         }
-        Ok(reply(self.change(outside, &client, &name, args).await).into())
+        // A change runs to its outcome whatever becomes of the request: the gate is not
+        // left with a proposal half made when the client goes away. What may take long
+        // (`agent_ask`, a call to an app) stops on this token instead, when the client
+        // cancels the request or drops the connection.
+        let stop = CancellationToken::new();
+        let gone = stop.clone().drop_guard();
+        let work = {
+            let (me, outside) = (self.clone(), outside.clone());
+            tokio::spawn(crate::apps::with_cancel(stop.clone(), async move {
+                me.change(&outside, &client, &name, args).await
+            }))
+        };
+        tokio::pin!(work);
+        let out = tokio::select! {
+            out = &mut work => out,
+            () = context.ct.cancelled() => {
+                stop.cancel();
+                work.await
+            }
+        };
+        let _ = gone.disarm();
+        Ok(reply(out.unwrap_or_else(|e| Err(format!("the call did not finish: {e}")))).into())
     }
 
     /// A change from an outside client, through the gate.
@@ -705,17 +732,22 @@ impl GhostServer {
     }
 
     pub(super) fn info(&self) -> ServerConfig {
-        let config = ServerConfig::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .build(),
-        )
-        .with_server_info(Implementation::new(NAME, env!("CARGO_PKG_VERSION")));
+        let about = Implementation::new(NAME, env!("CARGO_PKG_VERSION"));
         if self.outside.is_some() {
-            config.with_instructions(INSTRUCTIONS)
+            ServerConfig::new(
+                ServerCapabilities::builder()
+                    .enable_tools()
+                    .enable_resources()
+                    .build(),
+            )
+            .with_server_info(about)
+            .with_instructions(INSTRUCTIONS)
         } else {
-            config
+            // In process the resources are not advertised: Ghost offers an app's resources
+            // to its agents as two more read tools (ADR 0046), and the agents already have
+            // `docs_read` and `status`. Two tools on every turn for nothing new (ADR 0018).
+            ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+                .with_server_info(about)
         }
     }
 
