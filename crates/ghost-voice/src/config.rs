@@ -260,7 +260,7 @@ impl VoiceSettings {
             llm_env,
             llm_thinking: string("GHOST_LLM_THINKING", ghost_llm::DEFAULT_THINKING),
             llm_max_tokens: number("GHOST_LLM_MAX_TOKENS")?.map_or(LLM_MAX_TOKENS, |v| v as u32),
-            llm_fast_reads: flag("GHOST_LLM_FAST_READS", false),
+            llm_fast_reads: flag("GHOST_LLM_FAST_READS", true),
             llm_fast_read_max_chars: usize_or("GHOST_LLM_FAST_READ_MAX_CHARS", 4000)?,
             llm_fast_read_rounds: usize_or("GHOST_LLM_FAST_READ_ROUNDS", 2)?,
             stt_model: string("GHOST_STT_MODEL", "nemo-parakeet-tdt-0.6b-v3"),
@@ -501,7 +501,7 @@ mod tests {
         assert!(s.prerender(), "Kokoro renders the first clause ahead");
         assert_eq!(s.tts_first_clause_words, 4);
         assert_eq!(s.stt_early_read, crate::stt::EarlyReadMode::Off);
-        assert!(!s.llm_fast_reads);
+        assert!(s.llm_fast_reads, "with a fast model set, it makes reads itself");
         assert!(s.turn_speculate);
         assert!(s.turn_reread);
         assert_eq!(s.turn_stop_secs, 1.6);

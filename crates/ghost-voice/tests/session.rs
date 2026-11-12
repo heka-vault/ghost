@@ -1244,6 +1244,8 @@ async fn a_tool_call_from_the_fast_model_hands_the_turn_to_the_main_model() {
         ]],
     )
     .set("GHOST_TTS_PRERENDER", "false"); // so the voice renders only what it speaks
+    // ADR 0050 as first written: any call hands the turn over.
+    setup.vars.push(("GHOST_LLM_FAST_READS", "false".into()));
     setup.fast = Some(vec![vec![ScriptedModel::call(
         preamble,
         "github_search_issues",
@@ -1357,6 +1359,8 @@ async fn after_a_tool_result_the_main_model_answers_not_the_fast_one() {
             vec![ScriptedModel::say("The main model would say more.")],
         ],
     );
+    // ADR 0050 as first written: any call hands the turn over.
+    setup.vars.push(("GHOST_LLM_FAST_READS", "false".into()));
     setup.fast = Some(vec![
         vec![ScriptedModel::call("", "github_search_issues", Map::new())],
         vec![ScriptedModel::say("Any time.")],
@@ -1402,6 +1406,8 @@ async fn a_held_answer_handed_over_and_then_withdrawn_does_not_ask_the_fast_mode
         ]],
     );
     setup.grace = 0.6;
+    // ADR 0050 as first written: any call hands the turn over.
+    setup.vars.push(("GHOST_LLM_FAST_READS", "false".into()));
     setup.fast = Some(vec![vec![ScriptedModel::call(
         "",
         "github_search_issues",
@@ -1655,6 +1661,8 @@ async fn with_reads_off_any_call_hands_over_as_before() {
             ScriptedModel::say("Two are critical."),
         ]],
     );
+    // ADR 0050 as first written: any call hands the turn over.
+    setup.vars.push(("GHOST_LLM_FAST_READS", "false".into()));
     setup.fast = Some(vec![vec![ScriptedModel::call(
         "",
         "github_search_issues",

@@ -734,7 +734,18 @@ impl Bench {
                     .iter()
                     .any(|c| line.args.iter().all(|part| c.contains(part)))
             {
-                let p = format!("line {}: no call with {:?}", i + 1, line.args);
+                // The mock app's calls (the scenario's own data, no one's text) are named,
+                // so a wrong argument can be told from a different way to ask.
+                let p = format!(
+                    "line {}: no call with {:?} (calls: {})",
+                    i + 1,
+                    line.args,
+                    if calls.is_empty() {
+                        "none".to_string()
+                    } else {
+                        calls.join("; ")
+                    }
+                );
                 if let Some(l) = lines.get_mut(i) {
                     l.problems.push(p.clone());
                 }
