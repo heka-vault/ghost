@@ -14,6 +14,8 @@ pub mod pairing;
 pub mod routes;
 pub mod signing;
 pub mod stream;
+#[cfg(test)]
+mod vectors;
 
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;

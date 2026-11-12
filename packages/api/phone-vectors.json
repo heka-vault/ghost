@@ -1,0 +1,80 @@
+{
+  "about": "Shared test vectors for docs/phone-protocol.md, written by the daemon's own signing code (crates/ghostd/src/phone/vectors.rs). Regenerate with GHOST_WRITE_VECTORS=1 cargo test -p ghostd phone::vectors.",
+  "device": "dev-4f2a",
+  "events": [
+    {
+      "frame": "event: hello\ndata: {\"msg\":\"{\\\"epoch\\\":\\\"3fa9c2d1\\\",\\\"heartbeat_secs\\\":15,\\\"resumed\\\":false,\\\"type\\\":\\\"hello\\\"}\",\"sig\":\"Uot9wX1Get3FrZ9MSVmuYo14FXStwARv9LqwFIv8Xt8\"}\n\n",
+      "msg": "{\"epoch\":\"3fa9c2d1\",\"heartbeat_secs\":15,\"resumed\":false,\"type\":\"hello\"}",
+      "sig": "Uot9wX1Get3FrZ9MSVmuYo14FXStwARv9LqwFIv8Xt8",
+      "string": "ghost-v1-event\n00112233445566778899aabbccddeeff\nc7f1719b67ba75b1401fdb0bba0d5a58a0816eb6194721c73003fcfeb908c81e"
+    },
+    {
+      "frame": "event: question\nid: 3fa9c2d1.42\ndata: {\"msg\":\"{\\\"cursor\\\":\\\"3fa9c2d1.42\\\",\\\"question\\\":{\\\"answer\\\":null,\\\"answered_at\\\":null,\\\"answered_via\\\":null,\\\"asked_at\\\":\\\"2026-11-11T09:00:00Z\\\",\\\"asked_by\\\":\\\"Ledger\\\",\\\"change_id\\\":null,\\\"choice\\\":null,\\\"choices\\\":[\\\"Yes\\\",\\\"No\\\"],\\\"choices_only\\\":false,\\\"detail\\\":null,\\\"expires_at\\\":\\\"2026-11-12T09:00:00Z\\\",\\\"key\\\":\\\"question:0b00bdd56307\\\",\\\"kind\\\":\\\"question\\\",\\\"question\\\":\\\"Should the “October” invoice go out today?\\\\nIt is €1,200.\\\",\\\"source\\\":\\\"agent:ledger\\\",\\\"state\\\":\\\"open\\\",\\\"urgency\\\":\\\"notify\\\"},\\\"seq\\\":42,\\\"type\\\":\\\"question\\\"}\",\"sig\":\"gEHbRCzd9mv6DGSXqri5AwcZyHaIkJ0VojuR558bQe8\"}\n\n",
+      "msg": "{\"cursor\":\"3fa9c2d1.42\",\"question\":{\"answer\":null,\"answered_at\":null,\"answered_via\":null,\"asked_at\":\"2026-11-11T09:00:00Z\",\"asked_by\":\"Ledger\",\"change_id\":null,\"choice\":null,\"choices\":[\"Yes\",\"No\"],\"choices_only\":false,\"detail\":null,\"expires_at\":\"2026-11-12T09:00:00Z\",\"key\":\"question:0b00bdd56307\",\"kind\":\"question\",\"question\":\"Should the “October” invoice go out today?\\nIt is €1,200.\",\"source\":\"agent:ledger\",\"state\":\"open\",\"urgency\":\"notify\"},\"seq\":42,\"type\":\"question\"}",
+      "sig": "gEHbRCzd9mv6DGSXqri5AwcZyHaIkJ0VojuR558bQe8",
+      "string": "ghost-v1-event\n00112233445566778899aabbccddeeff\n909b11815c76747aaec068339300ef455b586f3776384c5b48bfe016c19bc58d"
+    },
+    {
+      "frame": "event: heartbeat\ndata: {\"msg\":\"{\\\"at\\\":\\\"2026-11-11T09:01:15Z\\\",\\\"cursor\\\":\\\"3fa9c2d1.42\\\",\\\"type\\\":\\\"heartbeat\\\"}\",\"sig\":\"zjr5NVHdmLeIR76u0cJ2Gr-mOeUtgcGbytEI0I3iT1g\"}\n\n",
+      "msg": "{\"at\":\"2026-11-11T09:01:15Z\",\"cursor\":\"3fa9c2d1.42\",\"type\":\"heartbeat\"}",
+      "sig": "zjr5NVHdmLeIR76u0cJ2Gr-mOeUtgcGbytEI0I3iT1g",
+      "string": "ghost-v1-event\n00112233445566778899aabbccddeeff\n18552f27db555e8491a3d40812f3544ce267422fed3e9e483545a819e067ea35"
+    }
+  ],
+  "nonce": "00112233445566778899aabbccddeeff",
+  "requests": [
+    {
+      "body": "",
+      "method": "GET",
+      "path": "/hello",
+      "signature": "BGZ5jV_ROCSfGl7zscqwKXKUEI2tIqiwQHnCsuNUUCc",
+      "string": "ghost-v1\nGET\n/hello\n1762851600\n00112233445566778899aabbccddeeff\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "body": "",
+      "method": "GET",
+      "path": "/stream?cursor=3fa9c2d1.41",
+      "signature": "YSWqmS856K8w2SJtNKJpqx0TY6g82v7oYsMyxuoy4ao",
+      "string": "ghost-v1\nGET\n/stream?cursor=3fa9c2d1.41\n1762851600\n00112233445566778899aabbccddeeff\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "body": "{\"id\":\"7d1f0c2e-9a41-4f3b-8c55-0e6d2b9a1f30\",\"key\":\"question:0b00bdd56307\",\"text\":\"Send it today, café “Lumen” too\"}",
+      "method": "POST",
+      "path": "/questions/answer",
+      "signature": "WytZcrvsLAsoVQOVK_ETfW04iSyXsqSLIEGfv3ulLEg",
+      "string": "ghost-v1\nPOST\n/questions/answer\n1762851600\n00112233445566778899aabbccddeeff\n1ff0bea050f0307cb76680897ef7b26a81a49c1a7c94bdca7bf04b1953668168"
+    },
+    {
+      "body": "{\"alert_id\":\"9c1e04a7b2d3\"}",
+      "method": "POST",
+      "path": "/seen",
+      "signature": "7DNZqLlo8Btfkdcla3ZnPMEWK4ZLVEBfSSJNTwvlBnk",
+      "string": "ghost-v1\nPOST\n/seen\n1762851600\n00112233445566778899aabbccddeeff\n1c6493bdf73d804f1ecb702d8858d20993d3b3b162aeebfa2c8706a31108b3eb"
+    }
+  ],
+  "responses": [
+    {
+      "body": "{\"ok\":true}",
+      "body_hash": "4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93",
+      "signature": "rNGBCTz1JQG7b8KSyrjCX3CwQ7X7a2jgZdGxPBeizTQ",
+      "status": 200,
+      "string": "ghost-v1-response\n200\n00112233445566778899aabbccddeeff\n1762851600\n4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93"
+    },
+    {
+      "body": "{\"error\":\"unauthorized\"}",
+      "body_hash": "782eeaa7f1915f6783146f8180751785584f0f24bd4e503165c7fc4a597da600",
+      "signature": "4O3ZCPEZLPAoHge5IV3Sgg4sbfgK27JUdQDWQqsGCS0",
+      "status": 401,
+      "string": "ghost-v1-response\n401\n00112233445566778899aabbccddeeff\n1762851600\n782eeaa7f1915f6783146f8180751785584f0f24bd4e503165c7fc4a597da600"
+    },
+    {
+      "body": "",
+      "body_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "signature": "e5NlZUp_yavBmAbf3Dwfwh76Ne_6L-C0e0baqt-qMmA",
+      "status": 200,
+      "string": "ghost-v1-response\n200\n00112233445566778899aabbccddeeff\n1762851600\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "time": "1762851600"
+}
