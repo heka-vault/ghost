@@ -22,6 +22,10 @@ use crate::source::ToolSource;
 
 /// How many tools one search gives.
 pub const SEARCH_RESULTS: usize = 8;
+/// How many of them, the best first, are offered by name from the next call (the rest
+/// stay callable by the name the search gave). Fewer than it gives: every one offered
+/// moves the tool list, and the cached prompt with it, and takes a place among the kept.
+pub const SEARCH_KEPT: usize = 3;
 
 /// The tools the model used or found lately, by the names it calls them: the ones still
 /// offered by name when most are found by search. The newest `cap` are kept; using one
@@ -520,7 +524,7 @@ impl Apps {
         hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         hits.truncate(SEARCH_RESULTS);
         // Best last, so the best is the newest and the last to be forgotten.
-        for (_, _, _, name) in hits.iter().rev() {
+        for (_, _, _, name) in hits.iter().take(SEARCH_KEPT).rev() {
             self.recent.touch(name);
         }
         hits.into_iter().map(|(_, _, tool, _)| tool).collect()

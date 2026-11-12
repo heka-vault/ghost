@@ -1387,6 +1387,33 @@ async fn what_the_model_used_is_remembered_and_offered_again_after_a_restart() {
 }
 
 #[tokio::test]
+async fn a_search_keeps_only_its_best_few_and_the_rest_stay_callable() {
+    // 2026-11-12: a search for a calendar that wasn't there put eight tools into the
+    // twelve kept (19 to 27 tools), which pushed out what the operator uses and rewrote
+    // the cached prompt. Its best three are offered by name; the rest it named can still
+    // be called by the name it gave.
+    let limits = Limits {
+        tools_max: 3,
+        ..Limits::default()
+    };
+    let m = many(20, limits, &[]).await;
+    let found = search(&m.apps, "thing").await;
+    assert_eq!(found["tools"].as_array().unwrap().len(), SEARCH_RESULTS);
+    let shown: Vec<String> = advertised(&m.apps)
+        .into_iter()
+        .filter(|n| n.starts_with("shifty_"))
+        .collect();
+    assert_eq!(shown.len(), SEARCH_KEPT, "{shown:?}");
+    let last = found["tools"].as_array().unwrap().last().unwrap()["name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(!shown.contains(&last));
+    let tool = last.strip_prefix("shifty_").unwrap();
+    m.apps.app("shifty").unwrap().call(tool, Map::new(), true).await.unwrap();
+}
+
+#[tokio::test]
 async fn the_size_of_the_schemas_counts_too() {
     let limits = Limits {
         tools_bytes: 400,
