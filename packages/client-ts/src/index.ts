@@ -189,7 +189,9 @@ export type GhostEvent =
   /** A run with nobody there started or has ended, with its row as it is now (ADR 0060). Desktop only. */
   | Schemas["RunEvent"]
   /** One tool call an agent made came back, as counts and sizes, never contents (ADR 0060). Desktop only. */
-  | Schemas["ReachEvent"];
+  | Schemas["ReachEvent"]
+  /** "Ghost, open the app" in a session (ADR 0059): the desktop brings its window to the operator. */
+  | Schemas["ShowAppEvent"];
 
 export type Unsubscribe = () => void;
 

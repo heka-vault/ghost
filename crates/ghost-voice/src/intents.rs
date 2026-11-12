@@ -263,6 +263,27 @@ pub const STOP_LISTENING: &[&str] = &[
     "mute the mic",
     "mute your microphone",
 ];
+/// The whole turn (fillers aside) asks to see Ghost's window (ADR 0059): the desktop brings
+/// it to the workspace the operator is on and to the front. The session goes on.
+pub const SHOW_APP: &[&str] = &[
+    "open the app",
+    "open your app",
+    "open the ghost app",
+    "open ghost",
+    "open the window",
+    "open your window",
+    "show the app",
+    "show me the app",
+    "show your app",
+    "show the window",
+    "show me the window",
+    "show me ghost",
+    "bring up the app",
+    "bring up the window",
+    "bring up ghost",
+];
+/// Said as the window comes up.
+pub const SHOWING_APP: &str = "Here it is.";
 /// Said before the microphone closes: what it did, and the way back, since Ghost can no
 /// longer hear one.
 pub const STOPPED_LISTENING: &str =
@@ -340,6 +361,13 @@ impl TurnInterceptor for QuickIntents {
             return Some(Handled {
                 say: Some(STOPPED_LISTENING.into()),
                 action: Some(Action::StopListening),
+                until: None,
+            });
+        }
+        if any_in(SHOW_APP) {
+            return Some(Handled {
+                say: Some(SHOWING_APP.into()),
+                action: Some(Action::ShowApp),
                 until: None,
             });
         }
@@ -510,6 +538,12 @@ mod tests {
                 Some(Action::StopListening),
             ),
             ("mute yourself", false, Some(Action::StopListening)),
+            // ADR 0059: the window comes to the operator; the session goes on
+            ("Ghost, open the app.", false, Some(Action::ShowApp)),
+            ("okay, show me the window", false, Some(Action::ShowApp)),
+            ("bring up the app please", false, Some(Action::ShowApp)),
+            ("open the app repo and read the readme", false, None),
+            ("don't open the app", false, None),
             ("don't stop listening", false, None),
             ("stop listening to the radio and play it", false, None),
             ("why did you stop listening", false, None),

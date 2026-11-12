@@ -5193,6 +5193,22 @@
         ],
         "type": "object"
       },
+      "ShowAppEvent": {
+        "description": "The operator asked by voice to see Ghost's window (ADR 0059): the desktop brings its main\nwindow to the workspace they are on and to the front. Inside a session only.",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "type": {
+            "default": "show_app",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
       "SkillAdd": {
         "properties": {
           "name": {
@@ -7520,6 +7536,7 @@
                       "reach": "#/components/schemas/ReachEvent",
                       "run": "#/components/schemas/RunEvent",
                       "saying": "#/components/schemas/SayingEvent",
+                      "show_app": "#/components/schemas/ShowAppEvent",
                       "status": "#/components/schemas/StatusEvent",
                       "turn": "#/components/schemas/TurnEvent",
                       "voice": "#/components/schemas/VoiceEvent",
@@ -7575,6 +7592,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ReachEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ShowAppEvent"
                     }
                   ]
                 }

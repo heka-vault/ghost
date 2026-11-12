@@ -1690,6 +1690,19 @@ impl Daemon {
             })
         });
         events.add({
+            let state = d.state.clone();
+            Arc::new(move |event| {
+                let state = state.clone();
+                Box::pin(async move {
+                    // ADR 0059: "open the app" in a session; the desktop raises its window.
+                    if event.kind == EventKind::ShowApp {
+                        info!("desktop: the operator asked for the window");
+                        state.publish_show_app();
+                    }
+                })
+            })
+        });
+        events.add({
             let mic = d.mic.clone();
             Arc::new(move |event| {
                 let mic = mic.clone();

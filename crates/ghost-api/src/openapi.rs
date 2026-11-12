@@ -179,6 +179,16 @@ pub struct ReachEvent {
     pub reach: crate::models::ReachCall,
 }
 
+/// The operator asked by voice to see Ghost's window (ADR 0059): the desktop brings its main
+/// window to the workspace they are on and to the front. Inside a session only.
+#[derive(ToSchema)]
+pub struct ShowAppEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "show_app")]
+    pub r#type: String,
+    pub session_id: String,
+}
+
 /// What the event stream carries, discriminated by `type`.
 #[derive(ToSchema)]
 #[serde(untagged)]
@@ -199,6 +209,7 @@ pub struct ReachEvent {
     ("hear" = "#/components/schemas/HearEvent"),
     ("run" = "#/components/schemas/RunEvent"),
     ("reach" = "#/components/schemas/ReachEvent"),
+    ("show_app" = "#/components/schemas/ShowAppEvent"),
 )))]
 pub enum Event {
     Status(StatusEvent),
@@ -217,6 +228,7 @@ pub enum Event {
     Hear(HearEvent),
     Run(RunEvent),
     Reach(ReachEvent),
+    ShowApp(ShowAppEvent),
 }
 
 /// `POST /conversations/{slug}/notes` takes a free object with `text` in it.
@@ -259,6 +271,7 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("SayingView", crate::models::SayingView::schema()),
         ("HearEvent", HearEvent::schema()),
         ("HearView", crate::hear::HearView::schema()),
+        ("ShowAppEvent", ShowAppEvent::schema()),
         ("ActivityView", crate::models::ActivityView::schema()),
         ("RunEvent", RunEvent::schema()),
         ("ReachEvent", ReachEvent::schema()),
