@@ -62,7 +62,10 @@ export type ModelConnectionView = Schemas["ModelConnectionView"];
 export type ModelProviderView = Schemas["ModelProviderView"];
 export type ModelDraft = Schemas["ModelDraft"];
 export type ModelListView = Schemas["ModelListView"];
-export type ModelTestResult = Schemas["ModelTestResult"];
+export type ModelCheckView = Schemas["ModelCheckView"];
+export type ModelCheckModel = Schemas["ModelCheckModel"];
+export type ModelCheckVerdict = Schemas["ModelCheckVerdict"];
+export type ModelCheckLatest = Schemas["ModelCheckLatest"];
 export type ModelSignInResult = Schemas["ModelSignInResult"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
@@ -141,6 +144,9 @@ export type HearTable = Schemas["HearTable"];
 export type HearRow = Schemas["HearRow"];
 export type HearFact = Schemas["HearFact"];
 export type HearVerdict = Schemas["HearVerdict"];
+/** What a live session did (ADR 0055). */
+export type ActivityView = Schemas["ActivityView"];
+export type ActivityKind = ActivityView["kind"];
 /** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
 export type HearChannel = "aec" | "raw";
 
@@ -158,6 +164,8 @@ export type GhostEvent =
   | Schemas["AppsEvent"]
   /** Ghost's own voice at the speaker, 0..1, ~20/s while it speaks, then one 0. */
   | Schemas["VoiceEvent"]
+  /** What the live session is doing (ADR 0055): the operator's turn, tool calls, a handover, a cut, an error. Names only, never words. */
+  | Schemas["ActivityEvent"]
   /** The Hearing test's recorder, ~20/s while it is open: its view, the mic's level 0..1, whether the VAD hears speech; then one `closed`. */
   | Schemas["HearEvent"];
 
@@ -353,9 +361,15 @@ export class GhostClient {
   modelList(draft: ModelDraft = { values: {} }) {
     return unwrap(this.api.POST("/model/models", { body: draft }));
   }
-  /** One tiny request through a draft connection: time to first token, as `make perf-llm` times it. */
-  testModel(draft: ModelDraft = { values: {} }) {
-    return unwrap(this.api.POST("/model/test", { body: draft }));
+  /** The provider check (ADR 0056) through a draft connection, or the saved one: each
+   *  model's first byte and first word, and whether streaming, tool calls, the prompt cache
+   *  and the thinking setting work. Kept by the daemon. */
+  checkModel(draft: ModelDraft = { values: {} }) {
+    return unwrap(this.api.POST("/model/check", { body: draft }));
+  }
+  /** The latest kept check of the saved connection, if any. */
+  modelCheckLatest() {
+    return unwrap(this.api.GET("/model/check"));
   }
   /** Sign in to OpenRouter: open `url`; the key comes back to Ghost, never to the app. */
   modelSignIn() {

@@ -2182,6 +2182,7 @@ dependencies = [
  "chrono",
  "futures",
  "ghost-core",
+ "ghost-llm",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2301,6 +2302,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "url",
  "wiremock",
  "zeroize",
 ]
@@ -2363,6 +2365,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wiremock",
  "zeroize",
 ]
 

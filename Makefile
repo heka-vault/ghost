@@ -56,7 +56,7 @@ endef
         wake say status check latency restore-volumes \
         lint fmt test deny typecheck ci api-schema version release \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
-        perf perf-micro perf-llm perf-hear perf-turns record wake-eval record-takes wake-takes-eval \
+        perf perf-micro perf-llm perf-providers perf-hear perf-turns record wake-eval record-takes wake-takes-eval wake-check-replay \
         android android-apk android-install mobile-web \
         bundle sidecars onnxruntime models
 
@@ -256,6 +256,10 @@ perf-llm: ## model and endpoint TTFB with Ghost's prompt and tools (a few thousa
 	@cargo build --release -q -p ghostd --bin ghostd -p ghost-core --bin ghost-mock-github
 	@$(load_env) target/release/ghostd perf llm $(ARGS)
 
+perf-providers: ## the provider check (ADR 0056) on every provider with a key in the environment, compared: make perf-providers [PROVIDERS="proxy anthropic:ANTHROPIC_API_KEY openrouter:OPENROUTER_API_KEY openrouter-openai"] [ARGS=--samples 5]
+	@cargo build --release -q -p ghostd --bin ghostd
+	@target/release/ghostd perf providers $(or $(PROVIDERS),proxy anthropic openrouter openrouter-openai openai) $(ARGS)
+
 perf-hear: ## how well Ghost hears (docs/benchmarks/hear-harness.md): make perf-hear [TAKES=latest|dir] [BASELINE=dir/results.json] [ARGS=--show-text ...]
 	@cargo build --release -q -p ghostd --bin ghostd
 	@$(load_env) target/release/ghostd perf hear $(if $(TAKES),--takes $(TAKES)) \
@@ -276,6 +280,9 @@ record-takes: ## guided recording of the wake test set (docs/wake-recording.md):
 
 wake-takes-eval: ## score the wake takes, transcript wake against the trained detector (the oracle): make wake-takes-eval [TAKES=dir]
 	@$(ORACLE) python -I docs/benchmarks/scripts/wake_takes_eval.py $(if $(TAKES),--takes $(TAKES)) $(ARGS)
+
+wake-check-replay: ## the detector and its check of a weak hit over labelled streams, before and after (the oracle): make wake-check-replay ARGS="--stream f.wav:pos@12.3 --stream g.wav:neg"
+	@$(ORACLE) python -I docs/benchmarks/scripts/wake_check_replay.py $(ARGS)
 
 ##@ Phone app (apps/mobile: Expo, installed over adb; no EAS, no Play Store)
 

@@ -91,6 +91,12 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         start_in,
         raised,
     } = start;
+    // The wake said twice ("Hey ghost. Hey ghost.") leaves the name as the first
+    // utterance: a bare wake, opened with the canned greeting (or what is waiting), not a
+    // request for the model (2026-11-12: 1.5 to 2.8 s for a made-up opening).
+    let first_utterance = first_utterance.filter(|first| {
+        *lock(&d.first_via) == TurnVia::Text || !ghost_voice::intents::only_the_name(first)
+    });
     let origin = if phone.is_some() {
         SessionOrigin::Phone
     } else {
@@ -248,6 +254,15 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             }
         })
     };
+    // What the session is doing, by name, never in words (ADR 0055): the desktop's screen.
+    let on_activity: ghost_voice::activity::OnActivity = {
+        let d = Arc::downgrade(d);
+        Arc::new(move |a| {
+            if let Some(d) = d.upgrade() {
+                d.state.publish_activity(activity_view(a));
+            }
+        })
+    };
     let on_conversation: OnSwitch = {
         let d = Arc::downgrade(d);
         Arc::new(move |p: Profile| {
@@ -321,6 +336,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             on_conversation: Some(on_conversation),
             on_latency: None,
             on_level: Some(on_level),
+            on_activity: Some(on_activity),
         },
         wake_phrases: Some(parse_phrases(Some(&cfg.wake_phrases))),
         wake_fuzzy: cfg.wake_fuzzy,
@@ -484,6 +500,8 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         d.refresh_waiting_now();
     }
     *lock(&d.session) = None;
+    // ADR 0056: the operator's own turns say whether the connection is slow.
+    d.refresh_slow_note();
     *lock(&d.heard) = None;
     *lock(&d.origin) = None;
     if origin == SessionOrigin::Desk {
@@ -639,4 +657,41 @@ impl PhoneEvents for PhoneEventsSink {
             let _ = self.0.send(&out);
         }
     }
+}
+
+/// The pipeline's activity as the event stream carries it (`Event::Activity`, ADR 0055).
+fn activity_view(a: ghost_voice::activity::Activity) -> ghost_api::models::ActivityView {
+    use ghost_api::models::{ActivityKind, ActivityView};
+    use ghost_voice::activity::Activity;
+    let mut v = ActivityView {
+        kind: ActivityKind::Error,
+        session_id: String::new(), // filled in by the state, from the live session
+        at: chrono::Utc::now(),
+        name: None,
+        id: None,
+        names: Vec::new(),
+        secs: None,
+    };
+    match a {
+        Activity::YouStarted => v.kind = ActivityKind::YouStarted,
+        Activity::YouStopped => v.kind = ActivityKind::YouStopped,
+        Activity::Call { name, id } => {
+            v.kind = ActivityKind::Call;
+            v.name = Some(name);
+            v.id = Some(id);
+        }
+        Activity::Result { name, id } => {
+            v.kind = ActivityKind::Result;
+            v.name = Some(name);
+            v.id = Some(id);
+        }
+        Activity::HandOver { names, secs } => {
+            v.kind = ActivityKind::Handover;
+            v.names = names;
+            v.secs = Some(secs);
+        }
+        Activity::Cut => v.kind = ActivityKind::Cut,
+        Activity::Error => v.kind = ActivityKind::Error,
+    }
+    v
 }

@@ -118,6 +118,15 @@ pub struct VoiceEvent {
     pub level: f32,
 }
 
+/// What the live session is doing (ADR 0055): names, ids and a duration, never words.
+#[derive(ToSchema)]
+pub struct ActivityEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "activity")]
+    pub r#type: String,
+    pub activity: crate::models::ActivityView,
+}
+
 /// The Hearing test's recorder (ADR 0042), about twenty a second while it is open: what
 /// it is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to
 /// 0 dBFS) and whether the VAD hears speech; then one with the state `closed`. Only while
@@ -146,6 +155,7 @@ pub struct HearEvent {
     ("question" = "#/components/schemas/QuestionEvent"),
     ("apps" = "#/components/schemas/AppsEvent"),
     ("voice" = "#/components/schemas/VoiceEvent"),
+    ("activity" = "#/components/schemas/ActivityEvent"),
     ("hear" = "#/components/schemas/HearEvent"),
 )))]
 pub enum Event {
@@ -159,6 +169,7 @@ pub enum Event {
     Question(QuestionEvent),
     Apps(AppsEvent),
     Voice(VoiceEvent),
+    Activity(ActivityEvent),
     Hear(HearEvent),
 }
 
@@ -195,8 +206,10 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("QuestionEvent", QuestionEvent::schema()),
         ("AppsEvent", AppsEvent::schema()),
         ("VoiceEvent", VoiceEvent::schema()),
+        ("ActivityEvent", ActivityEvent::schema()),
         ("HearEvent", HearEvent::schema()),
         ("HearView", crate::hear::HearView::schema()),
+        ("ActivityView", crate::models::ActivityView::schema()),
     ] {
         components.schemas.entry(name.to_string()).or_insert(schema);
     }

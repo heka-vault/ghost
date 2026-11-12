@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use super::detector::DETECTOR_PHRASE;
 use super::difflib;
 
 pub const DEFAULT_WAKE_PHRASES: &[&str] = &[
@@ -266,6 +267,46 @@ pub fn match_opening(
     None
 }
 
+/// What Parakeet writes for the "hey" of the operator's "Hey Ghost" on ghost.mic: "A
+/// ghost." most of all (2026-10-30 clips, 2026-11-12 rubric run: the detector scored those
+/// takes 0.32-0.92), then "Eh", "Ah" and the like. The "hey" is short and unstressed and
+/// the canceller takes its onset; the "ghost" comes through.
+pub const HEY_SPELLINGS: &[&str] = &[
+    "a", "ah", "eh", "uh", "oh", "ay", "aye", "hey", "hay", "hi", "he", "yo", "ok", "okay",
+];
+
+/// "Hey ghost" as Parakeet reads the operator saying it: a sentence that opens with the
+/// word "ghost", after one of `HEY_SPELLINGS` at most. Returns what followed, past a
+/// repeat of the phrase ("A ghost. A ghost."), so the repeat is not the request.
+///
+/// This is no evidence alone: "A ghost story" opens a sentence too. It confirms only a
+/// hit the "hey ghost" detector has already scored (a weak hit, under the threshold but at
+/// its checked floor) and recovers the request after a hit that needed no check. The name
+/// must be the whole word and open a sentence, so "I saw a ghost", "the ghost story",
+/// "ghostly" and Parakeet's "It goes" for room talk are no match.
+pub fn match_heys_spelling(text: &str) -> Option<WakeMatch> {
+    let words = words(text);
+    // where each sentence starts, in words
+    let mut sentences = vec![0usize];
+    for m in SENTENCE_END.find_iter(text) {
+        sentences.push(self::words(&text[..m.end()]).len());
+    }
+    let opens_at = |s: usize| -> Option<usize> {
+        let lead = usize::from(
+            words
+                .get(s)
+                .is_some_and(|w| HEY_SPELLINGS.contains(&w.as_str())),
+        );
+        (words.get(s + lead).map(String::as_str) == Some("ghost")).then_some(s + lead + 1)
+    };
+    let mut end = sentences.iter().find_map(|&s| opens_at(s))?;
+    // "A ghost. A ghost." or "a ghost a ghost": the phrase said again is not the request
+    while let Some(next) = opens_at(end) {
+        end = next;
+    }
+    Some(WakeMatch::new(DETECTOR_PHRASE, &after(text, end)))
+}
+
 #[cfg(test)]
 mod tests {
     //! `packages/voice/tests/test_wake.py`, the matcher's cases.
@@ -328,6 +369,52 @@ mod tests {
             parse_phrases(Some("Hey Ghost, Ghost: you there?")),
             vec!["hey ghost".to_string(), "ghost you there".to_string()]
         );
+    }
+
+    #[test]
+    fn heys_spelling_takes_parakeets_reading_of_the_operators_hey_ghost() {
+        // What Parakeet wrote for the operator's real "Hey Ghost" on ghost.mic, scored
+        // 0.32-0.92 by the detector (2026-10-30 clips, 2026-11-12 rubric run).
+        for (heard, remainder) in [
+            ("A ghost.", ""),
+            ("A ghost?", ""),
+            ("A ghost. A ghost.", ""),
+            ("A ghost a ghost", ""),
+            ("A Ghost", ""),
+            (
+                "Eh, ghost, what needs my sign-off?",
+                "what needs my sign-off?",
+            ),
+            ("Hey ghost.", ""),
+            (
+                "Okay. A ghost, list the open pull requests.",
+                "list the open pull requests.",
+            ),
+            ("Ghost.", ""),
+        ] {
+            let m = match_heys_spelling(heard).unwrap_or_else(|| panic!("{heard}"));
+            assert_eq!(m, WakeMatch::new("hey ghost", remainder), "{heard}");
+        }
+    }
+
+    #[test]
+    fn heys_spelling_wants_the_name_to_open_a_sentence() {
+        for heard in [
+            "",
+            "I saw a ghost.",
+            "There's a ghost in the hallway.",
+            "The ghost story was long.",
+            "A ghostly light.",
+            "A ghosts.",
+            "It goes.",
+            "He goes.",
+            "Eggs, please.",
+            "A goat.",
+            "So a ghost walked in.",
+            "Whatever, ghost.",
+        ] {
+            assert_eq!(match_heys_spelling(heard), None, "{heard}");
+        }
     }
 
     #[test]

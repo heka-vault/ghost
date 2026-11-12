@@ -368,7 +368,16 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): AgentRe
     session_id: live ? SESSION_ID : "b7e2f1",
     compacted: false,
   }));
-  const all = [...old, ...recent].map((t) => ({ ...t, id: id() }));
+  // Ghost's morning brief ran on its own before the operator's session (ADR 0047): marked in
+  // the transcript under the run's own session id.
+  const runs: TurnView[] =
+    seed.slug === "ghost"
+      ? [
+          { id: 0, role: "system", text: "[scheduled run: morning brief] Check ghost-mock/app for anything new since yesterday and tell me what needs me.", at: ago(startMin + 95), session_id: "run-7f3a", compacted: false },
+          { id: 0, role: "assistant", text: "[scheduled run: morning brief] Two new issues: 163, a typo in the footer, and 164, the export button does nothing on Firefox. Neither needs you yet.", at: ago(startMin + 94.5), session_id: "run-7f3a", compacted: false },
+        ]
+      : [];
+  const all = [...old, ...runs, ...recent].map((t) => ({ ...t, id: id() }));
   // Every applied summary is a version (ADR 0014): "auto" from the in-session summarizer,
   // "manual" from Compact now, "edit" when the operator changed memory by hand. Each fold
   // covers more of the older turns; an edit folds none.

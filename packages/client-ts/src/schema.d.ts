@@ -712,6 +712,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Model Check Latest
+         * @description The latest kept check of the saved connection, if there is one.
+         */
+        get: operations["model_check_latest_model_check_get"];
+        put?: never;
+        /**
+         * Model Check
+         * @description Check the connection being edited, or the saved one (ADR 0056): for the main
+         *     model and the fast one, whether it answers (or the error in plain words), the time
+         *     to the first byte and the first word over a few short calls, and whether streaming,
+         *     tool calls, prompt caching and the thinking setting work. A fixed synthetic prompt,
+         *     never anything of the operator's; the password is read from the vault by the daemon
+         *     and never shown. The result is kept, and Ghost shapes its requests to it.
+         */
+        post: operations["model_check_model_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model/models": {
         parameters: {
             query?: never;
@@ -749,27 +778,6 @@ export interface paths {
          *     the OPENROUTER_API_KEY password in Ghost's vault (ADR 0036). Nothing to copy.
          */
         post: operations["model_sign_in_model_sign_in_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/model/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Model Test
-         * @description Send one tiny request through the connection being edited and time its first
-         *     token, the way ``make perf-llm`` does.
-         */
-        post: operations["model_test_model_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1748,6 +1756,37 @@ export interface components {
             detail?: string | null;
             ok: boolean;
         };
+        /** @description What the live session is doing (ADR 0055): names, ids and a duration, never words. */
+        ActivityEvent: {
+            activity: components["schemas"]["ActivityView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "activity";
+        };
+        ActivityView: {
+            /** Format: date-time */
+            at: string;
+            /** @description A call's id: its `result` carries the same one. */
+            id?: string | null;
+            /**
+             * @description What a live session did (`Event::Activity`, ADR 0055).
+             * @enum {string}
+             */
+            kind: "you_started" | "you_stopped" | "call" | "result" | "handover" | "cut" | "error";
+            /** @description A call's tool, as the model calls it (`github_issue_read`). */
+            name?: string | null;
+            /** @description A handover's calls, by name, none of them run. */
+            names: string[];
+            /**
+             * Format: double
+             * @description How long a handover took to decide, in seconds.
+             */
+            secs?: number | null;
+            /** @description The session it happened in. */
+            session_id: string;
+        };
         /** @description One of an app's tools, and what Ghost's own permissions say about it. */
         AppAction: {
             /** @description A rule with argument patterns may decide some calls. */
@@ -2486,6 +2525,67 @@ export interface components {
              */
             type: "log";
         };
+        /** @description The latest kept check of the saved connection, if there is one. */
+        ModelCheckLatest: {
+            check?: components["schemas"]["ModelCheckView"] | null;
+        };
+        /** @description What the check found for one model of the connection. */
+        ModelCheckModel: {
+            /** @description What the provider said answered, when it says. */
+            answered_by?: string | null;
+            caching: components["schemas"]["ModelCheckVerdict"];
+            /** @description Why it didn't answer, or what failed after it did, in plain words. */
+            error?: string | null;
+            first_byte: components["schemas"]["ModelCheckTiming"];
+            first_word: components["schemas"]["ModelCheckTiming"];
+            /** @description What was asked for. */
+            model: string;
+            reachable: boolean;
+            /** @description `main` or `fast` (ADR 0050). */
+            role: string;
+            /**
+             * Format: int32
+             * @description Timed calls that answered.
+             */
+            samples: number;
+            streaming: components["schemas"]["ModelCheckVerdict"];
+            thinking: components["schemas"]["ModelCheckVerdict"];
+            /** @description The thinking setting tried, if any. */
+            thinking_mode?: string | null;
+            tools: components["schemas"]["ModelCheckVerdict"];
+        };
+        /** @description Median and worst over the timed calls, in milliseconds. */
+        ModelCheckTiming: {
+            /** Format: int64 */
+            median_ms?: number | null;
+            /** Format: int64 */
+            worst_ms?: number | null;
+        };
+        ModelCheckVerdict: {
+            /** @description In plain words. */
+            detail?: string | null;
+            /**
+             * @description One finding of the provider check (ADR 0056).
+             * @enum {string}
+             */
+            state: "yes" | "no" | "not_reported" | "not_applicable" | "untested";
+        };
+        /**
+         * @description The provider check (ADR 0056): the connection's models with a fixed synthetic prompt,
+         *     kept with a time.
+         */
+        ModelCheckView: {
+            /**
+             * @description What would help when the connection is too slow for a good spoken reply; Ghost
+             *     never changes the connection itself.
+             */
+            advice?: string | null;
+            /** Format: date-time */
+            checked_at: string;
+            models: components["schemas"]["ModelCheckModel"][];
+            /** @description Provider, protocol and host; never a key. */
+            where: string;
+        };
         /** @description The model connection now. No key is in it: only whether its Password is set. */
         ModelConnectionView: {
             /** @description Where calls go. */
@@ -2580,23 +2680,6 @@ export interface components {
             kokoro_present: boolean;
             ready: boolean;
             stt_model: string;
-        };
-        /** @description One tiny request, timed like `make perf-llm`: request to first token. */
-        ModelTestResult: {
-            /** @description What the provider said answered, when it says. */
-            answered_by?: string | null;
-            error?: string | null;
-            /** @description What was asked for. */
-            model: string;
-            ok: boolean;
-            /** @description The first words, shortened. */
-            reply?: string | null;
-            /** Format: int64 */
-            total_ms?: number | null;
-            /** Format: int64 */
-            ttft_ms?: number | null;
-            /** @description Provider, protocol and host; never a key. */
-            where: string;
         };
         OperationInfo: {
             /** @description By name alone; a rule with argument patterns may decide some calls. */
@@ -3460,6 +3543,8 @@ export interface components {
     pathItems: never;
 }
 export type SchemaAck = components['schemas']['Ack'];
+export type SchemaActivityEvent = components['schemas']['ActivityEvent'];
+export type SchemaActivityView = components['schemas']['ActivityView'];
 export type SchemaAppAction = components['schemas']['AppAction'];
 export type SchemaAppConnect = components['schemas']['AppConnect'];
 export type SchemaAppConnectResult = components['schemas']['AppConnectResult'];
@@ -3527,6 +3612,11 @@ export type SchemaHttpValidationError = components['schemas']['HTTPValidationErr
 export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
+export type SchemaModelCheckLatest = components['schemas']['ModelCheckLatest'];
+export type SchemaModelCheckModel = components['schemas']['ModelCheckModel'];
+export type SchemaModelCheckTiming = components['schemas']['ModelCheckTiming'];
+export type SchemaModelCheckVerdict = components['schemas']['ModelCheckVerdict'];
+export type SchemaModelCheckView = components['schemas']['ModelCheckView'];
 export type SchemaModelConnectionView = components['schemas']['ModelConnectionView'];
 export type SchemaModelDraft = components['schemas']['ModelDraft'];
 export type SchemaModelListView = components['schemas']['ModelListView'];
@@ -3534,7 +3624,6 @@ export type SchemaModelOptionView = components['schemas']['ModelOptionView'];
 export type SchemaModelProviderView = components['schemas']['ModelProviderView'];
 export type SchemaModelSignInResult = components['schemas']['ModelSignInResult'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
-export type SchemaModelTestResult = components['schemas']['ModelTestResult'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
@@ -4426,7 +4515,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["HearEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HearEvent"];
                 };
             };
         };
@@ -5101,6 +5190,66 @@ export interface operations {
             };
         };
     };
+    model_check_latest_model_check_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCheckLatest"];
+                };
+            };
+        };
+    };
+    model_check_model_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCheckView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Ghost can't check a connection now */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     model_list_model_models_post: {
         parameters: {
             query?: never;
@@ -5150,39 +5299,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelSignInResult"];
-                };
-            };
-        };
-    };
-    model_test_model_test_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModelDraft"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelTestResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

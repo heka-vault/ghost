@@ -17,5 +17,6 @@ pub use detector::{
     model_meaning, pick_hit,
 };
 pub use matcher::{
-    DEFAULT_WAKE_PHRASES, OPENING_LEAD, WakeMatch, match_opening, match_wake, parse_phrases,
+    DEFAULT_WAKE_PHRASES, HEY_SPELLINGS, OPENING_LEAD, WakeMatch, match_heys_spelling,
+    match_opening, match_wake, parse_phrases,
 };

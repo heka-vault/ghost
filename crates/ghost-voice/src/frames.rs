@@ -101,6 +101,14 @@ pub enum Frame {
     /// stage that drops or takes a transcript drops these. They are never the turn's words,
     /// never stored and never evidence of anything; the stop's `Transcript` follows.
     EarlyTranscript(String),
+    /// A segment's read came back empty: its length and its level. Inside an open turn the
+    /// aggregator reads the turn whole on it (ADR 0044), rather than closing on the words
+    /// before it as if the segment had not been spoken (2026-11-12, a sentence split
+    /// inside a word and answered from its first half).
+    HeardNothing {
+        secs: f64,
+        dbfs: f64,
+    },
     /// The user's turn opened (a start strategy fired).
     UserStarted,
     /// The user's turn closed (after Smart Turn and the grace): the model is about to run.
@@ -242,6 +250,7 @@ impl Frame {
             Frame::Interim(_) => "Interim",
             Frame::Transcript(_) => "Transcript",
             Frame::EarlyTranscript(_) => "EarlyTranscript",
+            Frame::HeardNothing { .. } => "HeardNothing",
             Frame::UserStarted => "UserStarted",
             Frame::UserStopped => "UserStopped",
             Frame::ResetAggregation => "ResetAggregation",

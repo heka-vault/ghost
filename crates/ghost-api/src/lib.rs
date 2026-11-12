@@ -34,7 +34,7 @@ pub use app::{
     waiting_view,
 };
 pub use client::{ClientError, GhostClient, Reply};
-pub use controller::{Controller, PhoneConnection, Probe, Refusal, Unavailable};
+pub use controller::{Controller, ModelCheckRun, PhoneConnection, Refusal, Unavailable};
 pub use conversations::{conversation_detail, conversation_view};
 pub use deps::{AppsPort, Deps, DevicesPort, ModelNet, SharedDeps, SignInPort, UI_SESSION};
 pub use error::{ApiError, ApiResult, HTTPValidationError, ValidationError};

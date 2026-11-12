@@ -232,6 +232,48 @@ pub struct OutcomeView {
 
 // --- events over the WebSocket ----------------------------------------------------------
 
+/// What a live session did (`Event::Activity`, ADR 0055).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityKind {
+    /// The operator started speaking (a turn opened).
+    YouStarted,
+    /// The operator's turn closed: the model is about to answer it.
+    YouStopped,
+    /// A tool was called (`name`, `id`).
+    Call,
+    /// The call came back (`name`, `id`).
+    Result,
+    /// The fast model handed the turn to the main one (`names`, `secs`).
+    Handover,
+    /// The operator cut in while Ghost was speaking.
+    Cut,
+    /// The turn failed; the reason is in the log.
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ActivityView {
+    #[schema(inline)]
+    pub kind: ActivityKind,
+    /// The session it happened in.
+    pub session_id: String,
+    pub at: DateTime<Utc>,
+    /// A call's tool, as the model calls it (`github_issue_read`).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// A call's id: its `result` carries the same one.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// A handover's calls, by name, none of them run.
+    #[serde(default)]
+    #[schema(required)]
+    pub names: Vec<String>,
+    /// How long a handover took to decide, in seconds.
+    #[serde(default)]
+    pub secs: Option<f64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OutcomeVia {
@@ -292,6 +334,14 @@ pub enum Event {
     /// never the microphone, never passive audio.
     Voice {
         level: f32,
+    },
+    /// What the live session is doing (ADR 0055): the operator's turn opening and
+    /// closing, a tool call starting and coming back, a handover from the fast model,
+    /// Ghost cut off, a turn that failed. Names, ids and a duration only: never the words
+    /// said, a reply, a tool's arguments or result, or audio. Inside a session only; not
+    /// sent to the phone.
+    Activity {
+        activity: ActivityView,
     },
     /// The Hearing test's recorder (ADR 0042), about twenty a second while it is open:
     /// what it is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms,
@@ -1874,27 +1924,85 @@ pub struct ModelListView {
     pub error: Option<String>,
 }
 
-/// One tiny request, timed like `make perf-llm`: request to first token.
+/// One finding of the provider check (ADR 0056).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCheckState {
+    Yes,
+    No,
+    /// The provider gave no figure to tell.
+    NotReported,
+    /// Nothing to check on this route.
+    NotApplicable,
+    /// Not tried: the model didn't answer.
+    Untested,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct ModelTestResult {
-    pub ok: bool,
+pub struct ModelCheckVerdict {
+    #[schema(inline)]
+    pub state: ModelCheckState,
+    /// In plain words.
     #[serde(default)]
-    pub ttft_ms: Option<i64>,
+    pub detail: Option<String>,
+}
+
+/// Median and worst over the timed calls, in milliseconds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckTiming {
     #[serde(default)]
-    pub total_ms: Option<i64>,
+    pub median_ms: Option<i64>,
+    #[serde(default)]
+    pub worst_ms: Option<i64>,
+}
+
+/// What the check found for one model of the connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckModel {
+    /// `main` or `fast` (ADR 0050).
+    pub role: String,
     /// What was asked for.
     pub model: String,
     /// What the provider said answered, when it says.
     #[serde(default)]
     pub answered_by: Option<String>,
-    /// The first words, shortened.
-    #[serde(default)]
-    pub reply: Option<String>,
+    pub reachable: bool,
+    /// Why it didn't answer, or what failed after it did, in plain words.
     #[serde(default)]
     pub error: Option<String>,
+    pub first_byte: ModelCheckTiming,
+    pub first_word: ModelCheckTiming,
+    /// Timed calls that answered.
+    pub samples: u32,
+    pub streaming: ModelCheckVerdict,
+    pub tools: ModelCheckVerdict,
+    pub caching: ModelCheckVerdict,
+    pub thinking: ModelCheckVerdict,
+    /// The thinking setting tried, if any.
+    #[serde(default)]
+    pub thinking_mode: Option<String>,
+}
+
+/// The provider check (ADR 0056): the connection's models with a fixed synthetic prompt,
+/// kept with a time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckView {
+    pub checked_at: DateTime<Utc>,
     /// Provider, protocol and host; never a key.
     #[serde(rename = "where")]
     pub where_: String,
+    pub models: Vec<ModelCheckModel>,
+    /// What would help when the connection is too slow for a good spoken reply; Ghost
+    /// never changes the connection itself.
+    #[serde(default)]
+    pub advice: Option<String>,
+}
+
+/// The latest kept check of the saved connection, if there is one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckLatest {
+    #[serde(default)]
+    pub check: Option<ModelCheckView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1914,6 +2022,19 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&e).unwrap(),
             json!({"type": "waiting", "count": 3})
+        );
+        let e: Event = serde_json::from_value(json!({"type": "activity", "activity": {
+            "kind": "call", "session_id": "s1", "at": "2026-11-12T10:00:00Z",
+            "name": "github_issue_read", "id": "c1"}}))
+        .unwrap();
+        let Event::Activity { activity } = &e else {
+            panic!("not an activity: {e:?}")
+        };
+        assert_eq!(activity.kind, ActivityKind::Call);
+        assert!(activity.names.is_empty());
+        assert_eq!(
+            serde_json::to_value(&e).unwrap()["activity"]["kind"],
+            json!("call")
         );
         let e = Event::Voice { level: 0.5 };
         assert_eq!(

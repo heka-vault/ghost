@@ -223,6 +223,11 @@
 .set-model-legacy { margin: 0 0 var(--space-3); }
 .set-model-test { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .set-model-test__main { min-width: 0; display: grid; gap: var(--space-0_5); }
+.set-model-check { display: grid; gap: var(--space-3); }
+.set-model-check__model { display: grid; gap: var(--space-1); min-width: 0; }
+.set-model-check__findings { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-1) var(--space-3); }
+.set-model-check__findings li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); min-width: 0; }
+.set-model-check__findings .set-help { flex-basis: 100%; }
 
 /* While Ghost speaks: each design's live preview at the top of its card. */
 .set-wave__preview { display: flex; align-items: center; justify-content: center; height: 56px; margin-block: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--bg-sunken); }

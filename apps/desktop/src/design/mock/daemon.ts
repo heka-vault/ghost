@@ -6,6 +6,8 @@
 import { speechEnvelope } from "../../ui/VoiceWave";
 import type {
   Ack,
+  ActivityView,
+  QuestionView,
   AppConnect,
   AppConnectResult,
   AppView,
@@ -59,7 +61,7 @@ import { CONFIG_DIR } from "./fixtures/folder";
 import type { Fixtures } from "./fixtures";
 import { renderPolicy } from "./fixtures/policy";
 import { PROVIDER_ONLY } from "./fixtures/settings";
-import type { SessionFixture } from "./fixtures/session";
+import { LONG_REPLY, type SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
 import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
@@ -218,6 +220,12 @@ export class MockDaemon {
   /** What needs the operator (ADR 0029). */
   private waitingItems: WaitingItemView[];
   private timers = new Set<ReturnType<typeof setTimeout>>();
+  /** The live session's activity so far (ADR 0055), replayed to each new subscriber. */
+  private activity: ActivityView[] = [];
+  /** Questions agents asked (ADR 0051). */
+  private questions: QuestionView[] = [];
+  /** A story plays once, on the first subscriber. */
+  private storyPlayed = false;
   /** The Hearing test (ADR 0042): the recorder, its takes, sessions and runs. */
   private hear: MockHear;
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
@@ -235,6 +243,8 @@ export class MockDaemon {
     this.options = options;
     this.script = f.session;
     this.turns = f.session.turns;
+    // The sentence it plays is a turn of its own: the session waits after Ghost's last reply.
+    if (scenario.pieces) while (this.turns.length && this.turns[this.turns.length - 1].role === "user") this.turns = this.turns.slice(0, -1);
     this.pending = f.session.pending;
     for (const l of f.conversations.agents) this.agents.set(l.detail.slug, l);
     this.rules = f.rules;
@@ -245,7 +255,9 @@ export class MockDaemon {
     this.catalog = f.catalog;
     this.sources = f.sources;
     this.policy = f.policy;
-    this.audit = f.audit;
+    this.audit = [...f.session.audit, ...f.audit];
+    this.activity = f.session.activity;
+    this.questions = f.session.questions;
     this.settings = f.settings.settings;
     this.passwords = structuredClone(f.settings.passwords);
     if (options.vault === "locked") this.passwords.vault = { ...this.passwords.vault, state: "locked", problem: "Your keyring is locked" };
@@ -330,8 +342,16 @@ export class MockDaemon {
   // ------------------------------------------------------------------ events
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
-    queueMicrotask(() => l(this.snapshot()));
+    queueMicrotask(() => {
+      l(this.snapshot());
+      for (const activity of this.activity) l({ type: "activity", activity });
+    });
     this.startVoice();
+    if (!this.storyPlayed) {
+      this.storyPlayed = true;
+      this.playStory();
+    }
+    this.playPieces();
     return () => this.listeners.delete(l);
   }
   /**
@@ -350,6 +370,66 @@ export class MockDaemon {
       else if (speaking) this.emit({ type: "voice", level: 0 });
       speaking = now;
     }, 50);
+  }
+  /** What the session did, as the daemon's pipeline observer reports it (ADR 0055). */
+  private act(kind: ActivityView["kind"], extra: Partial<ActivityView> = {}) {
+    if (!this.status.session_id) return;
+    const activity: ActivityView = { kind, session_id: this.status.session_id, at: now(), names: [], ...extra };
+    this.activity = [...this.activity, activity];
+    this.emit({ type: "activity", activity });
+  }
+  /**
+   * The conversation-screen stories (`Scenario.story`), played over the first seconds after load
+   * so the moving states can be seen and shot.
+   */
+  private playStory() {
+    switch (this.scenario.story) {
+      case "cut":
+        this.later(400, () => this.reply(LONG_REPLY, 60_000));
+        this.later(3000, () => {
+          this.act("cut");
+          this.act("you_started");
+          this.pushStatus({ phase: "listening" });
+        });
+        this.later(4200, () => {
+          this.act("you_stopped");
+          this.addTurn("user", "Wait, who\u2019s on the iOS question?", "voice");
+          this.pushStatus({ phase: "thinking" });
+        });
+        break;
+      case "hold":
+        this.later(400, () => this.reply("Take your time.", 900));
+        this.later(1500, () => this.pushStatus({ phase: "hold" }));
+        break;
+      case "ending":
+        this.later(400, () => {
+          this.addTurn("assistant", "Okay. Talk soon.", "voice");
+          this.pushStatus({ phase: "speaking", ending: true });
+        });
+        break;
+    }
+  }
+  /**
+   * `?mock=pieces`: one spoken sentence the way the daemon sends it, a turn event per stretch
+   * of speech read at each pause, the status's `thinking` when the turn closes, then the reply.
+   */
+  private piecesPlayed = false;
+  private playPieces() {
+    if (!this.scenario.pieces || this.piecesPlayed) return;
+    this.piecesPlayed = true;
+    const pieces: [number, string][] = [
+      [800, "Can you check on the deploy"],
+      [2600, "for the billing service"],
+      [4200, "and tell me if it finished."],
+    ];
+    // The operator's turn opens at their first word and closes with it (ADR 0055).
+    this.later(600, () => this.act("you_started"));
+    for (const [ms, text] of pieces) this.later(ms, () => this.addTurn("user", text, "voice"));
+    this.later(5200, () => {
+      this.act("you_stopped");
+      this.pushStatus({ phase: "thinking" });
+    });
+    this.later(6100, () => this.reply("It finished at 3:12 PM, and every check passed."));
   }
   private emit(e: GhostEvent) {
     for (const l of this.listeners) l(e);
@@ -412,7 +492,12 @@ export class MockDaemon {
     if (!this.status.session_id) this.wake(conversation);
     this.addTurn("user", text, "text");
     this.pushStatus({ phase: "thinking" });
-    this.later(900, () => {
+    // A reply that reads an app first: the calls go out, come back, then Ghost answers.
+    const calls = this.script.replies.find((r) => r.match.test(text))?.calls ?? [];
+    const ids = calls.map((name) => ({ name, id: newId().slice(0, 8) }));
+    if (ids.length) this.later(500, () => ids.forEach((c) => this.act("call", c)));
+    this.later(ids.length ? 1600 : 900, () => {
+      ids.forEach((c) => this.act("result", c));
       const patch = /(?:patch me (?:through )?to|transfer me to|switch to|get me|back to)\s+(?:the\s+)?([\w -]+?)(?:\s+(?:line|agent))?[.!?]*$/i.exec(text);
       if (patch) {
         const want = patch[1].trim().toLowerCase();
@@ -433,10 +518,15 @@ export class MockDaemon {
       this.reply(rule?.reply ?? this.script.fallbackReply);
     });
   }
-  private reply(text: string) {
+  /** Ghost says `text`: speaking for about as long as the words take (Kokoro, ~14 characters a second). */
+  private reply(text: string, ms = Math.max(1600, (text.length / 14) * 1000)) {
     this.addTurn("assistant", text, "system");
     this.pushStatus({ phase: "speaking" });
-    this.later(1600, () => this.status.session_id && this.pushStatus({ phase: "listening" }));
+    this.later(ms, () => {
+      if (!this.status.session_id || this.status.phase !== "speaking") return;
+      if (this.status.ending) return this.sleepNow();
+      this.pushStatus({ phase: "listening" });
+    });
   }
   private propose(p: Omit<PendingProposal, "id" | "expires_at" | "expires_in_secs">) {
     const where = { conversation: this.status.conversation ?? null };
@@ -470,7 +560,8 @@ export class MockDaemon {
   private sleepNow() {
     if (this.pending) this.settlePending("cancelled", { reason: "session ended" });
     this.setActive(null);
-    this.pushStatus({ session_id: null, phase: "passive", conversation: null, session_origin: null });
+    this.activity = [];
+    this.pushStatus({ session_id: null, phase: "passive", conversation: null, session_origin: null, ending: false });
     this.conversationEvent(null);
   }
   private settlePending(status: "executed" | "cancelled", detail?: Record<string, unknown>): AuditEntry | null {
@@ -1124,6 +1215,17 @@ export class MockDaemon {
       return { ok: true };
     }
     if (method === "GET" && path === "/waiting") return this.waitingView();
+    if (method === "GET" && path === "/questions") return { questions: this.questions };
+    if (method === "POST" && path === "/questions/answer") {
+      const q = this.questions.find((x) => x.key === b.key);
+      if (!q) throw new HttpError(404, "There's no question with that key.");
+      if (q.state !== "open") throw new HttpError(409, "That question is already settled.");
+      const text = String(b.text ?? "");
+      const answered: QuestionView = { ...q, state: "answered", answer: text, choice: q.choices.includes(text) ? text : null, answered_at: now(), answered_via: "desktop" };
+      this.questions = this.questions.map((x) => (x.key === q.key ? answered : x));
+      this.emit({ type: "question", question: answered });
+      return { question: answered };
+    }
     if (method === "POST" && path === "/waiting/ack") return { ok: this.markWaiting(String(b.key ?? ""), { state: "acknowledged", acknowledged_at: now() }) };
     if (method === "POST" && path === "/waiting/snooze") {
       const until = new Date(Date.now() + Number(b.minutes ?? 30) * 60000).toISOString();
@@ -1215,7 +1317,8 @@ export class MockDaemon {
     if (method === "POST" && path === "/passwords/import") return this.importPasswords();
     if (method === "GET" && path === "/model") return this.model.view();
     if (method === "POST" && path === "/model/models") return await sleep(300), this.model.list(b as ModelDraft);
-    if (method === "POST" && path === "/model/test") return await sleep(900), this.model.test(b as ModelDraft);
+    if (method === "POST" && path === "/model/check") return await sleep(1400), this.model.check(b as ModelDraft);
+    if (method === "GET" && path === "/model/check") return { check: this.model.last };
     if (method === "POST" && path === "/model/sign-in") return this.model.startSignIn();
     if (method === "GET" && path === "/devices") return this.devices;
     if (method === "POST" && path === "/setup/echo-cancel") {

@@ -35,7 +35,14 @@ Every live turn writes its timeline, timings only and never text, to
 summarises it. `make perf` (`ghostd perf run`, `crates/ghost-voice/src/perf/`) drives scripted
 conversations through the real pipeline without a person, the models real and the model's
 replies scripted, and reports each stage's p50 and p95; `make perf-micro` times the models one
-by one and `make perf-llm` the real model connection with Ghost's prompt and tools. The
+by one and `make perf-llm` the real model connection with Ghost's prompt and tools.
+`make perf-providers` runs the provider check the product runs (Settings › Model's Test,
+`ghostd llm test`; ADR 0056) against every provider named that the environment has a key for,
+keys from the variables named on the command line and never the vault, and writes a dated
+comparison here (`docs/benchmarks/perf/<date>-providers.md`): `PROVIDERS="proxy
+anthropic:ANTHROPIC_API_KEY openrouter:OPENROUTER_API_KEY openrouter-openai"`. The model's
+first word is the one wait Ghost can't hide: past 1.5 s, by the latest check or by the
+operator's last ten spoken turns, the waiting list says so and what would help. The
 fixtures the models are checked against come from the oracle (`tools/oracle`,
 `scripts/fixtures/record.py`; `crates/ghost-infer/tests/parity.rs`), the Python wrappers the
 Rust was measured against (ADR 0039).
