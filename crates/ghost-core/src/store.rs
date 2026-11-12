@@ -1080,10 +1080,28 @@ impl Store {
         )?)
     }
 
-    /// Summarized or hidden turns older than `before` are dropped; the summary stands in
-    /// for them.
-    pub fn prune_turns(&self, before: DateTime<Utc>) -> Result<usize> {
-        Ok(self.conn().execute("DELETE FROM turns WHERE at < ? AND (compaction_id IS NOT NULL OR hidden_by IS NOT NULL)", [iso(&before)])?)
+    /// Hidden turns (a reset or a delete) older than `hidden_before` are dropped, and
+    /// summarized ones older than `summarized_before` when it is given (ADR 0041: by
+    /// default they are kept for recall, the summary standing in for them in the prompt).
+    /// A turn no summary covers yet is never pruned. A pruned turn leaves the recall index
+    /// in the same statement (its trigger).
+    pub fn prune_turns(
+        &self,
+        summarized_before: Option<DateTime<Utc>>,
+        hidden_before: DateTime<Utc>,
+    ) -> Result<usize> {
+        let conn = self.conn();
+        let mut n = conn.execute(
+            "DELETE FROM turns WHERE at < ? AND hidden_by IS NOT NULL",
+            [iso(&hidden_before)],
+        )?;
+        if let Some(before) = summarized_before {
+            n += conn.execute(
+                "DELETE FROM turns WHERE at < ? AND compaction_id IS NOT NULL",
+                [iso(&before)],
+            )?;
+        }
+        Ok(n)
     }
 
     pub fn add_compaction(&self, c: &Compaction) -> Result<()> {
@@ -1543,6 +1561,69 @@ mod tests {
         assert_eq!(store.get_checkpoint("s1", "nope").unwrap(), None);
     }
 
+    /// ADR 0041's retention: summarized turns are kept unless a window is set, hidden ones
+    /// go after their own window, and a turn no summary covers is never pruned.
+    #[test]
+    fn retention_keeps_summaries_for_recall_and_drops_hidden_turns_after_their_window() {
+        let store = Store::in_memory().unwrap();
+        let ledger = Profile::new("ledger", "Ledger");
+        store.upsert_conversation(&ledger).unwrap();
+        let now = utcnow();
+        let turn = |text: &str, days_ago: i64| {
+            let id = store.add_turn(&ledger.id, "s1", Role::User, text).unwrap();
+            store
+                .conn()
+                .execute(
+                    "UPDATE turns SET at = ? WHERE id = ?",
+                    params![iso(&(now - Duration::days(days_ago))), id],
+                )
+                .unwrap();
+            id
+        };
+        let summarized = turn("old and summarized", 400);
+        let open = turn("old, no summary yet", 400);
+        let hidden_old = turn("reset a month ago", 30);
+        let hidden_new = turn("reset yesterday", 1);
+        store
+            .conn()
+            .execute(
+                "UPDATE turns SET compaction_id = 'c1' WHERE id = ?",
+                [summarized],
+            )
+            .unwrap();
+        store
+            .conn()
+            .execute(
+                "UPDATE turns SET hidden_by = 'reset' WHERE id IN (?, ?)",
+                params![hidden_old, hidden_new],
+            )
+            .unwrap();
+        let left = |store: &Store| -> Vec<i64> {
+            let conn = store.conn();
+            let mut st = conn.prepare("SELECT id FROM turns ORDER BY id").unwrap();
+            st.query_map([], |r| r.get(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        // The default: no window for summarized turns, a week for hidden ones.
+        assert_eq!(
+            store
+                .prune_turns(None, now - Duration::days(7))
+                .unwrap(),
+            1
+        );
+        assert_eq!(left(&store), vec![summarized, open, hidden_new]);
+        // The operator set a year: the summarized turn goes, the open one never does.
+        assert_eq!(
+            store
+                .prune_turns(Some(now - Duration::days(365)), now - Duration::days(7))
+                .unwrap(),
+            1
+        );
+        assert_eq!(left(&store), vec![open, hidden_new]);
+    }
+
     #[test]
     fn agents_turns_and_compactions_keep_their_history() {
         let store = Store::in_memory().unwrap();
@@ -1620,8 +1701,11 @@ mod tests {
         );
         assert_eq!(store.tag_turns(&ledger.id, "ghost:reset").unwrap(), 1);
         assert_eq!(store.turn_count(&ledger.id).unwrap(), 0);
+        // Summarized turns are kept for recall unless a window is set; the hidden one goes.
         assert_eq!(
-            store.prune_turns(utcnow() + Duration::seconds(1)).unwrap(),
+            store
+                .prune_turns(None, utcnow() + Duration::seconds(1))
+                .unwrap(),
             1,
             "the hidden turn is pruned"
         );

@@ -365,10 +365,23 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        // Pruned: gone from the index too.
+        // Pruned with no window for summarized turns (the default): only the hidden one
+        // goes, and a summarized turn is still found.
         let indexed = store.indexed_turns().unwrap();
-        let gone = store.prune_turns(utcnow() + Duration::seconds(1)).unwrap();
-        assert_eq!(gone, 2, "the compacted turn and the hidden one");
+        let soon = utcnow() + Duration::seconds(1);
+        assert_eq!(store.prune_turns(None, soon).unwrap(), 1, "the hidden one");
+        assert_eq!(store.indexed_turns().unwrap(), indexed - 1);
+        assert_eq!(
+            store
+                .search_turns("august", &mine(&ledger), 5)
+                .unwrap()
+                .len(),
+            1
+        );
+        // With a window: the summarized turn goes too, from the index as well. A turn no
+        // summary covers is never pruned.
+        let gone = store.prune_turns(Some(soon), soon).unwrap();
+        assert_eq!(gone, 1, "the compacted turn");
         assert_eq!(store.indexed_turns().unwrap(), indexed - 2);
         assert!(
             store

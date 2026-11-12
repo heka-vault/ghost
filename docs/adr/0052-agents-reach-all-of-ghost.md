@@ -131,4 +131,5 @@ Python and shell), never executable.
   control for `paused`.
 - `app_connect` does not offer a way for an agent to start the operator's sign-in in their
   browser; the operator presses Sign in on the Apps screen.
-- Retention changes proposed in ADR 0041.
+- (Built since, on `feat/polish-1`: the retention changes proposed in ADR 0041, and the
+  desktop's "made by" and pause controls for a watch.)

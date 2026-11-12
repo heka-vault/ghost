@@ -1,6 +1,6 @@
 # 0041: Recall searches an agent's own transcript, with FTS5 and no vector store
 
-- **Status:** accepted (proposed 2026-10-29 in heka-vault/ghost#48 for #47; built 2026-11-12 with ADR 0052 on the `feat/own-tools-2` branch: the index, `ghost_recall` and `ghost_transcript_read`. What was proposed and is not built is listed under "Where this departs")
+- **Status:** accepted (proposed 2026-10-29 in heka-vault/ghost#48 for #47; built 2026-11-12 with ADR 0052 on the `feat/own-tools-2` branch: the index, `ghost_recall` and `ghost_transcript_read`; the retention it proposed built on `feat/polish-1`. What departs from the proposal is listed under "Where this departs")
 - **Date:** 2026-10-29, accepted 2026-11-12
 - **Amends:** ADR 0014 (a transcript is searchable by the agent it belongs to, and by Ghost)
 
@@ -49,10 +49,15 @@ runs of the schedules it set up.
   the session. Agent zero manages the other agents (schedules, questions), and the owner
   asked that it reach everything Ghost can; an agent other than Ghost still reads only its
   own, so ADR 0014's private memory holds between agents.
-- **Retention is unchanged.** Keeping summarized turns for good by default, pruning hidden
-  turns after a short fixed window, and pruning daily are not built: `GHOST_TURN_RETENTION_DAYS`
-  is still 90 and pruning still runs when the daemon starts. A pruned turn leaves the index
-  in the same statement.
+- **Retention, built 2026-11-12 on `feat/polish-1` as proposed.** Summarized turns are kept
+  for good by default, so recall finds them: `GHOST_TURN_RETENTION_DAYS` is `0` (keep) unless
+  the operator sets a number of days, which then applies to summarized turns only. Hidden
+  turns (a reset or a delete) are pruned after a fixed week
+  (`conversations::HIDDEN_RETENTION_DAYS`); recall never returned them anyway. A turn no
+  summary covers yet is never pruned. Pruning runs when the daemon starts and then daily
+  (`ghostd::daemon::PRUNE_EVERY`). A pruned turn leaves the index in the same statement.
+  Keeping turns changes nothing in the prompt: resume still loads the summary, the notes
+  and the turns no summary covers.
 - **No meeting reuse yet.** The helper is over the `turns` table only; ADR 0040's meeting
   segments do not exist yet.
 
@@ -73,4 +78,6 @@ runs of the schedules it set up.
 
 - `ghost_recall` is one of the tools every turn carries (ADR 0052's core): 856 bytes of
   schema. `ghost_transcript_read` is found by search.
-- Disk grows by the index, about the size of the transcript's text again.
+- Disk grows by the index, about the size of the transcript's text again, and by the
+  summarized turns now kept: about a megabyte a year at today's use, twice that with the
+  index.

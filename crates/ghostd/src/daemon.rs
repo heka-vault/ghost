@@ -102,6 +102,8 @@ pub const WAITING_REFRESH_SECS: u64 = 15;
 pub const AT_DESK_SECS: u64 = 15 * 60;
 /// How long the wind-down waits for the control API to close.
 pub const API_STOP_WAIT: Duration = Duration::from_secs(5);
+/// How often the transcript is pruned (ADR 0041).
+pub const PRUNE_EVERY: Duration = Duration::from_secs(24 * 3600);
 
 /// The model connection's settings (ADR 0037).
 pub fn llm_env_keys() -> BTreeSet<&'static str> {
@@ -1301,7 +1303,8 @@ impl Daemon {
             ConversationsOptions {
                 default_voice: voice.tts_voice.clone(),
                 default_speed: voice.tts_speed,
-                retention: chrono::Duration::days(cfg.turn_retention_days),
+                retention: (cfg.turn_retention_days > 0)
+                    .then(|| chrono::Duration::days(cfg.turn_retention_days)),
                 ..ConversationsOptions::default()
             },
         )?);
@@ -1596,11 +1599,25 @@ impl Daemon {
             &watch_runner,
         );
         d.late.schedules.set(schedules.scheduler.clone()).ok();
-        match conversations.prune() {
-            Ok(n) if n > 0 => info!("conversations: pruned {n} summarized turns past retention"),
-            Ok(_) => {}
-            Err(e) => warn!("conversations: prune failed: {e}"),
-        }
+        // ADR 0041: hidden turns past a week, and summarized ones past the window when the
+        // operator set one, pruned now and then daily for as long as Ghost runs.
+        tokio::spawn({
+            let conversations = conversations.clone();
+            let stop = d.stop.child_token();
+            async move {
+                loop {
+                    match conversations.prune() {
+                        Ok(n) if n > 0 => info!("conversations: pruned {n} turns past retention"),
+                        Ok(_) => {}
+                        Err(e) => warn!("conversations: prune failed: {e}"),
+                    }
+                    tokio::select! {
+                        () = stop.cancelled() => break,
+                        () = tokio::time::sleep(PRUNE_EVERY) => {}
+                    }
+                }
+            }
+        });
         d.state
             .set_apps(lock(&registered).iter().cloned().collect());
         let mut events = Events::default();
@@ -1989,7 +2006,8 @@ impl Daemon {
                 default_voice: voice.tts_voice.clone(),
                 default_speed: voice.tts_speed,
                 voices,
-                retention: chrono::Duration::days(cfg.turn_retention_days),
+                retention: (cfg.turn_retention_days > 0)
+                    .then(|| chrono::Duration::days(cfg.turn_retention_days)),
                 ..ConversationsOptions::default()
             },
         ) {
