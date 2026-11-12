@@ -34,6 +34,10 @@ pub const CACHE_PROMPT: &str = "Reply with the single word: ready.";
 /// About this long and a spoken reply starts late enough to notice: the model's first
 /// word, before Ghost says anything (ADR 0018's budget, 2026-11-12's evidence).
 pub const SLOW_FIRST_WORD_SECS: f64 = 1.5;
+/// A slow note that holds clears only under this: hysteresis below
+/// [`SLOW_FIRST_WORD_SECS`], so a connection near the line does not raise and clear the
+/// note turn by turn.
+pub const QUICK_AGAIN_SECS: f64 = 1.2;
 
 /// The fixed system prompt of the cache probe: about 4,500 tokens, past every current
 /// model's smallest cacheable prefix (512 tokens on the 5.x models, 4,096 on Haiku 4.5).
@@ -406,61 +410,114 @@ pub struct Tried {
 /// How much faster another tried route must be to be named.
 const NAMED_IF_FASTER_BY: f64 = 0.3;
 
+/// A waiting-list item's title is clipped past 200 characters (`ghost_core::waiting`);
+/// the note stays inside it.
+const LINE_MAX: usize = 200;
+/// A model's or a connection's name in the note, at most.
+const NAME_MAX: usize = 32;
+const POINTER: &str = "Test it in Settings › Model.";
+
+fn short_name(name: &str) -> String {
+    if name.chars().count() <= NAME_MAX {
+        name.to_string()
+    } else {
+        let mut cut: String = name.chars().take(NAME_MAX - 1).collect();
+        cut.push('…');
+        cut
+    }
+}
+
+/// The slow note (ADR 0056): how slow, then what would help, one line for the waiting
+/// list. `lead` holds the figure; `help` the advice, so a note that holds can tell a new
+/// figure from new advice.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slow {
+    /// The measure it was raised on: the model's first word, seconds.
+    pub secs: f64,
+    pub lead: String,
+    pub help: String,
+}
+
+impl Slow {
+    pub fn text(&self) -> String {
+        format!("{} {}", self.lead, self.help)
+    }
+}
+
 /// What would help, in plain words, when the connection is too slow for a good spoken
-/// reply: the model that answers a spoken turn first (the fast model when there is one) took
-/// longer than [`SLOW_FIRST_WORD_SECS`] to its first word. `live` is the same measure
-/// from the operator's own recent turns (median seconds, how many). None when it is quick
-/// enough. Ghost never changes the connection itself: this only says what would help.
+/// reply: the model that answers a spoken turn first (the fast model when there is one)
+/// took longer than `over` to its first word ([`SLOW_FIRST_WORD_SECS`] to raise the note,
+/// [`QUICK_AGAIN_SECS`] while it holds). `live` is the same measure from the operator's
+/// own recent turns (median seconds, how many). None when it is quick enough. Ghost never
+/// changes the connection itself: this only says what would help.
 pub fn advice(
     models: &[ModelCheck],
     has_fast: bool,
     live: Option<(f64, usize)>,
     others: &[Tried],
-) -> Option<String> {
+    over: f64,
+) -> Option<Slow> {
     let main = models.iter().find(|m| m.role == "main");
     let fast = models.iter().find(|m| m.role == "fast");
     let first = fast.filter(|f| f.reachable).or(main);
     let checked = first
         .filter(|f| f.reachable)
         .and_then(|f| f.first_word.median);
-    let name = first.map_or("the model", |f| f.model.as_str());
-    let (secs, said) = match (live, checked) {
-        (Some((l, n)), _) if l > SLOW_FIRST_WORD_SECS => (
+    let name = short_name(first.map_or("the model", |f| f.model.as_str()));
+    let (secs, lead) = match (live, checked) {
+        (Some((l, _)), _) if l > over => (
             l,
-            format!("Your last {n} spoken replies waited {l:.1} s for the model's first word."),
-        ),
-        (_, Some(c)) if c > SLOW_FIRST_WORD_SECS => (
-            c,
             format!(
-                "Spoken replies will start slowly: {name} took {c:.1} s to its first word on this connection."
+                "Replies are starting slowly on this connection: about {l:.1} s to the first word."
             ),
+        ),
+        (_, Some(c)) if c > over => (
+            c,
+            format!("Replies will start slowly: {name} took {c:.1} s to its first word."),
         ),
         _ => return None,
     };
-    let mut helps = Vec::new();
-    match fast {
-        None if !has_fast => helps.push(
-            "A fast model on this connection (a small one, like a Haiku) answers small talk sooner."
-                .to_string(),
-        ),
-        Some(f) if f.slow() => helps.push(format!("The fast model, {}, is slow here too.", f.model)),
-        _ => {}
-    }
-    if let Some(best) = others
+    let faster = others
         .iter()
         .filter(|o| o.first_word + NAMED_IF_FASTER_BY < secs)
         .min_by(|a, b| a.first_word.total_cmp(&b.first_word))
-    {
-        helps.push(format!(
-            "Of the connections you've tested, {} answered in {:.1} s.",
-            best.label, best.first_word
-        ));
-    }
-    if first.is_some_and(|f| f.streaming.state == State::No) {
-        helps.push("This connection sends each reply all at once.".into());
-    }
-    helps.push("Ghost won't change the connection for you: it's in Settings, under Model.".into());
-    Some(format!("{said} {}", helps.join(" ")))
+        .map(|o| {
+            format!(
+                "{} ({:.1} s when tested)",
+                short_name(&o.label),
+                o.first_word
+            )
+        });
+    let help = match (fast, has_fast, faster) {
+        (None, false, Some(t)) => format!("A fast model, or {t}, would help."),
+        (None, false, None) => "A fast model, like a Haiku, would help.".to_string(),
+        (Some(f), _, Some(t)) if f.slow() => {
+            format!(
+                "The fast model, {}, is slow here too; {t} would help.",
+                short_name(&f.model)
+            )
+        }
+        (Some(f), _, None) if f.slow() => {
+            format!(
+                "The fast model, {}, is slow here too.",
+                short_name(&f.model)
+            )
+        }
+        (_, _, Some(t)) => format!("{t} would help."),
+        _ if first.is_some_and(|f| f.streaming.state == State::No) => {
+            "This connection sends each reply all at once.".to_string()
+        }
+        _ => String::new(),
+    };
+    // The pointer to the Test goes last, and only while the line still fits.
+    let fits =
+        lead.chars().count() + help.chars().count() + POINTER.chars().count() + 2 <= LINE_MAX;
+    let help = match (help.is_empty(), fits) {
+        (true, _) => POINTER.to_string(),
+        (false, true) => format!("{help} {POINTER}"),
+        (false, false) => help,
+    };
+    Some(Slow { secs, lead, help })
 }
 
 fn note_model(out: &mut ModelCheck, m: &Measured) {
@@ -491,16 +548,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_quick_connection_needs_no_advice() {
-        assert_eq!(advice(&[quick("main", "s", 0.8)], false, None, &[]), None);
-        // The fast model answers first: a slow main model behind a quick one is fine.
-        let both = [quick("main", "s", 2.0), quick("fast", "h", 0.6)];
-        assert_eq!(advice(&both, true, None, &[]), None);
+    fn said(a: Option<Slow>) -> String {
+        a.expect("a note").text()
     }
 
     #[test]
-    fn a_slow_connection_says_what_would_help_and_never_switches() {
+    fn a_quick_connection_needs_no_advice() {
+        let over = SLOW_FIRST_WORD_SECS;
+        assert_eq!(
+            advice(&[quick("main", "s", 0.8)], false, None, &[], over),
+            None
+        );
+        // The fast model answers first: a slow main model behind a quick one is fine.
+        let both = [quick("main", "s", 2.0), quick("fast", "h", 0.6)];
+        assert_eq!(advice(&both, true, None, &[], over), None);
+    }
+
+    #[test]
+    fn a_slow_connection_says_what_would_help_in_one_line_and_never_switches() {
+        let over = SLOW_FIRST_WORD_SECS;
         let tried = [
             Tried {
                 label: "claude-haiku-5-5 via cliproxy".into(),
@@ -516,34 +582,61 @@ mod tests {
             false,
             None,
             &tried,
+            over,
         )
         .unwrap();
-        assert!(a.contains("2.1 s"), "{a}");
-        assert!(a.contains("A fast model"), "{a}");
-        assert!(
-            a.contains("claude-haiku-5-5 via cliproxy answered in 0.7 s"),
-            "{a}"
+        assert_eq!(a.secs, 2.1);
+        assert_eq!(
+            a.text(),
+            "Replies will start slowly: anthropic/claude-sonnet-5.5 took 2.1 s to its first \
+             word. A fast model, or claude-haiku-5-5 via cliproxy (0.7 s when \
+             tested), would help. Test it in Settings › Model."
         );
-        assert!(!a.contains("ollama"), "{a}");
-        assert!(a.contains("won't change the connection"), "{a}");
+        let a = said(advice(&[quick("main", "s", 2.0)], false, None, &[], over));
+        assert!(a.contains("A fast model, like a Haiku, would help."), "{a}");
         let both = [quick("main", "s", 2.0), quick("fast", "h", 1.9)];
-        let a = advice(&both, true, None, &[]).unwrap();
+        let a = said(advice(&both, true, None, &[], over));
         assert!(a.contains("The fast model, h, is slow here too."), "{a}");
+        // One line on the waiting list: inside an item's title.
+        let long = [Tried {
+            label: format!("{} via {}", "m".repeat(60), "p".repeat(30)),
+            first_word: 0.4,
+        }];
+        let a = said(advice(
+            &[quick("main", &"n".repeat(60), 3.0)],
+            false,
+            None,
+            &long,
+            over,
+        ));
+        assert!(!a.contains('\n'));
+        assert!(a.chars().count() <= 200, "{} chars: {a}", a.chars().count());
     }
 
     #[test]
     fn the_operators_own_turns_say_it_too() {
-        let a = advice(&[quick("main", "s", 0.9)], false, Some((1.8, 10)), &[]).unwrap();
-        assert!(
-            a.starts_with("Your last 10 spoken replies waited 1.8 s"),
-            "{a}"
+        let over = SLOW_FIRST_WORD_SECS;
+        let a = advice(&[quick("main", "s", 0.9)], true, Some((1.8, 10)), &[], over).unwrap();
+        assert_eq!(a.secs, 1.8);
+        assert_eq!(
+            a.text(),
+            "Replies are starting slowly on this connection: about 1.8 s to the first word. \
+             Test it in Settings › Model."
         );
         // No check yet: the operator's turns alone say it.
-        assert!(advice(&[], true, Some((2.0, 6)), &[]).is_some());
+        assert!(advice(&[], true, Some((2.0, 6)), &[], over).is_some());
         assert_eq!(
-            advice(&[quick("main", "s", 0.9)], false, Some((1.2, 10)), &[]),
+            advice(
+                &[quick("main", "s", 0.9)],
+                false,
+                Some((1.2, 10)),
+                &[],
+                over
+            ),
             None
         );
+        // Under a lower bar (a note that holds), 1.4 s is still slow.
+        assert!(advice(&[], true, Some((1.4, 10)), &[], QUICK_AGAIN_SECS).is_some());
     }
 
     #[test]
