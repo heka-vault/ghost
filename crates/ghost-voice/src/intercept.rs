@@ -187,6 +187,10 @@ impl InterceptorProcessor {
                 // Whatever Ghost was saying stops; a pending question stays pending for later.
                 out.push(Frame::Interruption).await;
             }
+            Some(Action::ShowApp) => {
+                // The desktop brings its window here; nothing else changes.
+                self.events.emit(EventKind::ShowApp, Map::new()).await;
+            }
             Some(Action::Quiet) => {
                 let mut data = Map::new();
                 data.insert("until".into(), json!(h.until.map(|t| t.to_rfc3339())));
@@ -491,6 +495,33 @@ mod tests {
         );
         assert_eq!(*heard.lock().unwrap(), vec![EventKind::StopListening]);
         assert_eq!(*slept.lock().unwrap(), vec![true]);
+    }
+
+    #[tokio::test]
+    async fn test_open_the_app_tells_the_daemon_and_keeps_the_session() {
+        // ADR 0059: the desktop brings its window here; no model runs, the session goes on.
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mut events = Events::default();
+        events.add({
+            let heard = heard.clone();
+            Arc::new(move |e: ghost_core::Event| {
+                let heard = heard.clone();
+                Box::pin(async move { heard.lock().unwrap().push(e.kind) })
+            })
+        });
+        let (p, slept) = make(vec![Arc::new(QuickIntents)], FakeGate::new(false));
+        let mut p = p.with_events(Arc::new(events));
+        let (out, mut rx) = Out::capture();
+        p.process(said("Ghost, open the app."), Direction::Down, &out)
+            .await;
+        let pushed = drain(&mut rx).await;
+        assert!(!has_transcript(&pushed));
+        assert_eq!(
+            spoken(&pushed),
+            vec![crate::intents::SHOWING_APP.to_string()]
+        );
+        assert_eq!(*heard.lock().unwrap(), vec![EventKind::ShowApp]);
+        assert!(slept.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

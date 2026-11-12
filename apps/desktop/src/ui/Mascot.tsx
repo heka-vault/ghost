@@ -36,6 +36,11 @@ export interface MascotProps {
    * body lifts with what is heard, instead of the stand-in rhythm. Never the microphone.
    */
   level?: VoiceLevel;
+  /**
+   * Draw at most this many frames a second (the floating room, ADR 0059, where every frame is
+   * copied through XWayland). Unset: every display frame.
+   */
+  maxFps?: number;
 }
 
 /** A level older than this is stale: the voice stopped before its last 0 arrived. */
@@ -57,7 +62,7 @@ function draw(el: El, attrs: Attrs, key: number): ReactNode {
   return createElement(el.tag, { key, "data-part": el.part, ...el.props, ...live }, el.children?.map((c, i) => draw(c, attrs, i)));
 }
 
-export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, mood = null, still, frame, clock = 0, title, className, level }: MascotProps) {
+export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, mood = null, still, frame, clock = 0, title, className, level, maxFps }: MascotProps) {
   const detail = detailFor(size);
   const { simple, props } = detail;
   const d = useMemo(() => ({ simple, props }), [simple, props]);
@@ -72,8 +77,9 @@ export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, 
   const written = useRef(new Map<string, string>());
   const motion = useMemo(() => createMotion(WISP), []);
   const raf = useRef(0);
-  const live = useRef({ d, idle, isStill, level, mood });
-  live.current = { d, idle, isStill, level, mood };
+  const live = useRef({ d, idle, isStill, level, mood, maxFps });
+  live.current = { d, idle, isStill, level, mood, maxFps };
+  const drawn = useRef(0);
   /** The voice's level, eased so the mouth moves like a mouth and not like a meter. */
   const mouth = useRef(0);
 
@@ -110,8 +116,14 @@ export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, 
     if (raf.current || live.current.isStill) return;
     const step = (now: number) => {
       raf.current = 0;
-      const { d, idle, isStill, level, mood } = live.current;
+      const { d, idle, isStill, level, mood, maxFps } = live.current;
       if (isStill) return;
+      // Under a cap, skip this display frame when the last drawing is recent enough.
+      if (maxFps && now - drawn.current < 1000 / maxFps - 4) {
+        raf.current = requestAnimationFrame(step);
+        return;
+      }
+      drawn.current = now;
       let f = motion.frame(now, idle);
       if (level && mood === "speaking") {
         const { level: l, at } = level.get();

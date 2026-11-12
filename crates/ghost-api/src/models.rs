@@ -443,6 +443,13 @@ pub enum Event {
         level: f32,
         speaking: bool,
     },
+    /// The operator asked by voice to see Ghost's window ("open the app", ADR 0059): the
+    /// desktop brings its main window to the workspace they are on and to the front. Inside a
+    /// session only; it carries nothing else and is not sent to the phone.
+    #[serde(rename = "show_app")]
+    ShowApp {
+        session_id: String,
+    },
 }
 
 // --- the waiting list (ADR 0029, ADR 0030) ----------------------------------------------

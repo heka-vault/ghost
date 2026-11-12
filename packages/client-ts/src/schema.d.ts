@@ -3359,6 +3359,18 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * @description The operator asked by voice to see Ghost's window (ADR 0059): the desktop brings its main
+         *     window to the workspace they are on and to the front. Inside a session only.
+         */
+        ShowAppEvent: {
+            session_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "show_app";
+        };
         SkillAdd: {
             name?: string | null;
             /** @description A folder on this machine holding SKILL.md. */
@@ -3827,6 +3839,7 @@ export type SchemaSecretState = components['schemas']['SecretState'];
 export type SchemaSettingsResult = components['schemas']['SettingsResult'];
 export type SchemaSettingsUpdate = components['schemas']['SettingsUpdate'];
 export type SchemaSettingsView = components['schemas']['SettingsView'];
+export type SchemaShowAppEvent = components['schemas']['ShowAppEvent'];
 export type SchemaSkillAdd = components['schemas']['SkillAdd'];
 export type SchemaSkillBody = components['schemas']['SkillBody'];
 export type SchemaSkillFileView = components['schemas']['SkillFileView'];
@@ -4736,7 +4749,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["ShowAppEvent"];
                 };
             };
         };

@@ -159,6 +159,16 @@ pub struct HearEvent {
     pub speaking: bool,
 }
 
+/// The operator asked by voice to see Ghost's window (ADR 0059): the desktop brings its main
+/// window to the workspace they are on and to the front. Inside a session only.
+#[derive(ToSchema)]
+pub struct ShowAppEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "show_app")]
+    pub r#type: String,
+    pub session_id: String,
+}
+
 /// What the event stream carries, discriminated by `type`.
 #[derive(ToSchema)]
 #[serde(untagged)]
@@ -177,6 +187,7 @@ pub struct HearEvent {
     ("heard" = "#/components/schemas/HeardEvent"),
     ("saying" = "#/components/schemas/SayingEvent"),
     ("hear" = "#/components/schemas/HearEvent"),
+    ("show_app" = "#/components/schemas/ShowAppEvent"),
 )))]
 pub enum Event {
     Status(StatusEvent),
@@ -193,6 +204,7 @@ pub enum Event {
     Heard(HeardEvent),
     Saying(SayingEvent),
     Hear(HearEvent),
+    ShowApp(ShowAppEvent),
 }
 
 /// `POST /conversations/{slug}/notes` takes a free object with `text` in it.
@@ -235,6 +247,7 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("SayingView", crate::models::SayingView::schema()),
         ("HearEvent", HearEvent::schema()),
         ("HearView", crate::hear::HearView::schema()),
+        ("ShowAppEvent", ShowAppEvent::schema()),
         ("ActivityView", crate::models::ActivityView::schema()),
     ] {
         components.schemas.entry(name.to_string()).or_insert(schema);

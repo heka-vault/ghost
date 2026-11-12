@@ -1,11 +1,13 @@
 /**
- * The shell's posture, from `postureOf` (posture.ts) fed with this window's input and Ghost's
- * session. Provided once by the shell; `usePosture()` reads it anywhere (the conversation screen
- * can take its room view from here, so the two are one switch).
+ * The shell's posture, from `postureOf` (posture.ts) fed with this window's input, Ghost's
+ * session and the floating room's state (ADR 0059). Provided once by the shell; `usePosture()`
+ * reads it anywhere: the conversation screen takes its room view from here, so the rail's
+ * button, Ctrl+., the stage's button and the timer are one switch.
  */
 import { useGhost } from "@ghost/ui";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
+import { canFloat, useFloating, useWindowActive } from "./floating";
 import { type Posture, type PostureHold, type PostureReason, isRoomKey, nextChangeIn, postureOf, readAway, readSessionRoom, SESSION_IDLE_MS } from "./posture";
 
 export interface PostureState {
@@ -13,13 +15,15 @@ export interface PostureState {
   reason: PostureReason;
   /** A live session whose audio is at this desk. */
   deskSession: boolean;
+  /** The room is held (Ctrl+., the rail's or the stage's button), not come by itself. */
+  held: boolean;
   /** Hold a posture (`room` from the rail's button and Ctrl+.), or `auto` to follow the rule. */
   hold: (h: PostureHold) => void;
   /** Re-read the operator's choices (Settings › General changed them). */
   refresh: () => void;
 }
 
-const Ctx = createContext<PostureState>({ posture: "desk", reason: "desk", deskSession: false, hold: () => {}, refresh: () => {} });
+const Ctx = createContext<PostureState>({ posture: "desk", reason: "desk", deskSession: false, held: false, hold: () => {}, refresh: () => {} });
 
 const INPUT = ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"] as const;
 
@@ -36,6 +40,8 @@ export function PostureProvider({ children, enabled = true }: { children: ReactN
   const [, force] = useState(0);
   const holdRef = useRef(hold);
   holdRef.current = hold;
+  const floating = useFloating().status;
+  const windowActive = useWindowActive();
 
   const input = () => ({
     hold: enabled ? hold : ("desk" as const),
@@ -43,6 +49,8 @@ export function PostureProvider({ children, enabled = true }: { children: ReactN
     idleMs: Date.now() - last.current,
     awayAfterMs: prefs.away == null ? null : prefs.away * 60_000,
     sessionIdleMs: prefs.session ? SESSION_IDLE_MS : null,
+    floating: canFloat(floating),
+    windowActive,
   });
   const { posture, reason } = postureOf(input());
 
@@ -115,7 +123,8 @@ export function PostureProvider({ children, enabled = true }: { children: ReactN
     };
   }, [posture]);
 
-  const value = useMemo(() => ({ posture, reason, deskSession, hold: holdFn, refresh }), [posture, reason, deskSession, holdFn, refresh]);
+  const held = enabled && hold === "room";
+  const value = useMemo(() => ({ posture, reason, deskSession, held, hold: holdFn, refresh }), [posture, reason, deskSession, held, holdFn, refresh]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
