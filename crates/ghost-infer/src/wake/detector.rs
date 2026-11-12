@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use ort::{session::Session, value::Tensor};
 
-use super::matcher::{WakeMatch, match_opening, match_wake};
+use super::matcher::{WakeMatch, match_heys_spelling, match_opening, match_wake};
 use crate::{
     InferError, Result,
     session::{self, SessionConfig},
@@ -139,6 +139,26 @@ impl WakeModel {
         } else {
             match_wake(text, &[self.phrase.as_str()], fuzzy)
         }
+    }
+
+    /// Parakeet's reading confirms a hit: the phrase (`matches`), or, for a weak hit of
+    /// "hey ghost", the name opening a sentence after one of Parakeet's spellings of
+    /// "hey" (`match_heys_spelling`). The detector has voted for the phrase already;
+    /// Parakeet only has to show that someone said "ghost" to open what they said.
+    pub fn confirms(&self, text: &str, fuzzy: f64, weak: bool) -> Option<WakeMatch> {
+        self.matches(text, fuzzy).or_else(|| {
+            (weak && !self.opening)
+                .then(|| match_heys_spelling(text))
+                .flatten()
+        })
+    }
+
+    /// The phrase in what was heard once Ghost is woken, so the words after it are the
+    /// first turn: `matches`, then, for "hey ghost", Parakeet's spelling of it ("A ghost,
+    /// what needs my sign-off?").
+    pub fn request(&self, text: &str, fuzzy: f64) -> Option<WakeMatch> {
+        self.matches(text, fuzzy)
+            .or_else(|| (!self.opening).then(|| match_heys_spelling(text)).flatten())
     }
 }
 
