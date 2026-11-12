@@ -36,7 +36,11 @@ says otherwise, as Ghost's own changes are, ADR 0045):
   otherwise the run is told to finish `[SILENT]`, and when the operator answers, one more
   run of the same agent is queued with the question and the answer as its instruction
   ("You asked the operator … The operator answered (phone): …"), delivered like any run.
-  One per answer: it is queued once for the question's key, through the scheduler's own
+  That instruction says the answer is already recorded and the question closed, to do what
+  the answer calls for, and to reply exactly `[SILENT]` when nothing remains (a "no" that
+  needs nothing), so the operator is not told what they just said. The follow-up is not
+  offered `ghost_answer` or `ghost_ask` (`questions::FOLLOW_UP_WITHHELD`, refused by name
+  too), and what it delivers is titled by the question it follows up. One per answer: it is queued once for the question's key, through the scheduler's own
   once-per-key rule, so neither a second answer nor a restart starts another. None for a
   decline or an expiry. The answer is never a yes to a change: the run's changes still go
   through the gate.

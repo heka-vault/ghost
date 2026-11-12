@@ -844,20 +844,7 @@ impl Questions {
         let (Some(agent), Some(jobs)) = (q.agent.clone(), lock(&self.jobs).clone()) else {
             return q;
         };
-        let answer = q.answer.clone().unwrap_or_default();
-        let mut instruction = format!(
-            "You asked the operator: \"{}\"\nThe operator answered ({}): \"{}\"",
-            q.text,
-            q.answered_via.as_deref().unwrap_or("the waiting list"),
-            answer
-        );
-        if let Some(c) = &q.choice {
-            instruction.push_str(&format!("\nThat is the choice \"{c}\"."));
-        }
-        instruction.push_str(
-            "\nCarry on with what you asked it for. Their answer is not a yes to any change: \
-             a change that needs one still waits for it.",
-        );
+        let instruction = follow_up_instruction(&q);
         let spec = RunSpec {
             instruction,
             data: Some(json!({"question": q.key, "answered_via": q.answered_via})),
@@ -871,7 +858,7 @@ impl Questions {
             FOLLOW_UP_SOURCE,
             &q.key,
             &agent,
-            "answer from the operator",
+            &follow_up_name(&q.text),
             &spec,
             FOLLOW_UPS_PER_HOUR,
             true,
@@ -898,6 +885,45 @@ impl Questions {
             }
         }
     }
+}
+
+/// The tools a follow-up run is not offered (and refused if it calls them by name): the
+/// answer is recorded already, and the question is closed, so neither answering it nor
+/// asking it again has a place there.
+pub const FOLLOW_UP_WITHHELD: &[&str] = &["ghost_answer", "ghost_ask"];
+
+/// A follow-up run's name, and so its item's title when it delivers: the question it
+/// follows up, as the operator read it, never "answer from the operator".
+pub fn follow_up_name(question: &str) -> String {
+    let subject = question
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_end_matches(['?', '.', '!', ':', ' '])
+        .to_string();
+    crate::schedules::clip(&subject, crate::schedules::NAME_MAX)
+}
+
+/// What a follow-up run is asked: the question, the answer as recorded, that it is
+/// recorded and closed, and to do what it calls for or say nothing at all.
+pub fn follow_up_instruction(q: &Question) -> String {
+    let mut out = format!(
+        "You asked the operator: \"{}\"\nThe operator answered ({}): \"{}\"",
+        q.text,
+        q.answered_via.as_deref().unwrap_or("the waiting list"),
+        q.answer.as_deref().unwrap_or_default()
+    );
+    if let Some(c) = &q.choice {
+        out.push_str(&format!("\nThat is the choice \"{c}\"."));
+    }
+    out.push_str(
+        "\n\nTheir answer is already recorded and the question is closed: do not answer it or \
+         ask it again. Now do what the answer calls for. Their answer is not a yes to any \
+         change: a change that needs one still waits for it.\nIf nothing remains to be done \
+         (the answer was no, or it needs nothing from you), reply exactly [SILENT] and \
+         nothing else; the operator knows what they answered.",
+    );
+    out
 }
 
 // --- a connected app's question (ADR 0046's elicitation) ------------------------------------

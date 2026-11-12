@@ -514,6 +514,7 @@ impl HeadlessRunner {
             max_turns: a.max_turns,
             max_runtime: a.max_runtime,
             cancel: a.cancel,
+            withheld: Vec::new(),
         };
         self.run_marked(r, Some(mark)).await
     }
@@ -566,6 +567,7 @@ impl HeadlessRunner {
             &agent.slug,
             live,
         );
+        dispatcher.withhold(&r.withheld);
         let mut context = Context::new(self.system_prompt(&agent, &sources));
         context.messages = self.seed(&agent);
         context.push(Message::user(self.first_message_marked(&r, &mark, asked)));

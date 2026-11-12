@@ -313,6 +313,9 @@ pub struct RunRequest {
     pub max_turns: u32,
     pub max_runtime: Duration,
     pub cancel: CancellationToken,
+    /// Tools by the name the model sees that this run is not offered and may not call:
+    /// a follow-up to an answer is not offered `ghost_answer` or `ghost_ask` (ADR 0051).
+    pub withheld: Vec<String>,
 }
 
 /// How a run ended, as the runner saw it.

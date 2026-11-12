@@ -349,6 +349,7 @@ fn request(agent: &str, instruction: &str) -> RunRequest {
         max_turns: 30,
         max_runtime: Duration::from_secs(600),
         cancel: CancellationToken::new(),
+        withheld: Vec::new(),
     }
 }
 
@@ -1266,21 +1267,85 @@ async fn a_run_that_asks_ends_and_the_answer_starts_exactly_one_follow_up_run() 
     );
     assert!(asked.contains("The operator answered (desktop): \"business\""));
     assert!(asked.contains("That is the choice \"Business\"."));
-    // Its answer is delivered as any run's is, and there was exactly one.
+    // It is told the answer is recorded, to act on it, and to say [SILENT] if nothing is left.
+    assert!(asked.contains("already recorded"));
+    assert!(asked.contains("reply exactly [SILENT]"));
+    // Neither answering nor asking again is offered.
+    let offered = next.tools_at(0);
+    assert!(!offered.iter().any(|t| t == "ghost_answer"), "{offered:?}");
+    assert!(!offered.iter().any(|t| t == "ghost_ask"), "{offered:?}");
+    assert!(offered.iter().any(|t| t == "ghost_notify"), "{offered:?}");
+    // Its answer is delivered as any run's is, and there was exactly one, titled by the
+    // question it follows up.
     let runs = w.jobs.recent_runs(10).unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].status, RunStatus::Ok);
-    assert!(
-        w.waiting
-            .items
-            .open(None)
-            .unwrap()
-            .iter()
-            .any(|i| i.source == "agent:ledger"
-                && i.fields.get("detail").and_then(Value::as_str)
-                    == Some("Refunded from the business account."))
+    let delivered: Vec<_> = w
+        .waiting
+        .items
+        .open(None)
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.source == "agent:ledger" && !i.key.starts_with("question:"))
+        .collect();
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(
+        delivered[0].fields.get("detail").and_then(Value::as_str),
+        Some("Refunded from the business account.")
     );
+    assert_eq!(
+        delivered[0].title,
+        "Which account should the refund come from: Refunded from the business account."
+    );
+    assert!(!delivered[0].title.contains("answer from the operator"));
     assert!(w.jobs.queued().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_follow_up_with_nothing_left_to_do_delivers_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let model = Watched::new(vec![
+        ScriptedModel::call(
+            "",
+            "ghost_ask",
+            args(json!({"question": "Deploy the release now?", "choices": ["Yes", "No"]})),
+        ),
+        ScriptedModel::say("[SILENT]"),
+    ]);
+    w.runner(&model)
+        .run(request("ledger", "Deploy the release if the operator agrees."))
+        .await;
+    let q = w.questions.open(None).unwrap().pop().unwrap();
+    w.questions.answer(&q.key, "no", via::PHONE, None).unwrap();
+    assert_eq!(w.jobs.queued().unwrap().len(), 1);
+
+    // The answer was no: the agent has nothing to do and says so with [SILENT].
+    let next = Watched::new(vec![ScriptedModel::say("[SILENT]")]);
+    let scheduler = Scheduler::new(SchedulerParts {
+        jobs: w.jobs.clone(),
+        runner: Arc::new(w.runner(&next)),
+        waiting: w.waiting.clone(),
+        reader: None,
+        conversations: Some(w.convs.clone()),
+    });
+    scheduler.drain().await;
+    assert_eq!(next.calls(), 1);
+    let runs = w.jobs.recent_runs(10).unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, RunStatus::Ok);
+    assert_eq!(runs[0].delivery.as_deref(), Some("silent"));
+    // Nothing new for the operator: the question's own item is settled and nothing else
+    // of Ledger's is open.
+    let open: Vec<_> = w
+        .waiting
+        .items
+        .open(None)
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.source == "agent:ledger")
+        .collect();
+    assert!(open.is_empty(), "{open:?}");
 }
 
 #[tokio::test]

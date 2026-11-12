@@ -424,6 +424,14 @@ impl Scheduler {
             max_turns: spec.max_turns,
             max_runtime: limit,
             cancel: cancel.clone(),
+            withheld: if run.source == crate::questions::FOLLOW_UP_SOURCE {
+                crate::questions::FOLLOW_UP_WITHHELD
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            } else {
+                Vec::new()
+            },
         };
         info!(
             "schedule {}: {} is running ({})",
