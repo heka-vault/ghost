@@ -10,7 +10,7 @@
  */
 import { createElement, type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { createMotion, detailFor, type MascotAttrs as Attrs, type MascotEl as El, type MascotFrame, stillPose, WISP } from "@ghost/ui";
+import { createMotion, detailFor, type MascotAttrs as Attrs, type MascotEl as El, type MascotFrame, stillPose, type VoiceLevel, WISP } from "@ghost/ui";
 
 export interface MascotProps {
   /** Pixel size of the square. Under 24 draws the simple body; 40 and up adds the arms. */
@@ -31,7 +31,15 @@ export interface MascotProps {
   /** Accessible name; the mascot is decorative (aria-hidden) without one. */
   title?: string;
   className?: string;
+  /**
+   * Ghost's own voice level (`useGhost().voice`): in the speaking mood the mouth opens and the
+   * body lifts with what is heard, instead of the stand-in rhythm. Never the microphone.
+   */
+  level?: VoiceLevel;
 }
+
+/** A level older than this is stale: the voice stopped before its last 0 arrived. */
+const LEVEL_STALE_MS = 250;
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -49,7 +57,7 @@ function draw(el: El, attrs: Attrs, key: number): ReactNode {
   return createElement(el.tag, { key, "data-part": el.part, ...el.props, ...live }, el.children?.map((c, i) => draw(c, attrs, i)));
 }
 
-export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, mood = null, still, frame, clock = 0, title, className }: MascotProps) {
+export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, mood = null, still, frame, clock = 0, title, className, level }: MascotProps) {
   const detail = detailFor(size);
   const { simple, props } = detail;
   const d = useMemo(() => ({ simple, props }), [simple, props]);
@@ -64,8 +72,10 @@ export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, 
   const written = useRef(new Map<string, string>());
   const motion = useMemo(() => createMotion(WISP), []);
   const raf = useRef(0);
-  const live = useRef({ d, idle, isStill });
-  live.current = { d, idle, isStill };
+  const live = useRef({ d, idle, isStill, level, mood });
+  live.current = { d, idle, isStill, level, mood };
+  /** The voice's level, eased so the mouth moves like a mouth and not like a meter. */
+  const mouth = useRef(0);
 
   // React only ever renders the rest pose (or a fixed `frame`). Its props never change while the
   // loop runs, so React never writes over the loop's attributes.
@@ -100,9 +110,18 @@ export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, 
     if (raf.current || live.current.isStill) return;
     const step = (now: number) => {
       raf.current = 0;
-      const { d, idle, isStill } = live.current;
+      const { d, idle, isStill, level, mood } = live.current;
       if (isStill) return;
-      apply(WISP.attrs(motion.frame(now, idle), d, now));
+      let f = motion.frame(now, idle);
+      if (level && mood === "speaking") {
+        const { level: l, at } = level.get();
+        const target = now - at > LEVEL_STALE_MS ? 0 : l;
+        // Opens fast, closes a little slower: syllables read, silence closes it.
+        mouth.current += (target - mouth.current) * (target > mouth.current ? 0.45 : 0.2);
+        const m = mouth.current;
+        f = { ...f, mo: Math.min(1, 0.08 + 1.1 * m), y: (f.y ?? 0) - 0.9 * m, sy: (f.sy ?? 1) * (1 + 0.04 * m), es: (f.es ?? 1) * (1 + 0.06 * m) };
+      }
+      apply(WISP.attrs(f, d, now));
       if (!motion.settled) raf.current = requestAnimationFrame(step);
     };
     raf.current = requestAnimationFrame(step);
