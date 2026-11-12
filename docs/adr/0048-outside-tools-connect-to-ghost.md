@@ -1,6 +1,6 @@
 # 0048: Outside tools connect to Ghost's own app, each with a name and a token
 
-- **Status:** accepted
+- **Status:** accepted (decided 2026-11-11; built on the `feat/ghost-app-outside` branch: the listener, the clients and their tokens, the four tools, the bridge, Settings › Outside tools; `agent_ask` runs through ADR 0047's run with nobody there, and the schedules are offered to outside clients as their own)
 - **Date:** 2026-11-11
 - **Amends:** ADR 0045 (the same server, now also served to outside clients), ADR 0032
   (an outside tool's sentence may be what desk voice says), ADR 0013 (a second way in for
@@ -84,9 +84,17 @@ they cost a session nothing (ADR 0018).
 
 `agent_ask` needs a way to run an agent's turn with no audio. The typed turn
 (`POST /session/say`) cannot give it: with no session it opens one at the desk, and with
-one it speaks the answer aloud. So the tool, its gate operation and its audit row exist,
-and the run is behind a small trait (`ghost_app::outside::AgentRunner`) whose default
-answers "not available yet". The headless run that comes with schedules plugs in there.
+one it speaks the answer aloud. So the run is behind a small trait (`ghost_app::outside::AgentRunner`), and what the
+daemon plugs in is the run with nobody there that came with schedules (ADR 0047:
+`ghostd::outside::AskRunner` over `ghost_voice::headless`). The client's text is the
+agent's instruction: the agent's own prompt, memory and tools, the same dispatcher and
+gate, 30 model calls and ten minutes at the most. A change that resolves to `ask` inside
+it is set aside on the waiting list and the agent says so, because nothing a client
+writes is the operator's yes. The question and the answer are kept in that agent's
+transcript, marked `[asked by <tool>, an outside tool]`, under a run's session id. The
+turn stops when the client cancels the request or drops the connection, and a change the
+agent has in the gate at that moment still gets its outcome. Without a runner the tool
+answers "not available yet".
 
 `say` goes through desk voice (ADR 0032): the passive loop takes it as it takes a raised
 item, and the sentence, led by who it is from, is the greeting. It speaks only where the
@@ -106,7 +114,9 @@ subscription is a tap beside the bus, so it is not counted as the desktop being 
 (ADR 0031's "at the desk").
 
 The documentation and the status are also resources: `ghost://docs/<name>` and
-`ghost://status`, under the same checks as `docs_read` and `status`.
+`ghost://status`, under the same checks as `docs_read` and `status`. They are advertised
+to outside clients only: Ghost offers an app's resources to its agents as two more read
+tools (ADR 0046), and its own agents already have `ghost_docs_read` and `ghost_status`.
 
 **A bridge for tools that only start commands.** `ghostd mcp serve --client <name>` speaks
 the protocol on stdin and stdout and forwards each message to the listener with that
@@ -120,8 +130,18 @@ when there is none or the token is refused.
 
 ## What is and is not reachable
 
-Reachable, each through the checks above: the thirteen tools (the nine of ADR 0045 and the
-four here), the built-in documentation, and the status.
+Reachable, each through the checks above: the nine tools of ADR 0045, the four here, the
+two for schedules (ADR 0047), the built-in documentation, and the status. `tools_search`
+(ADR 0046) is not offered: it returns the connected apps' own text for tools a client
+cannot call.
+
+**Schedules.** `schedules_list` and `schedule_manage` go the same way as every other
+tool: the read against the `block` rules, the change through the gate as
+`ghost.schedule_manage` under the session `client:<name>`. A schedule a client sets up
+is made by `client:<name>` and runs as the agent it names, Ghost when it names none. A
+client updates, pauses, resumes, removes and runs only what it set up; of every other
+schedule it reads the id, the agent, when it runs and whether it is on, not its name,
+its instruction or what its runs said.
 
 Not reachable, and a test asserts the tool list has none of it: passive audio or passive
 transcripts, a session's transcript or an agent's memory (an agent is asked through

@@ -94,7 +94,8 @@ is refused from its next request.
 | `status()`, `apps_list()`, `audit_recent()` | How Ghost is, the connected apps, recent changes |
 | `docs_search(query)`, `docs_read(name, section?)` | Ghost's documentation; also as `ghost://docs/<name>`, and `ghost://status` |
 | `agents_list()` | Your agents and their jobs |
-| `agent_ask(agent, text)` | A written question for an agent. Not available yet: it answers so until Ghost can run an agent without a voice session |
+| `agent_ask(agent, text)` | A written question for an agent, and its written answer. The agent works as it does on a schedule: its own memory and tools, nothing spoken, ten minutes at the most. A change your permissions ask about is not made; it waits on your waiting list. The question and the answer are kept in that agent's transcript, marked as asked by the tool |
+| `schedules_list(id?)`, `schedule_manage(action, …)` | The schedules, and setting one up: an instruction an agent carries out on its own at a time. What a tool sets up is marked as its own and runs as the agent it names (Ghost when it names none); it changes, pauses and removes only its own, and of the others sees only that they are there |
 | `waiting_ack(keys)`, `waiting_snooze(keys, minutes)` | Marks items on the waiting list as heard, or quiet for a while |
 
 `say` speaks only when desk voice is on: `desk` in `[routes].enabled` of

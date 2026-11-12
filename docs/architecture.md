@@ -158,18 +158,24 @@ list for the operator's yes while the client is told "waiting for the operator",
 audit has the row under the session `client:<name>`. A client's `notify` is an item under
 `client:<name>`, its title led by "From Claude Code:", and a client resolves only its own.
 
-Outside clients have the nine tools above (without the `ghost_` prefix, which is the
-session's naming) and four of their own, which Ghost's agents are not offered:
+Outside clients have the tools above (without the `ghost_` prefix, which is the
+session's naming; not `tools_search`, since a client cannot call an app's tool) and four
+of their own, which Ghost's agents are not offered. The schedules are theirs through the
+same gate: what a client sets up is made by `client:<name>` and runs as the agent it
+names, Ghost when it names none; a client manages only its own, and of the others reads
+only that they are there and when they run.
 
 | Tool | Kind | |
 |---|---|---|
 | `agents_list` | read | The agents, their jobs, whether one is in a session |
-| `agent_ask` | change | A written turn for an agent and its written answer. The run is behind `ghost_app::outside::AgentRunner`, which answers "not available yet" until a headless run is plugged in; the typed turn (`POST /session/say`) cannot serve it, since it opens or uses a voice session |
+| `agent_ask` | change | A written turn for an agent and its written answer, through the run with nobody there (ADR 0047: `ghostd::outside::AskRunner` over `ghost_voice::headless`, behind `ghost_app::outside::AgentRunner`). The same dispatcher and gate; a change that resolves to `ask` in it is set aside on the waiting list, since nothing a client writes is the operator's yes; 30 model calls and ten minutes at the most; kept in the agent's transcript as `[asked by <tool>, an outside tool]` under a run's session id; stopped when the client cancels the request or drops the connection |
 | `say` | change | One sentence through desk voice (ADR 0032, `ghostd::outside::Desk`): only with `desk` in `[routes].enabled`, outside quiet hours and do-not-disturb, with the desk idle; always an item on the waiting list first |
 | `events_wait` | read | A long poll (60 s at most) over a numbered ring the daemon fills from its own event bus through a tap (`EventBus::tap`, not counted as the desktop being open): waiting-list items added, changed, acknowledged, snoozed or resolved, a change's outcome, a session starting or ending; never a log line, a turn or audio |
 
 The documentation and the status are also resources (`ghost://docs/<name>`,
-`ghost://status`). Nothing here reaches a password, the policy file, a transcript or
+`ghost://status`), advertised to outside clients only: in process they would come back
+to the agents as two more read tools (ADR 0046) beside `ghost_docs_read` and
+`ghost_status`. Nothing here reaches a password, the policy file, a transcript or
 audio, or changes a permission, an app or a client.
 
 `ghostd mcp serve --client <name>` is the bridge for a tool that can only start a
