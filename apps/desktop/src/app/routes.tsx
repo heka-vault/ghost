@@ -10,6 +10,7 @@ import {
   BellRing,
   Blocks,
   BookOpen,
+  Compass,
   Cpu,
   Eye,
   Ghost,
@@ -255,6 +256,19 @@ export const ROUTES: RouteDef[] = [
     needsDaemon: false,
     nav: { label: "Mobile", icon: Smartphone, group: "prototype" },
     component: DEV ? lazy(() => import("../prototypes/mobile")) : null,
+  },
+  {
+    id: "directions",
+    // Three directions for the whole app, for the owner to choose (docs/design/overhaul-2026-11.md).
+    patterns: ["/directions/:name?/:screen?"],
+    path: "/directions/briefing/home",
+    owner: "design",
+    title: "Directions",
+    kind: "prototype",
+    chrome: "bare",
+    needsDaemon: false,
+    nav: { label: "Directions", icon: Compass, group: "prototype" },
+    component: DEV ? lazy(() => import("../prototypes/directions")) : null,
   },
   {
     id: "mascot",
