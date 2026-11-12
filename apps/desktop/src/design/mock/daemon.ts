@@ -12,6 +12,8 @@ import type {
   AuditEntry,
   CatalogEntryView,
   CatalogPage,
+  ClientsView,
+  ClientView,
   ConversationDetail,
   ConversationView,
   DevicesView,
@@ -207,6 +209,8 @@ export class MockDaemon {
   private voices: VoiceInfo[];
   private phone: PhoneView;
   private pairing: PhonePairing | null = null;
+  /** The outside tools connected to Ghost (ADR 0048). */
+  private clients: ClientView[];
   private options: MockOptions;
   /** The SKILL.md folders Ghost reads (ADR 0023): Ghost's own and the operator's. */
   private skills: SkillFixture[];
@@ -222,6 +226,12 @@ export class MockDaemon {
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
     this.phone = f.settings.phone;
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    const cursor: ClientView = { name: "cursor", title: "Cursor", created_at: hoursAgo(24 * 3), last_used_at: null };
+    this.clients =
+      scenario.data === "empty"
+        ? []
+        : [{ name: "claude-code", title: "Claude Code", created_at: hoursAgo(24 * 12), last_used_at: hoursAgo(0.2) }, ...(scenario.data === "busy" ? [cursor] : [])];
     this.options = options;
     this.script = f.session;
     this.turns = f.session.turns;
@@ -1228,6 +1238,39 @@ export class MockDaemon {
       if (answer !== undefined) return answer;
     }
 
+    // Outside tools (ADR 0048): a token is made up here and shown once, as the daemon does.
+    if (method === "GET" && path === "/clients") return this.clientsView();
+    if (method === "POST" && path === "/clients") {
+      const name = String(b.name ?? "");
+      if (!/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/.test(name)) throw new HttpError(422, "a client's name is lowercase letters, digits and hyphens");
+      if (this.clients.some((c) => c.name === name)) throw new HttpError(409, `there is already a client called ${name}; remove it first for a new token`);
+      const title = name
+        .split("-")
+        .map((w) => w[0].toUpperCase() + w.slice(1))
+        .join(" ");
+      const client: ClientView = { name, title, created_at: new Date().toISOString(), last_used_at: null };
+      this.clients = [...this.clients, client].sort((x, y) => x.name.localeCompare(y.name));
+      const token = `ghost.${name}.mock-token-shown-once-0123456789abcdefghijk`;
+      const url = "http://127.0.0.1:47824/mcp";
+      const config = b.command
+        ? { mcpServers: { ghost: { command: "ghostd", args: ["mcp", "serve", "--client", name] } } }
+        : { mcpServers: { ghost: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } };
+      return {
+        client,
+        token,
+        claude_code: b.command ? `claude mcp add ghost -- ghostd mcp serve --client ${name}` : `claude mcp add --transport http ghost ${url} --header "Authorization: Bearer ${token}"`,
+        config_json: JSON.stringify(config, null, 2),
+        clients: this.clientsView(),
+      };
+    }
+    const clientPath = path.match(/^\/clients\/([^/]+)$/);
+    if (method === "DELETE" && clientPath) {
+      const name = decodeURIComponent(clientPath[1]);
+      if (!this.clients.some((c) => c.name === name)) throw new HttpError(404, `no client called ${name}`);
+      this.clients = this.clients.filter((c) => c.name !== name);
+      return this.clientsView();
+    }
+
     if (method === "GET" && path === "/phone") return this.phone;
     if (method === "POST" && path === "/phone/pairing") return this.newPairing();
     if (method === "DELETE" && path === "/phone") {
@@ -1350,6 +1393,10 @@ export class MockDaemon {
       }
     }
     throw new HttpError(404, `The mock has no route for ${method} ${path}.`);
+  }
+
+  private clientsView(): ClientsView {
+    return { clients: structuredClone(this.clients), listening: ["127.0.0.1:47824"], problem: null };
   }
 
   // ------------------------------------------------------------------ phone (ADR 0016)

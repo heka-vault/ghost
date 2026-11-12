@@ -82,6 +82,7 @@ utoipa-axum = "0.3"
 # A client of the socket (`ghostd status|wake|say|sleep`), the way the Tauri shell reaches it.
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1"
 http-body-util = "0.1"
 hyperlocal = "0.9"
 serde_path_to_error = "0.1"

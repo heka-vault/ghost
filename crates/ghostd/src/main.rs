@@ -3,7 +3,8 @@
 //! the vault, Ghost's folder and the apps, with a problem as the exit code. `ghostd push`:
 //! a signed delivery to the webhook listener (ADR 0027). `ghostd latency`: where the
 //! turns' time went (ADR 0018). `ghostd api-schema`: the control API's document.
-//! `ghostd version`: what this build is. `ghostd restore-volumes`: what the shell runs
+//! `ghostd mcp`: the outside tools connected to Ghost, and the bridge one of them runs
+//! (ADR 0048). `ghostd version`: what this build is. `ghostd restore-volumes`: what the shell runs
 //! before a start and after a stop (ADR 0038).
 //!
 //! `ghostd perf`: the latency harness (`ghost_voice::perf`, ADR 0018), with the vault's
@@ -26,6 +27,7 @@ use ghostd::check::check_command;
 use ghostd::config::runtime_dir;
 use ghostd::daemon::{Daemon, LogMirror, Ports, settings_from};
 use ghostd::latency::latency_command;
+use ghostd::mcp::{mcp_cli, serve_cli, settings_over};
 use ghostd::passwords::{Cli, Redacting, open_passwords, operator_keyring, passwords_cli};
 use ghostd::push::push_cli;
 use ghostd::{GhostdSettings, wake};
@@ -132,6 +134,18 @@ fn main() -> anyhow::Result<()> {
             }
             std::process::exit(ghost_voice::perf::cli::main(&args[1..]))
         }
+        Some("mcp") => {
+            let cfg = settings_over(std::env::vars().collect())?;
+            if args.get(1).map(String::as_str) == Some("serve") {
+                std::process::exit(mcp_serve(&args[2..], &cfg))
+            }
+            std::process::exit(mcp_cli(
+                &args[1..],
+                &cfg,
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            ))
+        }
         Some("api-schema") => {
             let doc = ghost_api::openapi::document();
             println!("{}", serde_json::to_string_pretty(&doc)?);
@@ -143,7 +157,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, push, latency, perf, restore-volumes, passwords, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, push, latency, perf, restore-volumes, passwords, mcp, api-schema, version"
         ),
     }
 }
@@ -213,6 +227,12 @@ fn restore_volumes() -> anyhow::Result<()> {
         Err(e) => warn!("restore-volumes: {e}"),
     }
     Ok(())
+}
+
+/// `ghostd mcp serve`: a tool's stdin and stdout to the running daemon (ADR 0048).
+#[tokio::main]
+async fn mcp_serve(args: &[String], cfg: &GhostdSettings) -> i32 {
+    serve_cli(args, cfg).await
 }
 
 /// `ghostd check`, on its own runtime: the apps connect to be described.

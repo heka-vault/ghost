@@ -39,6 +39,8 @@ use ghost_core::conversations::{
 };
 use ghost_core::folder::Folder;
 use ghost_core::gate::WriteGate;
+use ghost_core::ghost_app::clients::Clients;
+use ghost_core::ghost_app::outside::Outside;
 use ghost_core::ghost_app::{self, GhostServer};
 use ghost_core::hooks::{HookIntake, Secrets};
 use ghost_core::jev::{JevClassifier, JevClient, JevOptions, WatchDecider, watch_decider};
@@ -328,6 +330,8 @@ pub struct Late {
     pub schedules: OnceLock<Arc<ghost_core::schedules::Scheduler>>,
     /// The Hearing test's recorder (ADR 0042).
     pub hear: OnceLock<Arc<crate::hear::HearDesk>>,
+    /// The outside tools and their listener (ADR 0048).
+    pub outside: OnceLock<Arc<crate::outside::OutsideHost>>,
 }
 
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
@@ -584,6 +588,12 @@ impl Daemon {
 
     pub(crate) fn raise_q_empty(&self) -> bool {
         lock(&self.raise_rx).is_empty()
+    }
+
+    /// Ask the passive loop to speak first at the desk (ADR 0032): the desk route's
+    /// queue, for one sentence an outside tool sent (ADR 0048).
+    pub(crate) fn raise(&self, raised: Raised) -> bool {
+        self.raise_tx.send(raised).is_ok()
     }
 
     async fn next_raised(&self) -> Option<Raised> {
@@ -1175,6 +1185,10 @@ impl Daemon {
                 // never in this set, so never unregistered and never listed with them.
                 *reg = now.keys().filter(|n| *n != GHOST_APP).cloned().collect();
                 if let Some(d) = weak.upgrade() {
+                    // The changes only outside tools have, back beside Ghost's own.
+                    if let Some(server) = d.late.outside.get().and_then(|o| o.server.as_ref()) {
+                        server.register_operations();
+                    }
                     d.state.set_apps(reg.iter().cloned().collect());
                     d.refresh_waiting_now();
                 }
@@ -1237,10 +1251,13 @@ impl Daemon {
                             &password_problems(Some(&vault), &cfg),
                         );
                         out.extend(crate::schedules::problems(&jobs, &lock(&folder)));
-                        if let Some(d) = weak.upgrade()
-                            && let Some(problem) = lock(&d.models_problem).clone()
-                        {
-                            out.push((MODELS_PROBLEM_KEY.to_string(), problem));
+                        if let Some(d) = weak.upgrade() {
+                            if let Some(problem) = lock(&d.models_problem).clone() {
+                                out.push((MODELS_PROBLEM_KEY.to_string(), problem));
+                            }
+                            if let Some(problem) = d.late.outside.get().and_then(|o| o.problem()) {
+                                out.push((crate::outside::PROBLEM_KEY.to_string(), problem));
+                            }
                         }
                         out
                     }
@@ -1250,18 +1267,14 @@ impl Daemon {
         d.late.waiting.set(waiting.clone()).ok();
         // ADR 0045: Ghost is an app its own agents use, served in process before any
         // session can open. It needs no vault, no network and no sign-in.
-        let ghost_app = match ghost_app::attach(
-            &apps,
-            GhostServer::new(ghost_app::Parts {
-                store: store.clone(),
-                waiting: waiting.clone(),
-                apps: Arc::downgrade(&apps),
-                status: crate::ghost_app::status_fn(d),
-            })
-            .with_schedules(jobs.clone()),
-        )
-        .await
-        {
+        let ghost_server = GhostServer::new(ghost_app::Parts {
+            store: store.clone(),
+            waiting: waiting.clone(),
+            apps: Arc::downgrade(&apps),
+            status: crate::ghost_app::status_fn(d),
+        })
+        .with_schedules(jobs.clone());
+        let ghost_app = match ghost_app::attach(&apps, ghost_server.clone()).await {
             Ok(attached) => {
                 gate.register(GHOST_APP, attached.app.operations());
                 Some(attached)
@@ -1416,6 +1429,21 @@ impl Daemon {
             })
         });
         d.late.events.set(Arc::new(events)).ok();
+        // ADR 0048: the same app for the outside tools the operator connected, on its own
+        // listener. Made now (the API lists the clients), started after the phone's.
+        let outside = Arc::new(crate::outside::OutsideHost::new(
+            &cfg.mcp_listen,
+            Arc::new(Clients::new(store.clone(), cfg.clients_dir())),
+            ghost_app.as_ref().map(|_| &ghost_server),
+            Outside::new(gate.clone())
+                .with_desk(Arc::new(crate::outside::Desk(Arc::downgrade(d))))
+                // ADR 0047's run with nobody there is what `agent_ask` runs.
+                .with_runner(Arc::new(crate::outside::AskRunner::new(
+                    Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
+                    d.stop.child_token(),
+                ))),
+        ));
+        d.late.outside.set(outside.clone()).ok();
         // The hooks listener is made now (its addresses are in the API's status) and
         // started after the phone listener, as the Python did.
         let hooks_listener = (!cfg.hooks_listen.trim().is_empty())
@@ -1448,9 +1476,12 @@ impl Daemon {
                 passwords: passwords.clone(),
                 conversations: conversations.clone(),
                 schedules: schedules.scheduler.clone(),
+                clients: outside.clients.clone(),
+                clients_listening: outside.addresses(),
             })
             .await;
         d.start_phone_listener().await;
+        outside.start(&waiting, d.state.bus.tap()).await;
         if let Err(e) = waiting.refresh(None) {
             warn!("waiting: refresh failed: {e}");
         }
@@ -1587,6 +1618,7 @@ impl Daemon {
         if let Some(h) = &hooks_listener {
             h.stop().await;
         }
+        outside.stop().await;
         if let Some((wake, ducker)) = running {
             wake.close();
             ducker.restore();
@@ -1834,6 +1866,8 @@ impl Daemon {
             model_sign_in: ghost_api::deps::ModelSignIn::default(),
             hear: Some(self.hear_desk()),
             schedules: Some(p.schedules),
+            clients: Some(p.clients),
+            clients_listening: p.clients_listening,
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {
@@ -1960,6 +1994,8 @@ struct StartApi {
     watches: Arc<WatchRunner>,
     hooks: Arc<HookIntake>,
     hooks_listening: Vec<String>,
+    clients: Arc<Clients>,
+    clients_listening: Vec<String>,
     passwords: Arc<Passwords>,
     conversations: Arc<Conversations>,
     schedules: Arc<ghost_core::schedules::Scheduler>,
@@ -2262,6 +2298,7 @@ pub(crate) mod tests {
             vault_env_path: tmp.join("no-heka"),
             infra_dir: tmp.join("infra"),
             dictation_flag: tmp.join("rt/dictation"),
+            mcp_listen: String::new(), // never the operator's port from a test
             ..GhostdSettings::default()
         };
         let voice = VoiceSettings::from_vars(|name| {

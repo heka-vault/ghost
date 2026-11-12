@@ -13,6 +13,7 @@
 pub mod app;
 pub mod apps;
 pub mod client;
+pub mod clients;
 pub mod controller;
 pub mod conversations;
 pub mod deps;

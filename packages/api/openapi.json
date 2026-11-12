@@ -710,6 +710,116 @@
         ],
         "type": "object"
       },
+      "ClientCreate": {
+        "properties": {
+          "command": {
+            "description": "For a tool that can only start a command: Ghost keeps the token in a private file\nand the tool runs `ghostd mcp serve`.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ClientCreated": {
+        "description": "What `POST /clients` answers, once: the token is never returned again.",
+        "properties": {
+          "claude_code": {
+            "description": "The command that connects Claude Code.",
+            "type": "string"
+          },
+          "client": {
+            "$ref": "#/components/schemas/ClientView"
+          },
+          "clients": {
+            "$ref": "#/components/schemas/ClientsView"
+          },
+          "config_json": {
+            "description": "The config other tools read, as JSON text.",
+            "type": "string"
+          },
+          "token": {
+            "description": "The client's token. Shown once.",
+            "format": "password",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "client",
+          "token",
+          "claude_code",
+          "config_json",
+          "clients"
+        ],
+        "type": "object"
+      },
+      "ClientView": {
+        "description": "A tool the operator connected to Ghost. Never its token.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_used_at": {
+            "description": "The last time it called Ghost; None when it never has.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "What it was connected as: lowercase letters, digits and hyphens.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The name as Ghost says it: \"Claude Code\" for `claude-code`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "created_at",
+          "last_used_at"
+        ],
+        "type": "object"
+      },
+      "ClientsView": {
+        "properties": {
+          "clients": {
+            "items": {
+              "$ref": "#/components/schemas/ClientView"
+            },
+            "type": "array"
+          },
+          "listening": {
+            "description": "Where Ghost listens for them (`host:port`); empty when that is turned off.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "problem": {
+            "description": "Why Ghost is not listening though it should be, in a sentence.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "clients",
+          "listening",
+          "problem"
+        ],
+        "type": "object"
+      },
       "CompactionView": {
         "properties": {
           "at": {
@@ -3579,7 +3689,7 @@
             "type": "string"
           },
           "created_by": {
-            "description": "`operator`, or `agent:<slug>`.",
+            "description": "`operator`, `agent:<slug>`, or `client:<name>` for an outside tool.",
             "type": "string"
           },
           "cron": {
@@ -5541,6 +5651,110 @@
         "summary": "Catalog Entry",
         "tags": [
           "apps"
+        ]
+      }
+    },
+    "/clients": {
+      "get": {
+        "description": "The tools the operator connected to Ghost, and where Ghost listens for them. Never a token.",
+        "operationId": "get_clients_clients_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Clients",
+        "tags": [
+          "clients"
+        ]
+      },
+      "post": {
+        "description": "Connect a tool: its token and what to paste into it, returned once and never again.",
+        "operationId": "create_client_clients_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Client",
+        "tags": [
+          "clients"
+        ]
+      }
+    },
+    "/clients/{name}": {
+      "delete": {
+        "description": "Take a tool away: its token stops working at once.",
+        "operationId": "delete_client_clients__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Client",
+        "tags": [
+          "clients"
         ]
       }
     },

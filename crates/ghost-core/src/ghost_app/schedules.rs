@@ -6,6 +6,11 @@
 //! dispatcher sets `_agent`. A schedule an agent makes is attributed to it and runs as it;
 //! an agent manages its own, and Ghost (agent zero) manages all. The tools are on the
 //! server only when the daemon gives it the schedules ([`GhostServer::with_schedules`]).
+//!
+//! An outside tool the operator connected (ADR 0048) has the same two tools through the
+//! same gate. What it sets up is attributed to it (`client:<name>`) and runs as the agent
+//! it names, Ghost when it names none; it manages only what it set up, and of the other
+//! schedules it is shown that they are there and when they run, not what they say.
 
 use std::sync::Arc;
 
@@ -17,7 +22,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{GhostServer, reply};
+use super::clients::{CLIENT_SOURCE, shown};
+use super::{AGENT_SOURCE, Caller, GhostServer, reply};
 use crate::conversations::GHOST;
 use crate::schedules::when::parse_tz;
 use crate::schedules::{Check, Job, JobEdit, Jobs, Run, Written, by_agent, clip};
@@ -59,7 +65,7 @@ pub struct ScheduleManage {
     /// A time zone such as Europe/London; the machine's when left out.
     #[serde(default)]
     pub tz: Option<String>,
-    /// Ghost only: the agent that does it. Any other agent schedules itself.
+    /// Ghost or an outside tool: the agent that does it. Any other agent schedules itself.
     #[serde(default)]
     pub agent: Option<String>,
     /// Only between these hours: 08:00-18:00. Empty to clear.
@@ -144,13 +150,29 @@ impl GhostServer {
             .ok_or_else(|| "schedules are not available here".to_string())
     }
 
+    /// The outside tool this server is answering, as `client:<name>`; None for an agent.
+    fn outside_caller(&self) -> Option<&str> {
+        match &self.caller {
+            Caller::Named(who) if who.starts_with(CLIENT_SOURCE) => Some(who),
+            _ => None,
+        }
+    }
+
     fn do_schedules_list(&self, p: &SchedulesList) -> Result<Value, String> {
         let jobs = self.jobs()?;
+        // An outside tool reads its own schedules; of the others, only that they are
+        // there: an instruction and a run's answer are an agent's words (ADR 0048).
+        let client = self.outside_caller();
+        let mine = |job: &Job| client.is_none_or(|who| job.created_by == who);
         if let Some(id) = given(&p.id) {
             let job = jobs
                 .find(id)
                 .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("there is no schedule {id}"))?;
+                .filter(|j| mine(j))
+                .ok_or_else(|| match client {
+                    Some(_) => format!("there is no schedule {id} that you set up"),
+                    None => format!("there is no schedule {id}"),
+                })?;
             let runs = jobs.runs(&job.id, RUNS_SHOWN).map_err(|e| e.to_string())?;
             let mut out = job_view(&job);
             out["instruction"] = json!(job.instruction);
@@ -162,8 +184,23 @@ impl GhostServer {
             return Ok(out);
         }
         let all = jobs.list().map_err(|e| e.to_string())?;
+        let view = |job: &Job| match client {
+            None => job_view(job),
+            Some(_) if mine(job) => {
+                let mut out = job_view(job);
+                out["yours"] = json!(true);
+                out
+            }
+            Some(_) => json!({
+                "id": job.id,
+                "agent": job.agent,
+                "when": job.schedule.say(&job.options.tz),
+                "state": if job.enabled { "on" } else { "paused" },
+                "yours": false,
+            }),
+        };
         Ok(json!({
-            "schedules": all.iter().map(job_view).collect::<Vec<_>>(),
+            "schedules": all.iter().map(view).collect::<Vec<_>>(),
             "now": local(Some(utcnow()), jobs.default_tz()),
         }))
     }
@@ -210,21 +247,32 @@ impl GhostServer {
 
     fn do_schedule_manage(&self, p: ScheduleManage) -> Result<Value, String> {
         let jobs = self.jobs()?;
-        let caller = self.agent(p.caller.clone())?;
+        // Who is calling: `agent:<slug>`, or `client:<name>` for an outside tool.
+        let who = self.agent(p.caller.clone())?;
+        let client = who.starts_with(CLIENT_SOURCE);
+        let caller = who.strip_prefix(AGENT_SOURCE).unwrap_or(&who).to_string();
         let now = utcnow();
         let action = p.action.trim().to_lowercase();
         let mut edit = Self::edit_from(&p)?;
-        // Who it runs as: Ghost may name any agent; anyone else schedules itself.
+        // Who it runs as: Ghost and an outside tool may name any agent; any other agent
+        // schedules itself.
         let named = given(&p.agent);
-        if caller != GHOST && named.is_some_and(|a| a != caller) {
+        if !client && caller != GHOST && named.is_some_and(|a| a != caller) {
             return Err(
                 "you make schedules for yourself; Ghost makes them for other agents".into(),
             );
         }
         if action == "create" {
-            edit.agent = Some(named.unwrap_or(&caller).to_string());
+            // An outside tool is not an agent: what it sets up runs as the agent it names,
+            // Ghost when it names none, and is attributed to the tool.
+            let (runs_as, made_by) = if client {
+                (named.unwrap_or(GHOST), who.clone())
+            } else {
+                (named.unwrap_or(&caller), by_agent(&caller))
+            };
+            edit.agent = Some(runs_as.to_string());
             let job = jobs
-                .create(&edit, &by_agent(&caller), now)
+                .create(&edit, &made_by, now)
                 .map_err(|e| e.to_string())?;
             let mut out = job_view(&job);
             out["status"] = json!("created");
@@ -235,7 +283,15 @@ impl GhostServer {
             .find(wanted)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("there is no schedule {wanted}; see ghost_schedules_list"))?;
-        if !job.managed_by(&caller) {
+        if client {
+            // Its own only, and nothing of another's is said back, its name included.
+            if job.created_by != who {
+                return Err(format!(
+                    "{wanted} is not a schedule {} set up; an outside tool manages only its own",
+                    shown(&who[CLIENT_SOURCE.len()..])
+                ));
+            }
+        } else if !job.managed_by(&caller) {
             return Err(format!(
                 "{} is {}'s schedule; an agent manages only its own",
                 job.name, job.agent

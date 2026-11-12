@@ -33,6 +33,7 @@ describe("a schedule in the operator's words", () => {
   it("names who set it up and how each run ended", () => {
     expect(madeBy("operator")).toEqual({ you: true });
     expect(madeBy("agent:ledger")).toEqual({ you: false, slug: "ledger" });
+    expect(madeBy("client:claude-code")).toEqual({ you: false, tool: "claude-code" });
     expect(OUTCOME.unchanged).toEqual({ label: "Nothing changed", tone: "neutral" });
     expect(OUTCOME.timed_out.tone).toBe("danger");
   });

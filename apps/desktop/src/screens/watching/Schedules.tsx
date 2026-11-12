@@ -34,6 +34,7 @@ import {
   useLive,
   useToast,
 } from "../../ui";
+import { toolTitle } from "../settings/tools";
 import { DELIVERY, KINDS, OUTCOME, type ScheduleKind, URGENCY, count, madeBy, untilWords, whenWords } from "./model";
 
 /** How often the list is read again while the screen is open: next and last runs move. */
@@ -283,7 +284,7 @@ function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onR
                 , and only when <span className="t-mono">{`${s.check.app}.${s.check.read}`}</span> has changed
               </>
             )}
-            {by.you ? "" : ` · set up by ${maker(by.slug)}`}
+            {by.you ? "" : ` · set up by ${"tool" in by ? toolTitle(by.tool) : maker(by.slug)}`}
           </span>
           {s.last_error && last && last.tone !== "ok" && (
             <span className="wat-error" data-user-content>

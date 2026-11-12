@@ -296,6 +296,10 @@ pub struct Deps {
     pub hear: Option<Arc<dyn crate::hear::HearPort>>,
     /// The schedules and their runs (ADR 0047); None in a daemon without them.
     pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,
+    /// The outside tools the operator connected (ADR 0048).
+    pub clients: Option<Arc<ghost_core::ghost_app::clients::Clients>>,
+    /// Where Ghost listens for them, when on.
+    pub clients_listening: Vec<String>,
 }
 
 impl Deps {
@@ -342,6 +346,8 @@ impl Deps {
             model_sign_in: ModelSignIn::default(),
             hear: None,
             schedules: None,
+            clients: None,
+            clients_listening: Vec::new(),
         }
     }
 

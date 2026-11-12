@@ -296,6 +296,10 @@ reach the model whole; every other app's are held to the caps described above.
 have more tools than a turn should carry ([above](#many-tools)), and since what it returns
 is the apps' text, it holds itself to an app's result budget.
 
+The same app is what your other tools reach when you connect them to Ghost (Claude Code,
+Cursor, Codex): see [connect-ghost.md](connect-ghost.md). That is the other direction from
+this page. An app is something Ghost connects to; an outside tool connects to Ghost.
+
 ## Before a token exists
 
 `ghost-mock-github` (`ghost_core::mock_github`, a binary of the workspace that the bundle

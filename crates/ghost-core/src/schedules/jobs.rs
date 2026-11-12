@@ -436,7 +436,8 @@ impl Jobs {
         Ok(t.to_string())
     }
 
-    /// A new schedule. `created_by` is `operator` or `agent:<slug>`.
+    /// A new schedule. `created_by` is `operator`, `agent:<slug>` or `client:<name>` (an
+    /// outside tool, ADR 0048).
     pub fn create(&self, edit: &JobEdit, created_by: &str, now: DateTime<Utc>) -> Result<Job> {
         let instruction = Self::text(
             edit.instruction.as_deref().unwrap_or(""),

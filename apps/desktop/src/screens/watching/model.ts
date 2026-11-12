@@ -110,9 +110,11 @@ export function untilWords(iso: string | null | undefined, now = Date.now()): st
   return new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-/** Who made a schedule: “you”, or the agent by its slug. */
-export function madeBy(createdBy: string): { you: true } | { you: false; slug: string } {
-  return createdBy.startsWith("agent:") ? { you: false, slug: createdBy.slice("agent:".length) } : { you: true };
+/** Who made a schedule: “you”, the agent by its slug, or the outside tool by its name (ADR 0048). */
+export function madeBy(createdBy: string): { you: true } | { you: false; slug: string } | { you: false; tool: string } {
+  if (createdBy.startsWith("agent:")) return { you: false, slug: createdBy.slice("agent:".length) };
+  if (createdBy.startsWith("client:")) return { you: false, tool: createdBy.slice("client:".length) };
+  return { you: true };
 }
 
 /** The kinds a schedule can be, for the form: its label, an example and what to say under it. */

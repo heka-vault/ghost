@@ -160,6 +160,18 @@
 
 /* ------------------------------------------------------------------ phone */
 .set-phone__icon { color: var(--text-2); flex: none; }
+
+/* Outside tools (ADR 0048): the connect dialog, and what it shows once. */
+.set-tools__form { display: flex; flex-direction: column; gap: var(--space-4); }
+.set-tools__made { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.set-tools__copy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.set-tools__copy-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.set-tools__copy-label { font-size: var(--text-sm); color: var(--text-2); }
+.set-tools__code {
+  margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--bg-sunken);
+  font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-1); font-feature-settings: normal;
+  white-space: pre-wrap; overflow-wrap: anywhere; user-select: all;
+}
 .set-phone__live { color: var(--ok); }
 .set-phone__one { display: block; margin-top: var(--space-0_5); }
 .set-phone__actions { display: inline-flex; align-items: center; gap: var(--space-3); }

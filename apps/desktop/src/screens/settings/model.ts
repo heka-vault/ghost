@@ -29,7 +29,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
 };
 
 /** The pages this screen draws (SETTINGS_SCREEN_PAGES in app/routes.tsx). */
-export type PageId = "general" | "model" | "passwords" | "sound" | "phone";
+export type PageId = "general" | "model" | "passwords" | "sound" | "phone" | "tools";
 
 /** The settings page each section is on (#/settings/<page>). */
 export const SECTION_PAGE: Record<SectionId, string> = {

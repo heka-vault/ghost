@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
 );
 
 -- Schedules (ADR 0047): what an agent does on its own, and when. ``schedule`` and
--- ``options`` are JSON; ``created_by`` is 'operator' or 'agent:<slug>'.
+-- ``options`` are JSON; ``created_by`` is 'operator', 'agent:<slug>' or
+-- 'client:<name>' (an outside tool, ADR 0048).
 CREATE TABLE IF NOT EXISTS schedules (
     id           TEXT PRIMARY KEY,
     name         TEXT NOT NULL,
@@ -175,6 +176,14 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
 );
 CREATE INDEX IF NOT EXISTS schedule_runs_job ON schedule_runs(job, scheduled_for);
 CREATE INDEX IF NOT EXISTS schedule_runs_source ON schedule_runs(source, item_key);
+-- Outside clients (ADR 0048): a tool on this computer the operator let use Ghost's own
+-- app. Only the SHA-256 of its token is kept; the token is shown once and never again.
+CREATE TABLE IF NOT EXISTS outside_clients (
+    name         TEXT PRIMARY KEY,
+    token_hash   TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    last_used_at TEXT
+);
 "#;
 
 /// The three tables the lines (ADR 0014 to 0023) lived in. ADR 0024 started over: they
@@ -236,6 +245,15 @@ pub enum ItemMark {
     SnoozedUntil(Option<DateTime<Utc>>),
 }
 
+/// An outside client (ADR 0048), as the row holds it. `token_hash` never leaves the core.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientRow {
+    pub name: String,
+    pub token_hash: String,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
 /// Filters for the audit view.
 #[derive(Debug, Clone, Default)]
 pub struct ProposalQuery<'a> {
@@ -268,6 +286,21 @@ pub struct AuditEvent {
 
 pub struct Store {
     conn: Mutex<Connection>,
+}
+
+type ClientCols = (String, String, String, Option<String>);
+
+fn client_cols(r: &rusqlite::Row<'_>) -> rusqlite::Result<ClientCols> {
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+}
+
+fn client_row((name, token_hash, created, used): ClientCols) -> Result<ClientRow> {
+    Ok(ClientRow {
+        name,
+        token_hash,
+        created_at: must_dt(created)?,
+        last_used_at: col_dt(used),
+    })
 }
 
 fn opt_iso(dt: &Option<DateTime<Utc>>) -> Option<String> {
@@ -715,6 +748,56 @@ impl Store {
             params_from_iter(args.iter()),
         )?;
         Ok(n == 1)
+    }
+
+    // --- outside clients (ADR 0048) --------------------------------------------------
+
+    /// A new client; false when the name is taken.
+    pub fn insert_client(&self, name: &str, token_hash: &str, now: DateTime<Utc>) -> Result<bool> {
+        let n = self.conn().execute(
+            "INSERT OR IGNORE INTO outside_clients (name, token_hash, created_at) VALUES (?, ?, ?)",
+            params![name, token_hash, iso(&now)],
+        )?;
+        Ok(n == 1)
+    }
+
+    pub fn get_client(&self, name: &str) -> Result<Option<ClientRow>> {
+        let conn = self.conn();
+        let row = conn
+            .query_row(
+                "SELECT name, token_hash, created_at, last_used_at FROM outside_clients WHERE name = ?",
+                [name],
+                client_cols,
+            )
+            .optional()?;
+        row.map(client_row).transpose()
+    }
+
+    /// Every client, by name.
+    pub fn list_clients(&self) -> Result<Vec<ClientRow>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT name, token_hash, created_at, last_used_at FROM outside_clients ORDER BY name",
+        )?;
+        let rows = st
+            .query_map([], client_cols)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter().map(client_row).collect()
+    }
+
+    pub fn delete_client(&self, name: &str) -> Result<bool> {
+        let n = self
+            .conn()
+            .execute("DELETE FROM outside_clients WHERE name = ?", [name])?;
+        Ok(n == 1)
+    }
+
+    pub fn touch_client(&self, name: &str, now: DateTime<Utc>) -> Result<()> {
+        self.conn().execute(
+            "UPDATE outside_clients SET last_used_at = ? WHERE name = ?",
+            params![iso(&now), name],
+        )?;
+        Ok(())
     }
 
     // --- webhook deliveries (ADR 0027) ---------------------------------------------
