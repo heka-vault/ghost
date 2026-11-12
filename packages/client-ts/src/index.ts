@@ -143,6 +143,9 @@ export type HearTable = Schemas["HearTable"];
 export type HearRow = Schemas["HearRow"];
 export type HearFact = Schemas["HearFact"];
 export type HearVerdict = Schemas["HearVerdict"];
+/** What a live session did (ADR 0055). */
+export type ActivityView = Schemas["ActivityView"];
+export type ActivityKind = ActivityView["kind"];
 /** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
 export type HearChannel = "aec" | "raw";
 
@@ -160,6 +163,8 @@ export type GhostEvent =
   | Schemas["AppsEvent"]
   /** Ghost's own voice at the speaker, 0..1, ~20/s while it speaks, then one 0. */
   | Schemas["VoiceEvent"]
+  /** What the live session is doing (ADR 0055): the operator's turn, tool calls, a handover, a cut, an error. Names only, never words. */
+  | Schemas["ActivityEvent"]
   /** The Hearing test's recorder, ~20/s while it is open: its view, the mic's level 0..1, whether the VAD hears speech; then one `closed`. */
   | Schemas["HearEvent"];
 

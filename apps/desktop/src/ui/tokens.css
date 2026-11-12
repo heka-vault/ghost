@@ -26,6 +26,8 @@
   --text-2xl: 20px;  --leading-2xl: 28px;
   --text-3xl: 24px;  --leading-3xl: 32px;
   --text-4xl: 32px;  --leading-4xl: 40px;
+  /* Room view only (the conversation screen read from across a room): one step past 4xl. */
+  --text-5xl: 44px;  --leading-5xl: 56px;
 
   --weight-regular: 400;
   --weight-medium: 500;

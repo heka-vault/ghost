@@ -337,6 +337,15 @@ impl DaemonState {
         self.bus.publish(&Event::Voice { level });
     }
 
+    /// What the live session is doing (`Event::Activity`, ADR 0055); dropped outside one.
+    pub fn publish_activity(&self, mut activity: crate::models::ActivityView) {
+        let Some(id) = self.session_id() else {
+            return;
+        };
+        activity.session_id = id;
+        self.bus.publish(&Event::Activity { activity });
+    }
+
     pub fn set_pending(&self, pending: Option<PendingProposal>) {
         self.lock().pending = pending.clone();
         self.bus.publish(&Event::Pending { pending });

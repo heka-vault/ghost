@@ -1766,6 +1766,37 @@ export interface components {
             detail?: string | null;
             ok: boolean;
         };
+        /** @description What the live session is doing (ADR 0055): names, ids and a duration, never words. */
+        ActivityEvent: {
+            activity: components["schemas"]["ActivityView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "activity";
+        };
+        ActivityView: {
+            /** Format: date-time */
+            at: string;
+            /** @description A call's id: its `result` carries the same one. */
+            id?: string | null;
+            /**
+             * @description What a live session did (`Event::Activity`, ADR 0055).
+             * @enum {string}
+             */
+            kind: "you_started" | "you_stopped" | "call" | "result" | "handover" | "cut" | "error";
+            /** @description A call's tool, as the model calls it (`github_issue_read`). */
+            name?: string | null;
+            /** @description A handover's calls, by name, none of them run. */
+            names: string[];
+            /**
+             * Format: double
+             * @description How long a handover took to decide, in seconds.
+             */
+            secs?: number | null;
+            /** @description The session it happened in. */
+            session_id: string;
+        };
         /** @description One of an app's tools, and what Ghost's own permissions say about it. */
         AppAction: {
             /** @description A rule with argument patterns may decide some calls. */
@@ -3503,6 +3534,8 @@ export interface components {
     pathItems: never;
 }
 export type SchemaAck = components['schemas']['Ack'];
+export type SchemaActivityEvent = components['schemas']['ActivityEvent'];
+export type SchemaActivityView = components['schemas']['ActivityView'];
 export type SchemaAppAction = components['schemas']['AppAction'];
 export type SchemaAppConnect = components['schemas']['AppConnect'];
 export type SchemaAppConnectResult = components['schemas']['AppConnectResult'];
@@ -4472,7 +4505,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["HearEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HearEvent"];
                 };
             };
         };

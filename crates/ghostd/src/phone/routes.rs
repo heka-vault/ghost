@@ -87,7 +87,8 @@ pub trait PhoneEvents: Send + Sync {
 /// (`ready`): first what happened before the channel opened, minus log lines and stale
 /// statuses, then a fresh `status`, then live events, never a log line. The same JSON the
 /// control API's WebSocket sends, less the voice level (twenty a second for the desktop's
-/// waveform; nothing on the phone draws it, and the data channel shares the call).
+/// waveform; nothing on the phone draws it, and the data channel shares the call) and the
+/// session's activity (ADR 0055: the desktop's conversation screen, not the phone's).
 /// Returns when the bus closes.
 pub async fn forward_events(
     mut events: broadcast::Receiver<String>,
@@ -101,7 +102,7 @@ pub async fn forward_events(
         match events.try_recv() {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(kind(&data), Some("log" | "status" | "voice"))
+                    && !matches!(kind(&data), Some("log" | "status" | "voice" | "activity"))
                 {
                     backlog.push(data);
                 }
@@ -120,7 +121,7 @@ pub async fn forward_events(
         match events.recv().await {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(kind(&data), Some("log" | "voice"))
+                    && !matches!(kind(&data), Some("log" | "voice" | "activity"))
                 {
                     sink.send_server_message(&data).await;
                 }
@@ -1365,6 +1366,7 @@ mod tests {
             json!({"type": "log", "level": "info", "message": "x", "at": "2026-10-28T00:00:00Z"}),
             json!({"type": "pending", "pending": null}),
             json!({"type": "voice", "level": 0.4}),
+            json!({"type": "activity", "activity": {"kind": "you_started"}}),
         ] {
             tx.send(e.to_string()).unwrap();
         }
@@ -1375,6 +1377,8 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
             tx.send(json!({"type": "log", "level": "info", "message": "y", "at": "2026-10-28T00:00:00Z"}).to_string()).unwrap();
             tx.send(json!({"type": "voice", "level": 0.6}).to_string())
+                .unwrap();
+            tx.send(json!({"type": "activity", "activity": {"kind": "cut"}}).to_string())
                 .unwrap();
             tx.send(json!({"type": "waiting", "count": 2}).to_string())
                 .unwrap();
