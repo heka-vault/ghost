@@ -15,7 +15,10 @@ import { useAppActions } from "./actions";
 import { AddOwnDialog } from "./AddOwnDialog";
 import { AppIcon } from "./AppIcon";
 import { ConnectDialog } from "./ConnectDialog";
-import { sentence, summaryWords } from "./model";
+import { problemWords, sentence, summaryWords } from "./model";
+
+/** After a middle dot, lowercase, except a name (“Ghost can’t reach it”). */
+const afterDot = (t: string) => (t.startsWith("Ghost") ? t : t.charAt(0).toLowerCase() + t.slice(1));
 import { moreWords, placesOf, publisherParts } from "./provenance";
 
 const PAGE = 12;
@@ -147,7 +150,7 @@ function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof 
       <span className="apps-row__state is-warn">Needs you to sign in again</span>
     ) : (
       <span className="apps-row__state is-danger" data-user-content>
-        Not connected{a.problem ? `: ${a.problem}` : ""}
+        <span title={a.problem ?? undefined}>Not connected · {afterDot(problemWords(a.problem))}</span>
       </span>
     );
 

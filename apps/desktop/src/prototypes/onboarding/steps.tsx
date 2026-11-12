@@ -98,8 +98,8 @@ function promises(w: Wizard): { icon: ReactNode; title: string; body: ReactNode 
     },
     {
       icon: <Hand />,
-      title: "It does what you ask, and says what it did",
-      body: <>Ghost reads and acts on your apps and tells you each change. Your permissions decide what it may not do and what it asks you first. Every change is in the audit log.</>,
+      title: "It does the work and tells you",
+      body: <>Ghost uses the apps you connect and says what it changed. Anything you want it to ask about first, or never do, is one rule in Permissions.</>,
     },
     {
       icon: <KeyRound />,
@@ -340,8 +340,8 @@ export function DoneStep({ w }: { w: Wizard }) {
         centered
         lead={<HeroPresence phase={live.phase} size={96} ok />}
         title="You’re set"
-        description={`Say ${quoted(phrase)} whenever you need it. Ghost tells you every change it makes; set what it asks first in Permissions.`}
-        primary={{ label: "Go to the session", onClick: () => navigate("/") }}
+        description={`Say ${quoted(phrase)} whenever you need it. Ghost does what you ask and says what it changed; Permissions decides what it asks about first.`}
+        primary={{ label: "Go to Today", onClick: () => navigate("/") }}
         onBack={w.back}
         autoFocus={w.focusOnOpen}
       >
@@ -372,7 +372,7 @@ export function DoneStep({ w }: { w: Wizard }) {
       id="done"
       title="Almost there"
       description={`${open.length === 1 ? "One thing is" : `${NUMBER[open.length] ?? open.length} things are`} still open. Ghost can wait; finish ${open.length === 1 ? "it" : "them"} whenever you like.`}
-      primary={{ label: "Go to the session", onClick: () => navigate("/") }}
+      primary={{ label: "Go to Today", onClick: () => navigate("/") }}
       onBack={w.back}
       autoFocus={w.focusOnOpen}
     >
