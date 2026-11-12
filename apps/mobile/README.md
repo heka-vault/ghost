@@ -20,6 +20,49 @@ when either changes. Builds are arm64 only (`ANDROID_ARCH`). The APK is signed w
 debug key: fine for your own phone, not for the Play Store.
 
 
+## With the app closed
+
+Ghost reaches the phone with the app closed (ADR 0051): questions from agents, changes waiting
+for a yes, what is on the waiting list, and calls. A small connection service, separate from the
+session's microphone service, holds the desk's signed live stream (`docs/phone-protocol.md`, "The
+live stream"). It is Kotlin in `modules/ghost-call/android/src/main/java/dev/heka/ghost/call/link/`
+and needs no JavaScript, so it works after the app is swiped away:
+
+- **The stream.** Home address first, then the tunnel, as the app already chooses for `/hello`.
+  Every message's signature is checked over the stream request's nonce before it is read; a bad one
+  drops the stream. A snapshot, then changes from the cursor; 35 s without a message is a dead
+  stream; it backs off 1, 2, 4 … 30 s with jitter, and a network change (Wi-Fi to mobile, the
+  tunnel coming up) reconnects at once. The list, the cursor and the pairing are kept on the phone,
+  encrypted with a key that lives in the Android Keystore, so Home shows the list at once on open.
+- **Notifications.** Only when the desk's phone route alerts (after its quiet hours and
+  batching), on three channels: questions and changes (heads-up), waiting (ordinary), quiet
+  questions (no sound). A plain item has Got it and Later (2 h); a question has its choices (three
+  buttons at most, an inline answer counting as one) and an inline answer in your own words unless
+  only the choices will do; a change has Yes and No. A button sends a signed request with its own
+  `id`, sent again until the desk signs an answer; the notification loses its buttons and says
+  "Sending…" meanwhile, and comes down only when the stream says what came of it. The phone tells
+  the desk `seen` only once the notification is really up. The lock screen shows only "Something
+  is waiting for you".
+- **A call from Ghost.** A ring is a call-style notification with a full-screen screen over the
+  lock screen, with the phone's ringtone and vibration (the ringer switch applies), naming the agent
+  and nothing of what about. Answer stops the ringing, tells the desk, asks for the phone to be
+  unlocked (a call opens the microphone), and opens an ordinary session in that agent, naming the
+  item, so Ghost opens with it. Decline is "not now". A ring that is over, or replayed after a
+  reconnect when it already was, never rings; a ring never answers itself.
+- **During a session** the connection keeps running beside the microphone service: notifications
+  arrive silently and a ring is not shown. Audio routing and End are untouched.
+- **Settings** has Stay connected (on by default; off, the stream runs only while the app is open),
+  Start when the phone starts (off by default), the connection's state and the address in use, and
+  the notification and full-screen-call permissions, each with a button to fix it. Pairing asks for
+  notifications on its last screen, with the reason on it.
+
+Doze: a process with a foreground service keeps its network in Doze and App Standby, so the
+desk's heartbeat (every 15 s) still arrives and wakes the phone for a moment. Nothing holds a wake
+lock. In deep Doze the phone's own timers stop, so a tunnel that dies without a word is noticed at
+the next network change, or by an alarm allowed while idle that checks every 15 minutes (Doze lets
+such alarms through about every 9 minutes at best). Some phone makers kill background apps beyond
+what Android does; on those, let Ghost run unrestricted in the battery settings.
+
 ## Lines
 
 Home shows the other lines (threads, ADR 0014) under the ghost as a dial pad: three big keys
@@ -57,16 +100,21 @@ on the spot. Preferences are kept in secure storage with the pairing.
   status and the audit log, and a WebRTC call into the voice pipeline for a session. `mock.ts`
   stands in on the web.
 - `src/phone/`: the phone's own state (preferences, the last ended session), pairing in
-  secure storage, and request signing.
+  secure storage, request signing, and the notification permission.
+- `modules/ghost-call/`: the local Expo module. `index.ts` is the session's microphone service;
+  `link.ts` is the app's window onto the live connection (`android/.../link/`).
+- `app/answer.tsx`: where an answered ring lands (`ghost://answer?ring=…&agent=…&item=…`).
 - `src/ui/`: phone primitives (48dp targets, 64dp Start, 80dp End), the voice presence, rows.
 - Non-visual helpers shared with desktop (phase text, relative time, audit summaries, the
   ghost drawing) come from `@ghost/ui`.
 
 ## Confirming a change
 
-By voice only. When Ghost asks before a change, the session screen shows the question and
-“Say yes to go ahead”. The yes travels through the pipeline like any other turn; Jev
-classifies it and the gate writes. There is no Confirm button on the phone.
+In a session, by voice: when Ghost asks before a change, the session screen shows the question and
+“Say yes to go ahead”. The yes travels through the pipeline like any other turn; Jev classifies it
+and the gate writes. Outside a session, a change waiting for a yes is on Home and in its
+notification with Yes and No: a signed request from the paired phone, which the gate takes as its
+confirm by id and the audit records with `classifier: phone` (ADR 0051).
 
 ## Pairing with the desk
 
@@ -88,11 +136,23 @@ Only one session runs at a time. Start is refused while Ghost is in a session at
 and while the phone is in one the desk's wake phrase does nothing. In a phone session the
 desk stays quiet: no ducking, no chime. Ghost speaks on the phone's speaker.
 
+## Tests
+
+`pnpm --filter @ghost/mobile test` runs vitest over the plain TypeScript (the list's mapping, the
+connection's state, request signing). The Kotlin connection's logic (signing, Server-Sent Events,
+the list and its notifications, rings, retries) has JUnit tests; after `make android-apk` (or any
+build that ran `expo prebuild`), run them with
+`cd apps/mobile/android && ./gradlew :ghost-call:testDebugUnitTest`. Both sides read
+`packages/api/phone-vectors.json`, which the daemon's own signing code writes and checks
+(`cargo test -p ghostd phone::vectors`). The steps on a real phone are in
+`docs/phone-live-testing.md`.
+
 ## The mock desk
 
 The web build (`make mobile-web`) always uses it, and an Android build does too with
 `EXPO_PUBLIC_GHOST_DESK=mock`. `MockDesk` plays Ghost on the phone itself: the link comes up,
 Start opens a session, the audit log is seeded. The **Mock** pill at the top opens controls
 for what the phone can't do on its own: Ghost asking, saying yes or no, a session at the
-desk, losing the desk. Pairing accepts any address and code, except `000000` (wrong code)
+desk, losing the desk, an agent asking you something. Home's list starts with an item, a question
+and a change. Pairing accepts any address and code, except `000000` (wrong code)
 and an address starting `10.0.0.` (unreachable).

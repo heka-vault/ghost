@@ -160,7 +160,11 @@ Every route below is signed both ways ([Signing](#signing)).
 
 `id` is chosen by the phone, 1 to 64 characters (a UUID will do), one per action the operator took.
 The desk remembers it for ten minutes: the same `id` again gets exactly the answer it got the first time
-and does nothing twice, so a request the tunnel dropped is simply sent again with its `id`.
+and does nothing twice, so a request the tunnel dropped is simply sent again with its `id`. Only the
+four routes above that list `id` in their body take one. `/waiting/ack` and `/waiting/snooze` have no
+`id` (an extra field is ignored, not remembered); sending either twice is harmless, a second snooze only
+moving the time it comes back. `/seen` and `/ring` are keyed by their `alert_id` and `ring_id`: a second
+one answers `{ok: false}`.
 
 A `POST /offer` without `pc_id` starts a session; with the live session's `pc_id` it renegotiates. A
 second `POST /offer` without `pc_id` while the phone's own session is still running gets 409 `busy` too:
@@ -223,7 +227,8 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
 The phone keeps that nonce: every message on this stream is signed over it. Anything but 200 is an
-ordinary signed JSON error (401, 503).
+ordinary signed JSON error (401, 503), except a 401 for a device the desk doesn't know, which carries
+no signature (as on every route).
 
 ### Each message
 
@@ -247,7 +252,10 @@ ghost-v1-event
 
 The phone checks `sig` over `msg` exactly as received, then parses `msg`. A message that does not
 verify is dropped, and the phone closes the stream and opens a new one. `event:` repeats `msg.type`.
-`id:` is present on numbered messages and is their `cursor`.
+`id:` is present on numbered messages and is their `cursor`. The keys inside `msg` come in
+alphabetical order (`type` is not first), which is one more reason never to rebuild `msg` before
+checking it. `packages/api/phone-vectors.json` has signed requests, responses and whole frames,
+written by the daemon's own code (`crates/ghostd/src/phone/vectors.rs`); the phone's tests read it.
 
 ### The cursor, the snapshot, and nothing lost
 
@@ -328,6 +336,13 @@ The phone route delivering (ADR 0031): show a notification for these items now, 
 `POST /seen {alert_id}`. The desk waits 15 seconds for it; without it, the items go to the next route.
 Send `seen` only once the notification is actually shown. An alert replayed after a reconnect may be
 shown and `seen` like a live one; `seen` for one the desk stopped waiting for answers `{ok: false}`.
+An `item` added is not a reason to notify: the alert is, since it comes after the desk's quiet hours,
+batching and do-not-disturb. A `WaitingItemView` has no urgency of its own; only a question does
+(`urgency`), so that is what a notification's channel can follow.
+
+The desk does not hold alerts or rings back while a session runs, the phone's own included. The
+phone decides: during its own session it posts notifications silently and does not ring (the desk
+then hears nothing and moves on as for a ring nobody answered).
 
 ```json
 {"type": "ring", "ring_id": "5d2f8e0c41aa", "key": "question:0b00bdd56307", "agent": "ledger",
@@ -338,9 +353,12 @@ shown and `seen` like a live one; `seen` for one the desk stopped waiting for an
 ```
 
 `question` is null when the item is not a question. `why` is `answered`, `declined` or `timed_out`. A
-ring is live from its arrival until its `ring_over` or `ring_secs` later, whichever is first; a ring
-replayed after a reconnect whose `ring_over` is already in the log, or that is older than `ring_secs`,
-is not shown.
+ring is live from its arrival until its `ring_over` or `ring_secs` later, whichever is first. A ring
+carries no time of its own, so the phone cannot tell the age of one it first hears in a replay; what
+it can rely on is that the desk always logs a ring's `ring_over` within `ring_secs`, so a ring
+replayed after it was over is followed in the same burst by its `ring_over`. The phone therefore
+waits a moment (400 ms) before ringing, and never rings a ring whose `ring_over` arrived in that
+moment, one older than `ring_secs` by its own clock, or a `ring_id` it already rang.
 
 ```json
 {"type": "heartbeat", "cursor": "3fa9c2d1.48", "at": "2026-11-11T09:01:15Z"}
@@ -400,9 +418,11 @@ names.
 
 ## What the phone app must do
 
-- Hold the stream in a foreground service: the microphone service it already has during a call, and a
-  connection service (`connectedDevice` or `dataSync` type, with a quiet persistent notification) the
-  rest of the time. Open it when the app starts, when the network changes, and when the tunnel comes up.
+- Hold the stream in a foreground service of its own, not the microphone service a call uses: type
+  `connectedDevice` with a quiet persistent notification (`dataSync` is capped at six hours a day on
+  Android 15 and may not start at boot). Open it when the app starts, when the network changes, and
+  when the tunnel comes up. The app does this in Kotlin (`apps/mobile/modules/ghost-call`), so it runs
+  with the app's screen and JavaScript gone.
 - Keep the stream's request nonce, verify every message's `sig` before parsing `msg`, and drop and
   reopen on a failure.
 - Keep the last cursor; reconnect with it; replace the state on a snapshot.
@@ -410,13 +430,14 @@ names.
   address from `/hello` in order.
 - On `alert`: post a local notification per item (a question with its choices as notification actions,
   a change with Yes and No, anything else with Got it and Later), then `POST /seen {alert_id}`.
-- On `ring`: a full-screen incoming-call notification (`CATEGORY_CALL`, full-screen intent) showing who
-  asks and the question, ringing for `ring_secs` at most. Answer: `POST /ring answered`, then
+- On `ring`: a full-screen incoming-call notification (`CATEGORY_CALL`, full-screen intent) showing which
+  agent is calling and nothing of what about until it is answered, ringing for `ring_secs` at most. Answer: `POST /ring answered`, then
   `POST /offer` with `conversation: agent` and `item: key`, through the existing call path. Decline:
   `POST /ring declined`. Stop ringing on `ring_over`.
 - On `item resolved` or a question that is no longer open: take its notification down.
-- Every action from a notification or a screen (answer, decline, confirm, cancel, acknowledge, snooze)
-  is a signed `POST` with a fresh `id`, sent again with the same `id` until it gets a signed answer.
+- Every action from a notification or a screen (answer, decline, confirm, cancel) is a signed `POST`
+  with a fresh `id`, sent again with the same `id` until it gets a signed answer, for less than the ten
+  minutes the desk remembers it. Acknowledge and snooze are sent again the same way; they have no `id`.
 - Show a question's words and an item's title as text, with who asked. Never show or keep an answer
   given by voice (the stream does not send one).
 - Never record or send audio outside a call, and never ask the desk for a transcript: there is no route
