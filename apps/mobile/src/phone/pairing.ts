@@ -11,6 +11,7 @@ import { parsePairLink } from "@ghost/client-ts/pairLink";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
+import { forgetLink } from "../../modules/ghost-call/link";
 import { fromB64url } from "./signing";
 import { DEFAULT_PREFS, type Pairing, persistPrefsWith, type Prefs, stateOf, update } from "./store";
 
@@ -68,6 +69,8 @@ const sameList = (a: string[], b: string[]) => a.length === b.length && a.every(
 export async function forgetPairing() {
   secret = null;
   update({ pairing: null });
+  // The live connection stops, forgets the desk and takes down what it put in the shade.
+  forgetLink();
   if (!MOCK_DESK) await Promise.all([SecureStore.deleteItemAsync(PAIRING_KEY), SecureStore.deleteItemAsync(SECRET_KEY)]);
 }
 

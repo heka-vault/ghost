@@ -20,6 +20,7 @@ const ACTS: { act: MockAct; label: string; when: string }[] = [
   { act: "yes", label: "Say “yeah, go ahead”", when: "While Ghost is asking" },
   { act: "no", label: "Say “no, leave it”", when: "While Ghost is asking" },
   { act: "talk", label: "Ask Ghost something", when: "In a session" },
+  { act: "agentAsks", label: "An agent asks you something", when: "Any time" },
   { act: "drop", label: "Lose the desk for 6 seconds", when: "Any time" },
   { act: "deskSession", label: "Session starts or ends at the desk", when: "Out of a session" },
   { act: "deskDown", label: "Desk stops answering", when: "Any time" },
