@@ -12,8 +12,8 @@
  * desktop app reads. Every request is signed, and so is every reply. An answer whose signature
  * doesn't check is never applied, which is what keeps the audio between this phone and its desk.
  */
-import type { AuditPage, ConversationView, GhostEvent, Status, WaitingView } from "@ghost/client-ts";
-import { lineName } from "@ghost/ui";
+import type { AuditPage, ConversationView, GhostEvent, Status, Turn, WaitingView } from "@ghost/client-ts";
+import { captionPhase, captionTurn, lineName } from "@ghost/ui";
 import { DeviceEventEmitter, type EmitterSubscription, PermissionsAndroid, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
 import { mediaDevices, MediaStream, RTCPeerConnection, RTCSessionDescription } from "react-native-webrtc";
@@ -88,6 +88,8 @@ const MESSAGES: Record<string, string> = {
 };
 
 export class LiveDesk implements Desk {
+  /** The operator's spoken pieces of a turn still open: shown once it closes. */
+  private held: Turn[] = [];
   private state: DeskState = { link: "connecting", via: null, address: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null, questions: [], live: NO_LINK };
   /** The address in use; null until one answers, and again once it stops answering. */
   private address: string | null = null;
@@ -369,6 +371,7 @@ export class LiveDesk implements Desk {
     const wasOurs = !!this.pc && !!this.state.status?.session_id;
     const wasHold = this.state.status?.phase === "hold";
     this.set({ status, pending: status.pending ?? null });
+    if (this.held.length) this.setCaptions(captionPhase({ shown: this.state.turns, held: this.held }, status.phase));
     // The notification says when Ghost is waiting to be addressed by name (ADR 0021).
     if (this.pc && (status.phase === "hold") !== wasHold) updateCall(this.callBody());
     // The desk ended the session (Ghost said goodbye, or the operator ended it there).
@@ -380,13 +383,19 @@ export class LiveDesk implements Desk {
     }
   }
 
+  private setCaptions(c: { shown: Turn[]; held: Turn[] }) {
+    this.held = c.held;
+    if (c.shown !== this.state.turns) this.set({ turns: c.shown });
+  }
+
   private onEvent(e: GhostEvent) {
     switch (e.type) {
       case "status":
         return this.onStatus(e.status);
       case "turn":
         // Turns from before the channel opened come ahead of the first status, so trust the call.
-        if (this.pc) this.set({ turns: [...this.state.turns, e.turn] });
+        // The operator's spoken pieces wait for the turn to close, then show together (`Captions`).
+        if (this.pc) this.setCaptions(captionTurn({ shown: this.state.turns, held: this.held }, e.turn));
         return;
       case "pending":
         return this.set({ pending: e.pending ?? null });
@@ -484,6 +493,7 @@ export class LiveDesk implements Desk {
       await gathered(pc);
       this.callStartedAt = Date.now();
       const local = pc.localDescription!;
+      this.held = [];
       this.set({ turns: [], outcomes: {} });
       const line = conversation && conversation !== "ghost" ? conversation : undefined;
       const answer = await this.request<{ sdp: string; type: "answer"; pc_id: string }>("POST", "/offer", { sdp: local.sdp, type: local.type, ...(line ? { conversation: line } : {}), ...(item ? { item } : {}) });
@@ -659,6 +669,7 @@ export class LiveDesk implements Desk {
       }
     }
     if (this.state.status?.session_origin === "phone") {
+      this.held = [];
       this.set({ status: { ...this.state.status, session_id: null, session_origin: null, phase: "passive", pending: null }, pending: null, turns: [] });
     }
   }

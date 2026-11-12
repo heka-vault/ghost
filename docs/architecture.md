@@ -475,9 +475,12 @@ there rather than from the `BotStarted` frame queued behind a TTS stage still re
 reply. The echo filter is also told each clause as it is rendered, a clause ahead of the
 speaker, so what leaks past the canceller is recognised as Ghost's own words at once.
 The interceptors (`ghost_voice::intercept`) see
-each user turn first (Ghost's own fixed intents: a goodbye, "hang on", "never mind" while a
-change is pending); a handled turn is spoken to or acted on directly and never reaches the
-model.
+each user turn first (Ghost's own fixed intents: a goodbye, also at the end of a longer
+turn of small talk, "hang on", "never mind" while a change is pending, an acknowledgment
+said over Ghost, and a turn that only calls Ghost by name, answered with a short word); a
+handled turn is spoken to or acted on directly and never reaches the model. A turn is
+recorded in the agent's transcript once, when it closes, with the words the model was
+given (ADR 0044).
 
 The confirmation processor (`ghost_voice::confirmation`) sees every final transcript. If
 the gate holds a pending proposal for the session, the frame's text is the confirmation

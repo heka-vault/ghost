@@ -39,7 +39,10 @@ use crate::narration::NarrationCut;
 use crate::prompt::{Persona, build_system_prompt};
 use crate::speaking::Speaking;
 use crate::stt::{ParakeetStt, SharedRecognizer};
-use crate::tap::{AssistantTap, OnPhase, OnTurn, SessionPhase, UserTap, no_phase, no_turn};
+use crate::tap::{
+    AssistantTap, OnPhase, OnTurn, OnTurnRecord, SessionPhase, TurnRecord, UserTap, no_phase,
+    no_turn,
+};
 use crate::thinking::{ThinkingSoundCut, ThinkingSoundProcessor};
 use crate::tools::{ToolDispatcher, ToolsParams};
 use crate::transport::{AudioInput, AudioOutput, Media};
@@ -504,6 +507,9 @@ impl GhostSession {
             let _ = t.await;
         }
         self.control.stop_hold_timer();
+        if let Some(c) = &self.conversation {
+            c.flush_user(); // the session's last turn
+        }
         if let Some(l) = &self.latency {
             l.flush(); // the turn that was open when the session ended
         }
@@ -695,6 +701,35 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             })
         })
     };
+    // A spoken turn, once, with its final words: the store and the gate's request keep
+    // that, not the pieces it was heard in (`crate::tap::TurnRecord`). The pieces still go
+    // out as they come, to whatever shows them (`UserTap`).
+    let on_record: OnTurnRecord = {
+        let heard = heard.clone();
+        let runtime = runtime.clone();
+        Arc::new(move |record| {
+            {
+                let mut h = heard.lock().unwrap();
+                match &record {
+                    TurnRecord::Closed(text) => h.0.push(text.clone()),
+                    TurnRecord::Reopened => {
+                        h.0.pop();
+                    }
+                }
+            }
+            if let Some(rt) = &runtime {
+                match &record {
+                    TurnRecord::Closed(text) => rt.hold_user(text),
+                    TurnRecord::Reopened => rt.withdraw_user(),
+                }
+            }
+            Box::pin(async {})
+        })
+    };
+    let on_caption: OnTurn = {
+        let outer = on_turn_outer.clone();
+        Arc::new(move |role, text| outer(role, text))
+    };
     let control = Arc::new(SessionControl {
         session_id: session_id.clone(),
         source: source_tx,
@@ -842,7 +877,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     stages.push((
         None,
         Box::new(UserTap::new(
-            on_turn.clone(),
+            on_caption,
             on_phase.clone(),
             Some(held.clone()),
         )),
@@ -857,7 +892,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 .with_events(events.clone())
                 .with_speaking(speaking.clone())
                 .with_barge_in_min_words(settings.barge_in_min_words)
-                .with_turns(turns.clone()),
+                .with_turns(turns.clone())
+                .with_record(on_record.clone()),
         ),
     ));
     stages.push((
@@ -909,6 +945,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             .with_probe(probe.clone())
             .with_idle(settings.idle_timeout_secs, on_idle, held.clone())
             .with_reader(settings.turn_reread.then(|| p.models.stt.clone()))
+            .with_record(on_record)
             .with_speaking(speaking.clone()),
         ),
     ));

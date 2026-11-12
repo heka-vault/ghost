@@ -24,7 +24,12 @@ one-second pre-roll ring while no turn is open, then everything from the turn's 
 speech and the pauses between, up to the last VAD stop. When a second or later segment's
 transcript arrives, the aggregator reads the tape once with the same model and the same
 trailing silence and dither a segment gets, and that one text replaces the turn's pieces;
-the segment's own transcript is used only when the whole read says nothing. A
+the segment's own transcript is used only when the whole read says nothing. A second or
+later segment the model read as nothing, with speech's level in it (`HeardNothing`, at
+least `HEARD_NOTHING_MIN_DBFS`, −45 dBFS), is read whole the same way (amended
+2026-11-12: a sentence split inside a word had its second half, 3.6 s at −21 dBFS, read as
+nothing, and was answered from its first half); if the whole read hears nothing too, the
+turn closes on the pieces it has and the log says so. A
 single-segment turn is read once already and costs nothing more. Words that stood before
 the tape's first segment (a reopened turn's, or a segment whose audio went by before the
 turn opened) stay in front. Over `TAPE_MAX_SECS` (30 s) the tape stops and the pieces
@@ -38,10 +43,15 @@ answers the whole text.
 
 ## Consequences
 
-- The model, the speculation and the transcript store's `ContextAppend` get the whole
-  turn; the session's stored user lines (`UserTap`) stay per segment, so a stored turn
-  can read differently from what the model answered. Storing the turn at its close
-  instead is a later change.
+- The model, the speculation and the transcript store get the whole turn. Since
+  2026-11-12 the store keeps a spoken turn once, at its close, with the words the model
+  was given (`ghost_voice::tap::TurnRecord`, from the aggregator, or from an interceptor
+  that took the turn), and the gate's request (ADR 0017) is that turn too; a turn
+  reopened before its answer was heard takes its record back and is kept once when it
+  closes again (`ConversationRuntime::hold_user`). Before, every segment was a user turn
+  of its own, a wrong first read included, and they came back as consecutive user
+  messages in the next session's context. The pieces still go out as they come to what
+  shows them live (`UserTap`, the desktop's captions).
 - One more model read per turn of two segments or more, of the whole turn's length, at
   the close: about 30 ms per second of audio with fp32. The numbers are below.
 - The aggregator holds up to 30 s of the session's audio in memory while a turn is open;

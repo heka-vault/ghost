@@ -91,6 +91,12 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         start_in,
         raised,
     } = start;
+    // The wake said twice ("Hey ghost. Hey ghost.") leaves the name as the first
+    // utterance: a bare wake, opened with the canned greeting (or what is waiting), not a
+    // request for the model (2026-11-12: 1.5 to 2.8 s for a made-up opening).
+    let first_utterance = first_utterance.filter(|first| {
+        *lock(&d.first_via) == TurnVia::Text || !ghost_voice::intents::only_the_name(first)
+    });
     let origin = if phone.is_some() {
         SessionOrigin::Phone
     } else {

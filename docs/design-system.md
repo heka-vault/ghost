@@ -219,7 +219,7 @@ Helpers, also from `src/ui`: `cx()` (class names), `statusLabel(status)` and `st
 
 ### Forced states
 
-`.is-hover`, `.is-active` (pressed) and `.is-focus` force a state on `g-btn`, `g-icon-btn`, `g-input`, `g-textarea`, `g-row`, `g-switch`, `g-check`, `g-tabs__tab` and `g-seg__item` (and `.is-hover`/`.is-focus` on a `RadioGroup`). They exist for the gallery and for screenshots of a state; never use them to style real behavior. Shared state comes from `useGhost()` in `@ghost/ui` (status, connected, turns, pending, logs, lastEvent, conversationsVersion, client).
+`.is-hover`, `.is-active` (pressed) and `.is-focus` force a state on `g-btn`, `g-icon-btn`, `g-input`, `g-textarea`, `g-row`, `g-switch`, `g-check`, `g-tabs__tab` and `g-seg__item` (and `.is-hover`/`.is-focus` on a `RadioGroup`). They exist for the gallery and for screenshots of a state; never use them to style real behavior. Shared state comes from `useGhost()` in `@ghost/ui` (status, connected, turns, heldTurns, pending, logs, lastEvent, conversationsVersion, client). `turns` holds back the operator's spoken pieces until the turn closes (the status leaves listening, or a reply, note or typed turn arrives), so a sentence said with a pause never appears in fragments while they talk; the screen shows Ghost listening instead, and the words appear once, whole. `heldTurns` counts what is held, for a screen that re-reads the stored transcript (`withoutHeld`). See it with `?mock=pieces`.
 
 ## Page layout
 

@@ -40,8 +40,10 @@ use crate::config::VoiceSettings;
 use crate::frames::{Audio, Direction, Frame, Out, Stage};
 use crate::latency::percentile;
 use crate::pipeline::Models;
-use crate::stt::{PRE_ROLL_SECS, ParakeetStt, SAMPLE_RATE, TRAILING_SECS, recognize};
-use crate::turns::{Close, EndWords, SmartTurnAnalyzer, SmartTurnParams, TurnTiming};
+use crate::stt::{PRE_ROLL_SECS, ParakeetStt, SAMPLE_RATE, TRAILING_SECS, level_dbfs, recognize};
+use crate::turns::{
+    Close, EndWords, HEARD_NOTHING_MIN_DBFS, SmartTurnAnalyzer, SmartTurnParams, TurnTiming,
+};
 
 const FRAME: usize = 320;
 const TAIL_SECS: f64 = 2.0;
@@ -191,9 +193,13 @@ async fn ends_of(
             pieces.push(s.text.clone());
         }
         // What the aggregator holds at this end: the pieces, or from the second segment
-        // on the whole turn read once.
+        // on the whole turn read once; a segment read as nothing with speech's level in it
+        // is read whole too (`UserAggregator::heard_nothing`).
         let mut words = pieces.join(" ");
-        if i > 0 && settings.turn_reread && !s.text.is_empty() {
+        let heard = !s.text.is_empty()
+            || level_dbfs(&audio[s.start.min(audio.len())..s.stop.min(audio.len())])
+                >= HEARD_NOTHING_MIN_DBFS;
+        if i > 0 && settings.turn_reread && heard {
             let mut span = audio[first..s.stop.min(audio.len())].to_vec();
             span.extend(std::iter::repeat_n(
                 0i16,
@@ -212,7 +218,13 @@ async fn ends_of(
         }
         let Some(verdict) = s.verdict else { continue };
         let next = segments.get(i + 1);
-        let read = EndWords::of(&words);
+        // The segment's own words weigh against a last comma the whole read wrote, when
+        // Smart Turn is sure (`EndWords::of_turn`), as the stop strategy weighs them.
+        let own = if s.text.is_empty() { &words } else { &s.text };
+        let sure_voice = verdict.complete
+            && verdict.probability >= settings.turn_confident_prob
+            && settings.turn_confident_grace_secs < settings.turn_grace_secs;
+        let read = EndWords::of_turn(&words, own, sure_voice);
         ends.push(End {
             take: item.id.clone(),
             source: item.source.clone(),

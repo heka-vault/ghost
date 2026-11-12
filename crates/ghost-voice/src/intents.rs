@@ -19,10 +19,68 @@ const FILLERS: &[&str] = &["ghost", "okay", "ok", "hey", "oh", "um", "so", "plea
 /// What an interruption is made of when it only means "stop" (2026-10-30: "Okay," over a
 /// reading waited 3 s and got an answer).
 const STOP_WORDS: &[&str] = &[
-    "okay", "ok", "stop", "wait", "alright", "all", "right", "yeah", "yes", "no", "enough",
-    "sorry", "ghost", "hey", "oh", "um", "uh", "so", "please", "that's", "fine", "good", "got",
-    "it", "thanks", "thank", "you",
+    "okay",
+    "ok",
+    "stop",
+    "wait",
+    "alright",
+    "all",
+    "right",
+    "yeah",
+    "yes",
+    "no",
+    "enough",
+    "sorry",
+    "ghost",
+    "hey",
+    "oh",
+    "um",
+    "uh",
+    "so",
+    "please",
+    "that's",
+    "fine",
+    "good",
+    "got",
+    "it",
+    "thanks",
+    "thank",
+    "you",
+    // "Okay, thanks, I got it." over a reading went to the model (2026-11-12)
+    "i",
+    "see",
+    "cool",
+    "great",
+    "perfect",
+    "nice",
+    "understood",
+    "gotcha",
+    "sure",
 ];
+/// What a turn that only calls Ghost's name is made of besides the name: Parakeet hears
+/// "hey ghost" as "A ghost.", "I ghost." or "Hey ghost. Hey ghost." (2026-11-12).
+const CALLING: &[&str] = &[
+    "hey", "hi", "a", "i", "oh", "okay", "ok", "yo", "ay", "eh", "hay", "uh", "um", "so",
+];
+/// The name the operator calls Ghost by (the wake phrase is "hey ghost").
+const NAME: &str = "ghost";
+/// Said when a turn only calls Ghost's name (`only_the_name`): it is listening already.
+/// Two words at least, like the hold's: Kokoro reads a lone word flat.
+pub const ATTENTION: &[&str] = &["I'm here.", "I'm listening.", "Yes, I'm here.", "Go ahead."];
+
+/// The words only call Ghost by name, the wake phrase as Parakeet tends to hear it, once
+/// or twice: "Hey ghost.", "I ghost.", "Ghost. A ghost." Inside a session that is a call
+/// for attention, not a question for the model; as a wake's first utterance it is the wake
+/// said twice, not a request.
+pub fn only_the_name(text: &str) -> bool {
+    let norm = normalize(text);
+    let words: Vec<&str> = norm.split_whitespace().collect();
+    if words.is_empty() || words.len() > 4 {
+        return false;
+    }
+    let names = words.iter().filter(|w| **w == NAME).count();
+    names > 0 && words.iter().all(|w| *w == NAME || CALLING.contains(w))
+}
 
 pub const HANG_UP: &[&str] = &[
     "that's all",
@@ -154,7 +212,24 @@ const SMALL_TALK: &[&str] = &[
     "nothing",
     "else",
     "then",
+    // "Good job. Talk to you later. Bye.": a word on the work before the goodbye
+    // (2026-11-12, both went to the model and hung up 3.5 s later)
+    "job",
+    "work",
+    "nice",
+    "awesome",
+    "helpful",
+    "well",
+    "what",
+    "meant",
+    "but",
+    "fine",
+    "okay",
+    "ok",
 ];
+/// The most words a goodbye with small talk before it may have. Past this a turn is
+/// never a quick intent.
+const GOODBYE_MAX_WORDS: usize = 20;
 /// What Ghost says when the shortcut hangs up. Not a bare "Okay.": Kokoro reads a lone
 /// word flat and falling, and it came across as sad to be sent away. The goodbye stays
 /// (it is what makes the end feel human, 2026-10-20); the speed comes from everything
@@ -230,7 +305,7 @@ impl TurnInterceptor for QuickIntents {
     async fn on_user_turn(&self, turn: &UserTurn) -> Option<Handled> {
         let norm = normalize(&turn.text);
         let words: Vec<&str> = norm.split_whitespace().collect();
-        if words.is_empty() || words.len() > 12 {
+        if words.is_empty() || words.len() > GOODBYE_MAX_WORDS {
             return None;
         }
         if words.len() > 6 {
@@ -265,6 +340,15 @@ impl TurnInterceptor for QuickIntents {
             return Some(Handled {
                 say: Some(STOPPED_LISTENING.into()),
                 action: Some(Action::StopListening),
+                until: None,
+            });
+        }
+        // Only the name, in a session that is already listening: no model for it. Over
+        // Ghost's voice it is a stop (below); with a change waiting it is no answer.
+        if !turn.barged_in && only_the_name(&turn.text) {
+            return Some(Handled {
+                say: Some(pick(ATTENTION)),
+                action: None,
                 until: None,
             });
         }
@@ -431,6 +515,32 @@ mod tests {
             ("why did you stop listening", false, None),
             ("not yet, don't hang up", false, None),
             ("how do I hang up", false, None),
+            // a goodbye that ends a longer turn (2026-11-12: 3.5 s through the model)
+            (
+                "Nice work, see you later. Bye.",
+                false,
+                Some(Action::HangUp),
+            ),
+            (
+                "Okay, that's what I meant, but never mind then. Talk to you later. Bye.",
+                false,
+                Some(Action::HangUp),
+            ),
+            (
+                "Good job, thanks, see you later.",
+                false,
+                Some(Action::HangUp),
+            ),
+            // "bye" inside a request, or after one, is still the model's
+            ("Close issue four and then bye.", false, None),
+            ("What did we change yesterday? Bye.", false, None),
+            ("Good job, now label it bug. Bye.", false, None),
+            (
+                "Tell me what the bye week means for the schedule.",
+                false,
+                None,
+            ),
+            ("Good job, but don't hang up yet.", false, None),
         ] {
             let h = QuickIntents
                 .on_user_turn(&UserTurn {
@@ -509,6 +619,59 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_only_the_name() {
+        for (text, only) in [
+            ("Hey ghost.", true),
+            ("I ghost.", true),
+            ("A ghost.", true),
+            ("Ghost. A ghost.", true),
+            ("Hey ghost. Hey ghost.", true),
+            ("Ghost?", true),
+            ("Okay, ghost.", true),
+            ("Eggos.", false),
+            ("Hey.", false),
+            ("Hey ghost, what's next?", false),
+            ("Ghost, close it.", false),
+            ("Ghost stories.", false),
+            ("", false),
+        ] {
+            assert_eq!(only_the_name(text), only, "{text:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_calling_the_name_in_a_session_gets_a_word_not_the_model() {
+        // 2026-11-12: "I ghost." went to the model and came back "Sorry, I didn't catch
+        // that" two seconds later.
+        let turn = |text: &str, barged_in: bool| UserTurn {
+            text: text.into(),
+            pending: false,
+            last_assistant: String::new(),
+            barged_in,
+        };
+        let h = QuickIntents
+            .on_user_turn(&turn("I ghost.", false))
+            .await
+            .expect("taken");
+        assert!(ATTENTION.contains(&h.say.as_deref().unwrap()));
+        assert_eq!(h.action, None);
+        // over Ghost's voice the name is a stop: nothing said
+        let h = QuickIntents
+            .on_user_turn(&turn("Hey ghost.", true))
+            .await
+            .expect("taken");
+        assert_eq!((h.say, h.action), (None, None));
+        // an acknowledgment over Ghost's voice is a stop too
+        for text in ["Okay, thanks, I got it.", "Okay, I see.", "Great, perfect."] {
+            let h = QuickIntents
+                .on_user_turn(&turn(text, true))
+                .await
+                .expect("taken");
+            assert_eq!((h.say, h.action), (None, None), "{text:?}");
+        }
     }
 
     #[tokio::test]
