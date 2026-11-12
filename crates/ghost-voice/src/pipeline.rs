@@ -174,6 +174,12 @@ impl SessionControl {
     pub async fn hang_up(&self, keep_current: bool) {
         info!("hang_up");
         self.stop_hold_timer();
+        if !keep_current {
+            // Nobody will hear what a call still in flight returns: stop it, so the end
+            // is not queued behind an app that may take minutes (ADR 0046). The model's
+            // own hang_up keeps its reply, and the calls made with it.
+            self.turns.stop_calls();
+        }
         self.inject(vec![Frame::HangUp { keep_current }]).await;
         if let Some(h) = &self.on_hang_up {
             h().await;
@@ -449,6 +455,9 @@ impl GhostSession {
     }
 
     pub async fn end(&self) {
+        // The operator ended it: a call still in flight stops, and the end is not queued
+        // behind it.
+        self.control.turns.stop_calls();
         self.control.end().await;
     }
 

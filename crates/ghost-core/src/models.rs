@@ -29,8 +29,9 @@ pub const PROPOSAL_TTL_SECS: i64 = 60;
 /// file says otherwise (`[defaults] pending_ttl`).
 pub const PENDING_TTL_SECS: i64 = 3600;
 pub const MAX_STEPS: usize = 4;
-/// A string in an app's result, so one issue body never fills the context.
-pub const MAX_RESULT_TEXT: usize = 1200;
+/// One app's result as the model reads it, so one result never fills the context
+/// (ADR 0046; it was 1,200 for each string of it).
+pub const MAX_RESULT_TEXT: usize = 24_000;
 /// Ghost's own skills folder: what add writes and remove deletes.
 pub const SKILLS_GHOST_SOURCE: &str = "ghost";
 

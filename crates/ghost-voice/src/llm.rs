@@ -183,6 +183,29 @@ impl LlmStage {
         self.context.lock().unwrap().clone()
     }
 
+    /// The tools as they are now (ADR 0046): an app connected or disconnected, or told
+    /// Ghost its tools changed, or a tool was found by search, since the list was last
+    /// built. Asked before every model call; the list the model is sent, and the apps'
+    /// paragraphs of the prompt, are replaced only when the list differs, so the cached
+    /// prompt is lost once per change and not on every turn.
+    fn refresh_tools(&mut self) {
+        let now = self.dispatcher.schemas();
+        if now == self.tools {
+            return;
+        }
+        info!(
+            "tools: the list changed ({} to {} tools); advertised from this call",
+            self.tools.len(),
+            now.len()
+        );
+        self.tools = now;
+        if let Some(rt) = &self.runtime
+            && rt.has_reach()
+        {
+            self.context.lock().unwrap().system = rt.system_prompt(None);
+        }
+    }
+
     // --- the reply ----------------------------------------------------------------------
 
     /// One model run on the context, its calls, and the runs the results need. The turn's
@@ -194,12 +217,13 @@ impl LlmStage {
             if turn.is_cancelled() {
                 return;
             }
+            self.refresh_tools();
             let context = self.snapshot();
             let stream = self.model.stream(context, &self.tools, &self.options);
             let Some(reply) = self.consume(stream, &turn, out, None).await else {
                 return; // interrupted
             };
-            if !self.after_reply(reply, out).await {
+            if !self.after_reply(reply, &turn, out).await {
                 return;
             }
         }
@@ -303,7 +327,16 @@ impl LlmStage {
 
     /// The calls of a whole reply, in the Python's order: the calls announced, each one
     /// in progress, the response's end, then the results. True when the model runs again.
-    async fn after_reply(&mut self, reply: Reply, out: &Out) -> bool {
+    /// A call to an app stops when `turn` is cancelled (the operator spoke) or the
+    /// session's calls are stopped (they hung up): the stage is not held by an app that
+    /// may take minutes, each call still gets a result in the context, and a change still
+    /// gets its outcome in the audit (`ghost_core::apps::with_cancel`).
+    async fn after_reply(
+        &mut self,
+        reply: Reply,
+        turn: &tokio_util::sync::CancellationToken,
+        out: &Out,
+    ) -> bool {
         if !reply.calls.is_empty() && !self.turns.acting() {
             // The operator went on before Ghost answered: the turn is reopened, and nothing
             // is done for half of it. What was said of the reply goes too (`take_back`).
@@ -336,16 +369,33 @@ impl LlmStage {
         }
         // Every call of the reply, together.
         let dispatcher = self.dispatcher.clone();
-        let results: Vec<(ToolCall, CallResult)> =
-            futures::future::join_all(reply.calls.iter().map(|c| {
-                let dispatcher = dispatcher.clone();
-                async move {
-                    let r = dispatcher.call(&c.name, c.arguments.clone(), &c.id).await;
-                    (c.clone(), r)
+        let stop = tokio_util::sync::CancellationToken::new();
+        let hung_up = self.turns.calls_token();
+        let n = reply.calls.len();
+        self.turns.calls_began(n);
+        let results: Vec<(ToolCall, CallResult)> = {
+            let work = ghost_core::apps::with_cancel(
+                stop.clone(),
+                futures::future::join_all(reply.calls.iter().map(|c| {
+                    let dispatcher = dispatcher.clone();
+                    async move {
+                        let r = dispatcher.call(&c.name, c.arguments.clone(), &c.id).await;
+                        (c.clone(), r)
+                    }
+                })),
+            );
+            tokio::pin!(work);
+            loop {
+                tokio::select! {
+                    results = &mut work => break results,
+                    () = turn.cancelled(), if !stop.is_cancelled() => stop.cancel(),
+                    () = hung_up.cancelled(), if !stop.is_cancelled() => stop.cancel(),
                 }
-            }))
-            .await;
-        let mut run_again = true;
+            }
+        };
+        self.turns.calls_ended(n);
+        // Stopped by a hang-up: nobody is there for an answer to the results.
+        let mut run_again = !hung_up.is_cancelled();
         let mut after: Vec<Frame> = Vec::new();
         for (call, result) in results {
             {
@@ -388,6 +438,7 @@ impl LlmStage {
 
     async fn speculate(&mut self, text: String, out: &Out) {
         self.drop_speculation();
+        self.refresh_tools();
         let mut context = self.snapshot();
         context.push(self.user_turn(&text));
         let stream = self.model.stream(context, &self.tools, &self.options);
@@ -509,7 +560,7 @@ impl LlmStage {
         let Some(reply) = self.consume(live, &turn, out, Some(rx)).await else {
             return;
         };
-        self.after_reply(reply, out).await;
+        self.after_reply(reply, &turn, out).await;
         // The run loop continues on the results, if any called for one.
         if !self.context.lock().unwrap().messages.is_empty()
             && matches!(

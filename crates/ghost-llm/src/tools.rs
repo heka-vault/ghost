@@ -388,11 +388,18 @@ impl Offering {
 
     /// The tools advertised for a list of sources: their reads, each app's changes under
     /// their own names, `change` for Ghost's own operations, and the session's own tools.
-    /// A transfer advertises the new agent's.
+    /// A tool a source defers (`ToolSource::deferred`, ADR 0046) is not advertised: it is
+    /// found by search first, and `lookup` still resolves it. The model's stage asks
+    /// again before every model call, and advertises a list that changed.
     pub fn schemas(&self, sources: &[ToolSource]) -> Tools {
+        let deferred: BTreeSet<&str> = sources
+            .iter()
+            .flat_map(|s| s.deferred.iter().map(String::as_str))
+            .collect();
         let mut out: Vec<ToolSchema> = self
             .named(sources)
             .into_iter()
+            .filter(|(name, _)| !deferred.contains(name.as_str()))
             .map(|(name, offered)| match offered {
                 Offered::Read { tool, .. } => ToolSchema::new(
                     name,

@@ -1,19 +1,62 @@
 //! Every connected app. Connected at daemon start; one the operator connects in the
-//! desktop joins at once (`add`), one disconnected leaves (`remove`).
+//! desktop joins at once (`add`), one disconnected leaves (`remove`). A connection that
+//! dies is opened again in the background (`supervise`), and when the apps have more
+//! tools between them than a turn should carry, most are found by search first
+//! (`search_tools`, ADR 0046).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use tracing::{error, info};
 
-use super::bridge::source_of;
+use super::ask::{Asker, AskerSlot};
+use super::bridge::source_without;
+pub use super::connection::ChangeHook;
 use super::connection::{App, AuthFor};
+use super::limits::Limits;
 use super::spec::AppSpec;
-use super::{AppError, Environ};
+use super::{AppError, Environ, TOOLS_SEARCH};
 use crate::source::ToolSource;
 
-pub type ChangeHook = Arc<dyn Fn() + Send + Sync>;
+/// How many tools one search gives.
+pub const SEARCH_RESULTS: usize = 8;
+
+/// The tools the model used or found lately, by the names it calls them: the ones still
+/// offered by name when most are found by search. The newest `cap` are kept; using one
+/// already there changes nothing the model sees, so the tool list, and the cached prompt
+/// before it, moves only when a tool it had not used comes in.
+pub struct Recent {
+    cap: usize,
+    names: Mutex<Vec<String>>,
+}
+
+impl Recent {
+    pub fn new(cap: usize) -> Self {
+        Self {
+            cap,
+            names: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn touch(&self, name: &str) {
+        let mut names = self.names.lock().unwrap_or_else(|e| e.into_inner());
+        names.retain(|n| n != name);
+        names.push(name.to_string());
+        let over = names.len().saturating_sub(self.cap);
+        names.drain(..over);
+    }
+
+    pub fn names(&self) -> HashSet<String> {
+        self.names
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+}
 
 pub struct Apps {
     /// In the file's order: the first to name a tool keeps the name.
@@ -23,8 +66,15 @@ pub struct Apps {
     apps: RwLock<HashMap<String, Arc<App>>>,
     failed: RwLock<HashMap<String, String>>,
     connecting: RwLock<HashSet<String>>,
-    /// Called after an app joins or leaves (the gate and the sessions follow).
-    on_change: RwLock<Vec<ChangeHook>>,
+    /// Called after an app joins or leaves, or its tools change (the gate and the
+    /// sessions follow).
+    on_change: Arc<RwLock<Vec<ChangeHook>>>,
+    limits: Limits,
+    asker: Arc<AskerSlot>,
+    recent: Arc<Recent>,
+    /// When each app that is down is tried next, and how often it has been.
+    waits: Mutex<HashMap<String, (u32, Instant)>>,
+    supervisor: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Apps {
@@ -40,8 +90,31 @@ impl Apps {
             apps: RwLock::new(HashMap::new()),
             failed: RwLock::new(HashMap::new()),
             connecting: RwLock::new(HashSet::new()),
-            on_change: RwLock::new(Vec::new()),
+            on_change: Arc::new(RwLock::new(Vec::new())),
+            limits: Limits::default(),
+            asker: Arc::new(AskerSlot::default()),
+            recent: Arc::new(Recent::new(Limits::default().tools_kept)),
+            waits: Mutex::new(HashMap::new()),
+            supervisor: Mutex::new(None),
         }
+    }
+
+    /// The limits every app is held to, where its own entry does not say (ADR 0046).
+    pub fn with_limits(mut self, limits: Limits) -> Self {
+        self.recent = Arc::new(Recent::new(limits.tools_kept));
+        self.limits = limits;
+        self
+    }
+
+    pub fn limits(&self) -> Limits {
+        self.limits
+    }
+
+    /// Who an app's question for the operator goes to. Until this is called every
+    /// question is declined, and apps are not told Ghost can ask; an app connected
+    /// before the call learns of it when it next connects.
+    pub fn set_asker(&self, asker: Arc<dyn Asker>) {
+        self.asker.set(asker);
     }
 
     pub fn specs(&self) -> Vec<AppSpec> {
@@ -81,14 +154,25 @@ impl Apps {
 
     /// An app connected elsewhere (a test, an in-process app) joins as it is.
     pub fn attach(&self, app: Arc<App>) {
+        app.join(self.hook(), self.recent.clone());
         self.apps
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .insert(app.name().to_string(), app);
     }
 
+    /// What an app calls when its tools changed or its connection did.
+    fn hook(&self) -> ChangeHook {
+        let hooks = self.on_change.clone();
+        Arc::new(move || run(&hooks))
+    }
+
     fn make(&self, spec: AppSpec) -> Arc<App> {
-        Arc::new(App::new(spec, self.environ.clone(), self.auth_for.clone()))
+        let app = App::new(spec, self.environ.clone(), self.auth_for.clone())
+            .with_limits(self.limits)
+            .with_asker(self.asker.clone());
+        app.join(self.hook(), self.recent.clone());
+        Arc::new(app)
     }
 
     pub async fn connect(&self) {
@@ -124,6 +208,7 @@ impl Apps {
 
     pub fn needs_sign_in(&self, name: &str) -> bool {
         self.failed().get(name).map(String::as_str) == Some("needs sign-in")
+            || self.app(name).and_then(|a| a.failed()).as_deref() == Some("needs sign-in")
     }
 
     /// connected, connecting, needs_sign_in, failed or stopped, for the operator.
@@ -176,8 +261,8 @@ impl Apps {
     }
 
     /// Connect an app now (the operator connected it): its tools are offered from the
-    /// next session, or the next transfer in a running one. One already connected under
-    /// the name is replaced.
+    /// next model call, in a running session too. One already connected under the name
+    /// is replaced.
     pub async fn add(&self, spec: AppSpec, interactive: bool) -> Option<Arc<App>> {
         let name = spec.name.clone();
         self.stop(&name).await;
@@ -225,22 +310,17 @@ impl Apps {
             .unwrap_or_else(|e| e.into_inner())
             .remove(name);
         if let Some(old) = old {
-            old.close().await;
+            old.retire().await;
         }
     }
 
     fn changed(&self) {
-        let hooks = self
-            .on_change
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        for hook in hooks {
-            hook();
-        }
+        run(&self.on_change);
     }
 
-    /// Connected apps in the file's order: the first to name a tool keeps the name.
+    /// The apps whose tools are offered, in the file's order: the first to name a tool
+    /// keeps the name. One whose connection died stays, with the tools it had: the next
+    /// call opens it again.
     fn in_order(&self) -> Vec<Arc<App>> {
         let apps = self.apps();
         let mut order: Vec<String> = self.specs().into_iter().map(|s| s.name).collect();
@@ -253,7 +333,7 @@ impl Apps {
         order
             .iter()
             .filter_map(|n| apps.get(n).cloned())
-            .filter(|a| a.connected())
+            .filter(|a| a.known())
             .collect()
     }
 
@@ -269,11 +349,121 @@ impl Apps {
 
     pub fn sources(&self) -> Vec<ToolSource> {
         self.claim_names();
-        self.in_order()
-            .iter()
-            .map(source_of)
+        let apps = self.in_order();
+        let hidden = self.hidden(&apps);
+        apps.iter()
+            .map(|a| source_without(a, &hidden))
             .filter(|s| !s.read_tools.is_empty() || !s.operations.is_empty())
             .collect()
+    }
+
+    // --- many tools (ADR 0046) ------------------------------------------------------------
+
+    /// The tools not offered by name right now, by the names the model would call them.
+    /// While the connected apps' tools are within the limits (`tools_max` of them,
+    /// `tools_bytes` of schema) that is only Ghost's own search tool, which nothing
+    /// needs. Past either limit it is every app tool the operator has not pinned
+    /// (`pinned` in `apps.json`) and the model has not used or found lately; those are
+    /// found with the search tool, and stay callable by name.
+    fn hidden(&self, apps: &[Arc<App>]) -> HashSet<String> {
+        let search = apps
+            .iter()
+            .find(|a| a.is_own())
+            .map(|a| a.public_name(TOOLS_SEARCH));
+        let outside: Vec<&Arc<App>> = apps.iter().filter(|a| !a.is_own()).collect();
+        let count: usize = outside.iter().map(|a| a.offered().len()).sum();
+        let bytes: usize = outside.iter().map(|a| a.bytes()).sum();
+        let over = count > self.limits.tools_max || bytes > self.limits.tools_bytes;
+        // With no search tool to find them by (Ghost's own app is not running), every
+        // tool stays offered.
+        if !over || search.is_none() {
+            return search.into_iter().collect();
+        }
+        let recent = self.recent.names();
+        let mut hidden = HashSet::new();
+        for app in outside {
+            for (tool, name) in app.offered() {
+                if !app.spec.pinned.contains(&tool) && !recent.contains(&name) {
+                    hidden.insert(name);
+                }
+            }
+        }
+        hidden
+    }
+
+    /// Whether most tools are found by search right now.
+    pub fn deferring(&self) -> bool {
+        self.claim_names();
+        let apps = self.in_order();
+        let search: HashSet<String> = apps
+            .iter()
+            .filter(|a| a.is_own())
+            .map(|a| a.public_name(TOOLS_SEARCH))
+            .collect();
+        self.hidden(&apps).iter().any(|n| !search.contains(n))
+    }
+
+    /// The connected apps' tools that match `query`, best first: each with the name to
+    /// call it by, what it does and the arguments it takes. Every word of the query is
+    /// looked for in the tool's name (which counts three times), its app and its
+    /// description. What is found is offered by name from the next model call. Ghost's
+    /// own tools are not searched: they are always offered.
+    pub fn search_tools(&self, query: &str) -> Vec<Value> {
+        self.claim_names();
+        let words: Vec<String> = query
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 1)
+            .map(String::from)
+            .collect();
+        let mut hits: Vec<(usize, usize, Value, String)> = Vec::new();
+        let mut order = 0;
+        for app in self.in_order().iter().filter(|a| !a.is_own()) {
+            let offered = app.offered();
+            for t in app.tools() {
+                let Some((_, name)) = offered.iter().find(|(n, _)| *n == t.name) else {
+                    continue;
+                };
+                order += 1;
+                let said = t.offered_description();
+                let (in_name, in_app, in_text) = (
+                    name.to_lowercase(),
+                    app.spec.shown().to_lowercase(),
+                    said.to_lowercase(),
+                );
+                let score: usize = words
+                    .iter()
+                    .map(|w| {
+                        3 * usize::from(in_name.contains(w))
+                            + usize::from(in_app.contains(w))
+                            + usize::from(in_text.contains(w))
+                    })
+                    .sum();
+                if score == 0 {
+                    continue;
+                }
+                hits.push((
+                    score,
+                    order,
+                    json!({
+                        "name": name,
+                        "app": app.spec.shown(),
+                        "kind": if t.read_only { "read" } else { "change" },
+                        "description": said,
+                        "arguments": t.properties(),
+                        "required": t.required(),
+                    }),
+                    name.clone(),
+                ));
+            }
+        }
+        hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        hits.truncate(SEARCH_RESULTS);
+        // Best last, so the best is the newest and the last to be forgotten.
+        for (_, _, _, name) in hits.iter().rev() {
+            self.recent.touch(name);
+        }
+        hits.into_iter().map(|(_, _, tool, _)| tool).collect()
     }
 
     pub fn connected(&self) -> bool {
@@ -285,18 +475,118 @@ impl Apps {
     }
 
     /// Start an app again whose connection died or that failed at start (a watch reads
-    /// it, ADR 0028). The caller backs off; this tries once, without a browser.
+    /// it, ADR 0028). The caller backs off; this tries once, without a browser. An app
+    /// that was connected is opened again in place, so the tools a session holds keep
+    /// working.
     pub async fn revive(&self, name: &str) -> bool {
+        if let Some(app) = self.app(name) {
+            if app.connected() {
+                return true;
+            }
+            return app.reconnect().await.is_ok(); // tells the listeners itself
+        }
         let Some(spec) = self.spec(name) else {
             return false;
         };
-        self.stop(name).await;
         let app = self.start(spec, false).await;
         if app.is_some() {
             info!("app {name}: connected again");
             self.changed();
         }
         app.is_some()
+    }
+
+    // --- keeping connections up (ADR 0046) ------------------------------------------------
+
+    /// Keep the apps connected, in the background: every few seconds each connection is
+    /// looked at (an app over HTTP that has been quiet is pinged), and one that died or
+    /// never started is tried again, the wait doubling up to a minute for five tries and
+    /// then every five minutes (`Backoff`; the numbers are Hermes Agent's). An app that
+    /// needs a new sign-in is left for the operator, on the waiting list. Stops when the
+    /// apps close.
+    pub fn supervise(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        let every = self.limits.backoff.watch;
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(every).await;
+                let Some(apps) = weak.upgrade() else { return };
+                apps.look().await;
+            }
+        });
+        if let Some(old) = self
+            .supervisor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace(task)
+        {
+            old.abort();
+        }
+    }
+
+    /// One look at every app (`supervise`).
+    pub async fn look(&self) {
+        let backoff = self.limits.backoff;
+        let names: Vec<String> = self.specs().into_iter().map(|s| s.name).collect();
+        for name in &names {
+            let app = self.app(name);
+            if let Some(app) = &app
+                && app.connected()
+                && app.check(self.limits.keepalive).await
+            {
+                self.forget_wait(name);
+                continue;
+            }
+            let connecting = self
+                .connecting
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(name);
+            if connecting || self.needs_sign_in(name) {
+                self.forget_wait(name); // the operator's to do; nothing to retry
+                continue;
+            }
+            let now = Instant::now();
+            let due = {
+                let mut waits = self.waits.lock().unwrap_or_else(|e| e.into_inner());
+                let (_, at) = waits
+                    .entry(name.clone())
+                    .or_insert_with(|| (0, now + backoff.jittered(0, rand::random::<f64>())));
+                now >= *at
+            };
+            if !due {
+                continue;
+            }
+            if self.revive(name).await {
+                self.forget_wait(name);
+                continue;
+            }
+            let mut waits = self.waits.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((tried, at)) = waits.get_mut(name) {
+                *tried += 1;
+                *at = Instant::now() + backoff.jittered(*tried, rand::random::<f64>());
+            }
+        }
+        self.waits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|n, _| names.contains(n));
+    }
+
+    fn forget_wait(&self, name: &str) {
+        self.waits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(name);
+    }
+
+    /// How often an app that is down has been tried, for a test and the log.
+    pub fn tries(&self, name: &str) -> Option<u32> {
+        self.waits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(name)
+            .map(|(n, _)| *n)
     }
 
     /// A read the daemon makes (a watch, a webhook's check): the app brought back first
@@ -317,6 +607,14 @@ impl Apps {
     }
 
     pub async fn close(&self) {
+        if let Some(task) = self
+            .supervisor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            task.abort();
+        }
         let apps: Vec<Arc<App>> = self
             .apps
             .write()
@@ -325,7 +623,14 @@ impl Apps {
             .map(|(_, a)| a)
             .collect();
         for app in apps {
-            app.close().await;
+            app.retire().await;
         }
+    }
+}
+
+fn run(hooks: &RwLock<Vec<ChangeHook>>) {
+    let hooks = hooks.read().unwrap_or_else(|e| e.into_inner()).clone();
+    for hook in hooks {
+        hook();
     }
 }

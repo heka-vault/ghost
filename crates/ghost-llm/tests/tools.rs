@@ -267,3 +267,32 @@ fn test_the_schemas_take_each_protocols_shape() {
     );
     assert_eq!(a.len(), schemas.len());
 }
+
+#[test]
+fn test_a_deferred_tool_is_not_advertised_and_still_resolves() {
+    // ADR 0046: past the limits an app's tools are found by search first. The source
+    // still has them (the gate, a call by name); the list the model is sent does not.
+    let mut app = source(
+        "notes",
+        vec![
+            read("notes_search", "Search.", json!({}), &[]),
+            read("notes_export", "Export.", json!({}), &[]),
+        ],
+        vec![op("create", Some("notes_create"))],
+    );
+    app.deferred = vec!["notes_export".into(), "notes_create".into()];
+    let offering = Offering::new(Arc::new(OfferAll), SessionTools::default());
+    let sources = [app];
+    let schemas = offering.schemas(&sources);
+    let names = schemas.names();
+    assert!(names.contains(&"notes_search"));
+    assert!(!names.contains(&"notes_export") && !names.contains(&"notes_create"));
+    assert!(matches!(
+        offering.lookup(&sources, "notes_export"),
+        Some(Offered::Read { .. })
+    ));
+    assert!(matches!(
+        offering.lookup(&sources, "notes_create"),
+        Some(Offered::Change { .. })
+    ));
+}

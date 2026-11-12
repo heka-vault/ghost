@@ -1092,12 +1092,20 @@ impl Daemon {
                 }),
         );
         // ADR 0036: an app's ${NAME} is filled from the vault when it connects.
-        let apps = Arc::new(Apps::new(
-            apps_file.apps,
-            Arc::new(EnvironView(d.environ.clone())) as Arc<dyn Environ>,
-            Some(auth_for_apps(&signins)),
-        ));
+        let app_limits = {
+            let env = d.env();
+            ghost_core::apps::Limits::from_vars(|name| env.get(name).cloned())
+        };
+        let apps = Arc::new(
+            Apps::new(
+                apps_file.apps,
+                Arc::new(EnvironView(d.environ.clone())) as Arc<dyn Environ>,
+                Some(auth_for_apps(&signins)),
+            )
+            .with_limits(app_limits),
+        );
         apps.connect().await;
+        apps.supervise(); // ADR 0046: a connection that dies is opened again
         let catalog = Arc::new(Catalog::new(&cfg.catalog_path));
         // #35: skills.sh search and GitHub fetches for the Skills page, never for a session.
         let previews = cfg
