@@ -1139,3 +1139,31 @@ fn a_check_is_compared_by_what_it_says_not_by_its_order() {
     assert_eq!(changed_lines("a\nb\nc", "a\nc\nd"), "+ d\n- b");
     let _ = Duration::zero();
 }
+
+// --- what the desktop hears (ADR 0060) ------------------------------------------------------
+
+#[tokio::test]
+async fn a_run_is_told_when_it_starts_and_when_it_has_ended_with_its_row_current() {
+    use crate::schedules::RunPhase;
+    let w = world(&["All quiet."]);
+    let seen: Arc<std::sync::Mutex<Vec<(String, RunPhase, RunStatus)>>> = Arc::default();
+    {
+        let seen = seen.clone();
+        let jobs = w.jobs.clone();
+        w.scheduler.on_run(Arc::new(move |id, phase| {
+            let status = jobs.run(id).unwrap().unwrap().status;
+            seen.lock().unwrap().push((id.to_string(), phase, status));
+        }));
+    }
+    let job = w.job(&every("30m"));
+    w.tick(utc("2026-11-11T09:30:05Z")).await;
+    let seen = seen.lock().unwrap().clone();
+    let run = &w.jobs.runs(&job.id, 1).unwrap()[0];
+    assert_eq!(
+        seen,
+        vec![
+            (run.id.clone(), RunPhase::Started, RunStatus::Running),
+            (run.id.clone(), RunPhase::Ended, RunStatus::Ok),
+        ]
+    );
+}

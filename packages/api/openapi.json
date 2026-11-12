@@ -4065,6 +4065,207 @@
         ],
         "type": "object"
       },
+      "ReachCall": {
+        "description": "One tool call as kept (ADR 0060): the app, the tool's name, whether it was a read and\nworked, how many items came back and how many bytes (as the app sent them, before they\nwere fitted to the model's budget), and how long it took. Never contents.",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "description": "The session, or `run-<id>` for a run with nobody there.",
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "session_id",
+          "agent",
+          "app",
+          "tool",
+          "read",
+          "ok",
+          "bytes",
+          "ms"
+        ],
+        "type": "object"
+      },
+      "ReachEvent": {
+        "description": "One tool call an agent made came back, as counts and sizes (ADR 0060).",
+        "properties": {
+          "reach": {
+            "$ref": "#/components/schemas/ReachCall"
+          },
+          "type": {
+            "default": "reach",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reach"
+        ],
+        "type": "object"
+      },
+      "ReachTotalView": {
+        "description": "Totals over some calls, by one key: an app, an agent, a session or run, or `all`.",
+        "properties": {
+          "agent": {
+            "description": "The agent, for a session's or a run's total.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "apps": {
+            "description": "The apps called, by name.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "calls": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "changes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failed": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "first": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "last": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ms": {
+            "description": "The calls' time added up, in milliseconds.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reads": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "calls",
+          "reads",
+          "changes",
+          "failed",
+          "items",
+          "bytes",
+          "ms",
+          "apps"
+        ],
+        "type": "object"
+      },
+      "ReachView": {
+        "description": "How much Ghost read and did in a stretch of time (ADR 0060): everything, by app, by\nagent, and by session or run (newest first). Counts and sizes only.",
+        "properties": {
+          "by_agent": {
+            "items": {
+              "$ref": "#/components/schemas/ReachTotalView"
+            },
+            "type": "array"
+          },
+          "by_app": {
+            "items": {
+              "$ref": "#/components/schemas/ReachTotalView"
+            },
+            "type": "array"
+          },
+          "by_session": {
+            "items": {
+              "$ref": "#/components/schemas/ReachTotalView"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/ReachTotalView"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "total",
+          "by_app",
+          "by_agent",
+          "by_session"
+        ],
+        "type": "object"
+      },
       "ReadToolInfo": {
         "properties": {
           "description": {
@@ -4246,6 +4447,31 @@
         "required": [
           "path",
           "text"
+        ],
+        "type": "object"
+      },
+      "RunEvent": {
+        "description": "A run with nobody there started or has ended (ADR 0060), with its row as it is now.",
+        "properties": {
+          "phase": {
+            "description": "Where a run is (ADR 0060).",
+            "enum": [
+              "started",
+              "ended"
+            ],
+            "type": "string"
+          },
+          "run": {
+            "$ref": "#/components/schemas/ScheduleRunInfo"
+          },
+          "type": {
+            "default": "run",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run",
+          "phase"
         ],
         "type": "object"
       },
@@ -6323,7 +6549,7 @@
     },
     "/audit": {
       "get": {
-        "description": "Proposals, newest first; source narrows to one app or one of Ghost's own.",
+        "description": "Proposals, newest first; source narrows to one app or one of Ghost's own, since and until to a stretch of time (a day of the timeline, ADR 0060).",
         "operationId": "audit_audit_get",
         "parameters": [
           {
@@ -6370,6 +6596,26 @@
             "name": "session_id",
             "required": false,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Created at or after this (RFC 3339; ADR 0060).",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Created before this.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "date-time",
               "type": "string"
             }
           }
@@ -7263,6 +7509,8 @@
                       "outcome": "#/components/schemas/OutcomeEvent",
                       "pending": "#/components/schemas/PendingEvent",
                       "question": "#/components/schemas/QuestionEvent",
+                      "reach": "#/components/schemas/ReachEvent",
+                      "run": "#/components/schemas/RunEvent",
                       "saying": "#/components/schemas/SayingEvent",
                       "status": "#/components/schemas/StatusEvent",
                       "turn": "#/components/schemas/TurnEvent",
@@ -7313,6 +7561,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/HearEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReachEvent"
                     }
                   ]
                 }
@@ -8861,6 +9115,69 @@
         ]
       }
     },
+    "/reach": {
+      "get": {
+        "description": "How much Ghost read and did between two times (at most 31 days): the calls agents made in sessions and runs, totalled, by app, by agent and by session or run (`run-<id>`). Counts and sizes only, never contents.",
+        "operationId": "reach_reach_get",
+        "parameters": [
+          {
+            "description": "From this time (RFC 3339), inclusive.",
+            "in": "query",
+            "name": "since",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "To this time, exclusive; now when left out.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only these sessions or runs (`run-<id>`), comma separated, at most 40.",
+            "in": "query",
+            "name": "sessions",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReachView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reach",
+        "tags": [
+          "session"
+        ]
+      }
+    },
     "/rules": {
       "get": {
         "description": "Ghost's AGENTS.md: the rules in every agent's prompt (ADR 0035).",
@@ -8937,6 +9254,26 @@
               "maximum": 200,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Scheduled at or after this (RFC 3339; ADR 0060). `/runs` only.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scheduled before this. `/runs` only.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
             }
           }
         ],
@@ -9321,6 +9658,26 @@
               "maximum": 200,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Scheduled at or after this (RFC 3339; ADR 0060). `/runs` only.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scheduled before this. `/runs` only.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
             }
           }
         ],

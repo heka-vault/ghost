@@ -422,6 +422,23 @@ impl DaemonState {
         self.bus.publish(&Event::Activity { activity });
     }
 
+    /// A run started or has ended (`Event::Run`, ADR 0060).
+    pub fn publish_run(
+        &self,
+        run: crate::schedules::ScheduleRunInfo,
+        phase: crate::models::RunPhase,
+    ) {
+        self.bus.publish(&Event::Run { run, phase });
+    }
+
+    /// One call's counts and sizes (`Event::Reach`, ADR 0060). Only built when someone
+    /// is listening.
+    pub fn publish_reach(&self, row: &ghost_core::reach::ReachRow) {
+        if self.bus.subscribers() > 0 {
+            self.bus.publish(&Event::Reach { reach: row.into() });
+        }
+    }
+
     pub fn set_pending(&self, pending: Option<PendingProposal>) {
         self.lock().pending = pending.clone();
         self.bus.publish(&Event::Pending { pending });

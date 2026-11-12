@@ -106,7 +106,7 @@ pub async fn forward_events(
                 if let Some(data) = event_of(&text)
                     && !matches!(
                         kind(&data),
-                        Some("log" | "status" | "voice" | "activity" | "saying")
+                        Some("log" | "status" | "voice" | "activity" | "saying" | "run" | "reach")
                     )
                 {
                     backlog.push(data);
@@ -126,7 +126,10 @@ pub async fn forward_events(
         match events.recv().await {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(kind(&data), Some("log" | "voice" | "activity" | "saying"))
+                    && !matches!(
+                        kind(&data),
+                        Some("log" | "voice" | "activity" | "saying" | "run" | "reach")
+                    )
                 {
                     sink.send_server_message(&data).await;
                 }
