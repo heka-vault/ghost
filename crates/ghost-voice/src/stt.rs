@@ -118,6 +118,16 @@ pub fn recognize_fn(model: &SharedRecognizer) -> crate::wakeword::Recognize {
     Arc::new(move |audio: Vec<f32>| recognize(&model, &audio, true).unwrap_or_default())
 }
 
+/// A stretch's level in dBFS.
+pub fn level_dbfs(samples: &[i16]) -> f64 {
+    let power = samples
+        .iter()
+        .map(|&x| f64::from(x) * f64::from(x))
+        .sum::<f64>()
+        / samples.len().max(1) as f64;
+    20.0 * (power.sqrt() / 32768.0).max(1e-9).log10()
+}
+
 fn epoch() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -530,9 +540,17 @@ impl ParakeetStt {
             .await;
             let secs_audio = segment.len() as f64 / f64::from(SAMPLE_RATE);
             if text.is_empty() {
+                let dbfs = level_dbfs(&segment);
                 debug::audio(|| {
-                    format!("heard nothing in a {secs_audio:.1}s segment (read early)")
+                    format!(
+                        "heard nothing in a {secs_audio:.1}s segment at {dbfs:.0} dBFS (read early)"
+                    )
                 });
+                out.push(Frame::HeardNothing {
+                    secs: secs_audio,
+                    dbfs,
+                })
+                .await;
             } else {
                 debug::audio(|| format!("heard: {text:?} (read early)"));
                 out.push(Frame::Transcript(text.clone())).await;
@@ -540,14 +558,7 @@ impl ParakeetStt {
             return;
         }
         let secs = segment.len() as f64 / f64::from(SAMPLE_RATE);
-        let level = {
-            let power = segment
-                .iter()
-                .map(|&x| f64::from(x) * f64::from(x))
-                .sum::<f64>()
-                / segment.len().max(1) as f64;
-            20.0 * (power.sqrt() / 32768.0).max(1e-9).log10()
-        };
+        let level = level_dbfs(&segment);
         segment.extend(std::iter::repeat_n(
             0i16,
             (TRAILING_SECS * f64::from(SAMPLE_RATE)) as usize,
@@ -584,6 +595,7 @@ impl ParakeetStt {
             // 2026-10-30 19:28: a 2 s segment Smart Turn judged done (0.98) left no
             // line at all, and the turn closed on the words before it.
             debug::audio(|| format!("heard nothing in a {secs:.1}s segment at {level:.0} dBFS"));
+            out.push(Frame::HeardNothing { secs, dbfs: level }).await;
         } else {
             debug::audio(|| format!("heard: {text:?}"));
             out.push(Frame::Transcript(text)).await;

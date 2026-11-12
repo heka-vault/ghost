@@ -1118,6 +1118,15 @@ pub fn format_line(rec: &Value) -> String {
         Some(r) => head.push_str(&format!(" reply {r:.2}s")),
     }
     let mut parts: Vec<String> = Vec::new();
+    // The answer was made while the close waited: the model's and the voice's time after
+    // the close is what was left of them, often nothing.
+    let answered_early = rec
+        .get("hear")
+        .and_then(|h| h.get("speculation"))
+        .and_then(|s| s.get("kept"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        > 0;
     if let Some(hear) = rec.get("hear")
         && let Some(total) = num(hear.get("total"))
     {
@@ -1128,19 +1137,25 @@ pub fn format_line(rec: &Value) -> String {
         if let Some(pre) = num(hear.get("pre")).filter(|v| *v != 0.0) {
             sub.push(format!("pre {pre:.2}"));
         }
+        let hold = num(hear.get("hold")).filter(|v| *v != 0.0);
         if let Some(t) = num(hear.get("turn")).filter(|v| *v != 0.0) {
-            sub.push(format!("turn {t:.2}"));
+            // A close Smart Turn doubted waits its silence here, not in a hold: the answer
+            // made meanwhile was made during this wait (2026-11-12, "llm 0.00" read as a
+            // fault).
+            let during = answered_early && hold.is_none();
+            sub.push(format!(
+                "turn {t:.2}{}",
+                if during { ", answered during it" } else { "" }
+            ));
         }
-        if let Some(hold) = num(hear.get("hold")).filter(|v| *v != 0.0) {
-            let kept = hear
-                .get("speculation")
-                .and_then(|s| s.get("kept"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-                > 0;
+        if let Some(hold) = hold {
             sub.push(format!(
                 "hold {hold:.2}{}",
-                if kept { ", answered during it" } else { "" }
+                if answered_early {
+                    ", answered during it"
+                } else {
+                    ""
+                }
             ));
         }
         parts.push(format!("hear {total:.2} ({})", sub.join(", ")));
@@ -1159,6 +1174,9 @@ pub fn format_line(rec: &Value) -> String {
     if let Some(llm) = rec.get("llm").filter(|l| l.is_object()) {
         let calls = calls_of(rec);
         let mut sub: Vec<String> = Vec::new();
+        if answered_early && num(llm.get("total")).unwrap_or(0.0) < 0.005 {
+            sub.push("ready at the close".into());
+        }
         if let Some(first) = calls.first().and_then(|c| num(c.get("ttfb"))) {
             sub.push(format!("ttfb {first:.2}"));
         }
@@ -1854,5 +1872,21 @@ mod tests {
         assert_eq!(f(&rec["llm"]["calls"][0], "ttfb"), 0.7);
         assert_eq!(f(rec, "reply"), 1.55); // 1.8 -> 3.35
         assert!(format_line(rec).contains("answered during it"));
+        // Smart Turn doubted the end: the turn waited its silence, not a hold, and the
+        // answer was ready when it closed (2026-11-12: "llm 0.00 ... tts 0.00" read as a
+        // fault).
+        let doubted = json!({
+            "turn": 4, "origin": "desk", "kind": "voice", "reply": 2.05,
+            "hear": {"total": 2.05, "stt": 0.15, "turn": 1.71, "hold": 0.0,
+                     "speculation": {"started": 1, "kept": 1}},
+            "llm": {"total": 0.0, "calls": [{"ttfb": 1.02, "in": 4, "cache_read": 100}]},
+            "tts": {"total": 0.0}
+        });
+        let line = format_line(&doubted);
+        assert!(line.contains("turn 1.71, answered during it"), "{line}");
+        assert!(
+            line.contains("llm 0.00 (ready at the close, ttfb 1.02"),
+            "{line}"
+        );
     }
 }
