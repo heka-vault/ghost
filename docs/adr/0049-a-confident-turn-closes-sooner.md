@@ -154,6 +154,21 @@ pauses closed early and not reopened, so neither is the default. To run it on th
 takes: `make perf-turns TAKES=latest`, then `ghostd perf turns-report <run>/turns.json --set
 turn_confident_grace_secs=0.25`.
 
+## Amended 2026-11-12: the acknowledgment follows the close, and a silent model gets a word
+
+[The first-sound benchmark](../benchmarks/perf/2026-11-12-first-sound.md) found the
+acknowledgment waiting out the full 1.2 s from the end of speech after every close. A held
+answer's frames reach the acknowledgment only once the turn has closed, so the wait protected
+nothing the close had not. **The acknowledgment now follows the close the turn got**: after a
+confident close it is said as soon as the call starts. Going on still cuts the turn and the word
+with it, barge-in stops it, a goodbye or a hold gets none. **What the turn does still waits as
+long as it did**: a tool call of a turn that closed on the short grace runs only once the full
+grace would have run (`TurnControl::settle_at`), unchanged.
+
+The consequence below that "nothing fills it yet" no longer holds. When the model has written no
+word and started no call some time after the reply begins, Ghost says "One sec." once
+(`ghost_voice::acks::FirstSound`, ADR 0050's amendment of the same day has the rule).
+
 ## Considered options
 
 - **A shorter grace for every turn.** 0.35 s for every end Smart Turn calls done would
@@ -177,7 +192,8 @@ turn_confident_grace_secs=0.25`.
   one rendered clause dropped, and nothing the operator hears. It costs more often than
   before: on the recorded takes, 3 pauses in 39 against 1.
 - When the turn closes sooner than the model answers, the wait is the model's alone, in
-  silence. The thinking sound is off (2026-10-30) and nothing fills it yet.
+  silence. The thinking sound is off (2026-10-30) and nothing fills it yet. (Amended
+  2026-11-12: the first sound, above, fills it.)
 - `hear.close` in `latency.jsonl` says how each turn's close was timed (`confident`,
   `grace`, `number`, `unfinished`, `sentence`, `incomplete`), and `prerender` counts
   clauses rendered, played and dropped.

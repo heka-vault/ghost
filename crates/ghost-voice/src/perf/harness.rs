@@ -202,6 +202,13 @@ pub struct RunConfig {
     pub fast_real: bool,
     /// Which apps the session reaches (`--apps`, `apps=` in a variant).
     pub apps: AppSet,
+    /// With `real`, about this many tokens of synthetic reference appended to the system
+    /// prompt (`--pad-tokens`, `pad=` in a variant; `shaped`): the operator's prompt is
+    /// about 15,000 tokens of system and tools against the harness's 4,000.
+    pub pad_tokens: usize,
+    /// With `real`, every streamed call waits this long before it is sent, as a slow
+    /// provider's first byte does (`--first-byte-ms`, `delay=` in a variant, in ms).
+    pub first_byte: Duration,
 }
 
 /// The apps a run's session reaches.
@@ -271,18 +278,25 @@ impl Default for RunConfig {
             real: None,
             fast_real: false,
             apps: AppSet::One,
+            pad_tokens: 0,
+            first_byte: Duration::ZERO,
         }
     }
 }
 
 impl RunConfig {
     pub fn label(&self) -> String {
-        let label = self.label_without_apps();
-        if self.apps == AppSet::One {
-            label
-        } else {
-            format!("{label} apps={}", self.apps.name())
+        let mut label = self.label_without_apps();
+        if self.apps != AppSet::One {
+            label = format!("{label} apps={}", self.apps.name());
         }
+        if self.pad_tokens > 0 {
+            label = format!("{label} pad={}", self.pad_tokens);
+        }
+        if !self.first_byte.is_zero() {
+            label = format!("{label} delay={}ms", self.first_byte.as_millis());
+        }
+        label
     }
 
     fn label_without_apps(&self) -> String {
@@ -646,8 +660,12 @@ impl Bench {
                     },
                     _ => None,
                 };
+                // Shaped as real use is (`shaped`): a prompt the operator's size, a slow
+                // provider's first byte.
+                let shape = |m| super::shaped::Shaped::wrap(m, cfg.pad_tokens, cfg.first_byte);
+                let fast = fast.map(shape);
                 match real.client(&real.model) {
-                    Ok(m) => (m, fast),
+                    Ok(m) => (shape(m), fast),
                     Err(e) => {
                         return RunResult {
                             scenario: scenario.name.into(),

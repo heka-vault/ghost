@@ -201,6 +201,11 @@ pub enum Frame {
         name: String,
         said: Option<String>,
     },
+    /// The model that answers this turn wrote its first word (not a thought): an answer,
+    /// or a few words before a call, is on its way. Sent once per reply by the model's
+    /// stage, before the narration cut holds any text, so the acknowledgment stage knows
+    /// the model is not silent (`crate::acks`, the first sound). Nothing is said on it.
+    ModelWriting,
     Metrics(Metric),
 
     // --- the thinking sound
@@ -298,6 +303,7 @@ impl Frame {
             Frame::ReplyCut => "ReplyCut",
             Frame::HandOver { .. } => "HandOver",
             Frame::ToolStarting { .. } => "ToolStarting",
+            Frame::ModelWriting => "ModelWriting",
             Frame::Metrics(_) => "Metrics",
             Frame::ThinkingStart => "ThinkingStart",
             Frame::ThinkingStop => "ThinkingStop",

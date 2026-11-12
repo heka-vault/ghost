@@ -108,7 +108,17 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     };
     d.note_passwords_in_use();
     let cfg = d.cfg();
-    let voice = d.voice();
+    let voice = {
+        // The first sound waits on this connection's own first word (`acks::FirstSound`).
+        let voice = d.voice();
+        if voice.first_sound_secs.is_none() {
+            let mut v = (*voice).clone();
+            v.first_word_secs = d.first_word_secs();
+            Arc::new(v)
+        } else {
+            voice
+        }
+    };
     let ducker = lock(&d.ducker).clone();
     let already_chimed = d.chimed.swap(false, Ordering::SeqCst);
     let (media, phone) = match phone {

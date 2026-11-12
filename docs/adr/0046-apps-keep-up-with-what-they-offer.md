@@ -212,6 +212,20 @@ Other consequences:
   result 1,000 to 100,000 characters, 40 pinned tools); the app connects again with them.
 - **Which tools were used, across restarts.** Could be read from the audit at start.
 
+## Amended 2026-11-12: two connections to the same service say so
+
+The operator connects GitHub once per account, and both connections reach some of the same
+repositories. A general line in the prompt ("when two connected apps reach the same repository,
+read through one of them") named no app, and the model still read the same issue through both in
+some runs. Now `ghost_core::apps::twins` finds two connected apps that reach the same service (a
+URL's host, or the program a local app runs) with the same tools by the app's own names, and the
+later one's paragraph says so, naming both: read one thing through one of them, the one that
+reached it already in the conversation, else the first in `apps.json`. The words are Ghost's,
+chosen by code from the operator's file and the tools' names, never from an app's text. The
+general line is gone. It costs about 70 tokens in that paragraph when there is such a pair, read
+from the cache. Measured: 0 of 21 by-number reads through the second connection, against 1 of 12
+before ([the benchmark](../benchmarks/perf/2026-11-12-first-sound.md)).
+
 ## Alternatives considered
 
 - **Keep the first sentence, raise only the result.** The first sentence was chosen to
