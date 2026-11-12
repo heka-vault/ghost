@@ -9,13 +9,20 @@ import {
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
 import { createHearLive, type HearLive } from "./hearLive";
+import { type Captions, captionPhase, captionTurn, noCaptions } from "./turns";
 import { createVoiceLevel, type VoiceLevel } from "./voiceLevel";
 
 export interface GhostState {
   client: GhostClient;
   status: Status | null;
   connected: boolean;
+  /**
+   * The live session's turns as they are shown: the operator's spoken pieces wait until the
+   * turn closes, then appear together (see `Captions` in turns.ts).
+   */
   turns: Turn[];
+  /** How many spoken pieces of the operator's open turn are held back from `turns` (0 when none). */
+  heldTurns: number;
   pending: PendingProposal | null;
   logs: { level: string; message: string; at: string }[];
   lastEvent: GhostEvent | null;
@@ -37,7 +44,7 @@ const Ctx = createContext<GhostState | null>(null);
 export function GhostProvider({ client, children }: { client: GhostClient; children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [connected, setConnected] = useState(false);
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [captions, setCaptions] = useState<Captions<Turn>>(noCaptions);
   const [pending, setPending] = useState<PendingProposal | null>(null);
   const [logs, setLogs] = useState<GhostState["logs"]>([]);
   const [lastEvent, setLastEvent] = useState<GhostEvent | null>(null);
@@ -59,7 +66,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
           if (!isEvent(m)) {
             setStatus(m);
             setPending(m.pending ?? null);
-            client.turns().then(setTurns).catch(() => {});
+            // A snapshot can't say which pieces are of a turn still open: shown as they are.
+            client
+              .turns()
+              .then((t) => setCaptions({ shown: t, held: [] }))
+              .catch(() => {});
             return;
           }
           // Twenty a second while Ghost speaks: into the store, never into React state.
@@ -77,12 +88,12 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
             case "status":
               setStatus(m.status);
               setPending(m.status.pending ?? null);
-              if (m.status.phase === "passive" || m.status.phase === "starting") setTurns([]);
+              setCaptions((c) => captionPhase(c, m.status.phase));
               // The voice's last 0 can be lost with a dropped stream; the phase is the backstop.
               if (m.status.phase !== "speaking" && voice.get().level > 0) voice.set(0);
               break;
             case "turn":
-              setTurns((t) => [...t.slice(-199), m.turn]);
+              setCaptions((c) => captionTurn(c, m.turn));
               break;
             case "pending":
               setPending(m.pending ?? null);
@@ -138,8 +149,8 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   }, [client, voice, hear]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear }),
-    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear],
+    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear }),
+    [client, status, connected, captions, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

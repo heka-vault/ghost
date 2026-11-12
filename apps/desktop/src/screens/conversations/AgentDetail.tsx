@@ -9,7 +9,7 @@
  * as on Settings › Sound (one store, two ways in), saved with the rest of the draft.
  */
 import { type CompactionView, type ConversationDetail, type ConversationView, type TurnView } from "@ghost/client-ts";
-import { useGhost } from "@ghost/ui";
+import { useGhost, withoutHeld } from "@ghost/ui";
 import { Archive, ArchiveRestore, ArrowLeftRight, Brain, ChevronLeft, Clock, CloudOff, FolderOpen, Layers, MoreHorizontal, Phone, PhoneOff, Play, RotateCcw, SearchX, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -78,7 +78,7 @@ let keptWake: { base: string; draft: string } | null = null;
 const sameWake = (a: string, b: string) => joinList(splitList(a)) === joinList(splitList(b));
 
 export function AgentDetail({ slug }: { slug: string }) {
-  const { client, status, conversationsVersion, turns: sessionTurns, pending } = useGhost();
+  const { client, status, conversationsVersion, turns: sessionTurns, heldTurns, pending } = useGhost();
   const { online, connection, phase, loadingModels } = useLive();
   const design = useDesign();
   const toast = useToast();
@@ -962,7 +962,7 @@ export function AgentDetail({ slug }: { slug: string }) {
             </p>
           </>
         ) : tab === "transcript" ? (
-          <Transcript turns={turns} lineName={name} limit={TURN_LIMIT} total={detail.turn_count} />
+          <Transcript turns={live ? withoutHeld(turns, heldTurns) : turns} lineName={name} limit={TURN_LIMIT} total={detail.turn_count} />
         ) : (
           <History
             versions={versions}

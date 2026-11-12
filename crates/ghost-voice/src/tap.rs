@@ -2,7 +2,10 @@
 //!
 //! Two stages, because user text and assistant text live in different parts of the
 //! pipeline. `UserTap` sits right after STT and sees every transcription (including the
-//! ones an interceptor later takes). `AssistantTap` sits right before TTS and collects the
+//! ones an interceptor later takes): those are captions only. What the transcript store
+//! and the gate's request keep of a spoken turn is the turn, once, with its final words
+//! ([`TurnRecord`]): the aggregator says it when the turn closes (the whole-turn read's
+//! words, not the pieces it replaced), and an interceptor when it takes one. `AssistantTap` sits right before TTS and collects the
 //! model's text per response, plus anything spoken directly (`Speak`). Nothing here touches
 //! passive audio: both only exist inside a session.
 //!
@@ -43,6 +46,22 @@ impl SessionPhase {
 pub type OnTurn = Arc<dyn Fn(&'static str, String) -> BoxFuture<'static, ()> + Send + Sync>;
 pub type OnPhase = Arc<dyn Fn(SessionPhase) -> BoxFuture<'static, ()> + Send + Sync>;
 pub type OnMarker = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// A spoken turn as the record keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnRecord {
+    /// The turn closed with these words: one user turn.
+    Closed(String),
+    /// The last closed turn was reopened before anything of its answer was heard: its
+    /// words come back in the turn that goes on, and are not kept twice.
+    Reopened,
+}
+
+pub type OnTurnRecord = Arc<dyn Fn(TurnRecord) -> BoxFuture<'static, ()> + Send + Sync>;
+
+pub fn no_record() -> OnTurnRecord {
+    Arc::new(|_| Box::pin(async {}))
+}
 
 pub fn no_turn() -> OnTurn {
     Arc::new(|_, _| Box::pin(async {}))
