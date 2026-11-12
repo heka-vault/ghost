@@ -258,6 +258,13 @@ mod tests {
         // One system prompt for both: the written style rides on the turn.
         let p = build_system_prompt(&["F".into()], &Persona::ghost());
         assert!(!p.contains(TYPED_NOTE) && p.contains("one short sentence"));
+        // What reaches the model: a typed turn with the note, a spoken one without.
+        let said = |f: crate::frames::Frame| match f {
+            crate::frames::Frame::ContextAppend { messages, .. } => format!("{messages:?}"),
+            other => panic!("{other:?}"),
+        };
+        assert!(said(crate::frames::Frame::typed_text("hi")).contains("typed in the desktop app"));
+        assert!(!said(crate::frames::Frame::user_text("hi", true)).contains("typed"));
     }
 
     #[test]

@@ -1540,6 +1540,42 @@ mod asking {
         w.host.stop().await;
     }
 
+    /// ADR 0052: the same run for one agent asking another: marked as asked by that
+    /// agent, under a session recall can tell from an outside tool's, and told it cannot
+    /// hand the task on.
+    #[tokio::test]
+    async fn an_agent_asks_another_through_the_same_run() {
+        let w = asking(
+            "",
+            vec![ScriptedModel::say("Paid on the 3rd.")],
+            Duration::ZERO,
+        )
+        .await;
+        let ledger = w.convs.get("ledger").unwrap().unwrap();
+        let answer = w
+            .runner
+            .ask(&ledger, "Is October paid?", "agent:ghost")
+            .await
+            .unwrap();
+        assert_eq!(answer, "Paid on the 3rd.");
+        let turns = w.transcript("ledger");
+        assert_eq!(
+            turns[0].2,
+            "[asked by Ghost, another agent] Is October paid?"
+        );
+        assert!(turns[0].1.starts_with("run-agentask-"), "{}", turns[0].1);
+        // An outside tool's run says whose it is.
+        let w = asking("", vec![ScriptedModel::say("Yes.")], Duration::ZERO).await;
+        let ledger = w.convs.get("ledger").unwrap().unwrap();
+        w.runner
+            .ask(&ledger, "Paid?", "client:claude-code")
+            .await
+            .unwrap();
+        let session = w.transcript("ledger")[0].1.clone();
+        assert!(session.starts_with("run-ask-claude-code-"), "{session}");
+        assert_eq!(session.len(), "run-ask-claude-code-".len() + 32);
+    }
+
     #[tokio::test]
     async fn a_change_that_would_ask_inside_the_turn_is_set_aside_on_the_waiting_list() {
         // The operator's permissions ask before an agent tells them something. The client
