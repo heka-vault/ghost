@@ -25,7 +25,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, scrollPanelToTop, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
@@ -103,6 +103,11 @@ export default function SessionScreen(_: RouteProps) {
   const calls = useMemo(() => callsOf(activity, apps), [activity, apps.join(",")]);
   const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
   const { room, toggle: toggleRoom, leave: leaveRoom } = useRoomView(inSession && !onPhone);
+  // Room view fills the panel from its top; leaving it goes back to the end of the record.
+  useEffect(() => {
+    if (room) scrollPanelToTop();
+    else if (pinned.current) scrollIntoPanel(end.current, { block: "panel-end" });
+  }, [room]);
   const lastReply = [...turns].reverse().find((t) => t.role === "assistant") ?? null;
   const lastHeard = [...turns].reverse().find((t) => t.role === "user") ?? null;
   const answer = async (q: QuestionView, choice: string) => {
