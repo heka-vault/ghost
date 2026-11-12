@@ -1647,6 +1647,13 @@ pub struct ModelConnectionView {
     pub model: String,
     /// What is sent.
     pub wire_model: String,
+    /// A second model for a spoken turn's first call (ADR 0050), as saved; none, and the
+    /// one model answers everything.
+    #[serde(default)]
+    pub fast_model: Option<String>,
+    /// What is sent for it.
+    #[serde(default)]
+    pub fast_wire_model: Option<String>,
     /// The name.
     #[serde(default)]
     pub password: Option<String>,

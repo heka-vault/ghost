@@ -2339,6 +2339,20 @@
               "null"
             ]
           },
+          "fast_model": {
+            "description": "A second model for a spoken turn's first call (ADR 0050), as saved; none, and the\none model answers everything.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fast_wire_model": {
+            "description": "What is sent for it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "headers": {
             "additionalProperties": {
               "type": "string"
