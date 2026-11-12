@@ -11,7 +11,8 @@ use axum::Json;
 use axum::extract::{Path as PathArg, State};
 use chrono::{DateTime, Utc};
 use ghost_core::ghost_app::clients::{
-    ClientInfo, Clients, ClientsError, http_snippets, shown, stdio_snippets,
+    APPIMAGE_NOTE, ClientInfo, Clients, ClientsError, http_snippets, shown, stable_ghostd,
+    stdio_snippets,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -64,6 +65,11 @@ pub struct ClientCreated {
     pub claude_code: String,
     /// The config other tools read, as JSON text.
     pub config_json: String,
+    /// Why the snippets are not what was asked for, in a sentence: a command was asked for
+    /// and Ghost runs from an AppImage, so they connect by address.
+    #[serde(default)]
+    #[schema(required)]
+    pub note: Option<String>,
     pub clients: ClientsView,
 }
 
@@ -120,16 +126,16 @@ async fn create_client(
     State(deps): State<SharedDeps>,
     Body(body): Body<ClientCreate>,
 ) -> ApiResult<Json<ClientCreated>> {
+    // This process is ghostd: the command the other tool runs is this binary, unless it
+    // runs from an AppImage, whose mount goes away; then the tool connects by address.
+    let ghostd = stable_ghostd(|k| std::env::var(k).ok());
+    let command = body.command && ghostd.is_some();
+    let note = (body.command && !command).then(|| APPIMAGE_NOTE.to_string());
     let made = clients(&deps)?
-        .create(&body.name, body.command)
+        .create(&body.name, command)
         .map_err(failed)?;
-    let snippets = if body.command {
-        // This process is ghostd: the command the other tool runs is this binary.
-        let ghostd = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.to_str().map(String::from))
-            .unwrap_or_else(|| "ghostd".to_string());
-        stdio_snippets(&made.client.name, &ghostd)
+    let snippets = if let (true, Some(ghostd)) = (command, ghostd.as_deref()) {
+        stdio_snippets(&made.client.name, ghostd)
     } else {
         let address = deps.clients_listening.first().map_or(
             ghost_core::ghost_app::clients::DEFAULT_LISTEN,
@@ -142,6 +148,7 @@ async fn create_client(
         token: made.token.to_string(),
         claude_code: snippets.claude_code,
         config_json: snippets.config_json,
+        note,
         clients: clients_view(&deps)?,
     }))
 }

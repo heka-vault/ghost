@@ -73,6 +73,12 @@ For Claude Code that is `claude mcp add ghost -- ghostd mcp serve --client codex
 `ghostd mcp serve` forwards to the running Ghost. If Ghost is not up yet it waits 15
 seconds, and it carries on across a restart of Ghost.
 
+When Ghost runs from the AppImage, there is no such command: the AppImage is mounted at a
+new path each time it starts, and its launcher opens the desktop app rather than
+`ghostd`. Asked for a command there (`--command`, or the desktop's option for a tool that
+can only start one), Ghost says so and gives the address and the token instead, as for any
+other tool. A tool that can only start a command needs Ghost installed from the .deb.
+
 ## See and remove them
 
 ```

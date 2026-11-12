@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use ghost_core::envfile::read_env;
 use ghost_core::ghost_app::clients::{
-    Clients, DEFAULT_LISTEN, http_snippets, read_token, stdio_snippets,
+    APPIMAGE_NOTE, Clients, DEFAULT_LISTEN, http_snippets, read_token, stable_ghostd,
+    stdio_snippets,
 };
 use ghost_core::store::Store;
 use rmcp::RoleServer;
@@ -77,13 +78,6 @@ pub fn connect_address(cfg: &GhostdSettings) -> Option<String> {
     })
 }
 
-fn ghostd_path() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.to_str().map(String::from))
-        .unwrap_or_else(|| "ghostd".to_string())
-}
-
 /// `ghostd mcp add|list|remove`. The token is printed by `add` and nowhere else.
 pub fn mcp_cli(
     args: &[String],
@@ -91,18 +85,36 @@ pub fn mcp_cli(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    mcp_cli_in(args, cfg, out, err, &|k| std::env::var(k).ok())
+}
+
+/// [`mcp_cli`] with the environment it reads `APPIMAGE` and `APPDIR` from.
+pub fn mcp_cli_in(
+    args: &[String],
+    cfg: &GhostdSettings,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+    var: &dyn Fn(&str) -> Option<String>,
+) -> i32 {
     let fail = |err: &mut dyn Write, e: String| {
         let _ = writeln!(err, "{e}");
         1
     };
     match args.first().map(String::as_str) {
         Some("add") => {
-            let command = args.iter().any(|a| a == "--command");
+            let wants_command = args.iter().any(|a| a == "--command");
             let names: Vec<&String> = args[1..].iter().filter(|a| !a.starts_with("--")).collect();
             let [name] = names[..] else {
                 let _ = writeln!(err, "{USAGE}");
                 return 2;
             };
+            // Inside an AppImage there is no ghostd path that lasts, and its launcher does
+            // not reach `ghostd mcp serve`: the tool connects by address instead.
+            let ghostd = stable_ghostd(var);
+            let command = wants_command && ghostd.is_some();
+            if wants_command && !command {
+                let _ = writeln!(out, "{APPIMAGE_NOTE}\n");
+            }
             let made = match clients(cfg)
                 .and_then(|c| c.create(name, command).map_err(|e| e.to_string()))
             {
@@ -121,7 +133,7 @@ pub fn mcp_cli(
                         .map(|p| p.display().to_string())
                         .unwrap_or_default()
                 );
-                stdio_snippets(name, &ghostd_path())
+                stdio_snippets(name, ghostd.as_deref().unwrap_or("ghostd"))
             } else {
                 let address = connect_address(cfg).unwrap_or_else(|| DEFAULT_LISTEN.to_string());
                 if cfg.mcp_listen.trim().is_empty() {

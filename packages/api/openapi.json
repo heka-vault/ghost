@@ -742,6 +742,13 @@
             "description": "The config other tools read, as JSON text.",
             "type": "string"
           },
+          "note": {
+            "description": "Why the snippets are not what was asked for, in a sentence: a command was asked for\nand Ghost runs from an AppImage, so they connect by address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "token": {
             "description": "The client's token. Shown once.",
             "format": "password",
@@ -754,6 +761,7 @@
           "token",
           "claude_code",
           "config_json",
+          "note",
           "clients"
         ],
         "type": "object"

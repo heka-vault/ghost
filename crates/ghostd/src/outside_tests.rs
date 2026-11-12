@@ -1227,12 +1227,42 @@ async fn the_bridge_does_not_wait_on_a_token_ghost_refuses() {
 fn cli(args: &[&str], cfg: &crate::GhostdSettings) -> (i32, String, String) {
     let args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    let code = mcp_cli(&args, cfg, &mut out, &mut err);
+    let code = crate::mcp::mcp_cli_in(&args, cfg, &mut out, &mut err, &|_| None);
     (
         code,
         String::from_utf8(out).unwrap(),
         String::from_utf8(err).unwrap(),
     )
+}
+
+#[test]
+fn inside_an_appimage_a_command_client_is_given_the_address_instead() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = crate::GhostdSettings {
+        data_dir: tmp.path().join("data"),
+        db_path: tmp.path().join("data/ghost.db"),
+        ..crate::GhostdSettings::default()
+    };
+    let args: Vec<String> = ["add", "codex", "--command"]
+        .iter()
+        .map(|a| (*a).to_string())
+        .collect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let appimage = |k: &str| (k == "APPIMAGE").then(|| "/home/op/Ghost.AppImage".to_string());
+    let code = crate::mcp::mcp_cli_in(&args, &cfg, &mut out, &mut err, &appimage);
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(code, 0, "{}", String::from_utf8_lossy(&err));
+    assert!(out.contains("running from an AppImage"), "{out}");
+    // No command naming the temporary mount, and no token file: the address, with the
+    // token, as for any tool that connects to one.
+    assert!(!out.contains("mcp serve"), "{out}");
+    assert!(!out.contains(".mount_"), "{out}");
+    assert!(out.contains("--transport http ghost http://127.0.0.1:47824/mcp"), "{out}");
+    assert!(!cfg.clients_dir().join("codex.token").exists());
+    // Outside an AppImage the same command is the stdio bridge.
+    let (code, out, _) = cli(&["add", "cursor", "--command"], &cfg);
+    assert_eq!(code, 0);
+    assert!(out.contains("mcp serve --client cursor"), "{out}");
 }
 
 #[test]

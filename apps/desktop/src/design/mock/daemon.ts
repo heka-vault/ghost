@@ -1260,6 +1260,7 @@ export class MockDaemon {
         token,
         claude_code: b.command ? `claude mcp add ghost -- ghostd mcp serve --client ${name}` : `claude mcp add --transport http ghost ${url} --header "Authorization: Bearer ${token}"`,
         config_json: JSON.stringify(config, null, 2),
+        note: null,
         clients: this.clientsView(),
       };
     }

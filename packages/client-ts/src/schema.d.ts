@@ -1884,6 +1884,11 @@ export interface components {
             /** @description The config other tools read, as JSON text. */
             config_json: string;
             /**
+             * @description Why the snippets are not what was asked for, in a sentence: a command was asked for
+             *     and Ghost runs from an AppImage, so they connect by address.
+             */
+            note: string | null;
+            /**
              * Format: password
              * @description The client's token. Shown once.
              */

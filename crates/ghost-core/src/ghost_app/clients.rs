@@ -470,6 +470,36 @@ pub fn stdio_snippets(name: &str, ghostd: &str) -> Snippets {
     }
 }
 
+/// Said when a command was asked for and Ghost runs from an AppImage.
+pub const APPIMAGE_NOTE: &str = "Ghost is running from an AppImage, which is mounted at a new \
+path each time it starts, so another tool cannot be given a command to run that keeps working. \
+These connect by address instead. A tool that can only start a command needs Ghost installed \
+from the .deb.";
+
+/// Whether this process runs from an AppImage (`APPIMAGE` or `APPDIR` set by its
+/// runtime), whose `ghostd` is on a temporary mount.
+pub fn in_appimage(var: impl Fn(&str) -> Option<String>) -> bool {
+    ["APPIMAGE", "APPDIR"]
+        .iter()
+        .any(|k| var(k).is_some_and(|v| !v.trim().is_empty()))
+}
+
+/// The `ghostd` another tool can be told to run, and that will still be there tomorrow:
+/// this binary, unless it runs from an AppImage. The AppImage's launcher is the desktop
+/// app and does not hand its arguments to `ghostd`, so it is no command either; there is
+/// no stable one, and a command client connects by address instead.
+pub fn stable_ghostd(var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    if in_appimage(var) {
+        return None;
+    }
+    Some(
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(String::from))
+            .unwrap_or_else(|| "ghostd".to_string()),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,5 +689,19 @@ mod tests {
             "claude mcp add ghost -- ghostd mcp serve --client cursor"
         );
         assert!(!stdio.config_json.contains("ghost.cursor"));
+    }
+
+    #[test]
+    fn an_appimage_has_no_ghostd_a_tool_can_keep_running() {
+        let none = |_: &str| None;
+        assert!(!in_appimage(none));
+        assert!(stable_ghostd(none).is_some());
+        for key in ["APPIMAGE", "APPDIR"] {
+            let set = move |k: &str| (k == key).then(|| "/tmp/.mount_GhostAb12".to_string());
+            assert!(in_appimage(set), "{key}");
+            assert_eq!(stable_ghostd(set), None, "{key}");
+        }
+        // Set but empty is not an AppImage.
+        assert!(!in_appimage(|_: &str| Some(String::new())));
     }
 }
