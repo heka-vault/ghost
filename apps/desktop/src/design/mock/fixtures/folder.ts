@@ -42,6 +42,8 @@ const CI: WatchInfo = {
   error: null,
   open: 1,
   seen: 14,
+  made_by: null,
+  paused: false,
 };
 
 const REVIEWS: WatchInfo = {
@@ -57,6 +59,45 @@ const REVIEWS: WatchInfo = {
   error: null,
   open: 0,
   seen: 2,
+  made_by: null,
+  paused: false,
+};
+
+/** One an agent made (ADR 0052): Ledger watches the refunds it was asked to. */
+const REFUNDS: WatchInfo = {
+  name: "failed-refunds",
+  app: "stripe",
+  read: "list_refunds",
+  every_secs: 900,
+  steps: ["check"],
+  response: "tell",
+  acts_through: "ledger",
+  urgency: "notify",
+  last_run: ago(9),
+  last_ok: ago(9),
+  error: null,
+  open: 0,
+  seen: 6,
+  made_by: "agent:ledger",
+  paused: false,
+};
+
+/** Busy: an agent's watch that is paused. */
+const DEPLOY_WATCH: WatchInfo = {
+  name: "slow-deploys",
+  app: "github",
+  read: "list_deployments",
+  every_secs: 600,
+  steps: ["check"],
+  response: "record",
+  urgency: "digest",
+  last_run: ago(60 * 5),
+  last_ok: ago(60 * 5),
+  error: null,
+  open: 0,
+  seen: 3,
+  made_by: "agent:ghost",
+  paused: true,
 };
 
 /** Busy: a watch whose app stopped answering. */
@@ -73,6 +114,8 @@ const CALENDAR: WatchInfo = {
   error: "the calendar app isn’t connected (sign in again under Apps)",
   open: 0,
   seen: 0,
+  made_by: null,
+  paused: false,
 };
 
 const JOBS: HookInfo = {
@@ -116,7 +159,7 @@ export function watching(s: Scenario): WatchingView {
   if (s.data === "empty") return { watches: [], hooks: [], listening: [], problems: [] };
   if (s.data === "busy") {
     return {
-      watches: [CI, REVIEWS, CALENDAR],
+      watches: [CI, REVIEWS, CALENDAR, REFUNDS, DEPLOY_WATCH],
       hooks: [JOBS, DEPLOYS, STRIPE],
       listening: ["100.64.0.2:8790"],
       problems: [
@@ -125,7 +168,7 @@ export function watching(s: Scenario): WatchingView {
       ],
     };
   }
-  return { watches: [CI, REVIEWS], hooks: [JOBS, DEPLOYS], listening: ["127.0.0.1:8790"], problems: [] };
+  return { watches: [CI, REVIEWS, REFUNDS], hooks: [JOBS, DEPLOYS], listening: ["127.0.0.1:8790"], problems: [] };
 }
 
 /** In `minutes` from now, for a schedule's next run. */

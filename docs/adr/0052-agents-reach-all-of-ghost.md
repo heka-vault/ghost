@@ -127,8 +127,6 @@ Python and shell), never executable.
 
 ## What is not built
 
-- The desktop shows a watch an agent made like any other; there is no "made by" column or a
-  control for `paused`.
 - `app_connect` does not offer a way for an agent to start the operator's sign-in in their
   browser; the operator presses Sign in on the Apps screen.
 - (Built since, on `feat/polish-1`: the retention changes proposed in ADR 0041, and the

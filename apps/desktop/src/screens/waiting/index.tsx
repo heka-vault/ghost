@@ -9,11 +9,12 @@
  */
 import type { GhostClient, QuestionView, WaitingItemView, WaitingView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { BellOff, Check, ExternalLink, Eye, GitPullRequestArrow, Inbox, MessageCircleQuestion, ShieldAlert, Webhook } from "lucide-react";
+import { BellOff, CalendarClock, Check, ExternalLink, Eye, GitPullRequestArrow, Inbox, MessageCircleQuestion, PlugZap, ShieldAlert, Webhook } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
-import { Badge, Button, Card, EmptyState, IconButton, Input, ListRow, Menu, Notice, Page, Skeleton, errorText, relativeTime, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, IconButton, Input, ListRow, Menu, Notice, Page, Skeleton, agentName, errorText, relativeTime, useToast } from "../../ui";
+import { toolTitle } from "../settings/tools";
 import "./waiting.css";
 
 const STATE: Record<WaitingItemView["state"], { label: string; tone: "warn" | "info" | "neutral" }> = {
@@ -23,15 +24,28 @@ const STATE: Record<WaitingItemView["state"], { label: string; tone: "warn" | "i
   snoozed: { label: "Later", tone: "neutral" },
 };
 
-/** Where an item came from, in plain words: a watch, a webhook, a change, an agent, an outside tool, an app, Ghost itself. */
+/**
+ * Where an item came from, in plain words: a watch, a webhook, a change, an agent, an outside
+ * tool, an app, Ghost itself. An outside tool says it is one (ADR 0048), and what an agent
+ * did on its own says so too (ADR 0047): its scheduled run, its run for a watch, or a
+ * question it asked from one, whose answer starts one more run.
+ */
 export function sourceLabel(item: WaitingItemView): string {
   const [kind, rest] = item.source.includes(":") ? item.source.split(/:(.*)/s, 2) : [item.source, ""];
   if (kind === "watch") return `Watch ${rest}`;
   if (kind === "hook") return `Webhook ${rest}`;
   if (kind === "gate") return "A change";
-  if (item.question && item.question.kind === "question") return `Asked by ${item.question.asked_by}`;
-  if (kind === "agent") return `Agent ${rest}`;
-  if (kind === "client") return `Outside tool ${rest}`;
+  const q = item.question && item.question.kind === "question" ? item.question : null;
+  if (kind === "client") return q ? `Asked by ${q.asked_by}, an outside tool` : `From ${toolTitle(rest)}, an outside tool`;
+  if (q) return q.in_run ? `Asked by ${q.asked_by} in a scheduled run` : `Asked by ${q.asked_by}`;
+  if (kind === "agent") {
+    const who = agentName(rest);
+    // A run's answer is kept under `agent:<slug>:schedule:<id>` or `agent:<slug>:act:<hash>`.
+    const after = item.key.startsWith(`${item.source}:`) ? item.key.slice(item.source.length + 1) : "";
+    if (after.startsWith("schedule:")) return `${who}’s scheduled run`;
+    if (after.startsWith("act:")) return `${who}’s run for a watch`;
+    return `Agent ${who}`;
+  }
   if (kind === "app") return `App ${rest}`;
   return "Ghost";
 }
@@ -59,6 +73,8 @@ function SourceIcon({ item }: { item: WaitingItemView }) {
   if (item.question) return <MessageCircleQuestion aria-hidden />;
   if (item.source.startsWith("hook:")) return <Webhook aria-hidden />;
   if (item.source.startsWith("watch:")) return <Eye aria-hidden />;
+  if (item.source.startsWith("client:")) return <PlugZap aria-hidden />;
+  if (item.source.startsWith("agent:") && /^agent:[^:]+:(schedule|act):/.test(item.key)) return <CalendarClock aria-hidden />;
   return <ShieldAlert aria-hidden />;
 }
 

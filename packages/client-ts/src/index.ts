@@ -33,6 +33,7 @@ export type ReadToolInfo = Schemas["ReadToolInfo"];
 /** A connected app (ADR 0034): how it is reached, whether it is up, what each tool may do. */
 export type AppView = Schemas["AppView"];
 export type AppAction = Schemas["AppAction"];
+export type AppLimits = Schemas["AppLimits"];
 export type AppConnect = Schemas["AppConnect"];
 export type AppConnectResult = Schemas["AppConnectResult"];
 export type CatalogPage = Schemas["CatalogPage"];
@@ -288,6 +289,11 @@ export class GhostClient {
   disconnectApp(name: string) {
     return unwrap(this.api.DELETE("/apps/{name}", { params: { path: { name } } }));
   }
+  /** An app's own limits and pinned tools in apps.json (ADR 0046); null is Ghost's default.
+   *  The app connects again with them. */
+  setAppLimits(name: string, body: Schemas["AppLimitsUpdate"]) {
+    return unwrap(this.api.PUT("/apps/{name}/limits", { params: { path: { name } }, body }));
+  }
   permissions() {
     return unwrap(this.api.GET("/permissions"));
   }
@@ -439,6 +445,17 @@ export class GhostClient {
    *  addresses, and what is wrong in watches.json, hooks.json or left from an older layout. */
   watches() {
     return unwrap(this.api.GET("/watches"));
+  }
+  /** Pause a watch an agent made (ADR 0052); the operator's own are edited in watches.json. */
+  pauseWatch(name: string) {
+    return unwrap(this.api.POST("/watches/{name}/pause", { params: { path: { name } } }));
+  }
+  resumeWatch(name: string) {
+    return unwrap(this.api.POST("/watches/{name}/resume", { params: { path: { name } } }));
+  }
+  /** Remove a watch an agent made. */
+  removeWatch(name: string) {
+    return unwrap(this.api.DELETE("/watches/{name}", { params: { path: { name } } }));
   }
 
   // --- schedules (ADR 0047) ------------------------------------------------------------------

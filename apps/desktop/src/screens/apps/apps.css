@@ -170,3 +170,10 @@
 .apps-code { font-variant-ligatures: none; overflow-wrap: anywhere; }
 .apps-whole-note { margin: var(--space-3) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
 .apps-whole-note .t-mono { font-size: var(--text-sm); }
+
+/* An app's limits (ADR 0046): the pinned tools, a checkbox each, inside the limits card. */
+.apps-pinned { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); }
+.apps-pinned__label { margin: 0; color: var(--text-1); font-weight: 500; }
+.apps-pinned__key { margin-left: var(--space-2); font-weight: 400; }
+.apps-pinned__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-2) var(--space-4); margin-top: var(--space-2); }
+.apps-limit { padding: var(--space-3) var(--space-4); }

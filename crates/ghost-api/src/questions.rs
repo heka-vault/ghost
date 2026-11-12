@@ -57,6 +57,12 @@ pub fn question_view(q: &Question) -> QuestionView {
         answered_via: q.answered_via.clone(),
         answered_at: q.answered_at,
         change_id: q.change.clone(),
+        // A scheduled run's or a watch's act, not an asked turn (`run-ask-`, `run-agentask-`).
+        in_run: q.asked_in.as_deref().is_some_and(|s| {
+            ghost_core::schedules::is_run_session(s)
+                && !s.starts_with("run-ask-")
+                && !s.starts_with("run-agentask-")
+        }),
     }
 }
 

@@ -1,6 +1,6 @@
 # 0047: Agents work on a schedule, with nobody there
 
-- **Status:** accepted (decided 2026-11-11; built on the `feat/schedules` branch: the run with nobody there, the scheduler and its table, a watch's `act`, the two tools on Ghost's own app, the control API's `/schedules` and `/runs`, and the desktop's Watching screen; a run keeps up with the apps as ADR 0046 has a session do)
+- **Status:** accepted (decided 2026-11-11; built on the `feat/schedules` branch: the run with nobody there, the scheduler and its table, a watch's `act`, the two tools on Ghost's own app, the control API's `/schedules` and `/runs`, and the desktop's Watching screen (2026-11-12, `feat/polish-1`: editing a schedule, stopping a run, and the add form's hours, check, urgency, time zone and skills); a run keeps up with the apps as ADR 0046 has a session do)
 - **Date:** 2026-11-11
 - **Settles:** issue #10 (routines), and the `act` response ADR 0029 left proposed
 - **Amends:** ADR 0028 and ADR 0029 (a watch may act), ADR 0030 (a change at `ask` from a

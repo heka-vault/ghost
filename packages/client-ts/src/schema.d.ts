@@ -2845,6 +2845,11 @@ export interface components {
             detail?: string | null;
             /** Format: date-time */
             expires_at: string;
+            /**
+             * @description Asked from a scheduled run or a watch's run, with nobody there (ADR 0047): its answer
+             *     starts one more run of the agent that asked.
+             */
+            in_run: boolean;
             /** @description The waiting-list key: `question:<id>`, or `change:<proposal>` for a change. */
             key: string;
             /** @enum {string} */

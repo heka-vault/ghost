@@ -782,6 +782,7 @@ mod tests {
             answered_via: answer.map(|_| via.to_string()),
             answered_at: None,
             change_id: None,
+            in_run: false,
         }
     }
 

@@ -3649,6 +3649,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "in_run": {
+            "description": "Asked from a scheduled run or a watch's run, with nobody there (ADR 0047): its answer\nstarts one more run of the agent that asked.",
+            "type": "boolean"
+          },
           "key": {
             "description": "The waiting-list key: `question:<id>`, or `change:<proposal>` for a change.",
             "type": "string"
@@ -3697,7 +3701,8 @@
           "urgency",
           "asked_at",
           "expires_at",
-          "state"
+          "state",
+          "in_run"
         ],
         "type": "object"
       },

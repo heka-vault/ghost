@@ -403,6 +403,11 @@ pub struct QuestionView {
     /// The change's id, for a change.
     #[serde(default)]
     pub change_id: Option<String>,
+    /// Asked from a scheduled run or a watch's run, with nobody there (ADR 0047): its answer
+    /// starts one more run of the agent that asked.
+    #[serde(default)]
+    #[schema(required)]
+    pub in_run: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]

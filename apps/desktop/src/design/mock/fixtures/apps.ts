@@ -5,7 +5,7 @@
  * mock works out each tool's level from the permissions, as the daemon does, so the screens
  * show the same truth before and after a change.
  */
-import type { AppView, CatalogEntryView, CatalogOption } from "@ghost/client-ts";
+import type { AppLimits, AppView, CatalogEntryView, CatalogOption } from "@ghost/client-ts";
 
 import type { Scenario } from "../scenarios";
 
@@ -17,8 +17,9 @@ export interface AppTool {
 }
 
 export interface AppFixture {
-  /** The view without `actions`; the mock fills those from `tools` and the permissions. */
-  view: Omit<AppView, "actions">;
+  /** The view without `actions`; the mock fills those from `tools` and the permissions,
+   *  and `limits` with Ghost's defaults when a fixture leaves them out. */
+  view: Omit<AppView, "actions" | "limits"> & { limits?: AppLimits };
   /** Every tool the app offers once it is connected. */
   tools: AppTool[];
 }
@@ -504,3 +505,14 @@ export const CATALOG: CatalogSeed[] = [
     options: [pkg("pypi", "mcparmory-github")],
   },
 ];
+
+/** Ghost's defaults for an app's own limits (ADR 0046), as GET /apps/{name} reports them. */
+export const DEFAULT_LIMITS: AppLimits = {
+  timeout: null,
+  connect_timeout: null,
+  result_chars: null,
+  pinned: [],
+  default_timeout: 300,
+  default_connect_timeout: 60,
+  default_result_chars: 24000,
+};

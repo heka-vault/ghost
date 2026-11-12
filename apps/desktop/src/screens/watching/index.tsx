@@ -7,16 +7,19 @@
  *                       verified, its events, on or off and why, what it took and refused),
  *                       whether the webhook listener is on, and what is wrong in the files.
  *   #/departments/...   the old address (ADR 0024); it lands here.
- * The folder is the editor: Open folder reveals it; the screen never writes either file.
+ * The folder is the editor: Open folder reveals it. The screen writes one thing there: a
+ * watch an agent made (ADR 0052) shows who made it and can be paused, resumed or removed
+ * from its row, one entry of watches.json at a time; the operator's own and hooks.json
+ * stay the file's.
  */
 import type { HookInfo, WatchInfo, WatchingView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { CloudOff, Eye, FolderOpen, Webhook } from "lucide-react";
+import { CloudOff, Eye, FolderOpen, MoreHorizontal, Trash2, Webhook } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
 import { navigate, usePath } from "../../app/router";
-import { Badge, Button, Card, EmptyState, ListRow, Notice, Page, Section, Skeleton, agentName, errorText, relativeTime, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, IconButton, ListRow, Menu, Notice, Page, Section, Skeleton, Switch, agentName, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
 import { CONFIG_DIR, RESPONSE, URGENCY, VERIFY, count, everyWords, folderOf, listWords, reasonWords, revealFolder, stepWords, sumOf } from "./model";
 import { Schedules } from "./Schedules";
 import "./watching.css";
@@ -29,8 +32,13 @@ export default function WatchingScreen(_: RouteProps) {
   }, [path]);
 
   const { client, waitingVersion } = useGhost();
+  const { online } = useLive();
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [view, setView] = useState<WatchingView | null>(null);
+  /** The agent's watch a write is going for, and what refused the last one. */
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   /** Ghost's folder, from where its AGENTS.md is: the one path the daemon reports for it. */
   const [folder, setFolder] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -58,6 +66,30 @@ export default function WatchingScreen(_: RouteProps) {
   };
 
   const empty = view != null && view.watches.length === 0 && view.hooks.length === 0;
+
+  /** One write to an agent's watch: the row is busy while it goes; a refusal is said above. */
+  const act = async (w: WatchInfo, what: string, fn: () => Promise<WatchingView>) => {
+    if (busy) return;
+    setBusy(w.name);
+    setFailed(null);
+    try {
+      setView(await fn());
+    } catch (e) {
+      setFailed(`Ghost couldn’t ${what} ${w.name}: ${errorText(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const toggle = (w: WatchInfo, on: boolean) => act(w, on ? "resume" : "pause", () => (on ? client.resumeWatch(w.name) : client.pauseWatch(w.name)));
+  const remove = async (w: WatchInfo) => {
+    const ok = await confirm({
+      title: `Remove ${w.name}?`,
+      description: `It stops looking, and its entry leaves watches.json. ${agentName(madeBySlug(w))} can set it up again only with your okay.`,
+      confirmLabel: `Remove ${w.name}`,
+      tone: "danger",
+    });
+    if (ok) await act(w, "remove", () => client.removeWatch(w.name));
+  };
 
   return (
     <Page
@@ -162,11 +194,26 @@ export default function WatchingScreen(_: RouteProps) {
                     />
                   </Card>
                 ) : (
-                  <Card list>
-                    {view.watches.map((w) => (
-                      <WatchRow key={w.name} w={w} />
-                    ))}
-                  </Card>
+                  <>
+                    {failed && (
+                      <Notice tone="danger" title="That didn’t happen" onDismiss={() => setFailed(null)} className="wat-notice">
+                        {failed}
+                      </Notice>
+                    )}
+                    <Card list>
+                      {view.watches.map((w) => (
+                        <WatchRow
+                          key={w.name}
+                          w={w}
+                          busy={busy === w.name}
+                          online={online}
+                          reserve={view.watches.some((x) => x.made_by != null)}
+                          onToggle={(on) => void toggle(w, on)}
+                          onRemove={() => void remove(w)}
+                        />
+                      ))}
+                    </Card>
+                  </>
                 )}
               </Section>
 
@@ -217,17 +264,36 @@ export default function WatchingScreen(_: RouteProps) {
           )}
 
           <p className="wat-files t-small t-3">
-            The files: <span className="t-mono">{CONFIG_DIR}/watches.json</span> and <span className="t-mono">hooks.json</span>. They are yours; Ghost reads them and never writes them.
+            The files: <span className="t-mono">{CONFIG_DIR}/watches.json</span> and <span className="t-mono">hooks.json</span>. They are yours. An agent may add a watch of its own with your okay, marked with who made it; Ghost never changes your own entries or the webhooks.
           </p>
         </>
       )}
       </div>
+      {confirmDialog}
     </Page>
   );
 }
 
-function WatchRow({ w }: { w: WatchInfo }) {
-  const state = w.error ? (
+/** The agent that made a watch, from `agent:<slug>`. */
+const madeBySlug = (w: WatchInfo) => (w.made_by ?? "").replace(/^agent:/, "");
+
+interface WatchRowProps {
+  w: WatchInfo;
+  busy: boolean;
+  online: boolean;
+  /** Some row has the controls: keep this one's counts in the same column. */
+  reserve: boolean;
+  onToggle: (on: boolean) => void;
+  onRemove: () => void;
+}
+
+function WatchRow({ w, busy, online, reserve, onToggle, onRemove }: WatchRowProps) {
+  const agents = w.made_by != null;
+  const state = w.paused ? (
+    <Badge tone="neutral" dot size="sm">
+      Paused
+    </Badge>
+  ) : w.error ? (
     <Badge tone="danger" dot size="sm">
       Can’t read
     </Badge>
@@ -263,6 +329,7 @@ function WatchRow({ w }: { w: WatchInfo }) {
             {RESPONSE[w.response]}
             {w.response === "tell" ? ` ${URGENCY[w.urgency]}` : ""}
             {w.acts_through ? `, and ${agentName(w.acts_through)} looks into each new one` : ""}
+            {agents ? ` · set up by ${agentName(madeBySlug(w))}` : ""}
           </span>
           {w.error && (
             <span className="wat-error" data-user-content>
@@ -272,14 +339,33 @@ function WatchRow({ w }: { w: WatchInfo }) {
         </span>
       }
       trailing={
-        <span className="wat-end">
-          <span className="wat-end__counts t-num">
-            {w.open} open · {w.seen} seen
+        <span className="wat-sched-end">
+          <span className="wat-end">
+            <span className="wat-end__counts t-num">
+              {w.open} open · {w.seen} seen
+            </span>
+            <span className="wat-end__when">
+              {w.paused ? "not looking" : w.last_run ? `looked ${relativeTime(w.last_run)}` : "no look yet"}
+              {!w.paused && w.error && w.last_ok ? ` · last worked ${relativeTime(w.last_ok)}` : !w.paused && w.error && w.last_run ? " · never worked" : ""}
+            </span>
           </span>
-          <span className="wat-end__when">
-            {w.last_run ? `looked ${relativeTime(w.last_run)}` : "no look yet"}
-            {w.error && w.last_ok ? ` · last worked ${relativeTime(w.last_ok)}` : w.error && w.last_run ? " · never worked" : ""}
-          </span>
+          {!agents && reserve && (
+            // The controls' room, unseen and out of reach, so every row's counts line up.
+            <span className="wat-hold" aria-hidden inert>
+              <Switch checked={false} onChange={() => {}} size="sm" aria-label="" />
+              <IconButton label="" icon={<MoreHorizontal />} variant="ghost" size="sm" />
+            </span>
+          )}
+          {agents && (
+            <>
+              <Switch checked={!w.paused} onChange={onToggle} disabled={busy || !online} size="sm" aria-label={`Keep ${w.name} looking`} />
+              <Menu
+                align="end"
+                trigger={<IconButton label={`More for ${w.name}`} icon={<MoreHorizontal />} variant="ghost" size="sm" />}
+                items={[{ label: "Remove…", icon: <Trash2 />, danger: true, onSelect: onRemove, disabled: busy || !online }]}
+              />
+            </>
+          )}
         </span>
       }
     />

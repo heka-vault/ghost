@@ -34,6 +34,14 @@
 .wat-form { display: flex; flex-direction: column; gap: var(--space-4); }
 .wat-when { display: flex; align-items: center; gap: var(--space-3); }
 .wat-when > :last-child { flex: 1 1 auto; min-width: 0; }
+/* Under More: a field's label and control space from the disclosure's summary. */
+.wat-more { padding-top: var(--space-3); }
+/* Two controls on one line (the hours, the check's app and read), each taking half. */
+.wat-pair { display: flex; align-items: center; gap: var(--space-2); }
+.wat-pair > :not(span) { flex: 1 1 0; min-width: 0; }
+/* The skills to start with: a checkbox each, stacked. */
+.wat-skills { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.wat-skills > legend { padding: 0; margin-bottom: var(--space-2); color: var(--text-1); font-weight: 500; }
 
 /* What a schedule's runs said: one block per run, hairlines between. */
 .wat-runs { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
@@ -41,3 +49,4 @@
 .wat-run + .wat-run { border-top: 1px solid var(--border-subtle); }
 .wat-run__head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .wat-run__answer { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-1); }
+.wat-hold { display: inline-flex; gap: var(--space-3); visibility: hidden; }
