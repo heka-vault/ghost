@@ -1063,6 +1063,143 @@ in app, and the Redis versus Postgres call for the session cache.";
         assert!(pre.holding());
     }
 
+    // --- a window at a time (ADR 0053) ---------------------------------------------
+
+    /// Makes each piece in `windows` windows of 100 samples, `each` apart, and counts the
+    /// windows made and the renders stopped.
+    struct Windowed {
+        windows: usize,
+        each: std::time::Duration,
+        made: Arc<Mutex<(Vec<String>, usize, usize)>>,
+    }
+
+    impl Synth for Windowed {
+        fn voices(&self) -> Vec<String> {
+            vec!["af_heart".into()]
+        }
+        fn synthesize(&mut self, _: &str, _: &str, _: f32) -> ghost_infer::Result<Vec<i16>> {
+            Ok(vec![1; 100 * self.windows])
+        }
+        fn render(
+            &mut self,
+            text: &str,
+            _: &str,
+            _: f32,
+            emit: &mut dyn FnMut(Vec<i16>) -> bool,
+        ) -> ghost_infer::Result<()> {
+            self.made.lock().unwrap().0.push(text.to_string());
+            for _ in 0..self.windows {
+                std::thread::sleep(self.each);
+                self.made.lock().unwrap().1 += 1;
+                if !emit(vec![1; 100]) {
+                    self.made.lock().unwrap().2 += 1;
+                    return Ok(());
+                }
+            }
+            Ok(())
+        }
+    }
+
+    type Made = Arc<Mutex<(Vec<String>, usize, usize)>>;
+
+    fn windowed(windows: usize, each_ms: u64) -> (SharedSynth, Made) {
+        let made = Arc::new(Mutex::new((Vec::new(), 0, 0)));
+        let synth: SharedSynth = Arc::new(Mutex::new(Windowed {
+            windows,
+            each: std::time::Duration::from_millis(each_ms),
+            made: made.clone(),
+        }));
+        (synth, made)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_each_window_is_its_own_frame_and_the_first_comes_before_the_last_is_made() {
+        let (synth, made) = windowed(5, 30);
+        let announced = Arc::new(Mutex::new(Vec::new()));
+        let a = announced.clone();
+        let mut tts = KokoroTts::new(synth, TtsSettings::default(), Some(4))
+            .unwrap()
+            .with_on_say(Arc::new(move |t: &str| {
+                a.lock().unwrap().push(t.to_string())
+            }));
+        let (out, mut rx) = Out::capture();
+        let speaking = tokio::spawn(async move {
+            tts.process(Frame::Speak("Closed it.".into()), Direction::Down, &out)
+                .await;
+        });
+        // The first window's frame is out while the render is still going.
+        let first = loop {
+            if let Frame::TtsAudio { audio, .. } = rx.recv().await.expect("a frame").frame {
+                break audio;
+            }
+        };
+        assert_eq!(first.samples.len(), 100);
+        assert!(made.lock().unwrap().1 < 5, "all windows made before the first frame");
+        // The echo filter heard the words before any audio existed.
+        assert_eq!(*announced.lock().unwrap(), vec!["Closed it."]);
+        speaking.await.unwrap();
+        let rest = drain(&mut rx)
+            .await
+            .iter()
+            .filter(|f| matches!(f, Frame::TtsAudio { .. }))
+            .count();
+        assert_eq!(rest, 4);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_a_cancelled_turn_stops_the_render_at_its_next_window() {
+        let (synth, made) = windowed(10, 20);
+        let turns = TurnControl::new(tokio_util::sync::CancellationToken::new());
+        let mut tts = KokoroTts::new(synth, TtsSettings::default(), Some(4))
+            .unwrap()
+            .with_turns(turns.clone());
+        let (out, _rx) = Out::capture();
+        let t = turns.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(70)).await;
+            t.current().cancel(); // the barge-in
+        });
+        tts.process(Frame::Speak("Closed it.".into()), Direction::Down, &out)
+            .await;
+        let (_, windows, stopped) = made.lock().unwrap().clone();
+        assert_eq!(stopped, 1, "the render ran on");
+        assert!(windows < 10, "{windows}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_a_clause_rendered_ahead_a_window_at_a_time_plays_and_a_dropped_one_stops() {
+        let (synth, made) = windowed(4, 20);
+        let counted = Arc::new(Counted::default());
+        let pre = Prerender::new(
+            synth.clone(),
+            TtsSettings::default(),
+            Some(4),
+            Some(counted.clone()),
+        );
+        let mut tts = KokoroTts::new(synth.clone(), TtsSettings::default(), Some(4))
+            .unwrap()
+            .with_prerender(Some(pre.clone()));
+        pre.begin();
+        pre.text("Closed it.");
+        pre.end();
+        assert!(pre.holding());
+        // Released while it is still being made: every window plays, none made twice.
+        assert_eq!(speaks(&mut tts, "Closed it.").await, 4);
+        assert_eq!(made.lock().unwrap().0, vec!["Closed it."]);
+        assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "used"]);
+        // Withdrawn while it is being made: the render stops at its next window.
+        pre.begin();
+        pre.text("Withdrawn, as it happens.");
+        pre.end();
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        pre.cancel();
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        while made.lock().unwrap().2 == 0 {
+            assert!(Instant::now() < deadline, "the dropped clause kept rendering");
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
     // --- each session's TTS over the one loaded model ------------------------------
 
     async fn speak(tts: &mut KokoroTts, then_cancel: bool) -> usize {

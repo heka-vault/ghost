@@ -1126,6 +1126,41 @@ pub fn default_start_in() -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_a_windowed_voice_with_its_files_missing_falls_back_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = |stream: &str| {
+            let d = dir.path().to_string_lossy().to_string();
+            let stream = stream.to_string();
+            VoiceSettings::from_vars(move |name| match name {
+                "GHOST_TTS_STREAM" => Some(stream.clone()),
+                "GHOST_TTS_STREAM_DIR" => Some(d.clone()),
+                _ => None,
+            })
+            .unwrap()
+        };
+        // The default: no halves, nothing to say.
+        let (halves, problem) = windowed_halves(&settings("whole"));
+        assert!(halves.is_none() && problem.is_none());
+        // Asked for and missing: Kokoro whole, and a problem naming the files and the fix.
+        let (halves, problem) = windowed_halves(&settings("windowed"));
+        assert!(halves.is_none());
+        let problem = problem.expect("a problem for the waiting list");
+        assert!(problem.contains("kokoro-encoder.onnx"), "{problem}");
+        assert!(problem.contains("scripts/models.sh kokoro-windowed"), "{problem}");
+        assert!(problem.contains("whole render"), "{problem}");
+        // Present but not a model: the same fallback, never a panic.
+        std::fs::write(dir.path().join("kokoro-encoder.onnx"), b"not a model").unwrap();
+        std::fs::write(dir.path().join("kokoro-decoder.onnx"), b"not a model").unwrap();
+        let (halves, problem) = windowed_halves(&settings("windowed"));
+        assert!(halves.is_none());
+        assert!(problem.unwrap().contains("did not load"));
+        // An unknown value is a settings error, as an unknown engine is.
+        assert!(
+            VoiceSettings::from_vars(|n| (n == "GHOST_TTS_STREAM").then(|| "fast".into())).is_err()
+        );
+    }
+
     #[tokio::test]
     async fn test_session_end_runs_after_run_however_it_ended() {
         // The hold timer's cancel hangs on run(): it must run when the pipeline returns on
