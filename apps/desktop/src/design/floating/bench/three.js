@@ -1,0 +1,20 @@
+import * as THREE from "three"; import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js"; import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { VERT, FRAG } from "../field.ts"; import { inputs, stats, RES } from "./scene.js";
+const bloom = new URLSearchParams(location.search).get("bloom") === "1";
+const renderer = new THREE.WebGLRenderer({ alpha: true, premultipliedAlpha: true, antialias: false });
+renderer.setPixelRatio(RES); renderer.setSize(innerWidth, innerHeight); renderer.setClearColor(0, 0); document.body.appendChild(renderer.domElement);
+const strip = (s) => s.replace("#version 300 es", "").replace("out vec4 outColor;", "").replace(/outColor/g, "pc_fragColor").replace("precision highp float;", "");
+const uniforms = { uRes: { value: new THREE.Vector2(renderer.domElement.width, renderer.domElement.height) }, uScale: { value: RES } };
+for (const [k, v] of Object.entries(inputs(0, innerWidth, innerHeight))) uniforms[k] = { value: v };
+const mat = new THREE.RawShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: VERT.replace("#version 300 es", ""), fragmentShader: FRAG.replace("#version 300 es", ""), uniforms, transparent: true, depthTest: false });
+const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(9), 3));
+const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(mesh); const cam = new THREE.Camera();
+let composer = null;
+if (bloom) { composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, cam)); composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth * RES, innerHeight * RES), 0.9, 0.6, 0.1)); composer.addPass(new OutputPass()); }
+const tick = stats(bloom ? "three+bloom" : "three");
+const loop = (now) => { for (const [k, v] of Object.entries(inputs(now / 1000, innerWidth, innerHeight))) uniforms[k].value = v;
+  composer ? composer.render() : renderer.render(scene, cam); tick(now); requestAnimationFrame(loop); };
+requestAnimationFrame(loop);

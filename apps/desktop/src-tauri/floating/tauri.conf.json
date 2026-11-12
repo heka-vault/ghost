@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ghost-floating-spike",
+  "version": "2026.10.0",
+  "identifier": "dev.heka.ghost.floating",
+  "build": {
+    "devUrl": "http://localhost:1431",
+    "frontendDist": "../../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "../icons/32x32.png",
+      "../icons/128x128.png",
+      "../icons/icon.png"
+    ]
+  }
+}

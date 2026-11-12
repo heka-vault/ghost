@@ -34,3 +34,15 @@ rustix = { workspace = true, features = ["process"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# SPIKE (docs/design/floating-2026-11.md): Ghost as a floating surface over the desktop, a
+# separate example binary with its own config. Off by default; the app above is unchanged.
+[features]
+floating = ["dep:gtk"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+
+[[example]]
+name = "floating"
+required-features = ["floating"]
