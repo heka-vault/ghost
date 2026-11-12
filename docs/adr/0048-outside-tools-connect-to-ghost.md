@@ -126,7 +126,13 @@ is refused). It goes through the listener, not a socket of its own: one way in, 
 token, the lockout, the budget and the audit are the same for every client, where a peer
 on a socket would only be "this user". It keeps trying for 15 seconds a daemon that is not
 up yet, says the client's hello again to one that restarted, and answers a clear error
-when there is none or the token is refused.
+when there is none or the token is refused. A send that failed part way is sent again, so
+every tool call it forwards carries a key of its own (`_meta` `ghost/idempotency-key`,
+added 2026-11-12) and the listener answers a change sent again with the same key, from the
+same client, within five minutes, with the first call's result: `say` is never said twice
+(`ghost_app::outside::Once`, the pattern of the phone's `id`s). Inside an AppImage there is
+no `ghostd` a tool can keep running, so a command client is given the address instead
+(`clients::stable_ghostd`).
 
 ## What is and is not reachable
 

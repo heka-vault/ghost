@@ -23,7 +23,7 @@ use rmcp::{RoleClient, ServiceExt};
 use serde_json::Map;
 
 use super::*;
-use crate::mcp::{Target, bridge, mcp_cli};
+use crate::mcp::{Target, bridge, with_idempotency_key};
 
 type Client = RunningService<RoleClient, ()>;
 
@@ -1220,6 +1220,85 @@ async fn the_bridge_does_not_wait_on_a_token_ghost_refuses() {
     assert!(e.contains("refused this client's token"), "{e}");
     assert!(began.elapsed() < Duration::from_secs(5));
     task.abort();
+}
+
+/// The bridge resends a call whose send failed part way, and the daemon may have run it:
+/// the key it puts on the call makes the resend answer with the first call's result.
+#[tokio::test]
+async fn a_change_sent_again_with_its_key_is_made_once() {
+    use ghost_core::ghost_app::outside::IDEMPOTENCY_KEY;
+    let w = world("").await;
+    let c = connect(&w.url, &w.token("codex"), ClientLifecycleMode::Initialize)
+        .await
+        .unwrap();
+    let keyed = |key: &str, title: &str| {
+        let mut meta = rmcp::model::RequestMetaObject::default();
+        meta.insert(IDEMPOTENCY_KEY.to_string(), json!(key));
+        let mut p = CallToolRequestParams::new("notify")
+            .with_arguments(json!({"title": title}).as_object().cloned().unwrap());
+        p.meta = Some(meta);
+        p
+    };
+    let text = |r: rmcp::model::CallToolResult| -> String {
+        r.content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect()
+    };
+    let first = text(c.call_tool(keyed("k-1", "the build finished")).await.unwrap());
+    let again = text(c.call_tool(keyed("k-1", "the build finished")).await.unwrap());
+    assert_eq!(first, again);
+    let notified = |w: &World| {
+        let (rows, _) = w.store.list_proposals(&ProposalQuery::page(50, 0)).unwrap();
+        rows.iter().filter(|p| p.operation == "notify").count()
+    };
+    assert_eq!(notified(&w), 1, "made once");
+    // Another key, or none, is another call.
+    c.call_tool(keyed("k-2", "the build finished")).await.unwrap();
+    assert_eq!(notified(&w), 2);
+    call(&c, "notify", json!({"title": "and again"})).await.unwrap();
+    assert_eq!(notified(&w), 3);
+    // Another client's same key is its own.
+    let other = connect(&w.url, &w.token("cursor"), ClientLifecycleMode::Initialize)
+        .await
+        .unwrap();
+    other
+        .call_tool(keyed("k-1", "the build finished"))
+        .await
+        .unwrap();
+    assert_eq!(notified(&w), 4);
+    let _ = c.cancel().await;
+    let _ = other.cancel().await;
+    w.host.stop().await;
+}
+
+#[test]
+fn the_bridge_keys_every_tool_call_once_and_keeps_a_clients_own_key() {
+    let call: rmcp::model::ClientJsonRpcMessage = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+        "params": {"name": "say", "arguments": {"text": "hi"}}
+    }))
+    .unwrap();
+    let keyed = with_idempotency_key(call);
+    let key = |m: &rmcp::model::ClientJsonRpcMessage| {
+        serde_json::to_value(m).unwrap()["params"]["_meta"]["ghost/idempotency-key"].clone()
+    };
+    let k = key(&keyed);
+    assert!(k.as_str().is_some_and(|s| s.len() == 32), "{k}");
+    // A resend is the same message: the same key. Keying it again changes nothing.
+    assert_eq!(key(&with_idempotency_key(keyed.clone())), k);
+    // A key the client chose is kept; a message that is not a tool call is left alone.
+    let own: rmcp::model::ClientJsonRpcMessage = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+        "params": {"name": "say", "_meta": {"ghost/idempotency-key": "mine"}}
+    }))
+    .unwrap();
+    assert_eq!(key(&with_idempotency_key(own)), json!("mine"));
+    let list: rmcp::model::ClientJsonRpcMessage = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 9, "method": "tools/list"
+    }))
+    .unwrap();
+    assert_eq!(key(&with_idempotency_key(list)), Value::Null);
 }
 
 // --- the command line ---------------------------------------------------------------------------

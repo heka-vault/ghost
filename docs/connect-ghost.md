@@ -71,7 +71,11 @@ you, and the tool's config holds a command and no token:
 For Claude Code that is `claude mcp add ghost -- ghostd mcp serve --client codex`.
 `ghostd mcp add` prints the full path of `ghostd` in place of the bare name.
 `ghostd mcp serve` forwards to the running Ghost. If Ghost is not up yet it waits 15
-seconds, and it carries on across a restart of Ghost.
+seconds, and it carries on across a restart of Ghost. A call it has to send again (the
+first send failed part way, and Ghost may have run it) is not run twice: the bridge puts a
+key of its own on every tool call (`_meta` `ghost/idempotency-key`), and Ghost answers a
+change sent again with the same key, from the same tool, within five minutes, with the
+first call's result. Any tool may set that key itself for the same effect.
 
 When Ghost runs from the AppImage, there is no such command: the AppImage is mounted at a
 new path each time it starts, and its launcher opens the desktop app rather than

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ghost_core::envfile::read_env;
+use ghost_core::ghost_app::outside::IDEMPOTENCY_KEY;
 use ghost_core::ghost_app::clients::{
     APPIMAGE_NOTE, Clients, DEFAULT_LISTEN, http_snippets, read_token, stable_ghostd,
     stdio_snippets,
@@ -263,6 +264,24 @@ struct Bridge {
     swallow: HashSet<RequestId>,
 }
 
+/// A tool call gets a key of its own before its first send, so that sending it again
+/// after a send that failed part way (the daemon may have run it) gets the first call's
+/// result instead of running it twice. A key the client set itself is kept.
+pub fn with_idempotency_key(mut msg: ClientJsonRpcMessage) -> ClientJsonRpcMessage {
+    if let ClientJsonRpcMessage::Request(r) = &mut msg
+        && let ClientRequest::CallToolRequest(call) = &mut r.request
+    {
+        let meta = call.params.meta.get_or_insert_with(Default::default);
+        if !meta.contains_key(IDEMPOTENCY_KEY) {
+            meta.insert(
+                IDEMPOTENCY_KEY.to_string(),
+                serde_json::Value::String(uuid::Uuid::new_v4().simple().to_string()),
+            );
+        }
+    }
+    msg
+}
+
 fn is_init(msg: &ClientJsonRpcMessage) -> bool {
     matches!(msg, ClientJsonRpcMessage::Request(r) if matches!(r.request, ClientRequest::InitializeRequest(_)))
 }
@@ -430,6 +449,7 @@ where
         tokio::select! {
             msg = down.receive() => {
                 let Some(msg) = msg else { break };
+                let msg = with_idempotency_key(msg);
                 if is_init(&msg) {
                     b.init = Some(msg.clone());
                     b.initialized = None;
