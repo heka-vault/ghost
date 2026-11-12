@@ -1,5 +1,6 @@
 //! Ghost's daemon, as a library the `ghostd` binary assembles (W8 of heka-vault/ghost#39):
-//! its settings, what build it is, the phone's way in, the webhook listener, the routes
+//! its settings, what build it is, the phone's way in, the webhook listener, the listener
+//! for outside tools, the routes
 //! it runs itself, the vault's daemon side, the small pieces the wake loop reads, and the
 //! command line's `check`, `push` and `latency`.
 
@@ -14,6 +15,8 @@ pub mod ghost_app;
 pub mod hear;
 pub mod hooks_listener;
 pub mod latency;
+pub mod mcp;
+pub mod outside;
 pub mod passwords;
 pub mod phone;
 pub mod phone_host;

@@ -29,6 +29,10 @@ indexmap.workspace = true
 reqwest.workspace = true
 uuid.workspace = true
 
+# The listener for outside tools (ADR 0048): Ghost's own app over Streamable HTTP, and
+# `ghostd mcp serve`, which forwards a client's stdin and stdout to it.
+rmcp = { workspace = true, features = ["server", "client", "transport-streamable-http-server", "transport-streamable-http-client-reqwest", "reqwest", "transport-io"] }
+
 anyhow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

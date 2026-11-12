@@ -30,6 +30,9 @@ pub fn now() -> DateTime<Utc> {
 #[derive(Debug, Clone)]
 pub struct EventBus {
     tx: broadcast::Sender<String>,
+    /// The same events for the daemon's own parts (ADR 0048's feed). Apart from `tx`, so
+    /// a part of the daemon listening is not counted as the desktop being open.
+    taps: broadcast::Sender<String>,
 }
 
 impl Default for EventBus {
@@ -41,7 +44,14 @@ impl Default for EventBus {
 impl EventBus {
     pub fn new(maxsize: usize) -> Self {
         let (tx, _) = broadcast::channel(maxsize.max(1));
-        Self { tx }
+        let (taps, _) = broadcast::channel(maxsize.max(1));
+        Self { tx, taps }
+    }
+
+    /// The events, for a part of the daemon itself. Not a subscriber: `subscribers`
+    /// counts the operator's apps only.
+    pub fn tap(&self) -> broadcast::Receiver<String> {
+        self.taps.subscribe()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
@@ -50,6 +60,9 @@ impl EventBus {
 
     pub fn publish(&self, event: &Event) {
         if let Ok(payload) = serde_json::to_string(event) {
+            if self.taps.receiver_count() > 0 {
+                let _ = self.taps.send(payload.clone());
+            }
             // No subscriber is not an error: the daemon runs with the desktop closed.
             let _ = self.tx.send(payload);
         }

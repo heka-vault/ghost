@@ -10,10 +10,13 @@
 //! the model whole, and results are not trimmed (the tools cap themselves).
 //!
 //! The handler is `Clone` over one `Arc` of state and keeps nothing per connection, so the
-//! same one can later be served to outside clients over HTTP. Nothing here opens a
-//! listener.
+//! same one is served to outside clients over HTTP (ADR 0048: `clients`, `outside`,
+//! `outside_tools`). Nothing here opens a listener; the daemon's does.
 
+pub mod clients;
 pub mod docs;
+pub mod outside;
+pub mod outside_tools;
 pub mod schedules;
 #[cfg(test)]
 mod tests;
@@ -43,7 +46,8 @@ use docs::{Docs, Read, SEARCH_RESULTS};
 
 /// The app's name: the prefix of its tools, and the source its rules and audit rows name.
 pub const NAME: &str = GHOST_APP;
-/// The source of an agent's own items on the waiting list: `agent:<slug>`.
+/// The source of an agent's own items on the waiting list: `agent:<slug>`. An outside
+/// client's are under `client:<name>` (`clients::CLIENT_SOURCE`, ADR 0048).
 pub const AGENT_SOURCE: &str = "agent:";
 pub const DETAIL_MAX: usize = 500;
 pub const SUMMARY_MAX: usize = 240;
@@ -78,7 +82,8 @@ pub struct Parts {
 
 /// Who is calling. In process the session's dispatcher names the agent in `_agent`
 /// (`crate::apps::CALLER_ARG`), over anything the model wrote. A listener for outside
-/// clients must use `Named`, from what it authenticated, so an argument is never believed.
+/// clients uses `Named`, from what it authenticated, so an argument is never believed: an
+/// agent's slug, or `client:<name>` for an outside client (ADR 0048).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Caller {
     #[default]
@@ -158,19 +163,25 @@ pub fn agent_source(slug: &str) -> String {
 /// says, so the same thing said again is the same item. (Not a *note*: an agent's notes
 /// are its `notes.md`.)
 pub fn item_key(slug: &str, title: &str) -> String {
+    source_key(&agent_source(slug), title)
+}
+
+/// The same for any source that tells the operator things: `agent:<slug>` or
+/// `client:<name>`.
+pub fn source_key(source: &str, title: &str) -> String {
     let said = title
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
     let digest = hex::encode(Sha256::digest(said.as_bytes()));
-    format!("{AGENT_SOURCE}{slug}:{}", &digest[..10])
+    format!("{source}:{}", &digest[..10])
 }
 
-/// How loud an agent's item may get (ADR 0031): what the agent asked for with it. None
-/// for an item that is not an agent's.
+/// How loud an agent's item may get (ADR 0031): what the agent asked for with it. An
+/// outside client's the same. None for an item that is neither's.
 pub fn urgency_of(item: &Item) -> Option<Urgency> {
-    if !item.source.starts_with(AGENT_SOURCE) {
+    if !item.source.starts_with(AGENT_SOURCE) && !item.source.starts_with(clients::CLIENT_SOURCE) {
         return None;
     }
     Some(
@@ -220,6 +231,8 @@ pub struct GhostServer {
     /// The schedules and their two tools (ADR 0047), when the daemon gives them.
     schedules: Option<Arc<crate::schedules::Jobs>>,
     tool_router: ToolRouter<Self>,
+    /// What only a server for outside clients has (ADR 0048).
+    outside: Option<Arc<outside::Outside>>,
 }
 
 #[tool_router]
@@ -231,6 +244,7 @@ impl GhostServer {
             caller: Caller::Session,
             schedules: None,
             tool_router: Self::tool_router() + Self::tools_search_router(),
+            outside: None,
         }
     }
 
@@ -247,11 +261,16 @@ impl GhostServer {
         self.tool_router.list_all()
     }
 
-    /// The agent a call is from: never what a caller from outside wrote as an argument.
+    /// The source a call's items are kept under, `agent:<slug>` or `client:<name>`: never
+    /// what a caller from outside wrote as an argument.
     fn agent(&self, said: Option<String>) -> Result<String, String> {
-        let slug = match &self.caller {
-            Caller::Named(slug) => slug.clone(),
+        let who = match &self.caller {
+            Caller::Named(who) => who.clone(),
             Caller::Session => said.unwrap_or_default(),
+        };
+        let (kind, slug) = match who.strip_prefix(clients::CLIENT_SOURCE) {
+            Some(name) => (clients::CLIENT_SOURCE, name),
+            None => (AGENT_SOURCE, who.as_str()),
         };
         let ok = !slug.is_empty()
             && slug.len() <= 80
@@ -259,7 +278,7 @@ impl GhostServer {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
         if ok {
-            Ok(slug)
+            Ok(format!("{kind}{slug}"))
         } else {
             Err("this needs to know which agent is calling, and nothing said".into())
         }
@@ -371,7 +390,7 @@ impl GhostServer {
     }
 
     fn do_notify(&self, p: Notify) -> Result<Value, String> {
-        let agent = self.agent(p.agent)?;
+        let source = self.agent(p.agent)?;
         let title = clip(&p.title, waiting::TITLE_MAX);
         if title.is_empty() {
             return Err("an item needs a title".into());
@@ -393,14 +412,19 @@ impl GhostServer {
         {
             fields.insert("detail".into(), json!(detail));
         }
-        let key = item_key(&agent, &title);
+        let key = source_key(&source, &title);
+        // An outside client's item says who it is from, on every route (ADR 0048).
+        let title = match source.strip_prefix(clients::CLIENT_SOURCE) {
+            Some(name) => clip(
+                &format!("From {}: {title}", clients::shown(name)),
+                waiting::TITLE_MAX,
+            ),
+            None => title,
+        };
         let changed = self
             .parts
             .waiting
-            .observe(
-                &agent_source(&agent),
-                &ItemDraft::new(key.clone(), title).fields(fields),
-            )
+            .observe(&source, &ItemDraft::new(key.clone(), title).fields(fields))
             .map_err(|e| e.to_string())?;
         Ok(json!({
             "key": key,
@@ -409,11 +433,11 @@ impl GhostServer {
     }
 
     fn do_resolve(&self, p: Resolve) -> Result<Value, String> {
-        let agent = self.agent(p.agent)?;
+        let source = self.agent(p.agent)?;
         let done = self
             .parts
             .waiting
-            .resolve(&agent_source(&agent), p.key.trim())
+            .resolve(&source, p.key.trim())
             .map_err(|e| e.to_string())?;
         if done {
             Ok(json!({"key": p.key.trim(), "status": "resolved"}))
@@ -557,8 +581,46 @@ impl GhostServer {
     }
 }
 
+/// Everything past the tools themselves is in `outside`: who is calling, the gate for a
+/// call that had no session, and the resources.
 #[tool_handler(router = self.tool_router, name = "ghost")]
-impl ServerHandler for GhostServer {}
+impl ServerHandler for GhostServer {
+    fn get_info(&self) -> rmcp::model::ServerConfig {
+        self.info()
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        self.dispatch(request, context).await
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        Ok(self.tool_list(&context))
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListResourcesResult, rmcp::ErrorData> {
+        Ok(self.resource_list())
+    }
+
+    async fn read_resource(
+        &self,
+        request: rmcp::model::ReadResourceRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ReadResourceResponse, rmcp::ErrorData> {
+        Ok(self.resource(&request, &context)?.into())
+    }
+}
 
 /// The running app. Dropping it stops the task that keeps it served.
 pub struct Attached {

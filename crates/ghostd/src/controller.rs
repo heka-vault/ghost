@@ -401,6 +401,10 @@ impl Controller for Daemon {
     async fn passwords_opened(&self) {
         Daemon::passwords_opened(self).await;
     }
+
+    fn outside_problem(&self) -> Option<String> {
+        self.late.outside.get().and_then(|o| o.problem())
+    }
 }
 
 impl Daemon {

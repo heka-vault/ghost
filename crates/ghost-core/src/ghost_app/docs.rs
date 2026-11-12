@@ -41,6 +41,17 @@ const STOP_WORDS: &[&str] = &[
 
 static DOCS: LazyLock<Docs> = LazyLock::new(|| Docs::parse(&SOURCES));
 
+/// A whole document by its name, as it is in the build: what the `ghost://docs/<name>`
+/// resource returns (ADR 0048).
+pub fn whole(name: &str) -> Option<&'static str> {
+    let name = name.trim().to_lowercase();
+    let name = name.trim_end_matches(".md");
+    SOURCES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, text)| *text)
+}
+
 /// One heading of a document and the text under it, up to the next heading.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {

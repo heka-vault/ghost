@@ -99,6 +99,10 @@ pub trait Controller: Send + Sync {
     async fn end_phone(&self) -> bool;
     // the vault opened after it was locked (ADR 0036): Ghost's settings and the apps follow
     async fn passwords_opened(&self);
+    /// Why the listener for outside tools is not up though it is set (ADR 0048).
+    fn outside_problem(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A controller with nothing behind it: every call is refused, nothing is pending.

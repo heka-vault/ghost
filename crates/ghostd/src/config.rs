@@ -118,6 +118,11 @@ pub struct GhostdSettings {
     /// signed, parsed by declaration and checked at the source before it is an item.
     pub hooks_listen: String,
 
+    /// The listener for outside tools (ADR 0048): Ghost's own app over HTTP at /mcp,
+    /// for the clients the operator connected, each with its token; host:port, comma
+    /// separated. This computer only unless set otherwise. Empty = off.
+    pub mcp_listen: String,
+
     /// Wake. transcript: local VAD + Parakeet while passive, looking for a phrase
     /// (ADR 0010); onnx: the trained "hey ghost" detector, that phrase only, with no
     /// transcript fallback (ADR 0025, ghost_voice.wakeword); file: `ghostd wake` /
@@ -197,6 +202,7 @@ impl Default for GhostdSettings {
             infra_dir: default_infra_dir(),
             phone_listen: String::new(),
             hooks_listen: String::new(),
+            mcp_listen: ghost_core::ghost_app::clients::DEFAULT_LISTEN.into(),
             wake_mode: "transcript".into(),
             wake_phrases: String::new(),
             wake_fuzzy: 0.9,
@@ -380,6 +386,7 @@ impl GhostdSettings {
         env.path("GHOST_INFRA_DIR", &mut s.infra_dir);
         env.string("GHOST_PHONE_LISTEN", &mut s.phone_listen);
         env.string("GHOST_HOOKS_LISTEN", &mut s.hooks_listen);
+        env.string("GHOST_MCP_LISTEN", &mut s.mcp_listen);
         env.string("GHOST_WAKE_MODE", &mut s.wake_mode);
         env.string("GHOST_WAKE_PHRASES", &mut s.wake_phrases);
         env.float("GHOST_WAKE_FUZZY", &mut s.wake_fuzzy)?;
@@ -437,6 +444,11 @@ impl GhostdSettings {
     /// Where the paired phone is kept (ADR 0016).
     pub fn phone_path(&self) -> PathBuf {
         self.data_dir.join("phone.json")
+    }
+
+    /// Where the token of a client that is run as a command is kept (ADR 0048).
+    pub fn clients_dir(&self) -> PathBuf {
+        self.data_dir.join("clients")
     }
 }
 

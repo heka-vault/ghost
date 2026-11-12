@@ -180,6 +180,15 @@ impl WriteGate {
         }
     }
 
+    /// One more operation of a source, beside what it registered: the changes of Ghost's
+    /// own app that only outside clients have (ADR 0048).
+    pub fn add(&self, ability: &str, operation: Operation) {
+        self.ops.write().unwrap_or_else(|e| e.into_inner()).insert(
+            (ability.to_string(), operation.name.clone()),
+            Arc::new(operation),
+        );
+    }
+
     /// A source left (an app was disconnected). A change of it waiting for a yes stays
     /// on the list and fails as unknown if confirmed.
     pub fn unregister(&self, ability: &str) {

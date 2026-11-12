@@ -80,6 +80,7 @@ fn settings(tmp: &std::path::Path, wake_mode: &str) -> (GhostdSettings, VoiceSet
         infra_dir: t("infra"),
         wake_mode: wake_mode.into(),
         chime: false,
+        mcp_listen: String::new(), // never the operator's port from a test
         dictation_flag: t("rt/dictation"),
         ..GhostdSettings::default()
     };
@@ -454,4 +455,192 @@ async fn a_stop_while_the_models_are_missing_winds_down() {
         .unwrap()
         .unwrap();
     assert!(client.status().await.is_err(), "the socket is gone");
+}
+
+/// One tool call from an outside tool: what it answered, or what it refused with.
+async fn outside_call(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    tool: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let params = rmcp::model::CallToolRequestParams::new(tool.to_string())
+        .with_arguments(args.as_object().cloned().unwrap_or_default());
+    let result = client.call_tool(params).await.map_err(|e| e.to_string())?;
+    let text: String = result
+        .content
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+        .collect();
+    if result.is_error == Some(true) {
+        return Err(text);
+    }
+    Ok(serde_json::from_str(&text).unwrap_or(Value::String(text)))
+}
+
+/// ADR 0048, end to end: the operator connects a tool in Settings, the tool reads Ghost,
+/// tells the operator something, has Ghost say a sentence at the desk, and is refused the
+/// moment it is removed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_connected_tool_uses_the_running_ghost_and_is_refused_once_removed() {
+    use rmcp::ServiceExt;
+    use rmcp::transport::StreamableHttpClientTransport;
+    use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+    use serde_json::json;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path(), "file");
+    // The operator let Ghost speak first at the desk; the listener on a port of its own.
+    std::fs::create_dir_all(tmp.path().join("config")).unwrap();
+    std::fs::write(
+        tmp.path().join("config/policy.toml"),
+        "[routes]\nenabled = [\"digest\", \"desk\"]\n",
+    )
+    .unwrap();
+    w.daemon.cfg.lock().unwrap().mcp_listen = "127.0.0.1:0".into();
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    until(client, "passive with the models ready", |v| {
+        v["phase"] == "passive" && v["models_ready"] == true
+    })
+    .await;
+
+    // Settings: connect a tool. Its token comes back this once.
+    let made = client
+        .request(
+            hyper::Method::POST,
+            "/clients",
+            Some(&json!({"name": "claude-code"})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(made.status, 200, "{}", made.body);
+    let token = made.body["token"].as_str().unwrap().to_string();
+    assert_eq!(made.body["client"]["title"], "Claude Code");
+    assert_eq!(made.body["clients"]["listening"], json!(["127.0.0.1:0"]));
+    assert_eq!(made.body["clients"]["problem"], Value::Null);
+    let listed = client
+        .request(hyper::Method::GET, "/clients", None)
+        .await
+        .unwrap();
+    assert!(!listed.body.to_string().contains(&token), "never again");
+    assert_eq!(listed.body["clients"][0]["last_used_at"], Value::Null);
+
+    let port = w.daemon.late.outside.get().unwrap().port();
+    let tool = ()
+        .serve(StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(format!("http://127.0.0.1:{port}/mcp"))
+                .auth_header(token.clone()),
+        ))
+        .await
+        .unwrap();
+    let status = outside_call(&tool, "status", json!({})).await.unwrap();
+    assert_eq!(status["phase"], "passive");
+    assert_eq!(status["session"]["open"], false);
+    let agents = outside_call(&tool, "agents_list", json!({})).await.unwrap();
+    assert_eq!(agents["agents"][0]["agent"], "ghost");
+    // The daemon listening to its own events is not the desktop being open.
+    assert_eq!(w.daemon.state.bus.subscribers(), 0);
+
+    // It tells the operator something: on the waiting list under its own name, and in
+    // the audit as its change.
+    let told = outside_call(&tool, "notify", json!({"title": "the build finished"}))
+        .await
+        .unwrap();
+    let key = told["key"].as_str().unwrap().to_string();
+    assert!(
+        waiting_text(client)
+            .await
+            .contains("From Claude Code: the build finished")
+    );
+    let audit = client
+        .request(hyper::Method::GET, "/audit", None)
+        .await
+        .unwrap();
+    let row = &audit.body["items"][0];
+    assert_eq!(row["session_id"], "client:claude-code");
+    assert_eq!(
+        (&row["source"], &row["operation"]),
+        (&json!("ghost"), &json!("notify"))
+    );
+    assert!(!audit.body.to_string().contains(&token));
+    let listed = client
+        .request(hyper::Method::GET, "/clients", None)
+        .await
+        .unwrap();
+    assert!(listed.body["clients"][0]["last_used_at"].is_string());
+
+    // The operator acknowledges it; the tool, waiting, hears so.
+    let before = outside_call(&tool, "events_wait", json!({"timeout_s": 0}))
+        .await
+        .unwrap();
+    let ack = client
+        .request(
+            hyper::Method::POST,
+            "/waiting/ack",
+            Some(&json!({"key": key})),
+        )
+        .await
+        .unwrap();
+    assert!(ack.ok(), "{}", ack.body);
+    let heard = outside_call(
+        &tool,
+        "events_wait",
+        json!({"since": before["cursor"], "timeout_s": 10}),
+    )
+    .await
+    .unwrap();
+    assert!(
+        heard["events"].as_array().unwrap().iter().any(|e| {
+            e["change"] == "acknowledged" && e["key"] == key.as_str() && e["yours"] == true
+        }),
+        "{heard}"
+    );
+
+    // A sentence at the desk: Ghost says who it is from, through its own voice, and
+    // waits for a reply as desk voice does (ADR 0032).
+    let said = outside_call(&tool, "say", json!({"text": "the tests are green"}))
+        .await
+        .unwrap();
+    assert_eq!(said["status"], "saying it at the desk", "{said}");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !w
+        .spoken
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|s| s.contains("From Claude Code: the tests are green"))
+    {
+        assert!(
+            Instant::now() < deadline,
+            "never said: {:?}",
+            w.spoken.lock().unwrap()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // While Ghost is at the desk, a second sentence waits its turn on the list.
+    let later = outside_call(&tool, "say", json!({"text": "and the deploy is out"}))
+        .await
+        .unwrap();
+    assert_eq!(later["status"], "on the waiting list", "{later}");
+    client.sleep().await.unwrap();
+    until(client, "passive again", |v| v["phase"] == "passive").await;
+
+    // Removed in Settings: refused at its next call.
+    let gone = client
+        .request(hyper::Method::DELETE, "/clients/claude-code", None)
+        .await
+        .unwrap();
+    assert_eq!(gone.body["clients"], json!([]));
+    assert!(outside_call(&tool, "status", json!({})).await.is_err());
+    let _ = tool.cancel().await;
+
+    w.daemon.stop.cancel();
+    tokio::time::timeout(Duration::from_secs(15), run)
+        .await
+        .expect("the daemon stops")
+        .unwrap()
+        .unwrap();
 }
