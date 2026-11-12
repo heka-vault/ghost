@@ -86,26 +86,31 @@ class GhostLinkModule : Module() {
         .toString()
     }
 
-    Function("openNotificationSettings") {
-      open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
-    }
+    Function("openNotificationSettings") { open(notificationSettings()) }
 
     Function("openChannelSettings") { channel: String ->
       open(
-        Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-          .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-          .putExtra(Settings.EXTRA_CHANNEL_ID, channel)
+        if (Build.VERSION.SDK_INT >= 26) {
+          Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .putExtra(Settings.EXTRA_CHANNEL_ID, channel)
+        } else {
+          notificationSettings()
+        }
       )
     }
 
     Function("openFullScreenSettings") {
-      if (Build.VERSION.SDK_INT >= 34) {
-        open(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${context.packageName}")))
-      } else {
-        open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
-      }
+      open(
+        if (Build.VERSION.SDK_INT >= 34) Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${context.packageName}"))
+        else notificationSettings()
+      )
     }
   }
+
+  private fun notificationSettings(): Intent =
+    if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+    else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
 
   private fun open(intent: Intent) {
     try {

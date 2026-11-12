@@ -31,6 +31,7 @@ class LinkNotifier(context: Context) {
   private val nm = NotificationManagerCompat.from(ctx)
 
   fun ensureChannels() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return // no channels before Android 8
     val sys = ctx.getSystemService(NotificationManager::class.java) ?: return
     sys.createNotificationChannel(NotificationChannel(STATUS_CHANNEL, "Connection to your desk", NotificationManager.IMPORTANCE_MIN).apply {
       description = "Shown while Ghost keeps its connection to your desk open, so questions and calls reach you with the app closed."

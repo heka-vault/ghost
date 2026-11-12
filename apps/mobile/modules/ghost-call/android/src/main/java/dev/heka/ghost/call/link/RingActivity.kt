@@ -43,8 +43,9 @@ class RingActivity : Activity() {
       window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
     }
     read(intent)
-    if (intent.getBooleanExtra(EXTRA_ANSWER, false)) return answer()
+    // Drawn first even when answering from the notification: asking to unlock needs a window.
     setContentView(layout(intent.getStringExtra(EXTRA_NAME) ?: Notes.agentName(agent)))
+    if (intent.getBooleanExtra(EXTRA_ANSWER, false)) answer()
   }
 
   override fun onNewIntent(intent: Intent) {
