@@ -173,7 +173,7 @@ async fn world_with(policy: &str, runner: Runner) -> World {
         forget: None,
         watches: None,
         refresh: None,
-        routes: Some(routes.clone()),
+        routes: Some(ready(routes.clone())),
         policy: Some(Arc::new(move || {
             AutonomyPolicy::parse(&policy_text, "<test>").unwrap()
         })),

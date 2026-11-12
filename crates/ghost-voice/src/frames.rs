@@ -271,12 +271,18 @@ impl Frame {
         )
     }
 
-    /// A user turn's text: a typed turn, a resume after a hold, the first utterance.
+    /// A user turn's text: a resume after a hold, a spoken first utterance, a note.
     pub fn user_text(text: impl Into<String>, run_llm: bool) -> Frame {
         Frame::ContextAppend {
             messages: vec![Message::user(text)],
             run_llm,
         }
+    }
+
+    /// A typed turn (ADR 0052): the operator's words with the note that the reply is read
+    /// on screen (`crate::prompt::TYPED_NOTE`), so the answer may be written, not spoken.
+    pub fn typed_text(text: &str) -> Frame {
+        Frame::user_text(crate::prompt::typed_turn(text), true)
     }
 }
 

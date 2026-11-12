@@ -88,3 +88,46 @@ mod tests {
         assert!(!said.contains("sk-ant-not-for-agents"));
     }
 }
+
+/// What an agent's `app_disconnect` forgets with the app (ADR 0052), as the desktop's
+/// disconnect does: its sign-in, and the passwords Ghost kept for it that no other app
+/// names (`GHOST_APP_*`). A vault that is locked keeps them; the operator removes them in
+/// Settings › Passwords.
+pub fn forget_app(
+    apps: &Arc<ghost_core::Apps>,
+    signins: &Arc<ghost_core::signin::SignIns>,
+    passwords: &Arc<ghost_core::Passwords>,
+) -> ghost_core::ghost_app::more::Forget {
+    let (apps, signins, passwords) = (
+        Arc::downgrade(apps),
+        signins.clone(),
+        Arc::downgrade(passwords),
+    );
+    Arc::new(move |spec: &ghost_core::AppSpec| {
+        signins.forget(&spec.name);
+        let others: Vec<String> = apps
+            .upgrade()
+            .map(|a| {
+                a.specs()
+                    .iter()
+                    .filter(|s| s.name != spec.name)
+                    .flat_map(ghost_core::AppSpec::secrets)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let gone: Vec<String> = spec
+            .secrets()
+            .into_iter()
+            .filter(|k| k.starts_with("GHOST_APP_") && !others.contains(k))
+            .collect();
+        if let Some(vault) = passwords.upgrade()
+            && vault.is_open()
+            && !gone.is_empty()
+        {
+            let names: Vec<&str> = gone.iter().map(String::as_str).collect();
+            if let Err(e) = vault.delete(&names) {
+                tracing::warn!("apps: {}'s passwords were not forgotten: {e}", spec.name);
+            }
+        }
+    })
+}

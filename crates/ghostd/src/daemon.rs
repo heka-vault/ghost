@@ -1365,16 +1365,51 @@ impl Daemon {
             })
         });
         let _ = d.questions.set(questions.clone());
+        // ADR 0047, ADR 0052: a written turn with an agent, with nobody there: what an
+        // agent's `ask_agent` and an outside tool's `agent_ask` run.
+        let ask_runner = Arc::new(crate::outside::AskRunner::new(
+            Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
+            d.stop.child_token(),
+        ));
+        // Made a moment later; Ghost's own app reads them from then on (ADR 0052).
+        let late_watches: ghost_app::Late<WatchRunner> = Arc::default();
+        let late_routes: ghost_app::Late<RouteEngine> = Arc::default();
         // ADR 0045: Ghost is an app its own agents use, served in process before any
-        // session can open. It needs no vault, no network and no sign-in.
-        let ghost_server = GhostServer::new(ghost_app::Parts {
-            store: store.clone(),
-            waiting: waiting.clone(),
-            apps: Arc::downgrade(&apps),
-            status: crate::ghost_app::status_fn(d),
-        })
-        .with_schedules(jobs.clone())
-        .with_questions(questions.clone());
+        // session can open. It needs no vault, no network and no sign-in. ADR 0052: and it
+        // reaches all of Ghost, through the same gate.
+        let ghost_server =
+            GhostServer::new(ghost_app::Parts {
+                store: store.clone(),
+                waiting: waiting.clone(),
+                apps: Arc::downgrade(&apps),
+                status: crate::ghost_app::status_fn(d),
+            })
+            .with_schedules(jobs.clone())
+            .with_questions(questions.clone())
+            .with_more(ghost_app::More {
+                agents: Some(conversations.clone()),
+                config_dir: Some(cfg.config_dir.clone()),
+                catalog: Some(catalog.clone()),
+                forget: Some(crate::ghost_app::forget_app(&apps, &signins, &passwords)),
+                watches: Some(late_watches.clone()),
+                refresh: Some({
+                    let folder = folder.clone();
+                    Arc::new(move || lock(&folder).refresh())
+                }),
+                routes: Some(late_routes.clone()),
+                policy: Some({
+                    let gate = gate.clone();
+                    Arc::new(move || gate.autonomy())
+                }),
+                settings: Some({
+                    let path = cfg.settings_path.clone();
+                    Arc::new(move || ghost_core::envfile::read_env(&path).unwrap_or_default())
+                }),
+                skills: Some(skills.clone()),
+                runner: Some(
+                    ask_runner.clone() as Arc<dyn ghost_core::ghost_app::outside::AgentRunner>
+                ),
+            });
         let ghost_app = match ghost_app::attach(&apps, ghost_server.clone()).await {
             Ok(attached) => {
                 gate.register(GHOST_APP, attached.app.operations());
@@ -1410,6 +1445,7 @@ impl Daemon {
                 .with_on_change(on_change.clone()),
         );
         d.late.watch_runner.set(watch_runner.clone()).ok();
+        let _ = late_watches.set(watch_runner.clone());
         // ADR 0027: webhooks, signed and parsed by declaration, checked through read_for.
         let hook_intake = Arc::new(
             HookIntake::new(
@@ -1501,6 +1537,7 @@ impl Daemon {
         ];
         d.start_phone_feed();
         d.late.routes.set(routes.clone()).ok();
+        let _ = late_routes.set(routes.clone());
         d.late.desktop_route.set(desktop_route.clone()).ok();
         // What a session with any agent reaches (ADR 0034, ADR 0035): every connected
         // app (the operator's permissions apply in the gate), the skills, the agents' own
@@ -1572,10 +1609,7 @@ impl Daemon {
             Outside::new(gate.clone())
                 .with_desk(Arc::new(crate::outside::Desk(Arc::downgrade(d))))
                 // ADR 0047's run with nobody there is what `agent_ask` runs.
-                .with_runner(Arc::new(crate::outside::AskRunner::new(
-                    Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
-                    d.stop.child_token(),
-                ))),
+                .with_runner(ask_runner.clone()),
         ));
         d.late.outside.set(outside.clone()).ok();
         // The hooks listener is made now (its addresses are in the API's status) and

@@ -29,9 +29,9 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use ghost_core::conversations::models::Profile;
-use ghost_core::ghost_app::GhostServer;
 use ghost_core::ghost_app::clients::{AuthError, CLIENT_SOURCE, ClientId, Clients, shown};
 use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, Said};
+use ghost_core::ghost_app::{AGENT_SOURCE, GhostServer};
 use ghost_core::routes::{Delivery, RouteName, RoutePolicy};
 use ghost_core::schedules::{DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended};
 use ghost_core::store::Item;
@@ -308,14 +308,29 @@ impl AskRunner {
 #[async_trait]
 impl AgentRunner for AskRunner {
     async fn ask(&self, agent: &Profile, text: &str, from: &str) -> Result<String, String> {
-        let who = shown(from.strip_prefix(CLIENT_SOURCE).unwrap_or(from));
+        // Who asks: an outside tool (`client:<name>`, ADR 0048) or another of the
+        // operator's agents (`agent:<slug>`, ADR 0052's `ask_agent`). The run's id says
+        // which, so recall can tell an outside tool's own turns from everyone else's:
+        // `ask-<client>-<32 hex>`, or `agentask-<32 hex>`.
+        let run = uuid::Uuid::new_v4().simple().to_string();
+        let (id, who, by_agent) = match from.strip_prefix(AGENT_SOURCE) {
+            Some(slug) => {
+                let name = self.runner.agent_name(slug).unwrap_or_else(|| shown(slug));
+                (format!("agentask-{run}"), name, true)
+            }
+            None => {
+                let client = from.strip_prefix(CLIENT_SOURCE).unwrap_or(from);
+                (format!("ask-{client}-{run}"), shown(client), false)
+            }
+        };
         let cancel = self.stop.child_token();
         // The request this turn is for (`ghost_app::outside` runs a change under it).
         let request = ghost_core::apps::current_cancel();
         let asked = Asked {
-            id: format!("ask-{}", uuid::Uuid::new_v4().simple()),
+            id,
             agent: agent.slug.clone(),
             from: who,
+            by_agent,
             text: text.to_string(),
             max_turns: self.max_turns,
             max_runtime: self.max_runtime,

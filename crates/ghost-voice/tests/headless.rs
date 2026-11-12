@@ -1103,6 +1103,16 @@ async fn a_run_that_fails_is_told_and_noted_for_the_agent() {
     );
 }
 
+/// Every source the agent reaches, with nothing deferred: what a tool costs once it is
+/// found and offered by name (ADR 0052 defers most of Ghost's own until then).
+fn found(w: &World, agent: &ghost_core::conversations::Profile) -> Vec<ToolSource> {
+    let mut sources = (w.reach)(agent);
+    for s in &mut sources {
+        s.deferred.clear();
+    }
+    sources
+}
+
 /// ADR 0018: what the two schedule tools cost on every turn of every session, in the
 /// cached prefix. Run with `--no-capture` to read the numbers; the bound keeps a later
 /// argument from growing it unnoticed.
@@ -1112,7 +1122,7 @@ async fn what_the_schedule_tools_add_to_every_turn() {
     let w = world(tmp.path()).await;
     let ghost = w.convs.get("ghost").unwrap().unwrap();
     let tools = ToolDispatcher::new(ToolsParams {
-        sources: (w.reach)(&ghost),
+        sources: found(&w, &ghost),
         gate: w.gate.clone(),
         session_id: "s".into(),
         on_hang_up: no_action(),
@@ -1319,7 +1329,7 @@ async fn what_the_question_tools_add_to_every_turn() {
     let w = world(tmp.path()).await;
     let ghost = w.convs.get("ghost").unwrap().unwrap();
     let tools = ToolDispatcher::new(ToolsParams {
-        sources: (w.reach)(&ghost),
+        sources: found(&w, &ghost),
         gate: w.gate.clone(),
         session_id: "s".into(),
         on_hang_up: no_action(),
@@ -1351,39 +1361,95 @@ async fn what_the_question_tools_add_to_every_turn() {
 }
 
 /// ADR 0018, ADR 0052: what Ghost's own app costs on every turn of every session and run,
-/// all of its advertised tools together, in the cached prefix. Its new tools are found by
-/// search (`ghost_tools_search`), so this stays bounded however many it has.
+/// all of its advertised tools together, in the cached prefix, as the daemon builds it
+/// (the schedules, the questions and every wider part). Past its core its tools are found
+/// with `ghost_tools_search`, so this stays bounded however many it has. Before ADR 0052
+/// it was 16 tools and 8,397 bytes. Run with `--no-capture` to read the numbers.
 #[tokio::test]
 async fn what_ghosts_own_app_costs_every_turn() {
     let tmp = tempfile::tempdir().unwrap();
     let w = world(tmp.path()).await;
-    let ghost = w.convs.get("ghost").unwrap().unwrap();
-    let tools = ToolDispatcher::new(ToolsParams {
-        sources: (w.reach)(&ghost),
-        gate: w.gate.clone(),
-        session_id: "s".into(),
-        on_hang_up: no_action(),
-        on_hold: None,
-        turns: None,
-        events: None,
-        conversations: None,
-        on_call: None,
-        last_request: None,
-        probe: None,
+    let cfg = tmp.path().join("ghost");
+    // The daemon's own app, with everything it reaches.
+    let apps = Arc::new(Apps::new(
+        Vec::new(),
+        Arc::new(HashMap::<String, String>::new()),
+        None,
+    ));
+    let server = GhostServer::new(ghost_app::Parts {
+        store: w.store.clone(),
+        waiting: w.waiting.clone(),
+        apps: Arc::downgrade(&apps),
+        status: Arc::new(Map::new),
     })
-    .schemas();
-    let own: Vec<&str> = tools
-        .names()
-        .into_iter()
-        .filter(|n| n.starts_with("ghost_"))
-        .collect();
-    let bytes: usize = own
-        .iter()
-        .map(|n| {
-            serde_json::to_string(&tools.get(n).unwrap().anthropic())
-                .unwrap()
-                .len()
+    .with_schedules(w.jobs.clone())
+    .with_questions(w.questions.clone())
+    .with_more(ghost_app::More {
+        agents: Some(w.convs.clone()),
+        config_dir: Some(cfg.clone()),
+        catalog: Some(Arc::new(ghost_core::catalog::Catalog::new(
+            tmp.path().join("catalog.json"),
+        ))),
+        routes: Some(ghost_app::ready(Arc::new(
+            ghost_core::RouteEngine::new(Items::new(w.store.clone())).unwrap(),
+        ))),
+        policy: Some(Arc::new(AutonomyPolicy::default)),
+        settings: Some(Arc::new(Default::default)),
+        skills: Some(Arc::new(ghost_core::skills::Skills::new(
+            &cfg.join("skills"),
+            None,
+        ))),
+        runner: Some(Arc::new(ghost_core::ghost_app::outside::NoRunner)),
+        ..ghost_app::More::default()
+    });
+    let _attached = ghost_app::attach(&apps, server).await.unwrap();
+    let sources = apps.sources();
+    let size = |sources: &[ToolSource]| {
+        let tools = ToolDispatcher::new(ToolsParams {
+            sources: sources.to_vec(),
+            gate: w.gate.clone(),
+            session_id: "s".into(),
+            on_hang_up: no_action(),
+            on_hold: None,
+            turns: None,
+            events: None,
+            conversations: None,
+            on_call: None,
+            last_request: None,
+            probe: None,
         })
-        .sum();
-    println!("OWN advertised={} bytes={bytes} names={own:?}", own.len());
+        .schemas();
+        let own: Vec<String> = tools
+            .names()
+            .into_iter()
+            .filter(|n| n.starts_with("ghost_"))
+            .map(String::from)
+            .collect();
+        let bytes: usize = own
+            .iter()
+            .map(|n| {
+                serde_json::to_string(&tools.get(n).unwrap().anthropic())
+                    .unwrap()
+                    .len()
+            })
+            .sum();
+        (own, bytes)
+    };
+    let (advertised, bytes) = size(&sources);
+    let mut every = sources.clone();
+    for s in &mut every {
+        s.deferred.clear();
+    }
+    let (all, all_bytes) = size(&every);
+    println!(
+        "OWN advertised={} bytes={bytes}; if all were advertised: {} tools, {all_bytes} bytes; \
+         advertised: {advertised:?}",
+        advertised.len(),
+        all.len()
+    );
+    // The core and no more, and less than before this batch.
+    assert_eq!(advertised.len(), 10, "{advertised:?}");
+    assert!(bytes < 7_500, "{bytes}");
+    assert_eq!(all.len(), 35, "{all:?}");
+    assert!(all_bytes > bytes * 2);
 }

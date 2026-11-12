@@ -94,7 +94,11 @@ impl GhostServer {
     pub(crate) fn do_watches_list(&self) -> Result<Value, String> {
         let (_, body) = self.read_watches()?;
         let (watches, problems) = parse_watches(&body, WATCHES_FILE);
-        let runner = self.more().watches.clone();
+        let runner = self
+            .more()
+            .watches
+            .as_ref()
+            .and_then(|late| late.get().cloned());
         let rows: Vec<Value> = watches
             .values()
             .map(|w| {

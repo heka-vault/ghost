@@ -94,6 +94,17 @@ pub type PolicyFn = Arc<dyn Fn() -> AutonomyPolicy + Send + Sync>;
 pub type SettingsFn = Arc<dyn Fn() -> BTreeMap<String, String> + Send + Sync>;
 /// Ghost's folder was changed by a tool: read it again (the watches restart).
 pub type Refresh = Arc<dyn Fn() + Send + Sync>;
+/// A part the daemon makes after Ghost's own app is served (the watches' runner, the
+/// routes): set once, read by the tools from then on.
+pub type Late<T> = Arc<std::sync::OnceLock<Arc<T>>>;
+
+/// A part ready now, as a test gives it.
+pub fn ready<T>(part: Arc<T>) -> Late<T> {
+    let late = Arc::new(std::sync::OnceLock::new());
+    let _ = late.set(part);
+    late
+}
+
 /// What a disconnected app leaves behind that the desktop's disconnect also forgets: its
 /// sign-in and the passwords Ghost kept for it.
 pub type Forget = Arc<dyn Fn(&crate::apps::AppSpec) + Send + Sync>;
@@ -108,9 +119,9 @@ pub struct More {
     pub config_dir: Option<PathBuf>,
     pub catalog: Option<Arc<Catalog>>,
     pub forget: Option<Forget>,
-    pub watches: Option<Arc<WatchRunner>>,
+    pub watches: Option<Late<WatchRunner>>,
     pub refresh: Option<Refresh>,
-    pub routes: Option<Arc<RouteEngine>>,
+    pub routes: Option<Late<RouteEngine>>,
     pub policy: Option<PolicyFn>,
     pub settings: Option<SettingsFn>,
     pub skills: Option<Arc<Skills>>,

@@ -124,7 +124,8 @@ impl GhostServer {
     fn route_engine(&self) -> Result<std::sync::Arc<crate::routes::RouteEngine>, String> {
         self.more()
             .routes
-            .clone()
+            .as_ref()
+            .and_then(|late| late.get().cloned())
             .ok_or_else(|| "the routes are not available here".to_string())
     }
 

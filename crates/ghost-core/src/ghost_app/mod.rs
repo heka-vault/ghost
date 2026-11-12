@@ -32,7 +32,7 @@ pub mod watches;
 #[cfg(test)]
 mod wide_tests;
 
-pub use more::{CORE, More, NOT_FOR_OUTSIDE, asks_by_default};
+pub use more::{CORE, Late, More, NOT_FOR_OUTSIDE, asks_by_default, ready};
 
 use std::sync::{Arc, Weak};
 use std::time::Duration;

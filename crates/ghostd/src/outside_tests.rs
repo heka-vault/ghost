@@ -125,9 +125,37 @@ async fn world_full(
     if let Some(q) = &questions {
         server = server.with_questions(q.clone());
     }
+    // Everything Ghost's own agents reach (ADR 0052), so the line an outside client is
+    // held to is tested against all of it.
+    let cfg = tmp.path().join("config");
+    std::fs::create_dir_all(&cfg).unwrap();
+    server = server.with_more(ghost_app::More {
+        agents: Some(Arc::new(
+            ghost_core::conversations::Conversations::new(store.clone(), &cfg, Default::default())
+                .unwrap(),
+        )),
+        config_dir: Some(cfg.clone()),
+        catalog: Some(Arc::new(ghost_core::catalog::Catalog::new(
+            tmp.path().join("catalog.json"),
+        ))),
+        routes: Some(ghost_app::ready(Arc::new(
+            ghost_core::routes::RouteEngine::new(Items::new(store.clone())).unwrap(),
+        ))),
+        policy: Some(Arc::new(AutonomyPolicy::default)),
+        settings: Some(Arc::new(Default::default)),
+        skills: Some(Arc::new(ghost_core::skills::Skills::new(
+            &cfg.join("skills"),
+            None,
+        ))),
+        runner: Some(Arc::new(Echo)),
+        ..ghost_app::More::default()
+    });
     let attached = ghost_app::attach(&apps, server.clone()).await.unwrap();
     gate.register(NAME, attached.app.operations());
     for (slug, name, job) in [("ghost", "Ghost", ""), ("ledger", "Ledger", "The books")] {
+        if store.get_conversation(slug, true).unwrap().is_some() {
+            continue; // Ghost is made when its folder is read
+        }
         let mut p = Profile::new(slug, name);
         p.job = job.to_string();
         store.upsert_conversation(&p).unwrap();
@@ -309,7 +337,7 @@ async fn nothing_but_the_one_path_is_served() {
 }
 
 /// The tools an outside client has, and no other.
-const TOOLS: [&str; 13] = [
+const TOOLS: [&str; 17] = [
     "agent_ask",
     "agents_list",
     "apps_list",
@@ -318,11 +346,15 @@ const TOOLS: [&str; 13] = [
     "docs_search",
     "events_wait",
     "notify",
+    "recall",
     "resolve",
+    "routes_read",
     "say",
     "status",
+    "transcript_read",
     "waiting_ack",
     "waiting_snooze",
+    "watches_list",
 ];
 
 #[tokio::test]
@@ -798,8 +830,9 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
     assert_eq!(names, TOOLS);
     // No tool about passwords, the policy file, permissions, apps to connect, clients or
-    // their tokens, transcripts or audio: by its name, and by the name of any argument it
-    // takes.
+    // their tokens, memory, settings or audio: by its name, and by the name of any argument
+    // it takes. (`recall` and `transcript_read` are offered, over the turns of the runs the
+    // client itself started, ADR 0052: tested in `a_client_recalls_only_its_own_runs`.)
     let forbidden = [
         "password",
         "passwords",
@@ -812,10 +845,13 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "permissions",
         "token",
         "tokens",
-        "transcript",
         "transcripts",
         "turn",
         "turns",
+        "settings",
+        "skill",
+        "quiet",
+        "output",
         "audio",
         "microphone",
         "passive",
@@ -830,6 +866,7 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "memory",
         "watch",
         "hook",
+        "catalog",
         "confirm",
     ];
     for t in &tools {
@@ -865,14 +902,18 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
             "waiting_snooze"
         ]
     );
-    // A tool Ghost has for itself is not one a client can call.
+    // A tool Ghost has for itself is not one a client can call, the wider ones of
+    // ADR 0052 included.
     for tool in [
         "passwords_list",
         "policy_read",
         "clients_add",
         "change",
         "waiting_list",
-    ] {
+    ]
+    .into_iter()
+    .chain(ghost_app::NOT_FOR_OUTSIDE)
+    {
         assert!(call(&c, tool, json!({})).await.is_err(), "{tool}");
     }
     // Nothing a read says holds a token or its hash, and the status never a key.
@@ -1725,4 +1766,55 @@ mod asking {
         let _ = cursor.cancel().await;
         w.host.stop().await;
     }
+}
+
+/// ADR 0052: a client recalls the turns of the runs it started, and nothing an agent said
+/// to the operator or to another client; it reads the watches and the routes; and asking
+/// for an agent's memory, or naming another agent's slug in `_agent`, gets it nothing.
+#[tokio::test]
+async fn a_client_recalls_only_its_own_runs() {
+    use ghost_core::conversations::models::Role;
+    let w = world("").await;
+    let c = w
+        .client("claude-code", ClientLifecycleMode::Initialize)
+        .await;
+    let ledger = w
+        .store
+        .get_conversation("ledger", false)
+        .unwrap()
+        .unwrap()
+        .id;
+    let hex = |c: char| c.to_string().repeat(32);
+    for (session, text) in [
+        (
+            format!("run-ask-claude-code-{}", hex('a')),
+            "the invoice went out",
+        ),
+        (
+            format!("run-ask-cursor-{}", hex('b')),
+            "the invoice for cursor",
+        ),
+        ("s1".to_string(), "the invoice is between us"),
+    ] {
+        w.store
+            .add_turn(&ledger, &session, Role::System, text)
+            .unwrap();
+    }
+    let found = call(&c, "recall", json!({"query": "invoice", "_agent": "ghost"}))
+        .await
+        .unwrap();
+    let results = found["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1, "{found}");
+    assert_eq!(results[0]["kind"], "asked by an outside tool");
+    let page = call(&c, "transcript_read", json!({"agent": "ledger"}))
+        .await
+        .unwrap();
+    assert_eq!(page["turns"].as_array().unwrap().len(), 1, "{page}");
+    assert!(call(&c, "watches_list", json!({})).await.is_ok());
+    assert!(call(&c, "routes_read", json!({})).await.is_ok());
+    assert!(
+        call(&c, "memory_read", json!({"agent": "ledger"}))
+            .await
+            .is_err()
+    );
 }
