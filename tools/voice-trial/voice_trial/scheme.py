@@ -17,7 +17,6 @@ import pathlib
 import time
 
 import numpy as np
-import onnxruntime as ort
 
 from voice_trial.windowed import HARMONICS, HOP, phase_before, save, session
 
@@ -67,7 +66,9 @@ FB = mel_bank()
 def logmel(y: np.ndarray, n_fft=1024, hop=240) -> np.ndarray:
     win = np.hanning(n_fft)
     frames = 1 + max(0, (len(y) - n_fft) // hop)
-    spec = np.stack([np.abs(np.fft.rfft(win * y[i * hop : i * hop + n_fft])) ** 2 for i in range(frames)])
+    spec = np.stack(
+        [np.abs(np.fft.rfft(win * y[i * hop : i * hop + n_fft])) ** 2 for i in range(frames)]
+    )
     return 10 * np.log10(np.maximum(spec @ FB.T, 1e-10))
 
 
@@ -156,7 +157,11 @@ def main() -> None:
     p.add_argument("--fade", type=int, default=0)
     p.add_argument("--margin", type=int, default=2)
     p.add_argument("--save")
-    p.add_argument("--generator", action="store_true", help="the frame-rate front whole, the generator windowed")
+    p.add_argument(
+        "--generator",
+        action="store_true",
+        help="the frame-rate front whole, the generator windowed",
+    )
     a = p.parse_args()
     split = pathlib.Path(a.split)
     lines = json.loads((split / "lines.json").read_text())
@@ -175,7 +180,9 @@ def main() -> None:
         tokens = np.array([[0, *row["tokens"], 0]], dtype=np.int64)
         style = np.array([row["style"]], dtype=np.float32)
         t = time.perf_counter()
-        asr, f0, n, _ = enc.run(None, {"tokens": tokens, "style": style, "speed": np.array([1.0], np.float32)})
+        asr, f0, n, _ = enc.run(
+            None, {"tokens": tokens, "style": style, "speed": np.array([1.0], np.float32)}
+        )
         (whole,) = dec.run(None, {"asr": asr, "f0": f0, "n": n, "style": style, "phase": zero})
         t_whole = time.perf_counter() - t
         ws, we = trim(whole)
@@ -200,10 +207,10 @@ def main() -> None:
         jump = max((abs(float(out[j] - out[j - 1])) for j in joins), default=0.0)
         typical = float(np.percentile(np.abs(np.diff(ref)), 99))
         print(
-            f"  {words:>2}w: whole {t_whole*1000:5.0f} ms -> first audio {first_audio*1000:4.0f} ms "
-            f"(enc {t_enc*1000:3.0f} + {times[0]*1000:3.0f}); {len(times)} windows, decode total "
-            f"{sum(times)*1000:5.0f} ms; skipped lead {offset/RATE:.2f}s (whole's trim starts {ws/RATE:.2f}s, "
-            f"ours at +{s2/RATE:.2f}s); mel dist {dist:.2f} dB; loudness by window "
+            f"  {words:>2}w: whole {t_whole * 1000:5.0f} ms -> first audio {first_audio * 1000:4.0f} ms "
+            f"(enc {t_enc * 1000:3.0f} + {times[0] * 1000:3.0f}); {len(times)} windows, decode total "
+            f"{sum(times) * 1000:5.0f} ms; skipped lead {offset / RATE:.2f}s (whole's trim starts {ws / RATE:.2f}s, "
+            f"ours at +{s2 / RATE:.2f}s); mel dist {dist:.2f} dB; loudness by window "
             f"{', '.join(f'{x:+.1f}' for x in loud)}; level step at joins vs whole "
             f"{', '.join(f'{x:+.1f}' for x in steps)} dB; largest sample step at a join {jump:.3f} "
             f"(p99 step {typical:.3f}); DC {float(out.mean()):+.5f}; peak {float(np.abs(out).max()):.2f}"

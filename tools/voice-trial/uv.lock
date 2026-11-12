@@ -12,7 +12,7 @@ wheels = [
 
 [[package]]
 name = "ghost-voice-trial"
-version = "2026.11.0"
+version = "2026.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },

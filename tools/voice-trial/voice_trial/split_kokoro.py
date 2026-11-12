@@ -70,7 +70,9 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     enc = out / "kokoro-encoder.onnx"
     dec = out / "kokoro-decoder.onnx"
-    onnx.utils.extract_model(a.model, str(enc), ["tokens", "style", "speed"], [ASR, F0, N, DURATIONS])
+    onnx.utils.extract_model(
+        a.model, str(enc), ["tokens", "style", "speed"], [ASR, F0, N, DURATIONS]
+    )
     onnx.utils.extract_model(a.model, str(dec), [ASR, F0, N, "style"], ["audio"])
     for path, names in (
         (enc, [(ASR, "asr"), (F0, "f0"), (N, "n"), (DURATIONS, "durations")]),

@@ -37,7 +37,9 @@ def main() -> None:
     p.add_argument("--n", type=int, default=3)
     a = p.parse_args()
     d = a.dir
-    ref, rate = read_wav(os.path.join(d, "test_wavs", sorted(os.listdir(os.path.join(d, "test_wavs")))[0]))
+    ref, rate = read_wav(
+        os.path.join(d, "test_wavs", sorted(os.listdir(os.path.join(d, "test_wavs")))[0])
+    )
     print(f"load {os.getloadavg()[0]:.1f}")
     for threads in [int(t) for t in a.threads.split(",")]:
         tts = sherpa_onnx.OfflineTts(
@@ -82,9 +84,9 @@ def main() -> None:
                     secs = len(audio.samples) / audio.sample_rate
                     chunks = count[0]
                 print(
-                    f"  threads {threads} steps {steps} {words:>2} words: first chunk {np.median(firsts)*1000:5.0f} ms"
-                    f" ({chunks} callbacks), whole {np.median(wholes)*1000:5.0f} ms, audio {secs:4.2f} s,"
-                    f" RTF {np.median(wholes)/max(secs, 0.01):.2f}, rate {audio.sample_rate}"
+                    f"  threads {threads} steps {steps} {words:>2} words: first chunk {np.median(firsts) * 1000:5.0f} ms"
+                    f" ({chunks} callbacks), whole {np.median(wholes) * 1000:5.0f} ms, audio {secs:4.2f} s,"
+                    f" RTF {np.median(wholes) / max(secs, 0.01):.2f}, rate {audio.sample_rate}"
                 )
     print(f"load {os.getloadavg()[0]:.1f}")
 

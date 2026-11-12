@@ -28,7 +28,13 @@ def main(dirs: list[str]) -> None:
     for d in dirs:
         runs = json.load(open(f"{d}/records.json"))["runs"]
         for run in runs:
-            kind = "plain" if run["scenario"] in PLAIN else "lookup" if run["scenario"] in LOOKUP else None
+            kind = (
+                "plain"
+                if run["scenario"] in PLAIN
+                else "lookup"
+                if run["scenario"] in LOOKUP
+                else None
+            )
             if kind is None:
                 continue
             for rec in run["records"]:

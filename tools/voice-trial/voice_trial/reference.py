@@ -26,7 +26,9 @@ def main(split: str, styles: str) -> None:
     for words, row in lines.items():
         tokens = np.array([[0, *row["tokens"], 0]], dtype=np.int64)
         style = np.array([row["style"]], dtype=np.float32)
-        asr, f0, n, _ = enc.run(None, {"tokens": tokens, "style": style, "speed": np.array([1.0], np.float32)})
+        asr, f0, n, _ = enc.run(
+            None, {"tokens": tokens, "style": style, "speed": np.array([1.0], np.float32)}
+        )
         (whole,) = dec.run(None, {"asr": asr, "f0": f0, "n": n, "style": style, "phase": zero})
         k = len(row["tokens"])
         out = []
@@ -34,7 +36,9 @@ def main(split: str, styles: str) -> None:
             idx = min(max(k + delta, 1), len(rows) - 1)
             other = np.array([rows[idx]], dtype=np.float32)
             (moved,) = dec.run(None, {"asr": asr, "f0": f0, "n": n, "style": other, "phase": zero})
-            out.append(f"row {delta:+d}: {mel_distance(moved, whole):.2f} dB, level {rms_db(moved) - rms_db(whole):+.1f}")
+            out.append(
+                f"row {delta:+d}: {mel_distance(moved, whole):.2f} dB, level {rms_db(moved) - rms_db(whole):+.1f}"
+            )
         print(f"  {words:>2}w ({k} tokens): " + "; ".join(out))
 
 

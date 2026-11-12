@@ -74,9 +74,9 @@ def main() -> None:
             diff = float(np.abs(audio - audio2).max())
             secs = audio.shape[-1] / 24000
             print(
-                f"  {words:>2} words audio {secs:5.2f}s frames {asr.shape[-1]:4d}  whole {p50(tw)*1000:6.0f} ms"
-                f"  encoder {p50(te)*1000:5.0f} ms  decoder {p50(td)*1000:6.0f} ms"
-                f"  ({p50(td)/secs:.3f} s/s)  max diff {diff:.2e}"
+                f"  {words:>2} words audio {secs:5.2f}s frames {asr.shape[-1]:4d}  whole {p50(tw) * 1000:6.0f} ms"
+                f"  encoder {p50(te) * 1000:5.0f} ms  decoder {p50(td) * 1000:6.0f} ms"
+                f"  ({p50(td) / secs:.3f} s/s)  max diff {diff:.2e}"
             )
     print(f"load {os.getloadavg()}")
 

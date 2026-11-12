@@ -37,6 +37,8 @@ REMOTE = "origin"
 # own lock, as uv names them.
 WORKSPACE = ("ghost", "ghost-tools")
 ORACLE = "ghost-oracle"
+# Kokoro's split and the third round's measurements (ADR 0053), its own lock too.
+VOICE_TRIAL = "ghost-voice-trial"
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ COPIES: tuple[Copy, ...] = (
     _project_toml("tools/oracle/pyproject.toml"),
     *(_lock("uv.lock", name) for name in WORKSPACE),
     _lock("tools/oracle/uv.lock", ORACLE),
+    _project_toml("tools/voice-trial/pyproject.toml"),
+    _lock("tools/voice-trial/uv.lock", VOICE_TRIAL),
     _top_json("package.json"),
     _top_json("apps/desktop/package.json"),
     _top_json("apps/mobile/package.json"),

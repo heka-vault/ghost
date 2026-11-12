@@ -649,3 +649,266 @@ A speech-to-speech front end does all three at once, which is why those products
 none of them today; the good pipelines' 0.8 s is streaming recognition, streaming
 synthesis and a fast first token together. Without them Ghost's floor with a fast model is
 about 1.3 to 1.5 s: the scripted `instant` model's 1.15 s plus a fast model's half second.
+
+## Third round: a voice that starts as it is made, and words read before the stop
+
+Run the same day, on branch `feat/voice-speed-3`. The second round named two of the three
+things a pipeline needs to reach the leaders: a streaming voice and streaming hearing. This
+round went after both, measured before building, and built what the evidence supported
+([ADR 0053](../../adr/0053-ghosts-voice-starts-as-it-is-made.md),
+[ADR 0054](../../adr/0054-words-arrive-as-they-are-spoken.md)). The workstation is an Intel
+i5-11600K (6 cores, 12 threads, AVX-512), 30 GB of memory and no GPU. Load averages are
+given beside each run.
+
+### The answer to the owner's question
+
+End of the operator's speech to Ghost's voice, real models through the default connection
+(Sonnet 5.5 as the main model, Haiku 5.5 as the fast one), the mock GitHub app, three
+passes of two runs a scenario, load 0.9 to 2.9:
+
+| | plain spoken reply p50 / p95 | reply after one lookup p50 / p95 |
+|---|---|---|
+| (a) main model alone, as it ships | 2.45 / 3.04 s (n=8) | 5.52 / 8.59 s (n=8) |
+| (a) with the windowed voice | 2.41 / 2.88 s (n=8) | 5.09 / 7.53 s (n=8) |
+| (b) fast model in front, as it ships | 1.69 / 2.19 s (n=8) | 3.57 / 4.17 s (n=8) |
+| (b) with the windowed voice | **1.46 / 1.67 s** (n=12) | **2.95 / 3.31 s** (n=12) |
+| (b) windowed, and early words start the answer | 1.44 / 1.78 s (n=4) | 2.91 / 3.48 s (n=4) |
+| the bar: good pipelines | under 0.8 s | |
+| the bar: speech-to-speech products | 1.0 to 1.3 s | |
+
+A plain reply with a fast model in front and the windowed voice is 1.46 s at the p50, down
+from 1.69 s as the branch ships and 1.67 s in the second round. It is still 0.2 s over the
+top of the speech-to-speech range and nearly twice the good pipelines' 0.8 s. A reply
+after a lookup is 2.95 s, down from 3.57 s. The main model alone barely moves: its own 1.5
+to 1.9 s to a first token is the wait. The windowed voice is off by default until the
+operator has heard it (below), so "as it ships" is still the second and fourth rows.
+
+With the scripted model at the measured times (`--profile sonnet55 --fast haiku55`, three
+runs, load 1.8 to 5.9): a plain reply 1.38 / 1.71 s whole, 1.18 / 1.21 s windowed; after a
+lookup 2.75 / 2.95 s and 2.41 / 2.42 s. With no model time at all (`instant`, a fast model
+scripted in front): 1.48 s whole, 1.14 s windowed.
+
+### Part A: where Kokoro's time goes
+
+Kokoro v1.0 is one ONNX graph with two halves: an encoder (BERT, the duration and prosody
+predictors, the alignment of phonemes to frames) and a decoder, the iSTFTNet vocoder,
+which turns 25 ms frames into 600 samples each. `tools/voice-trial/voice_trial/split_kokoro.py`
+cuts the graph at that line with `onnx.utils.extract_model`; nothing inside either half
+changes. Run one after the other over every frame they give the whole model's samples
+bit for bit (`crates/ghost-infer/tests/kokoro_windowed.rs`, RMS difference 0 on four
+sentences). Timed in Python on ONNX Runtime 1.24.4 with Ghost's session options (CPU,
+sequential, every graph optimization), load 0.4 rising to 6.8 over the run:
+
+| words | audio | whole | encoder | decoder | decoder per second of audio |
+|---|---|---|---|---|---|
+| 2 | 1.55 s | 262 ms | 20 ms | 252 ms | 0.16 s |
+| 4 | 1.95 s | 338 ms | 22 ms | 319 ms | 0.16 s |
+| 8 | 3.30 s | 637 ms | 33 ms | 602 ms | 0.18 s |
+| 16 | 6.22 s | 1,283 ms | 51 ms | 1,247 ms | 0.20 s |
+| 32 | 11.85 s | 2,634 ms | 101 ms | 2,518 ms | 0.21 s |
+
+(The audio here is before Kokoro's trim of the silence at the ends.) The vocoder is 92 to
+97 % of the render and grows with the audio; the text side is 20 to 100 ms. So first audio
+scales with the piece because the vocoder renders a piece whole before any of it plays.
+
+The session's thread settings have no headroom. Ghost leaves intra-op threads at ONNX
+Runtime's default, which is the six physical cores, and that is the fastest setting
+measured: 1 thread 816 ms for two words and 6,829 ms for 32, 2 threads 481 and 4,244 ms, 4
+threads 313 and 2,980 ms, 6 threads 274 and 2,605 ms, the default 262 and 2,634 ms. The
+graph optimization level is already the highest. The quantized and fp16 Kokoro files were
+not tried: they change the vocoder's output, which is the sound, and the parity bar
+(ADR 0039) is the fp32 file.
+
+### Part A: what could start in 100 to 200 ms on this CPU
+
+- **Kokoro, its vocoder a window of frames at a time.** The decoder is convolutional with
+  two things that reach across the whole piece. The harmonic source integrates the pitch
+  into a phase with a cumulative sum; the split's decoder takes that phase as an input
+  (`phase`, in cycles, added after the sum) so a window starts where the whole render was,
+  and Ghost computes it from the pitch curve (`kokoro_windowed::phase_before`; checked:
+  a window decoded with the whole piece as context is the whole render's samples). The
+  other is AdaIN: every block normalizes each channel over the frames it is given. That
+  one cannot be carried in, so a window's audio is the vocoder's answer for those frames,
+  as a separate clause is today. Apache-2.0 (hexgrad/Kokoro-82M), the files Ghost already
+  has.
+- **Kyutai Pocket TTS.** Weights CC-BY-4.0 on Kyutai's Hugging Face card, gated behind a
+  sign-in and a prohibited-use policy; code MIT. The sherpa-onnx int8 export
+  (`sherpa-onnx-pocket-tts-int8-2026-01-26`, 192 MB, from KevinAHM/pocket-tts-onnx) carries
+  a CC-BY-4.0 LICENSE file but its README says "It is for non-commercial"; the upstream
+  card says CC BY 4.0 and nothing about commercial use, so the README looks stale, but the
+  conflict is recorded. Kyutai reports about 200 ms to a first chunk and 6x real time on
+  two cores of an M4. Measured here through sherpa-onnx 2.0.1's Python API (its callback
+  fires per sentence batch, not per frame), cloning the bundled reference clip, load 1 to
+  5: two words 288 ms, four 407 ms, eight 678 ms, sixteen 1,166 ms to the first chunk with
+  2 threads, and a real-time factor of 0.28 to 0.6 against Kokoro's 0.16 to 0.21. Frame by
+  frame it would be the encoder of the voice and text plus two 80 ms frames, plausibly near
+  150 ms, but that needs a port of its autoregressive loop over five graphs (there are
+  community Rust ports on candle), and it renders more slowly than Kokoro on this CPU once
+  it starts. Not built: the windowed Kokoro reaches the same first audio with the voice the
+  operator already has.
+- **Piper.** About ten times faster than Kokoro and clearly more robotic (ADR 0004); not
+  measured again.
+- **Chatterbox-Turbo** needs a GPU, and this machine has none.
+
+### Part A: what was built
+
+`GHOST_TTS_STREAM=windowed` renders each piece with the two halves
+(`ghost_infer::kokoro_windowed`, ADR 0053): the encoder over the whole piece, the leading
+pad's frames skipped, then the decoder over a first window of 8 frames (0.2 s) and windows
+twice as long after it, each with 16 frames of context on both sides thrown away, a 50 ms
+crossfade into each window from the one before, the tail trimmed. A piece of 1.2 s or less
+after its lead is one window, so a two-word reply renders exactly as it does whole. The TTS
+stage plays each window as its own audio frame under the reply's token
+(`Synth::render`, `tts::render_chunks`); a barge-in clears the speaker as before and stops
+the render at its next window; the echo filter is told the words before the first window,
+as before; the clause rendered ahead during the grace streams too, and dropped, it stops
+at its next window. The halves come from `scripts/models.sh kokoro-windowed`, pinned by
+SHA-256; missing or broken, Ghost speaks with the whole render and the waiting list says
+so. The setting is off by default.
+
+First audio from the piece's words, Rust, the same session options (`ghost-perf micro
+--only tts-stream --n 5`, load 8.3, other sessions building):
+
+| words | whole p50 / p95 | windowed first audio p50 / p95 | windowed, to the end | windows | longest wait for a window | loudness against whole |
+|---|---|---|---|---|---|---|
+| 2 | 260 / 367 ms | 270 / 280 ms | 270 ms | 1 | 0 | -0.5 LU |
+| 4 | 340 / 391 ms | **180** / 248 ms | 585 ms | 3 | 0 | -1.8 LU |
+| 8 | 630 / 644 ms | **181** / 191 ms | 921 ms | 4 | 0 | -0.6 LU |
+| 16 | 1,288 / 1,300 ms | **193** / 232 ms | 1,618 ms | 5 | 0 | -0.2 LU |
+| 32 | 2,591 / 2,629 ms | **236** / 320 ms | 2,944 ms | 6 | 0 | 0.0 LU |
+
+Real-time factor: the windows cost 14 to 72 % more CPU than the whole render (the context
+is decoded twice, which weighs most on short pieces), 0.26 to 0.45 s of render per second
+of speech against 0.23 to 0.24 whole, and playback never waited for a window. With 8 frames of context the first audio is 133 to 193 ms and the level
+moves more (-2.3 LU at four words).
+
+The objective checks, with nobody listening (same run): 24 kHz mono throughout; no sample
+clipped in either render; DC offset -0.0004 to -0.0005 of full scale in both; the largest
+sample step at a window's join 0.018 to 0.035, under the audio's own 99th-percentile step
+of 0.10 to 0.15, so no click; loudness above. Against the whole render, sample by sample
+(`voice_trial.scheme`, Python, context 8 to 48 frames), the windowed audio is 2.3 to 4.0 dB
+of mean log-mel distance from it on lines of eight words or more, and a window's level is 1
+to 3 dB under the same span of the whole render. Context does not close it: 48 frames each
+side (1.2 s) still leaves 2 dB on the long lines, so it is the normalization over the
+window, not the reach of the convolutions. For scale: Kokoro picks its voice row by the
+piece's token count, so every clause cut already renders with another row, and moving the
+row by five or ten tokens moves the whole render 0.02 to 1.1 dB. The windowed voice is a
+larger change than that, and smaller than what the early cut of the second round does to
+pitch at its join (6 semitones; windowing keeps the whole piece's pitch and timing exactly).
+Whether it sounds different is for the ear: the voice rubric's D5 and D6.
+
+The cloud voice. ElevenLabs was streaming end to end already (each clause sent as it is
+cut, audio played as each message arrives), but its socket was opened when the first
+clause was ready, so the first reply of a session and the first after an agent's voice
+change paid the handshake after the words were written. It now opens at the turn's first
+frame; its first piece is cut early as Kokoro's is (with `auto_mode` the service starts on
+each piece as it arrives); and a quiet socket is kept alive (`inactivity_timeout=180`, an
+empty text a minute), where before a context left quiet for the default 20 s could be
+closed under a listening session. Against a local stand-in with the service's times (150
+ms to connect, 250 ms from a text to its audio; the model's first token after 0.5 s, then
+290 tokens a second; `elevenlabs::tests::test_the_cloud_voice_waits_for_the_service_and_not_for_ghost`):
+
+| first token to first audio frame out of the stage | fresh socket | open socket |
+|---|---|---|
+| before | 469 ms (Ghost's own 219) | 312 ms (62) |
+| after | 276 ms (26) | 275 ms (25) |
+
+Of the 25 ms left, 15 are the model writing the first four words. The real service was not
+called: there is no key on this machine.
+
+### Part B: words before the stop
+
+Today the recognizer reads a segment after the VAD's 0.2 s stop (0.17 s p50), and the
+speculative answer starts on those words once Smart Turn has called the end. Two
+candidates were weighed before building either.
+
+- **A streaming recognizer.** NVIDIA's Nemotron Speech Streaming 0.6B (a cache-aware
+  FastConformer with an RNN-T head) has community ONNX exports and runs in the `parakeet-rs`
+  crate (MIT or Apache-2.0) with 560 ms chunks. Its weights are under the NVIDIA Open Model
+  License; the newer multilingual 3.5 model is OpenMDW-1.1 on NVIDIA's card and the NVIDIA
+  licence on mirrors, a conflict a June 2026 issue leaves open. It would be a second 0.6B
+  model running through every turn beside Parakeet, Smart Turn and Kokoro on six cores, a
+  new parity suite, and its last chunk still has to be flushed at the end of speech. What it
+  could save over (b) is the remaining read: about 0.05 to 0.1 s.
+- **The early read, made safe.** The read at the first quiet frame (second round) used only
+  to start the speculative answer; the stop's read still makes the transcript, and an
+  answer started on early words that differ is started again on the stop's. From the
+  second round's timing: the answer starts 0.08 to 0.17 s sooner on the 90 % of segments
+  whose early words are the stop's, and costs a thrown-away model call on the rest. No new
+  model, no new licence.
+
+(b) was built (`GHOST_STT_EARLY_READ=speculate`, ADR 0054). The early words go on as
+`Frame::EarlyTranscript` the moment they are read; the echo filter, the hold gate, a change
+waiting for its yes, and an interceptor that would take the words (asked, nothing done) all
+drop them wherever they would drop or take the transcript; the user aggregator gives them
+to the stop strategy for a turn's first segment only; the answer starts on them once the
+hold begins; the stop's words then keep it or restart it. The words the turn closes on, the
+model receives and the transcript stores are the stop's, every time.
+
+Scripted, fast model in front, windowed voice, three runs (load 1.2 to 6.6):
+
+| | stop's read only | early from 0.06 s of quiet | from 0.1 s |
+|---|---|---|---|
+| plain reply p50 / p95 | 1.17 / 1.23 s | **1.03** / 1.17 s | 1.10 / 1.13 s |
+| after a lookup p50 / p95 | 2.43 / 2.64 s | 2.42 / 2.65 s | 2.43 / 2.67 s |
+| the model's share of a plain reply, p50 | 0.34 s | 0.21 s | 0.24 s |
+| `stt` (the stop's read, end of speech side), p50 / p95 | 0.174 / 0.185 s | 0.219 / 0.240 s | 0.263 / 0.299 s |
+| `hear` (to the turn's release), p50 / p95 | 0.603 / 0.619 s | 0.614 / 0.622 s | 0.620 / 0.643 s |
+| answers started on early words, of them the stop's words the same | | 12, 12 | 12, 12 |
+
+It saves 0.07 to 0.14 s of a plain reply when the model is the wait, and nothing after a
+lookup, whose call waits for the full grace anyway (ADR 0049). The stop's read now queues
+behind the early read on Parakeet's lock, 45 ms later at the p50; the turn's release does
+not move, since a sure close waits the 0.35 s grace either way. With the real models (one
+pass, n=4) the plain reply was 1.44 s against 1.46 s: inside the noise of a model whose
+first token moves by 0.3 s from call to call.
+
+Safety, `make perf-hear` on Kokoro's rendered takes (one voice, 37 takes, load 1.1 to 4.2):
+
+| | the stop's read (today) | `speculate`, 0.06 s |
+|---|---|---|
+| stage word error rate | 3.0% | 3.0% |
+| turn word error rate | 2.1% | 2.1% |
+| empty reads | 0 of 37 | 0 of 37 |
+| early reads: the stop's words / different / thrown away (speech again) | | 51 / 3 / 16 (3.5 s of model) |
+| read at the close, p95 (the harness) | 0.22 s | 0.74 s |
+
+The words are identical by construction, and the scores are identical. The close's p95 in
+the hear harness fails its 150 ms budget: the harness feeds a take as fast as it can be
+processed, so the early read has had none of the stop's 0.14 s of quiet to finish in and
+the stop's read waits for all of it. At real time (`make perf`, above) the cost is 45 ms
+at the p50 and 55 ms at the p95. Three segments in 54 would have started an answer on other
+words (5.6 %), each a model call thrown away and started again.
+
+The setting is off by default. It is safe for the words and costs one more Parakeet read
+per segment (about 0.17 s of a core) and the reads thrown away; it buys a tenth of a second
+when a fast model is in front. Rubric D7 is the operator's check.
+
+### Part B: the VAD's stop and the short grace
+
+Not re-measured. With no streaming recognizer there is no verdict on the audio so far to
+put in place of the VAD's stop, and the close's rule is unchanged, so the second round's
+counts stand: on Kokoro's takes the 0.35 s short grace closes 12 of 65 pauses early, and
+every shorter wait closes more and leaves more of them closed when the voice starts.
+
+### What is left, and 1.0 to 1.3 s
+
+A plain reply with the fast model in front and the windowed voice, 1.46 s with the real
+models:
+
+| | s | what would cut it |
+|---|---|---|
+| the VAD's stop | 0.20 | a turn model judging speech as it goes; not safe with Smart Turn on silence (step 5, second round) |
+| the read | 0.17 | early words take 0.07 to 0.14 s of it off the answer's start (`speculate`) |
+| the short grace, beyond the read | 0.18 | the model already starts inside it |
+| the fast model's first token | 0.5 to 0.9 | a faster model; Haiku 5.5 is 0.52 s at its best |
+| writing the first piece | 0.05 to 0.1 | |
+| Kokoro's first audio | 0.18 to 0.24 | windowed; it was 0.25 to 0.65 whole |
+
+The voice is no longer the largest part Ghost owns: the VAD's stop, the read and the grace
+are, about 0.55 s together, and the model's first token is the largest part of all. To
+reach 1.3 s at the p50 Ghost needs the early words on (about 0.1 s) and a model a little
+faster than Haiku 5.5 through this proxy, or its first token without the proxy's hop. To
+reach 1.0 s it needs the turn decided as the speech ends rather than 0.55 s after it, which
+is a streaming turn model as well as a streaming recognizer, and neither Smart Turn nor
+Parakeet is one. The good pipelines' 0.8 s needs that and a first token near 0.3 s.

@@ -81,7 +81,9 @@ def main() -> None:
     lines = json.loads((split / "lines.json").read_text())
     enc = session(str(split / "kokoro-encoder.onnx"))
     dec = session(str(split / "kokoro-decoder.onnx"))
-    print(f"load {os.getloadavg()[0]:.1f}  first {a.first} frames, grow x{a.grow}, context {a.left}/{a.right}")
+    print(
+        f"load {os.getloadavg()[0]:.1f}  first {a.first} frames, grow x{a.grow}, context {a.left}/{a.right}"
+    )
     for words, row in lines.items():
         tokens = np.array([[0, *row["tokens"], 0]], dtype=np.int64)
         style = np.array([row["style"]], dtype=np.float32)
@@ -115,7 +117,9 @@ def main() -> None:
         stitched = np.concatenate(pieces)
         whole = whole[: len(stitched)]
         err = stitched - whole
-        snr = 10 * np.log10(np.sum(whole.astype(np.float64) ** 2) / (np.sum(err.astype(np.float64) ** 2) + 1e-20))
+        snr = 10 * np.log10(
+            np.sum(whole.astype(np.float64) ** 2) / (np.sum(err.astype(np.float64) ** 2) + 1e-20)
+        )
         joins, loud = [], []
         pos = 0
         for piece in pieces:
@@ -125,8 +129,8 @@ def main() -> None:
                 joins.append(abs(float(stitched[pos] - stitched[pos - 1])))
         typical = float(np.median(np.abs(np.diff(whole))))
         print(
-            f"  {words:>2} words {frames:4d} frames, {len(pieces)} windows: first audio {first_audio*1000:5.0f} ms"
-            f" (encoder {t_enc*1000:3.0f}, window {costs[0]*1000:4.0f}), all windows {sum(costs)*1000:5.0f} ms;"
+            f"  {words:>2} words {frames:4d} frames, {len(pieces)} windows: first audio {first_audio * 1000:5.0f} ms"
+            f" (encoder {t_enc * 1000:3.0f}, window {costs[0] * 1000:4.0f}), all windows {sum(costs) * 1000:5.0f} ms;"
             f" SNR {snr:5.1f} dB; loudness by window {', '.join(f'{x:+.2f}' for x in loud)} dB;"
             f" largest step at a join {max(joins, default=0):.4f} (median step {typical:.4f})"
         )
