@@ -141,7 +141,7 @@ pub struct Job {
     pub schedule: Schedule,
     pub options: JobOptions,
     pub enabled: bool,
-    /// `operator`, or `agent:<slug>`.
+    /// `operator`, `agent:<slug>`, or `client:<name>` for an outside tool (ADR 0048).
     pub created_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

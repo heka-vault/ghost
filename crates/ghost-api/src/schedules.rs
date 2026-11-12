@@ -111,7 +111,7 @@ pub struct ScheduleInfo {
     /// The schedule in a few words: `every 30m`, `0 9 * * 1-5 (Europe/London)`.
     pub summary: String,
     pub enabled: bool,
-    /// `operator`, or `agent:<slug>`.
+    /// `operator`, `agent:<slug>`, or `client:<name>` for an outside tool.
     pub created_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

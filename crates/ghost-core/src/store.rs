@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
 );
 
 -- Schedules (ADR 0047): what an agent does on its own, and when. ``schedule`` and
--- ``options`` are JSON; ``created_by`` is 'operator' or 'agent:<slug>'.
+-- ``options`` are JSON; ``created_by`` is 'operator', 'agent:<slug>' or
+-- 'client:<name>' (an outside tool, ADR 0048).
 CREATE TABLE IF NOT EXISTS schedules (
     id           TEXT PRIMARY KEY,
     name         TEXT NOT NULL,

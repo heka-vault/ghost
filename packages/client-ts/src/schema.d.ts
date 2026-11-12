@@ -2683,7 +2683,7 @@ export interface components {
             check?: components["schemas"]["ScheduleCheck"] | null;
             /** Format: date-time */
             created_at: string;
-            /** @description `operator`, or `agent:<slug>`. */
+            /** @description `operator`, `agent:<slug>`, or `client:<name>` for an outside tool. */
             created_by: string;
             /** @description Five cron fields. */
             cron?: string | null;

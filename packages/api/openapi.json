@@ -3689,7 +3689,7 @@
             "type": "string"
           },
           "created_by": {
-            "description": "`operator`, or `agent:<slug>`.",
+            "description": "`operator`, `agent:<slug>`, or `client:<name>` for an outside tool.",
             "type": "string"
           },
           "cron": {
