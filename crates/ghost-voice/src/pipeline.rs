@@ -419,6 +419,8 @@ pub struct SessionHooks {
     pub on_latency: Option<crate::latency::Sink>,
     /// The loudness of Ghost's own voice as it plays (`crate::level`); never the microphone.
     pub on_level: Option<crate::level::OnLevel>,
+    /// What the session is doing, by name and never in words (`crate::activity`, ADR 0055).
+    pub on_activity: Option<crate::activity::OnActivity>,
 }
 
 /// How a session opens.
@@ -605,7 +607,20 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         Some(l) => l.clone(),
         None => crate::latency::null_probe(),
     };
-    let observer: Option<Arc<dyn Observer>> = latency.clone().map(|l| l as Arc<dyn Observer>);
+    let observer: Option<Arc<dyn Observer>> = {
+        let mut all: Vec<Arc<dyn Observer>> = Vec::new();
+        if let Some(l) = latency.clone() {
+            all.push(l as Arc<dyn Observer>);
+        }
+        if let Some(on) = p.hooks.on_activity.clone() {
+            all.push(Arc::new(crate::activity::ActivityObserver::new(on)));
+        }
+        match all.len() {
+            0 => None,
+            1 => all.pop(),
+            _ => Some(Arc::new(crate::activity::Observers(all))),
+        }
+    };
     let events = p.events.unwrap_or_default();
 
     let session_token = CancellationToken::new();
