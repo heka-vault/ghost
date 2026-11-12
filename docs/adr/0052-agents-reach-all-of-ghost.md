@@ -116,7 +116,8 @@ Python and shell), never executable.
   **16 tools and 8,397 bytes** of schema before this, and **10 tools and 7,022 bytes** after
   (`schedule_manage` 2,300, `ask` 1,335, `recall` 856, `notify` 551, `tools_search` 457,
   `answer` 421, `docs_search` 306, `waiting_ack` 293, `status` 257, `resolve` 246). The test
-  fails past 7,500 bytes or past ten tools. Ghost's paragraph of the prompt grows from 692
+  fails past 7,500 bytes or past ten tools. (2026-11-12: `docs_search`'s description says
+  a short section comes back whole, 335 bytes, so 7,051 in all.) Ghost's paragraph of the prompt grows from 692
   to 812 bytes. A tool found by search costs one model call and one loss of the cached
   prompt when it joins the list.
 - An agent that needs `docs_read` after `docs_search`, or `transcript_read` after `recall`,

@@ -349,11 +349,17 @@ impl GhostServer {
         }
         let results: Vec<Value> = hits
             .into_iter()
-            .map(|h| json!({"document": h.document, "heading": h.heading, "excerpt": h.excerpt}))
+            .map(|h| {
+                if h.whole {
+                    json!({"document": h.document, "heading": h.heading, "section": h.excerpt})
+                } else {
+                    json!({"document": h.document, "heading": h.heading, "excerpt": h.excerpt})
+                }
+            })
             .collect();
         Ok(json!({
             "results": results,
-            "note": "Read a whole section with ghost_docs_read (name, section).",
+            "note": "A result with `section` is the whole section. One with `excerpt` is the best sentences of a longer one: read it whole with ghost_docs_read (name, section).",
         }))
     }
 
@@ -543,7 +549,7 @@ impl GhostServer {
     }
 
     #[tool(
-        description = "Search Ghost's own documentation: what Ghost is and how it works. Returns the best sections with a short excerpt each.",
+        description = "Search Ghost's own documentation: what Ghost is and how it works. Returns the best sections: a short one whole, a longer one as its best sentences.",
         annotations(read_only_hint = true)
     )]
     fn docs_search(&self, Parameters(p): Parameters<DocsSearch>) -> CallToolResult {

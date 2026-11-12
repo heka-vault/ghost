@@ -120,9 +120,11 @@ Only a core of these tools is offered by name on every turn (`ghost_app::CORE`: 
 `schedule_manage`, `tools_search`); the rest are found with `ghost_tools_search` and
 offered by name from the next model call, through the same deferral ADR 0046 made for
 connected apps (`Apps::hidden`, `Recent`). Measured by
-`what_ghosts_own_app_costs_every_turn`: 10 tools and 7,022 bytes of schema on every turn,
+`what_ghosts_own_app_costs_every_turn`: 10 tools and 7,051 bytes of schema on every turn,
 where before ADR 0052 it was 16 tools and 8,397 bytes; all 35 offered by name would be
-17,140. [tools.md](tools.md) lists every tool with its default level.
+17,169. `ghost_docs_search` returns a section under 1,200 characters whole and a longer
+one as its best whole sentences or list items (400 characters at most), so an answer
+rarely needs `ghost_docs_read` after it. [tools.md](tools.md) lists every tool with its default level.
 
 ### Permissions
 
