@@ -1263,10 +1263,12 @@ mod ghosts_own_app {
         own_with(tmp, None, None).await
     }
 
+    type MakeQuestions = dyn Fn(Arc<Store>, Arc<WaitingList>) -> Arc<Questions>;
+
     /// The same, with the questions (ADR 0051) and what the operator last said.
     async fn own_with(
         tmp: &Path,
-        questions: Option<&dyn Fn(Arc<Store>, Arc<WaitingList>) -> Arc<Questions>>,
+        questions: Option<&MakeQuestions>,
         heard: Option<Arc<Mutex<String>>>,
     ) -> Own {
         let store = Arc::new(Store::in_memory().unwrap());
