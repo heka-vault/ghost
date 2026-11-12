@@ -1,6 +1,6 @@
 # Ghost
 
-Ghost is a voice-first assistant for triaging GitHub issues. Say "Ghost" at your desk, ask what needs your sign-off, talk through the options, and approve or request changes without opening the issue tracker. You decide how much it does on its own: by default it labels and comments as you ask and tells you in passing, and asks before closing anything. Change your mind and Ghost changes it back, the same way.
+Ghost is a voice-first assistant for triaging GitHub issues. Say "Ghost" at your desk, ask what needs your sign-off, talk through the options, and approve or request changes without opening the issue tracker. You decide how much it does on its own: by default it does what you ask and tells you what it changed, and your permissions say what it must ask about first or never do. Change your mind and Ghost changes it back, the same way.
 
 <p align="center">
   <img src="docs/screenshots/session-pending.webp" alt="The Ghost desktop app in a session: the transcript, and a change waiting for your okay with Confirm and Cancel" width="100%">
