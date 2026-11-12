@@ -29,6 +29,7 @@ and don't end on a number. Then the turn closes after `GHOST_TURN_CONFIDENT_GRAC
 | Smart Turn says done, less sure, or no stop was written | 1.2 s (`GHOST_TURN_GRACE_SECS`) |
 | ... and the words end on a number | 1.7 s (the grace and `GHOST_TURN_NUMBER_SECS`) |
 | The words stop mid-thought, whatever Smart Turn says | 3 s (`GHOST_TURN_UNFINISHED_SECS`) |
+| ... but only by a last comma the whole-turn read wrote, the last segment's own read ending a sentence and Smart Turn sure | 0.35 s, as the first row (`EndWords::of_turn`, 2026-11-12) |
 | Smart Turn says not done, the words end a sentence | 1.6 s (`GHOST_TURN_STOP_SECS`) |
 | Smart Turn says not done | 3 s |
 

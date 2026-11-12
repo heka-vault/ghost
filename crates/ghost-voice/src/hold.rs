@@ -181,6 +181,7 @@ impl Stage for HoldGate {
             // On hold nothing is answered, early words least of all (ADR 0054).
             Frame::Interim(_)
             | Frame::EarlyTranscript(_)
+            | Frame::HeardNothing { .. }
             | Frame::UserStarted
             | Frame::UserStopped
             | Frame::VadStarted { .. }
