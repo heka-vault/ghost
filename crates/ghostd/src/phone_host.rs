@@ -305,6 +305,14 @@ impl PhoneHost for Daemon {
 
     /// A change confirmed from the paired phone: the gate's confirm by id, its evidence
     /// recorded with the classifier `phone`. What counts as a yes is the gate's, as ever.
+    async fn set_listening(
+        &self,
+        listening: bool,
+        minutes: Option<u32>,
+    ) -> Result<Option<ghost_api::models::NotListening>, String> {
+        Daemon::set_listening(self, listening, minutes).await
+    }
+
     async fn confirm_change(&self, id: &str) -> Option<OutcomeView> {
         let gate = self.gate()?;
         let live = self

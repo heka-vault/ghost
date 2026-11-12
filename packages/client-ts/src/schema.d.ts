@@ -692,6 +692,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/listening": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether Ghost is listening (ADR 0057) */
+        get: operations["get_listening_listening_get"];
+        /** Turn listening on or off */
+        put: operations["put_listening_listening_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model": {
         parameters: {
             query?: never;
@@ -2514,6 +2532,22 @@ export interface components {
         ItemKey: {
             key: string;
         };
+        /** @description `PUT /listening`: turn Ghost's microphone on or off (ADR 0057). */
+        ListeningRequest: {
+            /** @description `false` closes the microphone; `true` opens it again. */
+            listening: boolean;
+            /**
+             * Format: int32
+             * @description With `listening: false`, for how long (1 to 1440); unset: until turned back on.
+             */
+            minutes?: number | null;
+        };
+        /** @description What `GET` and `PUT /listening` answer. */
+        ListeningView: {
+            listening: boolean;
+            /** @description When listening comes back by itself (RFC 3339), while not listening. */
+            until: string | null;
+        };
         LogEvent: {
             /** Format: date-time */
             at: string;
@@ -2680,6 +2714,14 @@ export interface components {
             kokoro_present: boolean;
             ready: boolean;
             stt_model: string;
+        };
+        /**
+         * @description Ghost's microphone is closed (ADR 0057): no capture stream is open, nothing is heard,
+         *     not even its name. Typed turns, the phone's own calls, schedules and watches go on.
+         */
+        NotListening: {
+            /** @description When listening comes back by itself (RFC 3339); null: when the operator turns it on. */
+            until: string | null;
         };
         OperationInfo: {
             /** @description By name alone; a rule with argument patterns may decide some calls. */
@@ -3341,6 +3383,7 @@ export interface components {
             /** @description Ghost has decided to hang up: its goodbye may still be playing. */
             ending: boolean;
             models_ready: boolean;
+            not_listening: components["schemas"]["NotListening"] | null;
             pending?: components["schemas"]["PendingProposal"] | null;
             phase: components["schemas"]["Phase"];
             session_id: string | null;
@@ -3611,6 +3654,8 @@ export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
+export type SchemaListeningRequest = components['schemas']['ListeningRequest'];
+export type SchemaListeningView = components['schemas']['ListeningView'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
 export type SchemaModelCheckLatest = components['schemas']['ModelCheckLatest'];
 export type SchemaModelCheckModel = components['schemas']['ModelCheckModel'];
@@ -3624,6 +3669,7 @@ export type SchemaModelOptionView = components['schemas']['ModelOptionView'];
 export type SchemaModelProviderView = components['schemas']['ModelProviderView'];
 export type SchemaModelSignInResult = components['schemas']['ModelSignInResult'];
 export type SchemaModelsView = components['schemas']['ModelsView'];
+export type SchemaNotListening = components['schemas']['NotListening'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
@@ -5163,6 +5209,66 @@ export interface operations {
             };
             /** @description No take is going */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_listening_listening_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListeningView"];
+                };
+            };
+        };
+    };
+    put_listening_listening_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListeningRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListeningView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Ghost could not keep the switch */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

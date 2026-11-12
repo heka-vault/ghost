@@ -1,4 +1,4 @@
-//! `ghostd run`: the daemon. `ghostd status|wake|say|sleep`: clients of its socket.
+//! `ghostd run`: the daemon. `ghostd status|wake|say|sleep|listening`: clients of its socket.
 //! `ghostd passwords`: the vault from the command line. `ghostd check`: the settings,
 //! the vault, Ghost's folder and the apps, with a problem as the exit code. `ghostd push`:
 //! a signed delivery to the webhook listener (ADR 0027). `ghostd latency`: where the
@@ -71,6 +71,8 @@ fn main() -> anyhow::Result<()> {
         Some("wake") => client("wake", &args[1..]),
         Some("say") => client("say", &args[1..]),
         Some("sleep") => client("sleep", &args[1..]),
+        // ADR 0057: for a keyboard shortcut of the desktop's own
+        Some("listening") => client("listening", &args[1..]),
         Some("restore-volumes") => restore_volumes(),
         Some("check") => {
             let cfg = GhostdSettings::load()?;
@@ -286,6 +288,25 @@ async fn client(cmd: &str, args: &[String]) -> anyhow::Result<()> {
         "wake" => {
             client
                 .wake((!text.is_empty()).then_some(text.as_str()))
+                .await
+        }
+        "listening" => {
+            let usage = "ghostd listening on|off|toggle [minutes]";
+            let minutes = match args.get(1) {
+                Some(m) => Some(m.parse::<u32>().with_context(|| usage.to_string())?),
+                None => None,
+            };
+            let listening = match args.first().map(String::as_str) {
+                Some("on") => true,
+                Some("off") => false,
+                Some("toggle") => {
+                    let status = client.status().await?;
+                    !status["not_listening"].is_null()
+                }
+                _ => anyhow::bail!("{usage}"),
+            };
+            client
+                .set_listening(listening, minutes.filter(|_| !listening))
                 .await
         }
         "say" => {

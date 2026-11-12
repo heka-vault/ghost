@@ -27,6 +27,7 @@ export class LiveDesk implements Desk {
   async loadAudit() {}
   async acknowledge(_key: string) {}
   async snooze(_key: string, _minutes: number) {}
+  async setDeskListening(_listening: boolean) {}
   async answer(_key: string, _text: string) {}
   async decline(_key: string) {}
   async confirmChange(_key: string, _changeId: string) {}

@@ -123,6 +123,8 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
                 audio: d.audio_settings(false), // ducked here, not by the devices
                 thinking_sound: voice.thinking_sound,
                 chime: cfg.chime && !already_chimed,
+                // ADR 0057: a typed turn while not listening; the speaker only
+                mic: !d.mic.is_off(),
             })
             .await;
             match opened {

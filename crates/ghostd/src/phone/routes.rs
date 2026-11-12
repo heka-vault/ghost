@@ -197,6 +197,23 @@ impl Snooze {
     }
 }
 
+/// `POST /listening` (ADR 0057): `{listening, minutes?}`, the desk's microphone off or on.
+#[derive(Debug, Deserialize)]
+struct ListeningBody {
+    listening: bool,
+    #[serde(default)]
+    minutes: Option<u32>,
+}
+
+impl ListeningBody {
+    fn check(&self) -> bool {
+        match self.minutes {
+            None => true,
+            Some(m) => !self.listening && (1..=ghost_core::listening::MOST_MINUTES).contains(&m),
+        }
+    }
+}
+
 /// `POST /offer`: `{sdp, type: "offer", pc_id?, restart_pc?, conversation?}`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct OfferRequest {
@@ -275,6 +292,7 @@ pub fn routes(listener: Arc<PhoneListener>) -> Router {
         .route("/waiting/snooze", post(snooze))
         .route("/offer", post(offer).patch(candidates))
         .route("/end", post(end))
+        .route("/listening", post(listening))
         .merge(super::stream::routes())
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(listener)
@@ -390,6 +408,21 @@ async fn candidates(State(l): Listener, body: Bytes) -> Response {
 async fn end(State(l): Listener) -> Response {
     l.host.end_phone().await;
     reply(StatusCode::OK, json!({ "ok": true }))
+}
+
+/// The desk's microphone, from the paired phone (ADR 0057). Setting a state, not a toggle,
+/// so a request sent twice does what it did once.
+async fn listening(State(l): Listener, body: Bytes) -> Response {
+    let Some(req) = parse::<ListeningBody>(&body).filter(ListeningBody::check) else {
+        return error(StatusCode::UNPROCESSABLE_ENTITY, None);
+    };
+    match l.host.set_listening(req.listening, req.minutes).await {
+        Ok(off) => reply(
+            StatusCode::OK,
+            json!({ "listening": off.is_none(), "until": off.and_then(|o| o.until) }),
+        ),
+        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, None),
+    }
 }
 
 async fn method_not_allowed() -> Response {
@@ -613,6 +646,7 @@ mod tests {
         feed: Arc<super::super::stream::PhoneFeed>,
         answers: Mutex<Vec<(String, String)>>,
         confirmed: Mutex<Vec<String>>,
+        listening: Mutex<Vec<(bool, Option<u32>)>>,
     }
 
     impl FakeHost {
@@ -623,6 +657,17 @@ mod tests {
 
     #[async_trait]
     impl PhoneHost for FakeHost {
+        async fn set_listening(
+            &self,
+            listening: bool,
+            minutes: Option<u32>,
+        ) -> Result<Option<ghost_api::models::NotListening>, String> {
+            lock(&self.listening).push((listening, minutes));
+            Ok((!listening).then(|| ghost_api::models::NotListening {
+                until: minutes.map(|_| "2026-11-12T18:00:00Z".into()),
+            }))
+        }
+
         fn status(&self) -> Status {
             Status {
                 phase: Phase::Passive,
@@ -639,6 +684,7 @@ mod tests {
                 session_origin: None,
                 ending: false,
                 waiting: 0,
+                not_listening: None,
             }
         }
 
@@ -1092,6 +1138,58 @@ mod tests {
         let (r, _) = signed(&p.app, &creds, "GET", "/end", None).await;
         assert_eq!(r.status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(r.json(), json!({"error": "method_not_allowed"}));
+    }
+
+    #[tokio::test]
+    async fn the_phone_turns_the_desks_microphone_off_and_on() {
+        // ADR 0057: signed like everything else; a time goes with off only.
+        let p = phone();
+        let creds = pair(&p).await;
+        let (r, nonce) = signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/listening",
+            Some(json!({"listening": false, "minutes": 60})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK);
+        assert!(response_ok(&r, &creds, &nonce));
+        assert_eq!(
+            r.json(),
+            json!({"listening": false, "until": "2026-11-12T18:00:00Z"})
+        );
+        let (r, _) = signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/listening",
+            Some(json!({"listening": true})),
+        )
+        .await;
+        assert_eq!(r.json(), json!({"listening": true, "until": null}));
+        assert_eq!(
+            *lock(&p.host.listening),
+            vec![(false, Some(60)), (true, None)]
+        );
+        for bad in [
+            json!({"listening": true, "minutes": 5}),
+            json!({"listening": false, "minutes": 0}),
+            json!({"minutes": 5}),
+        ] {
+            let (r, _) = signed(&p.app, &creds, "POST", "/listening", Some(bad)).await;
+            assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        let r = send(
+            &p.app,
+            Request::builder()
+                .method("POST")
+                .uri("/listening")
+                .body(Body::from(r#"{"listening":true}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

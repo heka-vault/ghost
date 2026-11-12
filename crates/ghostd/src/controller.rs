@@ -39,6 +39,9 @@ impl Controller for Daemon {
         if self.state.phase() != Phase::Passive {
             return false;
         }
+        if first_utterance.is_none() && self.mic.is_off() {
+            return false; // ADR 0057: a voice session would open the microphone
+        }
         let Some(manual) = lock(&self.manual).clone() else {
             return false;
         };
@@ -69,6 +72,14 @@ impl Controller for Daemon {
         self.state.set_ending();
         session.end().await;
         true
+    }
+
+    async fn set_listening(
+        &self,
+        listening: bool,
+        minutes: Option<u32>,
+    ) -> Result<Option<ghost_api::models::NotListening>, String> {
+        Daemon::set_listening(self, listening, minutes).await
     }
 
     async fn say(&self, text: String, conversation: Option<String>) -> bool {

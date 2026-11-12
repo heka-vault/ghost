@@ -15,6 +15,7 @@ pub mod ghost_app;
 pub mod hear;
 pub mod hooks_listener;
 pub mod latency;
+pub mod listening;
 pub mod llm_cli;
 pub mod mcp;
 pub mod model_check;
