@@ -8,6 +8,7 @@ import {
 } from "@ghost/client-ts";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
+import { type Activity, addActivity } from "./activity";
 import { createHearLive, type HearLive } from "./hearLive";
 import { createVoiceLevel, type VoiceLevel } from "./voiceLevel";
 
@@ -17,6 +18,8 @@ export interface GhostState {
   connected: boolean;
   turns: Turn[];
   pending: PendingProposal | null;
+  /** What the live session did, by name and never in words (ADR 0055); empty outside one. */
+  activity: Activity[];
   logs: { level: string; message: string; at: string }[];
   lastEvent: GhostEvent | null;
   /** Bumps whenever a conversation is created, edited, deleted or switched (ADR 0014). */
@@ -39,6 +42,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [connected, setConnected] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [pending, setPending] = useState<PendingProposal | null>(null);
+  const [activity, setActivity] = useState<Activity[]>([]);
   const [logs, setLogs] = useState<GhostState["logs"]>([]);
   const [lastEvent, setLastEvent] = useState<GhostEvent | null>(null);
   const [conversationsVersion, setConversationsVersion] = useState(0);
@@ -77,7 +81,10 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
             case "status":
               setStatus(m.status);
               setPending(m.status.pending ?? null);
-              if (m.status.phase === "passive" || m.status.phase === "starting") setTurns([]);
+              if (m.status.phase === "passive" || m.status.phase === "starting") {
+                setTurns([]);
+                setActivity([]);
+              }
               // The voice's last 0 can be lost with a dropped stream; the phase is the backstop.
               if (m.status.phase !== "speaking" && voice.get().level > 0) voice.set(0);
               break;
@@ -86,6 +93,9 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
               break;
             case "pending":
               setPending(m.pending ?? null);
+              break;
+            case "activity":
+              setActivity((list) => addActivity(list, m.activity));
               break;
             case "log":
               setLogs((l) => [...l.slice(-499), { level: m.level, message: m.message, at: m.at }]);
@@ -138,8 +148,8 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   }, [client, voice, hear]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear }),
-    [client, status, connected, turns, pending, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear],
+    () => ({ client, status, connected, turns, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear }),
+    [client, status, connected, turns, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

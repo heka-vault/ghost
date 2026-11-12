@@ -42,6 +42,13 @@ export interface Scenario {
    * ?phone=off|unpaired|paired|tunnel|tunnel-down|pairs|expires (see mock/index.ts).
    */
   phone?: "off" | "unpaired" | "paired" | "tunnel" | "tunnel-down";
+  /**
+   * A conversation-screen story (fixtures/session.ts): `thread` a session with tool calls, a
+   * handover, a change Ghost made, a pause and an agent's question; `you` the operator speaking;
+   * `cut` Ghost cut off mid-reply; `hold` the session going on hold; `ending` Ghost saying
+   * goodbye; `error` a turn that failed. They play out over the first few seconds after load.
+   */
+  story?: "thread" | "you" | "cut" | "hold" | "ending" | "error";
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -57,6 +64,12 @@ export const SCENARIOS: Scenario[] = [
   { name: "expiring", label: "Okay running out", description: "A confirm-level change that expires 8 seconds after load.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal", pendingExpiresIn: 8 },
   { name: "reconnecting", label: "Reconnecting", description: "A live session; the daemon drops 1.5 seconds after load and stays away.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal", dropAfterMs: 1500 },
   { name: "phone", label: "On the phone", description: "A live session the paired phone started; the desk can end it.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", origin: "phone", phone: "paired" },
+  { name: "thread", label: "A full session", description: "Ghost used apps, handed a turn over, made a change, paused, and an agent asked a question.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "thread" },
+  { name: "you", label: "You're speaking", description: "Mid-session, the operator is talking; Ghost hears them.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "you" },
+  { name: "cut", label: "Cut off", description: "Ghost starts a long answer; the operator cuts in after two seconds.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "cut" },
+  { name: "hold", label: "On hold", description: "The session goes on hold a moment after load (“hang on, Ghost”).", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "hold" },
+  { name: "ending", label: "Hanging up", description: "Ghost says goodbye and the session ends.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "ending" },
+  { name: "turn-error", label: "A turn failed", description: "The model failed on the last turn.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "error" },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, seven apps, one of them not connecting.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];
 
