@@ -18,6 +18,28 @@ use crate::source::{Operation, Prepared, ReadTool, ToolSource, Writer};
 /// session's dispatcher sets it, over anything the model wrote; `clean` drops a `_`-led
 /// argument for every other app, so no app the operator connected ever sees it.
 pub const CALLER_ARG: &str = "_agent";
+/// The session (or `run-<id>`) the call is made in, set by the dispatcher the same way
+/// (ADR 0051): what tells a question asked from a run, to be followed up, from one asked
+/// in a session.
+pub const SESSION_ARG: &str = "_session";
+/// Set by a session's dispatcher on `ghost.answer` only, and only once it has found the
+/// answer's words in the operator's own last turn (ADR 0051): the session's id. A run, an
+/// outside tool and the model can never set it; the server refuses an answer without it.
+pub const HEARD_ARG: &str = "_heard";
+/// What Ghost's own app takes from the dispatcher, past the model's arguments.
+pub const OWN_ARGS: [&str; 3] = [CALLER_ARG, SESSION_ARG, HEARD_ARG];
+
+/// The arguments for a call to Ghost's own app: the model's without any `_`-led one, and
+/// those the dispatcher set.
+pub fn own_args(raw: &Map<String, Value>) -> Map<String, Value> {
+    let mut out = super::tools::clean(raw);
+    for k in OWN_ARGS {
+        if let Some(Value::String(v)) = raw.get(k) {
+            out.insert(k.into(), Value::String(v.clone()));
+        }
+    }
+    out
+}
 
 /// The gate's writer for an app's change: nothing to read first, then the call. What the
 /// app answered comes back as the read-back, once, for the model to say.
@@ -74,11 +96,12 @@ impl Writer for AppWriter {
 /// target, a change set and the words that ask for it.
 fn prepare(app: &App, tool: &ToolInfo, raw: &Map<String, Value>) -> Result<Prepared, AppError> {
     let mut b = bound(tool, raw)?;
-    if app.is_own()
-        && let Some(Value::String(agent)) = raw.get(CALLER_ARG)
-    {
-        b.rest
-            .insert(CALLER_ARG.into(), Value::String(agent.clone()));
+    if app.is_own() {
+        for k in OWN_ARGS {
+            if let Some(Value::String(v)) = raw.get(k) {
+                b.rest.insert(k.into(), Value::String(v.clone()));
+            }
+        }
     }
     let rationale = match raw.get("rationale") {
         Some(Value::String(s)) => s.clone(),
@@ -132,7 +155,14 @@ impl App {
                     let tool_name = tool_name.clone();
                     Box::pin(async move {
                         let trim = !app.is_own();
-                        match app.call(&tool_name, super::tools::clean(&args), trim).await {
+                        // Ghost's own reads are told who is asking (ADR 0051: an asker
+                        // reads its own questions); no other app ever sees a `_` argument.
+                        let args = if app.is_own() {
+                            own_args(&args)
+                        } else {
+                            super::tools::clean(&args)
+                        };
+                        match app.call(&tool_name, args, trim).await {
                             Ok(out) => Ok(out),
                             Err(e) => Ok(Map::from_iter([(
                                 "error".to_string(),

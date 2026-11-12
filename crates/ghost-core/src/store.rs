@@ -184,6 +184,31 @@ CREATE TABLE IF NOT EXISTS outside_clients (
     created_at   TEXT NOT NULL,
     last_used_at TEXT
 );
+-- Questions for the operator (ADR 0051): an item on the waiting list with an answer.
+-- ``key`` is the item's key; ``asker`` its source (``agent:<slug>``, ``client:<name>``,
+-- ``app:<name>``). The answer is the operator's own words, never a model's.
+CREATE TABLE IF NOT EXISTS questions (
+    key           TEXT PRIMARY KEY,
+    asker         TEXT NOT NULL,
+    who           TEXT NOT NULL,
+    agent         TEXT,
+    asked_in      TEXT,
+    follow_up     INTEGER NOT NULL DEFAULT 0,
+    question      TEXT NOT NULL,
+    detail        TEXT,
+    choices       TEXT NOT NULL DEFAULT '[]',
+    choices_only  INTEGER NOT NULL DEFAULT 0,
+    urgency       TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    state         TEXT NOT NULL,
+    answer        TEXT,
+    choice        TEXT,
+    answered_via  TEXT,
+    answered_at   TEXT,
+    follow_up_run TEXT
+);
+CREATE INDEX IF NOT EXISTS questions_open ON questions(state, asker);
 "#;
 
 /// The three tables the lines (ADR 0014 to 0023) lived in. ADR 0024 started over: they

@@ -862,14 +862,23 @@ impl SpokenDigest {
     }
 
     pub fn with_most(engine: Arc<RouteEngine>, items: &[Item], most: usize) -> Self {
+        let items = digest_order(items);
         Self {
             engine,
-            items: items.to_vec(),
             named: items.iter().take(most).cloned().collect(),
-            text: spoken_digest(items, most),
+            text: spoken_digest(&items, most),
+            items,
             said: false,
             heard: false,
         }
+    }
+
+    /// The questions the opening line put to the operator (ADR 0051), for the model.
+    pub fn questions(&self) -> Vec<&Item> {
+        self.named
+            .iter()
+            .filter(|i| crate::questions::is_question(i))
+            .collect()
     }
 
     pub fn on_turn(&mut self, role: &str, text: &str, now: Option<DateTime<Utc>>) -> Result<()> {
@@ -902,11 +911,35 @@ pub fn spoken_digest(items: &[Item], most: usize) -> String {
     if items.is_empty() {
         return String::new();
     }
-    let titles: Vec<String> = items
+    let items = digest_order(items);
+    let named: Vec<&Item> = items.iter().take(most).collect();
+    // A question is put, not announced (ADR 0051): "Ledger asks: …? Yes or no?", last, so
+    // the operator's reply is its answer.
+    let asked: Vec<String> = named
         .iter()
-        .take(most)
+        .filter_map(|i| crate::questions::said_of(i))
+        .collect();
+    let titles: Vec<String> = named
+        .iter()
+        .filter(|i| !crate::questions::is_question(i))
         .map(|i| clip_said(&i.title, 90))
         .collect();
+    if !asked.is_empty() {
+        let rest = if items.len() <= most {
+            String::new()
+        } else {
+            format!(
+                " And {} more waiting.",
+                count(items.len() - most).to_lowercase()
+            )
+        };
+        let lead = if titles.is_empty() {
+            "Hi.".to_string()
+        } else {
+            format!("Hi. {}.", titles.join("; "))
+        };
+        return format!("{lead}{rest} {}", asked.join(" "));
+    }
     let head = if items.len() == 1 {
         "One thing is waiting".to_string()
     } else {
@@ -918,6 +951,26 @@ pub fn spoken_digest(items: &[Item], most: usize) -> String {
         format!(", and {} more", count(items.len() - most).to_lowercase())
     };
     format!("Hi. {head}: {}{rest}.", titles.join("; "))
+}
+
+/// The digest's order: what is only told first, the questions last (at most two, so the
+/// line stays one breath), each kept in its own order.
+fn digest_order(items: &[Item]) -> Vec<Item> {
+    let (asked, told): (Vec<&Item>, Vec<&Item>) =
+        items.iter().partition(|i| crate::questions::is_question(i));
+    if asked.is_empty() {
+        return items.to_vec();
+    }
+    let lead = told
+        .len()
+        .min(DIGEST_TITLES.saturating_sub(asked.len().min(2)));
+    told[..lead]
+        .iter()
+        .chain(asked.iter().take(2))
+        .chain(told[lead..].iter())
+        .chain(asked.iter().skip(2))
+        .map(|i| (*i).clone())
+        .collect()
 }
 
 fn clip_said(t: &str, n: usize) -> String {
