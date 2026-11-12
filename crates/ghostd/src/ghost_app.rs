@@ -51,44 +51,6 @@ pub fn status_fn(daemon: &Arc<Daemon>) -> StatusFn {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ghost_api::models::SessionOrigin;
-
-    #[test]
-    fn status_says_the_session_the_agent_and_the_model_and_never_a_key() {
-        let tmp = tempfile::tempdir().unwrap();
-        let d = crate::daemon::tests::daemon(tmp.path());
-        let mut status = PhoneHost::status(&*d);
-        let quiet = status_fields(&status, "anthropic", "claude-sonnet-5-5");
-        assert_eq!(quiet["session"], json!({"open": false, "origin": null}));
-        assert_eq!(quiet["version"], json!(status.version));
-        assert_eq!(
-            quiet["model"],
-            json!({"provider": "anthropic", "model": "claude-sonnet-5-5"})
-        );
-        status.phase = Phase::Listening;
-        status.session_id = Some("s1".into());
-        status.session_origin = Some(SessionOrigin::Phone);
-        status.conversation = Some("ledger".into());
-        let live = status_fields(&status, "openrouter", "x/y");
-        assert_eq!(live["phase"], "listening");
-        assert_eq!(live["session"], json!({"open": true, "origin": "phone"}));
-        assert_eq!(live["agent"], "ledger");
-
-        // The daemon's own: the provider and the model's name, with a key in the
-        // environment that never shows.
-        d.environ
-            .lock()
-            .unwrap()
-            .insert("ANTHROPIC_API_KEY".into(), "sk-ant-not-for-agents".into());
-        let said = Value::Object(status_fn(&d)()).to_string();
-        assert!(said.contains("\"provider\""));
-        assert!(!said.contains("sk-ant-not-for-agents"));
-    }
-}
-
 /// What an agent's `app_disconnect` forgets with the app (ADR 0052), as the desktop's
 /// disconnect does: its sign-in, and the passwords Ghost kept for it that no other app
 /// names (`GHOST_APP_*`). A vault that is locked keeps them; the operator removes them in
@@ -130,4 +92,42 @@ pub fn forget_app(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ghost_api::models::SessionOrigin;
+
+    #[test]
+    fn status_says_the_session_the_agent_and_the_model_and_never_a_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = crate::daemon::tests::daemon(tmp.path());
+        let mut status = PhoneHost::status(&*d);
+        let quiet = status_fields(&status, "anthropic", "claude-sonnet-5-5");
+        assert_eq!(quiet["session"], json!({"open": false, "origin": null}));
+        assert_eq!(quiet["version"], json!(status.version));
+        assert_eq!(
+            quiet["model"],
+            json!({"provider": "anthropic", "model": "claude-sonnet-5-5"})
+        );
+        status.phase = Phase::Listening;
+        status.session_id = Some("s1".into());
+        status.session_origin = Some(SessionOrigin::Phone);
+        status.conversation = Some("ledger".into());
+        let live = status_fields(&status, "openrouter", "x/y");
+        assert_eq!(live["phase"], "listening");
+        assert_eq!(live["session"], json!({"open": true, "origin": "phone"}));
+        assert_eq!(live["agent"], "ledger");
+
+        // The daemon's own: the provider and the model's name, with a key in the
+        // environment that never shows.
+        d.environ
+            .lock()
+            .unwrap()
+            .insert("ANTHROPIC_API_KEY".into(), "sk-ant-not-for-agents".into());
+        let said = Value::Object(status_fn(&d)()).to_string();
+        assert!(said.contains("\"provider\""));
+        assert!(!said.contains("sk-ant-not-for-agents"));
+    }
 }

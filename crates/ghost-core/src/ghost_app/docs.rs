@@ -441,15 +441,17 @@ mod tests {
         let top = |q: &str| d.search(q, 3);
         let hits = top("can you check the build every morning?");
         assert!(
-            hits.iter().any(|h| h.heading.to_lowercase().contains("schedule")),
+            hits.iter()
+                .any(|h| h.heading.to_lowercase().contains("schedule")),
             "{hits:?}"
         );
         let hits = top("how do I connect Claude Code?");
         assert_eq!(hits[0].document, "connect-ghost", "{hits:?}");
         let hits = top("why did you ask me before closing that issue?");
         assert!(
-            hits.iter().any(|h| h.heading.contains("asked")
-                || h.heading.to_lowercase().contains("permission")),
+            hits.iter()
+                .any(|h| h.heading.contains("asked")
+                    || h.heading.to_lowercase().contains("permission")),
             "{hits:?}"
         );
         let hits = top("what tools do agents have to remember what was said");
