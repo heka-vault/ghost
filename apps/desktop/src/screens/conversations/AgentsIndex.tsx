@@ -36,6 +36,7 @@ import {
 import { drafts } from "./draft";
 import { LineStateText, lineState } from "./lineState";
 import { NewAgentDialog } from "./NewAgentDialog";
+import { RosterLine } from "./RosterLine";
 import { personaCache } from "./personaCache";
 import { isRetired, retiredAt } from "./threads";
 import { agentPath, designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
@@ -158,7 +159,8 @@ export function AgentsIndex() {
         leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
         title={name}
         description={
-          persona === undefined ? (
+          <>
+          {persona === undefined ? (
             <span className="conv-row-desc conv-row-desc--loading" aria-hidden>
               <Skeleton width={l.is_ghost ? 260 : 320} height={10} />
             </span>
@@ -172,7 +174,9 @@ export function AgentsIndex() {
             <span className="conv-row-desc">{v.name}, {voiceKind(v)}</span>
           ) : (
             <span className="conv-row-desc t-3">No persona yet</span>
-          )
+          )}
+            <RosterLine slug={l.slug} />
+          </>
         }
         meta={unsaved ? <span className="conv-row-meta">Unsaved changes</span> : l.job ? <span className="conv-row-job">{l.job}</span> : undefined}
         trailing={
@@ -216,7 +220,7 @@ export function AgentsIndex() {
       title="Agents"
       description={
         <>
-          The agents you can be transferred to. Say {quoted("transfer me to brand")}, {quoted("get me the Q3 audit")}, or {quoted("back to Ghost")}. Each keeps its own persona, job and memory, and every one follows Ghost’s rules below.
+          Who works for you, what each is doing and what it does next. Say {quoted("transfer me to brand")} to talk to one.
         </>
       }
       actions={

@@ -64,11 +64,11 @@ export const OUTCOME: Record<RunStatus, { label: string; tone: BadgeTone }> = {
 
 /** What came of a run's answer. */
 export const DELIVERY: Record<string, string> = {
-  delivered: "On What needs you",
+  delivered: "On Today",
   silent: "Nothing to tell",
   empty: "No answer",
   by_agent: "The agent told you itself",
-  failure: "On What needs you",
+  failure: "On Today",
   failure_not_told: "Not told",
   none: "",
 };
@@ -81,16 +81,64 @@ export function intervalWords(every: string): string {
   return count(Number(m[1]), unit);
 }
 
-/** When a schedule runs, in words: “Every 2 hours”, “Once, Dec 1 at 9:00 AM”, or the cron. */
-export function whenWords(s: Pick<ScheduleInfo, "kind" | "at" | "every" | "cron" | "time_zone">, zone: string): { text: string; mono?: string } {
+/** When a schedule runs, in words: “Every 2 hours”, “Weekdays at 9 AM”, “Once, Dec 1 at 9:00 AM”.
+ *  A cron Ghost can read is said in words, the expression kept as `detail`; one it can't is
+ *  shown as written (`mono`), with its zone when it isn't this machine's. */
+export function whenWords(s: Pick<ScheduleInfo, "kind" | "at" | "every" | "cron" | "time_zone">, zone: string): { text: string; mono?: string; detail?: string } {
   if (s.kind === "every" && s.every) return { text: `Every ${intervalWords(s.every).replace(/^1 /, "")}` };
   if (s.kind === "at" && s.at) {
     const at = new Date(s.at);
     const day = at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: at.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
     return { text: `Once, ${day} at ${at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` };
   }
-  // A cron expression is an identifier: shown as written, with its zone when it isn't this machine's.
+  const words = s.cron ? cronWords(s.cron) : null;
+  if (words) return { text: s.time_zone === zone ? words : `${words}, ${s.time_zone} time`, detail: s.cron ?? "" };
   return { text: s.time_zone === zone ? "On" : `In ${s.time_zone}, on`, mono: s.cron ?? "" };
+}
+
+const DAYS = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
+
+function clockWords(h: number, m: number): string {
+  const hh = h % 12 === 0 ? 12 : h % 12;
+  return `${hh}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
+}
+
+function ordinal(n: number): string {
+  const s = n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th";
+  return `${n}${s}`;
+}
+
+/**
+ * A five-field cron in plain words, for the shapes people write: every day, weekdays, weekends,
+ * given days, a day of the month, every N minutes or hours, every hour at a minute. Anything
+ * else is null: Ghost shows the expression rather than guess at it.
+ */
+export function cronWords(cron: string): string | null {
+  const f = cron.trim().split(/\s+/);
+  if (f.length !== 5) return null;
+  const [min, hour, dom, mon, dow] = f;
+  const num = (x: string) => (/^\d+$/.test(x) ? Number(x) : null);
+  if (mon !== "*") return null;
+  let m: RegExpExecArray | null;
+  if ((m = /^\*\/(\d+)$/.exec(min)) && hour === "*" && dom === "*" && dow === "*") return `Every ${m[1]} minutes`;
+  const mm = num(min);
+  if (mm == null || mm > 59) return null;
+  if ((m = /^\*\/(\d+)$/.exec(hour)) && dom === "*" && dow === "*") return mm === 0 ? `Every ${m[1]} hours` : null;
+  if (hour === "*" && dom === "*" && dow === "*") return `Every hour at :${String(mm).padStart(2, "0")}`;
+  const hh = num(hour);
+  if (hh == null || hh > 23) return null;
+  const at = clockWords(hh, mm);
+  if (dom !== "*") {
+    const d = num(dom);
+    return d != null && dow === "*" && d >= 1 && d <= 31 ? `The ${ordinal(d)} of every month at ${at}` : null;
+  }
+  if (dow === "*") return `Every day at ${at}`;
+  if (dow === "1-5") return `Weekdays at ${at}`;
+  if (dow === "0,6" || dow === "6,0") return `Weekends at ${at}`;
+  const days = dow.split(",").map((x) => num(x));
+  if (days.some((d) => d == null || d > 7)) return null;
+  const names = days.map((d) => DAYS[d! % 7]);
+  return `${names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`} at ${at}`;
 }
 
 /** A time to come: “in under a minute”, “in 48 min”, “in 14 h”, “tomorrow”, “in 3 days”, “Dec 1”. */

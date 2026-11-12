@@ -189,6 +189,15 @@ are the rail's design menu (development only); the version line is the presence'
 Settings › General. What needs you is Today's Now (every action kept). The session at `#/` is the
 conversation screen at `#/session`, unchanged inside.
 
-Still to build, in order: Agents as a roster with what each did last and has scheduled (step 5),
-agent detail on the conversation screen's record (step 4), Watching in plain words (step 6), Apps
-with lettered tiles (step 7), onboarding's copy to ADR 0034 (step 3), the phone (step 8).
+The second slice: **Agents** is a roster: under each agent, running now with its clock, or what it
+last did on its own and what it said, and its next scheduled run in words (step 5).
+**Watching** says a schedule in words (“Weekdays at 9 AM”, `cronWords`), the cron kept as its
+tooltip, and a run's answer goes “to Today” (step 6). **Apps** says why an app isn't connected in
+plain words (“its command isn’t installed”), the app's own message in the tooltip and on its
+page; logos already fall back to a monogram (step 7). **Onboarding** promises what Ghost does
+now, ADR 0034: it does the work and says so; Permissions decides what it asks about (step 3).
+
+Still to build: agent detail on the conversation screen's record (step 4, which needs the
+session owner's transcript component), Watching's warnings in one notice (they are amber, which
+the contract keeps for a waiting okay), the tray's native menu (Room, and Today's count: Rust in
+`src-tauri/src/tray.rs`), and the phone (step 8).
