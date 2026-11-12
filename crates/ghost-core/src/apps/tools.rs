@@ -1,5 +1,5 @@
-//! Tools and results: what the model sees of an app's tool, how a result is sized for a
-//! spoken turn, how the model's arguments are bounded, and the words that ask for a call.
+//! Tools and results: what the model sees of an app's tool, how a result is fitted to its
+//! budget, how the model's arguments are bounded, and the words that ask for a call.
 
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -12,15 +12,16 @@ use sha2::{Digest, Sha256};
 use super::AppError;
 use crate::redact::redact_text;
 
-/// A string argument of a change.
-pub const MAX_TEXT_CHARS: usize = 16_000;
-/// A list argument of a change.
-pub const MAX_LIST_ITEMS: usize = 100;
-/// A string in a result, so one issue body never fills the context.
+/// A string argument (ADR 0046; it was 16,000): a document an agent writes fits.
+pub const MAX_TEXT_CHARS: usize = 200_000;
+/// A list argument (it was 100).
+pub const MAX_LIST_ITEMS: usize = 1_000;
+/// One whole result as the model reads it, by default (`limits::RESULT_CHARS`).
 pub const MAX_RESULT_TEXT: usize = crate::models::MAX_RESULT_TEXT;
-pub const MAX_RESULT_ITEMS: usize = 30;
-/// A watch's read is not trimmed for speech, but it is capped.
+pub use super::limits::{DESCRIPTION_MAX, MAX_RESULT_ITEMS};
+/// A watch's read is not fitted to the model's budget, but it is capped.
 pub const MAX_WATCH_BYTES: usize = 2_000_000;
+/// The first sentence of a description, for the operator's list of an app's tools.
 pub const BRIEF_MAX: usize = 240;
 /// An argument short enough to name what a change is about.
 pub const MAX_FIELD_CHARS: usize = 60;
@@ -135,14 +136,27 @@ const ALIASES: &[(&str, &[&str])] = &[
     ("comment", &["note"]),
 ];
 
+/// What a tool is: one the app lists, or one Ghost offers over what the app advertises
+/// besides tools (ADR 0046).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolKind {
+    #[default]
+    Tool,
+    ListResources,
+    ReadResource,
+    ListPrompts,
+    GetPrompt,
+}
+
 /// One tool as the app lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolInfo {
     pub name: String,
-    /// The app's, in full: for the operator (`GET /apps`).
+    /// The app's, in full and redacted: for the operator (`GET /apps`).
     pub description: String,
     pub schema: Map<String, Value>,
     pub read_only: bool,
+    pub kind: ToolKind,
 }
 
 impl ToolInfo {
@@ -152,12 +166,98 @@ impl ToolInfo {
             description: description.into(),
             schema,
             read_only,
+            kind: ToolKind::Tool,
         }
     }
 
-    /// What the model sees. An app's description is often a page of instructions aimed at
-    /// agents ("show this notice word for word"); the first sentence says what the tool
-    /// does, which is all the model needs to pick it.
+    /// The four reads Ghost offers over an app's resources and prompts, when the app
+    /// advertises them. The pattern is Hermes Agent's utility tools (MIT,
+    /// `tools/mcp_tool_schema.py`).
+    pub(crate) fn utilities(resources: bool, prompts: bool) -> Vec<ToolInfo> {
+        let object = |props: Value, required: &[&str]| -> Map<String, Value> {
+            serde_json::json!({"type": "object", "properties": props, "required": required})
+                .as_object()
+                .cloned()
+                .unwrap_or_default()
+        };
+        let mut out = Vec::new();
+        if resources {
+            out.push(ToolInfo {
+                kind: ToolKind::ListResources,
+                ..ToolInfo::new(
+                    "list_resources",
+                    "List the documents and data this app offers to read, each with its address.",
+                    object(serde_json::json!({}), &[]),
+                    true,
+                )
+            });
+            out.push(ToolInfo {
+                kind: ToolKind::ReadResource,
+                ..ToolInfo::new(
+                    "read_resource",
+                    "Read one of this app's documents by its address, from list_resources.",
+                    object(
+                        serde_json::json!({"uri": {"type": "string",
+                            "description": "The address list_resources gave."}}),
+                        &["uri"],
+                    ),
+                    true,
+                )
+            });
+        }
+        if prompts {
+            out.push(ToolInfo {
+                kind: ToolKind::ListPrompts,
+                ..ToolInfo::new(
+                    "list_prompts",
+                    "List the ready-made prompts this app offers, with the arguments each takes.",
+                    object(serde_json::json!({}), &[]),
+                    true,
+                )
+            });
+            out.push(ToolInfo {
+                kind: ToolKind::GetPrompt,
+                ..ToolInfo::new(
+                    "get_prompt",
+                    "Get one of this app's ready-made prompts by name, filled in with arguments.",
+                    object(
+                        serde_json::json!({
+                            "name": {"type": "string", "description": "From list_prompts."},
+                            "arguments": {"type": "object",
+                                "description": "The prompt's arguments, as text."},
+                        }),
+                        &["name"],
+                    ),
+                    true,
+                )
+            });
+        }
+        out
+    }
+
+    /// What the model reads about the tool: the app's description up to
+    /// [`DESCRIPTION_MAX`] characters (ADR 0046). It is the app's text, so it is data: the
+    /// prompt says so, and a password in it was replaced when the tool was listed.
+    pub fn offered_description(&self) -> String {
+        let text = self.description.trim();
+        if text.is_empty() {
+            return self.name.replace('_', " ");
+        }
+        if text.chars().count() <= DESCRIPTION_MAX {
+            return text.to_string();
+        }
+        format!("{}…", prefix_chars(text, DESCRIPTION_MAX - 1).trim_end())
+    }
+
+    /// How big the tool is on a turn: about what the model API is sent for it.
+    pub fn bytes(&self) -> usize {
+        self.name.len()
+            + self.offered_description().len()
+            + Value::Object(self.schema.clone()).to_string().len()
+    }
+
+    /// The first sentence: what the tool does, for the operator's list. An app's
+    /// description is often a page aimed at agents.
     pub fn brief(&self) -> String {
         let b = brief(&self.description);
         if b.is_empty() {
@@ -212,40 +312,192 @@ fn brief(text: &str) -> String {
     first
 }
 
-/// Results sized for a spoken turn: long strings cut, long lists cut, nested too.
-pub(crate) fn trim(value: &Value) -> Value {
+/// How long a value is as the model reads it: its JSON, in characters.
+fn json_chars(value: &Value) -> usize {
+    value.to_string().chars().count()
+}
+
+/// Lists cut to [`MAX_RESULT_ITEMS`], nested too, each cut saying how many more there were.
+fn cap_lists(value: &Value) -> Value {
     match value {
-        Value::String(s) => {
-            if s.chars().count() <= MAX_RESULT_TEXT {
-                value.clone()
-            } else {
-                Value::String(format!("{}…", prefix_chars(s, MAX_RESULT_TEXT)))
-            }
-        }
         Value::Array(items) => {
-            let mut out: Vec<Value> = items.iter().take(MAX_RESULT_ITEMS).map(trim).collect();
+            let mut out: Vec<Value> = items.iter().take(MAX_RESULT_ITEMS).map(cap_lists).collect();
             if items.len() > MAX_RESULT_ITEMS {
                 out.push(Value::String(format!(
-                    "… {} more",
+                    "… {} more items",
                     items.len() - MAX_RESULT_ITEMS
                 )));
             }
             Value::Array(out)
         }
-        Value::Object(m) => Value::Object(m.iter().map(|(k, v)| (k.clone(), trim(v))).collect()),
+        Value::Object(m) => {
+            Value::Object(m.iter().map(|(k, v)| (k.clone(), cap_lists(v))).collect())
+        }
         other => other.clone(),
     }
 }
 
-/// The whole result as an object: structured content when the app gives it, else the
-/// text. `trim` sizes it for the model.
+/// `value` in document order until `left` characters are spent: what comes first is kept
+/// whole, the string the budget ends in is cut there, and what follows is left out.
+fn take(value: &Value, left: &mut usize) -> Value {
+    match value {
+        Value::String(s) => {
+            let n = s.chars().count();
+            if n + 2 <= *left {
+                *left -= n + 2;
+                return value.clone();
+            }
+            let keep = left.saturating_sub(3);
+            *left = 0;
+            Value::String(format!("{}…", prefix_chars(s, keep)))
+        }
+        Value::Array(items) => {
+            let mut out = Vec::new();
+            for (i, item) in items.iter().enumerate() {
+                if *left == 0 {
+                    out.push(Value::String(format!("… {} more items", items.len() - i)));
+                    break;
+                }
+                out.push(take(item, left));
+                *left = left.saturating_sub(1);
+            }
+            Value::Array(out)
+        }
+        Value::Object(m) => {
+            let mut out = Map::new();
+            for (i, (k, v)) in m.iter().enumerate() {
+                if *left == 0 {
+                    out.insert(
+                        "…".into(),
+                        Value::String(format!("{} more fields", m.len() - i)),
+                    );
+                    break;
+                }
+                *left = left.saturating_sub(k.chars().count() + 4);
+                out.insert(k.clone(), take(v, left));
+            }
+            Value::Object(out)
+        }
+        other => {
+            *left = left.saturating_sub(other.to_string().len());
+            other.clone()
+        }
+    }
+}
+
+/// The key of the note a cut result carries.
+pub const CUT_NOTE: &str = "_cut";
+
+/// One result fitted to its budget (ADR 0046): whole when it is within `budget`
+/// characters, else cut at the end, with a note saying how much was dropped so the model
+/// can ask for less rather than take the cut for the whole. Lists keep
+/// [`MAX_RESULT_ITEMS`] items within the budget.
+pub(crate) fn fit(value: &Value, budget: usize) -> Value {
+    let whole = json_chars(value);
+    let capped = cap_lists(value);
+    if json_chars(&capped) <= budget {
+        return capped;
+    }
+    let mut left = budget;
+    let cut = take(&capped, &mut left);
+    let kept = json_chars(&cut);
+    let note = Value::String(format!(
+        "cut to fit: about {} of {whole} characters were dropped from the end. Ask for less \
+         (one item, a page, a narrower search) to read the rest.",
+        whole.saturating_sub(kept)
+    ));
+    match cut {
+        Value::Object(mut m) => {
+            m.insert(CUT_NOTE.into(), note);
+            Value::Object(m)
+        }
+        other => Value::Object(Map::from_iter([
+            ("result".to_string(), other),
+            (CUT_NOTE.to_string(), note),
+        ])),
+    }
+}
+
+/// What came back besides text, by kind and size: an image, a sound, a file. The model
+/// is told it is there; the bytes are not sent to it.
+fn describe_block(block: &Value) -> Option<Value> {
+    let kind = block.get("type").and_then(Value::as_str)?;
+    let bytes_of = |b64: Option<&Value>| -> usize {
+        b64.and_then(Value::as_str).map_or(0, |s| s.len() / 4 * 3)
+    };
+    let field = |key: &str| block.get(key).cloned().unwrap_or(Value::Null);
+    let mut out = Map::new();
+    match kind {
+        "text" => return None,
+        "image" | "audio" => {
+            out.insert("kind".into(), Value::String(kind.into()));
+            out.insert("type".into(), field("mimeType"));
+            out.insert("bytes".into(), Value::from(bytes_of(block.get("data"))));
+        }
+        "resource" => {
+            let inner = block.get("resource")?;
+            if inner.get("text").is_some() {
+                return None; // read as text
+            }
+            out.insert("kind".into(), Value::String("file".into()));
+            out.insert(
+                "address".into(),
+                inner.get("uri").cloned().unwrap_or(Value::Null),
+            );
+            out.insert(
+                "type".into(),
+                inner.get("mimeType").cloned().unwrap_or(Value::Null),
+            );
+            out.insert("bytes".into(), Value::from(bytes_of(inner.get("blob"))));
+        }
+        "resource_link" => {
+            out.insert("kind".into(), Value::String("link".into()));
+            out.insert("address".into(), field("uri"));
+            out.insert("name".into(), field("name"));
+            out.insert("type".into(), field("mimeType"));
+            out.insert("bytes".into(), field("size"));
+        }
+        other => {
+            out.insert("kind".into(), Value::String(other.into()));
+        }
+    }
+    out.retain(|_, v| !v.is_null());
+    Some(Value::Object(out))
+}
+
+/// The key under which a result says what it carried besides text.
+pub const ALSO_RETURNED: &str = "also_returned";
+
+/// The whole result as an object: structured content as the JSON the app gave, else the
+/// text (a text file it embedded counts), and under [`ALSO_RETURNED`] what else came
+/// back, by kind and size. `fit` sizes it for the model.
 pub(crate) fn result_to_dict(result: &CallToolResult) -> Result<Map<String, Value>, AppError> {
-    let texts: Vec<&str> = result
+    let blocks: Vec<Value> = result
         .content
         .iter()
-        .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+        .filter_map(|c| serde_json::to_value(c).ok())
+        .collect();
+    let owned: Vec<String> = blocks
+        .iter()
+        .filter_map(|b| match b.get("type").and_then(Value::as_str) {
+            Some("text") => b.get("text").and_then(Value::as_str).map(String::from),
+            Some("resource") => b
+                .get("resource")
+                .and_then(|r| r.get("text"))
+                .and_then(Value::as_str)
+                .map(String::from),
+            _ => None,
+        })
         .filter(|t| !t.is_empty())
         .collect();
+    let texts: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let others: Vec<Value> = blocks.iter().filter_map(describe_block).collect();
+    let with_others = |mut m: Map<String, Value>| -> Map<String, Value> {
+        if !others.is_empty() {
+            m.insert(ALSO_RETURNED.into(), Value::Array(others.clone()));
+        }
+        m
+    };
     if result.is_error == Some(true) {
         // An app's error is its text too: a password in it is replaced (ADR 0036).
         let text = redact_text(&texts.join(" "));
@@ -258,22 +510,25 @@ pub(crate) fn result_to_dict(result: &CallToolResult) -> Result<Map<String, Valu
     if let Some(structured) = &result.structured_content
         && super::spec::truthy(structured)
     {
-        return Ok(match structured {
+        return Ok(with_others(match structured {
             Value::Object(m) => m.clone(),
             other => Map::from_iter([("result".to_string(), other.clone())]),
-        });
+        }));
     }
     if texts.len() == 1 {
-        return Ok(match serde_json::from_str::<Value>(texts[0]) {
+        return Ok(with_others(match serde_json::from_str::<Value>(texts[0]) {
             Ok(Value::Object(m)) => m,
             Ok(parsed) => Map::from_iter([("result".to_string(), parsed)]),
             Err(_) => Map::from_iter([("text".to_string(), Value::String(texts[0].to_string()))]),
-        });
+        }));
     }
-    Ok(Map::from_iter([(
+    if texts.is_empty() && !others.is_empty() {
+        return Ok(with_others(Map::new()));
+    }
+    Ok(with_others(Map::from_iter([(
         "text".to_string(),
         Value::String(texts.join("\n")),
-    )]))
+    )])))
 }
 
 /// The plain type a schema names, looking through `anyOf`/`oneOf` for an optional
@@ -391,8 +646,22 @@ pub fn verbs_of(tool: &str, args: &Map<String, Value>) -> Vec<String> {
     out
 }
 
+/// `name` with a short hash of `whole` on its end, within the model API's length: the
+/// name a tool gets when the plain one is taken. The idea is Goose's
+/// `provider_safe_tool_name` (Apache-2.0,
+/// `crates/goose/src/agents/extension_manager/lease.rs`): a rewritten name carries a hash
+/// of the original, so `db.query` and `db_query`, or two names that share their first 64
+/// characters, stay two tools.
+pub fn hashed_tool_name(name: &str, whole: &str) -> String {
+    let clean = TOOL_NAME_BAD.replace_all(name, "_").to_string();
+    let digest = format!("{:x}", Sha256::digest(whole.as_bytes()));
+    let head: String = clean.chars().take(MAX_TOOL_NAME - 9).collect();
+    format!("{head}_{}", &digest[..8])
+}
+
 /// `name` as the model API accepts it: other characters become `_`, and a name too long
-/// keeps its start and a short hash of the whole, so two long names stay two.
+/// keeps its start and a short hash of the whole, so two long names stay two. Two names
+/// that come out the same are told apart where they meet (`App::offered`).
 pub fn model_tool_name(name: &str) -> String {
     let clean = TOOL_NAME_BAD.replace_all(name, "_").to_string();
     let clean = if clean.is_empty() {
@@ -536,16 +805,91 @@ mod unit {
     }
 
     #[test]
-    fn results_are_trimmed_for_a_spoken_turn() {
-        let v = json!({"text": "x".repeat(2000), "items": (0..40).collect::<Vec<_>>()});
-        let t = trim(&v);
-        assert_eq!(
-            t["text"].as_str().unwrap().chars().count(),
-            MAX_RESULT_TEXT + 1
-        );
+    fn a_result_within_its_budget_is_whole() {
+        // An issue body of 20,000 characters and 150 comments: what 1,200 and 30 cut.
+        let v = json!({"body": "x".repeat(20_000), "items": (0..150).collect::<Vec<_>>()});
+        assert_eq!(fit(&v, 24_000), v);
+    }
+
+    #[test]
+    fn a_result_past_its_budget_is_cut_at_the_end_and_says_how_much() {
+        let v = json!({"a_title": "Crash on start", "body": "x".repeat(50_000), "z": "last"});
+        let t = fit(&v, 24_000);
+        assert_eq!(t["a_title"], "Crash on start"); // what comes first is whole
+        let body = t["body"].as_str().unwrap();
+        assert!(body.ends_with('…') && body.chars().count() < 24_000);
+        let size = t.to_string().chars().count();
+        assert!(size <= 24_000 + 300, "{size}");
+        let note = t[CUT_NOTE].as_str().unwrap();
+        assert!(note.contains("of 50") && note.contains("dropped"), "{note}");
+        // a result that is not an object keeps its shape under `result`
+        let t = fit(&json!("y".repeat(100)), 40);
+        assert!(t["result"].as_str().unwrap().ends_with('…'));
+        assert!(t[CUT_NOTE].is_string());
+    }
+
+    #[test]
+    fn a_long_list_keeps_two_hundred_items_within_the_budget() {
+        let v = json!({"items": (0..500).collect::<Vec<_>>()});
+        let t = fit(&v, 24_000);
         let items = t["items"].as_array().unwrap();
         assert_eq!(items.len(), MAX_RESULT_ITEMS + 1);
-        assert_eq!(items.last().unwrap(), "… 10 more");
+        assert_eq!(items.last().unwrap(), "… 300 more items");
+        assert!(t.get(CUT_NOTE).is_none()); // the list's own note says it
+        // and a list of big things stops where the budget does
+        let big: Vec<Value> = (0..100)
+            .map(|i| json!({"n": i, "body": "b".repeat(1_000)}))
+            .collect();
+        let t = fit(&json!({"issues": big}), 10_000);
+        let issues = t["issues"].as_array().unwrap();
+        assert!(issues.len() < 20, "{}", issues.len());
+        let last = issues.last().unwrap().as_str().unwrap();
+        assert!(last.ends_with("more items"), "{last}");
+        assert!(t[CUT_NOTE].as_str().unwrap().contains("dropped"));
+    }
+
+    #[test]
+    fn what_came_back_besides_text_is_named_with_its_size() {
+        use rmcp::model::ContentBlock;
+        let result = CallToolResult::success(vec![
+            ContentBlock::text("A chart of this week."),
+            ContentBlock::image("QUJDREVGR0g=", "image/png"),
+        ]);
+        let d = result_to_dict(&result).unwrap();
+        assert_eq!(d["text"], "A chart of this week.");
+        assert_eq!(
+            d[ALSO_RETURNED],
+            json!([{"kind": "image", "type": "image/png", "bytes": 9}])
+        );
+        // an image alone is still an answer, not an empty one
+        let only = CallToolResult::success(vec![ContentBlock::image("QUJD", "image/jpeg")]);
+        let d = result_to_dict(&only).unwrap();
+        assert_eq!(d[ALSO_RETURNED][0]["kind"], "image");
+        assert!(d.get("text").is_none());
+        // a text file the app embedded is read as text
+        let file = CallToolResult::success(vec![ContentBlock::embedded_text(
+            "file:///notes.md",
+            "the notes",
+        )]);
+        assert_eq!(result_to_dict(&file).unwrap()["text"], "the notes");
+    }
+
+    #[test]
+    fn a_description_reaches_the_model_up_to_its_cap() {
+        let t = ToolInfo::new(
+            "search",
+            "Search issues. Use `repo:` to narrow. Returns at most 30.",
+            Map::new(),
+            true,
+        );
+        assert_eq!(t.offered_description(), t.description); // not the first sentence
+        assert_eq!(t.brief(), "Search issues.");
+        let long = ToolInfo::new("x", &"d".repeat(3_000), Map::new(), true);
+        let said = long.offered_description();
+        assert_eq!(said.chars().count(), DESCRIPTION_MAX);
+        assert!(said.ends_with('…'));
+        let bare = ToolInfo::new("list_issues", "", Map::new(), true);
+        assert_eq!(bare.offered_description(), "list issues");
     }
 
     #[test]
@@ -582,5 +926,20 @@ mod unit {
         assert_eq!(a.len(), MAX_TOOL_NAME);
         assert_ne!(a, b);
         assert!(a.starts_with("a_very_long_tool_name_"));
+        let ok = Regex::new(r"^[a-zA-Z0-9_-]{1,64}$").unwrap();
+        // a name another tool has is told apart by a hash of its whole
+        let h = hashed_tool_name("github_issue_read", "github_issue/read");
+        assert!(h.starts_with("github_issue_read_"));
+        assert_eq!(h.len(), "github_issue_read_".len() + 8);
+        assert_ne!(
+            h,
+            hashed_tool_name("github_issue_read", "github/issue_read")
+        );
+        let long = "n".repeat(200);
+        for name in ["db.query", "größe", long.as_str(), "a b/c"] {
+            assert!(ok.is_match(&model_tool_name(name)), "{name}");
+            let hashed = hashed_tool_name(&model_tool_name(name), name);
+            assert!(ok.is_match(&hashed), "{name}");
+        }
     }
 }

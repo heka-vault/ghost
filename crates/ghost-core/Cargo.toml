@@ -42,6 +42,7 @@ toml.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 unicode-normalization.workspace = true
 yaml-rust2.workspace = true
 aes-gcm.workspace = true

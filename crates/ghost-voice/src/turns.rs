@@ -940,6 +940,11 @@ pub struct TurnControl {
     /// The current turn cut Ghost's reply off. A hold asked for in it, by phrase or by the
     /// model's tool, only stops Ghost: the operator is about to speak (ADR 0021).
     barged_in: std::sync::atomic::AtomicBool,
+    /// Tool calls in flight (the model's stage counts them): Ghost is working, not idle.
+    calling: std::sync::atomic::AtomicUsize,
+    /// Cancelled when the calls in flight should stop without the turn being cut: the
+    /// operator hung up (ADR 0046). Replaced by a fresh one each time.
+    calls: Mutex<CancellationToken>,
 }
 
 impl TurnControl {
@@ -950,7 +955,38 @@ impl TurnControl {
             turn: Mutex::new(turn),
             answer: Mutex::new(Answer::Settled),
             barged_in: std::sync::atomic::AtomicBool::new(false),
+            calling: std::sync::atomic::AtomicUsize::new(0),
+            calls: Mutex::new(CancellationToken::new()),
         })
+    }
+
+    /// The model's stage is waiting on `n` more (or fewer) tool calls.
+    pub fn calls_began(&self, n: usize) {
+        self.calling
+            .fetch_add(n, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn calls_ended(&self, n: usize) {
+        self.calling
+            .fetch_sub(n, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// A tool call is in flight: a long one is not the operator gone quiet.
+    pub fn calling(&self) -> bool {
+        self.calling.load(std::sync::atomic::Ordering::SeqCst) > 0
+    }
+
+    /// Cancelled when the calls in flight should stop (`stop_calls`).
+    pub fn calls_token(&self) -> CancellationToken {
+        self.calls.lock().unwrap().clone()
+    }
+
+    /// Stop the tool calls in flight: the operator hung up, so nobody will hear what they
+    /// return. Each app is told its request was cancelled.
+    pub fn stop_calls(&self) {
+        let mut calls = self.calls.lock().unwrap();
+        calls.cancel();
+        *calls = CancellationToken::new();
     }
 
     /// A turn began; `barged_in` when Ghost was speaking and it cut the reply off.
@@ -1328,11 +1364,13 @@ impl UserAggregator {
         }
         let held = self.held.clone();
         let speaking = self.speaking.clone();
+        let turns = self.turns.clone();
         self.idle = Some(tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
             // Still talking (the BotStarted that disarms this is behind the TTS stage):
-            // the BotStopped that follows arms it again.
-            if !held() && !speaking.is_on() {
+            // the BotStopped that follows arms it again. Still waiting on an app (a call
+            // may take minutes, ADR 0046): the reply that follows speaks, and arms it too.
+            if !held() && !speaking.is_on() && !turns.calling() {
                 on_idle().await;
             }
         }));

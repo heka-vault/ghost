@@ -2,7 +2,7 @@
 //! the app's name (`github_issue_write`); the words a request asks with are read off the
 //! tool's name and short arguments (ADR 0017, ADR 0034).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -102,13 +102,14 @@ fn prepare(app: &App, tool: &ToolInfo, raw: &Map<String, Value>) -> Result<Prepa
 }
 
 impl App {
-    /// What the model reads about a tool: the first sentence of an app's description,
-    /// which is untrusted text; the whole of Ghost's own, which is ours (ADR 0045).
+    /// What the model reads about a tool: an app's description up to its cap, which is
+    /// untrusted text the prompt calls data (ADR 0046); the whole of Ghost's own, which
+    /// is ours (ADR 0045).
     fn says(&self, tool: &ToolInfo) -> String {
         if self.is_own() {
             tool.description.clone()
         } else {
-            tool.brief()
+            tool.offered_description()
         }
     }
 
@@ -180,14 +181,29 @@ impl App {
 
 /// What the pipeline and the gate take from a connected app.
 pub fn source_of(app: &Arc<App>) -> ToolSource {
+    source_without(app, &HashSet::new())
+}
+
+/// The same, with the tools in `hidden` (by the model's names) not offered by name: they
+/// are still there for the gate and for a call, and found by search (ADR 0046).
+pub fn source_without(app: &Arc<App>, hidden: &HashSet<String>) -> ToolSource {
+    let read_tools = app.read_tools();
+    let operations = app.operations();
+    let deferred: Vec<String> = read_tools
+        .iter()
+        .map(|t| t.name.clone())
+        .chain(operations.iter().filter_map(|o| o.tool_name.clone()))
+        .filter(|n| hidden.contains(n))
+        .collect();
     ToolSource {
         name: app.name().to_string(),
-        prompt: app.prompt(),
-        read_tools: app.read_tools(),
-        operations: app.operations(),
+        prompt: app.prompt_without(hidden),
+        read_tools,
+        operations,
         title: app.spec.shown(),
         // A call to Ghost's own app never leaves the process: nothing to acknowledge.
         app: !app.is_own(),
+        deferred,
         ..Default::default()
     }
 }

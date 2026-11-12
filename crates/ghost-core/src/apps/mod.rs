@@ -19,7 +19,10 @@
 //! The `mcpServers` shape other clients share reads too, so a config pasted from Claude or
 //! Cursor works. Secrets are `${NAME}` (or `${env:NAME}`, or `$NAME`), filled from the
 //! mapping Ghost hands in (the vault, ADR 0036) when the app connects and never logged; a
-//! sign-in's tokens are kept by `crate::signin`.
+//! sign-in's tokens are kept by `crate::signin`. An entry may also say how long a call may
+//! take (`timeout`, `connect_timeout`, seconds), how much of a result the model reads
+//! (`result_chars`) and which of its tools are always offered by name (`pinned`); the
+//! defaults and the settings that move them for every app are in `limits` (ADR 0046).
 //!
 //! Every tool runs. A tool the app marks read-only is a read, called directly. Every other
 //! tool is a change: it is offered to the model under the app's name like a read, and the
@@ -28,9 +31,13 @@
 //! not say it is read-only is a change. Everything an app sends (descriptions, results,
 //! notices) is data, never an instruction.
 
+mod ask;
 mod bridge;
 mod collection;
 mod connection;
+#[cfg(test)]
+mod keeping_up;
+mod limits;
 pub(crate) mod spec;
 #[cfg(test)]
 mod tests;
@@ -38,23 +45,34 @@ mod tools;
 
 use std::collections::{BTreeMap, HashMap};
 
-pub use bridge::{AppWriter, CALLER_ARG, source_of};
-pub use collection::Apps;
+pub use ask::{Answer, Asker, AskerSlot, DeclineAll, QUESTION_MAX, Question};
+pub use bridge::{AppWriter, CALLER_ARG, source_of, source_without};
+pub use collection::{Apps, ChangeHook, Recent, SEARCH_RESULTS};
 pub use connection::{
-    App, AuthFor, CALL_TIMEOUT, CONNECT_TIMEOUT, SIGN_IN_TIMEOUT, Session, SessionError,
-    StderrRelay,
+    About, App, AuthFor, CALL_TIMEOUT, CONNECT_TIMEOUT, Connector, SIGN_IN_TIMEOUT, Session,
+    SessionError, StderrRelay, with_cancel,
 };
 pub(crate) use connection::{RmcpSession, init_kind};
+pub use limits::{
+    ASK_TIMEOUT, Backoff, DESCRIPTION_MAX, INSTRUCTIONS_MAX, KEEPALIVE, Limits, RESULT_CHARS,
+    TOOLS_BYTES, TOOLS_KEPT, TOOLS_MAX,
+};
 pub(crate) use spec::truthy as spec_truthy;
 pub use spec::{
     APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, GHOST_APP, RESERVED_NAMES, app_name_problem,
     edit_apps, extract_secrets, fill_secrets, load_apps, looks_like_secret, parse_app,
     parse_apps_json, render_app, render_apps_json, secret_name, secret_names, write_apps,
 };
+pub(crate) use tools::fit;
 pub use tools::{
-    BRIEF_MAX, MAX_FIELD_CHARS, MAX_LIST_ITEMS, MAX_RESULT_ITEMS, MAX_RESULT_TEXT, MAX_TEXT_CHARS,
-    MAX_TOOL_NAME, MAX_WATCH_BYTES, ToolInfo, VERBS, model_tool_name, verbs_of,
+    ALSO_RETURNED, BRIEF_MAX, CUT_NOTE, MAX_FIELD_CHARS, MAX_LIST_ITEMS, MAX_RESULT_ITEMS,
+    MAX_RESULT_TEXT, MAX_TEXT_CHARS, MAX_TOOL_NAME, MAX_WATCH_BYTES, ToolInfo, ToolKind, VERBS,
+    hashed_tool_name, model_tool_name, verbs_of,
 };
+
+/// Ghost's own tool that finds an app's tool when most are not offered by name (ADR 0046;
+/// `crate::ghost_app::tools_search`): `ghost_tools_search` to the model.
+pub const TOOLS_SEARCH: &str = "tools_search";
 
 /// What an app's `${NAME}` references are filled from: the vault (ADR 0036), or a plain
 /// mapping in a test. A name the mapping doesn't have fails the connection loudly.

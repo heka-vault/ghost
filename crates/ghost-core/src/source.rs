@@ -217,6 +217,10 @@ pub struct ToolSource {
     /// leaves the machine or runs a program, and is what Ghost acknowledges aloud before
     /// the answer (`ghost_voice::acks`).
     pub app: bool,
+    /// Tools (by the names the model calls them) that are not offered by name on a turn:
+    /// the connected apps have too many between them, so these are found by search first
+    /// (ADR 0046). They are still here for the gate and for a call.
+    pub deferred: Vec<String>,
 }
 
 impl ToolSource {

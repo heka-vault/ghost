@@ -94,15 +94,86 @@ Every tool runs:
 
 There is no undo. To reverse a change, ask for the opposite one (ADR 0015).
 
-The model sees each tool under the app's name (`github_issue_write`), with only the first
-sentence of the app's description. A name the model can't take is shortened to one it can;
-when two apps would offer the same name, the app listed first in `apps.json` keeps it and
-the other's tool is not offered, a problem on that app's page. It is told that everything an app sends is data: it
-answers you from results in its own words and leaves out notices, usage messages and
-anything a result asks it to repeat. Results are trimmed to the size of a spoken turn.
-Before anything reads a result, an error or a description, every password Ghost holds
-(8 characters or longer) is replaced with `[password: NAME]`, so an app that echoes a key
-never puts it in front of the model, the audit or a log.
+The model sees each tool under the app's name (`github_issue_write`), with the app's
+description of it up to 1,024 characters and the description of each argument. What the
+app says about itself when it connects (its instructions) joins the app's paragraph of the
+prompt, up to 2,000 characters. A name the model can't take is rewritten to one it can;
+when two tools would get the same name, the app listed first in `apps.json` keeps it and
+the other is offered under that name with a short hash on the end. The model is told that
+everything an app sends or says about itself is data: it answers you from results in its
+own words and leaves out notices, usage messages and anything an app asks it to repeat.
+Before anything reads a result, an error, a description or an app's instructions, every
+password Ghost holds (8 characters or longer) is replaced with `[password: NAME]`, so an
+app that echoes a key never puts it in front of the model, the audit or a log.
+
+### Results
+
+One result is read whole when it is within 24,000 characters, which is a long issue with
+its comments or a document. A longer one is cut at the end and carries a note saying how
+much was dropped, so Ghost asks for less (one item, a page, a narrower search) instead of
+taking the cut for the whole. A list keeps 200 items within that. Structured data comes
+back as the app gave it. An image, a sound or a file is named with its type and size;
+Ghost does not look at it. An app's own error message is passed on, cut to 300
+characters.
+
+### Keeping up with the app (ADR 0046)
+
+- **Its tools change.** When an app says its tools changed, Ghost lists them again. An
+  open session offers the new list from the next time the model is asked, and so do an
+  app you connect or disconnect in the middle of a conversation.
+- **A slow call.** A call may take five minutes and connecting one minute. While a call
+  runs you hear the thinking sound, and you can still talk over it, say "hang on, Ghost"
+  or hang up: the call is stopped, the app is told, and Ghost answers what you said. A
+  change that was stopped may or may not have been made; Ghost is told to check.
+- **A connection that dies.** The app's tools stay offered. The next call opens the
+  connection again, once. In the background Ghost tries too: after 1, 2, 4, 8 and 16
+  seconds (each a fifth more or less), then every five minutes. An app on the internet
+  that has been quiet for three minutes is pinged. An app that wants you to sign in again
+  is not retried; it waits on your list.
+- **Documents and prompts.** An app that offers documents to read or ready-made prompts
+  gets four more reads: `<app>_list_resources`, `<app>_read_resource`,
+  `<app>_list_prompts` and `<app>_get_prompt`. Block them like any tool
+  (`notion.read_resource`).
+- **A question for you.** An app may ask you something in the middle of a call. Ghost has
+  the plumbing and, for now, declines every question; an app that sends you to a web page
+  to answer is declined too.
+
+### Many tools
+
+Every tool offered by name is in the prompt on every turn. When the connected apps have
+more than 40 tools between them, or more than 30,000 bytes of tool descriptions and
+arguments, Ghost offers by name only the tools you pinned and the twelve it used or found
+most recently. It finds the rest with `ghost_tools_search`: a few words ("create calendar
+event") give the tools that match, and those are offered by name from then on. Below the
+limits nothing is hidden and the search is not offered. Hiding a tool is about the size of
+the prompt and is not a permission: a hidden tool still runs when called, and what is
+blocked is still your rules.
+
+### Settings for an app
+
+An entry in `apps.json` may carry four more keys:
+
+```json
+{"apps": {"reports": {"url": "https://reports.example/mcp", "sign_in": true,
+  "timeout": 900, "connect_timeout": 30, "result_chars": 60000,
+  "pinned": ["run_report"]}}}
+```
+
+| Key | Default | For every app, in `settings.env` |
+|---|---|---|
+| `timeout`, seconds one call may take | 300 | `GHOST_APP_TIMEOUT` |
+| `connect_timeout`, seconds connecting may take | 60 | `GHOST_APP_CONNECT_TIMEOUT` |
+| `result_chars`, characters of one result Ghost reads | 24000 | `GHOST_APP_RESULT_CHARS` |
+| `pinned`, tools always offered by name | none | |
+| tools offered by name before search takes over | 40 | `GHOST_APP_TOOLS_MAX` |
+| the same, by bytes of schema | 30000 | `GHOST_APP_TOOLS_BYTES` |
+| recently used tools kept offered past that | 12 | `GHOST_APP_TOOLS_KEPT` |
+
+### What Ghost cannot connect
+
+An app must speak over stdio or Streamable HTTP. The older HTTP+SSE transport is not
+supported (the protocol library Ghost uses has no client for it). An app cannot ask
+Ghost's model to write for it (sampling), and an app's own screens are not shown.
 
 ## Permissions
 
@@ -220,7 +291,10 @@ announcement. `allow = ["ghost.notify"]` has Ghost say it each time, `ask` has i
 first, and `block` takes the tool away.
 
 Ghost's own text is not an outside system's, so these tools' descriptions and results
-reach the model whole; every other app's are cut as described above.
+reach the model whole; every other app's are held to the caps described above.
+`ghost_tools_search` is one of these tools; it is offered only when the connected apps
+have more tools than a turn should carry ([above](#many-tools)), and since what it returns
+is the apps' text, it holds itself to an app's result budget.
 
 ## Before a token exists
 
@@ -234,15 +308,22 @@ harness (`make perf`) runs on it.
 ## Performance
 
 - **Connecting.** Each app takes well under a second at start. Connecting one from the
-  desktop costs nothing on a turn. Its tools are offered from the next session, or the
-  next transfer in a running one.
-- **The prompt.** Every tool of every app is in the prompt, and that costs time to the
-  first token on every turn (ADR 0018). The GitHub app with every toolset offers about a
-  hundred tools. Measure with `make perf` after connecting an app. Where it costs too
-  much, narrow the app with its own arguments (GitHub's `--toolsets`), or block the tools
-  you don't use, so they leave the prompt.
-- **A call.** It costs what the app costs. The latency line names it
+  desktop costs nothing on a turn. Its tools are offered from the next time the model is
+  asked, in a running session too, and the cached prompt is lost once when they join.
+- **The prompt.** Every tool offered by name is in the prompt, and that costs time to the
+  first token on every turn (ADR 0018). A description may be 1,024 characters, about 250
+  tokens. The GitHub app with every toolset offers about a hundred tools, which is past
+  the limits, so most of them are found by search ([above](#many-tools)). Measure with
+  `make perf` after connecting an app. Where it costs too much, narrow the app with its
+  own arguments (GitHub's `--toolsets`), block the tools you don't use, or lower
+  `GHOST_APP_TOOLS_MAX`.
+- **The tool list.** Ghost builds it again before each model call and sends a new one
+  only when it differs: 0.4 ms with the seed's tools, 6 ms with 200 app tools, in an
+  unoptimised build (ADR 0046).
+- **A call.** It costs what the app costs, up to its timeout. The latency line names it
   (`tools 0.47 (github_list_issues 0.47)`), and `make latency` shows the distribution.
+- **A result.** Up to 24,000 characters, about 6,000 tokens, stay in the conversation's
+  context for each result. Lower `result_chars` for an app that says more than you need.
 - **The catalog.** Reading Ghost's copy (about 48,000 apps, 2026-10) takes about 1.3 s,
   0.45 s of it for who published each app and which are the maker's own. The daemon does
   it once at start, and after each refresh in a thread so the voice loop isn't held; a
@@ -251,7 +332,9 @@ harness (`make perf`) runs on it.
 ## For developers
 
 An app speaks the Model Context Protocol. `ghost_core::apps` is the client (`App`, `Apps`,
-the gate bridge `AppTarget`, `AppChange`, `AppWriter`), `ghost_core::catalog` the registry
+the gate bridge `AppTarget`, `AppChange`, `AppWriter`; `Limits` for the caps and their
+settings, `with_cancel` for the turn a call belongs to, `Asker` for an app's question,
+`Connector` for an app opened some other way than `apps.json` says), `ghost_core::catalog` the registry
 copy, `ghost_core::provenance` who publishes a catalog entry, whether it is the maker's own
 and where it runs (`KNOWN_MAKERS` and `SHARED_HOSTS` are the hand-kept lists),
 `ghost_core::signin` the OAuth client storage and loopback, and

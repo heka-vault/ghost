@@ -16,6 +16,7 @@
 pub mod docs;
 #[cfg(test)]
 mod tests;
+pub mod tools_search;
 
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -225,7 +226,7 @@ impl GhostServer {
             parts: Arc::new(parts),
             docs: Docs::built_in(),
             caller: Caller::Session,
-            tool_router: Self::tool_router(),
+            tool_router: Self::tool_router() + Self::tools_search_router(),
         }
     }
 

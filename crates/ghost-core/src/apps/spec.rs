@@ -39,8 +39,20 @@ const TRANSPORTS: [&str; 5] = [
     "streamable_http",
     "streamableHttp",
 ];
-const APP_KEYS: [&str; 9] = [
-    "type", "command", "args", "env", "url", "headers", "title", "catalog", "sign_in",
+const APP_KEYS: [&str; 13] = [
+    "type",
+    "command",
+    "args",
+    "env",
+    "url",
+    "headers",
+    "title",
+    "catalog",
+    "sign_in",
+    "timeout",
+    "connect_timeout",
+    "result_chars",
+    "pinned",
 ];
 /// A literal that is probably a token: a known prefix, or a bearer value with no reference.
 static SECRET_SHAPES: LazyLock<Regex> = LazyLock::new(|| {
@@ -176,6 +188,15 @@ pub struct AppSpec {
     pub catalog: Option<String>,
     /// Ghost signs in to it (OAuth) when it asks.
     pub sign_in: bool,
+    /// Seconds one call may take, over the default (ADR 0046).
+    pub timeout: Option<u64>,
+    /// Seconds connecting may take, over the default.
+    pub connect_timeout: Option<u64>,
+    /// How many characters of one result the model reads, over the default.
+    pub result_chars: Option<usize>,
+    /// Tools (by the app's own names) always offered by name, however many tools the
+    /// connected apps have between them.
+    pub pinned: Vec<String>,
 }
 
 impl AppSpec {
@@ -239,6 +260,10 @@ impl Default for AppSpec {
             env: IndexMap::new(),
             catalog: None,
             sign_in: false,
+            timeout: None,
+            connect_timeout: None,
+            result_chars: None,
+            pinned: Vec::new(),
         }
     }
 }
@@ -524,6 +549,26 @@ fn parse_entry(
         ));
     }
     let sign_in = matches!(t.get("sign_in"), Some(Ordered::Other(v)) if truthy(v)) && url.is_some();
+    // A limit is a whole number above zero; anything else is named and the default stands.
+    let mut limit = |key: &str| -> Option<u64> {
+        match t.get(key) {
+            None => None,
+            Some(Ordered::Other(v)) if v.is_null() => None,
+            Some(Ordered::Other(Value::Number(n))) if n.as_u64().is_some_and(|n| n > 0) => {
+                n.as_u64()
+            }
+            Some(_) => {
+                problems.push(format!(
+                    "{where_}: {key} must be a whole number above zero; the default is used"
+                ));
+                None
+            }
+        }
+    };
+    let timeout = limit("timeout");
+    let connect_timeout = limit("connect_timeout");
+    let result_chars = limit("result_chars").map(|n| n as usize);
+    let pinned = str_list(t.get("pinned"), &format!("{where_}.pinned"))?;
     Ok(AppSpec {
         name: name.to_string(),
         title: text_of("title").unwrap_or_default(),
@@ -534,6 +579,10 @@ fn parse_entry(
         env,
         catalog: text_of("catalog"),
         sign_in,
+        timeout,
+        connect_timeout,
+        result_chars,
+        pinned,
     })
 }
 
@@ -609,6 +658,26 @@ fn render_entry(spec: &AppSpec) -> Ordered {
         entry.insert(
             "catalog".into(),
             Ordered::Other(Value::String(catalog.clone())),
+        );
+    }
+    for (key, value) in [
+        ("timeout", spec.timeout),
+        ("connect_timeout", spec.connect_timeout),
+        ("result_chars", spec.result_chars.map(|n| n as u64)),
+    ] {
+        if let Some(n) = value {
+            entry.insert(key.into(), Ordered::Other(Value::from(n)));
+        }
+    }
+    if !spec.pinned.is_empty() {
+        entry.insert(
+            "pinned".into(),
+            Ordered::Other(Value::Array(
+                spec.pinned
+                    .iter()
+                    .map(|p| Value::String(p.clone()))
+                    .collect(),
+            )),
         );
     }
     Ordered::Object(entry)

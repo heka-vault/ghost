@@ -43,12 +43,25 @@ is open) or sends a password to, or a command it runs on this computer; password
 registry (`ghost_core::catalog`: the first-party apps first, then the rest in the
 background, refreshed at most hourly), by address, or from another tool's pasted config.
 `ghostd` connects them at start (`ghost_core::apps::Apps`) and one connected later joins
-the gate at once and the tools from the next session. Every tool is offered under the
-app's name: one the app marks read-only is a read, called directly; every other tool is a
-change, which goes to the gate. An app that fails to connect, or wants a new sign-in, is on
-the waiting list and the Apps page and is skipped. Everything an app sends is data: the
-model sees the first sentence of each description, results are trimmed, and nothing in
-them changes a permission. See [apps.md](apps.md).
+the gate at once and an open session's tools from its next model call. Every tool is
+offered under the app's name: one the app marks read-only is a read, called directly;
+every other tool is a change, which goes to the gate. An app that fails to connect, or
+wants a new sign-in, is on the waiting list and the Apps page and is skipped. Everything
+an app sends is data: the model reads each description up to 1,024 characters and the
+app's own instructions up to 2,000, one result up to 24,000 characters with a note when it
+was cut, all of it redacted first, and nothing in them changes a permission.
+
+The client keeps up with the app (ADR 0046). Its tools are listed again when it says they
+changed, and the model's stage asks for the tool list before every model call, replacing
+it only when it differs. A call may take 300 seconds and stops when the turn it was made
+for is cancelled, the operator hangs up or its time is up; the app is sent
+`notifications/cancelled` and the model reads an error (`ghost_core::apps::with_cancel`,
+`TurnControl::stop_calls`). A connection that died is opened again by the next call and
+in the background with backoff (`Apps::supervise`). An app that advertises documents or
+prompts gets reads over them (`<app>_list_resources`, `<app>_read_resource`,
+`<app>_list_prompts`, `<app>_get_prompt`). An app's question for the operator goes to an
+`Asker`, which today declines. Past 40 tools or 30,000 bytes of schema, most tools are
+found with `ghost_tools_search` and not offered by name. See [apps.md](apps.md).
 
 ### Ghost's own app
 
@@ -70,10 +83,12 @@ a change goes through the gate, and the operator's `ghost.*` rules apply.
 | `ghost_apps_list` | read | The connected apps, their state, and how many reads and changes each offers |
 | `ghost_notify`, `ghost_resolve` | change | An item from the calling agent on the waiting list, under `agent:<slug>`, and its clearing; an agent clears only its own |
 | `ghost_waiting_ack`, `ghost_waiting_snooze` | change | What `POST /waiting/ack` and `/waiting/snooze` do |
+| `ghost_tools_search` | read | The connected apps' tools that match a few words, with the name to call each by; offered only past the limits on how many tools a turn carries (ADR 0046) |
 
 Three things differ from an app the operator connected. Its text is Ghost's own, so
-descriptions reach the model whole and results are not trimmed (the tools cap themselves:
-a section at 8,000 characters, said when cut). The calling agent is never an argument the
+descriptions reach the model whole and results are not cut on the way out (the tools cap
+themselves: a section at 8,000 characters, said when cut; the tool search at an app's
+result budget, since what it returns is the apps' text). The calling agent is never an argument the
 model writes: the session's dispatcher sets `_agent` to the agent the session is with.
 And where no rule names a `ghost.*` change and the mode is `open`, it runs at `quiet`,
 since an item on the waiting list is its own announcement. Nothing listens for outside
@@ -196,7 +211,7 @@ asking is the operator's call (ADR 0011, ADR 0034); by default, everything:
 1. The LLM calls a change: an app's tool under its own name (`github_issue_write`), or
    `change` for one of Ghost's own operations. The source's `prepare` turns the arguments
    into a target and a typed change set: for an app, checked against the tool's own schema
-   and bounded (16,000 characters a string, 100 items a list), with the words that would
+   and bounded (200,000 characters a string, 1,000 items a list), with the words that would
    ask for it read off the tool's name and short arguments.
 2. `core` checks the source's own limit, then resolves the level from the permissions for
    this source, tool and arguments: the most careful match among the operator's rules,
@@ -214,7 +229,9 @@ asking is the operator's call (ADR 0011, ADR 0034); by default, everything:
    up again (`bring_up_change`) and a yes, applies it.
 5. Execution claims the proposal atomically, applies each step through the writer, and
    records success, partial, or failed. For an app, what it answered (the new issue's
-   number, the sent message) comes back as the read-back, trimmed.
+   number, the sent message) comes back as the read-back, within the app's result budget.
+   A call stopped because the operator spoke or hung up is recorded as failed, and the
+   model is told the change may or may not have been made.
 6. The model says what happened in a few words, or asks one short question when the
    change waits. There is no undo (ADR 0015): asked to change something back, Ghost asks
    for the opposite change like any other.
