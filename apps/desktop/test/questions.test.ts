@@ -1,7 +1,7 @@
 import type { QuestionView, WaitingItemView } from "@ghost/client-ts";
 import { describe, expect, it } from "vitest";
 
-import { canSend, expiresIn, sourceLabel } from "../src/screens/waiting";
+import { canSend, expiresIn, sourceLabel } from "../src/screens/today/needs";
 
 const question = (over: Partial<QuestionView> = {}): QuestionView => ({
   key: "question:abc",

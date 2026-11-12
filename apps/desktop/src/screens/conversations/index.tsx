@@ -19,11 +19,11 @@ import "./conversations.css";
 const GHOST_TABS = ["persona", "memory", "history"];
 
 export default function ConversationsScreen({ params }: RouteProps) {
-  // Ghost's conversation is home (#/): one place to talk to Ghost, not two. Its persona,
+  // Ghost’s conversation is the conversation screen (#/session): one place to talk to Ghost, not two. Its persona,
   // memory and history still open here, from home's ⋯ menu.
   const ghostHome = params.slug === "ghost" && !GHOST_TABS.includes(readParam("tab", "ghost") ?? "");
   useEffect(() => {
-    if (ghostHome) navigate("/", { replace: true });
+    if (ghostHome) navigate("/session", { replace: true });
   }, [ghostHome]);
   if (ghostHome) return null;
   return params.slug ? <AgentDetail key={params.slug} slug={params.slug} /> : <AgentsIndex />;

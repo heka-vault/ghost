@@ -51,6 +51,7 @@ import {
 
 import { navigate } from "../../app/router";
 import { ListeningButton } from "../../app/ListeningSwitch";
+import { RoomSettings } from "../../app/RoomSettings";
 import { listeningSentence, notListening } from "../../app/listening";
 import { VersionNotice, VersionRows } from "./About";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
@@ -887,6 +888,9 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         {s && page === "general" && (
           <>
             {showSetup && <SetupSection steps={steps} onGo={(id) => go(id)} />}
+            <Section id="room" title="The room" description="The desk is this screen as you work at it; the room is Ghost read from across the room." className="set-section">
+              <RoomSettings />
+            </Section>
             <Section id={sectionDomId("about")} title={SECTION_TITLE.about} className="set-section">
               <VersionNotice status={status} />
               <Card list>

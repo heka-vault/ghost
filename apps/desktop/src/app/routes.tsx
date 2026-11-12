@@ -10,7 +10,6 @@ import {
   BellRing,
   Blocks,
   BookOpen,
-  Compass,
   Cpu,
   Eye,
   Ghost,
@@ -27,6 +26,7 @@ import {
   ShieldCheck,
   Smartphone,
   Sparkles,
+  Sun,
   Volume2,
 } from "lucide-react";
 import { type ComponentType, lazy, type LazyExoticComponent } from "react";
@@ -68,28 +68,29 @@ const DEV = import.meta.env.DEV;
 
 export const ROUTES: RouteDef[] = [
   {
-    id: "session",
+    // Today: the briefing, the desk's home (docs/design/overhaul-2026-11.md, the combined direction).
+    id: "today",
     patterns: ["/"],
     path: "/",
-    owner: "session",
-    title: "Session",
+    owner: "today",
+    title: "Today",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    // No row of its own: the sidebar's status card is the way here.
-    component: lazy(() => import("../screens/session")),
+    nav: { label: "Today", icon: Sun, group: "main" },
+    component: lazy(() => import("../screens/today")),
   },
   {
-    id: "waiting",
-    patterns: ["/waiting"],
-    path: "/waiting",
-    owner: "waiting",
-    title: "What needs you",
+    // The conversation screen: Ghost's own page, where every wake lands. The rail's presence is the way here.
+    id: "session",
+    patterns: ["/session"],
+    path: "/session",
+    owner: "session",
+    title: "Conversation",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "What needs you", icon: Inbox, group: "main" },
-    component: lazy(() => import("../screens/waiting")),
+    component: lazy(() => import("../screens/session")),
   },
   {
     id: "conversations",
@@ -258,19 +259,6 @@ export const ROUTES: RouteDef[] = [
     component: DEV ? lazy(() => import("../prototypes/mobile")) : null,
   },
   {
-    id: "directions",
-    // Three directions for the whole app, for the owner to choose (docs/design/overhaul-2026-11.md).
-    patterns: ["/directions/:name?/:screen?"],
-    path: "/directions/briefing/home",
-    owner: "design",
-    title: "Directions",
-    kind: "prototype",
-    chrome: "bare",
-    needsDaemon: false,
-    nav: { label: "Directions", icon: Compass, group: "prototype" },
-    component: DEV ? lazy(() => import("../prototypes/directions")) : null,
-  },
-  {
     id: "mascot",
     patterns: ["/mascot/:view?"],
     path: "/mascot",
@@ -336,6 +324,8 @@ export function settingsPageOf(path: string): SettingsPage | null {
  */
 const REDIRECTS: { from: string; to: (p: Record<string, string>) => string }[] = [
   { from: "/settings", to: () => SETTINGS_PAGES[0].path },
+  // What needs you is Today's first block now (the combined direction, 2026-11-12).
+  { from: "/waiting", to: () => "/" },
   { from: "/apps/:name?", to: (p) => (p.name ? `/settings/apps/${encodeURIComponent(p.name)}` : "/settings/apps") },
   // #/servers and #/policy were these screens' addresses before ADR 0034.
   { from: "/servers", to: () => "/settings/apps" },
