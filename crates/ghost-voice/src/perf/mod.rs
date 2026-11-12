@@ -18,3 +18,4 @@ pub mod llm;
 pub mod micro;
 pub mod report;
 pub mod scenarios;
+pub mod turns;

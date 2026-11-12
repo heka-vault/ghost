@@ -3,7 +3,8 @@
 //! ```text
 //! ghost-perf run    [--scenario a,b] [--runs N] [--history N] [--set turn_grace_secs=0.4]
 //!                   [--no-jev] [--ablate none,all,tts_clauses+speculate] [--ttfb-ms N]
-//!                   [--out DIR] [--show-text]
+//!                   [--tokens-per-sec N] [--profile sonnet,haiku,instant]
+//!                   [--variant name:field=value+field=value]... [--out DIR] [--show-text]
 //! ghost-perf micro  [--only stt,tts,jev,turn] [--n N] [--out DIR]
 //! ghost-perf llm    [--model a,b] [--endpoint current,proxy,openrouter+sysbp,<provider>]
 //!                   [--openrouter-models a,b] [--thinking between_tools] [--n N] [--out DIR]
@@ -12,6 +13,9 @@
 //!                   [--blocks A,B] [--set vad_stop_secs=0.4] [--baseline DIR/results.json]
 //!                   [--close-budget-ms 150] [--out DIR] [--show-text]
 //! ghost-perf hear-report DIR/results.json [--baseline DIR/results.json]
+//! ghost-perf turns  [--takes DIR|latest] [--channel aec|raw] [--voices am_michael]
+//!                   [--blocks A,B] [--set turn_confident_grace_secs=0.5] [--out DIR]
+//! ghost-perf turns-report DIR/turns.json [--set turn_confident_prob=0.95]
 //! ```
 //!
 //! Output goes to `.scratch/perf/<timestamp>/` (report.md, records.json, latency.jsonl;
@@ -26,12 +30,11 @@ use std::time::{Duration, Instant};
 use indexmap::IndexMap;
 use serde_json::{Value, json};
 
-use super::harness::{Bench, RunConfig, parse_ablations};
+use super::harness::{Bench, Profile, RunConfig, parse_ablations};
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
-pub const USAGE: &str =
-    "usage: ghost-perf run|micro|llm|report|hear|hear-report|hear-check [options]";
+pub const USAGE: &str = "usage: ghost-perf run|micro|llm|report|hear|hear-report|hear-check|turns|turns-report [options]";
 
 fn csv(s: Option<&String>) -> Vec<String> {
     s.map(|s| {
@@ -135,6 +138,9 @@ pub fn main(argv: &[String]) -> i32 {
     if args.cmd == "hear-report" {
         return hear_report(&args);
     }
+    if args.cmd == "turns-report" {
+        return turns_report(&args);
+    }
     if args.cmd == "hear-check" {
         let Some(dir) = args.positional.first() else {
             eprintln!("usage: ghost-perf hear-check SESSION_DIR [--show-text]");
@@ -157,10 +163,10 @@ pub fn main(argv: &[String]) -> i32 {
     }
     let out = args.one("out").map(PathBuf::from).unwrap_or_else(|| {
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-        scratch.join(if args.cmd == "hear" {
-            format!("{stamp}-hear")
-        } else {
-            stamp
+        scratch.join(match args.cmd.as_str() {
+            "hear" => format!("{stamp}-hear"),
+            "turns" => format!("{stamp}-turns"),
+            _ => stamp,
         })
     });
     if let Err(e) = std::fs::create_dir_all(&out) {
@@ -227,8 +233,56 @@ pub fn main(argv: &[String]) -> i32 {
                 2
             }
         },
+        "turns" => match hear_args(&args, &out, &scratch, &root) {
+            Ok(a) => match rt.block_on(super::turns::run_turns(&a)) {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("turns: {e}");
+                    1
+                }
+            },
+            Err(e) => {
+                eprintln!("{e}");
+                2
+            }
+        },
         other => {
             eprintln!("unknown command {other:?}; {USAGE}");
+            2
+        }
+    }
+}
+
+/// A turns report again from its results, under other waits (`--set`), running nothing.
+fn turns_report(args: &Args) -> i32 {
+    let Some(path) = args.positional.first() else {
+        eprintln!("usage: ghost-perf turns-report DIR/turns.json [--set turn_confident_prob=0.95]");
+        return 2;
+    };
+    let results = match super::turns::read_results(Path::new(path)) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let settings = overrides(args).and_then(|overrides| {
+        let base = crate::config::VoiceSettings::from_env().map_err(|e| e.to_string())?;
+        super::harness::make_settings(
+            &base,
+            &RunConfig {
+                overrides,
+                ..RunConfig::default()
+            },
+        )
+    });
+    match settings {
+        Ok(s) => {
+            print!("{}", super::turns::render(&results, &s.turn_timing()));
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
             2
         }
     }
@@ -243,6 +297,22 @@ fn overrides(args: &Args) -> Result<BTreeMap<String, String>, String> {
         out.insert(k.to_string(), v.to_string());
     }
     Ok(out)
+}
+
+/// A named set of settings for one run: its name, the overrides, the fast model's profile.
+type Variant = (Option<String>, BTreeMap<String, String>, Option<Profile>);
+
+/// `--fast haiku`, or `none`.
+fn fast_profile(name: &str) -> Result<Option<Profile>, String> {
+    if name == "none" || name.is_empty() {
+        return Ok(None);
+    }
+    Profile::named(name).map(Some).ok_or_else(|| {
+        format!(
+            "unknown fast model profile {name:?}; known: {}",
+            Profile::NAMES.join(", ")
+        )
+    })
 }
 
 /// Of sessions, the one whose manifest changed last.
@@ -398,16 +468,80 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
         .one("history")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let configs: Vec<RunConfig> = ablations
-        .into_iter()
-        .map(|ablate| RunConfig {
-            history,
-            jev: !args.has("no-jev"),
-            overrides: overrides.clone(),
-            ablate,
-            ttfb,
-        })
-        .collect();
+    let rate: Option<f64> = args.one("tokens-per-sec").and_then(|v| v.parse().ok());
+    // The model's assumed time, one config per profile; none is `--ttfb-ms` as given.
+    let mut profiles: Vec<Option<Profile>> = Vec::new();
+    for name in csv(args.one("profile")) {
+        match Profile::named(&name) {
+            Some(p) => profiles.push(Some(p)),
+            None => {
+                eprintln!(
+                    "unknown profile {name:?}; known: {}",
+                    Profile::NAMES.join(", ")
+                );
+                return 2;
+            }
+        }
+    }
+    if profiles.is_empty() {
+        profiles.push(None);
+    }
+    // A fast model in front (ADR 0050), scripted from the same lines: `--fast haiku`.
+    let fast = match args.one("fast").map(|v| fast_profile(v)).transpose() {
+        Ok(f) => f.flatten(),
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    // Named sets of overrides, compared in one run: `before:turn_grace_secs=1.2+fast=haiku`.
+    let mut variants: Vec<Variant> = Vec::new();
+    for spec in args.flags.get("variant").cloned().unwrap_or_default() {
+        let (name, sets) = spec.split_once(':').unwrap_or((spec.as_str(), ""));
+        let mut over = overrides.clone();
+        let mut fast = fast.clone();
+        for kv in sets.split('+').map(str::trim).filter(|s| !s.is_empty()) {
+            match kv.split_once('=') {
+                // The fast model is the connection's, not a voice setting.
+                Some(("fast", v)) => match fast_profile(v) {
+                    Ok(p) => fast = p,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return 2;
+                    }
+                },
+                Some((k, v)) => {
+                    over.insert(k.to_string(), v.to_string());
+                }
+                None => {
+                    eprintln!("--variant wants name:field=value+field=value, got {spec:?}");
+                    return 2;
+                }
+            }
+        }
+        variants.push((Some(name.to_string()), over, fast));
+    }
+    if variants.is_empty() {
+        variants.push((None, overrides.clone(), fast.clone()));
+    }
+    let mut configs: Vec<RunConfig> = Vec::new();
+    for ablate in ablations {
+        for (variant, over, fast) in &variants {
+            for profile in &profiles {
+                configs.push(RunConfig {
+                    history,
+                    jev: !args.has("no-jev"),
+                    overrides: over.clone(),
+                    ablate: ablate.clone(),
+                    ttfb: profile.as_ref().map_or(ttfb, |p| p.ttfb),
+                    tokens_per_sec: profile.as_ref().map_or(rate, |p| p.tokens_per_sec),
+                    profile: profile.as_ref().map(|p| p.name.clone()),
+                    variant: variant.clone(),
+                    fast: fast.clone(),
+                });
+            }
+        }
+    }
     let total = configs.len() * names.len() * runs_each;
     println!(
         "perf: {total} runs ({} configs x {} scenarios x {runs_each})",
@@ -440,6 +574,49 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
         )),
     );
     meta.insert("endpoints".into(), json!("the scripted model (no network)"));
+    let named: Vec<String> = profiles
+        .iter()
+        .flatten()
+        .map(|p| {
+            format!(
+                "{} (first token {} ms, {})",
+                p.name,
+                p.ttfb.as_millis(),
+                p.tokens_per_sec
+                    .map_or("the reply at once".to_string(), |r| format!(
+                        "{r:.0} tokens/s"
+                    ))
+            )
+        })
+        .collect();
+    if !named.is_empty() {
+        meta.insert(
+            "model time (assumed, not measured)".into(),
+            json!(named.join("; ")),
+        );
+    }
+    let described: Vec<String> = variants
+        .iter()
+        .filter_map(|(name, over, fast)| {
+            name.as_ref().map(|n| {
+                let mut sets: Vec<String> = over.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                if let Some(f) = fast {
+                    sets.push(format!("a fast model in front ({})", f.name));
+                }
+                format!(
+                    "{n}: {}",
+                    if sets.is_empty() {
+                        "the defaults".to_string()
+                    } else {
+                        sets.join(", ")
+                    }
+                )
+            })
+        })
+        .collect();
+    if !described.is_empty() {
+        meta.insert("variants".into(), json!(described.join("; ")));
+    }
     meta.insert("scenarios".into(), json!(names.join(", ")));
     meta.insert("runs per scenario".into(), json!(runs_each));
     meta.insert(

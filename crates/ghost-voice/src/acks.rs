@@ -20,6 +20,13 @@
 //! is told its words, since a short clip after silence is where the canceller leaks most
 //! (#42). One per turn: a reply that calls tools in several rounds is acknowledged once,
 //! and not at all once any of it has been spoken.
+//!
+//! With a fast model in front (ADR 0050) the moment comes sooner: when the fast model
+//! hands the turn to the main one ([`Frame::HandOver`]), the acknowledgment is said then,
+//! and covers the main model's first token as well as the tools. Nothing has been done
+//! for the turn at that point, so the operator may still be going on after a pause
+//! (ADR 0049): the acknowledgment waits until the turn's grace has run from the end of
+//! their speech, and is not said if they went on first.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -282,6 +289,10 @@ pub struct AckStage {
     /// Something of this turn's reply went to the voice.
     spoke: bool,
     picker: Picker,
+    /// How long after the operator's speech ended a hand-over is acknowledged at the
+    /// soonest (`with_settle`), and when that speech ended.
+    settle: std::time::Duration,
+    segment_ended: Option<std::time::Instant>,
 }
 
 impl AckStage {
@@ -306,7 +317,16 @@ impl AckStage {
             acked: false,
             spoke: false,
             picker: Picker::default(),
+            settle: std::time::Duration::ZERO,
+            segment_ended: None,
         }
+    }
+
+    /// A hand-over is acknowledged no sooner than `secs` after the operator's speech
+    /// ended (the turn's grace): before that they may only be pausing.
+    pub fn with_settle(mut self, secs: f64) -> Self {
+        self.settle = std::time::Duration::from_secs_f64(secs.max(0.0));
+        self
     }
 
     /// Told the words as the acknowledgment goes out: the echo filter (`EchoFilter::acked`).
@@ -321,10 +341,51 @@ impl AckStage {
     }
 
     async fn acknowledge(&mut self, names: &[String], out: &Out) {
+        let kind = names.iter().filter_map(|n| (self.outside)(n)).max();
+        let turn = self
+            .reply_turn
+            .clone()
+            .unwrap_or_else(|| self.turns.current());
+        self.say(kind, names, turn, std::time::Duration::ZERO, out)
+            .await;
+    }
+
+    /// The fast model handed the turn over: the main model's first token is a second or
+    /// more away whatever it then does, so Ghost says it heard, unless what was asked
+    /// for is a goodbye or a hold, whose own words follow.
+    async fn handed_over(&mut self, names: &[String], out: &Out) {
+        let quick = !names.is_empty()
+            && names
+                .iter()
+                .all(|n| crate::narration::SPOKEN_WITH.contains(&n.as_str()));
+        if quick {
+            return;
+        }
+        let kind = names
+            .iter()
+            .filter_map(|n| (self.outside)(n))
+            .max()
+            .unwrap_or(AckKind::Read);
+        let wait = self.segment_ended.map_or(std::time::Duration::ZERO, |at| {
+            self.settle.saturating_sub(at.elapsed())
+        });
+        self.say(Some(kind), names, self.turns.current(), wait, out)
+            .await;
+    }
+
+    /// Say one of `kind`'s lines for `turn`, after `wait`, unless the turn is cut first.
+    async fn say(
+        &mut self,
+        kind: Option<AckKind>,
+        names: &[String],
+        turn: CancellationToken,
+        wait: std::time::Duration,
+        out: &Out,
+    ) {
         if self.acked || self.spoke {
             return;
         }
-        let Some(kind) = names.iter().filter_map(|n| (self.outside)(n)).max() else {
+        let Some(kind) = kind else {
             return;
         };
         self.acked = true; // once per turn, said or not
@@ -336,23 +397,35 @@ impl AckStage {
         let Some(clip) = self.picker.pick(voiced.of(kind)).cloned() else {
             return;
         };
-        let turn = self
-            .reply_turn
-            .clone()
-            .unwrap_or_else(|| self.turns.current());
         if turn.is_cancelled() {
             return;
         }
         debug::audio(|| format!("ack: {:?} before {}", clip.text, names.join(", ")));
-        if let Some(on_ack) = &self.on_ack {
-            on_ack(clip.text);
-        }
-        out.push(Frame::Ack {
+        let frame = Frame::Ack {
             text: clip.text.to_string(),
             audio: Audio::new((*clip.pcm).clone(), RATE),
-            turn,
-        })
-        .await;
+            turn: turn.clone(),
+        };
+        if wait.is_zero() {
+            if let Some(on_ack) = &self.on_ack {
+                on_ack(clip.text);
+            }
+            out.push(frame).await;
+            return;
+        }
+        // Not yet: the operator may be going on. The stage's inbox is not held meanwhile.
+        let (out, on_ack) = (out.clone(), self.on_ack.clone());
+        tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                () = turn.cancelled() => return,
+                () = tokio::time::sleep(wait) => {}
+            }
+            if let Some(on_ack) = &on_ack {
+                on_ack(clip.text);
+            }
+            out.push(frame).await;
+        });
     }
 }
 
@@ -372,6 +445,7 @@ impl Stage for AckStage {
                 | Frame::ThinkingStart
                 | Frame::Interruption => self.new_turn(),
                 Frame::ReplyTurn(t) => self.reply_turn = Some(t.clone()),
+                Frame::VadStopped { .. } => self.segment_ended = Some(std::time::Instant::now()),
                 Frame::LlmText(_) | Frame::Speak(_) => self.spoke = true,
                 Frame::VoiceChange { voice, speed } => {
                     self.voice = voice.clone();
@@ -381,6 +455,10 @@ impl Stage for AckStage {
                 Frame::FunctionCallsStarted(names) => {
                     let names = names.clone();
                     self.acknowledge(&names, out).await;
+                }
+                Frame::HandOver { names, .. } => {
+                    let names = names.clone();
+                    self.handed_over(&names, out).await;
                 }
                 _ => {}
             }
@@ -495,6 +573,10 @@ mod tests {
     // --- the stage ----------------------------------------------------------------
 
     fn stage(said: Arc<Mutex<Vec<String>>>) -> AckStage {
+        stage_with(said, TurnControl::new(CancellationToken::new()))
+    }
+
+    fn stage_with(said: Arc<Mutex<Vec<String>>>, turns: Arc<TurnControl>) -> AckStage {
         let acks = Acks::new(None);
         acks.insert("af_heart", 1.0, acks.render(&synth(), "af_heart", 1.0));
         let outside: Outside = Arc::new(|name: &str| match name {
@@ -502,15 +584,8 @@ mod tests {
             n if n.starts_with("github_") => Some(AckKind::Read),
             _ => None,
         });
-        AckStage::new(
-            acks,
-            synth(),
-            outside,
-            "af_heart",
-            1.0,
-            TurnControl::new(CancellationToken::new()),
-        )
-        .with_on_ack(Arc::new(move |t: &str| said.lock().unwrap().push(t.into())))
+        AckStage::new(acks, synth(), outside, "af_heart", 1.0, turns)
+            .with_on_ack(Arc::new(move |t: &str| said.lock().unwrap().push(t.into())))
     }
 
     async fn run(s: &mut AckStage, frames: Vec<Frame>) -> Vec<String> {
@@ -530,6 +605,79 @@ mod tests {
 
     fn calls(names: &[&str]) -> Frame {
         Frame::FunctionCallsStarted(names.iter().map(|n| n.to_string()).collect())
+    }
+
+    fn handed(names: &[&str]) -> Frame {
+        Frame::HandOver {
+            names: names.iter().map(|n| n.to_string()).collect(),
+            secs: 0.6,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_a_hand_over_is_acknowledged_once_and_not_again_at_the_call() {
+        // ADR 0050: the fast model asked for the main one. The gap is covered whatever
+        // it asked for, a tool of an app's or `think_harder`; the main model's own call,
+        // when it comes, is not acknowledged a second time.
+        for names in [vec!["github_issue_read"], vec!["think_harder"], vec![]] {
+            let said = Arc::new(Mutex::new(Vec::new()));
+            let mut s = stage(said.clone());
+            let acks = run(
+                &mut s,
+                vec![
+                    Frame::UserStopped,
+                    handed(&names),
+                    calls(&["github_issue_read"]),
+                ],
+            )
+            .await;
+            assert_eq!(acks.len(), 1, "{names:?}");
+            assert!(READ.contains(&acks[0].as_str()), "{acks:?}");
+        }
+        // A change is acknowledged as one; a goodbye's own words are what is said.
+        let said = Arc::new(Mutex::new(Vec::new()));
+        let mut s = stage(said.clone());
+        let acks = run(
+            &mut s,
+            vec![Frame::UserStopped, handed(&["github_issue_write"])],
+        )
+        .await;
+        assert!(CHANGE.contains(&acks[0].as_str()), "{acks:?}");
+        let none = run(&mut s, vec![Frame::UserStopped, handed(&["hang_up"])]).await;
+        assert!(none.is_empty(), "{none:?}");
+    }
+
+    #[tokio::test]
+    async fn test_a_hand_over_waits_out_the_grace_and_is_not_said_if_the_operator_went_on() {
+        // The turn closed after the short grace (ADR 0049) and nothing was done for it:
+        // the operator may be pausing. The acknowledgment waits until the grace has run
+        // from the end of their speech; going on first takes the turn, and the word.
+        for goes_on in [false, true] {
+            let said = Arc::new(Mutex::new(Vec::new()));
+            let turns = TurnControl::new(CancellationToken::new());
+            let mut s = stage_with(said.clone(), turns.clone()).with_settle(0.3);
+            let (out, mut rx) = Out::capture();
+            for f in [
+                Frame::VadStopped { stop_secs: 0.2 },
+                Frame::UserStopped,
+                handed(&["github_issue_read"]),
+            ] {
+                s.process(f, Direction::Down, &out).await;
+            }
+            let acks = |frames: Vec<Frame>| {
+                frames
+                    .iter()
+                    .filter(|f| matches!(f, Frame::Ack { .. }))
+                    .count()
+            };
+            assert_eq!(acks(drain(&mut rx).await), 0, "not yet");
+            if goes_on {
+                turns.interrupt();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            assert_eq!(acks(drain(&mut rx).await), usize::from(!goes_on));
+            assert_eq!(said.lock().unwrap().len(), usize::from(!goes_on));
+        }
     }
 
     #[tokio::test]

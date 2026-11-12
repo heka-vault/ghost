@@ -79,6 +79,39 @@ pub const HISTORY: [(&str, &str); 8] = [
 /// scenarios that measure the yes (ADR 0017) have one to measure.
 pub const PERF_POLICY: &str = "[permissions]\nask = [\"github.issue_write(state=closed)\"]\n";
 
+/// How long the scripted model takes: a real model's first token and its rate, assumed.
+/// The harness spends no tokens, so these stand in for the connection; `ghostd perf llm`
+/// measures the real one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Profile {
+    pub name: String,
+    pub ttfb: Duration,
+    /// Output tokens a second; None writes the reply at once.
+    pub tokens_per_sec: Option<f64>,
+}
+
+impl Profile {
+    pub const NAMES: [&'static str; 3] = ["sonnet", "haiku", "instant"];
+
+    /// `sonnet`: 1.2 s to the first token, 60 tokens a second (the main model as measured
+    /// 2026-10-19 to 2026-10-29: first token 1.1 to 1.5 s). `haiku`: 0.45 s and 150 (a
+    /// small model through the same connection: 0.6 s to "hello" on 2026-10-19).
+    /// `instant`: no model time, the stages alone.
+    pub fn named(name: &str) -> Option<Self> {
+        let (ttfb_ms, rate) = match name {
+            "sonnet" => (1200, Some(60.0)),
+            "haiku" => (450, Some(150.0)),
+            "instant" => (0, None),
+            _ => return None,
+        };
+        Some(Self {
+            name: name.into(),
+            ttfb: Duration::from_millis(ttfb_ms),
+            tokens_per_sec: rate,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     /// Earlier turns seeded into the ghost conversation's record.
@@ -89,6 +122,15 @@ pub struct RunConfig {
     pub ablate: BTreeSet<String>,
     /// The scripted model's time to first token.
     pub ttfb: Duration,
+    /// Its output tokens a second; None writes the reply at once.
+    pub tokens_per_sec: Option<f64>,
+    /// The profile those two came from, for the label.
+    pub profile: Option<String>,
+    /// A named set of overrides compared with the others in one run (`--variant`).
+    pub variant: Option<String>,
+    /// A fast model in front (ADR 0050), with this profile's time: scripted from each
+    /// line's first reply, so a line that opens with a tool call is handed over.
+    pub fast: Option<Profile>,
 }
 
 impl Default for RunConfig {
@@ -99,12 +141,22 @@ impl Default for RunConfig {
             overrides: BTreeMap::new(),
             ablate: BTreeSet::new(),
             ttfb: Duration::ZERO,
+            tokens_per_sec: None,
+            profile: None,
+            variant: None,
+            fast: None,
         }
     }
 }
 
 impl RunConfig {
     pub fn label(&self) -> String {
+        if let Some(v) = &self.variant {
+            // A variant's name stands for its overrides.
+            let mut parts = vec![v.clone()];
+            parts.extend(self.profile.clone());
+            return parts.join(" ");
+        }
         let mut parts = vec!["scripted model".to_string(), "local".to_string()];
         if !self.ablate.is_empty() {
             if ABLATIONS.iter().all(|a| self.ablate.contains(*a)) {
@@ -116,8 +168,18 @@ impl RunConfig {
                 ));
             }
         }
-        if self.ttfb > Duration::ZERO {
-            parts.push(format!("ttfb={}ms", self.ttfb.as_millis()));
+        if let Some(p) = &self.profile {
+            parts.push(p.clone());
+        } else {
+            if self.ttfb > Duration::ZERO {
+                parts.push(format!("ttfb={}ms", self.ttfb.as_millis()));
+            }
+            if let Some(r) = self.tokens_per_sec {
+                parts.push(format!("{r:.0}tok/s"));
+            }
+        }
+        if let Some(f) = &self.fast {
+            parts.push(format!("fast={}", f.name));
         }
         if self.history > 0 {
             parts.push(format!("history={}", self.history));
@@ -380,11 +442,22 @@ impl Bench {
         };
         let (media, mouth, ear) = scripted_media();
         let lines: Vec<Vec<_>> = scenario.lines.iter().map(|l| l.replies.clone()).collect();
-        let model = ScriptedModel::new(lines, cfg.ttfb);
+        // The fast model answers what the scenario's model would have opened with: plain
+        // speech is its reply, a tool call is its hand-over.
+        let fast_model = cfg.fast.as_ref().map(|p| {
+            let opening: Vec<Vec<_>> = lines
+                .iter()
+                .map(|l| l.iter().take(1).cloned().collect())
+                .collect();
+            ScriptedModel::paced(opening, p.ttfb, p.tokens_per_sec, "scripted-fast")
+                as Arc<dyn crate::llm::ModelPort>
+        });
+        let model = ScriptedModel::paced(lines, cfg.ttfb, cfg.tokens_per_sec, "scripted");
         let session = build_session(SessionParams {
             settings: Arc::new(settings),
             models: self.models.clone(),
             model,
+            fast_model,
             sources: env.sources.clone(),
             gate: env.gate.clone(),
             events: Some(Arc::new(Events::default())),

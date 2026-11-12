@@ -172,6 +172,137 @@ fn comparison(by_config: &IndexMap<String, Vec<Value>>) -> Vec<String> {
     out.push(String::new());
     out.extend(scenario_matrix(by_config));
     out.push(String::new());
+    out.extend(costs_compared(by_config));
+    out.push(String::new());
+    out
+}
+
+/// What the quick paths cost, counted over every record of a config (a turn that was
+/// reopened or withdrawn is a record too, though it never spoke).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Costs {
+    /// Answers started while a close waited, and how each ended.
+    pub started: u64,
+    pub kept: u64,
+    pub withdrawn: u64,
+    pub missed: u64,
+    pub tool: u64,
+    pub unfinished: u64,
+    /// First clauses rendered ahead, played, and thrown away.
+    pub rendered: u64,
+    pub used: u64,
+    pub dropped: u64,
+    /// Turns reopened before any of the answer was heard, and after Ghost's voice began.
+    pub reopened_unheard: u64,
+    pub reopened_started: u64,
+    /// Turns the fast model handed to the main one, and the seconds it took to ask.
+    pub handovers: u64,
+    pub handover_secs: f64,
+    /// Closes by how they were timed.
+    pub closes: IndexMap<String, u64>,
+}
+
+pub fn costs(runs: &[Value]) -> Costs {
+    let mut c = Costs::default();
+    for rec in runs.iter().flat_map(records) {
+        let n = |v: &Value| v.as_u64().unwrap_or(0);
+        let spec = &rec["hear"]["speculation"];
+        c.started += n(&spec["started"]);
+        c.kept += n(&spec["kept"]);
+        c.withdrawn += n(&spec["withdrawn"]);
+        c.missed += n(&spec["missed"]);
+        c.tool += n(&spec["tool"]);
+        c.unfinished += n(&spec["unfinished"]);
+        let pre = &rec["prerender"];
+        c.rendered += n(&pre["rendered"]);
+        c.used += n(&pre["used"]);
+        c.dropped += n(&pre["dropped"]);
+        match rec["hear"]["reopened"].as_str() {
+            Some("unheard") => c.reopened_unheard += 1,
+            Some("started") => c.reopened_started += 1,
+            _ => {}
+        }
+        c.handovers += n(&rec["handover"]["n"]);
+        c.handover_secs += rec["handover"]["secs"].as_f64().unwrap_or(0.0);
+        if let Some(band) = rec["hear"]["close"].as_str() {
+            *c.closes.entry(band.to_string()).or_insert(0) += 1;
+        }
+    }
+    c
+}
+
+fn closes(c: &Costs) -> String {
+    if c.closes.is_empty() {
+        return "-".into();
+    }
+    let mut bands: Vec<(&String, &u64)> = c.closes.iter().collect();
+    bands.sort();
+    bands
+        .iter()
+        .map(|(k, n)| format!("{k} {n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn costs_compared(by_config: &IndexMap<String, Vec<Value>>) -> Vec<String> {
+    let mut out = vec![
+        "### What the quick paths cost (counts over every turn, spoken or not)".to_string(),
+        String::new(),
+        "| config | answers started early | kept | withdrawn | redone at a tool | clauses rendered ahead | played | dropped | reopened unheard | reopened after Ghost began | hand-overs | closes |".to_string(),
+        "|---|---|---|---|---|---|---|---|---|---|---|---|".to_string(),
+    ];
+    for (config, cruns) in by_config {
+        let c = costs(cruns);
+        out.push(format!(
+            "| {config} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            c.started,
+            c.kept,
+            c.withdrawn + c.missed + c.unfinished,
+            c.tool,
+            c.rendered,
+            c.used,
+            c.dropped,
+            c.reopened_unheard,
+            c.reopened_started,
+            c.handovers,
+            closes(&c),
+        ));
+    }
+    out
+}
+
+fn costs_section(runs: &[Value]) -> Vec<String> {
+    let c = costs(runs);
+    let mut out = vec![
+        "### What the quick paths cost".to_string(),
+        String::new(),
+        format!(
+            "Answers started while a close waited: {}; kept {}, withdrawn {} (the operator went \
+             on, or the words changed or stopped mid-thought), redone at a tool call {}. Each \
+             one not kept is a model call thrown away.",
+            c.started,
+            c.kept,
+            c.withdrawn + c.missed + c.unfinished,
+            c.tool
+        ),
+        format!(
+            "First clauses rendered ahead: {}; played {}, dropped {}.",
+            c.rendered, c.used, c.dropped
+        ),
+        format!(
+            "Turns reopened: {} before any of the answer was heard, {} after Ghost's voice had begun.",
+            c.reopened_unheard, c.reopened_started
+        ),
+    ];
+    if c.handovers > 0 {
+        out.push(format!(
+            "Hand-overs from the fast model: {} (mean {:.2} s before the main model started).",
+            c.handovers,
+            c.handover_secs / c.handovers as f64
+        ));
+    }
+    out.push(format!("Closes by how they were timed: {}.", closes(&c)));
+    out.push(String::new());
     out
 }
 
@@ -233,6 +364,7 @@ fn config_section(config: &str, runs: &[Value]) -> Vec<String> {
     out.extend(contributors(&turns));
     out.extend(per_scenario(runs));
     out.extend(stages(&turns));
+    out.extend(costs_section(runs));
     out.extend(llm(runs));
     out.extend(cache_sequence(runs));
     out.extend(tools(&turns));

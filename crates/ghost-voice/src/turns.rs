@@ -21,9 +21,13 @@
 //!
 //! [`PatientTurnStopStrategy`] is Smart Turn's end of turn, held for `grace_secs` before it
 //! counts, with the speculative answer started at the verdict, and not taken when the
-//! words stop mid-thought. [`UserAggregator`] is the stage that runs both over the frames,
+//! words stop mid-thought. How long the hold is depends on how sure the end is
+//! ([`TurnTiming`], ADR 0049): a short one when Smart Turn is sure and the words end a
+//! sentence, the usual one otherwise, the long silences for words that stop mid-thought.
+//! [`UserAggregator`] is the stage that runs both over the frames,
 //! keeps the turn's pieces, and hands the model the whole turn; when the operator goes on
-//! before any of the answer was heard or done, it reopens that turn ([`TurnControl`]).
+//! before any of the answer was heard or done, or just as its first words began, it
+//! reopens that turn ([`TurnControl`]).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -328,6 +332,9 @@ pub trait TurnStopSink: Send + Sync {
     async fn turn_finalized(&self, confirms_speculation: bool);
     /// The held answer is thrown away.
     async fn speculation_cancelled(&self);
+    /// The turn is about to close on the short grace: until `at`, when the grace itself
+    /// would have run out, nothing may be done for it (ADR 0049).
+    async fn settles(&self, _at: Instant) {}
 }
 
 #[derive(Default)]
@@ -342,6 +349,9 @@ struct StopInner {
     /// When the segment's silence began: the pause's length, for the record, when the
     /// operator goes on or the turn closes.
     silence_began: Option<Instant>,
+    /// The segment's words reached the strategy since its verdict: a sure end is read off
+    /// them, never off the words of the segment before.
+    arrived: bool,
 }
 
 pub type TurnText = Arc<dyn Fn() -> String + Send + Sync>;
@@ -486,7 +496,133 @@ pub fn ends_a_sentence(text: &str) -> bool {
     text.trim_end().ends_with(['.', '?', '!'])
 }
 
+/// Which wait a segment's end got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Close {
+    /// Smart Turn is sure and the words end a sentence: the short grace.
+    Confident,
+    /// Smart Turn says done: the grace.
+    Grace,
+    /// Done, and the words end on a number: the grace and a little more.
+    Number,
+    /// Done by the voice, but the words stop mid-thought: the long silence.
+    Unfinished,
+    /// Smart Turn says not done, but the words end a sentence: the shorter silence.
+    Sentence,
+    /// Smart Turn says not done: the long silence.
+    Incomplete,
+}
+
+impl Close {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Close::Confident => "confident",
+            Close::Grace => "grace",
+            Close::Number => "number",
+            Close::Unfinished => "unfinished",
+            Close::Sentence => "sentence",
+            Close::Incomplete => "incomplete",
+        }
+    }
+}
+
+/// What the rule reads off a turn's words at a segment's end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EndWords {
+    /// They end a sentence ([`ends_a_sentence`]).
+    pub sentence: bool,
+    /// They stop mid-thought ([`sounds_unfinished`]).
+    pub unfinished: bool,
+    /// They end on a number ([`ends_with_number`]).
+    pub number: bool,
+}
+
+impl EndWords {
+    pub fn of(words: &str) -> Self {
+        Self {
+            sentence: ends_a_sentence(words),
+            unfinished: sounds_unfinished(words),
+            number: ends_with_number(words),
+        }
+    }
+
+    /// An end nobody goes on from mid-thought: a full stop, a question mark or an
+    /// exclamation mark Parakeet wrote, no trailing word that wants more, and not a
+    /// number, after which people pause and go on ("four one five ... from quotient").
+    pub fn sure(self) -> bool {
+        self.sentence && !self.unfinished && !self.number
+    }
+}
+
+/// How long a turn's close waits after a segment ends, by how sure the end is (ADR 0049).
+/// Every wait is counted from the VAD's stop. The strategy below runs these waits over the
+/// frames; this is the rule itself, pure, so the harness can run recorded takes through it
+/// (`perf::turns`) and a test can hold the strategy to it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TurnTiming {
+    /// The grace: Smart Turn says done.
+    pub grace_secs: f64,
+    /// The short grace, when Smart Turn is at least `confident_prob` sure and the words
+    /// end a sentence. At or over `grace_secs` there is no short grace.
+    pub confident_grace_secs: f64,
+    pub confident_prob: f32,
+    pub stop_secs: f64,
+    pub unfinished_secs: f64,
+    pub sentence_min_prob: f32,
+    pub number_secs: f64,
+}
+
+impl TurnTiming {
+    /// Smart Turn's probability alone allows the short grace.
+    pub fn confident(&self, prob: f32) -> bool {
+        self.grace_secs > 0.0
+            && self.confident_grace_secs < self.grace_secs
+            && prob >= self.confident_prob
+    }
+
+    /// The wait a segment's end gets, and its seconds from the VAD's stop.
+    pub fn close(&self, verdict: TurnVerdict, words: &str) -> (Close, f64) {
+        self.close_on(verdict, EndWords::of(words))
+    }
+
+    /// The same, on what was read off the words.
+    pub fn close_on(&self, verdict: TurnVerdict, words: EndWords) -> (Close, f64) {
+        if !verdict.complete {
+            return if words.sentence
+                && !words.unfinished
+                && verdict.probability >= self.sentence_min_prob
+            {
+                (Close::Sentence, self.stop_secs)
+            } else {
+                (Close::Incomplete, self.unfinished_secs)
+            };
+        }
+        if self.grace_secs <= 0.0 {
+            return (Close::Grace, 0.0); // Smart Turn as is
+        }
+        if words.unfinished {
+            return (Close::Unfinished, self.unfinished_secs.max(self.grace_secs));
+        }
+        if self.confident(verdict.probability) && words.sure() {
+            return (Close::Confident, self.confident_grace_secs.max(0.0));
+        }
+        if words.number && self.number_secs > 0.0 {
+            return (Close::Number, self.grace_secs + self.number_secs);
+        }
+        (Close::Grace, self.grace_secs)
+    }
+}
+
+/// How often the hold looks for the segment's words once the short grace has run.
+const WORDS_POLL: Duration = Duration::from_millis(10);
+
 /// Smart Turn's end of turn, held for `grace_secs` before it counts.
+///
+/// With a short grace set (`with_confident`), a verdict Smart Turn is sure of whose words
+/// end a sentence closes after that instead (ADR 0049): the words are read when they
+/// arrive, the turn closes then or at the short grace, whichever is later, and anything
+/// less sure waits the grace as before. The reopened turn (`TurnControl`) is what makes
+/// that safe: going on before Ghost was heard takes the turn back whole.
 ///
 /// Smart Turn ends a turn as soon as the words sound finished, and people pause in the
 /// middle of a thought ("are there any other open issues I need to … look at"). Its
@@ -517,6 +653,9 @@ pub fn ends_a_sentence(text: &str) -> bool {
 pub struct PatientTurnStopStrategy {
     analyzer: Option<SmartTurnAnalyzer>,
     grace: f64,
+    /// The short grace and the probability it needs; at or over `grace`, none.
+    confident_grace: f64,
+    confident_prob: f32,
     speculate: bool,
     probe: Arc<dyn LatencyProbe>,
     inner: Arc<Mutex<StopInner>>,
@@ -539,6 +678,8 @@ impl PatientTurnStopStrategy {
         Self {
             analyzer,
             grace: grace_secs,
+            confident_grace: grace_secs,
+            confident_prob: 1.0,
             speculate,
             probe: null_probe(),
             inner: Arc::new(Mutex::new(StopInner::default())),
@@ -553,6 +694,27 @@ impl PatientTurnStopStrategy {
     pub fn with_probe(mut self, probe: Arc<dyn LatencyProbe>) -> Self {
         self.probe = probe;
         self
+    }
+
+    /// The short grace (ADR 0049): a verdict at least `prob` sure whose words end a
+    /// sentence closes after `grace_secs`. At or over the grace, the grace stands alone.
+    pub fn with_confident(mut self, grace_secs: f64, prob: f32) -> Self {
+        self.confident_grace = grace_secs;
+        self.confident_prob = prob;
+        self
+    }
+
+    /// The waits this strategy runs, as the rule states them.
+    pub fn timing(&self) -> TurnTiming {
+        TurnTiming {
+            grace_secs: self.grace,
+            confident_grace_secs: self.confident_grace,
+            confident_prob: self.confident_prob,
+            stop_secs: self.stop_secs(),
+            unfinished_secs: self.unfinished_secs(),
+            sentence_min_prob: self.sentence_min_prob(),
+            number_secs: self.number_secs(),
+        }
     }
 
     /// What a speculative answer answers: the aggregator's whole turn.
@@ -575,12 +737,24 @@ impl PatientTurnStopStrategy {
     /// Smart Turn said the operator is done: hold it for the grace. The answer starts when
     /// the segment's words arrive, a moment after this.
     pub async fn trigger_user_turn_stopped(&mut self) {
+        self.trigger_stopped_with(0.0).await;
+    }
+
+    /// The same, with Smart Turn's probability that the turn is done: sure enough, and the
+    /// hold may be the short one.
+    pub async fn trigger_stopped_with(&mut self, prob: f32) {
         self.cancel_fallback();
         if self.grace <= 0.0 {
+            self.probe.closed(Close::Grace.as_str());
             self.sink.turn_stopped().await;
             return;
         }
         self.release_hold().await;
+        let short = self
+            .timing()
+            .confident(prob)
+            .then(|| Duration::from_secs_f64(self.confident_grace.max(0.0)));
+        self.inner.lock().unwrap().arrived = false;
         let inner = self.inner.clone();
         let sink = self.sink.clone();
         let probe = self.probe.clone();
@@ -594,28 +768,56 @@ impl PatientTurnStopStrategy {
         shared.set_closing(true);
         let task = tokio::spawn(async move {
             let began = Instant::now();
-            tokio::time::sleep(grace).await;
-            let words = turn_text();
-            if sounds_unfinished(&words) {
-                debug::audio(|| format!("turn: {words:?} sounds unfinished, waiting"));
-                if inner.lock().unwrap().speculation.take().is_some() {
-                    probe.speculation("unfinished");
-                    sink.speculation_cancelled().await;
+            let mut band = Close::Grace;
+            if let Some(short) = short {
+                // Sure of the end by the voice: the words decide, when they are here. They
+                // follow the verdict by the read's time, so the hold looks for them from
+                // the short grace on and falls back to the grace without them.
+                tokio::time::sleep(short).await;
+                while began.elapsed() < grace && !inner.lock().unwrap().arrived {
+                    tokio::time::sleep(WORDS_POLL).await;
                 }
-                tokio::time::sleep(rest).await;
-            } else if ends_with_number(&words) && !number.is_zero() {
-                // The answer started on the words stays; the close just waits a little.
-                debug::audio(|| {
-                    format!(
-                        "turn: {words:?} ends on a number; waiting {:.1}s more",
-                        number.as_secs_f64()
-                    )
-                });
-                tokio::time::sleep(number).await;
+                let words = turn_text();
+                if inner.lock().unwrap().arrived && EndWords::of(&words).sure() {
+                    debug::audio(|| {
+                        format!(
+                            "turn: {words:?} ends a sentence and Smart Turn is sure ({prob:.2}); closing after {:.2}s",
+                            began.elapsed().as_secs_f64()
+                        )
+                    });
+                    band = Close::Confident;
+                    // Closed early to speak early. What the turn does, a tool call, waits
+                    // as long as it always did: the operator may yet go on.
+                    sink.settles(began + grace).await;
+                }
+            }
+            if band != Close::Confident {
+                tokio::time::sleep(grace.saturating_sub(began.elapsed())).await;
+                let words = turn_text();
+                if sounds_unfinished(&words) {
+                    debug::audio(|| format!("turn: {words:?} sounds unfinished, waiting"));
+                    if inner.lock().unwrap().speculation.take().is_some() {
+                        probe.speculation("unfinished");
+                        sink.speculation_cancelled().await;
+                    }
+                    band = Close::Unfinished;
+                    tokio::time::sleep(rest).await;
+                } else if ends_with_number(&words) && !number.is_zero() {
+                    // The answer started on the words stays; the close just waits a little.
+                    debug::audio(|| {
+                        format!(
+                            "turn: {words:?} ends on a number; waiting {:.1}s more",
+                            number.as_secs_f64()
+                        )
+                    });
+                    band = Close::Number;
+                    tokio::time::sleep(number).await;
+                }
             }
             inner.lock().unwrap().held = None;
             shared.set_closing(false);
             probe.held(began.elapsed().as_secs_f64());
+            probe.closed(band.as_str());
             Self::close(&inner, &sink, &probe, &turn_text).await;
         });
         self.inner.lock().unwrap().held = Some(task);
@@ -670,9 +872,25 @@ impl PatientTurnStopStrategy {
         }
         self.withdraw().await;
         debug::audio(|| format!("turn: answering {heard:?} while the close waits"));
-        self.inner.lock().unwrap().speculation = Some(heard.clone());
         self.probe.speculation("started");
-        self.sink.inference_triggered(Some(heard)).await;
+        // The start goes out before the close can know of it: a close that found the
+        // answer while its start was still on the way confirmed an answer the model's
+        // stage did not have yet, and the turn got none (2026-11-11, on words that arrived
+        // as the hold ran out).
+        self.sink.inference_triggered(Some(heard.clone())).await;
+        let waiting = {
+            let mut i = self.inner.lock().unwrap();
+            let waiting = i.held.is_some() || i.fallback.is_some();
+            if waiting {
+                i.speculation = Some(heard);
+            }
+            waiting
+        };
+        if !waiting {
+            // The close came meanwhile and the turn's own run is under way.
+            self.probe.speculation("missed");
+            self.sink.speculation_cancelled().await;
+        }
     }
 
     /// The answer under way, if any, is thrown away.
@@ -736,7 +954,7 @@ impl PatientTurnStopStrategy {
                         stop
                     )
                 });
-                self.run_fallback(stop, began);
+                self.run_fallback(stop, began, Close::Sentence);
             }
             self.speculate_on(heard).await;
         }
@@ -778,6 +996,8 @@ impl PatientTurnStopStrategy {
                 if self.holding() || self.in_fallback() {
                     let heard = self.heard();
                     self.words_arrived(heard).await;
+                    // Only now: a hold that closes on the words finds their answer started.
+                    self.inner.lock().unwrap().arrived = true;
                 }
             }
             Frame::AudioIn(audio) => {
@@ -811,7 +1031,7 @@ impl PatientTurnStopStrategy {
                     )),
                 };
                 match verdict {
-                    Some((v, _)) if v.complete => self.trigger_user_turn_stopped().await,
+                    Some((v, _)) if v.complete => self.trigger_stopped_with(v.probability).await,
                     Some((v, _)) => self.start_fallback(v.probability),
                     None => {}
                 }
@@ -841,7 +1061,7 @@ impl PatientTurnStopStrategy {
         self.cancel_fallback();
         self.inner.lock().unwrap().fallback_prob = prob;
         self.shared.set_closing(true);
-        self.run_fallback(self.unfinished_secs(), Instant::now());
+        self.run_fallback(self.unfinished_secs(), Instant::now(), Close::Incomplete);
     }
 
     fn sentence_min_prob(&self) -> f32 {
@@ -851,7 +1071,7 @@ impl PatientTurnStopStrategy {
     }
 
     /// Close the turn `secs` after `began`, the answer under way being the answer.
-    fn run_fallback(&mut self, secs: f64, began: Instant) {
+    fn run_fallback(&mut self, secs: f64, began: Instant, band: Close) {
         if let Some(f) = self.inner.lock().unwrap().fallback.take() {
             f.abort();
         }
@@ -869,6 +1089,7 @@ impl PatientTurnStopStrategy {
                 i.fallback_began = None;
             }
             shared.set_closing(false);
+            probe.closed(band.as_str());
             Self::close(&inner, &sink, &probe, &turn_text).await;
         });
         let mut i = self.inner.lock().unwrap();
@@ -921,6 +1142,9 @@ enum Answer {
     Settled,
     /// The turn's words went to the model and nothing of the answer has been heard.
     Unheard(String),
+    /// Ghost's voice began answering the turn at this moment, and nothing was done for
+    /// it: for a short while the operator going on is still the same turn (ADR 0049).
+    Started(String, Instant),
     /// The operator went on first: the turn is theirs again, and no call of its answer runs.
     Reopened,
 }
@@ -945,6 +1169,8 @@ pub struct TurnControl {
     /// Cancelled when the calls in flight should stop without the turn being cut: the
     /// operator hung up (ADR 0046). Replaced by a fresh one each time.
     calls: Mutex<CancellationToken>,
+    /// Until when the last turn's tool calls wait (`settle_at`).
+    settles: Mutex<Option<Instant>>,
 }
 
 impl TurnControl {
@@ -957,7 +1183,20 @@ impl TurnControl {
             barged_in: std::sync::atomic::AtomicBool::new(false),
             calling: std::sync::atomic::AtomicUsize::new(0),
             calls: Mutex::new(CancellationToken::new()),
+            settles: Mutex::new(None),
         })
+    }
+
+    /// The turn closed on the short grace (ADR 0049): no tool call of its answer runs
+    /// before `at`, when the grace would have closed it, so going on in a pause still
+    /// finds nothing done.
+    pub fn settle_at(&self, at: Instant) {
+        *self.settles.lock().unwrap() = Some(at);
+    }
+
+    /// When the last turn's calls may run, if that is still to come.
+    pub fn settles(&self) -> Option<Instant> {
+        (*self.settles.lock().unwrap()).filter(|at| *at > Instant::now())
     }
 
     /// The model's stage is waiting on `n` more (or fewer) tool calls.
@@ -993,6 +1232,7 @@ impl TurnControl {
     pub fn began(&self, barged_in: bool) {
         self.barged_in
             .store(barged_in, std::sync::atomic::Ordering::SeqCst);
+        *self.settles.lock().unwrap() = None;
     }
 
     pub fn barged_in(&self) -> bool {
@@ -1010,8 +1250,27 @@ impl TurnControl {
     /// the reply has played.
     pub fn heard(&self) {
         let mut a = self.answer.lock().unwrap();
-        if matches!(*a, Answer::Unheard(_)) {
-            *a = Answer::Settled;
+        let text = match &*a {
+            Answer::Unheard(text) => text.clone(),
+            _ => return,
+        };
+        *a = Answer::Started(text, Instant::now());
+    }
+
+    /// The operator's words cut in on an answer that had only begun: their speech began
+    /// (`onset`) within `window` of Ghost's first sample, and nothing was done for the
+    /// turn. They were going on, not answering Ghost: the turn is taken for not heard,
+    /// and its words come back. Words decide this, as they decide any barge-in; the VAD
+    /// alone never stops Ghost, whose own first words reach it too.
+    pub fn reopen_started(&self, onset: Instant, window: Duration) -> Option<String> {
+        let mut a = self.answer.lock().unwrap();
+        match &*a {
+            Answer::Started(text, at) if onset <= *at + window => {
+                let text = text.clone();
+                *a = Answer::Reopened;
+                Some(text)
+            }
+            _ => None,
         }
     }
 
@@ -1024,6 +1283,11 @@ impl TurnControl {
         }
         *a = Answer::Settled;
         true
+    }
+
+    /// The last turn went to the model and nothing of its answer has been heard or done.
+    pub fn unheard(&self) -> bool {
+        matches!(&*self.answer.lock().unwrap(), Answer::Unheard(_))
     }
 
     /// The operator went on: the turn's words when nothing of its answer was heard or done.
@@ -1126,13 +1390,17 @@ impl TurnStopSink for AggregatorSink {
         out.push(Frame::UserStopped).await;
         if confirms_speculation {
             self.turns.answering(&text);
-            out.push(Frame::SpeculationConfirmed).await;
+            out.push(Frame::SpeculationConfirmed(text)).await;
         }
     }
 
     async fn speculation_cancelled(&self) {
         let Some(out) = self.out() else { return };
         out.push(Frame::SpeculationCancelled).await;
+    }
+
+    async fn settles(&self, at: Instant) {
+        self.turns.settle_at(at);
     }
 }
 
@@ -1161,20 +1429,43 @@ struct TurnTape {
     /// segment whose audio went by before the turn opened): they stay in front.
     base: usize,
     full: bool,
+    /// The turn closed and the tape runs on a while: reopened, the turn is still read
+    /// whole, pause and all (`resume`).
+    parked: bool,
 }
+
+/// Speech that began under an acknowledgment and is still going this long after it ended
+/// is not its echo: the VAD over Ghost's voice closes a segment 0.6 s after the sound
+/// stops (`GHOST_VAD_OVER_GHOST_STOP_SECS`).
+const ECHO_TAIL: Duration = Duration::from_millis(750);
+
+/// How long a closed turn's tape runs on, waiting for the turn to be reopened.
+const PARK_MAX_SECS: f64 = 10.0;
 
 impl TurnTape {
     fn push(&mut self, samples: &[i16]) {
-        if !self.open {
-            self.pre.extend(samples.iter().copied());
-            let keep = (PRE_ROLL_SECS * f64::from(SAMPLE_RATE)) as usize;
-            while self.pre.len() > keep {
-                self.pre.pop_front();
+        if self.open {
+            if !self.full {
+                self.audio.extend_from_slice(samples);
+                if self.audio.len() > (TAPE_MAX_SECS * f64::from(SAMPLE_RATE)) as usize {
+                    self.full = true;
+                }
             }
-        } else if !self.full {
+            return;
+        }
+        self.pre.extend(samples.iter().copied());
+        let keep = (PRE_ROLL_SECS * f64::from(SAMPLE_RATE)) as usize;
+        while self.pre.len() > keep {
+            self.pre.pop_front();
+        }
+        if self.parked {
             self.audio.extend_from_slice(samples);
-            if self.audio.len() > (TAPE_MAX_SECS * f64::from(SAMPLE_RATE)) as usize {
-                self.full = true;
+            let rate = f64::from(SAMPLE_RATE);
+            if self.audio.len() - self.end > (PARK_MAX_SECS * rate) as usize
+                || self.audio.len() > (TAPE_MAX_SECS * rate) as usize
+            {
+                self.parked = false; // nobody went on: the next turn is its own
+                self.audio.clear();
             }
         }
     }
@@ -1184,9 +1475,37 @@ impl TurnTape {
         self.audio = self.pre.drain(..).collect();
         self.end = 0;
         self.open = true;
+        self.parked = false;
         self.segments = 0;
         self.base = 0;
         self.full = false;
+    }
+
+    /// The turn closed: the ring runs again for the next turn's pre-roll, and the tape
+    /// runs on in case this one is reopened. (Left open, the next turn began with no
+    /// pre-roll at all, and its whole read lost what was said before the VAD's start.)
+    fn park(&mut self) {
+        if !self.open {
+            return;
+        }
+        self.open = false;
+        self.parked = !self.full && self.segments > 0;
+        if !self.parked {
+            self.audio.clear();
+        }
+    }
+
+    /// The turn was reopened before anything of its answer was heard: the tape goes on
+    /// where it was, so the turn is read whole across the pause. False, and a fresh tape,
+    /// when there is none to go on with.
+    fn resume(&mut self) -> bool {
+        if self.parked {
+            self.parked = false;
+            self.open = true;
+            return true;
+        }
+        self.begin();
+        false
     }
 
     /// A segment started with `pieces` already in the turn.
@@ -1209,6 +1528,7 @@ impl TurnTape {
         self.audio.clear();
         self.end = 0;
         self.open = false;
+        self.parked = false;
         self.segments = 0;
         self.full = false;
     }
@@ -1272,6 +1592,12 @@ pub struct UserAggregator {
     /// The turn's audio, and the model that reads it whole (`with_reader`).
     tape: TurnTape,
     reader: Option<SharedRecognizer>,
+    /// How long after Ghost's first sample the operator's words still reopen the turn
+    /// (`with_reopen_started`); zero: once any of the answer is at the speaker it stands.
+    reopen_started: Duration,
+    /// When the segment that began over Ghost's voice began, by the VAD's own start time.
+    over_onset: Option<Instant>,
+    probe: Arc<dyn LatencyProbe>,
 }
 
 impl UserAggregator {
@@ -1308,11 +1634,29 @@ impl UserAggregator {
             vad_stop_secs: 0.2,
             tape: TurnTape::default(),
             reader: None,
+            reopen_started: Duration::ZERO,
+            over_onset: None,
+            probe: null_probe(),
         }
     }
 
     pub fn with_probe(mut self, probe: Arc<dyn LatencyProbe>) -> Self {
+        self.probe = probe.clone();
         self.stop = self.stop.with_probe(probe);
+        self
+    }
+
+    /// The short grace for an end Smart Turn is sure of (`GHOST_TURN_CONFIDENT_*`, ADR 0049).
+    pub fn with_confident_close(mut self, grace_secs: f64, prob: f32) -> Self {
+        self.stop = self.stop.with_confident(grace_secs, prob);
+        self
+    }
+
+    /// Words from the operator whose speech began within `secs` of Ghost's first sample
+    /// reopen the turn (`GHOST_TURN_REOPEN_STARTED_SECS`); 0 keeps a turn whose answer
+    /// began, and those words are a barge-in as before.
+    pub fn with_reopen_started(mut self, secs: f64) -> Self {
+        self.reopen_started = Duration::from_secs_f64(secs.max(0.0));
         self
     }
 
@@ -1387,9 +1731,24 @@ impl UserAggregator {
         // Going on before any of the answer was heard or done is the same turn: its words
         // come back, and the model's stage takes them and the unheard answer out of the
         // context. Talking over Ghost is a barge-in, and the turn it answered stands.
-        let barged_in = self.start.bot_speaking();
+        // Over the first moment of Ghost's voice it is still the same turn: the operator
+        // had not heard an answer, they were going on (ADR 0049).
+        let speaking = self.start.bot_speaking();
+        let over = self.over_onset.take();
+        // Unheard and yet Ghost is speaking: an acknowledgment is all that was said (a
+        // fast model handed the turn over, ADR 0050), and words over it go on with the
+        // turn like words in silence.
+        let unheard = self.turns.reopen();
+        let begun = match (&unheard, over) {
+            (None, Some(onset)) if speaking && !self.reopen_started.is_zero() => {
+                self.turns.reopen_started(onset, self.reopen_started)
+            }
+            _ => None,
+        };
+        let after_start = begun.is_some();
+        let reopened = unheard.or(begun);
+        let barged_in = speaking && reopened.is_none();
         self.turns.began(barged_in);
-        let reopened = if barged_in { None } else { self.turns.reopen() };
         self.start.handle_user_turn_started();
         self.stop.handle_user_turn_started().await;
         {
@@ -1399,20 +1758,50 @@ impl UserAggregator {
                 s.pieces = vec![text.clone()];
             }
         }
-        self.tape.begin();
+        // A turn reopened unheard is read whole across its pause; one Ghost spoke into
+        // (its answer's first words, or an acknowledgment) has Ghost's voice on the tape,
+        // and starts a fresh one.
+        if reopened.is_some() && !speaking {
+            self.tape.resume();
+        } else {
+            self.tape.begin();
+        }
         // A new turn interrupts whatever Ghost was doing for the last one, spoken or still
         // being made (Pipecat's interruption): the reply's token is cancelled first, so the
         // voice stops within the frame and the model's stream ends, then the stages are told.
         self.turns.interrupt();
         out.push(Frame::Interruption).await;
         out.push_up(Frame::Interruption).await;
+        let was_reopened = reopened.is_some();
         if let Some(text) = reopened {
-            debug::audio(|| format!("turn: reopened, nothing of the answer heard: {text:?}"));
+            debug::audio(|| {
+                if after_start {
+                    format!("turn: reopened, the answer had only begun: {text:?}")
+                } else {
+                    format!("turn: reopened, nothing of the answer heard: {text:?}")
+                }
+            });
             out.push(Frame::ReopenTurn(text)).await;
         }
         self.bot_speaking = false;
         out.push_up(Frame::UserStarted).await;
         out.push(Frame::UserStarted).await;
+        if was_reopened {
+            self.probe.reopened(after_start); // on the turn that goes on
+        }
+    }
+
+    /// Speech began while Ghost said an acknowledgment, with the turn's answer still
+    /// unheard (a hand-over, ADR 0050), and it is still going well after the
+    /// acknowledgment ended: the operator going on. The VAD's start was not trusted while
+    /// Ghost's voice played; an echo would have ended with it.
+    fn went_on_under_an_acknowledgment(&self) -> bool {
+        self.vad_on
+            && self.over_onset.is_some()
+            && !self.turn_open()
+            && !self.start.bot_speaking()
+            && self.turns.unheard()
+            && self.speaking.silent_for().is_some_and(|d| d >= ECHO_TAIL)
     }
 
     async fn apply_start_events(&mut self, out: &Out) {
@@ -1493,13 +1882,20 @@ impl Stage for UserAggregator {
                         let stop = Frame::VadStopped {
                             stop_secs: self.vad_stop_secs,
                         };
-                        if let Some((verdict, ms)) = self.stop.process_frame(&stop).await {
-                            out.push(Frame::Metrics(Metric::Turn {
-                                complete: verdict.complete,
-                                probability: f64::from(verdict.probability),
-                                ms,
-                            }))
-                            .await;
+                        match self.stop.process_frame(&stop).await {
+                            Some((verdict, ms)) => {
+                                out.push(Frame::Metrics(Metric::Turn {
+                                    complete: verdict.complete,
+                                    probability: f64::from(verdict.probability),
+                                    ms,
+                                }))
+                                .await;
+                            }
+                            // Its segment was judged already, with the turn that has
+                            // since closed (the read took longer than the grace: 1.5 s on
+                            // a busy machine, 2026-11-11, and the turn hung until the idle
+                            // timer). No audio is left to judge: the grace, then the close.
+                            None => self.stop.trigger_user_turn_stopped().await,
                         }
                     }
                 }
@@ -1513,9 +1909,17 @@ impl Stage for UserAggregator {
                 }
                 return; // only the barge-in rule reads an interim
             }
-            Frame::VadStarted { .. } => {
+            Frame::VadStarted { start_secs } => {
                 self.vad_on = true;
                 if !self.turn_open() {
+                    if self.start.bot_speaking() {
+                        // When this speech began: what a barge-in on its words is timed by.
+                        let now = Instant::now();
+                        self.over_onset = Some(
+                            now.checked_sub(Duration::from_secs_f32(start_secs.max(0.0)))
+                                .unwrap_or(now),
+                        );
+                    }
                     self.start.process_frame(&frame);
                     self.apply_start_events(out).await;
                 }
@@ -1545,8 +1949,19 @@ impl Stage for UserAggregator {
                 return;
             }
             Frame::AudioIn(audio) => {
+                if self.tape.open && !self.turn_open() {
+                    self.tape.park(); // the turn closed since the last frame
+                }
                 self.tape.push(&audio.samples);
                 self.stop.process_frame(&frame).await;
+                if self.went_on_under_an_acknowledgment() {
+                    debug::audio(|| {
+                        "turn: speech that began under the acknowledgment goes on".into()
+                    });
+                    self.turn_started(out).await;
+                    let pieces = self.state.lock().unwrap().pieces.len();
+                    self.tape.started(pieces);
+                }
                 return; // audio ends here: the model and the voice take text
             }
             Frame::EagerCancel => {
@@ -1577,6 +1992,7 @@ impl Stage for UserAggregator {
 mod tests {
     use super::*;
     use crate::frames::{Audio, drain};
+    use tokio::sync::mpsc as mpsc_rx;
 
     // --- the start ---------------------------------------------------------------
 
@@ -1957,6 +2373,326 @@ mod tests {
         );
     }
 
+    // --- how sure the end is (ADR 0049) ------------------------------------------
+
+    fn timing() -> TurnTiming {
+        TurnTiming {
+            grace_secs: 1.2,
+            confident_grace_secs: 0.35,
+            confident_prob: 0.9,
+            stop_secs: 1.6,
+            unfinished_secs: 3.0,
+            sentence_min_prob: 0.1,
+            number_secs: 0.5,
+        }
+    }
+
+    fn done(probability: f32) -> TurnVerdict {
+        TurnVerdict {
+            probability,
+            complete: true,
+        }
+    }
+
+    fn not_done(probability: f32) -> TurnVerdict {
+        TurnVerdict {
+            probability,
+            complete: false,
+        }
+    }
+
+    #[test]
+    fn test_the_wait_for_each_kind_of_end() {
+        let t = timing();
+        // Sure by the voice and a sentence by the words: the short grace.
+        for words in ["What time is it?", "Close it.", "Yes, go ahead."] {
+            assert_eq!(
+                t.close(done(0.97), words),
+                (Close::Confident, 0.35),
+                "{words}"
+            );
+        }
+        assert_eq!(t.close(done(0.9), "Close it."), (Close::Confident, 0.35));
+        // Middling by the voice: the grace, as before.
+        assert_eq!(t.close(done(0.7), "What time is it?"), (Close::Grace, 1.2));
+        assert_eq!(t.close(done(0.89), "Close it."), (Close::Grace, 1.2));
+        // Sure by the voice, but Parakeet wrote no stop: the grace.
+        assert_eq!(
+            t.close(done(0.99), "what needs my sign off"),
+            (Close::Grace, 1.2)
+        );
+        // A number: people pause after one and go on.
+        assert_eq!(
+            t.close(done(0.99), "Read me issue four one five."),
+            (Close::Number, 1.7)
+        );
+        // Words that stop mid-thought wait as long as they did, however sure the voice.
+        for words in [
+            "Can you count, um",
+            "Tell me about",
+            "Read me issue.",
+            "and then,",
+            "Can you pull up issue?",
+        ] {
+            assert_eq!(
+                t.close(done(0.99), words),
+                (Close::Unfinished, 3.0),
+                "{words}"
+            );
+        }
+        // Smart Turn's "not done" waits as it did.
+        assert_eq!(t.close(not_done(0.01), "Can you"), (Close::Incomplete, 3.0));
+        assert_eq!(
+            t.close(not_done(0.3), "I will talk to you later."),
+            (Close::Sentence, 1.6)
+        );
+        assert_eq!(
+            t.close(not_done(0.04), "Can you read me the issue."),
+            (Close::Incomplete, 3.0)
+        );
+    }
+
+    #[test]
+    fn test_one_grace_for_every_turn_is_a_setting_away() {
+        for old in [
+            TurnTiming {
+                confident_grace_secs: 1.2,
+                ..timing()
+            },
+            TurnTiming {
+                confident_prob: 1.1,
+                ..timing()
+            },
+        ] {
+            assert_eq!(
+                old.close(done(0.99), "What time is it?"),
+                (Close::Grace, 1.2)
+            );
+            assert_eq!(
+                old.close(done(0.99), "Read me issue four one five."),
+                (Close::Number, 1.7)
+            );
+        }
+        // No grace at all is Smart Turn as is, as it was.
+        let none = TurnTiming {
+            grace_secs: 0.0,
+            ..timing()
+        };
+        assert_eq!(
+            none.close(done(0.99), "What time is it?"),
+            (Close::Grace, 0.0)
+        );
+    }
+
+    /// Smart Turn with one answer: done at or over a half.
+    struct Sure(f32);
+
+    impl TurnModel for Sure {
+        fn predict(&mut self, _audio: &[f32]) -> ghost_infer::Result<TurnVerdict> {
+            Ok(TurnVerdict {
+                probability: self.0,
+                complete: self.0 >= 0.5,
+            })
+        }
+    }
+
+    /// The strategy over a Smart Turn that is `prob` sure, the waits a quarter of the
+    /// shipped ones: grace 0.3 s, short grace 0.1 s at 0.9, a number +0.15 s, a doubted
+    /// sentence 0.45 s, unfinished 0.75 s.
+    fn banded(prob: f32) -> Speculating {
+        let events = Arc::new(Events(Mutex::new(Vec::new())));
+        let model: Arc<Mutex<dyn TurnModel>> = Arc::new(Mutex::new(Sure(prob)));
+        let analyzer = SmartTurnAnalyzer::new(
+            model,
+            SmartTurnParams {
+                stop_secs: 0.45,
+                unfinished_secs: 0.75,
+                number_secs: 0.15,
+                ..SmartTurnParams::default()
+            },
+        );
+        let s = PatientTurnStopStrategy::new(Some(analyzer), 0.3, true, events.clone())
+            .with_confident(0.1, 0.9);
+        wired(s, events)
+    }
+
+    /// A segment as the aggregator hands it over: the VAD's start, its audio, the stop
+    /// with Smart Turn's verdict, then the words.
+    async fn one_segment(t: &mut Speculating, text: &str) -> Instant {
+        t.s.process_frame(&vad_start()).await;
+        t.s.process_frame(&room(0.2)).await;
+        t.s.process_frame(&vad_stop()).await;
+        let stopped = Instant::now();
+        t.hears(text).await;
+        stopped
+    }
+
+    /// Seconds from `stopped` to the turn's close, by watching for it.
+    async fn closed_after(t: &Speculating, stopped: Instant) -> f64 {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if seen(&t.events)
+                .iter()
+                .any(|e| e == "confirmed" || e == "rerun")
+            {
+                return stopped.elapsed().as_secs_f64();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "never closed: {:?}",
+                seen(&t.events)
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_the_strategy_waits_what_the_rule_says_for_each_end() {
+        // The strategy runs the rule over the frames; each end closes when the rule says,
+        // give or take the scheduler.
+        for (prob, words, band) in [
+            (0.97, "What time is it?", Close::Confident),
+            (0.7, "What time is it?", Close::Grace),
+            (0.99, "what needs my sign off", Close::Grace),
+            (0.99, "Read me issue four one five.", Close::Number),
+            (0.99, "Can you count, um", Close::Unfinished),
+            (0.3, "I will talk to you later.", Close::Sentence),
+            (0.01, "Can you", Close::Incomplete),
+        ] {
+            let mut t = banded(prob);
+            let (expected, wait) = t.s.timing().close(
+                TurnVerdict {
+                    probability: prob,
+                    complete: prob >= 0.5,
+                },
+                words,
+            );
+            assert_eq!(expected, band, "{words}");
+            let stopped = one_segment(&mut t, words).await;
+            let took = closed_after(&t, stopped).await;
+            assert!(
+                took >= wait - 0.01 && took < wait + 0.12,
+                "{words:?} ({prob}): closed after {took:.2}s, the rule says {wait:.2}s"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_a_sure_end_keeps_the_answer_started_on_its_words() {
+        let mut t = banded(0.97);
+        let stopped = one_segment(&mut t, "What time is it?").await;
+        closed_after(&t, stopped).await;
+        assert_eq!(
+            seen(&t.events),
+            vec!["answer:What time is it?", "confirmed"],
+            "closed on the held answer, with no second inference"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a_sure_end_whose_words_come_late_closes_when_they_come() {
+        // A long turn's read outlasts the short grace: the close waits for the words
+        // rather than taking the verdict alone.
+        let mut t = banded(0.97);
+        t.s.process_frame(&vad_start()).await;
+        t.s.process_frame(&room(0.2)).await;
+        t.s.process_frame(&vad_stop()).await;
+        let stopped = Instant::now();
+        sleep(0.18).await;
+        assert!(seen(&t.events).is_empty(), "no words, no close");
+        t.hears("What time is it?").await;
+        let took = closed_after(&t, stopped).await;
+        assert!((0.18..0.28).contains(&took), "closed after {took:.2}s");
+    }
+
+    /// A sink whose start of an answer takes a while to go out, as a frame does through a
+    /// busy pipeline.
+    struct SlowStart(Events);
+
+    #[async_trait]
+    impl TurnStopSink for SlowStart {
+        async fn turn_stopped(&self) {
+            self.0.turn_stopped().await;
+        }
+        async fn inference_triggered(&self, speculation: Option<String>) {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            self.0.inference_triggered(speculation).await;
+        }
+        async fn turn_finalized(&self, confirms: bool) {
+            self.0.turn_finalized(confirms).await;
+        }
+        async fn speculation_cancelled(&self) {
+            self.0.speculation_cancelled().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_a_close_never_overtakes_the_start_of_the_answer_it_confirms() {
+        // The words arrive after the short grace has run, so the hold closes the moment
+        // it sees them. The answer's start must be out first, or the model's stage is
+        // told to speak an answer it has not been asked for and the turn gets nothing.
+        let slow = Arc::new(SlowStart(Events(Mutex::new(Vec::new()))));
+        let model: Arc<Mutex<dyn TurnModel>> = Arc::new(Mutex::new(Sure(0.97)));
+        let analyzer = SmartTurnAnalyzer::new(model, SmartTurnParams::default());
+        let mut s = PatientTurnStopStrategy::new(Some(analyzer), 0.5, true, slow.clone())
+            .with_confident(0.05, 0.9);
+        let heard = Arc::new(Mutex::new(String::new()));
+        let h = heard.clone();
+        s.set_turn_text(Arc::new(move || h.lock().unwrap().clone()));
+        s.process_frame(&vad_start()).await;
+        s.process_frame(&room(0.2)).await;
+        s.process_frame(&vad_stop()).await;
+        sleep(0.12).await; // the short grace is over; the hold waits for the words
+        *heard.lock().unwrap() = "What time is it?".into();
+        s.process_frame(&said("What time is it?")).await;
+        sleep(0.2).await;
+        assert_eq!(
+            seen(&slow.0),
+            vec!["answer:What time is it?", "confirmed"],
+            "the start, then the confirmation"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_an_answer_started_as_the_hold_ran_out_is_not_left_behind() {
+        // The hold ends while the answer's start is still going out: the turn runs on
+        // its own, and the answer started for it is called off, not left for nobody.
+        let slow = Arc::new(SlowStart(Events(Mutex::new(Vec::new()))));
+        let mut s = PatientTurnStopStrategy::new(None, 0.05, true, slow.clone());
+        let heard = Arc::new(Mutex::new(String::new()));
+        let h = heard.clone();
+        s.set_turn_text(Arc::new(move || h.lock().unwrap().clone()));
+        s.trigger_user_turn_stopped().await;
+        sleep(0.02).await;
+        *heard.lock().unwrap() = "what needs my sign off".into();
+        s.process_frame(&said("what needs my sign off")).await; // 60 ms to start: the hold ends in 30
+        sleep(0.1).await;
+        assert_eq!(
+            seen(&slow.0),
+            vec!["rerun", "answer:what needs my sign off", "withdrawn"]
+        );
+        assert_eq!(s.speculation(), None);
+    }
+
+    #[tokio::test]
+    async fn test_a_sure_end_is_never_read_off_the_segment_before() {
+        // "What's waiting for triage?" then a pause, then more: at the second segment's
+        // verdict the turn's words still end a sentence, the first segment's. The short
+        // grace must not close on them.
+        let mut t = banded(0.97);
+        t.s.trigger_stopped_with(0.97).await;
+        t.hears("What's waiting for triage?").await;
+        t.s.process_frame(&vad_start()).await; // the operator goes on inside the short grace
+        t.s.process_frame(&room(0.2)).await;
+        t.s.process_frame(&vad_stop()).await; // sure again, its words not read yet
+        sleep(0.2).await;
+        assert_eq!(
+            seen(&t.events),
+            vec!["answer:What's waiting for triage?", "withdrawn"],
+            "held open: the second segment's words are not here"
+        );
+    }
+
     // --- the shared model ----------------------------------------------------------
 
     struct FakeModel;
@@ -2091,6 +2827,259 @@ mod tests {
         // the pre-roll, both segments, the pause between them, the trailing silence
         let expected = ((1.0 + 1.0 + 0.3 + 0.8 + 0.2) * 16_000.0) as usize;
         assert_eq!(reads[0], expected);
+    }
+
+    #[tokio::test]
+    async fn test_a_reopened_turn_is_read_whole_and_the_next_turn_has_its_pre_roll() {
+        let reads = Arc::new(Mutex::new(Vec::new()));
+        let model: SharedRecognizer = Arc::new(Mutex::new(WholeReader {
+            text: "remind me tomorrow morning to review the notes",
+            reads: reads.clone(),
+        }));
+        let turns = TurnControl::new(CancellationToken::new());
+        let mut agg =
+            UserAggregator::new(0, None, 0.05, false, turns.clone()).with_reader(Some(model));
+        let (out, mut rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(room(2.0), Direction::Down, &out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(room(1.0), Direction::Down, &out).await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        agg.process(
+            Frame::Transcript("Remind me tomorrow morning.".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        sleep(0.1).await; // the close: the turn is handed over
+        assert!(!agg.turn_open());
+        // The operator goes on before any of the answer is heard: the same turn, and
+        // its tape runs on across the pause.
+        agg.process(room(0.4), Direction::Down, &out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(room(0.8), Direction::Down, &out).await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        agg.process(
+            Frame::Transcript("To review the notes.".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        assert_eq!(
+            agg.aggregation(),
+            "remind me tomorrow morning to review the notes"
+        );
+        let pushed = drain(&mut rx).await;
+        assert!(
+            pushed
+                .iter()
+                .any(|f| matches!(f, Frame::ReopenTurn(t) if t == "Remind me tomorrow morning.")),
+            "{pushed:?}"
+        );
+        // the pre-roll, both segments, the pause between them, the trailing silence
+        let whole = ((1.0 + 1.0 + 0.4 + 0.8 + 0.2) * 16_000.0) as usize;
+        assert_eq!(*reads.lock().unwrap(), vec![whole]);
+
+        // The answer is heard; the next turn is its own, and starts with the second
+        // before it (left open, the tape gave the next turn no pre-roll at all).
+        sleep(0.1).await;
+        turns.heard();
+        agg.process(room(2.0), Direction::Down, &out).await;
+        for secs in [0.5, 0.6] {
+            agg.process(vad_start(), Direction::Down, &out).await;
+            agg.process(room(secs), Direction::Down, &out).await;
+            agg.process(vad_stop(), Direction::Down, &out).await;
+            agg.process(Frame::Transcript("And.".into()), Direction::Down, &out)
+                .await;
+            agg.process(room(0.01), Direction::Down, &out).await;
+        }
+        let next = ((1.0 + 0.5 + 0.01 + 0.6 + 0.2) * 16_000.0) as usize;
+        assert_eq!(reads.lock().unwrap().last(), Some(&next));
+    }
+
+    // --- going on as Ghost's voice begins (ADR 0049) ---------------------------------
+
+    /// A turn handed over and closed, Ghost not yet heard: the aggregator, its control,
+    /// the output stage's flag, and what it pushes.
+    async fn handed_over(
+        window: f64,
+    ) -> (
+        UserAggregator,
+        Arc<TurnControl>,
+        Speaking,
+        Out,
+        mpsc_rx::Receiver<crate::frames::Pushed>,
+    ) {
+        let turns = TurnControl::new(CancellationToken::new());
+        let speaking = Speaking::new();
+        let mut agg = UserAggregator::new(2, None, 0.0, false, turns.clone())
+            .with_speaking(speaking.clone())
+            .with_reopen_started(window);
+        let (out, mut rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(said("What's waiting for triage?"), Direction::Down, &out)
+            .await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        let pushed = drain(&mut rx).await;
+        assert!(
+            pushed
+                .iter()
+                .any(|f| matches!(f, Frame::ContextAppend { .. })),
+            "{pushed:?}"
+        );
+        (agg, turns, speaking, out, rx)
+    }
+
+    /// Ghost's first sample is at the speaker, as the output stage says it.
+    fn ghost_begins(turns: &TurnControl, speaking: &Speaking) {
+        speaking.set(true);
+        turns.heard();
+    }
+
+    fn reopened_turn(pushed: &[Frame]) -> Option<String> {
+        pushed.iter().find_map(|f| match f {
+            Frame::ReopenTurn(t) => Some(t.clone()),
+            _ => None,
+        })
+    }
+
+    #[tokio::test]
+    async fn test_a_vad_start_as_ghosts_voice_begins_stops_nothing_without_words() {
+        // Ghost's own first words past the canceller start the VAD too. The VAD alone
+        // never stops Ghost, in the window or out of it; the words that follow decide.
+        for after in [0.05, 0.3] {
+            let (mut agg, turns, speaking, out, mut rx) = handed_over(0.6).await;
+            ghost_begins(&turns, &speaking);
+            sleep(after).await;
+            agg.process(vad_start(), Direction::Down, &out).await;
+            let pushed = drain(&mut rx).await;
+            assert!(reopened_turn(&pushed).is_none(), "{pushed:?}");
+            assert!(
+                !pushed.iter().any(|f| matches!(f, Frame::Interruption)),
+                "{pushed:?}"
+            );
+            assert!(!agg.turn_open());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_words_soon_after_ghost_began_reopen_the_turn_and_later_ones_cut_in() {
+        for (vad_after, reopens) in [(0.45, true), (1.1, false)] {
+            let (mut agg, turns, speaking, out, mut rx) = handed_over(0.6).await;
+            ghost_begins(&turns, &speaking);
+            sleep(vad_after).await; // their speech began 0.2 s before this
+            agg.process(vad_start(), Direction::Down, &out).await;
+            assert!(!agg.turn_open(), "the VAD alone starts nothing over Ghost");
+            agg.process(interim("in the app repo"), Direction::Down, &out)
+                .await;
+            let pushed = drain(&mut rx).await;
+            assert!(agg.turn_open());
+            assert_eq!(
+                reopened_turn(&pushed).is_some(),
+                reopens,
+                "the VAD's start {vad_after}s after Ghost began: {pushed:?}"
+            );
+            assert_eq!(turns.barged_in(), !reopens);
+            if reopens {
+                assert!(pushed.iter().any(|f| matches!(f, Frame::Interruption)));
+                assert_eq!(agg.aggregation(), "What's waiting for triage?");
+                assert!(!turns.acting(), "no call of the half answer runs");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_words_over_an_acknowledgment_go_on_with_the_turn() {
+        // The fast model handed the turn over and Ghost said "Sure." while the operator
+        // was only pausing. Nothing of the answer was heard: their words over the
+        // acknowledgment are the rest of the turn, however long after it began, and
+        // whatever the window is.
+        for window in [0.25, 0.0] {
+            let (mut agg, turns, speaking, out, mut rx) = handed_over(window).await;
+            speaking.set(true); // the acknowledgment plays; the answer is still unheard
+            sleep(0.4).await;
+            agg.process(vad_start(), Direction::Down, &out).await;
+            assert!(!agg.turn_open(), "the VAD alone starts nothing over Ghost");
+            agg.process(interim("in the app repo"), Direction::Down, &out)
+                .await;
+            let pushed = drain(&mut rx).await;
+            assert_eq!(
+                reopened_turn(&pushed).as_deref(),
+                Some("What's waiting for triage?"),
+                "{pushed:?}"
+            );
+            assert!(!turns.barged_in());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_speech_still_going_after_an_acknowledgment_ended_takes_the_turn_back() {
+        // No words yet (the interim reads stop with Ghost's voice), but the speech that
+        // began under "Sure." is still going three quarters of a second after it ended.
+        // An echo of the acknowledgment would have stopped with it.
+        for keeps_talking in [true, false] {
+            let (mut agg, turns, speaking, out, mut rx) = handed_over(0.25).await;
+            speaking.set(true);
+            speaking.audio(); // the acknowledgment's last chunk
+            agg.process(vad_start(), Direction::Down, &out).await;
+            speaking.set(false); // it is over
+            sleep(0.4).await;
+            agg.process(room(0.02), Direction::Down, &out).await;
+            assert!(!agg.turn_open(), "too soon to tell from its echo");
+            if !keeps_talking {
+                agg.process(vad_stop(), Direction::Down, &out).await;
+            }
+            sleep(0.45).await;
+            agg.process(room(0.02), Direction::Down, &out).await;
+            let pushed = drain(&mut rx).await;
+            assert_eq!(
+                reopened_turn(&pushed).is_some(),
+                keeps_talking,
+                "{pushed:?}"
+            );
+            assert_eq!(agg.turn_open(), keeps_talking);
+            assert!(!turns.barged_in());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_with_no_window_a_turn_whose_answer_began_stands() {
+        // GHOST_TURN_REOPEN_STARTED_SECS=0: as before ADR 0049.
+        let (mut agg, turns, speaking, out, mut rx) = handed_over(0.0).await;
+        ghost_begins(&turns, &speaking);
+        sleep(0.1).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(interim("in the app repo"), Direction::Down, &out)
+            .await;
+        let pushed = drain(&mut rx).await;
+        assert!(reopened_turn(&pushed).is_none(), "{pushed:?}");
+        assert!(turns.barged_in());
+    }
+
+    #[test]
+    fn test_a_turn_whose_answer_began_is_reopened_only_for_a_moment_and_never_after_it_acted() {
+        let window = Duration::from_millis(600);
+        let turns = TurnControl::new(CancellationToken::new());
+        turns.answering("half a");
+        turns.heard();
+        let began = Instant::now();
+        assert_eq!(turns.reopen(), None, "heard: the plain reopen is over");
+        assert_eq!(
+            turns.reopen_started(began + Duration::from_secs(2), window),
+            None
+        );
+        assert_eq!(
+            turns.reopen_started(began + Duration::from_millis(300), window),
+            Some("half a".to_string())
+        );
+        assert!(!turns.acting(), "the reopened turn's calls don't run");
+        // An answer that acted stands, voice or no voice.
+        let turns = TurnControl::new(CancellationToken::new());
+        turns.answering("close it");
+        assert!(turns.acting());
+        turns.heard();
+        assert_eq!(turns.reopen_started(Instant::now(), window), None);
     }
 
     #[tokio::test]
@@ -2251,6 +3240,67 @@ mod tests {
             pushed.iter().any(|f| matches!(f, Frame::UserStopped)),
             "{pushed:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_words_that_arrive_after_their_turn_closed_are_answered_with_it() {
+        // The read of the last segment took longer than the grace. The turn closed
+        // without its words; they arrive with no turn open and no VAD stop to come. The
+        // turn is reopened whole and must close again, or Ghost sits silent.
+        struct Done;
+        impl TurnModel for Done {
+            fn predict(&mut self, _audio: &[f32]) -> ghost_infer::Result<TurnVerdict> {
+                Ok(TurnVerdict {
+                    probability: 0.99,
+                    complete: true,
+                })
+            }
+        }
+        let model: Arc<Mutex<dyn TurnModel>> = Arc::new(Mutex::new(Done));
+        let analyzer = SmartTurnAnalyzer::new(model, SmartTurnParams::default());
+        let mut agg = UserAggregator::new(
+            2,
+            Some(analyzer),
+            0.05,
+            false,
+            TurnControl::new(CancellationToken::new()),
+        );
+        let (out, mut rx) = Out::capture();
+        agg.started(&out).await;
+        for text in ["What's going on with the app", ""] {
+            agg.process(vad_start(), Direction::Down, &out).await;
+            agg.process(room(0.3), Direction::Down, &out).await;
+            agg.process(vad_stop(), Direction::Down, &out).await;
+            if !text.is_empty() {
+                agg.process(said(text), Direction::Down, &out).await;
+            }
+        }
+        sleep(0.1).await; // the grace runs out before the second segment is read
+        assert!(!agg.turn_open());
+        agg.process(
+            said("and what have people said about it?"),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        sleep(0.15).await;
+        let pushed = drain(&mut rx).await;
+        let turns: Vec<String> = pushed
+            .iter()
+            .filter_map(|f| match f {
+                Frame::ContextAppend { messages, .. } => match messages.first() {
+                    Some(ghost_llm::Message::User(t)) => Some(t.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            turns.last().map(String::as_str),
+            Some("What's going on with the app and what have people said about it?"),
+            "{pushed:?}"
+        );
+        assert!(!agg.turn_open(), "closed again");
     }
 
     #[tokio::test]

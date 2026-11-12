@@ -109,8 +109,10 @@ pub enum Frame {
     RunLlm,
     /// Start answering `text` at Smart Turn's verdict, before the grace confirms the turn.
     Speculate(String),
-    /// The grace ended with the same words: the held answer is the answer.
-    SpeculationConfirmed,
+    /// The grace ended with the same words: the held answer is the answer. The words
+    /// travel with it, so a model stage that holds no answer to them (it was dropped, or
+    /// its start is still on the way) answers them anyway rather than nothing.
+    SpeculationConfirmed(String),
     /// The operator went on, or the words changed: the held answer is thrown away.
     SpeculationCancelled,
     /// The operator went on before any of the answer to this turn was heard or done: the
@@ -139,6 +141,12 @@ pub enum Frame {
     LlmEnd,
     /// The reply hit the output cap (`ghost_llm`); the turn is flagged `cut_off`.
     ReplyCut,
+    /// The fast model asked for the main one (ADR 0050): the calls it started, by name,
+    /// none of them run, and how long it took to ask. Nothing it wrote is spoken.
+    HandOver {
+        names: Vec<String>,
+        secs: f64,
+    },
     Metrics(Metric),
 
     // --- the thinking sound
@@ -218,7 +226,7 @@ impl Frame {
             Frame::SetTools(_) => "SetTools",
             Frame::RunLlm => "RunLlm",
             Frame::Speculate(_) => "Speculate",
-            Frame::SpeculationConfirmed => "SpeculationConfirmed",
+            Frame::SpeculationConfirmed(_) => "SpeculationConfirmed",
             Frame::SpeculationCancelled => "SpeculationCancelled",
             Frame::ReopenTurn(_) => "ReopenTurn",
             Frame::EagerCancel => "EagerCancel",
@@ -231,6 +239,7 @@ impl Frame {
             Frame::FunctionCallResult { .. } => "FunctionCallResult",
             Frame::LlmEnd => "LlmEnd",
             Frame::ReplyCut => "ReplyCut",
+            Frame::HandOver { .. } => "HandOver",
             Frame::Metrics(_) => "Metrics",
             Frame::ThinkingStart => "ThinkingStart",
             Frame::ThinkingStop => "ThinkingStop",
