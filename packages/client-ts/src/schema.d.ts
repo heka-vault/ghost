@@ -3166,6 +3166,8 @@ export interface components {
             by_agent: components["schemas"]["ReachTotalView"][];
             by_app: components["schemas"]["ReachTotalView"][];
             by_session: components["schemas"]["ReachTotalView"][];
+            /** @description The latest calls in the stretch, newest first, at most `REACH_RECENT`. */
+            recent: components["schemas"]["ReachCall"][];
             /** Format: date-time */
             since: string;
             total: components["schemas"]["ReachTotalView"];

@@ -83,6 +83,12 @@ async fn reach(
         by_app: s.by_app.into_iter().map(Into::into).collect(),
         by_agent: s.by_agent.into_iter().map(Into::into).collect(),
         by_session: s.by_session.into_iter().map(Into::into).collect(),
+        recent: rows
+            .iter()
+            .rev()
+            .take(crate::models::REACH_RECENT)
+            .map(Into::into)
+            .collect(),
     }))
 }
 

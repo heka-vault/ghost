@@ -29,11 +29,15 @@ fn q(t: chrono::DateTime<Utc>) -> String {
 #[tokio::test]
 async fn reach_totals_a_day_by_app_agent_and_run() {
     let w = World::new();
-    for r in [
+    for (i, mut r) in [
         row("s1", "ghost", "github", true, 400, 3_000_000),
         row("s1", "ghost", "linear", true, 12, 700_000),
         row("run-r1", "ledger", "github", false, 1, 300),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        r.at += Duration::seconds(i as i64);
         w.store.add_reach(&r).unwrap();
     }
     // Yesterday's is not today's.
@@ -54,6 +58,10 @@ async fn reach_totals_a_day_by_app_agent_and_run() {
         serde_json::json!(["github", "linear"])
     );
     assert_eq!(got["by_app"][0]["key"], "github");
+    // The latest calls themselves, newest first: counts and sizes, for the screen's margin.
+    let recent = got["recent"].as_array().unwrap();
+    assert_eq!(recent.len(), 3);
+    assert_eq!(recent[0]["bytes"], 300);
     let run = got["by_session"]
         .as_array()
         .unwrap()

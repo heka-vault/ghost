@@ -33,7 +33,7 @@ schedule's check (no model) are not kept either, so the number is what agents re
 
 **`GET /reach?since&until&sessions`**: the calls in a stretch of time (at most 31 days), totalled
 (calls, reads, changes, failed, items, bytes, time, apps), by app, by agent and by session or
-run. Today says "read 412 items across 4 apps, 3.7 MB" from it, and the timeline shows a run's
+run, with the latest 24 calls themselves (each a `reach` row, so still no contents). Today says "read 412 items across 4 apps, 3.7 MB" from it, and the timeline shows a run's
 reach.
 
 **`since` and `until` on `GET /audit` and `GET /runs`** (RFC 3339): a day of the timeline is
