@@ -641,4 +641,22 @@ mod tests {
         assert_eq!(tail_records(&path, 1 << 20).len(), 200);
         assert!(tail_records(&dir.path().join("none"), 1024).is_empty());
     }
+
+    #[test]
+    fn reading_the_tail_costs_the_same_however_long_the_file() {
+        // A session opening reads it (`Daemon::first_word_secs`): it must stay a few
+        // milliseconds when the file is at its 5 MB rotation size.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("latency.jsonl");
+        let rec = serde_json::json!({"kind": "voice", "llm": {"calls": [{"ttfb": 1.2, "pad": "x".repeat(1200)}]}})
+            .to_string();
+        let n = 5 * 1024 * 1024 / rec.len();
+        std::fs::write(&path, vec![rec; n].join("\n") + "\n").unwrap();
+        let began = std::time::Instant::now();
+        let tail = tail_records(&path, 64 * 1024);
+        let took = began.elapsed();
+        println!("tail of a 5 MB file: {} records in {took:?}", tail.len());
+        assert!(tail.len() >= 40, "{}", tail.len());
+        assert!(took < std::time::Duration::from_millis(100), "{took:?}");
+    }
 }
