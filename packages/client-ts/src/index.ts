@@ -101,6 +101,10 @@ export type RuleAdd = Schemas["RuleAdd"];
 export type WatchingView = Schemas["WatchingView"];
 export type WaitingItemView = Schemas["WaitingItemView"];
 export type WaitingView = Schemas["WaitingView"];
+/** Questions for the operator (ADR 0051): who asked, the choices, the answer. */
+export type QuestionView = Schemas["QuestionView"];
+export type QuestionsView = Schemas["QuestionsView"];
+export type QuestionResult = Schemas["QuestionResult"];
 export type WatchInfo = Schemas["WatchInfo"];
 export type HookInfo = Schemas["HookInfo"];
 export type RoutesView = Schemas["RoutesView"];
@@ -148,6 +152,8 @@ export type GhostEvent =
   | Schemas["LogEvent"]
   | Schemas["ConversationEvent"]
   | Schemas["WaitingEvent"]
+  /** A question for the operator asked or settled (ADR 0051). */
+  | Schemas["QuestionEvent"]
   | Schemas["AppsEvent"]
   /** Ghost's own voice at the speaker, 0..1, ~20/s while it speaks, then one 0. */
   | Schemas["VoiceEvent"]
@@ -233,6 +239,17 @@ export class GhostClient {
   }
   snooze(key: string, minutes: number) {
     return unwrap(this.api.POST("/waiting/snooze", { body: { key, minutes } }));
+  }
+  /** The questions for the operator (ADR 0051): open ones, then the last day's. */
+  questions() {
+    return unwrap(this.api.GET("/questions"));
+  }
+  /** The operator's answer, in their words or as one of the choices. */
+  answerQuestion(key: string, text: string) {
+    return unwrap(this.api.POST("/questions/answer", { body: { key, text } }));
+  }
+  declineQuestion(key: string) {
+    return unwrap(this.api.POST("/questions/decline", { body: { key } }));
   }
   audit(query: paths["/audit"]["get"]["parameters"]["query"] = {}) {
     return unwrap(this.api.GET("/audit", { params: { query } }));
