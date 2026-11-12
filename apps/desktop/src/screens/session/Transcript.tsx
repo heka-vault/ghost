@@ -22,12 +22,13 @@
 import { type Call, joinSpoken, secondsBetween, useGhost } from "@ghost/ui";
 import type { CallPreview, QuestionView, Turn } from "@ghost/client-ts";
 import { Check, ChevronRight, Clock, Copy, Hand, Keyboard, Mic, Pause, PhoneOff, TriangleAlert, Volume2, Wrench, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { Button, formatDateTime, formatTime, IconButton, LineGlyph, cx } from "../../ui";
 import type { Saying } from "./live";
 import { type Announced, cutReplies, gapText, lengthText } from "./timeline";
 import type { Decision, Item, LineInfo } from "./transcript";
+import { shapeOf } from "./result";
 
 export interface TranscriptProps {
   items: Item[];
@@ -383,18 +384,74 @@ function CallRow({ call: c, change }: { call: Call; change: Announced | null }) 
           {got?.state === "loading" && <p className="thread-result__note">Getting what came back…</p>}
           {got?.state === "gone" && <p className="thread-result__note">{change ? "What the app answered isn’t kept any more. The audit log has the change." : "What came back isn’t kept any more. Ghost keeps the last 64 calls’ results while it runs."}</p>}
           {got?.state === "failed" && <p className="thread-result__note">Couldn’t get what came back. Open it again to retry.</p>}
-          {got?.state === "ok" && (
-            <>
-              <p className="thread-result__note">{got.preview.read ? "What the app returned, as Ghost read it" : "What the app answered"}</p>
-              <pre className="thread-result__text t-mono" data-user-content tabIndex={0}>
-                {got.preview.preview}
-              </pre>
-              {got.preview.dropped > 0 && <p className="thread-result__note">{got.preview.dropped.toLocaleString()} more characters not shown</p>}
-            </>
-          )}
+          {got?.state === "ok" && <CallResult preview={got.preview} id={id} />}
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * What came back, in plain words where its shape is recognisable (a list of items, one item's
+ * fields, a message), the raw text one click further; the same bounded, redacted preview.
+ */
+function CallResult({ preview: p, id }: { preview: CallPreview; id: string }) {
+  const shape = useMemo(() => shapeOf(p.preview), [p.preview]);
+  const [raw, setRaw] = useState(shape.kind === "raw");
+  const note = p.read ? "What the app returned, as Ghost read it" : "What the app answered";
+  return (
+    <>
+      <p className="thread-result__note">{note}</p>
+      {!raw && shape.kind === "list" && (
+        <div className="thread-shape" data-user-content>
+          <p className="thread-shape__count">
+            {shape.count === 0 ? "Nothing: an empty list" : `${shape.count} ${shape.count === 1 ? "item" : "items"}${shape.total != null ? ` of ${shape.total.toLocaleString()}` : ""}`}
+          </p>
+          {shape.items.length > 0 && (
+            <ul className="thread-shape__list">
+              {shape.items.map((it, i) => (
+                <li key={i} className="thread-shape__item">
+                  <span className="thread-shape__title">{it.title}</span>
+                  {it.meta.length > 0 && <span className="thread-shape__meta">{it.meta.join(" · ")}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {shape.count > shape.items.length && <p className="thread-result__note">and {shape.count - shape.items.length} more</p>}
+        </div>
+      )}
+      {!raw && shape.kind === "fields" && (
+        <div className="thread-shape" data-user-content>
+          {shape.title && <p className="thread-shape__title">{shape.title}</p>}
+          {shape.fields.length > 0 && (
+            <dl className="thread-shape__fields">
+              {shape.fields.map(([k, v]) => (
+                <div key={k} className="thread-shape__field">
+                  <dt>{k}</dt>
+                  <dd>{v}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      )}
+      {!raw && shape.kind === "text" && (
+        <p className="thread-shape__text" data-user-content>
+          {shape.text}
+        </p>
+      )}
+      <pre className="thread-result__text t-mono" data-user-content tabIndex={0} id={`${id}-raw`} hidden={!raw}>
+        {p.preview}
+      </pre>
+      <p className="thread-result__note thread-result__foot">
+        {shape.kind !== "raw" && (
+          <button type="button" className="thread-result__toggle" aria-expanded={raw} aria-controls={`${id}-raw`} onClick={() => setRaw((r) => !r)}>
+            {raw ? "Show it in words" : "Show it as it came back"}
+          </button>
+        )}
+        {p.dropped > 0 && <span>{p.dropped.toLocaleString()} more characters not shown</span>}
+      </p>
+    </>
   );
 }
 

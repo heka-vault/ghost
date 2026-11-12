@@ -19,7 +19,7 @@ export function Signal() {
   const working = today.working.filter((r) => r.status === "running").length;
   const now = useNow(working > 0 || today.calls.length > 0 ? 5_000 : 0);
   const rate = perMinute(today.calls, now);
-  const wire = wireOf(today.calls.length ? today.calls : [], 6);
+  const wire = wireOf(today.calls, 7, today.reachDay?.recent ?? []);
   const appsTitle = t.apps.length ? t.apps.join(", ") : "none yet";
 
   return (
@@ -78,7 +78,8 @@ function Figure({ label, value, unit, hint, href, live, trouble, troubleText }: 
         {live && <span className="today-figure__live" aria-hidden />}
         {label}
       </span>
-      <span className={cx("today-figure__hint", trouble && "is-trouble")}>{troubleText ? `${troubleText} · ${hint}` : hint}</span>
+      <span className={cx("today-figure__hint", trouble && !troubleText && "is-trouble")}>{hint}</span>
+      {troubleText && <span className="today-figure__hint is-trouble">{troubleText}</span>}
     </>
   );
   return (

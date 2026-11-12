@@ -65,7 +65,7 @@ function grouped(rows: readonly ReachCall[], by: (r: ReachCall) => string, withA
 /** What `GET /reach` answers over some rows. */
 export function summarize(rows: readonly ReachCall[], since: string, until: string): ReachView {
   const bySession = grouped(rows, (r) => r.session_id, true).sort((a, b) => (b.last ?? "").localeCompare(a.last ?? ""));
-  return { since, until, total: totalOf("all", rows), by_app: grouped(rows, (r) => r.app, false), by_agent: grouped(rows, (r) => r.agent, false), by_session: bySession };
+  return { since, until, total: totalOf("all", rows), by_app: grouped(rows, (r) => r.app, false), by_agent: grouped(rows, (r) => r.agent, false), by_session: bySession, recent: [...rows].reverse().slice(0, 24) };
 }
 
 export class MockReach {

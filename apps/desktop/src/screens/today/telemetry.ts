@@ -58,9 +58,14 @@ export function tallyFor(base: ReachView | null, live: readonly ReachCall[], ses
   return t;
 }
 
-/** The latest calls, newest first. */
-export function wireOf(live: readonly ReachCall[], n = 6): ReachCall[] {
-  return [...live].sort((a, b) => b.at.localeCompare(a.at)).slice(0, n);
+/** The latest calls, newest first: the day's as read, and the live ones, each once. */
+export function wireOf(live: readonly ReachCall[], n = 6, recent: readonly ReachCall[] = []): ReachCall[] {
+  const seen = new Set<string>();
+  const key = (c: ReachCall) => `${c.at}|${c.session_id}|${c.app}|${c.tool}`;
+  return [...recent, ...live]
+    .filter((c) => (seen.has(key(c)) ? false : (seen.add(key(c)), true)))
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, n);
 }
 
 /** Calls in the last minute: how busy Ghost is right now. */

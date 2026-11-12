@@ -11,6 +11,7 @@ const base: ReachView = {
   total: total(),
   by_app: [],
   by_agent: [],
+  recent: [],
   by_session: [{ ...total({ calls: 2, items: 40, bytes: 1000, apps: ["github"] }), key: "run-r1", agent: "ledger" }],
 };
 
@@ -48,6 +49,8 @@ describe("telemetry", () => {
     expect(reachSentence(tallyOf(null, []))).toBe("Nothing read yet");
     const a = call("2026-11-12T16:00:00.000Z"), b = call("2026-11-12T16:00:30.000Z");
     expect(wireOf([a, b])[0]).toBe(b);
+    // The day's latest and the live ones, each call once.
+    expect(wireOf([b], 6, [a, b]).length).toBe(2);
     expect(perMinute([a, b], Date.parse("2026-11-12T16:00:45.000Z"))).toBe(2);
     expect(perMinute([a, b], Date.parse("2026-11-12T16:01:10.000Z"))).toBe(1);
   });

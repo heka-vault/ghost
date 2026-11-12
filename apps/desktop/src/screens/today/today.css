@@ -242,7 +242,10 @@ a.today-figure:hover .today-figure__value { color: var(--accent-text); }
   .tl-row__meta { display: none; }
   .talk__state { display: none; }
   .now-card__meta { margin-left: 0; }
-  .today-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-figures { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4) var(--space-4); }
+  .today-figure__value { font-size: var(--text-2xl); }
+  .today-figure__unit { font-size: var(--text-sm); }
+  .today-wire__line:nth-child(n + 4) { display: none; }
   .today-wire__line { grid-template-columns: 7ch minmax(0, 1fr) 4ch 7ch; }
   .today-wire__who, .today-wire__ms { display: none; }
 }
