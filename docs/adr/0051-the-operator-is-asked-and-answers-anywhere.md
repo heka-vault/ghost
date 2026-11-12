@@ -107,7 +107,9 @@ the Android app can hold in a foreground service, does this directly.
 **The phone route is delivered on the phone's word.** `PhoneRoute` sends an `alert` on the
 live stream and waits 15 seconds for `POST /seen`, which the phone sends once it has shown
 the notification: delivered. No stream, or no `seen`: unavailable, and the item goes to
-the next route at once. A read of `/waiting` is no longer a delivery.
+the next route at once. A read of `/waiting` is no longer a delivery. While the phone's own
+call is running, the route does not alert and hands on, as desk voice does for a desk
+session; the call route does not ring while any session runs.
 
 **The desk rings the phone** (issue #22). `CallRoute` (off unless `call` is in
 `[routes].enabled`, under the operator's call caps) sends a `ring` for the first item at

@@ -531,14 +531,27 @@ fn open_desktop() {
 pub struct PhoneRoute {
     feed: Arc<PhoneFeed>,
     wait: Duration,
+    on_the_phone: std::sync::OnceLock<Busy>,
 }
+
+/// Whether a route has to step aside now: the phone's own session is running, or a
+/// session is.
+pub type Busy = Arc<dyn Fn() -> bool + Send + Sync>;
 
 impl PhoneRoute {
     pub fn new(feed: Arc<PhoneFeed>) -> Self {
         Self {
             feed,
             wait: SEEN_WAIT,
+            on_the_phone: std::sync::OnceLock::new(),
         }
+    }
+
+    /// The phone's own session is running (or about to): the operator is on the phone
+    /// with Ghost, so no notification is put over the call. The item goes to the next
+    /// route, as desk voice hands on while a desk session runs. Set once, by the daemon.
+    pub fn set_on_the_phone(&self, busy: Busy) {
+        let _ = self.on_the_phone.set(busy);
     }
 
     /// How long it waits for the phone's `seen` (a test shortens it).
@@ -555,7 +568,7 @@ impl Route for PhoneRoute {
     }
 
     async fn deliver(&self, items: &[Item], _policy: &RoutePolicy) -> anyhow::Result<Delivery> {
-        if self.feed.streams() == 0 {
+        if self.feed.streams() == 0 || self.on_the_phone.get().is_some_and(|busy| busy()) {
             return Ok(Delivery::Unavailable);
         }
         let shown: Vec<(String, String)> = items
@@ -588,6 +601,7 @@ pub struct CallRoute {
     feed: Arc<PhoneFeed>,
     items: Items,
     wait: Duration,
+    in_session: Option<Busy>,
 }
 
 impl CallRoute {
@@ -596,7 +610,16 @@ impl CallRoute {
             feed,
             items,
             wait: RING_WAIT,
+            in_session: None,
         }
+    }
+
+    /// A session is running (or a phone session is about to): the phone is never rung
+    /// over the operator's own call, and an answered ring could not open one beside a
+    /// desk session (`/offer` is busy), so the item goes to the next route.
+    pub fn with_in_session(mut self, busy: Busy) -> Self {
+        self.in_session = Some(busy);
+        self
     }
 
     pub fn with_wait(mut self, wait: Duration) -> Self {
@@ -620,7 +643,7 @@ impl Route for CallRoute {
         let Some(item) = items.first() else {
             return Ok(Delivery::Unavailable);
         };
-        if self.feed.streams() == 0 {
+        if self.feed.streams() == 0 || self.in_session.as_ref().is_some_and(|busy| busy()) {
             return Ok(Delivery::Unavailable);
         }
         let ring = Ring {

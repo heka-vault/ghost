@@ -730,6 +730,18 @@ impl Daemon {
             && !is_dictating(&self.cfg().dictation_flag)
     }
 
+    /// The phone's own session is running, or is about to start: the phone route does
+    /// not alert over it.
+    pub(crate) fn on_the_phone(&self) -> bool {
+        *lock(&self.origin) == Some(SessionOrigin::Phone) || !self.phone_q_empty()
+    }
+
+    /// Any session is running, or a phone session is about to: the call route does not
+    /// ring over it.
+    pub(crate) fn in_session(&self) -> bool {
+        self.session().is_some() || self.on_the_phone()
+    }
+
     /// The operator is at the desk: a desk session ran lately, or the desktop app is
     /// connected to the event stream.
     pub(crate) fn at_desk(&self) -> bool {
@@ -1518,12 +1530,18 @@ impl Daemon {
             ),
         );
         routes.add_route(desktop_route.clone());
+        d.phone_route.set_on_the_phone({
+            let weak = Arc::downgrade(d);
+            Arc::new(move || weak.upgrade().is_some_and(|d| d.on_the_phone()))
+        });
         routes.add_route(d.phone_route.clone());
         // ADR 0051: the desk rings the phone, and ntfy for when the phone is off the tunnel.
-        routes.add_route(Arc::new(CallRoute::new(
-            d.phone_feed.clone(),
-            Items::new(store.clone()),
-        )));
+        routes.add_route(Arc::new(
+            CallRoute::new(d.phone_feed.clone(), Items::new(store.clone())).with_in_session({
+                let weak = Arc::downgrade(d);
+                Arc::new(move || weak.upgrade().is_some_and(|d| d.in_session()))
+            }),
+        ));
         routes.add_route(Arc::new(NtfyRoute::new({
             let weak = Arc::downgrade(d);
             Arc::new(move |name: &str| weak.upgrade().and_then(|d| d.env().get(name).cloned()))

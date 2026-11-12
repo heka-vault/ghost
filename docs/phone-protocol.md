@@ -328,6 +328,9 @@ The phone route delivering (ADR 0031): show a notification for these items now, 
 `POST /seen {alert_id}`. The desk waits 15 seconds for it; without it, the items go to the next route.
 Send `seen` only once the notification is actually shown. An alert replayed after a reconnect may be
 shown and `seen` like a live one; `seen` for one the desk stopped waiting for answers `{ok: false}`.
+While the phone's own call with Ghost is running (or about to start), the desk sends no `alert`: the
+phone route hands the items to the next route at once, as desk voice does during a desk session. The
+phone does not need to hold back notifications during a call itself; the desk never sends them.
 
 ```json
 {"type": "ring", "ring_id": "5d2f8e0c41aa", "key": "question:0b00bdd56307", "agent": "ledger",
@@ -362,7 +365,9 @@ phone may update its screen from either.
 ## The ring
 
 ADR 0051, issue #22. The desk rings the phone for an item at `call` urgency, when the operator enabled
-the `call` route, within the operator's call caps.
+the `call` route, within the operator's call caps. It never rings while a session is running, the
+phone's own call or one at the desk (an answered ring could not open a call beside it): the item goes
+to the next route, and rings again on a later tick once the session is over if it still needs to.
 
 ```
 desk                                                  phone
