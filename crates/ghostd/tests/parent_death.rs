@@ -21,6 +21,19 @@ fn isolated(cmd: &mut Command, dir: &Path, socket: &Path) {
         // No Parakeet: the full-precision model takes ten seconds to load, not needed here.
         .env("GHOST_STT_DIR", dir.join("no-stt"))
         .env("GHOST_CONFIG_DIR", dir.join("config"))
+        // Each of these has a default of its own under the operator's home, whatever the
+        // two folders above say: the database most of all, which the daemon opens and
+        // migrates at start.
+        .env("GHOST_DB_PATH", dir.join("ghost.db"))
+        .env("GHOST_POLICY_PATH", dir.join("config/policy.toml"))
+        .env("GHOST_SETTINGS_PATH", dir.join("config/settings.env"))
+        .env("GHOST_ENV_PATH", dir.join("config/env"))
+        .env("GHOST_VAULT_ENV_PATH", dir.join("no-heka"))
+        .env("GHOST_CATALOG_PATH", dir.join("cache/catalog.json"))
+        .env("GHOST_SKILLS_DIR", dir.join("config/skills"))
+        .env("GHOST_HOME_SKILLS_DIR", dir.join("home-skills"))
+        // No listener for outside tools on the operator's own port (ADR 0048).
+        .env("GHOST_MCP_LISTEN", "")
         .env("DBUS_SESSION_BUS_ADDRESS", NO_BUS);
 }
 
