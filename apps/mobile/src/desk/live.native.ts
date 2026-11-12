@@ -316,6 +316,11 @@ export class LiveDesk implements Desk {
     await this.act("snooze", key, String(minutes), "/waiting/snooze", { key, minutes });
   }
 
+  async setDeskListening(listening: boolean) {
+    await this.request("POST", "/listening", { listening });
+    await this.tick(); // the status says what holds now
+  }
+
   async answer(key: string, text: string) {
     await this.act("answer", key, text, "/questions/answer", { id: actionId(), key, text });
   }

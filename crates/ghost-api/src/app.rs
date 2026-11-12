@@ -33,15 +33,18 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::deps::{Deps, SharedDeps, UI_SESSION};
-use crate::error::{ApiError, ApiResult, Body, HTTPValidationError, OptionalBody, check_len};
+use crate::error::{
+    ApiError, ApiResult, Body, HTTPValidationError, OptionalBody, check_len, check_range,
+};
 use crate::models::{
     API_VERSION, Ack, AuditEntry, AuditEventView, AuditPage, Carry, DevicesView, HookInfo, ItemKey,
-    Level, Mode, ModelsView, OperationInfo, OutcomeStatus, OutcomeView, OutputInfo,
-    PendingProposal, PermissionsView, PhonePairing, PhoneView, PolicyResult, PolicyUpdate,
-    PolicyView, ReadToolInfo, Response as WatchResponse, RouteName, RoutesView, RuleAdd, RulesView,
-    SayRequest, SecretState, SettingsResult, SettingsUpdate, SettingsView, SkillAdd, SkillBody,
-    SkillInfo, SnoozeRequest, SourceInfo, Status, Turn, Urgency, Verify, WaitingItemView,
-    WaitingState, WaitingView, WakeRequest, WatchInfo, WatchingView,
+    Level, ListeningRequest, ListeningView, Mode, ModelsView, NotListening, OperationInfo,
+    OutcomeStatus, OutcomeView, OutputInfo, PendingProposal, PermissionsView, PhonePairing,
+    PhoneView, PolicyResult, PolicyUpdate, PolicyView, ReadToolInfo, Response as WatchResponse,
+    RouteName, RoutesView, RuleAdd, RulesView, SayRequest, SecretState, SettingsResult,
+    SettingsUpdate, SettingsView, SkillAdd, SkillBody, SkillInfo, SnoozeRequest, SourceInfo,
+    Status, Turn, Urgency, Verify, WaitingItemView, WaitingState, WaitingView, WakeRequest,
+    WatchInfo, WatchingView,
 };
 use crate::passwords::{
     SECRET_KEYS_SET, password_check, referenced, revive_apps_using, save_passwords, secret_states,
@@ -195,6 +198,7 @@ pub fn status_snapshot(deps: &Deps) -> Status {
         session_origin: st.session_origin(),
         ending: st.ending(),
         waiting: st.waiting(),
+        not_listening: st.not_listening(),
     }
 }
 
@@ -406,7 +410,7 @@ async fn wake(
     Ok(Json(if ok {
         Ack::ok()
     } else {
-        Ack::no("not passive, or no such line")
+        Ack::no("not passive, not listening, or no such line")
     }))
 }
 
@@ -415,6 +419,54 @@ async fn wake(
 async fn sleep(State(deps): State<SharedDeps>) -> Json<Ack> {
     let ok = deps.control.sleep().await;
     Json(if ok { Ack::ok() } else { Ack::no("no session") })
+}
+
+fn listening_view(not_listening: Option<NotListening>) -> ListeningView {
+    ListeningView {
+        listening: not_listening.is_none(),
+        until: not_listening.and_then(|n| n.until),
+    }
+}
+
+#[utoipa::path(get, path = "/listening", operation_id = "get_listening_listening_get", tag = "session",
+    summary = "Whether Ghost is listening (ADR 0055)",
+    responses((status = 200, description = "Successful Response", body = ListeningView)))]
+async fn get_listening(State(deps): State<SharedDeps>) -> Json<ListeningView> {
+    Json(listening_view(deps.state.not_listening()))
+}
+
+/// Close or open Ghost's microphone (ADR 0055). Closing it ends a session at the desk;
+/// the phone's own call goes on. The operator's control only: no tool reaches it.
+#[utoipa::path(put, path = "/listening", operation_id = "put_listening_listening_put", tag = "session",
+    summary = "Turn listening on or off", request_body = ListeningRequest,
+    responses((status = 200, description = "Successful Response", body = ListeningView),
+              (status = 422, description = "Validation Error", body = HTTPValidationError),
+              (status = 503, description = "Ghost could not keep the switch")))]
+async fn put_listening(
+    State(deps): State<SharedDeps>,
+    Body(req): Body<ListeningRequest>,
+) -> ApiResult<Json<ListeningView>> {
+    if let Some(m) = req.minutes {
+        if req.listening {
+            return Err(ApiError::invalid(
+                &["body", "minutes"],
+                "minutes goes with listening false",
+                "value_error",
+            ));
+        }
+        check_range(
+            &["body", "minutes"],
+            m,
+            1,
+            ghost_core::listening::MOST_MINUTES,
+        )?;
+    }
+    let view = deps
+        .control
+        .set_listening(req.listening, req.minutes)
+        .await
+        .map_err(ApiError::unavailable)?;
+    Ok(Json(listening_view(view)))
 }
 
 #[utoipa::path(post, path = "/session/say", operation_id = "say_session_say_post", tag = "session",
@@ -1510,6 +1562,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .routes(routes!(get_status))
         .routes(routes!(wake))
         .routes(routes!(sleep))
+        .routes(routes!(get_listening, put_listening))
         .routes(routes!(say))
         .routes(routes!(turns))
         .routes(routes!(pending))

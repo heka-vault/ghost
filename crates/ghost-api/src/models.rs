@@ -56,7 +56,8 @@ fn subtle_eq(a: &[u8], b: &[u8]) -> bool {
 pub enum Phase {
     /// Models loading; the socket is up so the UI can show progress.
     Starting,
-    /// Waiting for the wake phrase; idle audio stays on the machine.
+    /// Not in a session: waiting for the wake phrase (idle audio stays on the machine), or,
+    /// with `Status.not_listening` set, with the microphone closed (ADR 0055).
     Passive,
     /// In a session, the operator's turn.
     Listening,
@@ -132,6 +133,34 @@ pub enum SessionOrigin {
     Phone,
 }
 
+/// Ghost's microphone is closed (ADR 0055): no capture stream is open, nothing is heard,
+/// not even its name. Typed turns, the phone's own calls, schedules and watches go on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NotListening {
+    /// When listening comes back by itself (RFC 3339); null: when the operator turns it on.
+    #[schema(required)]
+    pub until: Option<String>,
+}
+
+/// `PUT /listening`: turn Ghost's microphone on or off (ADR 0055).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ListeningRequest {
+    /// `false` closes the microphone; `true` opens it again.
+    pub listening: bool,
+    /// With `listening: false`, for how long (1 to 1440); unset: until turned back on.
+    #[serde(default)]
+    pub minutes: Option<u32>,
+}
+
+/// What `GET` and `PUT /listening` answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ListeningView {
+    pub listening: bool,
+    /// When listening comes back by itself (RFC 3339), while not listening.
+    #[schema(required)]
+    pub until: Option<String>,
+}
+
 fn api_version() -> String {
     API_VERSION.to_string()
 }
@@ -173,6 +202,11 @@ pub struct Status {
     #[serde(default)]
     #[schema(required)]
     pub waiting: u64,
+    /// Set while Ghost is not listening (ADR 0055): the microphone is closed. Orthogonal to
+    /// `phase`: a typed turn or the phone's call can run meanwhile.
+    #[serde(default)]
+    #[schema(required)]
+    pub not_listening: Option<NotListening>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

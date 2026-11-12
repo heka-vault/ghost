@@ -22,6 +22,7 @@ pub mod ghost_app;
 pub mod hooks;
 pub mod jev;
 pub mod levels;
+pub mod listening;
 pub mod mock_github;
 pub mod models;
 pub mod outputs;

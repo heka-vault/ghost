@@ -45,6 +45,13 @@ html[data-capture="full"] .sidebar { position: sticky; top: 0; }
 .sidebar__status-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .sidebar__status-title { font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar__status-sub { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Not listening (ADR 0055): the card, and the switch by the brand (under the card in the rail). Off reads as a hardware mic-off
+   light: the struck mic in --danger, on the danger tint, so it is seen from across the desk. */
+.sidebar__rail-switch { display: flex; justify-content: center; margin: calc(-1 * var(--space-2)) 0 var(--space-3); }
+.sidebar__status.is-not-listening { border-color: var(--danger-border); background: var(--danger-soft); }
+.sidebar__status.is-not-listening:hover { border-color: var(--danger); }
+.sidebar__mic-off { color: var(--danger); }
+.g-icon-btn.listening-switch.is-off { color: var(--danger); background: var(--danger-soft); }
 
 /* The list scrolls when it must (busy, 1280x800). Edges fade only on the side with more,
    so nothing is cut mid-glyph against the footer and the resting list is never faded. */

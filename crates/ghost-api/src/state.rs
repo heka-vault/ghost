@@ -12,8 +12,8 @@ use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
 
 use crate::models::{
-    Build, Event, OutcomeVia, OutcomeView, PendingProposal, Phase, SessionOrigin, Status, Turn,
-    TurnRole, TurnVia,
+    Build, Event, NotListening, OutcomeVia, OutcomeView, PendingProposal, Phase, SessionOrigin,
+    Status, Turn, TurnRole, TurnVia,
 };
 
 /// How many events a slow client may fall behind before its oldest are dropped.
@@ -93,6 +93,8 @@ struct Fields {
     session_origin: Option<SessionOrigin>,
     /// Going to sleep; the goodbye may still be playing.
     ending: bool,
+    /// The microphone is closed (ADR 0055).
+    not_listening: Option<NotListening>,
     /// Items on the waiting list still to be heard (ADR 0029).
     waiting: u64,
     turns: VecDeque<Turn>,
@@ -141,6 +143,7 @@ impl DaemonState {
                 conversation: None,
                 session_origin: None,
                 ending: false,
+                not_listening: None,
                 waiting: 0,
                 turns: VecDeque::with_capacity(TURNS_KEPT),
             }),
@@ -202,6 +205,10 @@ impl DaemonState {
 
     pub fn ending(&self) -> bool {
         self.lock().ending
+    }
+
+    pub fn not_listening(&self) -> Option<NotListening> {
+        self.lock().not_listening.clone()
     }
 
     pub fn waiting(&self) -> u64 {
@@ -336,6 +343,18 @@ impl DaemonState {
         self.publish_status();
     }
 
+    /// The microphone closed or opened (ADR 0055); the apps and the phone follow the status.
+    pub fn set_not_listening(&self, not_listening: Option<NotListening>) {
+        {
+            let mut f = self.lock();
+            if f.not_listening == not_listening {
+                return;
+            }
+            f.not_listening = not_listening;
+        }
+        self.publish_status();
+    }
+
     /// The waiting list changed; the apps re-read it.
     pub fn set_waiting(&self, count: u64) {
         self.lock().waiting = count;
@@ -392,6 +411,7 @@ impl DaemonState {
             session_origin: f.session_origin,
             ending: f.ending,
             waiting: f.waiting,
+            not_listening: f.not_listening.clone(),
         }
     }
 

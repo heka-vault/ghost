@@ -42,6 +42,11 @@ export interface Scenario {
    * ?phone=off|unpaired|paired|tunnel|tunnel-down|pairs|expires (see mock/index.ts).
    */
   phone?: "off" | "unpaired" | "paired" | "tunnel" | "tunnel-down";
+  /**
+   * Not listening (ADR 0055): the microphone is closed, until turned back on (`true`) or for
+   * this many minutes from load. Any scenario can set it with ?listening=off|<minutes>.
+   */
+  notListening?: true | number;
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -57,6 +62,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "expiring", label: "Okay running out", description: "A confirm-level change that expires 8 seconds after load.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal", pendingExpiresIn: 8 },
   { name: "reconnecting", label: "Reconnecting", description: "A live session; the daemon drops 1.5 seconds after load and stays away.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal", dropAfterMs: 1500 },
   { name: "phone", label: "On the phone", description: "A live session the paired phone started; the desk can end it.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", origin: "phone", phone: "paired" },
+  { name: "notlistening", label: "Not listening", description: "The microphone is closed until the operator turns it back on: no wake, typing still works.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", notListening: true },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, seven apps, one of them not connecting.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];
 

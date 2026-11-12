@@ -11,7 +11,7 @@ use ghost_core::policy::{AutonomyPolicy, PolicyError};
 use ghost_core::routes::RouteName;
 use serde::{Deserialize, Serialize};
 
-use crate::models::{PhonePairing, PhoneView};
+use crate::models::{NotListening, PhonePairing, PhoneView};
 
 /// Why a phone session is refused (`ghostd.phone`'s `Refusal`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +57,13 @@ pub trait Controller: Send + Sync {
     /// when unset. A retired or unknown line is refused.
     async fn wake(&self, first_utterance: Option<String>, conversation: Option<String>) -> bool;
     async fn sleep(&self) -> bool;
+    /// Close (`false`) or open Ghost's microphone (ADR 0055), for `minutes` or until turned
+    /// back on. Closing ends a session at the desk. What holds after, or why it couldn't.
+    async fn set_listening(
+        &self,
+        listening: bool,
+        minutes: Option<u32>,
+    ) -> Result<Option<NotListening>, String>;
     /// A typed turn into the session; with none running, the one it opens.
     async fn say(&self, text: String, conversation: Option<String>) -> bool;
     async fn confirm_pending(&self) -> Option<Outcome>;
@@ -117,6 +124,14 @@ impl Controller for Unavailable {
 
     async fn sleep(&self) -> bool {
         false
+    }
+
+    async fn set_listening(
+        &self,
+        _listening: bool,
+        _minutes: Option<u32>,
+    ) -> Result<Option<NotListening>, String> {
+        Err("the daemon is not running".into())
     }
 
     async fn say(&self, _text: String, _conversation: Option<String>) -> bool {

@@ -31,6 +31,37 @@ async fn status_and_wake_sleep() {
 }
 
 #[tokio::test]
+async fn listening_is_turned_off_and_on_and_the_status_says_so() {
+    // ADR 0055: the switch the desktop, the tray and the phone use.
+    let w = World::new();
+    let c = w.client();
+    w.state.set_phase(Phase::Passive, None, None);
+    assert_eq!(c.get("/status").await["not_listening"], Value::Null);
+    assert_eq!(c.get("/listening").await["listening"], true);
+    let r = c
+        .put("/listening", json!({"listening": false, "minutes": 30}))
+        .await;
+    assert_eq!(r["listening"], false);
+    assert_eq!(r["until"], "2026-11-12T18:00:00Z");
+    assert_eq!(w.control.last_call(), json!(["listening", false, 30]));
+    assert_eq!(
+        c.get("/status").await["not_listening"]["until"],
+        "2026-11-12T18:00:00Z"
+    );
+    let r = c.put("/listening", json!({"listening": true})).await;
+    assert_eq!(r["listening"], true);
+    assert_eq!(c.get("/status").await["not_listening"], Value::Null);
+    // a time goes with off only, and a day at most
+    for bad in [
+        json!({"listening": true, "minutes": 30}),
+        json!({"listening": false, "minutes": 0}),
+        json!({"listening": false, "minutes": 1441}),
+    ] {
+        assert_eq!(c.put("/listening", bad).await.status, 422);
+    }
+}
+
+#[tokio::test]
 async fn wake_can_open_the_session_in_a_line() {
     // A Call button on a line's page (2026-10-24): the session starts there, not in Ghost.
     let w = World::new();
@@ -398,6 +429,7 @@ async fn openapi_lists_every_route_with_tags() {
         "/status",
         "/wake",
         "/sleep",
+        "/listening",
         "/session/say",
         "/proposals/pending/confirm",
         "/audit",

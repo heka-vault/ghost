@@ -22,6 +22,8 @@ export type Schemas = components["schemas"];
 export type Status = Schemas["Status"];
 export type Build = Schemas["Build"];
 export type Phase = Schemas["Phase"];
+export type NotListening = Schemas["NotListening"];
+export type ListeningView = Schemas["ListeningView"];
 export type Turn = Schemas["Turn"];
 export type PendingProposal = Schemas["PendingProposal"];
 export type OutcomeView = Schemas["OutcomeView"];
@@ -202,6 +204,14 @@ export class GhostClient {
   }
   sleep() {
     return unwrap(this.api.POST("/sleep"));
+  }
+  /** Whether Ghost's microphone is open (ADR 0055). */
+  listening() {
+    return unwrap(this.api.GET("/listening"));
+  }
+  /** Close (`false`) or open Ghost's microphone; `minutes` with false: for that long, else until turned back on. */
+  setListening(listening: boolean, minutes?: number) {
+    return unwrap(this.api.PUT("/listening", { body: { listening, minutes: listening ? null : (minutes ?? null) } }));
   }
   /** Type to the live agent; with no session running, open one (with `conversation`, or Ghost) with these words as its first turn. */
   say(text: string, conversation?: string) {

@@ -33,7 +33,7 @@ An outside tool you connected to Ghost (Claude Code, Cursor) sees a narrower set
 |---|---|---|---|---|
 | `docs_search` **core** | read | | Searches this documentation | yes |
 | `docs_read` | read | | Reads one section of it | yes |
-| `status` **core** | read | | Version, phase, the session, the apps, what is waiting | yes |
+| `status` **core** | read | | Version, phase, the session, whether Ghost is listening (ADR 0055; no tool turns it on or off), the apps, what is waiting | yes |
 | `audit_recent` | read | | What was changed lately, by which agent | yes |
 | `tools_search` **core** | read | | Finds a tool not in the list, an app's or Ghost's own | no |
 

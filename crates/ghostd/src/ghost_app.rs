@@ -28,6 +28,14 @@ pub fn status_fields(status: &Status, provider: &str, model: &str) -> Map<String
         json!({"open": open, "origin": status.session_origin}),
     );
     out.insert("agent".into(), json!(status.conversation));
+    // ADR 0055: read only. No tool turns listening on, or off: it is the operator's switch.
+    out.insert(
+        "listening".into(),
+        json!({
+            "on": status.not_listening.is_none(),
+            "until": status.not_listening.as_ref().and_then(|n| n.until.clone()),
+        }),
+    );
     out.insert(
         "change_waiting_for_a_yes".into(),
         json!(status.pending.as_ref().map(|p| p.summary.clone())),
@@ -119,6 +127,12 @@ mod tests {
         assert_eq!(live["phase"], "listening");
         assert_eq!(live["session"], json!({"open": true, "origin": "phone"}));
         assert_eq!(live["agent"], "ledger");
+        assert_eq!(quiet["listening"], json!({"on": true, "until": null}));
+        status.not_listening = Some(ghost_api::models::NotListening { until: None });
+        assert_eq!(
+            status_fields(&status, "x", "y")["listening"],
+            json!({"on": false, "until": null})
+        );
 
         // The daemon's own: the provider and the model's name, with a key in the
         // environment that never shows.

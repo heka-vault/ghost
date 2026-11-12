@@ -1141,6 +1141,11 @@ impl HearDesk {
         session: Option<String>,
         new: bool,
     ) -> HearResult<()> {
+        if d.mic.is_off() {
+            return Err(HearError::Unavailable(
+                "Ghost is not listening. Turn listening on to run the Hearing test.".into(),
+            ));
+        }
         let (granted_tx, granted_rx) = oneshot::channel();
         let (release_tx, release_rx) = oneshot::channel();
         *lock(&self.lease_q) = Some(Lease {

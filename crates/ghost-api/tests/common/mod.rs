@@ -119,6 +119,19 @@ impl Controller for FakeControl {
         true
     }
 
+    async fn set_listening(
+        &self,
+        listening: bool,
+        minutes: Option<u32>,
+    ) -> Result<Option<ghost_api::models::NotListening>, String> {
+        self.record(json!(["listening", listening, minutes]));
+        let off = (!listening).then(|| ghost_api::models::NotListening {
+            until: minutes.map(|_| "2026-11-12T18:00:00Z".to_string()),
+        });
+        self.state.set_not_listening(off.clone());
+        Ok(off)
+    }
+
     async fn say(&self, text: String, conversation: Option<String>) -> bool {
         self.record(json!(["say", text]));
         if self.state.phase() == Phase::Starting {

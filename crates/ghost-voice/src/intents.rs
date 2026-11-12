@@ -166,6 +166,32 @@ pub const GOODBYES: &[&str] = &[
     "Sounds good, talk soon!",
     "Bye for now!",
 ];
+/// The whole turn (fillers aside) asks Ghost to stop listening (ADR 0055): the microphone
+/// closes and stays closed until the operator turns it on from the desktop or the phone.
+pub const STOP_LISTENING: &[&str] = &[
+    "stop listening",
+    "stop listening to me",
+    "stop listening for now",
+    "stop listening now",
+    "turn off the mic",
+    "turn off your mic",
+    "turn the mic off",
+    "turn your mic off",
+    "turn off the microphone",
+    "turn off your microphone",
+    "turn the microphone off",
+    "turn your microphone off",
+    "mic off",
+    "microphone off",
+    "mute yourself",
+    "mute your mic",
+    "mute the mic",
+    "mute your microphone",
+];
+/// Said before the microphone closes: what it did, and the way back, since Ghost can no
+/// longer hear one.
+pub const STOPPED_LISTENING: &str =
+    "Okay, I've stopped listening. Turn me back on from the desktop or your phone.";
 /// Only when a change is waiting for a yes.
 pub const CANCEL: &[&str] = &[
     "never mind",
@@ -227,6 +253,18 @@ impl TurnInterceptor for QuickIntents {
             return Some(Handled {
                 say: Some(pick(GOODBYES)),
                 action: Some(Action::HangUp),
+                until: None,
+            });
+        }
+        // "stop" is a negation word to the confirmation guard, so this one names its own
+        if any_in(STOP_LISTENING)
+            && !words
+                .iter()
+                .any(|w| ["don't", "dont", "not", "no"].contains(w))
+        {
+            return Some(Handled {
+                say: Some(STOPPED_LISTENING.into()),
+                action: Some(Action::StopListening),
                 until: None,
             });
         }
@@ -375,6 +413,22 @@ mod tests {
             ("close it and then hang up", false, None),
             ("label it bug, bye", false, None),
             ("don't hang up", false, None),
+            // ADR 0055: the microphone closes; the words only, never the model
+            ("Ghost, stop listening.", false, Some(Action::StopListening)),
+            (
+                "okay ghost stop listening",
+                true,
+                Some(Action::StopListening),
+            ),
+            (
+                "Turn off your mic, please.",
+                false,
+                Some(Action::StopListening),
+            ),
+            ("mute yourself", false, Some(Action::StopListening)),
+            ("don't stop listening", false, None),
+            ("stop listening to the radio and play it", false, None),
+            ("why did you stop listening", false, None),
             ("not yet, don't hang up", false, None),
             ("how do I hang up", false, None),
         ] {

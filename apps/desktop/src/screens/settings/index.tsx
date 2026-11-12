@@ -50,6 +50,8 @@ import {
 } from "react";
 
 import { navigate } from "../../app/router";
+import { ListeningButton } from "../../app/ListeningSwitch";
+import { listeningSentence, notListening } from "../../app/listening";
 import { VersionNotice, VersionRows } from "./About";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
 import { type SettingsMark, type SettingsMarks, setSettingsMarks } from "../../app/settingsMarks";
@@ -1045,6 +1047,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                     </Notice>
                   )}
                   <Card list>
+                    <ListeningRow />
                     <Row>
                       <Field
                         layout="inline"
@@ -1257,6 +1260,13 @@ const stepToFuzzy = (n: number) => Math.round((1 - n * 0.05) * 100) / 100;
  * for the level (Strict, Balanced, Forgiving), inline like every other slider on the page, and
  * the same word is what the slider announces.
  */
+/** Not listening (ADR 0055): the same switch as the sidebar's, in words. */
+function ListeningRow() {
+  const { status } = useGhost();
+  const off = notListening(status);
+  return <ListRow title={off ? "Not listening" : "Listening"} description={listeningSentence(off)} meta={<ListeningButton />} />;
+}
+
 function WakeSensitivity({ step, exact, onStep, onExact }: { step: number; exact: boolean; onStep: (n: number) => void; onExact: (on: boolean) => void }) {
   return (
     <div className="set-sense">

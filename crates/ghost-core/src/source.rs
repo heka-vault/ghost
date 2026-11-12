@@ -144,6 +144,9 @@ pub enum Action {
     Hold,
     Cancel,
     Quiet,
+    /// "Ghost, stop listening" (ADR 0055): the microphone closes once the line is said, and
+    /// the session ends. There is no spoken way back: Ghost cannot hear it.
+    StopListening,
 }
 
 /// An interceptor took the turn. The model never sees it.
@@ -193,6 +196,8 @@ pub enum EventKind {
     Outcome,
     Error,
     Quiet,
+    /// The operator said to stop listening (ADR 0055); the daemon closes the microphone.
+    StopListening,
 }
 
 #[derive(Debug, Clone, PartialEq)]

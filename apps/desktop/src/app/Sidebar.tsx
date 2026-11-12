@@ -1,6 +1,6 @@
 import type { ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { ChevronDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ChevronDown, MicOff, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { type ReactElement, type ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
@@ -10,6 +10,8 @@ import { agentPath, newAgentSeed } from "../screens/conversations/url";
 import { hrefFor, usePath } from "./router";
 import { navMatch, ROUTES, type RouteDef } from "./routes";
 import { difference } from "./version";
+import { ListeningSwitch, useListeningShortcut } from "./ListeningSwitch";
+import { notListening, notListeningSub } from "./listening";
 
 /** Design-mode chrome, compiled only in development; null in production builds. */
 const MockBadge = import.meta.env.DEV ? lazy(() => import("../design/chrome").then((m) => ({ default: m.MockBadge }))) : null;
@@ -66,6 +68,7 @@ export function Sidebar() {
   const design = useDesign();
   const { client, status, connected, pending, conversationsVersion } = useGhost();
   const { connection: state, phase } = useLive();
+  useListeningShortcut();
   const [agents, setAgents] = useState<ConversationView[]>([]);
   const scroller = useRef<HTMLDivElement>(null);
   const [rail, setRail] = useState<boolean>(() => localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -142,7 +145,13 @@ export function Sidebar() {
   // The card says "Not running" only once the shell says offline, the same moment the Offline
   // page appears. Until then it is a neutral, still "Connecting…": never a false alarm. The
   // same liveLabel() feeds <LiveStatus /> wherever it is used, so the two never disagree.
-  const { dot: cardPhase, title } = liveLabel(state, phase);
+  const live = liveLabel(state, phase);
+  // ADR 0055: with the microphone closed and no session, the card says so, in red, as a
+  // smart speaker's mic-off light does. A typed turn or the phone's call shows as itself.
+  const off = state === "online" && phase === "passive" ? notListening(status) : null;
+  const cardPhase = live.dot;
+  const title = off ? "Not listening" : live.title;
+  const showSwitch = state !== "offline" && state !== "connecting";
   // The footer never moves between states: the last known version, or a reserved empty row.
   // When this window isn’t the daemon’s build (a checkout’s window on the deployed Ghost: another
   // version, or the same at another commit), a second quiet line says which this one is
@@ -160,6 +169,8 @@ export function Sidebar() {
           ? "Loading voice models"
           : phase === "recording"
             ? "Not listening for its name"
+            : off
+            ? notListeningSub(off)
             : inSession
             ? status?.session_origin === "phone"
               ? "On your phone"
@@ -186,9 +197,16 @@ export function Sidebar() {
             <MockBadge />
           </Suspense>
         )}
+        {/* The mic switch sits by the toggle, so the status card keeps its full width. */}
+        {showSwitch && <ListeningSwitch />}
       </Brand>
 
-      <StatusCard phase={cardPhase} title={title} sub={sub} rail={rail} />
+      <StatusCard phase={cardPhase} title={title} sub={sub} rail={rail} off={!!off} />
+      {rail && showSwitch && (
+        <div className="sidebar__rail-switch">
+          <ListeningSwitch rail />
+        </div>
+      )}
 
       <nav className="sidebar__nav" aria-label="Main">
       <div className="sidebar__scroll" ref={scroller} onScroll={measure}>
@@ -330,12 +348,12 @@ export function Sidebar() {
 }
 
 /** The sidebar's status card: the one place the voice loop's phase dot lives. Exported for the gallery. */
-export function StatusCard({ phase, title, sub, rail = false }: { phase: GhostPhase; title: string; sub: string; rail?: boolean }) {
+export function StatusCard({ phase, title, sub, rail = false, off = false }: { phase: GhostPhase; title: string; sub: string; rail?: boolean; off?: boolean }) {
   return (
     <RailTip rail={rail} content={`${title} · ${sub}`}>
-    <a className={cx("sidebar__status", `is-${phase}`)} href={hrefFor("/")} aria-label={rail ? `${title}, ${sub}` : undefined}>
+    <a className={cx("sidebar__status", `is-${phase}`, off && "is-not-listening")} href={hrefFor("/")} aria-label={rail ? `${title}, ${sub}` : undefined}>
       <span className="sidebar__status-dot">
-        <StatusDot phase={phase} />
+        {off ? <MicOff size={16} aria-hidden className="sidebar__mic-off" /> : <StatusDot phase={phase} />}
       </span>
       <span className="sidebar__status-text">
         <span className="sidebar__status-title">{title}</span>
