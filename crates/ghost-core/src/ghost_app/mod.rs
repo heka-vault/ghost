@@ -115,8 +115,8 @@ pub struct DocsSearch {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DocsRead {
-    /// readme, glossary, architecture, apps, connect-ghost, skills, folder, performance or
-    /// phone-protocol.
+    /// readme, glossary, architecture, apps, connect-ghost, tools, skills, folder,
+    /// performance or phone-protocol.
     pub name: String,
     /// A heading of that document; leave out for its list of headings.
     #[serde(default)]

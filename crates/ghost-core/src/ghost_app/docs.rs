@@ -11,7 +11,7 @@ pub const SEARCH_RESULTS: usize = 5;
 /// The documents an agent may read, by the name it asks for them with. The ADRs, the
 /// design system, the original product documents and the direction draft are left out:
 /// they are how Ghost was decided, not how it works.
-const SOURCES: [(&str, &str); 9] = [
+const SOURCES: [(&str, &str); 10] = [
     ("readme", include_str!("../../../../README.md")),
     ("glossary", include_str!("../../../../GLOSSARY.md")),
     (
@@ -23,6 +23,7 @@ const SOURCES: [(&str, &str); 9] = [
         "connect-ghost",
         include_str!("../../../../docs/connect-ghost.md"),
     ),
+    ("tools", include_str!("../../../../docs/tools.md")),
     ("skills", include_str!("../../../../docs/skills.md")),
     ("folder", include_str!("../../../../docs/folder.md")),
     (
@@ -420,6 +421,7 @@ mod tests {
                 "architecture",
                 "apps",
                 "connect-ghost",
+                "tools",
                 "skills",
                 "folder",
                 "performance",
@@ -435,6 +437,23 @@ mod tests {
             d.read("glossary", Some("Glossary")),
             Ok(Read::Section { .. })
         ));
+        // What the operator asks an agent, and where it lands (ADR 0052).
+        let top = |q: &str| d.search(q, 3);
+        let hits = top("can you check the build every morning?");
+        assert!(
+            hits.iter().any(|h| h.heading.to_lowercase().contains("schedule")),
+            "{hits:?}"
+        );
+        let hits = top("how do I connect Claude Code?");
+        assert_eq!(hits[0].document, "connect-ghost", "{hits:?}");
+        let hits = top("why did you ask me before closing that issue?");
+        assert!(
+            hits.iter().any(|h| h.heading.contains("asked")
+                || h.heading.to_lowercase().contains("permission")),
+            "{hits:?}"
+        );
+        let hits = top("what tools do agents have to remember what was said");
+        assert!(hits.iter().any(|h| h.document == "tools"), "{hits:?}");
         // The glossary is one table: a search still lands on the row that has the word.
         let hits = d.search("wisp mascot", SEARCH_RESULTS);
         assert_eq!(hits[0].document, "glossary");

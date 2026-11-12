@@ -106,8 +106,14 @@ between tools is common); links inside a skill are not.
 
 - An index in the system prompt: each skill's name and one line, so the model knows what
   it can read. Capped at 30 skills and 140 characters each.
-- `read_skill(name, file)`: the body (6,000 characters at most) and the files beside it,
-  one at a time, text only, inside the skill's folder only.
+- `read_skill(name, file)`: the body (24,000 characters at most, the budget an app's
+  result has) and the files beside it, one at a time, text only, inside the skill's
+  folder only.
+- `ghost_skill_write(name, description, body)` (ADR 0052): an agent writes a skill from
+  what it learned, into Ghost's own skills folder. It writes the `SKILL.md` and nothing
+  else, so it never places a script; it never replaces one of yours in `~/.agents/skills`
+  or one installed from GitHub, and replaces one of Ghost's only when told to. It waits for
+  your yes unless a rule says otherwise (`allow = ["ghost.skill_write"]`).
 
 ## What a skill cannot do
 

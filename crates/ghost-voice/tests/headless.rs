@@ -1425,15 +1425,17 @@ async fn what_ghosts_own_app_costs_every_turn() {
             .filter(|n| n.starts_with("ghost_"))
             .map(String::from)
             .collect();
-        let bytes: usize = own
+        let each: Vec<(String, usize)> = own
             .iter()
             .map(|n| {
-                serde_json::to_string(&tools.get(n).unwrap().anthropic())
+                let b = serde_json::to_string(&tools.get(n).unwrap().anthropic())
                     .unwrap()
-                    .len()
+                    .len();
+                (n.clone(), b)
             })
-            .sum();
-        (own, bytes)
+            .collect();
+        println!("EACH {each:?}");
+        (own, each.iter().map(|(_, b)| b).sum::<usize>())
     };
     let (advertised, bytes) = size(&sources);
     let mut every = sources.clone();
