@@ -527,6 +527,11 @@ mod tests {
             home.join(".local/share/ghost/passwords.vault")
         );
         assert_eq!(s.phone_path(), home.join(".local/share/ghost/phone.json"));
+        // ADR 0048: this computer only, unless the operator says otherwise; empty is off.
+        assert_eq!(s.mcp_listen, "127.0.0.1:47824");
+        assert_eq!(s.clients_dir(), home.join(".local/share/ghost/clients"));
+        let off = GhostdSettings::from_env(&env(&[("GHOST_MCP_LISTEN", "")])).unwrap();
+        assert_eq!(off.mcp_listen, "");
         assert!(s.dictation_flag.ends_with("dictation-audio-duck.state"));
     }
 

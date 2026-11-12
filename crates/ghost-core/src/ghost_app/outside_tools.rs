@@ -227,13 +227,23 @@ impl GhostServer {
             .map(|(n, mut e)| {
                 if let Some(o) = e.as_object_mut() {
                     o.insert("n".into(), json!(n));
-                    // An item's words are its source's: a client reads its own, and only
-                    // that another one's exists.
-                    if o.get("type").and_then(Value::as_str) == Some("waiting") {
+                    // An item's words are its source's, and a change's are its session's: a
+                    // client reads its own, and of another's only that it happened.
+                    let kind = o
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    if kind == "waiting" || kind == "change" {
                         let mine = o.get("source").and_then(Value::as_str) == Some(me.as_str());
                         o.insert("yours".into(), json!(mine));
                         if !mine {
                             o.remove("title");
+                            o.remove("target");
+                            o.remove("summary");
+                        }
+                        if kind == "change" {
+                            o.remove("source");
                         }
                     }
                 }

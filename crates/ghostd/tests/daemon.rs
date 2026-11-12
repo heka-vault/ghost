@@ -493,7 +493,7 @@ async fn a_connected_tool_uses_the_running_ghost_and_is_refused_once_removed() {
     std::fs::create_dir_all(tmp.path().join("config")).unwrap();
     std::fs::write(
         tmp.path().join("config/policy.toml"),
-        "[routes]\nenabled = [\"digest\", \"desk\"]\n",
+        "[permissions]\nask = [\"ghost.waiting_snooze\"]\n\n[routes]\nenabled = [\"digest\", \"desk\"]\n",
     )
     .unwrap();
     w.daemon.cfg.lock().unwrap().mcp_listen = "127.0.0.1:0".into();
@@ -598,6 +598,50 @@ async fn a_connected_tool_uses_the_running_ghost_and_is_refused_once_removed() {
         }),
         "{heard}"
     );
+
+    // A change the operator's permissions ask about has not run: it waits for their yes,
+    // and the tool hears what came of it once they click Confirm.
+    let asked = outside_call(
+        &tool,
+        "waiting_snooze",
+        json!({"keys": [key], "minutes": 5}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(asked["status"], "waiting for the operator", "{asked}");
+    let id = asked["id"].as_str().unwrap().to_string();
+    assert!(waiting_text(client).await.contains(&format!("change:{id}")));
+    let cursor = heard["cursor"].clone();
+    let yes = client
+        .request(
+            hyper::Method::POST,
+            &format!("/proposals/{id}/confirm"),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(yes.ok(), "{}", yes.body);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut cursor = cursor;
+    loop {
+        let got = outside_call(
+            &tool,
+            "events_wait",
+            json!({"since": cursor, "timeout_s": 5}),
+        )
+        .await
+        .unwrap();
+        cursor = got["cursor"].clone();
+        if got["events"].as_array().unwrap().iter().any(|e| {
+            e["type"] == "change"
+                && e["id"] == id.as_str()
+                && e["outcome"] == "success"
+                && e["yours"] == true
+        }) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no outcome: {got}");
+    }
 
     // A sentence at the desk: Ghost says who it is from, through its own voice, and
     // waits for a reply as desk voice does (ADR 0032).

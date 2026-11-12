@@ -320,10 +320,18 @@ impl Feed {
             Some("waiting" | "pending") => self.waiting_changed(),
             Some("outcome") => {
                 let o = &event["outcome"];
+                // Whose change it was: the session it was proposed in. A client is told
+                // what came of its own; of anyone else's, only that one ended.
+                let session = o["proposal_id"]
+                    .as_str()
+                    .and_then(|id| self.waiting.items.store().get_proposal(id).ok().flatten())
+                    .map(|p| p.session_id)
+                    .unwrap_or_default();
                 self.log.push(json!({
                     "type": "change",
                     "id": o["proposal_id"],
                     "outcome": o["status"],
+                    "source": session,
                     "target": o["target"],
                     "summary": clip(o["summary"].as_str().unwrap_or_default(), SUMMARY_MAX),
                 }));
@@ -985,6 +993,12 @@ mod tests {
         feed.on_bus(&json!({"type": "apps", "sign_in_url": "https://example.com/oauth"}));
         let after = log.since(before);
         assert_eq!(after.len(), 2);
+        // A change's outcome, with the session it was proposed in when the store has it.
+        feed.on_bus(&json!({"type": "outcome", "via": "ui", "outcome": {
+            "proposal_id": "p1", "status": "success", "target": "acme/app#7", "summary": "Applied."}}));
+        let last = log.since(log.cursor() - 1);
+        assert_eq!(last[0].1["type"], "change");
+        assert_eq!(last[0].1["source"], "");
         assert_eq!(after[0].1["state"], "started");
         assert_eq!(after[1].1["state"], "ended");
         let all = serde_json::to_string(&log.since(0)).unwrap();

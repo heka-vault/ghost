@@ -11,7 +11,7 @@ pub const SEARCH_RESULTS: usize = 5;
 /// The documents an agent may read, by the name it asks for them with. The ADRs, the
 /// design system, the original product documents and the direction draft are left out:
 /// they are how Ghost was decided, not how it works.
-const SOURCES: [(&str, &str); 8] = [
+const SOURCES: [(&str, &str); 9] = [
     ("readme", include_str!("../../../../README.md")),
     ("glossary", include_str!("../../../../GLOSSARY.md")),
     (
@@ -19,6 +19,10 @@ const SOURCES: [(&str, &str); 8] = [
         include_str!("../../../../docs/architecture.md"),
     ),
     ("apps", include_str!("../../../../docs/apps.md")),
+    (
+        "connect-ghost",
+        include_str!("../../../../docs/connect-ghost.md"),
+    ),
     ("skills", include_str!("../../../../docs/skills.md")),
     ("folder", include_str!("../../../../docs/folder.md")),
     (
@@ -415,6 +419,7 @@ mod tests {
                 "glossary",
                 "architecture",
                 "apps",
+                "connect-ghost",
                 "skills",
                 "folder",
                 "performance",

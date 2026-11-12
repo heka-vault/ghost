@@ -621,6 +621,8 @@ pub struct World {
     pub devices: Option<Arc<dyn DevicesPort>>,
     pub model_net: Option<Arc<dyn ModelNet>>,
     pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,
+    /// Where Ghost listens for outside tools (ADR 0048); the clients are always there.
+    pub clients_listening: Vec<String>,
 }
 
 impl World {
@@ -717,6 +719,7 @@ impl World {
             devices: None,
             model_net: None,
             schedules: None,
+            clients_listening: Vec::new(),
             tmp,
         }
     }
@@ -770,6 +773,11 @@ impl World {
         deps.skill_catalog = self.skill_catalog.clone();
         deps.hooks_listening = self.hooks_listening.clone();
         deps.schedules = self.schedules.clone();
+        deps.clients = Some(Arc::new(ghost_core::ghost_app::clients::Clients::new(
+            self.store.clone(),
+            self.tmp.path().join("clients"),
+        )));
+        deps.clients_listening = self.clients_listening.clone();
         if let Some(d) = &self.devices {
             deps.devices = d.clone();
         }
