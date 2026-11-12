@@ -24,6 +24,8 @@ export interface VoiceControl {
   onClick: () => void;
   disabled: boolean;
   loading: boolean;
+  /** `danger`: the mic is off (ADR 0057), and this control turns it back on. */
+  tone?: "danger";
 }
 
 export interface ComposerProps {
@@ -126,7 +128,7 @@ export const Composer = forwardRef<HTMLTextAreaElement | null, ComposerProps>(fu
           loading={voice.loading}
           disabled={voice.disabled}
           onClick={voice.onClick}
-          className="session-composer__voice"
+          className={voice.tone === "danger" ? "session-composer__voice is-mic-off" : "session-composer__voice"}
         />
       )}
       <IconButton type="submit" size="lg" variant="primary" label="Send" icon={<ArrowUp />} loading={sending} disabled={disabled || (!value.trim() && !sending)} className="session-composer__send" />

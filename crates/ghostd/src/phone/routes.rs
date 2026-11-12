@@ -88,7 +88,9 @@ pub trait PhoneEvents: Send + Sync {
 /// statuses, then a fresh `status`, then live events, never a log line. The same JSON the
 /// control API's WebSocket sends, less the voice level (twenty a second for the desktop's
 /// waveform; nothing on the phone draws it, and the data channel shares the call) and the
-/// session's activity (ADR 0055: the desktop's conversation screen, not the phone's).
+/// session's activity (ADR 0055: the desktop's conversation screen, not the phone's) and
+/// which words of a reply are heard (`saying`, ADR 0058: the desktop's highlight). The
+/// operator's turn as it closed (`heard`) does go: the phone's captions show its words.
 /// Returns when the bus closes.
 pub async fn forward_events(
     mut events: broadcast::Receiver<String>,
@@ -102,7 +104,10 @@ pub async fn forward_events(
         match events.try_recv() {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(kind(&data), Some("log" | "status" | "voice" | "activity"))
+                    && !matches!(
+                        kind(&data),
+                        Some("log" | "status" | "voice" | "activity" | "saying")
+                    )
                 {
                     backlog.push(data);
                 }
@@ -121,7 +126,7 @@ pub async fn forward_events(
         match events.recv().await {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(kind(&data), Some("log" | "voice" | "activity"))
+                    && !matches!(kind(&data), Some("log" | "voice" | "activity" | "saying"))
                 {
                     sink.send_server_message(&data).await;
                 }
@@ -1380,6 +1385,16 @@ mod tests {
                 .unwrap();
             tx.send(json!({"type": "activity", "activity": {"kind": "cut"}}).to_string())
                 .unwrap();
+            // ADR 0058: the words being heard stay on the desk; the closed turn goes.
+            tx.send(
+                json!({"type": "saying", "saying": {"reply": 0, "from": 0, "to": 3}}).to_string(),
+            )
+            .unwrap();
+            tx.send(
+                json!({"type": "heard", "heard": {"text": "close it", "reopened": false}})
+                    .to_string(),
+            )
+            .unwrap();
             tx.send(json!({"type": "waiting", "count": 2}).to_string())
                 .unwrap();
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1390,7 +1405,7 @@ mod tests {
             .iter()
             .map(|v| v["type"].as_str().unwrap().to_string())
             .collect();
-        assert_eq!(kinds, ["turn", "pending", "status", "waiting"]);
+        assert_eq!(kinds, ["turn", "pending", "status", "heard", "waiting"]);
         let sent = lock(&sink.sent);
         assert_eq!(sent[2]["status"]["apps"], json!(["fake"])); // a fresh one, not the old
     }

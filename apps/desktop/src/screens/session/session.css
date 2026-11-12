@@ -104,6 +104,8 @@
 .thread-meta { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); }
 /* The reply being said: said words in full color, the rest a step back until reached. */
 .thread-said { color: var(--text-1); }
+/* The piece the voice is on now (ADR 0058): bright, underlined in the speaking color. */
+.thread-now { color: var(--text-1); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--phase-speaking) 70%, transparent); text-decoration-thickness: 2px; text-underline-offset: 0.25em; }
 .thread-unsaid { color: var(--text-3); transition: color var(--duration-base) var(--ease-out); }
 .thread-ghost.is-saying .thread-said { transition: color var(--duration-base) var(--ease-out); }
 /* Where the operator cut in: a short upright bar in the warn color, then what was never said. */
@@ -162,6 +164,24 @@
 .thread-work[aria-expanded="true"] .thread-work__chev { transform: rotate(90deg); }
 .thread-calls { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: var(--space-2) 0 0; list-style: none; border-top: 1px solid var(--border-subtle); }
 .thread-call { display: grid; grid-template-columns: var(--space-4) minmax(0, 1fr) auto; column-gap: var(--space-2); align-items: baseline; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+/* A call is a disclosure: opened, what came back. */
+button.thread-call {
+  width: 100%; margin: 0; padding: var(--space-1) var(--space-2) var(--space-1) 0; border: 0; border-radius: var(--radius-sm);
+  background: transparent; font: inherit; text-align: left; cursor: pointer;
+}
+button.thread-call:hover:not(:disabled) { background: var(--bg-hover); }
+button.thread-call:disabled { cursor: default; }
+button.thread-call[aria-expanded="true"] .thread-call__app { color: var(--text-1); }
+.thread-call-item { display: flex; flex-direction: column; gap: var(--space-1); }
+.thread-result { display: flex; flex-direction: column; gap: var(--space-1); margin: 0 0 var(--space-2) var(--space-6); padding-left: var(--space-3); border-left: 2px solid var(--border-subtle); }
+.thread-result__note { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.thread-result__change { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); }
+.thread-result__change.is-failed { color: var(--danger); }
+.thread-result__text {
+  margin: 0; max-height: calc(var(--space-12) * 4); overflow: auto; padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md); background: var(--bg-sunken);
+  font-size: var(--text-xs); line-height: var(--leading-sm); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .thread-call__state { display: inline-flex; align-self: center; justify-content: center; color: var(--ok); }
 .thread-call__state > svg { width: var(--icon-xs); height: var(--icon-xs); }
 .thread-call__state.is-running .thread-dot { background: var(--phase-thinking); animation: stage-pulse 1.2s var(--ease-in-out) infinite alternate; }
@@ -199,9 +219,21 @@
 /* What is happening now, on the composer: a sign, the words, Ghost's voice across the rest. */
 .stage {
   display: flex; align-items: center; gap: var(--space-3);
-  min-height: var(--control-lg); padding: 0 var(--space-1) 0 var(--space-4);
+  min-height: var(--control-lg); padding: 0 var(--space-1) 0 var(--space-2);
+  border-radius: var(--radius-xl);
+  transition: min-height var(--duration-slow) var(--ease-emphasized), background-color var(--duration-slow) var(--ease-out), padding var(--duration-slow) var(--ease-emphasized);
 }
-.stage__sign { flex: none; display: inline-flex; width: var(--space-6); justify-content: center; }
+.stage__sign { flex: none; display: inline-flex; justify-content: center; }
+/* Someone is speaking: the strip opens into a band, the voice is the thing on screen. */
+.stage.is-open {
+  min-height: calc(var(--space-12) + var(--space-8)); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--presence-tint, var(--phase-speaking)) 7%, transparent);
+}
+.stage--you.is-open { --presence-tint: var(--phase-listening); }
+.stage.is-open .stage__words { flex-direction: column; align-items: flex-start; gap: 0; }
+.stage.is-open .stage__title { font-size: var(--text-xl); line-height: var(--leading-xl); }
+.stage__action { flex: 1 1 auto; display: flex; justify-content: flex-end; }
+.stage.is-mic-off .stage__title { color: var(--danger); }
 .stage__words { flex: none; display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; margin: 0; }
 .stage__title { font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-medium); color: var(--text-1); white-space: nowrap; }
 .stage__hint { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -216,6 +248,53 @@
 /* Room view draws the voice wide; the strip keeps its words and the way back. */
 .stage.is-room .stage__wave { visibility: hidden; }
 @container (max-width: 560px) { .stage__hint { display: none; } }
+
+/* ------------------------------------------------------------------ the presence */
+/* Wisp on a halo, in the agent's color. --lvl is Ghost's voice level, written per frame. */
+.presence {
+  --lvl: 0;
+  position: relative; display: inline-grid; place-items: center; flex: none;
+  width: var(--presence); height: var(--presence); color: var(--presence-fg);
+}
+.presence > * { grid-area: 1 / 1; }
+.presence__wisp { position: relative; display: grid; place-items: center; z-index: 1; }
+.presence__halo {
+  width: 100%; height: 100%; border-radius: var(--radius-full);
+  background: var(--presence-bg);
+  transform: scale(calc(0.86 + var(--lvl) * 0.22));
+  transition: transform var(--duration-slow) var(--ease-out), background-color var(--duration-slow) var(--ease-out);
+}
+.presence__halo--outer {
+  background: transparent; border: 2px solid color-mix(in srgb, var(--presence-fg) calc(var(--lvl) * 60%), transparent);
+  transform: scale(calc(1 + var(--lvl) * 0.45)); opacity: calc(var(--lvl) * 1.4);
+  transition: none;
+}
+.presence--speaking .presence__halo { transition: none; }
+/* The operator speaking: rings flow in toward Wisp at a steady pace, whatever the volume. */
+.presence__ring {
+  width: 100%; height: 100%; border-radius: var(--radius-full);
+  border: 2px solid var(--phase-listening); opacity: 0;
+  animation: presence-in 2.4s var(--ease-out) infinite;
+}
+.presence__ring--2 { animation-delay: 0.8s; }
+.presence__ring--3 { animation-delay: 1.6s; }
+@keyframes presence-in {
+  from { transform: scale(1.7); opacity: 0; }
+  35% { opacity: 0.55; }
+  to { transform: scale(0.9); opacity: 0; }
+}
+.presence--you .presence__halo { background: color-mix(in srgb, var(--phase-listening) 16%, var(--presence-bg)); }
+/* Working: an arc turning round the halo. */
+.presence__arc {
+  width: 100%; height: 100%; border-radius: var(--radius-full);
+  border: 2px solid transparent; border-top-color: var(--phase-thinking); border-right-color: color-mix(in srgb, var(--phase-thinking) 40%, transparent);
+  animation: stage-spin 1.4s linear infinite;
+}
+.presence--hold .presence__halo, .presence--ending .presence__halo, .presence--offline .presence__halo { background: var(--bg-hover); }
+.presence--offline { opacity: 0.5; }
+/* The mic is closed: Wisp greys and a struck ring sits round it. */
+.presence.is-mic-off { color: var(--text-3); }
+.presence.is-mic-off .presence__halo { background: color-mix(in srgb, var(--danger) 12%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--danger) 55%, transparent); }
 
 /* The operator is heard: a ring breathing slowly, the same whatever the volume. */
 .stage-breath {
@@ -262,6 +341,7 @@
   letter-spacing: var(--tracking-tight); color: var(--text-1); text-wrap: pretty; overflow-wrap: anywhere;
 }
 .room__said { color: var(--text-1); }
+.room__now { color: var(--text-1); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--phase-speaking) 70%, transparent); text-decoration-thickness: 3px; text-underline-offset: 0.2em; }
 .room__unsaid { color: var(--text-3); }
 .room__heard { max-width: 36ch; margin: 0; font-size: var(--text-2xl); line-height: var(--leading-2xl); color: var(--text-2); }
 .room__label { margin: 0; font-size: var(--text-4xl); line-height: var(--leading-4xl); font-weight: var(--weight-medium); color: var(--text-2); }
@@ -273,7 +353,11 @@
 .room__state { margin: 0; text-align: center; font-size: var(--text-xl); line-height: var(--leading-xl); color: var(--text-2); }
 
 @media (prefers-reduced-motion: reduce) {
-  .stage-breath, .stage-orbit, .thread-call__state.is-running .thread-dot, .room { animation: none; }
+  .stage-breath, .stage-orbit, .thread-call__state.is-running .thread-dot, .room, .presence__arc { animation: none; }
+  .stage { transition: none; }
+  /* The rings stand still: one ring at its middle, so the sign is still there. */
+  .presence__ring { animation: none; opacity: 0.5; transform: scale(1.18); }
+  .presence__ring--2, .presence__ring--3 { display: none; }
   .thread-working__text, .thread-work__what.is-running { animation: none; background: none; color: var(--text-3); }
 }
 @media (forced-colors: active) {
@@ -350,6 +434,13 @@
 .session-composer__input:disabled { cursor: not-allowed; }
 /* 12px between the voice control and Send, so a focus ring never crowds the filled button. */
 .session-composer__voice { flex: none; margin-right: var(--space-1); }
+/* The mic is off (ADR 0057): the control is the struck mic in red, as the sidebar's switch. */
+.session-composer__voice.is-mic-off { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.session-start__mic-off {
+  display: inline-grid; place-items: center; width: calc(var(--space-12) * 2); height: calc(var(--space-12) * 2); border-radius: var(--radius-full);
+  color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.session-start__mic-off > svg { width: var(--space-10); height: var(--space-10); }
 .session-composer__send { flex: none; }
 
 .session-nowrap { white-space: nowrap; }

@@ -308,6 +308,52 @@ pub struct ActivityView {
     pub secs: Option<f64>,
 }
 
+/// The operator's spoken turn as it closed (`Event::Heard`, ADR 0058): the words the
+/// model was given for it, read whole (ADR 0044), in place of the pieces `turn` events
+/// showed. `reopened`: the last one closed was taken back before its answer was heard;
+/// its words come back in the turn that goes on, and `text` is empty.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct HeardView {
+    pub session_id: String,
+    pub at: DateTime<Utc>,
+    pub text: String,
+    #[serde(default)]
+    pub reopened: bool,
+}
+
+/// Which words of Ghost's reply are being heard now (`Event::Saying`, ADR 0058): the
+/// words `from` up to `to` of the reply numbered `reply` in the session, counted as runs
+/// of text with a letter or a digit in them, a line's list marker left out. Sent when the
+/// piece being heard changes, in step with `voice`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct SayingView {
+    pub session_id: String,
+    pub reply: u32,
+    pub from: u32,
+    pub to: u32,
+}
+
+/// What a call of the live session returned, as the model was given it (ADR 0058):
+/// bounded and redacted by the apps' limits on its way in (ADR 0046), then cut to
+/// `CALL_PREVIEW_CHARS` here. Kept in memory for the last calls only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct CallPreview {
+    pub id: String,
+    pub session_id: String,
+    /// The tool as the model called it.
+    pub name: String,
+    /// A read; else a change through the gate (the audit has what it did).
+    pub read: bool,
+    pub at: DateTime<Utc>,
+    /// The result as JSON text, pretty-printed, cut at `CALL_PREVIEW_CHARS`.
+    pub preview: String,
+    /// Characters cut from the end; 0 when it is whole.
+    pub dropped: u64,
+}
+
+/// What a call's preview keeps of its result.
+pub const CALL_PREVIEW_CHARS: usize = 2_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OutcomeVia {
@@ -376,6 +422,17 @@ pub enum Event {
     /// sent to the phone.
     Activity {
         activity: ActivityView,
+    },
+    /// The operator's spoken turn closed with these words, or was taken back (ADR 0058).
+    /// A live session's own turn, never a passive transcript; sent to the phone too, whose
+    /// captions show it.
+    Heard {
+        heard: HeardView,
+    },
+    /// Which words of Ghost's reply are heard now (ADR 0058). Inside a session only; not
+    /// sent to the phone.
+    Saying {
+        saying: SayingView,
     },
     /// The Hearing test's recorder (ADR 0042), about twenty a second while it is open:
     /// what it is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms,

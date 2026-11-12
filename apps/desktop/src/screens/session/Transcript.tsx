@@ -9,19 +9,24 @@
  * hold and the session's end each have their own mark. Ghost's words are the brightest thing
  * on the page; the operator's sit a step back, since they know what they said.
  *
- * The reply being said shows which words have been said (`said.ts`): said ones in full
- * color, the rest dim, moving word by word with Ghost's voice. A reply the operator cut off
- * keeps the dim part and a mark where the cut came. Screen readers get each turn once, whole:
- * the split is visual only.
+ * The reply being said shows which words have been said: said ones in full color, the piece
+ * the voice is on now underlined in the speaking color, the rest dim, moving with the daemon's
+ * stamps (ADR 0058) or, without them, word by word with Ghost's voice (`said.ts`). A reply the
+ * operator cut off keeps the dim part and a mark where the cut came. Screen readers get each
+ * turn once, whole: the split is visual only.
+ *
+ * A call opens to what it returned (ADR 0058): fetched when opened, never pushed, the result as
+ * the model was given it (bounded and redacted, then cut to 2,000 characters), and for a change
+ * what the gate's audit says it did.
  */
-import { joinSpoken, secondsBetween, useGhost } from "@ghost/ui";
-import type { QuestionView, Turn } from "@ghost/client-ts";
+import { type Call, joinSpoken, secondsBetween, useGhost } from "@ghost/ui";
+import type { CallPreview, QuestionView, Turn } from "@ghost/client-ts";
 import { Check, ChevronRight, Clock, Copy, Hand, Keyboard, Mic, Pause, PhoneOff, TriangleAlert, Volume2, Wrench, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { Button, formatDateTime, formatTime, IconButton, LineGlyph, cx } from "../../ui";
 import type { Saying } from "./live";
-import { cutReplies, gapText, lengthText } from "./timeline";
+import { type Announced, cutReplies, gapText, lengthText } from "./timeline";
 import type { Decision, Item, LineInfo } from "./transcript";
 
 export interface TranscriptProps {
@@ -37,9 +42,11 @@ export interface TranscriptProps {
   canReplay?: boolean;
   /** Answer a question with one of its choices (ADR 0051). */
   onAnswer?: (q: QuestionView, choice: string) => Promise<void>;
+  /** The changes the gate made in the sessions shown, for what a change call did. */
+  changes?: readonly Announced[];
 }
 
-export function Transcript({ items, nameOf, thinkingAs, saying = {}, lines = [], canReplay = false, onAnswer }: TranscriptProps) {
+export function Transcript({ items, nameOf, thinkingAs, saying = {}, lines = [], canReplay = false, onAnswer, changes = [] }: TranscriptProps) {
   const last = items[items.length - 1];
   const cut = cutReplies(items);
   // The name leads a reply only when the voice changes (the first reply, the first after a
@@ -153,7 +160,7 @@ export function Transcript({ items, nameOf, thinkingAs, saying = {}, lines = [],
           case "run":
             return <RunRow key={it.key} label={it.label} turns={it.turns} />;
           case "work":
-            return <WorkRow key={it.key} item={it} />;
+            return <WorkRow key={it.key} item={it} changes={changes} />;
           case "cut":
             return (
               <Row key={it.key} mark={<Hand />} tone="quiet" at={it.at}>
@@ -233,15 +240,15 @@ function YouMark({ typed }: { typed: boolean }) {
 /** One of Ghost's turns: plain, or split where the saying is (said bright, the rest dim). */
 function Reply({ text, saying, cutHere }: { text: string; saying?: Saying; cutHere: boolean }) {
   if (!saying) return <p className="thread-ghost" data-user-content>{text}</p>;
-  const said = text.slice(0, saying.chars);
-  const rest = text.slice(saying.chars);
+  const nowEnd = saying.cut ? saying.chars : Math.max(saying.chars, saying.now?.end ?? saying.chars);
   return (
     <p className={cx("thread-ghost", saying.cut ? "is-cut" : "is-saying")} data-user-content>
       <span className="sr-only">{text}</span>
       <span aria-hidden>
-        <span className="thread-said">{said}</span>
+        <span className="thread-said">{text.slice(0, saying.chars)}</span>
+        {nowEnd > saying.chars && <span className="thread-now">{text.slice(saying.chars, nowEnd)}</span>}
         {(saying.cut || cutHere) && <span className="thread-cut" title="You cut in here" />}
-        <span className="thread-unsaid">{rest}</span>
+        <span className="thread-unsaid">{text.slice(nowEnd)}</span>
       </span>
     </p>
   );
@@ -290,7 +297,7 @@ function ReplyActions({ text, voice }: { text: string; voice: { voice: string; s
 }
 
 /** The work between two turns: one row, “Used GitHub · 2 calls · 1.4 s”, opened to each call. */
-function WorkRow({ item }: { item: Extract<Item, { kind: "work" }> }) {
+function WorkRow({ item, changes }: { item: Extract<Item, { kind: "work" }>; changes: readonly Announced[] }) {
   const [open, setOpen] = useState(false);
   const running = item.calls.some((c) => !c.endedAt);
   const now = useTicking(running);
@@ -321,19 +328,73 @@ function WorkRow({ item }: { item: Extract<Item, { kind: "work" }> }) {
             </li>
           )}
           {item.calls.map((c) => (
-            <li key={c.id} className="thread-call">
-              <span className={cx("thread-call__state", !c.endedAt && "is-running")}>{c.endedAt ? <Check /> : <Dot />}</span>
-              <span className="thread-call__name">
-                <span className="thread-call__app">{appTitle(c.app ?? "app")}</span> {c.tool}
-                <span className="thread-call__id t-mono">{c.name}</span>
-              </span>
-              <span className="thread-call__time">{c.endedAt ? seconds(secondsBetween(c.startedAt, c.endedAt)) : "running"}</span>
-            </li>
+            <CallRow key={c.id} call={c} change={changeDuring(c, changes)} />
           ))}
-          <li className="thread-call thread-call--note">What came back went to the model, not this screen. Changes are in the audit log.</li>
         </ul>
       )}
     </Row>
+  );
+}
+
+/** The change the gate finished while a call ran (or just after): what a change call did. */
+function changeDuring(c: Call, changes: readonly Announced[]): Announced | null {
+  const from = new Date(c.startedAt).getTime();
+  const to = new Date(c.endedAt ?? c.startedAt).getTime() + 2000;
+  return changes.find((x) => {
+    const t = new Date(x.at).getTime();
+    return t >= from && t <= to;
+  }) ?? null;
+}
+
+/** One call, opened to what it returned: fetched on open, never before. */
+function CallRow({ call: c, change }: { call: Call; change: Announced | null }) {
+  const { client } = useGhost();
+  const [open, setOpen] = useState(false);
+  const [got, setGot] = useState<{ state: "loading" } | { state: "ok"; preview: CallPreview } | { state: "gone" } | { state: "failed" } | null>(null);
+  const id = `call-${c.id}`;
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && (!got || got.state === "failed")) {
+      setGot({ state: "loading" });
+      client
+        .call(c.id)
+        .then((preview) => setGot({ state: "ok", preview }))
+        .catch((e) => setGot({ state: (e as { status?: number })?.status === 404 ? "gone" : "failed" }));
+    }
+  };
+  return (
+    <li className="thread-call-item">
+      <button type="button" className="thread-call" aria-expanded={open} aria-controls={id} onClick={toggle} disabled={!c.endedAt}>
+        <span className={cx("thread-call__state", !c.endedAt && "is-running")}>{c.endedAt ? <Check /> : <Dot />}</span>
+        <span className="thread-call__name">
+          <span className="thread-call__app">{appTitle(c.app ?? "app")}</span> {c.tool}
+          <span className="thread-call__id t-mono">{c.name}</span>
+        </span>
+        <span className="thread-call__time">{c.endedAt ? seconds(secondsBetween(c.startedAt, c.endedAt)) : "running"}</span>
+      </button>
+      {open && (
+        <div id={id} className="thread-result">
+          {change && (
+            <p className={cx("thread-result__change", !change.ok && "is-failed")}>
+              {change.ok ? "Changed" : "Didn’t go through"} · <span data-user-content>{change.summary}</span>
+            </p>
+          )}
+          {got?.state === "loading" && <p className="thread-result__note">Getting what came back…</p>}
+          {got?.state === "gone" && <p className="thread-result__note">{change ? "What the app answered isn’t kept any more. The audit log has the change." : "What came back isn’t kept any more. Ghost keeps the last 64 calls’ results while it runs."}</p>}
+          {got?.state === "failed" && <p className="thread-result__note">Couldn’t get what came back. Open it again to retry.</p>}
+          {got?.state === "ok" && (
+            <>
+              <p className="thread-result__note">{got.preview.read ? "What the app returned, as Ghost read it" : "What the app answered"}</p>
+              <pre className="thread-result__text t-mono" data-user-content tabIndex={0}>
+                {got.preview.preview}
+              </pre>
+              {got.preview.dropped > 0 && <p className="thread-result__note">{got.preview.dropped.toLocaleString()} more characters not shown</p>}
+            </>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 

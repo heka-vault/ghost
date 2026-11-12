@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type Captions, captionPhase, captionTurn, joinSpoken, noCaptions, withoutHeld } from "@ghost/ui";
+import { type Captions, captionHeard, captionPhase, captionTurn, joinSpoken, noCaptions, withoutHeld } from "@ghost/ui";
 
 const at = (s: number) => `2026-10-29T23:20:${String(s).padStart(2, "0")}Z`;
 const said = (text: string, s: number) => ({ role: "user", text, via: "voice", at: at(s) });
@@ -56,14 +56,16 @@ describe("captions: the operator's words show once, whole, when the turn closes"
     expect(c.held).toHaveLength(2);
   });
 
-  it("shows the pieces together, once, when the turn closes", () => {
-    const c = play([said("Can you check on the deploy", 1), said("for the billing service", 3), said("and tell me if it finished.", 5), "thinking"]);
-    expect(shown(c)).toEqual(["Can you check on the deploy for the billing service and tell me if it finished."]);
+  it("shows the turn once, whole, when the daemon says it closed (ADR 0058), not when the status moves", () => {
+    const open = play([said("Can you check on the deploy", 1), said("for the billing service", 3), said("and tell me if it finished.", 5), "thinking"]);
+    expect(open.shown).toEqual([]);
+    const c = captionHeard(open, { text: "Can you check on the deploy for the billing service and tell me if it finished?", at: at(6) });
+    expect(shown(c)).toEqual(["Can you check on the deploy for the billing service and tell me if it finished?"]);
     expect(c.held).toEqual([]);
   });
 
-  it("shows them when Ghost starts to answer, if that is the first sign the turn closed", () => {
-    expect(shown(play([said("What's waiting?", 1), "speaking"]))).toEqual(["What's waiting?"]);
+  it("shows the pieces with Ghost's answer if the close never came (an older daemon)", () => {
+    expect(shown(play([said("What's waiting?", 1), "speaking"]))).toEqual([]);
     expect(shown(play([said("What's waiting?", 1), reply("Two issues.", 3)]))).toEqual(["What's waiting?", "Two issues."]);
   });
 
@@ -75,7 +77,8 @@ describe("captions: the operator's words show once, whole, when the turn closes"
   it("holds words said over Ghost until that turn closes too", () => {
     const c = play([said("Read me the first one.", 1), "thinking", reply("Issue 415 is", 3), "speaking", "listening", said("No, the second", 5)]);
     expect(shown(c)).toEqual(["Read me the first one.", "Issue 415 is"]);
-    expect(shown(captionPhase(c, "thinking"))).toEqual(["Read me the first one.", "Issue 415 is", "No, the second"]);
+    expect(shown(captionPhase(c, "thinking"))).toEqual(["Read me the first one.", "Issue 415 is"]);
+    expect(shown(captionHeard(c, { text: "No, the second.", at: at(6) }))).toEqual(["Read me the first one.", "Issue 415 is", "No, the second."]);
   });
 
   it("drops everything, held or not, when the session ends", () => {

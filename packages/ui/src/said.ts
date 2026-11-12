@@ -76,3 +76,71 @@ export function createVoicedClock() {
     },
   };
 }
+
+// ---------------------------------------------------------------- the exact clock (ADR 0058)
+
+/**
+ * The daemon's TTS stage numbers the words of each reply as it renders them and the output
+ * stage says which are heard, in step with the voice (`{"type": "saying"}`): the words `from`
+ * up to `to` of reply number `reply` in the session. A word is a run between spaces with a
+ * letter or a digit in it, and a line's list or heading marker (`1.`, `-`, `#`) is not one,
+ * exactly as `ghost_voice::spoken::word_count` counts what the voice says of the reply.
+ */
+export interface Span {
+  session_id: string;
+  reply: number;
+  from: number;
+  to: number;
+}
+
+const MARKER = /^(?:#{1,6}|[-*+]|\d+[.)]|>)$/;
+
+/** Where each counted word of `text` ends, in characters: the n-th word ends at `wordEnds(text)[n - 1]`. */
+export function wordEnds(text: string): number[] {
+  const out: number[] = [];
+  const re = /\S+/g;
+  let lineStart = true;
+  let last = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (text.slice(last, m.index).includes("\n")) lineStart = true;
+    last = m.index + m[0].length;
+    const marker = lineStart && MARKER.test(m[0]);
+    lineStart = false;
+    if (marker || !/[\p{L}\p{N}]/u.test(m[0])) continue;
+    out.push(last);
+  }
+  return out;
+}
+
+/** The characters of `text` that `n` counted words take: 0 for none, all of it past its last word. */
+export function charsOfWords(text: string, n: number): number {
+  if (n <= 0) return 0;
+  const ends = wordEnds(text);
+  if (n > ends.length) return text.length;
+  return ends[n - 1];
+}
+
+/** The latest `saying` span, outside React state like the voice level. */
+export interface SaidWords {
+  get(): Span | null;
+  set(span: Span | null): void;
+  subscribe(fn: (span: Span | null) => void): () => void;
+}
+
+export function createSaidWords(): SaidWords {
+  let span: Span | null = null;
+  const listeners = new Set<(span: Span | null) => void>();
+  return {
+    get: () => span,
+    set(next) {
+      span = next;
+      for (const fn of listeners) fn(span);
+    },
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+  };
+}
