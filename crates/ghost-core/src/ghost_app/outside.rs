@@ -505,6 +505,22 @@ impl Once {
     }
 }
 
+/// Cancelled when the HTTP response a request is answered on is dropped: the tool closed
+/// the connection. The listener (`ghostd::outside`) puts it in the request's extensions.
+/// On the protocol's stateful sessions the server keeps a call running when its
+/// connection goes, so this, not the call's future being dropped, is what stops a change
+/// that takes long (`agent_ask`) when the tool that asked for it is gone.
+#[derive(Clone, Debug)]
+pub struct RequestGone(pub CancellationToken);
+
+fn request_gone(context: &RequestContext<RoleServer>) -> Option<CancellationToken> {
+    context
+        .extensions
+        .get::<http::request::Parts>()
+        .and_then(|parts| parts.extensions.get::<RequestGone>())
+        .map(|g| g.0.clone())
+}
+
 /// The key a client sent with a call, when it is a usable one.
 fn idempotency_key(request: &CallToolRequestParams, context: &RequestContext<RoleServer>) -> Option<String> {
     request
@@ -797,9 +813,15 @@ impl GhostServer {
             }))
         };
         tokio::pin!(work);
+        let gone_away = request_gone(&context).unwrap_or_default();
         let out = tokio::select! {
             out = &mut work => out,
             () = context.ct.cancelled() => {
+                stop.cancel();
+                work.await
+            }
+            () = gone_away.cancelled() => {
+                debug!("outside: a change's connection closed; stopping it");
                 stop.cancel();
                 work.await
             }

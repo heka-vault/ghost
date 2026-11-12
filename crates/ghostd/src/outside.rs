@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
@@ -30,7 +31,7 @@ use axum::middleware::{self, Next};
 use axum::response::Response;
 use ghost_core::conversations::models::Profile;
 use ghost_core::ghost_app::clients::{AuthError, CLIENT_SOURCE, ClientId, Clients, shown};
-use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, Said};
+use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, RequestGone, Said};
 use ghost_core::ghost_app::{AGENT_SOURCE, GhostServer};
 use ghost_core::routes::{Delivery, RouteName, RoutePolicy};
 use ghost_core::schedules::{ASK_WAIT, AgentTurns, DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended};
@@ -111,7 +112,19 @@ async fn guard(
     match checked {
         Ok(Ok(name)) => {
             req.extensions_mut().insert(ClientId(name));
-            next.run(req).await
+            // The response's body going away before its end is the tool closing the
+            // connection: a change it asked for and still running is stopped
+            // (`RequestGone`). A body that ended normally cancels it too, by then harmlessly.
+            let gone = CancellationToken::new();
+            req.extensions_mut().insert(RequestGone(gone.clone()));
+            let resp = next.run(req).await;
+            let guard = gone.drop_guard();
+            resp.map(|body| {
+                Body::from_stream(body.into_data_stream().map(move |chunk| {
+                    let _held = &guard;
+                    chunk
+                }))
+            })
         }
         Ok(Err(AuthError::Locked { retry_after })) => {
             let mut resp = refuse(StatusCode::TOO_MANY_REQUESTS, "locked_out");

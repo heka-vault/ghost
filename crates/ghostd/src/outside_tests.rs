@@ -1687,6 +1687,131 @@ mod asking {
         assert_eq!(session.len(), "run-ask-claude-code-".len() + 32);
     }
 
+    /// A tool that goes away mid-`agent_ask`: the HTTP connection is closed with the run
+    /// still waiting on the model. The run is stopped, what was asked is kept as not
+    /// answered, and the audit records the ask as stopped, not done.
+    #[tokio::test]
+    async fn a_connection_closed_mid_ask_stops_the_run_and_it_is_recorded() {
+        // The model would take ten minutes to answer.
+        let w = asking(
+            "",
+            vec![ScriptedModel::say("Too late.")],
+            Duration::from_secs(600),
+        )
+        .await;
+        let token = w.clients.create("claude-code", false).unwrap().token.to_string();
+        let http = reqwest::Client::new();
+        let send = |body: Value, session: Option<String>| {
+            let mut req = http
+                .post(&w.url)
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("authorization", format!("Bearer {token}"))
+                .body(body.to_string());
+            if let Some(s) = session {
+                req = req.header("mcp-session-id", s);
+            }
+            req.send()
+        };
+        let hello = send(
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "t", "version": "0"}}}),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(hello.status(), 200);
+        let session = hello
+            .headers()
+            .get("mcp-session-id")
+            .map(|v| v.to_str().unwrap().to_string());
+        let _ = hello.bytes().await;
+        let done = send(
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            session.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(done.status().is_success(), "{}", done.status());
+        // The ask: its response is a stream that would carry the answer. Once the run has
+        // started (its row in the gate), the tool goes away: the response is dropped and
+        // the connection with it.
+        let asked = send(
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                "name": "agent_ask", "arguments": {"agent": "ledger", "text": "the total?"}}}),
+            session,
+        )
+        .await
+        .unwrap();
+        assert_eq!(asked.status(), 200);
+        let started = || {
+            w.store
+                .list_proposals(&ProposalQuery::page(10, 0))
+                .unwrap()
+                .0
+                .into_iter()
+                .find(|p| p.operation == "agent_ask")
+        };
+        for _ in 0..100 {
+            if started().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(started().is_some(), "the ask reached the gate");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(asked);
+        drop(http);
+
+        // Stopped, not run to its ten minutes: what was asked is kept as not answered,
+        // and the ask's outcome in the audit is not a success.
+        let began = std::time::Instant::now();
+        let mut kept = Vec::new();
+        for _ in 0..1000 {
+            kept = w.transcript("ledger");
+            if !kept.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(
+            kept[0].2,
+            format!("{} the total? (not answered)", asked_mark("Claude Code"))
+        );
+        // Within moments, not at the run's own ten-minute limit.
+        assert!(began.elapsed() < Duration::from_secs(20), "{:?}", began.elapsed());
+        let ask = started().unwrap();
+        let mut events = Vec::new();
+        for _ in 0..100 {
+            events = w.store.events(&ask.id).unwrap();
+            if events.iter().any(|e| e.event == "finished") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let finished = events
+            .iter()
+            .find(|e| e.event == "finished")
+            .expect("the ask has an outcome");
+        assert_eq!(
+            finished.detail.as_ref().unwrap()["status"],
+            "failed",
+            "the ask is recorded as stopped: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| e
+                .detail
+                .as_ref()
+                .is_some_and(|d| d.to_string().contains("stopped before Ledger answered"))),
+            "{events:?}"
+        );
+        // And the agent is free again for the next.
+        assert!(!w.jobs.turns().busy("ledger"));
+        w.host.stop().await;
+    }
+
     /// One piece of work at a time per agent: an ask waits for a scheduled run of the same
     /// agent, goes before the next one, and is told the agent is busy after its wait.
     #[tokio::test]

@@ -93,7 +93,11 @@ it is set aside on the waiting list and the agent says so, because nothing a cli
 writes is the operator's yes. The question and the answer are kept in that agent's
 transcript, marked `[asked by <tool>, an outside tool]`, under a run's session id. The
 turn stops when the client cancels the request or drops the connection, and a change the
-agent has in the gate at that moment still gets its outcome. Without a runner the tool
+agent has in the gate at that moment still gets its outcome. (2026-11-12: a dropped
+connection did not stop it before. The protocol's stateful session keeps a call running
+when its connection goes, so the drop guard on the call's future never fired. The
+listener now cancels a `RequestGone` token when the response's body is dropped, and the
+dispatch stops the change on it; a test closes a real connection mid-`agent_ask`.) Without a runner the tool
 answers "not available yet".
 
 `say` goes through desk voice (ADR 0032): the passive loop takes it as it takes a raised
