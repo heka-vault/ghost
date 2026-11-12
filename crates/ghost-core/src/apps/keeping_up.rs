@@ -1344,6 +1344,81 @@ async fn a_tool_the_model_used_stays_offered_and_the_oldest_gives_way() {
 }
 
 #[tokio::test]
+async fn what_the_model_used_is_remembered_and_offered_again_after_a_restart() {
+    // 2026-11-12: past the threshold, every new daemon (and every session after a
+    // restart) began with the model searching for the issue read it had used the day
+    // before, a model call of about two seconds. What it used or found is kept (SQLite,
+    // `Store::recent_tools`) and offered by name from the start.
+    let limits = Limits {
+        tools_max: 3,
+        tools_kept: 2,
+        ..Limits::default()
+    };
+    let kept: Arc<std::sync::Mutex<Vec<Vec<String>>>> = Arc::default();
+    let m = many(5, limits, &[]).await;
+    let save = {
+        let kept = kept.clone();
+        Arc::new(move |names: &[String]| kept.lock().unwrap().push(names.to_vec()))
+    };
+    m.apps.remember(Vec::new(), save);
+    let app = m.apps.app("shifty").unwrap();
+    app.call("thing_2", Map::new(), true).await.unwrap();
+    app.call("thing_2", Map::new(), true).await.unwrap(); // nothing moved: not saved again
+    app.call("thing_3", Map::new(), true).await.unwrap();
+    assert_eq!(
+        *kept.lock().unwrap(),
+        vec![
+            vec!["shifty_thing_2".to_string()],
+            vec!["shifty_thing_2".to_string(), "shifty_thing_3".to_string()],
+        ]
+    );
+    // Started again with what was kept: offered by name before any search or call.
+    let again = many(5, limits, &[]).await;
+    again.apps.remember(
+        vec!["shifty_thing_3".into(), "shifty_thing_4".into()],
+        Arc::new(|_: &[String]| {}),
+    );
+    let mut shown: Vec<String> = advertised(&again.apps)
+        .into_iter()
+        .filter(|n| n.starts_with("shifty_"))
+        .collect();
+    shown.sort();
+    assert_eq!(shown, vec!["shifty_thing_3", "shifty_thing_4"]);
+}
+
+#[tokio::test]
+async fn a_search_keeps_only_its_best_few_and_the_rest_stay_callable() {
+    // 2026-11-12: a search for a calendar that wasn't there put eight tools into the
+    // twelve kept (19 to 27 tools), which pushed out what the operator uses and rewrote
+    // the cached prompt. Its best three are offered by name; the rest it named can still
+    // be called by the name it gave.
+    let limits = Limits {
+        tools_max: 3,
+        ..Limits::default()
+    };
+    let m = many(20, limits, &[]).await;
+    let found = search(&m.apps, "thing").await;
+    assert_eq!(found["tools"].as_array().unwrap().len(), SEARCH_RESULTS);
+    let shown: Vec<String> = advertised(&m.apps)
+        .into_iter()
+        .filter(|n| n.starts_with("shifty_"))
+        .collect();
+    assert_eq!(shown.len(), SEARCH_KEPT, "{shown:?}");
+    let last = found["tools"].as_array().unwrap().last().unwrap()["name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(!shown.contains(&last));
+    let tool = last.strip_prefix("shifty_").unwrap();
+    m.apps
+        .app("shifty")
+        .unwrap()
+        .call(tool, Map::new(), true)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn the_size_of_the_schemas_counts_too() {
     let limits = Limits {
         tools_bytes: 400,

@@ -1012,6 +1012,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 runtime.clone(),
             )
             .with_fast(p.fast_model.clone())
+            .with_fast_thinking(settings.llm_fast_thinking.clone())
             .with_fast_reads(
                 (settings.llm_fast_reads && p.fast_model.is_some()).then(|| {
                     let d = dispatcher.clone();
@@ -1121,6 +1122,10 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             Frame::user_text(first, true)
         });
     } else {
+        if settings.llm_warm && !matches!(p.greeting, Greeting::None) {
+            // The first turn is a few seconds off: its prompt is cached meanwhile.
+            opening.push(Frame::WarmCache);
+        }
         match &p.greeting {
             Greeting::Varied => {
                 let text = match &runtime {

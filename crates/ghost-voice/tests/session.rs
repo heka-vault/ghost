@@ -112,7 +112,11 @@ struct Asked {
     model: Arc<ScriptedModel>,
     asked: Arc<Mutex<Vec<Vec<String>>>>,
     offered: Arc<Mutex<Vec<Vec<String>>>>,
+    /// Each warm-up: the tools, the system prompt and the thinking setting it carried.
+    warmed: Arc<Mutex<Vec<Warmed>>>,
 }
+
+type Warmed = (Vec<String>, String, Option<String>);
 
 impl ModelPort for Asked {
     fn stream(
@@ -149,6 +153,21 @@ impl ModelPort for Asked {
     fn model_name(&self) -> String {
         self.model.model_name()
     }
+
+    fn warm_cache(
+        &self,
+        context: ghost_llm::Context,
+        tools: &ghost_llm::Tools,
+        options: &ghost_llm::Options,
+    ) -> ghost_core::source::BoxFuture<'static, Result<Option<ghost_llm::Usage>, ghost_llm::LlmError>>
+    {
+        self.warmed.lock().unwrap().push((
+            tools.names().iter().map(|n| n.to_string()).collect(),
+            context.system.clone(),
+            options.thinking.clone(),
+        ));
+        Box::pin(async { Ok(Some(ghost_llm::Usage::default())) })
+    }
 }
 
 struct World {
@@ -164,6 +183,8 @@ struct World {
     fast_asked: Arc<Mutex<Vec<Vec<String>>>>,
     offered: Arc<Mutex<Vec<Vec<String>>>>,
     fast_offered: Arc<Mutex<Vec<Vec<String>>>>,
+    warmed: Arc<Mutex<Vec<Warmed>>>,
+    fast_warmed: Arc<Mutex<Vec<Warmed>>>,
     /// The windowed fake's counts (ADR 0053).
     rendering: Rendering,
 }
@@ -366,11 +387,14 @@ fn world_setup(setup: Setup) -> World {
     let offered = Arc::new(Mutex::new(Vec::new()));
     let fast_asked = Arc::new(Mutex::new(Vec::new()));
     let fast_offered = Arc::new(Mutex::new(Vec::new()));
+    let warmed = Arc::new(Mutex::new(Vec::new()));
+    let fast_warmed = Arc::new(Mutex::new(Vec::new()));
     let fast_model = fast.map(|script| {
         Arc::new(Asked {
             model: ScriptedModel::paced(script, Duration::from_millis(20), None, "fast"),
             asked: fast_asked.clone(),
             offered: fast_offered.clone(),
+            warmed: fast_warmed.clone(),
         }) as Arc<dyn ModelPort>
     });
     let session = build_session(SessionParams {
@@ -380,6 +404,7 @@ fn world_setup(setup: Setup) -> World {
             model: ScriptedModel::new(replies, Duration::from_millis(50)),
             asked: asked.clone(),
             offered: offered.clone(),
+            warmed: warmed.clone(),
         }),
         fast_model,
         sources,
@@ -417,6 +442,8 @@ fn world_setup(setup: Setup) -> World {
         fast_asked,
         offered,
         fast_offered,
+        warmed,
+        fast_warmed,
         rendering,
     }
 }
@@ -1845,4 +1872,77 @@ async fn a_barge_in_stops_a_windowed_voice_within_100ms_and_stops_its_render() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     w.session.cancel().await;
+}
+
+#[tokio::test]
+async fn a_lookup_the_fast_model_makes_itself_is_covered_by_its_own_words() {
+    // 2026-11-12, live: the fast model went straight to a read of its own, nothing was
+    // acknowledged (no hand-over, and its words before the call were dropped), and the
+    // operator heard the thinking sound for five seconds. Its words before the call are
+    // said as the call starts, as an acknowledgment is: before the answer, not in the
+    // transcript.
+    let mut setup = Setup::new(
+        &["any critical issues in quotient"],
+        vec![vec![ScriptedModel::say("The main model was not needed.")]],
+    )
+    .set("GHOST_TTS_PRERENDER", "false");
+    setup.fast = Some(vec![vec![
+        ScriptedModel::call("Checking quotient.", "github_search_issues", Map::new()),
+        ScriptedModel::say("Two are critical."),
+    ]]);
+    setup.sources = vec![github_app()];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    let ack = rec["ack"].as_f64().expect("the lookup was acknowledged");
+    assert!(ack < rec["reply"].as_f64().unwrap(), "{rec}");
+    let rendered = w.spoken.lock().unwrap().clone();
+    assert!(
+        rendered.iter().any(|t| t.contains("Checking quotient")),
+        "{rendered:?}"
+    );
+    assert_eq!(said_by_ghost(&w), vec!["Yeah?", "Two are critical."]);
+    assert!(
+        w.asked.lock().unwrap().is_empty(),
+        "the main model was asked"
+    );
+    finish(&w).await;
+}
+
+#[tokio::test]
+async fn each_models_prompt_cache_is_warmed_as_the_session_opens_with_its_first_calls_prefix() {
+    // 2026-11-12, live: every session's first turn found both models' prompts cold
+    // (10,000 to 13,000 tokens written, first byte 1.9 to 2.7 s). The cache is written as
+    // the session opens, with what the first call will send, so the first turn reads it.
+    let mut setup = Setup::new(
+        &["any critical issues in quotient"],
+        vec![vec![ScriptedModel::say("Two are critical.")]],
+    );
+    setup.fast = Some(vec![vec![ScriptedModel::call(
+        "",
+        "think_harder",
+        Map::new(),
+    )]]);
+    setup.sources = vec![github_app()];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    let main = w.warmed.lock().unwrap().clone();
+    let fast = w.fast_warmed.lock().unwrap().clone();
+    assert_eq!(main.len(), 1, "the main model, once: {main:?}");
+    assert_eq!(fast.len(), 1, "the fast model, once: {fast:?}");
+    assert!(
+        main[0].2.is_some(),
+        "with the main model's thinking setting"
+    );
+    assert_eq!(fast[0].2, None, "the fast model's own setting, left out");
+    say(&w, 0.3).await;
+    voice_records(&w, 1).await;
+    // What each was warmed with is what its first call was offered, in the same order.
+    assert_eq!(Some(&main[0].0), w.offered.lock().unwrap().first());
+    assert_eq!(Some(&fast[0].0), w.fast_offered.lock().unwrap().first());
+    assert_eq!(main[0].1, fast[0].1, "one system prompt");
+    finish(&w).await;
 }

@@ -302,6 +302,33 @@ pub fn scenarios() -> Vec<Scenario> {
             tags: vec![],
         },
         Scenario {
+            name: "no_app",
+            about: "a question no connected app answers: one model call says so (2026-11-12)",
+            lines: vec![Line::new(
+                "What's on my calendar today?",
+                vec![ScriptedModel::say("No calendar is connected, so I can't see it.")],
+            )],
+            check: None,
+            tags: vec![],
+        },
+        Scenario {
+            name: "by_number",
+            about: "an issue by its number alone: looked up, not asked about (2026-11-12)",
+            lines: vec![
+                Line::new(
+                    "Read me issue one forty two.",
+                    vec![
+                        read_issue(142, "get"),
+                        ScriptedModel::say("One forty two is choosing Redis or Postgres for the session cache."),
+                    ],
+                )
+                .tools(&["github_issue_read"])
+                .args(&["github_issue_read(", "issue_number=142"]),
+            ],
+            check: None,
+            tags: vec![],
+        },
+        Scenario {
             name: "session",
             about: "a realistic session: lookups, a change, goodbye (cache growth across turns)",
             lines: vec![

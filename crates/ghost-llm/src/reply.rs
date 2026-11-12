@@ -130,6 +130,10 @@ impl Watch {
                 self.saw_content = true;
                 let block = &v["content_block"];
                 if block["type"] == "tool_use" {
+                    let name = block["name"].as_str().unwrap_or("").to_string();
+                    if !name.is_empty() {
+                        out.push_back(Event::ToolStarting(name));
+                    }
                     self.open = Some(ToolUse {
                         id: block["id"].as_str().unwrap_or("").to_string(),
                         name: block["name"].as_str().unwrap_or("").to_string(),
@@ -234,6 +238,9 @@ impl Watch {
                 if let Some(name) = function["name"].as_str().filter(|n| !n.is_empty())
                     && name != call.name
                 {
+                    if call.name.is_empty() {
+                        out.push_back(Event::ToolStarting(name.to_string()));
+                    }
                     call.name.push_str(name);
                 }
                 if let Some(args) = function["arguments"].as_str().filter(|a| !a.is_empty()) {
@@ -276,6 +283,11 @@ impl Watch {
         }
         self.reply
     }
+}
+
+/// A usage object of the Messages API, into `into` (a warm-up's answer).
+pub(crate) fn note_anthropic_usage(u: &Value, into: &mut Usage) {
+    anthropic_usage(u, into);
 }
 
 fn anthropic_usage(u: &Value, into: &mut Usage) {

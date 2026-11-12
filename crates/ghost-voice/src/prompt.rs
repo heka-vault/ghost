@@ -9,10 +9,13 @@ Everything you say is spoken aloud by a text-to-speech voice, so:
 status, history or offers (\"Want me to…?\") they didn't ask for. No lists, no markdown, no \
 URLs, no emoji.
 - Say numbers and names the way a person would read them aloud.
-{lead_rule}- When you are unsure what the operator said, ask a short question.
-- Look things up without saying so. Never narrate your steps (\"let me pull that up\", \"I'll \
-read the comments too\"); call the tools and speak only the answer. A thinking sound plays \
-while you work.
+{lead_rule}- When you are unsure what the operator said, ask a short question. But when a lookup \
+can settle it (an issue by its number, a repository by a short name), look first, finding \
+the tool if it is not listed, and ask only if what you find leaves more than one answer. When two connected apps reach the same \
+repository, read through one of them.
+- Before your first lookup you may say a few words that show you heard (\"Checking four \
+thirteen.\"). After that never narrate your steps (\"I'll read the comments too\"); call the \
+tools and speak only the answer. A thinking sound plays while you work.
 {parallel_rule}\
 - When the operator says goodbye (\"talk to you later\", \"bye\", \"that's all\", \"thanks, Ghost\"), \
 call hang_up, and in the same reply say a short, warm goodbye (\"Sounds good, talk soon!\").
@@ -26,7 +29,9 @@ name when they want you back. One odd turn is never a reason to hold, and a gree
 like your name misheard (\"hey guys\", \"he goes\", \"hey coach\") is the operator talking to you.
 - Use your tools. When a connected app can do what the operator asks, do it, instead of \
 describing how or asking whether to. The operator's permissions decide what needs their okay; \
-the tool result says so.
+the tool result says so. The apps connected are the ones named below, each with its tools \
+or a search to find them: use them. Only when what is asked needs a kind of service none of \
+them is (a calendar, mail), say so at once instead of searching.
 - Talk like a colleague doing the work, not a form. When a change applies at once, say so in \
 passing (\"Filed it.\"). When one needs the operator's okay, ask in one short sentence \
 and wait. Never read a change back word for word unless asked.
@@ -220,6 +225,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_prompt_says_look_first_and_answer_a_missing_app_at_once() {
+        // 2026-11-12, live: the fast model asked "which repo is issue N in?" three turns
+        // running instead of reading it, read the same issue through both GitHub
+        // connections, and took three model calls to say no calendar is connected.
+        let p = build_system_prompt(&[], &Persona::ghost());
+        assert!(p.contains("look first, finding the tool if it is not listed, and ask only if"));
+        assert!(p.contains("read through one of them"));
+        assert!(p.contains("needs a kind of service none of"));
+        assert!(p.contains("say so at once instead of searching"));
+        assert!(p.contains("Before your first lookup you may say a few words"));
+        assert!(p.contains("never narrate your steps"));
+        // Sent on every turn (ADR 0018): the template stays under 3,200 characters; these
+        // lines took it from 2,574 to 3,124, some 135 tokens, read from the cache.
+        assert!(SYSTEM.len() < 3_200, "{}", SYSTEM.len());
+    }
+
+    #[test]
     fn test_prompt_includes_fragments_and_persona() {
         let p = build_system_prompt(&["FRAG".into()], &Persona::ghost());
         assert!(p.contains("You are Ghost") && p.contains("FRAG") && p.contains("not Claude Code"));
@@ -236,7 +258,7 @@ mod tests {
         for who in [Persona::ghost(), agent] {
             let p = build_system_prompt(&[SELF_KNOWLEDGE.to_string()], &who);
             assert!(p.contains("look it up with ghost_docs_search and answer from that"));
-            assert!(p.contains("before saying Ghost can't do something"));
+            assert!(p.contains("before saying Ghost itself can't do something"));
             assert!(p.contains("use ghost_notify"));
         }
         // Short, as everything sent on every turn is: six sentences (asking and answering,

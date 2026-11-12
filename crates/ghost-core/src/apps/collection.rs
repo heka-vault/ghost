@@ -22,30 +22,65 @@ use crate::source::ToolSource;
 
 /// How many tools one search gives.
 pub const SEARCH_RESULTS: usize = 8;
+/// How many of them, the best first, are offered by name from the next call (the rest
+/// stay callable by the name the search gave). Fewer than it gives: every one offered
+/// moves the tool list, and the cached prompt with it, and takes a place among the kept.
+pub const SEARCH_KEPT: usize = 3;
 
 /// The tools the model used or found lately, by the names it calls them: the ones still
 /// offered by name when most are found by search. The newest `cap` are kept; using one
 /// already there changes nothing the model sees, so the tool list, and the cached prompt
 /// before it, moves only when a tool it had not used comes in.
+///
+/// What is kept outlives the daemon when a keeper is set (`Apps::remember`): the daemon
+/// keeps it in SQLite (`Store::recent_tools`), so a new one offers by name what the model
+/// used before, and the cached prompt of the first session holds as it did.
 pub struct Recent {
     cap: usize,
     names: Mutex<Vec<String>>,
+    save: Mutex<Option<SaveRecent>>,
 }
+
+/// Told what is kept, oldest first, whenever it changes.
+pub type SaveRecent = Arc<dyn Fn(&[String]) + Send + Sync>;
 
 impl Recent {
     pub fn new(cap: usize) -> Self {
         Self {
             cap,
             names: Mutex::new(Vec::new()),
+            save: Mutex::new(None),
         }
     }
 
     pub fn touch(&self, name: &str) {
-        let mut names = self.names.lock().unwrap_or_else(|e| e.into_inner());
-        names.retain(|n| n != name);
-        names.push(name.to_string());
-        let over = names.len().saturating_sub(self.cap);
-        names.drain(..over);
+        let kept = {
+            let mut names = self.names.lock().unwrap_or_else(|e| e.into_inner());
+            let before = names.clone();
+            names.retain(|n| n != name);
+            names.push(name.to_string());
+            let over = names.len().saturating_sub(self.cap);
+            names.drain(..over);
+            if *names == before {
+                return; // used again, and already the newest
+            }
+            names.clone()
+        };
+        let save = self.save.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(save) = save {
+            save(&kept);
+        }
+    }
+
+    /// Start from `names` (oldest first; the newest `cap` are kept) and tell `save` of
+    /// every change from here on.
+    pub fn restore(&self, names: Vec<String>, save: SaveRecent) {
+        {
+            let mut kept = self.names.lock().unwrap_or_else(|e| e.into_inner());
+            let over = names.len().saturating_sub(self.cap);
+            *kept = names.into_iter().skip(over).collect();
+        }
+        *self.save.lock().unwrap_or_else(|e| e.into_inner()) = Some(save);
     }
 
     pub fn names(&self) -> HashSet<String> {
@@ -108,6 +143,14 @@ impl Apps {
 
     pub fn limits(&self) -> Limits {
         self.limits
+    }
+
+    /// The tools the model used or found before (oldest first), kept by the caller and
+    /// told to `save` whenever what is kept changes. Offered by name past the limits like
+    /// any used lately, so a daemon started again does not search for them first.
+    pub fn remember(&self, names: Vec<String>, save: SaveRecent) {
+        self.recent.restore(names, save);
+        self.changed();
     }
 
     /// Who an app's question for the operator goes to. Until this is called every
@@ -481,7 +524,7 @@ impl Apps {
         hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         hits.truncate(SEARCH_RESULTS);
         // Best last, so the best is the newest and the last to be forgotten.
-        for (_, _, _, name) in hits.iter().rev() {
+        for (_, _, _, name) in hits.iter().take(SEARCH_KEPT).rev() {
             self.recent.touch(name);
         }
         hits.into_iter().map(|(_, _, tool, _)| tool).collect()

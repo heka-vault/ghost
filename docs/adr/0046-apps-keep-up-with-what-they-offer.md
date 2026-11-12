@@ -116,6 +116,16 @@ are offered by name from the next model call. A hidden tool is still registered 
 gate and can be called by name. Within the limits the search tool is not offered and
 nothing is hidden.
 
+*Amended 2026-11-12:* what the model used or found is kept in SQLite (`recent_tools`,
+`Store::recent_tools`, `Apps::remember`), not only in memory, so a daemon started again
+offers it by name from the first turn. Live that day, past the limit with four apps and
+106 tools, every first lookup after a restart began with a `ghost_tools_search` (about
+two seconds of model time), and the search changed the tool list mid-session, which
+rewrites the cached prompt from its start (the turns read 37% of their input from the
+cache). Nothing more is offered per turn than before: at most the twelve kept tools,
+the same cap, now from the start instead of after the first searches. No read is
+offered by name because it is common in general: the operator's own use decides.
+
 ### Each limit, before and after
 
 | Limit | Before | After | Set with |

@@ -144,7 +144,8 @@ Every tool offered by name is in the prompt on every turn. When the connected ap
 more than 40 tools between them, or more than 30,000 bytes of tool descriptions and
 arguments, Ghost offers by name only the tools you pinned and the twelve it used or found
 most recently. It finds the rest with `ghost_tools_search`: a few words ("create calendar
-event") give the tools that match, and those are offered by name from then on. Below the
+event") give the tools that match, and those are offered by name from then on, after a
+restart too (Ghost keeps the list with the rest of its state). Below the
 limits nothing is hidden and the search is not offered. Hiding a tool is about the size of
 the prompt and is not a permission: a hidden tool still runs when called, and what is
 blocked is still your rules.

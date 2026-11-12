@@ -164,13 +164,16 @@ pub fn text(events: &[Event]) -> String {
         .collect()
 }
 
-/// Each event's kind, in order.
+/// Each event's kind, in order. A call's start (`ToolStarting`) is left out: it is an
+/// early sign, tested on its own, and the shapes these tests check are the reply's.
 pub fn kinds(events: &[Event]) -> Vec<&'static str> {
     events
         .iter()
+        .filter(|e| !matches!(e, Event::ToolStarting(_)))
         .map(|e| match e {
             Event::Text(_) => "Text",
             Event::Thought(_) => "Thought",
+            Event::ToolStarting(_) => "ToolStarting",
             Event::ToolCall(_) => "ToolCall",
             Event::Usage(_) => "Usage",
             Event::Finished(_) => "Finished",

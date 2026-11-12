@@ -84,16 +84,25 @@ pub fn fast_tools(tools: &Tools) -> Tools {
     Tools::new(all)
 }
 
-/// How the fast model is asked: as the main model is, without the thinking setting.
-/// A small model answers small talk and needs none, and it may refuse the main model's:
-/// Haiku 5.5 answers `between_tools`, Ghost's default, with HTTP 400 ("not supported for
-/// this model", 2026-11-12), and every turn was handed over for it.
-pub fn fast_options(options: &Options) -> Options {
+/// How the fast model is asked: as the main model is, with its own thinking setting
+/// (`GHOST_LLM_FAST_THINKING`; None, the default, leaves the field out). It may refuse
+/// the main model's: Haiku 5.5 answers `between_tools`, Ghost's default, with HTTP 400
+/// ("not supported for this model", 2026-11-12), and every turn was handed over for it.
+/// Left out, Haiku 5.5 thinks adaptively, unseen. With `disabled` it began a tool call
+/// sooner (0.84 s against 1.17 s, p50, n=9) and wrote a few words first, but looked less
+/// far: asked what was waiting for triage it read Ghost's own status and answered in 3 of
+/// 3 runs, where with its thinking it went on to the issues in 3 of 3 (2026-11-12, the
+/// harness's deferred apps). Right later beats wrong sooner, so it is left out.
+pub fn fast_options(options: &Options, thinking: Option<&str>) -> Options {
     Options {
-        thinking: None,
+        thinking: thinking.map(str::to_string),
         ..options.clone()
     }
 }
+
+/// The thinking setting that turns the fast model's thinking off, when the operator
+/// chooses speed over how far it looks (`GHOST_LLM_FAST_THINKING=disabled`).
+pub const FAST_THINKING_OFF: &str = "disabled";
 
 pub const COMPACTION_PROMPT: &str =
     "You are condensing the older part of a spoken conversation between an \
@@ -121,6 +130,47 @@ pub trait ModelPort: Send + Sync {
         max_tokens: u32,
     ) -> BoxFuture<'_, Result<String, LlmError>>;
     fn model_name(&self) -> String;
+    /// Write the prompt cache for a turn on `context` before it comes (a session's
+    /// opening). `Ok(None)` when nothing was sent: the same prefix was used or warmed
+    /// within `CACHE_FRESH`, or the model has no cache to warm (a scripted one).
+    fn warm_cache(
+        &self,
+        _context: Context,
+        _tools: &Tools,
+        _options: &Options,
+    ) -> BoxFuture<'static, Result<Option<ghost_llm::Usage>, LlmError>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+/// How long a prefix the model was sent counts as cached: under the five minutes a
+/// provider keeps it by default, so a warm-up is skipped only while the entry surely lives.
+pub const CACHE_FRESH: std::time::Duration = std::time::Duration::from_secs(240);
+
+/// When each prefix was last sent (`prefix_key`), for the whole daemon: a session that
+/// opens a minute after the last one finds its prompt cached and sends no warm-up.
+static SENT: std::sync::LazyLock<Mutex<std::collections::HashMap<u64, Instant>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// What the cached part of a request is keyed by: the model, the tools, the system prompt
+/// (whose cache marker ends that part) and the thinking setting, which is rendered into
+/// the prompt.
+pub fn prefix_key(model: &str, context: &Context, tools: &Tools, options: &Options) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    model.hash(&mut h);
+    context.system.hash(&mut h);
+    format!("{tools:?}").hash(&mut h);
+    options.thinking.hash(&mut h);
+    h.finish()
+}
+
+/// Note that the prefix was sent now; true when it had not been within `CACHE_FRESH`.
+pub fn sent_now(key: u64) -> bool {
+    let mut sent = SENT.lock().unwrap_or_else(|e| e.into_inner());
+    let stale = sent.get(&key).is_none_or(|at| at.elapsed() >= CACHE_FRESH);
+    sent.insert(key, Instant::now());
+    stale
 }
 
 impl ModelPort for Model {
@@ -130,7 +180,21 @@ impl ModelPort for Model {
         tools: &Tools,
         options: &Options,
     ) -> BoxStream<'static, Result<Event, LlmError>> {
+        sent_now(prefix_key(&self.target().model, &context, tools, options));
         Box::pin(Model::stream(self, context, tools, options))
+    }
+
+    fn warm_cache(
+        &self,
+        context: Context,
+        tools: &Tools,
+        options: &Options,
+    ) -> BoxFuture<'static, Result<Option<ghost_llm::Usage>, LlmError>> {
+        if !sent_now(prefix_key(&self.target().model, &context, tools, options)) {
+            return Box::pin(async { Ok(None) });
+        }
+        let (model, tools, options) = (self.clone(), tools.clone(), options.clone());
+        Box::pin(async move { model.warm(&context, &tools, &options).await.map(Some) })
     }
 
     fn complete(
@@ -186,6 +250,12 @@ enum Held {
     HandOver {
         names: Vec<String>,
         secs: f64,
+    },
+    /// A tool call began (`Event::ToolStarting`); `said` is what the fast model wrote
+    /// before it, held here and not passed on as text.
+    Starting {
+        name: String,
+        said: Option<String>,
     },
 }
 
@@ -249,6 +319,7 @@ impl Call {
             let mut calls: Vec<ToolCall> = Vec::new();
             let mut spoke = false;
             let mut failed = false;
+            let mut written = String::new();
             loop {
                 let ev = tokio::select! {
                     biased;
@@ -257,6 +328,15 @@ impl Call {
                 };
                 let Some(ev) = ev else { break };
                 match ev {
+                    Ok(Event::ToolStarting(name)) => {
+                        // Said now, not when the reply ends: the voice can cover the
+                        // call's writing, and what the fast model wrote before it may be
+                        // what it says.
+                        let said = Some(written.clone()).filter(|w| !w.trim().is_empty());
+                        if tx.send(Ok(Held::Starting { name, said })).is_err() {
+                            return;
+                        }
+                    }
                     Ok(Event::ToolCall(call)) => {
                         names.push(call.name.clone());
                         calls.push(call);
@@ -270,6 +350,7 @@ impl Call {
                         if let Event::Text(t) = &ev {
                             first.get_or_insert_with(|| began.elapsed().as_secs_f64());
                             spoke |= !t.trim().is_empty();
+                            written.push_str(t);
                             if let Some(p) = pre {
                                 p.text(t);
                             }
@@ -366,6 +447,17 @@ impl Call {
                     secs: began.elapsed().as_secs_f64(),
                 }));
             }
+            if let Ok(Event::ToolStarting(name)) = &ev {
+                // The main model's words before it were passed on as they came.
+                let starting = Held::Starting {
+                    name: name.clone(),
+                    said: None,
+                };
+                if tx.send(Ok(starting)).is_err() {
+                    return;
+                }
+                continue;
+            }
             match &ev {
                 Ok(Event::ToolCall(_)) => {
                     called = true;
@@ -441,6 +533,8 @@ pub struct LlmStage {
     last_results_chars: usize,
     /// Rounds of reads the fast model made in this turn.
     fast_rounds: usize,
+    /// The fast model's thinking setting (`with_fast_thinking`).
+    fast_thinking: Option<String>,
 }
 
 impl LlmStage {
@@ -473,7 +567,14 @@ impl LlmStage {
             fast_reads: None,
             last_results_chars: 0,
             fast_rounds: 0,
+            fast_thinking: None,
         }
+    }
+
+    /// The fast model's thinking setting; None leaves the field out of its requests.
+    pub fn with_fast_thinking(mut self, thinking: Option<String>) -> Self {
+        self.fast_thinking = thinking;
+        self
     }
 
     /// Let the fast model make reads itself and answer from short results (see the
@@ -508,7 +609,7 @@ impl LlmStage {
             (
                 fast.clone(),
                 fast_tools(&self.tools),
-                fast_options(&self.options),
+                fast_options(&self.options, self.fast_thinking.as_deref()),
             )
         });
         Call {
@@ -527,6 +628,39 @@ impl LlmStage {
                 .map(|r| r.is_read.clone()),
         }
         .start()
+    }
+
+    /// The session opens (`Frame::WarmCache`): each model's prompt cache is written now,
+    /// with the prefix its first call will send, while the greeting plays. Nothing waits
+    /// on it, and a failure costs only the warm-up.
+    fn warm(&mut self) {
+        self.refresh_tools();
+        let context = self.snapshot();
+        let mut jobs = vec![(self.model.clone(), self.tools.clone(), self.options.clone())];
+        if let Some(fast) = &self.fast {
+            jobs.push((
+                fast.clone(),
+                fast_tools(&self.tools),
+                fast_options(&self.options, self.fast_thinking.as_deref()),
+            ));
+        }
+        for (model, tools, options) in jobs {
+            let name = model.model_name();
+            let work = model.warm_cache(context.clone(), &tools, &options);
+            tokio::spawn(async move {
+                let began = Instant::now();
+                match work.await {
+                    Ok(Some(u)) => info!(
+                        "llm: warmed {name}'s prompt cache in {:.2}s ({} tokens written, {} read)",
+                        began.elapsed().as_secs_f64(),
+                        u.cache_write_tokens.unwrap_or(0),
+                        u.cache_read_tokens.unwrap_or(0)
+                    ),
+                    Ok(None) => {}
+                    Err(e) => warn!("llm: warming {name}'s prompt cache: {e}"),
+                }
+            });
+        }
     }
 
     fn cancel_prerender(&self) {
@@ -688,6 +822,12 @@ impl LlmStage {
                     reply.text.clear(); // nothing of the fast model's is the reply
                     reply.by_fast = false;
                     out.push(Frame::HandOver { names, secs }).await;
+                }
+                Ok(Held::Starting { name, said }) => {
+                    out.push(Frame::ToolStarting { name, said }).await;
+                }
+                Ok(Held::Event(Event::ToolStarting(name))) => {
+                    out.push(Frame::ToolStarting { name, said: None }).await;
                 }
                 Ok(Held::Event(Event::Text(t))) => {
                     reply.text.push_str(&t);
@@ -1119,6 +1259,7 @@ impl Stage for LlmStage {
             Frame::SystemPrompt(s) => self.context.lock().unwrap().system = s,
             Frame::SetTools(t) => self.tools = t,
             Frame::RunLlm => self.run(out).await,
+            Frame::WarmCache => self.warm(),
             Frame::Speculate(text) => self.speculate(text, out).await,
             Frame::SpeculationConfirmed(text) => self.confirm_speculation(text, out).await,
             Frame::SpeculationCancelled => self.drop_speculation(),
@@ -1368,16 +1509,19 @@ fn async_stream_words(
         .map(|w| (wait(TOKENS_PER_WORD), Event::Text(w)))
         .collect();
     let n_calls = calls.len();
-    events.extend(
-        calls
-            .into_iter()
-            .map(|c| (wait(call_tokens(&c)), Event::ToolCall(c))),
-    );
-    // The first event is the first token: `ttfb` is its whole wait. A call is written
-    // before it is seen, so a reply that opens with one keeps the call's own time.
-    if let Some((first, ev)) = events.first_mut()
-        && !matches!(ev, Event::ToolCall(_))
-    {
+    // A call is announced as it starts (`Event::ToolStarting`, at once) and seen whole
+    // once its arguments are written.
+    events.extend(calls.into_iter().flat_map(|c| {
+        [
+            (
+                std::time::Duration::ZERO,
+                Event::ToolStarting(c.name.clone()),
+            ),
+            (wait(call_tokens(&c)), Event::ToolCall(c)),
+        ]
+    }));
+    // The first event is the first token: `ttfb` is its whole wait.
+    if let Some((first, _)) = events.first_mut() {
         *first = std::time::Duration::ZERO;
     }
     let events: Vec<(std::time::Duration, Event)> = events
@@ -1431,12 +1575,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_fast_model_is_asked_without_the_thinking_setting() {
+    fn a_prefix_sent_lately_is_not_warmed_again() {
+        // The five-minute cache: within `CACHE_FRESH` of the last request with the same
+        // tools, system prompt and thinking, a warm-up would only pay to write it again.
+        let ctx = Context::new("You are Ghost (a test of the warm-up).");
+        let tools = Tools::new(vec![ToolSchema::new("a", "d", json!({}), vec![])]);
+        let key = prefix_key("m-warm-test", &ctx, &tools, &Options::default());
+        assert!(sent_now(key), "never sent");
+        assert!(!sent_now(key), "just sent");
+        // Another model, other tools, another thinking setting: another prefix.
+        assert_ne!(key, prefix_key("m2", &ctx, &tools, &Options::default()));
+        assert_ne!(
+            key,
+            prefix_key(
+                "m-warm-test",
+                &ctx,
+                &fast_tools(&tools),
+                &Options::default()
+            )
+        );
+        assert_ne!(
+            key,
+            prefix_key(
+                "m-warm-test",
+                &ctx,
+                &tools,
+                &fast_options(&Options::default(), Some(FAST_THINKING_OFF))
+            )
+        );
+    }
+
+    #[test]
+    fn the_fast_model_is_asked_with_its_own_thinking_setting() {
         // Haiku 5.5 refuses `between_tools` with a 400, so every turn was handed over.
         let main = Options::default();
         assert_eq!(main.thinking.as_deref(), Some("between_tools"));
-        let fast = fast_options(&main);
-        assert_eq!(fast.thinking, None);
+        let fast = fast_options(&main, Some(FAST_THINKING_OFF));
+        assert_eq!(fast.thinking.as_deref(), Some("disabled"));
+        // The default leaves the field out: Haiku 5.5 then thinks as it chooses.
+        assert_eq!(fast_options(&main, None).thinking, None);
         assert_eq!(fast.max_tokens, main.max_tokens);
         assert_eq!(fast.cache_system, main.cache_system);
     }

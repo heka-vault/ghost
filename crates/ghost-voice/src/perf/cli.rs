@@ -7,6 +7,7 @@
 //!                   [--variant name:field=value+field=value]... [--out DIR] [--show-text]
 //!                   [--llm-url URL --llm-model M [--llm-fast-model M] [--llm-key-env NAME]
 //!                    [--llm-protocol anthropic|openai]]  (a real model; `fast=real`)
+//!                   [--apps one|deferred|deferred-kept]  (`apps=` in a variant)
 //! ghost-perf micro  [--only stt,tts,jev,turn] [--n N] [--out DIR]
 //! ghost-perf llm    [--model a,b] [--endpoint current,proxy,openrouter+sysbp,<provider>]
 //!                   [--openrouter-models a,b] [--thinking between_tools] [--n N] [--out DIR]
@@ -32,7 +33,7 @@ use std::time::{Duration, Instant};
 use indexmap::IndexMap;
 use serde_json::{Value, json};
 
-use super::harness::{Bench, Profile, RealModel, RunConfig, parse_ablations};
+use super::harness::{AppSet, Bench, Profile, RealModel, RunConfig, parse_ablations};
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
@@ -306,12 +307,13 @@ fn overrides(args: &Args) -> Result<BTreeMap<String, String>, String> {
 }
 
 /// A named set of settings for one run: its name, the overrides, the fast model's profile,
-/// and whether the real fast model is in front (`fast=real`).
+/// whether the real fast model is in front (`fast=real`), and the apps it reaches.
 type Variant = (
     Option<String>,
     BTreeMap<String, String>,
     Option<Profile>,
     bool,
+    AppSet,
 );
 
 /// `--fast haiku`, or `none`.
@@ -534,6 +536,14 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
     let fast_real_default = real.as_ref().is_some_and(|r| r.fast_model.is_some())
         && args.one("fast").map(String::as_str) == Some("real");
     let fast = if fast_real_default { None } else { fast };
+    let app_set = match args.one("apps").map(|a| AppSet::named(a)) {
+        None => AppSet::One,
+        Some(Some(a)) => a,
+        Some(None) => {
+            eprintln!("unknown --apps; known: {}", AppSet::NAMES.join(", "));
+            return 2;
+        }
+    };
     // Named sets of overrides, compared in one run: `before:turn_grace_secs=1.2+fast=haiku`.
     let mut variants: Vec<Variant> = Vec::new();
     for spec in args.flags.get("variant").cloned().unwrap_or_default() {
@@ -541,8 +551,17 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
         let mut over = overrides.clone();
         let mut fast = fast.clone();
         let mut fast_real = fast_real_default;
+        let mut app_set = app_set;
         for kv in sets.split('+').map(str::trim).filter(|s| !s.is_empty()) {
             match kv.split_once('=') {
+                // The apps the session reaches, not a voice setting.
+                Some(("apps", v)) => match AppSet::named(v) {
+                    Some(a) => app_set = a,
+                    None => {
+                        eprintln!("unknown apps={v}; known: {}", AppSet::NAMES.join(", "));
+                        return 2;
+                    }
+                },
                 // The real fast model, given by --llm-fast-model.
                 Some(("fast", "real")) => {
                     if real.as_ref().and_then(|r| r.fast_model.as_ref()).is_none() {
@@ -569,14 +588,20 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                 }
             }
         }
-        variants.push((Some(name.to_string()), over, fast, fast_real));
+        variants.push((Some(name.to_string()), over, fast, fast_real, app_set));
     }
     if variants.is_empty() {
-        variants.push((None, overrides.clone(), fast.clone(), fast_real_default));
+        variants.push((
+            None,
+            overrides.clone(),
+            fast.clone(),
+            fast_real_default,
+            app_set,
+        ));
     }
     let mut configs: Vec<RunConfig> = Vec::new();
     for ablate in ablations {
-        for (variant, over, fast, fast_real) in &variants {
+        for (variant, over, fast, fast_real, app_set) in &variants {
             for profile in &profiles {
                 configs.push(RunConfig {
                     history,
@@ -591,6 +616,7 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                     fast: fast.clone(),
                     real: real.clone(),
                     fast_real: *fast_real,
+                    apps: *app_set,
                 });
             }
         }
@@ -662,9 +688,12 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
     }
     let described: Vec<String> = variants
         .iter()
-        .filter_map(|(name, over, fast, fast_real)| {
+        .filter_map(|(name, over, fast, fast_real, app_set)| {
             name.as_ref().map(|n| {
                 let mut sets: Vec<String> = over.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                if *app_set != AppSet::One {
+                    sets.push(format!("apps={}", app_set.name()));
+                }
                 if let Some(f) = fast {
                     sets.push(format!("a fast model in front ({})", f.name));
                 }

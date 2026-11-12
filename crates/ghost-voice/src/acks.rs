@@ -21,6 +21,15 @@
 //! (#42). One per turn: a reply that calls tools in several rounds is acknowledged once,
 //! and not at all once any of it has been spoken.
 //!
+//! The moment is the first sign a reply needs a tool ([`Frame::ToolStarting`], as the
+//! model begins writing the call), not the call made whole a second or more later, and it
+//! is any tool that sends the model round again: Ghost's own lookups (recall, the docs,
+//! the tool search) cost a model call as an app's do (2026-11-12: four turns of the live
+//! run went five seconds with only the thinking sound, three of them on Ghost's own tools).
+//! When the model wrote a few words before its first call ("Checking four thirteen.",
+//! `crate::narration::preamble`), those are said instead of a fixed line, rendered then;
+//! a goodbye's or a hold's call is not acknowledged, its own words follow.
+//!
 //! With a fast model in front (ADR 0050) the moment comes sooner: when the fast model
 //! hands the turn to the main one ([`Frame::HandOver`]), the acknowledgment is said then,
 //! and covers the main model's first token as well as the tools. Nothing has been done
@@ -249,6 +258,33 @@ impl Acks {
     }
 }
 
+/// The model's own words before its first call, rendered for the acknowledgment; None
+/// when they cannot be (the fixed line is said instead).
+async fn render(
+    synth: SharedSynth,
+    words: String,
+    voice: String,
+    speed: f64,
+) -> Option<(String, Vec<i16>)> {
+    tokio::task::spawn_blocking(move || {
+        let rendered = {
+            let mut s = synth.lock().unwrap_or_else(|e| e.into_inner());
+            s.synthesize(&words, &voice, speed as f32)
+        };
+        match rendered.map(|pcm| trim(&pcm)) {
+            Ok(pcm) if !pcm.is_empty() => Some((words, pcm)),
+            Ok(_) => None,
+            Err(e) => {
+                warn!("ack: Kokoro could not say the model's words: {e}");
+                None
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Which clip, at random, never the one said last.
 #[derive(Debug, Default)]
 pub struct Picker {
@@ -340,14 +376,56 @@ impl AckStage {
         self.spoke = false;
     }
 
+    /// What a call sends Ghost to: an app's read or change, Ghost's own `change`, or any
+    /// other of Ghost's own tools, which is a read. None for a goodbye or a hold.
+    fn kind_of(&self, names: &[String]) -> Option<AckKind> {
+        let quick = names
+            .iter()
+            .all(|n| crate::narration::SPOKEN_WITH.contains(&n.as_str()));
+        if names.is_empty() || quick {
+            return None;
+        }
+        names
+            .iter()
+            .filter(|n| !crate::narration::SPOKEN_WITH.contains(&n.as_str()))
+            .map(|n| {
+                (self.outside)(n).unwrap_or(if n == "change" {
+                    AckKind::Change
+                } else {
+                    AckKind::Read
+                })
+            })
+            .max()
+    }
+
     async fn acknowledge(&mut self, names: &[String], out: &Out) {
-        let kind = names.iter().filter_map(|n| (self.outside)(n)).max();
+        let kind = self.kind_of(names);
         let turn = self
             .reply_turn
             .clone()
             .unwrap_or_else(|| self.turns.current());
-        self.say(kind, names, turn, std::time::Duration::ZERO, out)
+        self.say(kind, None, names, turn, std::time::Duration::ZERO, out)
             .await;
+    }
+
+    /// No later than the turn's grace from the end of the operator's speech: before that
+    /// they may only be pausing (ADR 0049).
+    fn settle_wait(&self) -> std::time::Duration {
+        self.segment_ended.map_or(std::time::Duration::ZERO, |at| {
+            self.settle.saturating_sub(at.elapsed())
+        })
+    }
+
+    /// A reply began a call: said now, with the model's own words when it wrote a few.
+    async fn starting(&mut self, name: &str, said: Option<String>, out: &Out) {
+        let names = vec![name.to_string()];
+        let kind = self.kind_of(&names);
+        let turn = self
+            .reply_turn
+            .clone()
+            .unwrap_or_else(|| self.turns.current());
+        let wait = self.settle_wait();
+        self.say(kind, said, &names, turn, wait, out).await;
     }
 
     /// The fast model handed the turn over: the main model's first token is a second or
@@ -361,22 +439,18 @@ impl AckStage {
         if quick {
             return;
         }
-        let kind = names
-            .iter()
-            .filter_map(|n| (self.outside)(n))
-            .max()
-            .unwrap_or(AckKind::Read);
-        let wait = self.segment_ended.map_or(std::time::Duration::ZERO, |at| {
-            self.settle.saturating_sub(at.elapsed())
-        });
-        self.say(Some(kind), names, self.turns.current(), wait, out)
+        let kind = self.kind_of(names).unwrap_or(AckKind::Read);
+        let wait = self.settle_wait();
+        self.say(Some(kind), None, names, self.turns.current(), wait, out)
             .await;
     }
 
-    /// Say one of `kind`'s lines for `turn`, after `wait`, unless the turn is cut first.
+    /// Say `words` (the model's own, rendered now) or else one of `kind`'s lines for
+    /// `turn`, after `wait`, unless the turn is cut first.
     async fn say(
         &mut self,
         kind: Option<AckKind>,
+        words: Option<String>,
         names: &[String],
         turn: CancellationToken,
         wait: std::time::Duration,
@@ -389,43 +463,68 @@ impl AckStage {
             return;
         };
         self.acked = true; // once per turn, said or not
-        let Some(voiced) = self.acks.get(&self.voice, self.speed) else {
-            debug::audio(|| format!("ack: none yet in {}", self.voice));
-            self.acks.warm(self.synth.clone(), &self.voice, self.speed);
-            return;
-        };
-        let Some(clip) = self.picker.pick(voiced.of(kind)).cloned() else {
-            return;
-        };
         if turn.is_cancelled() {
             return;
         }
-        debug::audio(|| format!("ack: {:?} before {}", clip.text, names.join(", ")));
-        let frame = Frame::Ack {
-            text: clip.text.to_string(),
-            audio: Audio::new((*clip.pcm).clone(), RATE),
-            turn: turn.clone(),
+        let clip = match self.acks.get(&self.voice, self.speed) {
+            Some(voiced) => self.picker.pick(voiced.of(kind)).cloned(),
+            None => {
+                self.acks.warm(self.synth.clone(), &self.voice, self.speed);
+                None
+            }
         };
-        if wait.is_zero() {
+        if words.is_none() && clip.is_none() {
+            debug::audio(|| format!("ack: none yet in {}", self.voice));
+            return;
+        }
+        if words.is_none()
+            && wait.is_zero()
+            && let Some(clip) = &clip
+        {
+            // A fixed line, due now: in order, before anything after it.
+            debug::audio(|| format!("ack: {:?} before {}", clip.text, names.join(", ")));
             if let Some(on_ack) = &self.on_ack {
                 on_ack(clip.text);
             }
-            out.push(frame).await;
+            out.push(Frame::Ack {
+                text: clip.text.to_string(),
+                audio: Audio::new((*clip.pcm).clone(), RATE),
+                turn,
+            })
+            .await;
             return;
         }
-        // Not yet: the operator may be going on. The stage's inbox is not held meanwhile.
+        // The stage's inbox is not held while the words render or the grace runs.
         let (out, on_ack) = (out.clone(), self.on_ack.clone());
-        tokio::spawn(async move {
+        let (synth, voice, speed) = (self.synth.clone(), self.voice.clone(), self.speed);
+        let names = names.join(", ");
+        let work = async move {
+            let rendered = match words {
+                Some(words) => render(synth, words, voice, speed).await,
+                None => None,
+            };
+            let (text, pcm) = match (rendered, clip) {
+                (Some((text, pcm)), _) => (text, pcm),
+                (None, Some(clip)) => (clip.text.to_string(), (*clip.pcm).clone()),
+                (None, None) => return,
+            };
             tokio::select! {
                 biased;
                 () = turn.cancelled() => return,
                 () = tokio::time::sleep(wait) => {}
             }
+            debug::audio(|| format!("ack: {text:?} before {names}"));
             if let Some(on_ack) = &on_ack {
-                on_ack(clip.text);
+                on_ack(&text);
             }
-            out.push(frame).await;
-        });
+            out.push(Frame::Ack {
+                text,
+                audio: Audio::new(pcm, RATE),
+                turn,
+            })
+            .await;
+        };
+        tokio::spawn(work);
     }
 }
 
@@ -459,6 +558,10 @@ impl Stage for AckStage {
                 Frame::HandOver { names, .. } => {
                     let names = names.clone();
                     self.handed_over(&names, out).await;
+                }
+                Frame::ToolStarting { name, said } => {
+                    let (name, said) = (name.clone(), said.clone());
+                    self.starting(&name, said, out).await;
                 }
                 _ => {}
             }
@@ -725,7 +828,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_no_ack_for_what_ghost_has_or_its_own_tools() {
+    async fn test_no_ack_for_what_ghost_has_a_goodbye_or_a_reply_already_speaking() {
         let mut s = stage(Arc::default());
         let none = run(
             &mut s,
@@ -735,10 +838,11 @@ mod tests {
                 Frame::LlmStart,
                 Frame::LlmText("The first one was the Redis timeout.".into()),
                 Frame::LlmEnd,
-                // its own tools: memory, the waiting list, hanging up
+                // hanging up, holding
                 Frame::UserStopped,
-                calls(&["change", "waiting_list"]),
                 calls(&["hang_up"]),
+                Frame::UserStopped,
+                starting("hold", None),
                 // a reply already being spoken when it reaches for an app
                 Frame::UserStopped,
                 Frame::LlmText("Here are the three. ".into()),
@@ -747,6 +851,88 @@ mod tests {
         )
         .await;
         assert!(none.is_empty(), "{none:?}");
+    }
+
+    #[tokio::test]
+    async fn ghosts_own_lookups_are_acknowledged_too() {
+        // 2026-11-12: recall, the tool search and the docs each sent the model round again,
+        // a second or two of silence each, and none was acknowledged.
+        let mut s = stage(Arc::default());
+        let read = run(&mut s, vec![Frame::UserStopped, calls(&["ghost_recall"])]).await;
+        assert!(READ.contains(&read[0].as_str()), "{read:?}");
+        let change = run(&mut s, vec![Frame::UserStopped, calls(&["change"])]).await;
+        assert!(CHANGE.contains(&change[0].as_str()), "{change:?}");
+    }
+
+    fn starting(name: &str, said: Option<&str>) -> Frame {
+        Frame::ToolStarting {
+            name: name.into(),
+            said: said.map(String::from),
+        }
+    }
+
+    async fn acks_within(
+        rx: &mut tokio::sync::mpsc::Receiver<crate::frames::Pushed>,
+        ms: u64,
+    ) -> Vec<String> {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        drain(rx)
+            .await
+            .into_iter()
+            .filter_map(|f| match f {
+                Frame::Ack { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_call_is_acknowledged_as_it_starts_with_the_models_own_words_when_it_wrote_some() {
+        let said = Arc::new(Mutex::new(Vec::new()));
+        let mut s = stage(said.clone());
+        let (out, mut rx) = Out::capture();
+        for f in [
+            Frame::UserStopped,
+            starting("github_issue_read", Some("Checking four thirteen.")),
+            // the call made whole, a second later: not acknowledged again
+            calls(&["github_issue_read"]),
+        ] {
+            s.process(f, Direction::Down, &out).await;
+        }
+        assert_eq!(
+            acks_within(&mut rx, 100).await,
+            vec!["Checking four thirteen."]
+        );
+        assert_eq!(*said.lock().unwrap(), vec!["Checking four thirteen."]);
+        // No words: one of the fixed lines, at once.
+        let none = run(
+            &mut s,
+            vec![Frame::UserStopped, starting("ghost_tools_search", None)],
+        )
+        .await;
+        assert!(READ.contains(&none[0].as_str()), "{none:?}");
+    }
+
+    #[tokio::test]
+    async fn a_call_start_waits_out_the_grace_and_is_not_said_if_the_operator_went_on() {
+        for goes_on in [false, true] {
+            let turns = TurnControl::new(CancellationToken::new());
+            let mut s = stage_with(Arc::default(), turns.clone()).with_settle(0.3);
+            let (out, mut rx) = Out::capture();
+            for f in [
+                Frame::VadStopped { stop_secs: 0.2 },
+                Frame::UserStopped,
+                starting("github_issue_read", Some("Checking.")),
+            ] {
+                s.process(f, Direction::Down, &out).await;
+            }
+            assert!(acks_within(&mut rx, 50).await.is_empty(), "not yet");
+            if goes_on {
+                turns.interrupt();
+            }
+            let later = acks_within(&mut rx, 400).await;
+            assert_eq!(later.len(), usize::from(!goes_on), "{later:?}");
+        }
     }
 
     #[tokio::test]

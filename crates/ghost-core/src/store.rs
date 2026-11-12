@@ -209,6 +209,13 @@ CREATE TABLE IF NOT EXISTS questions (
     follow_up_run TEXT
 );
 CREATE INDEX IF NOT EXISTS questions_open ON questions(state, asker);
+-- The tools offered by name past the apps' limits (ADR 0046): the ones the model used or
+-- found lately, oldest first, by the names it calls them. Kept so a daemon started again
+-- offers what the operator uses without a search first.
+CREATE TABLE IF NOT EXISTS recent_tools (
+    position INTEGER PRIMARY KEY,
+    name     TEXT NOT NULL
+);
 -- The provider check (ADR 0056): what one route (provider, address, model) did with a
 -- fixed synthetic prompt, kept so Ghost shapes its requests to it and can say which of
 -- the operator's tried options answered faster. Never a key, never the operator's words.
@@ -801,6 +808,33 @@ impl Store {
         Ok(n == 1)
     }
 
+    // --- the tools offered by name (ADR 0046) ---------------------------------------
+
+    /// The tools the model used or found lately, oldest first.
+    pub fn recent_tools(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut st = conn.prepare("SELECT name FROM recent_tools ORDER BY position")?;
+        let rows = st
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Keep these, oldest first, in place of what was kept.
+    pub fn set_recent_tools(&self, names: &[String]) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM recent_tools", [])?;
+        for (i, name) in names.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO recent_tools (position, name) VALUES (?, ?)",
+                params![i as i64, name],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     // --- outside clients (ADR 0048) --------------------------------------------------
 
     /// A new client; false when the name is taken.
@@ -1374,6 +1408,21 @@ mod tests {
     use super::*;
     use crate::models::*;
     use serde_json::json;
+
+    #[test]
+    fn the_recent_tools_are_kept_in_order_and_replaced_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ghost.db");
+        let s = Store::open(&path).unwrap();
+        assert!(s.recent_tools().unwrap().is_empty());
+        let names = ["github_issue_read".to_string(), "ghost_recall".to_string()];
+        s.set_recent_tools(&names).unwrap();
+        drop(s);
+        let s = Store::open(&path).unwrap(); // a daemon started again
+        assert_eq!(s.recent_tools().unwrap(), names);
+        s.set_recent_tools(&["ghost_recall".to_string()]).unwrap();
+        assert_eq!(s.recent_tools().unwrap(), vec!["ghost_recall"]);
+    }
 
     #[test]
     fn model_checks_keep_the_latest_per_route() {
