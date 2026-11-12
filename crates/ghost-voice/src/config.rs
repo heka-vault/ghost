@@ -186,6 +186,13 @@ pub struct VoiceSettings {
     pub quick_intents: bool,
     /// `GHOST_ACK`: a one- or two-word acknowledgment as Ghost goes to an app (`acks`).
     pub ack: bool,
+    /// `GHOST_FIRST_SOUND_SECS`: when the model has written nothing this long after a
+    /// turn's reply began, Ghost says "One sec." (`acks::FirstSound`). Unset: chosen per
+    /// connection from `first_word_secs`; 0: never.
+    pub first_sound_secs: Option<f64>,
+    /// The connection's usual first word, in seconds after the call (the daemon fills it
+    /// from the operator's last turns or the latest check, `Daemon::first_word_secs`).
+    pub first_word_secs: Option<f64>,
     pub thinking_sound: bool,
     pub thinking_volume: f64,
     pub thinking_delay_secs: f64,
@@ -228,6 +235,20 @@ impl Default for VoiceSettings {
 }
 
 impl VoiceSettings {
+    /// When the first sound is said (`acks::FirstSound`): as set, never at 0, or chosen
+    /// for the connection's own first word when unset.
+    pub fn first_sound(&self) -> Option<crate::acks::FirstSound> {
+        match self.first_sound_secs {
+            Some(s) if s <= 0.0 || !s.is_finite() => None,
+            Some(s) => Some(crate::acks::FirstSound {
+                after: std::time::Duration::from_secs_f64(s),
+            }),
+            None => Some(crate::acks::FirstSound::for_connection(
+                self.first_word_secs,
+            )),
+        }
+    }
+
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_vars(|name| std::env::var(name).ok())
     }
@@ -379,6 +400,8 @@ impl VoiceSettings {
             compact_summary_tokens: f64_or("GHOST_COMPACT_SUMMARY_TOKENS", 3000.0)? as u32,
             quick_intents: flag("GHOST_QUICK_INTENTS", true),
             ack: flag("GHOST_ACK", true),
+            first_sound_secs: number("GHOST_FIRST_SOUND_SECS")?,
+            first_word_secs: None,
             // Off (2026-10-30): the pulses leak through the echo canceller, the VAD takes the
             // residual for a voice, and the operator finds it unpleasant; how Ghost shows it
             // is working is to be rethought.
@@ -682,6 +705,33 @@ mod tests {
         assert_eq!(
             VoiceSettings::from_vars(vars(&[("GHOST_VAD_STOP_SECS", "soon")])).err(),
             Some(ConfigError::Number("GHOST_VAD_STOP_SECS".into()))
+        );
+    }
+
+    #[test]
+    fn the_first_sound_is_per_connection_unless_set() {
+        let with = |v: Option<&str>| {
+            VoiceSettings::from_vars(|n| {
+                (n == "GHOST_FIRST_SOUND_SECS")
+                    .then(|| v.map(String::from))
+                    .flatten()
+            })
+            .unwrap()
+        };
+        let mut s = with(None);
+        assert_eq!(
+            s.first_sound(),
+            Some(crate::acks::FirstSound::for_connection(None))
+        );
+        s.first_word_secs = Some(1.9); // OpenRouter's Haiku 5.5 on 2026-11-12
+        assert_eq!(
+            s.first_sound(),
+            Some(crate::acks::FirstSound::for_connection(Some(1.9)))
+        );
+        assert_eq!(with(Some("0")).first_sound(), None, "0 is off");
+        assert_eq!(
+            with(Some("0.9")).first_sound().unwrap().after,
+            std::time::Duration::from_millis(900)
         );
     }
 }

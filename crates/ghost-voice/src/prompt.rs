@@ -11,8 +11,8 @@ URLs, no emoji.
 - Say numbers and names the way a person would read them aloud.
 {lead_rule}- When you are unsure what the operator said, ask a short question. But when a lookup \
 can settle it (an issue by its number, a repository by a short name), look first, finding \
-the tool if it is not listed, and ask only if what you find leaves more than one answer. When two connected apps reach the same \
-repository, read through one of them.
+the tool if it is not listed, and ask only if what you find leaves more than one answer. A filter on a name you guessed (a label, a status) \
+that finds nothing is not an answer: look again without it before saying there are none.
 - Before your first lookup you may say a few words that show you heard (\"Checking four \
 thirteen.\"). After that never narrate your steps (\"I'll read the comments too\"); call the \
 tools and speak only the answer. A thinking sound plays while you work.
@@ -231,13 +231,21 @@ mod tests {
         // connections, and took three model calls to say no calendar is connected.
         let p = build_system_prompt(&[], &Persona::ghost());
         assert!(p.contains("look first, finding the tool if it is not listed, and ask only if"));
-        assert!(p.contains("read through one of them"));
+        // 2026-11-12: "What's waiting for triage?" filtered on a label it guessed
+        // (`triage`), found nothing, and said nothing was waiting; the app's label was
+        // `needs-triage`. Empty under a guessed filter is not "none".
+        assert!(p.contains("A filter on a name you guessed"));
+        assert!(p.contains("look again without it before saying there are none"));
+        // Which two connections reach the same service is said in their own paragraph,
+        // by name (`ghost_core::apps::twins`), not here in general.
+        assert!(!p.contains("read through one of them"));
         assert!(p.contains("needs a kind of service none of"));
         assert!(p.contains("say so at once instead of searching"));
         assert!(p.contains("Before your first lookup you may say a few words"));
         assert!(p.contains("never narrate your steps"));
         // Sent on every turn (ADR 0018): the template stays under 3,200 characters; these
-        // lines took it from 2,574 to 3,124, some 135 tokens, read from the cache.
+        // lines took it from 2,574 to 3,124, some 135 tokens, read from the cache, and the
+        // guessed filter's line for the general twin line made it 3,185 (2026-11-12).
         assert!(SYSTEM.len() < 3_200, "{}", SYSTEM.len());
     }
 
