@@ -265,8 +265,7 @@ impl ParakeetStt {
     /// The operator went quiet (the VAD's first quiet frame after speech): read what was
     /// said, with silence for the stop the VAD has still to wait.
     pub(crate) fn silence_began(&mut self) {
-        if self.early_read == EarlyReadMode::Off || !self.user_speaking || self.segment.is_empty()
-        {
+        if self.early_read == EarlyReadMode::Off || !self.user_speaking || self.segment.is_empty() {
             return;
         }
         self.drop_early();
@@ -466,7 +465,11 @@ impl ParakeetStt {
             Some(e) => {
                 let began = Instant::now();
                 let (text, secs) = e.task.await.unwrap_or((None, 0.0));
-                Some((text.unwrap_or_default(), began.elapsed().as_secs_f64(), secs))
+                Some((
+                    text.unwrap_or_default(),
+                    began.elapsed().as_secs_f64(),
+                    secs,
+                ))
             }
             None => None,
         };
@@ -486,7 +489,9 @@ impl ParakeetStt {
             .await;
             let secs_audio = segment.len() as f64 / f64::from(SAMPLE_RATE);
             if text.is_empty() {
-                debug::audio(|| format!("heard nothing in a {secs_audio:.1}s segment (read early)"));
+                debug::audio(|| {
+                    format!("heard nothing in a {secs_audio:.1}s segment (read early)")
+                });
             } else {
                 debug::audio(|| format!("heard: {text:?} (read early)"));
                 out.push(Frame::Transcript(text.clone())).await;
@@ -525,7 +530,11 @@ impl ParakeetStt {
                 debug::audio(|| format!("early read differs: {early_text:?} at the stop {text:?}"));
             }
             out.push(Frame::Metrics(Metric::EarlyRead {
-                what: if early_text == text { "same" } else { "differs" },
+                what: if early_text == text {
+                    "same"
+                } else {
+                    "differs"
+                },
                 secs,
             }))
             .await;
@@ -613,8 +622,7 @@ impl Stage for ParakeetStt {
                                     self.early_tried = false;
                                 }
                                 self.quiet_secs += audio.seconds();
-                                if !self.early_tried && self.quiet_secs >= self.early_after_secs
-                                {
+                                if !self.early_tried && self.quiet_secs >= self.early_after_secs {
                                     self.silence_began();
                                 }
                             }
@@ -1034,7 +1042,8 @@ mod tests {
     /// early read starts), then the stop's quiet; `resume` puts speech back in between.
     async fn segment(mode: EarlyReadMode, resume: bool) -> (Vec<Frame>, Vec<usize>) {
         let (model, calls) = counting(30);
-        let mut stt = ParakeetStt::new(model, None, VadParams::default(), 0.0).with_early_read(mode);
+        let mut stt =
+            ParakeetStt::new(model, None, VadParams::default(), 0.0).with_early_read(mode);
         let (out, mut rx) = Out::capture();
         stt.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
             .await;
@@ -1099,8 +1108,8 @@ mod tests {
         // With the read 0.15 s long and started 0.2 s before the stop, the words come at
         // the stop: the stage reports the time it waited, not the read's.
         let (model, _) = counting(150);
-        let mut stt =
-            ParakeetStt::new(model, None, VadParams::default(), 0.0).with_early_read(EarlyReadMode::On);
+        let mut stt = ParakeetStt::new(model, None, VadParams::default(), 0.0)
+            .with_early_read(EarlyReadMode::On);
         let (out, mut rx) = Out::capture();
         stt.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
             .await;

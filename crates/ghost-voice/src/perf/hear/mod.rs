@@ -182,7 +182,7 @@ async fn hear_stage(
     let mut stt = ParakeetStt::new(models.stt.clone(), Some(vad), settings.vad_params(), 0.0)
         .with_vad_clock(clock)
         .with_early_read(settings.stt_early_read)
-            .with_early_read_after(settings.stt_early_read_after_secs);
+        .with_early_read_after(settings.stt_early_read_after_secs);
     let (out, mut rx) = Out::capture();
     let mut audio = pcm.to_vec();
     audio.extend(plan::room_noise(TAIL_SECS, -70.0, 99));

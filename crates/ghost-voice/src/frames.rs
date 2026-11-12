@@ -70,7 +70,10 @@ pub enum Metric {
     /// A segment read from its first quiet frame (`stt::EarlyReadMode`): `used`,
     /// `discarded` when speech came back first, `same` or `differs` when verified; `secs`
     /// is the model's time on it.
-    EarlyRead { what: &'static str, secs: f64 },
+    EarlyRead {
+        what: &'static str,
+        secs: f64,
+    },
 }
 
 /// Everything that travels between stages. The names keep Pipecat's where the idea is the

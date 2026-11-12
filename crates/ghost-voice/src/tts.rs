@@ -169,9 +169,8 @@ impl Prerender {
     /// Cut the reply's first piece early, as the TTS stage does
     /// (`KokoroTts::with_first_clause`): what is rendered ahead must be what it would say.
     pub fn with_first_clause(self, words: usize) -> Self {
-        let inner = Arc::try_unwrap(self.0).unwrap_or_else(|_| {
-            panic!("with_first_clause is for a handle no one shares yet")
-        });
+        let inner = Arc::try_unwrap(self.0)
+            .unwrap_or_else(|_| panic!("with_first_clause is for a handle no one shares yet"));
         let first_clause_words = words;
         Self(Arc::new(PrerenderInner {
             first_clause_words,

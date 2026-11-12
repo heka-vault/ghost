@@ -305,7 +305,9 @@ impl Call {
                     model: fast.model_name(),
                     secs: first.unwrap_or_else(|| began.elapsed().as_secs_f64()),
                 }));
-                let text_events = kept.into_iter().filter(|e| !matches!(e, Event::Finished(_)));
+                let text_events = kept
+                    .into_iter()
+                    .filter(|e| !matches!(e, Event::Finished(_)));
                 for ev in text_events
                     .chain(calls.into_iter().map(Event::ToolCall))
                     .chain([Event::Finished(ghost_llm::FinishReason::ToolUse)])
@@ -502,17 +504,13 @@ impl LlmStage {
         held: Option<(Arc<std::sync::atomic::AtomicU8>, Out)>,
         handed: Handed,
     ) -> (Events, JoinHandle<()>) {
-        let fast = self
-            .fast
-            .as_ref()
-            .filter(|_| first)
-            .map(|fast| {
-                (
-                    fast.clone(),
-                    fast_tools(&self.tools),
-                    fast_options(&self.options),
-                )
-            });
+        let fast = self.fast.as_ref().filter(|_| first).map(|fast| {
+            (
+                fast.clone(),
+                fast_tools(&self.tools),
+                fast_options(&self.options),
+            )
+        });
         Call {
             main: self.model.clone(),
             fast,

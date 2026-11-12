@@ -95,18 +95,47 @@ pub fn match_endofsentence(text: &str) -> usize {
 
 /// Words a reply's first piece may end before: each starts a phrase of its own, so the
 /// voice can stop there as it would at a comma. Few on purpose: "or", "for" and "with" join
-/// names and set phrases ("Redis or Postgres", "waiting for triage") too often.
+/// names and set phrases ("Redis or Postgres", "waiting for triage") too often, and "which"
+/// asks as often as it relates ("confirm which repository").
 pub const PHRASE_STARTS: &[&str] = &[
-    "and", "but", "so", "because", "while", "though", "although", "since", "unless",
-    "until",
+    "and", "but", "so", "because", "while", "though", "although", "since", "unless", "until",
 ];
 
 /// Words that say a number: a cut after one would split "one forty two and ...".
 const NUMBER_WORDS: &[&str] = &[
-    "zero", "oh", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
-    "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
-    "hundred", "thousand", "million", "billion",
+    "zero",
+    "oh",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+    "thousand",
+    "million",
+    "billion",
 ];
 
 /// Whether a reply's first piece may end after `word`: a lowercase word that is not a
@@ -456,7 +485,11 @@ mod tests {
         // Three words and a comma are enough for the first piece; the rest of the reply
         // follows the usual rule (four words before a comma).
         assert_eq!(
-            first(3, Some(4), "Three are waiting, the first one is red, and that's it."),
+            first(
+                3,
+                Some(4),
+                "Three are waiting, the first one is red, and that's it."
+            ),
             vec![
                 "Three are waiting,",
                 "the first one is red,",
@@ -489,10 +522,7 @@ mod tests {
                 Some(4),
                 "The build failed last night because the cache was cold."
             ),
-            vec![
-                "The build failed last night",
-                "because the cache was cold."
-            ]
+            vec!["The build failed last night", "because the cache was cold."]
         );
     }
 
@@ -500,7 +530,11 @@ mod tests {
     fn the_first_clause_is_not_cut_inside_a_name_or_a_number() {
         // A capitalized word before the conjunction is a name ("Redis and Postgres").
         assert_eq!(
-            first(3, Some(4), "Choose between Redis and Postgres for the cache."),
+            first(
+                3,
+                Some(4),
+                "Choose between Redis and Postgres for the cache."
+            ),
             vec!["Choose between Redis and Postgres for the cache."]
         );
         // A number, in digits or in words, before it.
@@ -557,7 +591,11 @@ mod tests {
         );
         // Off (0): what the aggregator did before.
         assert_eq!(
-            first(0, Some(4), "Three are waiting, the first one is red, and that's it."),
+            first(
+                0,
+                Some(4),
+                "Three are waiting, the first one is red, and that's it."
+            ),
             run(
                 Some(4),
                 &["Three are waiting, the first one is red, and that's it."]

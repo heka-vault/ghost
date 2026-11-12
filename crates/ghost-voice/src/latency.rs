@@ -943,9 +943,10 @@ pub fn build_record(
         rec.insert("hear".into(), Value::Object(hear));
     }
     if !turn.early_read.is_empty() {
-        let mut e = turn.early_read.clone();
-        let secs = round(turn.early_read_secs, 3);
-        rec.insert("early_read".into(), json!({"n": e.drain(..).collect::<IndexMap<_, _>>(), "secs": secs}));
+        rec.insert(
+            "early_read".into(),
+            json!({"n": turn.early_read, "secs": round(turn.early_read_secs, 3)}),
+        );
     }
     if !turn.prerender.is_empty() {
         rec.insert("prerender".into(), json!(turn.prerender));

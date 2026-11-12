@@ -38,7 +38,11 @@ fn rms_db(pcm: &[i16]) -> f64 {
     if pcm.is_empty() {
         return -120.0;
     }
-    let p = pcm.iter().map(|&x| f64::from(x) * f64::from(x)).sum::<f64>() / pcm.len() as f64;
+    let p = pcm
+        .iter()
+        .map(|&x| f64::from(x) * f64::from(x))
+        .sum::<f64>()
+        / pcm.len() as f64;
     20.0 * (p.sqrt() / 32768.0).max(1e-9).log10()
 }
 
@@ -279,14 +283,21 @@ mod tests {
     #[test]
     fn a_join_with_the_whole_renders_pause_measures_as_natural() {
         let silence = |s: f64| vec![0i16; (24_000.0 * s) as usize];
-        let whole: Vec<i16> = [tone(150.0, 0.5, 8000.0), silence(0.15), tone(150.0, 0.5, 8000.0)]
-            .concat();
+        let whole: Vec<i16> = [
+            tone(150.0, 0.5, 8000.0),
+            silence(0.15),
+            tone(150.0, 0.5, 8000.0),
+        ]
+        .concat();
         let first: Vec<i16> = [tone(150.0, 0.5, 8000.0), silence(0.05)].concat();
         let second: Vec<i16> = [silence(0.03), tone(150.0, 0.5, 8000.0)].concat();
         let j = measure(&whole, &first, &second, 24_000);
         assert!((j.natural_ms - 150.0).abs() <= 20.0, "{j:?}");
         assert!((j.gap_ms() - 80.0).abs() <= 20.0, "{j:?}");
-        assert!(j.energy_before_db.abs() < 1.0 && j.energy_after_db.abs() < 1.0, "{j:?}");
+        assert!(
+            j.energy_before_db.abs() < 1.0 && j.energy_after_db.abs() < 1.0,
+            "{j:?}"
+        );
         assert!(j.jump_pieces_st.unwrap().abs() < 0.5, "{j:?}");
         let f = f0(&tone(200.0, 0.06, 8000.0), 24_000).unwrap();
         assert!((f - 200.0).abs() < 5.0, "{f}");

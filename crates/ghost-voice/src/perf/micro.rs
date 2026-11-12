@@ -117,7 +117,10 @@ pub async fn run_micro(only: &[String], n: usize, out: &Path, cache: &Path) -> a
     );
     let mut lines: Vec<String> = Vec::new();
     let wants = |k: &str| only.iter().any(|o| o == k);
-    let models = if ["stt", "tts", "turn", "tts-len", "tts-join"].iter().any(|k| wants(k)) {
+    let models = if ["stt", "tts", "turn", "tts-len", "tts-join"]
+        .iter()
+        .any(|k| wants(k))
+    {
         Some(Arc::new(Models::load(&settings)?))
     } else {
         None
@@ -240,10 +243,7 @@ pub async fn run_micro(only: &[String], n: usize, out: &Path, cache: &Path) -> a
                 num(&Value::Object(s.clone()), "p95") * 1000.0,
                 num(&Value::Object(s.clone()), "p50") / audio.max(0.01)
             ));
-            by_len.insert(
-                words.to_string(),
-                json!({"render": s, "audio": audio}),
-            );
+            by_len.insert(words.to_string(), json!({"render": s, "audio": audio}));
         }
         results.insert("tts_len".into(), Value::Object(by_len));
     }
@@ -257,8 +257,8 @@ pub async fn run_micro(only: &[String], n: usize, out: &Path, cache: &Path) -> a
         ));
         let mut rows = Vec::new();
         for text in JOIN_LINES {
-            let mut agg = ClauseAggregator::new(settings.clause_min_words())
-                .with_first_clause(words);
+            let mut agg =
+                ClauseAggregator::new(settings.clause_min_words()).with_first_clause(words);
             let mut pieces = agg.push(text);
             pieces.extend(agg.flush());
             if pieces.len() < 2 {

@@ -501,7 +501,10 @@ mod tests {
         assert!(s.prerender(), "Kokoro renders the first clause ahead");
         assert_eq!(s.tts_first_clause_words, 4);
         assert_eq!(s.stt_early_read, crate::stt::EarlyReadMode::Off);
-        assert!(s.llm_fast_reads, "with a fast model set, it makes reads itself");
+        assert!(
+            s.llm_fast_reads,
+            "with a fast model set, it makes reads itself"
+        );
         assert!(s.turn_speculate);
         assert!(s.turn_reread);
         assert_eq!(s.turn_stop_secs, 1.6);

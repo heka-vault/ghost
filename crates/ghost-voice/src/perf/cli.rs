@@ -303,7 +303,12 @@ fn overrides(args: &Args) -> Result<BTreeMap<String, String>, String> {
 
 /// A named set of settings for one run: its name, the overrides, the fast model's profile,
 /// and whether the real fast model is in front (`fast=real`).
-type Variant = (Option<String>, BTreeMap<String, String>, Option<Profile>, bool);
+type Variant = (
+    Option<String>,
+    BTreeMap<String, String>,
+    Option<Profile>,
+    bool,
+);
 
 /// `--fast haiku`, or `none`.
 fn fast_profile(name: &str) -> Result<Option<Profile>, String> {

@@ -1518,15 +1518,26 @@ async fn the_fast_model_reads_and_answers_from_a_short_result_without_the_main_m
     wait_for(&w.records, "opening", Duration::from_secs(5)).await;
     say(&w, 0.3).await;
     let rec = voice_records(&w, 1).await.remove(0);
-    assert_eq!(reads.load(Ordering::SeqCst), 1, "the fast model's read ran once");
-    assert!(w.asked.lock().unwrap().is_empty(), "the main model was asked");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the fast model's read ran once"
+    );
+    assert!(
+        w.asked.lock().unwrap().is_empty(),
+        "the main model was asked"
+    );
     assert_eq!(
         said_by_ghost(&w),
         vec!["Yeah?", "One is critical: the Redis one."]
     );
     assert!(rec.get("handover").is_none(), "{rec}");
     assert!(rec["ack"].is_number(), "the lookup is acknowledged: {rec}");
-    assert_eq!(w.fast_asked.lock().unwrap().len(), 2, "the read, then the answer");
+    assert_eq!(
+        w.fast_asked.lock().unwrap().len(),
+        2,
+        "the read, then the answer"
+    );
     finish(&w).await;
 }
 
@@ -1675,6 +1686,10 @@ async fn with_reads_off_any_call_hands_over_as_before() {
     say(&w, 0.3).await;
     let rec = voice_records(&w, 1).await.remove(0);
     assert_eq!(rec["handover"]["n"], json!(1), "{rec}");
-    assert_eq!(reads.load(Ordering::SeqCst), 1, "the main model's read only");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the main model's read only"
+    );
     finish(&w).await;
 }
