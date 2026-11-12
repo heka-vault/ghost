@@ -51,7 +51,8 @@ answers the whole text.
   closes again (`ConversationRuntime::hold_user`). Before, every segment was a user turn
   of its own, a wrong first read included, and they came back as consecutive user
   messages in the next session's context. The pieces still go out as they come to what
-  shows them live (`UserTap`, the desktop's captions).
+  shows them live (`UserTap`, the desktop's captions), and the closed turn's words follow as a
+  `heard` event that replaces them on screen (ADR 0058).
 - One more model read per turn of two segments or more, of the whole turn's length, at
   the close: about 30 ms per second of audio with fp32. The numbers are below.
 - The aggregator holds up to 30 s of the session's audio in memory while a turn is open;

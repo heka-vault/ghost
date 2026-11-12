@@ -149,6 +149,12 @@ export type HearVerdict = Schemas["HearVerdict"];
 /** What a live session did (ADR 0055). */
 export type ActivityView = Schemas["ActivityView"];
 export type ActivityKind = ActivityView["kind"];
+/** The operator's spoken turn as it closed, with the words the model was given (ADR 0058). */
+export type HeardView = Schemas["HeardView"];
+/** Which words of Ghost's reply are heard now (ADR 0058). */
+export type SayingView = Schemas["SayingView"];
+/** What one call of the live session returned, as the model was given it (ADR 0058). */
+export type CallPreview = Schemas["CallPreview"];
 /** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
 export type HearChannel = "aec" | "raw";
 
@@ -168,6 +174,10 @@ export type GhostEvent =
   | Schemas["VoiceEvent"]
   /** What the live session is doing (ADR 0055): the operator's turn, tool calls, a handover, a cut, an error. Names only, never words. */
   | Schemas["ActivityEvent"]
+  /** The operator's spoken turn closed with these words, or was taken back (ADR 0058). */
+  | Schemas["HeardEvent"]
+  /** Which words of Ghost's reply are heard now (ADR 0058). Desktop only. */
+  | Schemas["SayingEvent"]
   /** The Hearing test's recorder, ~20/s while it is open: its view, the mic's level 0..1, whether the VAD hears speech; then one `closed`. */
   | Schemas["HearEvent"];
 
@@ -269,6 +279,14 @@ export class GhostClient {
   }
   declineQuestion(key: string) {
     return unwrap(this.api.POST("/questions/decline", { body: { key } }));
+  }
+  /** What sessions did between their turns, kept beside the transcript (ADR 0058). */
+  activity(sessions: readonly string[]) {
+    return unwrap(this.api.GET("/activity", { params: { query: { sessions: sessions.join(",") } } }));
+  }
+  /** What one call of the live session returned, bounded and redacted (ADR 0058); 404 once not kept. */
+  call(id: string) {
+    return unwrap(this.api.GET("/calls/{id}", { params: { path: { id } } }));
   }
   audit(query: paths["/audit"]["get"]["parameters"]["query"] = {}) {
     return unwrap(this.api.GET("/audit", { params: { query } }));
@@ -515,6 +533,10 @@ export class GhostClient {
   /** A schedule's runs, newest first, with what each answered. */
   scheduleRuns(id: string, limit = 20) {
     return unwrap(this.api.GET("/schedules/{schedule_id}/runs", { params: { path: { schedule_id: id }, query: { limit } } }));
+  }
+  /** The latest runs of every agent, newest first: scheduled, for a watch, or asked for. */
+  runs(limit = 20) {
+    return unwrap(this.api.GET("/runs", { params: { query: { limit } } }));
   }
   /** Stop a run that is waiting or going. */
   cancelRun(id: string) {

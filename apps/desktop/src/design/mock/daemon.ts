@@ -3,10 +3,13 @@
  * update this state and emit the same events the real daemon would, so screens behave
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
+import { wordEnds } from "@ghost/ui";
+
 import { speechEnvelope } from "../../ui/VoiceWave";
 import type {
   Ack,
   ActivityView,
+  CallPreview,
   QuestionView,
   AppConnect,
   AppConnectResult,
@@ -222,6 +225,10 @@ export class MockDaemon {
   private timers = new Set<ReturnType<typeof setTimeout>>();
   /** The live session's activity so far (ADR 0055), replayed to each new subscriber. */
   private activity: ActivityView[] = [];
+  /** What each call returned, as `GET /calls/{id}` answers (ADR 0058). */
+  private callResults = new Map<string, CallPreview>();
+  /** The live session's replies, numbered as the daemon's TTS stage numbers them (ADR 0058). */
+  private replyNo = -1;
   /** Questions agents asked (ADR 0051). */
   private questions: QuestionView[] = [];
   /** A story plays once, on the first subscriber. */
@@ -257,6 +264,7 @@ export class MockDaemon {
     this.policy = f.policy;
     this.audit = [...f.session.audit, ...f.audit];
     this.activity = f.session.activity;
+    for (const [id, p] of Object.entries(f.session.results)) this.callResults.set(id, { ...p, id, session_id: f.session.sessionId ?? "" });
     this.questions = f.session.questions;
     this.settings = f.settings.settings;
     this.passwords = structuredClone(f.settings.passwords);
@@ -315,6 +323,16 @@ export class MockDaemon {
         events: [{ at: new Date(Date.now() - 8_000).toISOString(), event: "prepared", detail: { source: this.pending.source, operation: this.pending.operation, target: `github:${this.pending.target}`, autonomy: "confirm" } }],
         conversation: this.status.conversation ?? null,
       });
+    }
+    // A configured Ghost has checked its model connection once (ADR 0056): Today and the room
+    // show how fast a reply starts from it. An empty or unconfigured one hasn't yet.
+    if (scenario.configured && scenario.data !== "empty") {
+      try {
+        const c = this.model.check({ values: {} });
+        this.model.last = { ...c, checked_at: new Date(Date.now() - 3 * 3600_000).toISOString() };
+      } catch {
+        /* the check needs nothing the mock lacks; never block the scenario on it */
+      }
     }
     this.schedules = new MockSchedules(f.schedules, {
       agent: (slug) => {
@@ -378,12 +396,50 @@ export class MockDaemon {
     const activity: ActivityView = { kind, session_id: this.status.session_id, at: now(), names: [], ...extra };
     this.activity = [...this.activity, activity];
     this.emit({ type: "activity", activity });
+    if (kind === "result" && extra.id && extra.name && !this.callResults.has(extra.id)) {
+      const read = !/_(write|close|create|update|delete)$/.test(extra.name);
+      this.callResults.set(extra.id, { id: extra.id, session_id: activity.session_id, name: extra.name, read, at: activity.at, preview: resultFor(extra.name), dropped: 0 });
+    }
+  }
+  /**
+   * Which words of a reply are heard, as the daemon stamps them (ADR 0058): one `saying` per
+   * clause, spread over the time the reply takes, the words counted as the TTS stage counts them.
+   */
+  private stamp(text: string, ms: number) {
+    const sid = this.status.session_id;
+    if (!sid) return;
+    const no = ++this.replyNo;
+    const clauses = text.split(/(?<=[,.;:?!])\s+/);
+    let words = 0;
+    let chars = 0;
+    for (const clause of clauses) {
+      const from = words;
+      words += wordEnds(clause).length;
+      const to = words;
+      const at = (chars / Math.max(1, text.length)) * ms;
+      chars += clause.length;
+      if (to > from)
+        this.later(Math.round(at) + 60, () => {
+          if (this.status.session_id === sid && this.status.phase === "speaking") this.emit({ type: "saying", saying: { session_id: sid, reply: no, from, to } });
+        });
+    }
+  }
+  /** The operator's turn closed with these words, as the daemon heard it whole (ADR 0044, ADR 0058). */
+  private heard(text: string) {
+    if (!this.status.session_id) return;
+    this.emit({ type: "heard", heard: { session_id: this.status.session_id, at: now(), text, reopened: false } });
   }
   /**
    * The conversation-screen stories (`Scenario.story`), played over the first seconds after load
    * so the moving states can be seen and shot.
    */
   private playStory() {
+    // `speaking`: the reply on screen is being said; stamp it as the daemon would, once.
+    if (!this.scenario.story && this.status.phase === "speaking") {
+      const last = [...this.turns].reverse().find((t) => t.role === "assistant");
+      this.replyNo = 0;
+      if (last) this.stamp(last.text, (last.text.length / 14) * 1000);
+    }
     switch (this.scenario.story) {
       case "cut":
         this.later(400, () => this.reply(LONG_REPLY, 60_000));
@@ -395,6 +451,7 @@ export class MockDaemon {
         this.later(4200, () => {
           this.act("you_stopped");
           this.addTurn("user", "Wait, who\u2019s on the iOS question?", "voice");
+          this.heard("Wait, who\u2019s on the iOS question?");
           this.pushStatus({ phase: "thinking" });
         });
         break;
@@ -426,8 +483,10 @@ export class MockDaemon {
     // The operator's turn opens at their first word and closes with it (ADR 0055).
     this.later(600, () => this.act("you_started"));
     for (const [ms, text] of pieces) this.later(ms, () => this.addTurn("user", text, "voice"));
+    // The turn closes: read again whole (ADR 0044), the words the model was given replace the pieces (ADR 0058).
     this.later(5200, () => {
       this.act("you_stopped");
+      this.heard("Can you check on the deploy for the billing service, and tell me if it finished?");
       this.pushStatus({ phase: "thinking" });
     });
     this.later(6100, () => this.reply("It finished at 3:12 PM, and every check passed."));
@@ -482,6 +541,7 @@ export class MockDaemon {
     const target = this.agents.get(slug)?.detail;
     if (!target || target.retired_at) throw new HttpError(409, `There's no working agent called ${slug}.`);
     this.turns = [];
+    this.replyNo = -1;
     this.setActive(slug);
     this.pushStatus({ session_id: newId(), phase: "listening", conversation: slug, session_origin: "desk" });
     this.addTurn("assistant", target.is_ghost ? "Ghost here." : `${target.name} here.`, "system");
@@ -523,6 +583,7 @@ export class MockDaemon {
   private reply(text: string, ms = Math.max(1600, (text.length / 14) * 1000)) {
     this.addTurn("assistant", text, "system");
     this.pushStatus({ phase: "speaking" });
+    this.stamp(text, ms);
     this.later(ms, () => {
       if (!this.status.session_id || this.status.phase !== "speaking") return;
       if (this.status.ending) return this.sleepNow();
@@ -557,6 +618,27 @@ export class MockDaemon {
       this.pushStatus();
       if (this.status.session_id) this.reply("I didn’t hear a yes, so I left it alone.");
     });
+  }
+  /**
+   * `GET /activity`: what the sessions did, kept beside the transcript (ADR 0058). The live
+   * session's from the story; an earlier one's calls made up from its turns (one read after the
+   * operator's first question), so history shows its work.
+   */
+  private storedActivity(sessions: string[]): ActivityView[] {
+    const out: ActivityView[] = [];
+    for (const sid of sessions.slice(0, 40)) {
+      if (sid === this.status.session_id) {
+        out.push(...this.activity.filter((a) => a.kind !== "you_started" && a.kind !== "you_stopped"));
+        continue;
+      }
+      const turns = [...this.agents.values()].flatMap((l) => l.turns).filter((t) => t.session_id === sid);
+      const asked = turns.find((t) => t.role === "user");
+      if (!asked || turns.some((t) => /^\[scheduled run/.test(t.text))) continue;
+      const at = (s: number) => new Date(new Date(asked.at).getTime() + s * 1000).toISOString();
+      const id = `h-${sid.slice(0, 8)}`;
+      out.push({ kind: "call", session_id: sid, at: at(1.5), name: "github_issue_list", id, names: [] }, { kind: "result", session_id: sid, at: at(2.7), name: "github_issue_list", id, names: [] });
+    }
+    return out;
   }
   private listeningView() {
     return { listening: !this.status.not_listening, until: this.status.not_listening?.until ?? null };
@@ -1241,6 +1323,13 @@ export class MockDaemon {
     }
     if (method === "GET" && path === "/waiting") return this.waitingView();
     if (method === "GET" && path === "/questions") return { questions: this.questions };
+    if (method === "GET" && path === "/activity") return this.storedActivity((query.get("sessions") ?? "").split(",").filter(Boolean));
+    const called = /^\/calls\/([^/]+)$/.exec(path);
+    if (called && method === "GET") {
+      const got = this.callResults.get(decodeURIComponent(called[1]));
+      if (!got) throw new HttpError(404, "that call's result is no longer kept");
+      return got;
+    }
     if (method === "POST" && path === "/questions/answer") {
       const q = this.questions.find((x) => x.key === b.key);
       if (!q) throw new HttpError(404, "There's no question with that key.");
@@ -1586,4 +1675,13 @@ export class MockDaemon {
     for (const t of this.timers) clearTimeout(t);
     this.listeners.clear();
   }
+}
+
+/** A believable result for a tool the mock calls live (ADR 0058's preview). */
+function resultFor(name: string): string {
+  if (/issue_list|search/.test(name))
+    return JSON.stringify({ issues: [{ number: 212, title: "Invoice PDFs round euro totals down a cent", labels: ["billing"] }, { number: 208, title: "Annual plan shows the monthly price on the receipt", labels: ["billing", "needs-review"] }, { number: 77, title: "Nightly ledger export failed twice", repo: "ghost-mock/infra" }] }, null, 2);
+  if (/issue_read/.test(name)) return JSON.stringify({ number: 163, title: "Typo in the footer", state: "open", author: "dana", comments: 2 }, null, 2);
+  if (/_(write|close|create|update|delete)$/.test(name)) return JSON.stringify({ ok: true, status: "success", summary: "closed the issue" }, null, 2);
+  return JSON.stringify({ ok: true }, null, 2);
 }

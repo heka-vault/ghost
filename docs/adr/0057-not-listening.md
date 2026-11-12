@@ -86,5 +86,7 @@ says it to agents.
   volume. Every turn of it is logged (`listening: on`, `listening: off …`).
 - `Phase::Passive` now means "not in a session"; a client that wants to say "waiting for
   Hey Ghost" checks `not_listening` too (the desktop's sidebar and tray do).
-- The session screen's own start state (owned elsewhere) still says to say the wake phrase
-  while not listening; the sidebar's card is the truth until it is updated.
+- The session screen says the mic is off in every state (2026-11-12): the start state
+  ("Ghost isn't listening"), the strip over the composer with Listen again, the composer's
+  voice control as the struck mic in red that turns listening on, and a typed session's
+  stage ("Mic off · Type below. Ghost can't hear you.").

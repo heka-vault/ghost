@@ -13,7 +13,7 @@
  * doesn't check is never applied, which is what keeps the audio between this phone and its desk.
  */
 import type { AuditPage, ConversationView, GhostEvent, Status, Turn, WaitingView } from "@ghost/client-ts";
-import { captionPhase, captionTurn, lineName } from "@ghost/ui";
+import { captionHeard, captionPhase, captionTurn, lineName } from "@ghost/ui";
 import { DeviceEventEmitter, type EmitterSubscription, PermissionsAndroid, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
 import { mediaDevices, MediaStream, RTCPeerConnection, RTCSessionDescription } from "react-native-webrtc";
@@ -396,6 +396,10 @@ export class LiveDesk implements Desk {
         // Turns from before the channel opened come ahead of the first status, so trust the call.
         // The operator's spoken pieces wait for the turn to close, then show together (`Captions`).
         if (this.pc) this.setCaptions(captionTurn({ shown: this.state.turns, held: this.held }, e.turn));
+        return;
+      case "heard":
+        // The turn closed: its pieces give way to the words Ghost heard it as (ADR 0058).
+        if (this.pc) this.setCaptions(captionHeard({ shown: this.state.turns, held: this.held }, e.heard));
         return;
       case "pending":
         return this.set({ pending: e.pending ?? null });

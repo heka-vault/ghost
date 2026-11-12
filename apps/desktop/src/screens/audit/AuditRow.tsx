@@ -178,7 +178,7 @@ export const AuditRow = forwardRef<HTMLButtonElement, AuditRowProps>(function Au
                   onCancel={live.onCancel}
                 />
                 <div className="audit-detail__live-aside">
-                  <Button size="sm" variant="ghost" href={hrefFor("/")} trailingIcon={<ArrowUpRight />}>
+                  <Button size="sm" variant="ghost" href={hrefFor("/session")} trailingIcon={<ArrowUpRight />}>
                     Answer in the session
                   </Button>
                 </div>

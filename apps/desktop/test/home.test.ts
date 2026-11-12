@@ -12,9 +12,9 @@ const lines = [
   { slug: "accounting", name: "Accounting", aliases: ["books"] },
 ];
 
-describe("home is Ghost's page", () => {
-  it("sends Ghost's row home and every other agent to its page", () => {
-    expect(agentPath("ghost")).toBe("/");
+describe("Ghost’s page is the conversation screen", () => {
+  it("sends Ghost to the conversation screen and every other agent to its page", () => {
+    expect(agentPath("ghost")).toBe("/session");
     expect(agentPath("accounting")).toBe("/agents/accounting");
   });
 

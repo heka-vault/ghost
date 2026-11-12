@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Activity
+         * @description What the sessions did between their turns, oldest first per session: calls, handovers, cuts and failed turns, by name. Kept as long as the session's transcript.
+         */
+        get: operations["activity_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps": {
         parameters: {
             query?: never;
@@ -105,6 +125,26 @@ export interface paths {
          * @description Proposals, newest first; source narrows to one app or one of Ghost's own.
          */
         get: operations["audit_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/calls/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Call
+         * @description What one call of the live session returned, as the model was given it (bounded and redacted), cut to 2,000 characters. 404 once it is no longer kept.
+         */
+        get: operations["call_calls_id_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1974,6 +2014,28 @@ export interface components {
             launcher?: ("make-dev" | "make-start") | null;
         };
         /**
+         * @description What a call of the live session returned, as the model was given it (ADR 0058):
+         *     bounded and redacted by the apps' limits on its way in (ADR 0046), then cut to
+         *     `CALL_PREVIEW_CHARS` here. Kept in memory for the last calls only.
+         */
+        CallPreview: {
+            /** Format: date-time */
+            at: string;
+            /**
+             * Format: int64
+             * @description Characters cut from the end; 0 when it is whole.
+             */
+            dropped: number;
+            id: string;
+            /** @description The tool as the model called it. */
+            name: string;
+            /** @description The result as JSON text, pretty-printed, cut at `CALL_PREVIEW_CHARS`. */
+            preview: string;
+            /** @description A read; else a change through the gate (the audit has what it did). */
+            read: boolean;
+            session_id: string;
+        };
+        /**
          * @description An app in the catalog. Its text is the registry's: shown to the operator, never to the
          *     model.
          */
@@ -2246,6 +2308,28 @@ export interface components {
             take: string;
             warnings: components["schemas"]["HearWarning"][];
             words: components["schemas"]["HearWord"][];
+        };
+        /** @description The operator's spoken turn as it closed, with the words the model was given (ADR 0058). */
+        HeardEvent: {
+            heard: components["schemas"]["HeardView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "heard";
+        };
+        /**
+         * @description The operator's spoken turn as it closed (`Event::Heard`, ADR 0058): the words the
+         *     model was given for it, read whole (ADR 0044), in place of the pieces `turn` events
+         *     showed. `reopened`: the last one closed was taken back before its answer was heard;
+         *     its words come back in the turn that goes on, and `text` is empty.
+         */
+        HeardView: {
+            /** Format: date-time */
+            at: string;
+            reopened?: boolean;
+            session_id: string;
+            text: string;
         };
         /**
          * @description The Hearing test's recorder (ADR 0042), about twenty a second while it is open: what
@@ -3053,6 +3137,30 @@ export interface components {
             speed: number;
             text?: string | null;
         };
+        /** @description Which words of Ghost's reply are heard now (ADR 0058). */
+        SayingEvent: {
+            saying: components["schemas"]["SayingView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "saying";
+        };
+        /**
+         * @description Which words of Ghost's reply are being heard now (`Event::Saying`, ADR 0058): the
+         *     words `from` up to `to` of the reply numbered `reply` in the session, counted as runs
+         *     of text with a letter or a digit in them, a line's list marker left out. Sent when the
+         *     piece being heard changes, in step with `voice`.
+         */
+        SayingView: {
+            /** Format: int32 */
+            from: number;
+            /** Format: int32 */
+            reply: number;
+            session_id: string;
+            /** Format: int32 */
+            to: number;
+        };
         SayRequest: {
             /** @description With no session running, the line the new one opens in; Ghost when unset. */
             conversation?: string | null;
@@ -3599,6 +3707,7 @@ export type SchemaAuditEntry = components['schemas']['AuditEntry'];
 export type SchemaAuditEventView = components['schemas']['AuditEventView'];
 export type SchemaAuditPage = components['schemas']['AuditPage'];
 export type SchemaBuild = components['schemas']['Build'];
+export type SchemaCallPreview = components['schemas']['CallPreview'];
 export type SchemaCatalogEntryView = components['schemas']['CatalogEntryView'];
 export type SchemaCatalogMaker = components['schemas']['CatalogMaker'];
 export type SchemaCatalogOption = components['schemas']['CatalogOption'];
@@ -3619,6 +3728,8 @@ export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
 export type SchemaHearBlock = components['schemas']['HearBlock'];
 export type SchemaHearCheck = components['schemas']['HearCheck'];
+export type SchemaHeardEvent = components['schemas']['HeardEvent'];
+export type SchemaHeardView = components['schemas']['HeardView'];
 export type SchemaHearEvent = components['schemas']['HearEvent'];
 export type SchemaHearFact = components['schemas']['HearFact'];
 export type SchemaHearKind = components['schemas']['HearKind'];
@@ -3702,6 +3813,8 @@ export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaRuleSet = components['schemas']['RuleSet'];
 export type SchemaRulesView = components['schemas']['RulesView'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
+export type SchemaSayingEvent = components['schemas']['SayingEvent'];
+export type SchemaSayingView = components['schemas']['SayingView'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];
 export type SchemaScheduleCheck = components['schemas']['ScheduleCheck'];
 export type SchemaScheduleHours = components['schemas']['ScheduleHours'];
@@ -3745,6 +3858,38 @@ export type SchemaWatchInfo = components['schemas']['WatchInfo'];
 export type SchemaWatchingView = components['schemas']['WatchingView'];
 export type $defs = Record<string, never>;
 export interface operations {
+    activity_activity_get: {
+        parameters: {
+            query: {
+                /** @description Session ids, comma separated, at most 40. */
+                sessions: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_apps_apps_get: {
         parameters: {
             query?: never;
@@ -3958,6 +4103,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    call_calls_id_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The call's id, as `activity` carries it */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallPreview"];
+                };
+            };
+            /** @description Not kept */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -4561,7 +4736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HearEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"];
                 };
             };
         };

@@ -187,8 +187,12 @@ The desk ignores every other client message type.
 
 The desk sends `bot-ready`, the speaking events (`user-started-speaking`, `user-stopped-speaking`,
 `bot-started-speaking`, `bot-stopped-speaking`), and `server-message` whose `data` is one control API
-event, exactly as the WebSocket would send it: `status`, `turn`, `pending`, `outcome` or `conversation`.
-Log events are never sent. Server messages start after `client-ready`: first the turn, pending, outcome and
+event, exactly as the WebSocket would send it: `status`, `turn`, `heard`, `pending`, `outcome` or `conversation`.
+`turn` events carry the operator's words as each stretch of speech is read; the phone holds those
+pieces until `heard` says the turn closed and shows its `text` in their place, the words the model was
+given (ADR 0058); `heard` with `reopened` true takes the last closed turn back into the one still open.
+Log events, Ghost's voice level (`voice`), the session's `activity` and the words being heard
+(`saying`) are never sent. Server messages start after `client-ready`: first the turn, pending, outcome and
 conversation events from before the channel opened, then a fresh `status`, then live events. Ghost's greeting
 is spoken once the peer connects. The phone builds its state from these messages and doesn't use RTVI's own
 transcripts.

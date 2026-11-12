@@ -271,7 +271,64 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         let d = Arc::downgrade(d);
         Arc::new(move |a| {
             if let Some(d) = d.upgrade() {
-                d.state.publish_activity(activity_view(a));
+                let view = activity_view(a);
+                // Kept beside the transcript, so a reload and history show the calls, a
+                // handover, a cut (ADR 0058); off the pipeline's task.
+                if let (Some(kind), Some(store), Some(session_id)) = (
+                    ghost_api::calls::kept(view.kind),
+                    d.late.store.get().cloned(),
+                    d.state.session_id(),
+                ) {
+                    let row = ghost_core::store::ActivityRow {
+                        session_id,
+                        kind: kind.to_string(),
+                        at: view.at,
+                        name: view.name.clone(),
+                        call_id: view.id.clone(),
+                        names: view.names.clone(),
+                        secs: view.secs,
+                    };
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(e) = store.add_activity(&row) {
+                            tracing::warn!("session: activity not kept: {e}");
+                        }
+                    });
+                }
+                d.state.publish_activity(view);
+            }
+        })
+    };
+    // The operator's turn as it closed, with the words the model was given (ADR 0058).
+    let on_heard: ghost_voice::tap::OnTurnRecord = {
+        let d = Arc::downgrade(d);
+        Arc::new(move |record| {
+            if let Some(d) = d.upgrade() {
+                match record {
+                    ghost_voice::tap::TurnRecord::Closed(text) => {
+                        d.state.publish_heard(Some(&text))
+                    }
+                    ghost_voice::tap::TurnRecord::Reopened => d.state.publish_heard(None),
+                }
+            }
+            Box::pin(async {})
+        })
+    };
+    // Which words of the reply are heard now (ADR 0058), in step with the voice level.
+    let on_said: ghost_voice::level::OnSaid = {
+        let d = Arc::downgrade(d);
+        Arc::new(move |s| {
+            if let Some(d) = d.upgrade() {
+                d.state.publish_saying(s.reply, s.from, s.to);
+            }
+        })
+    };
+    // What each call returned, for the desktop's preview of an opened call (ADR 0058).
+    let on_result: ghost_voice::tools::OnResult = {
+        let d = Arc::downgrade(d);
+        Arc::new(move |c| {
+            if let Some(d) = d.upgrade() {
+                d.state
+                    .keep_call(&c.id, &c.name, c.read, &Value::Object(c.result));
             }
         })
     };
@@ -349,6 +406,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             on_latency: None,
             on_level: Some(on_level),
             on_activity: Some(on_activity),
+            on_heard: Some(on_heard),
+            on_said: Some(on_said),
+            on_result: Some(on_result),
         },
         wake_phrases: Some(parse_phrases(Some(&cfg.wake_phrases))),
         wake_fuzzy: cfg.wake_fuzzy,

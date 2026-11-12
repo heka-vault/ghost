@@ -1,7 +1,7 @@
 import { SearchX } from "lucide-react";
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Button, EmptyState, LiveContext, type LiveState, PageChromeContext, Progress, Skeleton, Spinner, ToastProvider } from "../ui";
+import { Button, cx, EmptyState, LiveContext, type LiveState, PageChromeContext, Progress, Skeleton, Spinner, ToastProvider } from "../ui";
 import { useDesign } from "../design/context";
 import { useConnection } from "./connection";
 import { DaemonNotices } from "./daemon";
@@ -11,8 +11,12 @@ import { hrefFor, navigate, usePath } from "./router";
 import { SETTINGS_PAGES, redirectFor, resolve, settingsPageOf } from "./routes";
 import { SettingsFrame } from "./SettingsFrame";
 import { useSetupNeeded } from "./setup";
-import { Sidebar } from "./Sidebar";
+import { PostureProvider, usePosture } from "./PostureContext";
+import { Rail } from "./Rail";
+import { Room } from "./Room";
+import { TodayProvider } from "./today";
 import "./shell.css";
+import "./rail.css";
 
 /** Design-mode chrome (the prototype strip), compiled only in development. */
 const PrototypeStrip = import.meta.env.DEV ? lazy(() => import("../design/chrome").then((m) => ({ default: m.PrototypeStrip }))) : null;
@@ -86,7 +90,7 @@ export function App() {
 
   const title = settingsPage?.label ?? match?.route.title;
   useEffect(() => {
-    document.title = match ? (match.route.id === "session" ? "Ghost" : `${title} · Ghost`) : "Not found · Ghost";
+    document.title = match ? (match.route.id === "today" ? "Ghost" : `${title} · Ghost`) : "Not found · Ghost";
   }, [match?.route.id, title]);
 
   const Screen = match?.route.component;
@@ -104,7 +108,7 @@ export function App() {
       icon={<SearchX />}
       title="Nothing here"
       description={`There is no page at ${path}.`}
-      actions={<Button href={hrefFor("/")}>Go to the session</Button>}
+      actions={<Button href={hrefFor("/")}>Go to Today</Button>}
     />
   );
 
@@ -123,13 +127,16 @@ export function App() {
   return (
     <LiveContext.Provider value={live}>
     <ToastProvider>
+    <TodayProvider>
+    <PostureProvider>
+    <Postured routeId={match?.route.id ?? null}>
       <DaemonNotices />
       {/* A button, not href="#main": under hash routing that hash is a route. */}
       <button type="button" className="shell-skip" onClick={skipToContent}>
         Skip to content
       </button>
       <div className="shell">
-        <Sidebar />
+        <Rail />
         <main ref={mainRef} className="shell__main" id="main" tabIndex={-1} onScroll={onScroll}>
           {/* Sticky at the top of the panel: connection banners, then the compact page bar's slot. */}
           <div className="shell__top" ref={setTop}>
@@ -187,8 +194,33 @@ export function App() {
           </PageChromeContext.Provider>
         </main>
       </div>
+    </Postured>
+    </PostureProvider>
+    </TodayProvider>
     </ToastProvider>
     </LiveContext.Provider>
+  );
+}
+
+/**
+ * The two postures over one shell. At the desk, the rail and the page. In the room: on the
+ * conversation screen in a session at this desk, the rail goes and the screen's own room view
+ * takes the window; anywhere else the room is laid over the desk, which stays mounted and
+ * inert underneath, so nothing typed is lost. The move between them is one transition: the desk
+ * eases back and dims as the room rises over it (reduced motion: a cut).
+ */
+function Postured({ routeId, children }: { routeId: string | null; children: ReactNode }) {
+  const { posture, deskSession } = usePosture();
+  const room = posture === "room";
+  const sessionRoom = room && routeId === "session" && deskSession;
+  const overlay = room && !sessionRoom;
+  return (
+    <div className={cx("posture", room && "is-room", sessionRoom && "is-session-room")}>
+      <div className="posture__desk" inert={overlay ? true : undefined} aria-hidden={overlay || undefined}>
+        {children}
+      </div>
+      {overlay && <Room />}
+    </div>
   );
 }
 

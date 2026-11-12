@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-11-12
 - **Amends:** ADR 0013 (the event stream carries two more kinds, both live-session only)
+- **Amended by:** ADR 0058 (the turn's final words, the words being heard exactly, a call's result on request, activity kept beside the transcript)
 
 The conversation screen was a chat transcript with a microphone beside it: the operator could
 not see that Ghost was heard, what it was doing between two turns, how far into a reply it was,
@@ -42,7 +43,8 @@ a level is 50 ms of voice, so voiced time × 16 characters a second (Kokoro's vo
 speed 1.0) × the agent's speed is about where the voice is. It moves by whole words, never
 claims the last word while the voice is going, is exact only at the ends, and a `cut` freezes
 it. An exact word clock would need the TTS stage to stamp audio with its text; not worth it
-until the estimate is seen to be wrong.
+until the estimate is seen to be wrong. (ADR 0058 added that stamp; the estimate stays for a
+voice that does not stamp.)
 
 **The operator's own speaking is a sign, not a level**: the stage shows "Listening to you" and
 a slow breathing ring from `you_started` (or pieces #73 holds), the same whatever the volume.
@@ -65,10 +67,10 @@ the speaker; `make perf` is not affected.
 ## Consequences
 
 - The record shows the work between turns (one row per run of calls, opened to each), a cut
-  where it came, and a failed turn, live. They are not stored: a reload shows the turns, the
-  audit's changes and the questions, not the calls of a session already seen.
+  where it came, and a failed turn, live. (ADR 0058 keeps them beside the transcript, so a
+  reload and history show them too.)
 - What came back from a read is not shown: the result is untrusted app text that reaches the
   model within ADR 0046's bounds, and putting it on screen needs its own bounded, redacted
-  path. The opened row says so.
+  path. (ADR 0058 is that path: `GET /calls/{id}`, on request.)
 - A new kind of activity is a new variant in `ghost_voice::activity::Activity`, `ActivityKind`
   in `ghost_api::models` and the TS client; it must carry no words.
