@@ -28,8 +28,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use ghost_api::models::{
-    AuditPage, ConversationView, PhoneAddress, PhoneDevice, PhonePairing, PhoneView, Status,
-    WaitingView,
+    AuditPage, ConversationView, OutcomeView, PhoneAddress, PhoneDevice, PhonePairing, PhoneView,
+    QuestionView, QuestionsView, Status, WaitingView,
 };
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -71,6 +71,16 @@ impl Refusal {
 /// How often a listen address whose interface isn't up yet is tried again.
 pub const REBIND_SECS: f64 = 5.0;
 pub const UNSIGNED_PATHS: [&str; 1] = ["/pair"];
+/// Signed requests whose answer is a stream (ADR 0051): not buffered, each message signed.
+pub const STREAM_PATHS: [&str; 1] = ["/stream"];
+
+/// What a verified request's handler may sign with: the paired device's secret and the
+/// request's nonce. Only the live stream uses it.
+#[derive(Clone)]
+pub struct StreamKey {
+    pub secret: super::signing::Secret,
+    pub nonce: String,
+}
 /// The phone app's own scheme (apps/mobile/app.json).
 pub const PAIR_LINK: &str = "ghost://pair";
 /// A signed request's body may be this long (an SDP offer is well under it).
@@ -332,8 +342,22 @@ pub async fn sign_requests(State(s): State<Arc<Signing>>, req: Request, next: Ne
         local,
     });
 
-    let req = Request::from_parts(parts, Body::from(bytes));
+    let streaming = STREAM_PATHS.contains(&parts.uri.path());
+    let mut req = Request::from_parts(parts, Body::from(bytes));
+    if let (Some(secret), Some(nonce)) = (secret.clone(), nonce.clone()) {
+        // The live stream signs each message itself, over this request's nonce.
+        req.extensions_mut().insert(StreamKey { secret, nonce });
+    }
     let resp = next.run(req).await;
+    if streaming && resp.status() == StatusCode::OK {
+        // A stream has no end to hash: its head is signed as if its body were empty, and
+        // every message carries its own signature (docs/phone-protocol.md).
+        let (mut head, body) = resp.into_parts();
+        if let Some((ts, signature)) = sign(head.status, b"") {
+            add_signature(&mut head.headers, &ts, &signature);
+        }
+        return Response::from_parts(head, body);
+    }
     let (mut head, body) = resp.into_parts();
     let payload: Bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -398,6 +422,18 @@ pub enum CandidateError {
     BadCandidate,
 }
 
+/// Why the phone's action on a question was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionError {
+    /// No such question (404 `not_found`).
+    NotFound,
+    /// It was answered, declined or expired already (409 `settled`).
+    Settled(String),
+    /// An answer that does not fit: empty, too long, none of the choices it needs (422
+    /// `bad_answer`).
+    BadAnswer(String),
+}
+
 /// What the daemon gives the listener. It owns sessions, so it decides whether a phone
 /// may start one, and it owns the media (the WebRTC peer, built by the media crate), so
 /// an offer's SDP goes to it and the answer's SDP comes back from it; the listener keeps
@@ -417,12 +453,41 @@ pub trait PhoneHost: Send + Sync {
     /// A cheap check before negotiating.
     fn admit_phone(&self) -> Option<Refusal>;
     /// Take the phone's offer: build the peer, and run the session on it, in `conversation`
-    /// (a slug from `/conversations`) or in Ghost. The answer the phone applies.
+    /// (a slug from `/conversations`) or in Ghost. `item` is a waiting-list key when the
+    /// phone answered a ring for it (ADR 0051): the session opens with it. The answer the
+    /// phone applies.
     async fn start_phone(
         &self,
         sdp: &str,
         conversation: Option<&str>,
+        item: Option<&str>,
     ) -> Result<Answer, OfferError>;
+    /// The questions, as the phone may see them (ADR 0051): an answer given by voice is
+    /// shown by its choice only, never its words.
+    fn questions(&self) -> QuestionsView {
+        QuestionsView {
+            questions: Vec::new(),
+        }
+    }
+    /// The operator's answer from the paired phone, recorded with the route `phone`.
+    fn answer_question(&self, _key: &str, _text: &str) -> Result<QuestionView, ActionError> {
+        Err(ActionError::NotFound)
+    }
+    fn decline_question(&self, _key: &str) -> Result<QuestionView, ActionError> {
+        Err(ActionError::NotFound)
+    }
+    /// A change waiting for a yes, confirmed from the paired phone: the gate's confirm by
+    /// id with the classifier `phone`. None when it is not waiting.
+    async fn confirm_change(&self, _id: &str) -> Option<OutcomeView> {
+        None
+    }
+    async fn cancel_change(&self, _id: &str) -> bool {
+        false
+    }
+    /// The live stream's feed (ADR 0051); None while the daemon has none.
+    fn feed(&self) -> Option<Arc<super::stream::PhoneFeed>> {
+        None
+    }
     /// A new offer for the live peer (`pc_id`): a renegotiation, an ICE restart.
     async fn renegotiate(
         &self,
@@ -698,6 +763,7 @@ mod tests {
             &self,
             _sdp: &str,
             _conversation: Option<&str>,
+            _item: Option<&str>,
         ) -> Result<Answer, OfferError> {
             Err(OfferError::Refused(Refusal::NotReady))
         }

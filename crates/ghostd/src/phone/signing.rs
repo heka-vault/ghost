@@ -177,6 +177,23 @@ pub fn sign_response(secret: &Secret, status: u16, nonce: &str, ts: &str, body: 
     mac(secret, &response_string(status, nonce, ts, body))
 }
 
+pub const EVENT_PREFIX: &str = "ghost-v1-event";
+
+/// One message on the live stream (ADR 0051, docs/phone-protocol.md): signed with the
+/// device's secret over the stream request's own nonce and the message's exact bytes, so
+/// a message from another stream, or one changed on the way, does not verify.
+pub fn event_string(nonce: &str, msg: &[u8]) -> String {
+    [EVENT_PREFIX, nonce, &body_hash(msg)].join("\n")
+}
+
+pub fn sign_event(secret: &Secret, nonce: &str, msg: &[u8]) -> String {
+    mac(secret, &event_string(nonce, msg))
+}
+
+pub fn verify_event(secret: &Secret, nonce: &str, msg: &[u8], signature: &str) -> bool {
+    same(&sign_event(secret, nonce, msg), signature)
+}
+
 /// The four request headers, as the phone sends them. Used by tests and tools.
 #[derive(Debug, Clone)]
 pub struct SignedHeaders {
