@@ -36,7 +36,7 @@ use super::harness::{Bench, Profile, RealModel, RunConfig, parse_ablations};
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
-pub const USAGE: &str = "usage: ghost-perf run|micro|llm|report|hear|hear-report|hear-check|turns|turns-report [options]";
+pub const USAGE: &str = "usage: ghost-perf run|micro|llm|providers|report|hear|hear-report|hear-check|turns|turns-report [options]";
 
 fn csv(s: Option<&String>) -> Vec<String> {
     s.map(|s| {
@@ -136,6 +136,10 @@ pub fn main(argv: &[String]) -> i32 {
             .unwrap_or_default();
         print!("{}", render(&runs, &meta));
         return 0;
+    }
+    if args.cmd == "providers" {
+        // Its own arguments: providers by name, keys only from the variables named.
+        return super::providers::cli(&argv[1..], &root);
     }
     if args.cmd == "hear-report" {
         return hear_report(&args);

@@ -484,6 +484,8 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         d.refresh_waiting_now();
     }
     *lock(&d.session) = None;
+    // ADR 0055: the operator's own turns say whether the connection is slow.
+    d.refresh_slow_note();
     *lock(&d.heard) = None;
     *lock(&d.origin) = None;
     if origin == SessionOrigin::Desk {

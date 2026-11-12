@@ -47,3 +47,5 @@ ghost-core = { workspace = true, features = ["fakes"] }
 tokio = { workspace = true, features = ["test-util"] }
 # An app in process for the session's tests: the types `ghost_core::apps::Session` speaks.
 rmcp = { workspace = true }
+# A provider that fails, for a spoken turn's failure (ADR 0055).
+wiremock = { workspace = true }

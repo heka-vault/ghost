@@ -71,7 +71,12 @@ The model is picked in the desktop app under Settings › Model (ADR 0037): a pr
 or `custom`), its model from the provider's own list (`GHOST_LLM_MODEL`), and its password,
 kept in the vault like any other and referred to by name (`ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, and so on, or `GHOST_LLM_PASSWORD`). OpenRouter is a sign-in, with nothing
-to copy. Test connection there times the first token. Every session, compaction and a
+to copy. Its Test button (or `ghostd llm test`) checks the connection with a fixed, synthetic
+prompt: how soon each model's first word comes back, and whether streaming, tool calls, the
+prompt cache and the thinking setting work; Ghost keeps the result, leaves out of its requests
+whatever the connection refuses, and says on the waiting list when the connection is too slow
+for a good spoken reply, with what would help (ADR 0055). It never switches provider or model
+for you. `make perf-providers` compares providers the same way. Every session, compaction and a
 watch's model step use it, over the Anthropic Messages API or an OpenAI-compatible one, and
 a saved change applies from the next session. Older settings still work: without a
 provider, `GHOST_LLM_ENDPOINT=openrouter` is OpenRouter with the `OPENROUTER_API_KEY`

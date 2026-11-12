@@ -5,7 +5,7 @@
  * its own a few seconds later. Nothing leaves the window.
  */
 import { HttpError } from "./errors";
-import type { ModelConnectionView, ModelDraft, ModelListView, ModelProviderView, ModelTestResult, SettingsView } from "@ghost/client-ts";
+import type { ModelConnectionView, ModelDraft, ModelListView, ModelCheckModel, ModelCheckView, ModelProviderView, SettingsView } from "@ghost/client-ts";
 
 export const MODEL_PROVIDERS: ModelProviderView[] = [
   { id: "anthropic", title: "Anthropic", blurb: "Claude, with a password (API key) from the Anthropic Console.", protocol: "anthropic", base_url: "https://api.anthropic.com", password: "ANTHROPIC_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "claude-sonnet-5-5" },
@@ -124,14 +124,49 @@ export class MockModel {
     return { models, default: fallback && models.some((m) => m.id === fallback) ? fallback : models[0]?.id ?? fallback, error: null };
   }
 
-  test(draft: ModelDraft): ModelTestResult {
+  /** The kept check of the saved connection (ADR 0055). */
+  last: ModelCheckView | null = null;
+
+  check(draft: ModelDraft): ModelCheckView {
     const c = this.view(draft);
     const where = `${c.provider} (${c.protocol}, ${c.base_url.replace(/^(https?:\/\/[^/]+).*$/, "$1")})`;
-    if (!c.ready) return { ok: false, model: c.wire_model, error: c.problems[0] ?? "Not set up.", where, ttft_ms: null, total_ms: null, answered_by: null, reply: null };
-    if (c.provider === "lmstudio") return { ok: false, model: c.wire_model, error: "APIConnectionError: couldn’t reach localhost:1234", where, ttft_ms: null, total_ms: null, answered_by: null, reply: null };
-    const local = c.provider === "ollama";
-    const ttft = local ? 238 : c.provider === "openrouter" ? 1046 : 712;
-    return { ok: true, ttft_ms: ttft, total_ms: ttft + 140, model: c.wire_model, answered_by: c.wire_model, reply: "Hello there, good to meet.", error: null, where };
+    const at = new Date().toISOString();
+    if (!c.ready) return { checked_at: at, where, models: [], advice: c.problems[0] ?? "Not set up." };
+    const yes = { state: "yes" as const, detail: null };
+    const model = (role: string, id: string, word: number): ModelCheckModel => ({
+      role,
+      model: id,
+      answered_by: id,
+      reachable: true,
+      error: null,
+      first_byte: { median_ms: word - 180, worst_ms: word + 220 },
+      first_word: { median_ms: word, worst_ms: word + 420 },
+      samples: 3,
+      streaming: yes,
+      tools: yes,
+      caching: c.protocol === "anthropic" ? { state: "yes", detail: "4210 tokens read from the cache" } : { state: "not_reported", detail: "the provider doesn't report it" },
+      thinking:
+        role === "fast"
+          ? { state: "no", detail: "refuses between_tools; Ghost sends its requests without it (HTTP 400)" }
+          : c.protocol === "anthropic"
+            ? { state: "yes", detail: "accepts between_tools" }
+            : { state: "not_applicable", detail: "no thinking setting is sent" },
+      thinking_mode: c.protocol === "anthropic" ? "between_tools" : null,
+    });
+    if (c.provider === "lmstudio") {
+      const m = model("main", c.wire_model, 0);
+      return { checked_at: at, where, advice: null, models: [{ ...m, reachable: false, error: "I can't reach the model right now. Check the model connection in Settings. (ConnectError: can't reach http://localhost:1234)", answered_by: null }] };
+    }
+    const word = c.provider === "ollama" ? 238 : c.provider === "openrouter" ? 1840 : 712;
+    const models = [model("main", c.wire_model, word)];
+    if (c.fast_wire_model) models.push(model("fast", c.fast_wire_model, Math.round(word * 0.6)));
+    const slow = word * (c.fast_wire_model ? 0.6 : 1) > 1500;
+    const advice = slow
+      ? `Spoken replies will start slowly: ${models[models.length - 1].model} took ${((word * (c.fast_wire_model ? 0.6 : 1)) / 1000).toFixed(1)} s to its first word on this connection. Of the connections you've tested, claude-haiku-5-5 via cliproxy answered in 0.7 s. Ghost won't change the connection for you: it's in Settings, under Model.`
+      : null;
+    const r = { checked_at: at, where, models, advice };
+    if (!Object.keys(draft.values ?? {}).some((k) => draft.values[k])) this.last = r;
+    return r;
   }
 
   startSignIn(): { url: string } {

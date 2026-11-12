@@ -15,7 +15,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request};
 use chrono::Utc;
-use ghost_api::controller::{ModelEnv, PhoneConnection, Probe, Refusal};
+use ghost_api::controller::{ModelCheckRun, ModelEnv, PhoneConnection, Refusal};
 use ghost_api::deps::{AppsPort, DevicesPort, ModelNet, SignInPort};
 use ghost_api::models::{DeviceInfo, PhoneDevice, PhonePairing, PhoneView};
 use ghost_api::{Controller, DaemonState, Deps, Phase};
@@ -46,7 +46,7 @@ use zeroize::Zeroizing;
 
 // --- the controller ---------------------------------------------------------------------------
 
-pub type ProbeFn = Arc<dyn Fn(ModelEnv, String, u32) -> Probe + Send + Sync>;
+pub type CheckFn = Arc<dyn Fn(ModelEnv) -> ModelCheckRun + Send + Sync>;
 
 /// Records calls; a real gate sits behind confirm/cancel.
 pub struct FakeControl {
@@ -57,7 +57,7 @@ pub struct FakeControl {
     pub applied: Mutex<Vec<String>>,
     pub phone_address: Mutex<Option<String>>,
     pub phone_device: Mutex<Option<PhoneDevice>>,
-    pub probe: Mutex<Option<ProbeFn>>,
+    pub check: Mutex<Option<CheckFn>>,
 }
 
 impl FakeControl {
@@ -85,8 +85,8 @@ impl FakeControl {
         *self.phone_device.lock().unwrap() = device;
     }
 
-    pub fn set_probe(&self, probe: ProbeFn) {
-        *self.probe.lock().unwrap() = Some(probe);
+    pub fn set_check(&self, check: CheckFn) {
+        *self.check.lock().unwrap() = Some(check);
     }
 
     fn record(&self, call: Value) {
@@ -197,9 +197,9 @@ impl Controller for FakeControl {
         Vec::new()
     }
 
-    async fn probe_model(&self, env: ModelEnv, prompt: &str, max_tokens: u32) -> Option<Probe> {
-        let probe = self.probe.lock().unwrap().clone()?;
-        Some(probe(env, prompt.to_string(), max_tokens))
+    async fn check_model(&self, env: ModelEnv) -> Option<ModelCheckRun> {
+        let check = self.check.lock().unwrap().clone()?;
+        Some(check(env))
     }
 
     fn routes_available(&self) -> Vec<RouteName> {
@@ -672,7 +672,7 @@ impl World {
             applied: Mutex::new(Vec::new()),
             phone_address: Mutex::new(None),
             phone_device: Mutex::new(None),
-            probe: Mutex::new(None),
+            check: Mutex::new(None),
         });
         let infra = root.join("infra").join("pipewire");
         std::fs::create_dir_all(&infra).unwrap();

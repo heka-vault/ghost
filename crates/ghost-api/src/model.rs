@@ -24,8 +24,9 @@ use utoipa_axum::routes;
 use crate::deps::{Deps, SharedDeps};
 use crate::error::{ApiError, ApiResult, Body, HTTPValidationError, check_len};
 use crate::models::{
-    ModelConnectionView, ModelDraft, ModelListView, ModelOptionView, ModelProviderView,
-    ModelSignInResult, ModelTestResult, Protocol,
+    ModelCheckLatest, ModelCheckModel, ModelCheckState, ModelCheckTiming, ModelCheckVerdict,
+    ModelCheckView, ModelConnectionView, ModelDraft, ModelListView, ModelOptionView,
+    ModelProviderView, ModelSignInResult, Protocol,
 };
 use crate::passwords::save_passwords;
 
@@ -33,8 +34,6 @@ use crate::passwords::save_passwords;
 pub const SIGN_IN: &str = "model:openrouter";
 /// OpenRouter's codes last ten minutes.
 pub const SIGN_IN_SECS: u64 = 600;
-pub const PROBE_PROMPT: &str = "Say hello in five words.";
-pub const PROBE_TOKENS: u32 = 32;
 /// Stands for a Password's value where only set-or-not is asked.
 pub const HELD: &str = "(in the vault)";
 
@@ -294,59 +293,117 @@ async fn model_list(
     }))
 }
 
-/// Send one tiny request through the connection being edited and time its first token,
-/// the way `make perf-llm` does.
-#[utoipa::path(post, path = "/model/test", operation_id = "model_test_model_test_post", tag = "model",
-    summary = "Model Test",
-    description = "Send one tiny request through the connection being edited and time its first\ntoken, the way ``make perf-llm`` does.",
+fn ms(s: Option<f64>) -> Option<i64> {
+    s.map(|s| (s * 1000.0).round() as i64)
+}
+
+fn timing(t: &ghost_llm::check::Timing) -> ModelCheckTiming {
+    ModelCheckTiming {
+        median_ms: ms(t.median),
+        worst_ms: ms(t.worst),
+    }
+}
+
+fn verdict(v: &ghost_llm::check::Verdict) -> ModelCheckVerdict {
+    use ghost_llm::check::State;
+    ModelCheckVerdict {
+        state: match v.state {
+            State::Yes => ModelCheckState::Yes,
+            State::No => ModelCheckState::No,
+            State::NotReported => ModelCheckState::NotReported,
+            State::NotApplicable => ModelCheckState::NotApplicable,
+            State::Untested => ModelCheckState::Untested,
+        },
+        detail: v.detail.clone(),
+    }
+}
+
+/// The API's shape of a check.
+pub fn check_view(run: &crate::controller::ModelCheckRun, where_: String) -> ModelCheckView {
+    ModelCheckView {
+        checked_at: run.at,
+        where_,
+        models: run
+            .models
+            .iter()
+            .map(|m| ModelCheckModel {
+                role: m.role.clone(),
+                model: m.model.clone(),
+                answered_by: m.answered_by.clone(),
+                reachable: m.reachable,
+                error: m.error.clone(),
+                first_byte: timing(&m.first_byte),
+                first_word: timing(&m.first_word),
+                samples: m.samples as u32,
+                streaming: verdict(&m.streaming),
+                tools: verdict(&m.tools),
+                caching: verdict(&m.caching),
+                thinking: verdict(&m.thinking),
+                thinking_mode: m.thinking_mode.clone(),
+            })
+            .collect(),
+        advice: run.advice.clone(),
+    }
+}
+
+/// Provider, protocol and host of a connection; never a key.
+fn where_of(conn: &ModelConnection) -> String {
+    let described = conn.describe();
+    described
+        .split_once(" via ")
+        .map_or(described.as_str(), |(_, w)| w)
+        .to_string()
+}
+
+/// Check the connection being edited, or the saved one (ADR 0055): for the main model
+/// and the fast one, whether it answers (or the error in plain words), the time to the
+/// first byte and the first word over a few short calls, and whether streaming, tool
+/// calls, prompt caching and the thinking setting work. A fixed synthetic prompt, never
+/// anything of the operator's; the password is read from the vault by the daemon and
+/// never shown. The result is kept, and Ghost shapes its requests to it.
+#[utoipa::path(post, path = "/model/check", operation_id = "model_check_model_check_post", tag = "model",
+    summary = "Model Check",
+    description = "Check the connection being edited, or the saved one (ADR 0055): for the main\nmodel and the fast one, whether it answers (or the error in plain words), the time\nto the first byte and the first word over a few short calls, and whether streaming,\ntool calls, prompt caching and the thinking setting work. A fixed synthetic prompt,\nnever anything of the operator's; the password is read from the vault by the daemon\nand never shown. The result is kept, and Ghost shapes its requests to it.",
     request_body = ModelDraft,
-    responses((status = 200, description = "Successful Response", body = ModelTestResult),
-              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
-async fn model_test(
+    responses((status = 200, description = "Successful Response", body = ModelCheckView),
+              (status = 422, description = "Validation Error", body = HTTPValidationError),
+              (status = 503, description = "Ghost can't check a connection now")))]
+async fn model_check(
     State(deps): State<SharedDeps>,
     Body(draft): Body<ModelDraft>,
-) -> ApiResult<Json<ModelTestResult>> {
+) -> ApiResult<Json<ModelCheckView>> {
     check_draft(&draft)?;
     let env = model_env(&deps, Some(&draft), true)?;
     let conn = ModelConnection::from_env(&env);
-    let described = conn.describe();
-    let where_ = described
-        .split_once(" via ")
-        .map_or(described.as_str(), |(_, w)| w)
-        .to_string();
+    let where_ = where_of(&conn);
     if let Some(problem) = conn.problems_in_settings.first() {
-        return Ok(Json(ModelTestResult {
-            ok: false,
-            ttft_ms: None,
-            total_ms: None,
-            model: conn.wire_model(),
-            answered_by: None,
-            reply: None,
-            error: Some(problem.clone()),
+        return Ok(Json(ModelCheckView {
+            checked_at: chrono::Utc::now(),
             where_,
+            models: Vec::new(),
+            advice: Some(problem.clone()),
         }));
     }
-    let probe = deps
-        .control
-        .probe_model(env, PROBE_PROMPT, PROBE_TOKENS)
-        .await
-        .ok_or_else(|| ApiError::unavailable("Ghost can't test a model connection right now"))?;
-    let ms = |s: Option<f64>| s.map(|s| (s * 1000.0).round() as i64);
-    let reply: String = probe.text.chars().take(120).collect();
-    Ok(Json(ModelTestResult {
-        ok: probe.error.is_none() && probe.ttft.is_some(),
-        ttft_ms: ms(probe.ttft),
-        total_ms: ms(probe.total),
-        model: conn.wire_model(),
-        answered_by: (!probe.model.is_empty()).then_some(probe.model),
-        reply: (!reply.is_empty()).then_some(reply),
-        error: probe.error.or_else(|| {
-            probe
-                .ttft
-                .is_none()
-                .then(|| "No answer came back.".to_string())
-        }),
-        where_,
+    let run =
+        deps.control.check_model(env).await.ok_or_else(|| {
+            ApiError::unavailable("Ghost can't check a model connection right now")
+        })?;
+    Ok(Json(check_view(&run, where_)))
+}
+
+/// The latest kept check of the saved connection, if there is one.
+#[utoipa::path(get, path = "/model/check", operation_id = "model_check_latest_model_check_get", tag = "model",
+    summary = "Model Check Latest",
+    description = "The latest kept check of the saved connection, if there is one.",
+    responses((status = 200, description = "Successful Response", body = ModelCheckLatest)))]
+async fn model_check_latest(State(deps): State<SharedDeps>) -> ApiResult<Json<ModelCheckLatest>> {
+    let env = model_env(&deps, None, false)?;
+    let where_ = where_of(&ModelConnection::from_env(&env));
+    Ok(Json(ModelCheckLatest {
+        check: deps
+            .control
+            .last_model_check()
+            .map(|run| check_view(&run, where_)),
     }))
 }
 
@@ -459,6 +516,6 @@ pub fn router() -> OpenApiRouter<SharedDeps> {
     OpenApiRouter::new()
         .routes(routes!(get_model))
         .routes(routes!(model_list))
-        .routes(routes!(model_test))
+        .routes(routes!(model_check, model_check_latest))
         .routes(routes!(model_sign_in))
 }

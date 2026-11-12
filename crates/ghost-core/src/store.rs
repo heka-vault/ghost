@@ -209,7 +209,33 @@ CREATE TABLE IF NOT EXISTS questions (
     follow_up_run TEXT
 );
 CREATE INDEX IF NOT EXISTS questions_open ON questions(state, asker);
+-- The provider check (ADR 0055): what one route (provider, address, model) did with a
+-- fixed synthetic prompt, kept so Ghost shapes its requests to it and can say which of
+-- the operator's tried options answered faster. Never a key, never the operator's words.
+CREATE TABLE IF NOT EXISTS model_checks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          TEXT NOT NULL,
+    route       TEXT NOT NULL,
+    role        TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    report      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS model_checks_route ON model_checks(route, at);
 "#;
+
+/// One model's provider check as kept (ADR 0055).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelCheckRow {
+    pub at: DateTime<Utc>,
+    /// Provider, protocol, address and model; never a key.
+    pub route: String,
+    /// `main` or `fast`.
+    pub role: String,
+    pub provider: String,
+    pub model: String,
+    pub report: Value,
+}
 
 /// The three tables the lines (ADR 0014 to 0023) lived in. ADR 0024 started over: they
 /// are moved aside under these names, never read again, for the operator to drop.
@@ -825,6 +851,68 @@ impl Store {
         Ok(())
     }
 
+    // --- the provider check (ADR 0055) ---------------------------------------------
+
+    /// Keep one model's check. `report` is the check's JSON.
+    pub fn add_model_check(&self, row: &ModelCheckRow) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO model_checks (at, route, role, provider, model, report) VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                iso(&row.at),
+                row.route,
+                row.role,
+                row.provider,
+                row.model,
+                row.report.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The latest check of every route, newest first.
+    pub fn latest_model_checks(&self) -> Result<Vec<ModelCheckRow>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT at, route, role, provider, model, report FROM model_checks m \
+             WHERE id = (SELECT MAX(id) FROM model_checks WHERE route = m.route) \
+             ORDER BY id DESC",
+        )?;
+        let rows = st
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(at, route, role, provider, model, report)| {
+                Ok(ModelCheckRow {
+                    at: must_dt(at)?,
+                    route,
+                    role,
+                    provider,
+                    model,
+                    report: serde_json::from_str(&report)
+                        .map_err(|e| StoreError::Invalid(format!("a model check: {e}")))?,
+                })
+            })
+            .collect()
+    }
+
+    /// Keep the last `keep` checks of each route.
+    pub fn prune_model_checks(&self, keep: i64) -> Result<usize> {
+        Ok(self.conn().execute(
+            "DELETE FROM model_checks WHERE id IN (SELECT id FROM model_checks m WHERE \
+             (SELECT COUNT(*) FROM model_checks n WHERE n.route = m.route AND n.id > m.id) >= ?)",
+            [keep],
+        )?)
+    }
+
     // --- webhook deliveries (ADR 0027) ---------------------------------------------
 
     /// Record a delivery id; false when it was seen before (a replay). Ids older than
@@ -1286,6 +1374,29 @@ mod tests {
     use super::*;
     use crate::models::*;
     use serde_json::json;
+
+    #[test]
+    fn model_checks_keep_the_latest_per_route() {
+        let store = Store::in_memory().unwrap();
+        let row = |route: &str, n: i64| ModelCheckRow {
+            at: utcnow(),
+            route: route.into(),
+            role: "main".into(),
+            provider: "cliproxy".into(),
+            model: "m".into(),
+            report: json!({"n": n}),
+        };
+        for n in 0..4 {
+            store.add_model_check(&row("a", n)).unwrap();
+        }
+        store.add_model_check(&row("b", 9)).unwrap();
+        let latest = store.latest_model_checks().unwrap();
+        assert_eq!(latest.len(), 2);
+        assert_eq!(latest[0].route, "b");
+        assert_eq!(latest[1].report["n"], 3);
+        assert_eq!(store.prune_model_checks(2).unwrap(), 2);
+        assert_eq!(store.latest_model_checks().unwrap()[1].report["n"], 3);
+    }
 
     fn proposal(session: &str) -> Proposal {
         Proposal::new(Draft {
