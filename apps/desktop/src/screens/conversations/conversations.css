@@ -224,3 +224,13 @@
 .conv-output__text { flex: 1 1 auto; min-width: 0; font-size: var(--text-md); line-height: var(--leading-md); overflow-wrap: anywhere; }
 .conv-output__text .t-mono { font-variant-ligatures: none; }
 .conv-output__actions { display: inline-flex; flex: none; gap: var(--space-3); }
+
+/* The roster line (RosterLine.tsx): what an agent is doing, last did and does next. */
+.conv-roster { display: flex; flex-wrap: wrap; gap: var(--space-0_5) var(--space-4); margin-top: var(--space-1); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+.conv-roster__now { display: inline-flex; align-items: center; gap: var(--space-1_5); color: var(--kind-run); font-weight: var(--weight-medium); }
+.conv-roster__dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-full); background: var(--kind-run); animation: conv-roster-pulse 1.6s var(--ease-in-out) infinite; }
+@keyframes conv-roster-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.conv-roster__last { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-roster__said { color: var(--text-3); }
+.conv-roster__next { color: var(--text-3); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .conv-roster__dot { animation: none; } }

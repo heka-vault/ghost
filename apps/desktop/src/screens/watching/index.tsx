@@ -95,7 +95,7 @@ export default function WatchingScreen(_: RouteProps) {
     <Page
       width="default"
       title="Watching"
-      description={<>What your agents do on a schedule, what Ghost keeps an eye on and the webhooks it takes. Each look is a plain read and a check; the model is asked only when a schedule is due or a watch says so.</>}
+      description="What your agents do on their own, what Ghost keeps an eye on, and the webhooks it takes."
       actions={
         // With nothing watched yet the empty state carries Open folder; one place for it.
         empty ? undefined : (
@@ -178,7 +178,7 @@ export default function WatchingScreen(_: RouteProps) {
               <Section
                 id="wat-watches"
                 title="Watches"
-                description={<>Each reads a connected app on its own schedule and keeps only the fields it names. One failure is one item on What needs you, however often it is seen.</>}
+                description={<>Each reads a connected app on its own schedule and keeps only the fields it names. One failure is one item on Today, however often it is seen.</>}
               >
                 {view.watches.length === 0 ? (
                   <Card>

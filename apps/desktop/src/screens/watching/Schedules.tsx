@@ -74,7 +74,7 @@ export function Schedules() {
     return () => {
       on = false;
     };
-    // A run's answer lands on What needs you: read the list again when that changes.
+    // A run's answer lands on Today: read the list again when that changes.
   }, [client, waitingVersion, tick]);
 
   useEffect(() => {
@@ -111,7 +111,7 @@ export function Schedules() {
     act(s, "run", async () => {
       await client.runSchedule(s.id);
       put({ ...s, running: true });
-      toast({ title: "Started", description: `${nameOf(s.agent)} is on it. The answer goes to What needs you.` });
+      toast({ title: "Started", description: `${nameOf(s.agent)} is on it. The answer goes to Today.` });
     });
 
   /** Stop the run that is going (or waiting): it records that it was stopped. */
@@ -128,7 +128,7 @@ export function Schedules() {
   const remove = async (s: ScheduleInfo) => {
     const ok = await confirm({
       title: `Remove ${s.name}?`,
-      description: "It stops running, and what its runs said goes with it. What it already put on What needs you stays.",
+      description: "It stops running, and what its runs said goes with it. What it already put on Today stays.",
       confirmLabel: `Remove ${s.name}`,
       tone: "danger",
     });
@@ -143,7 +143,7 @@ export function Schedules() {
     <Section
       id="wat-schedules"
       title="Schedules"
-      description={<>What your agents do on their own, with nobody there. Each run uses the agent’s tools under your permissions, and its answer goes to What needs you.</>}
+      description={<>What your agents do on their own, with nobody there. Each run uses the agent’s tools under your permissions, and its answer goes to Today.</>}
       actions={
         view != null && view.schedules.length > 0 ? (
           <Button variant="secondary" size="sm" leadingIcon={<Plus />} onClick={() => setAdding(true)} disabled={!online}>
@@ -295,7 +295,7 @@ function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onS
       description={
         <span className="wat-desc">
           <span>
-            {agent} · {when.text}
+            {agent} · <span title={when.detail}>{when.text}</span>
             {when.mono && (
               <>
                 {" "}
