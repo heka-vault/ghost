@@ -107,7 +107,9 @@ password, or a package that runs on this computer), by address, or by pasting an
 config. Ghost's folder holds the rules every agent reads, what it watches, what it makes
 and its agents ([docs/folder.md](docs/folder.md)); skills are folders of instructions
 ([docs/skills.md](docs/skills.md)). `ghost-mock-github` stands in for GitHub before you
-connect the real one.
+connect the real one. The other way round, your other tools (Claude Code, Cursor, Codex)
+can reach you through Ghost: `ghostd mcp add <name>`, or Settings › Outside tools
+([docs/connect-ghost.md](docs/connect-ghost.md)).
 
 ## Desktop app
 

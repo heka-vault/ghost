@@ -10,11 +10,12 @@
 //! one way in, so the token, the lockout, the budget and the audit are the same for every
 //! client, and a peer on a socket would only be "this user", never a named client.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ghost_core::envfile::read_env;
 use ghost_core::ghost_app::clients::{
     Clients, DEFAULT_LISTEN, http_snippets, read_token, stdio_snippets,
 };
@@ -31,6 +32,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use zeroize::Zeroizing;
 
 use crate::GhostdSettings;
+use crate::config::ConfigError;
 use crate::outside::{PATH, is_loopback, parse_addresses};
 use crate::phone::listener::parse_listen;
 
@@ -40,6 +42,19 @@ pub const USAGE: &str =
 pub const RETRY_FOR: Duration = Duration::from_secs(15);
 /// JSON-RPC's range for a server's own errors.
 const NOT_REACHABLE: i32 = -32001;
+
+/// The settings for `ghostd mcp`: the environment, and under it Ghost's `settings.env`.
+/// The daemon is handed that file by whatever starts it; a tool that starts
+/// `ghostd mcp serve` hands over nothing, and the listener's address may be set there.
+pub fn settings_over(mut env: HashMap<String, String>) -> Result<GhostdSettings, ConfigError> {
+    let base = GhostdSettings::from_env(&env)?;
+    if let Ok(file) = read_env(&base.settings_path) {
+        for (key, value) in file {
+            env.entry(key).or_insert(value);
+        }
+    }
+    GhostdSettings::from_env(&env)
+}
 
 fn clients(cfg: &GhostdSettings) -> Result<Clients, String> {
     if let Some(parent) = cfg.db_path.parent() {

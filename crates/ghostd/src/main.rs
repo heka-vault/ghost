@@ -27,7 +27,7 @@ use ghostd::check::check_command;
 use ghostd::config::runtime_dir;
 use ghostd::daemon::{Daemon, LogMirror, Ports, settings_from};
 use ghostd::latency::latency_command;
-use ghostd::mcp::{mcp_cli, serve_cli};
+use ghostd::mcp::{mcp_cli, serve_cli, settings_over};
 use ghostd::passwords::{Cli, Redacting, open_passwords, operator_keyring, passwords_cli};
 use ghostd::push::push_cli;
 use ghostd::{GhostdSettings, wake};
@@ -135,7 +135,7 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(ghost_voice::perf::cli::main(&args[1..]))
         }
         Some("mcp") => {
-            let cfg = GhostdSettings::load()?;
+            let cfg = settings_over(std::env::vars().collect())?;
             if args.get(1).map(String::as_str) == Some("serve") {
                 std::process::exit(mcp_serve(&args[2..], &cfg))
             }

@@ -1035,6 +1035,48 @@ fn cli(args: &[&str], cfg: &crate::GhostdSettings) -> (i32, String, String) {
 }
 
 #[test]
+fn the_command_line_reads_the_listeners_address_from_ghosts_settings_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("settings.env");
+    std::fs::write(
+        &file,
+        "GHOST_MCP_LISTEN=127.0.0.1:5151\nGHOST_CHIME=false\n",
+    )
+    .unwrap();
+    let env = |more: &[(&str, &str)]| -> HashMap<String, String> {
+        let mut env = HashMap::from([(
+            "GHOST_SETTINGS_PATH".to_string(),
+            file.to_string_lossy().into_owned(),
+        )]);
+        env.extend(
+            more.iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string())),
+        );
+        env
+    };
+    let cfg = crate::mcp::settings_over(env(&[])).unwrap();
+    assert_eq!(cfg.mcp_listen, "127.0.0.1:5151");
+    assert_eq!(crate::mcp::connect_address(&cfg).unwrap(), "127.0.0.1:5151");
+    // What the environment says wins, as it does for the daemon; an empty value is off.
+    let cfg = crate::mcp::settings_over(env(&[("GHOST_MCP_LISTEN", "0.0.0.0:6161")])).unwrap();
+    assert_eq!(crate::mcp::connect_address(&cfg).unwrap(), "127.0.0.1:6161");
+    let cfg = crate::mcp::settings_over(env(&[("GHOST_MCP_LISTEN", "")])).unwrap();
+    assert!(crate::mcp::connect_address(&cfg).is_none());
+    // No file at all is the defaults.
+    let none = HashMap::from([(
+        "GHOST_SETTINGS_PATH".to_string(),
+        tmp.path()
+            .join("missing.env")
+            .to_string_lossy()
+            .into_owned(),
+    )]);
+    assert_eq!(
+        crate::mcp::settings_over(none).unwrap().mcp_listen,
+        "127.0.0.1:47824"
+    );
+}
+
+#[test]
 fn the_command_line_adds_lists_and_removes_and_shows_a_token_once() {
     let tmp = tempfile::tempdir().unwrap();
     let cfg = crate::GhostdSettings {
