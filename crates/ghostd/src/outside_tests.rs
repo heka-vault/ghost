@@ -1451,7 +1451,9 @@ mod asking {
                 skills: None,
             })),
             CancellationToken::new(),
-        ));
+        )
+        // The scheduler's queue: a short wait, so a test of a busy agent is quick.
+        .with_turns(jobs.turns().clone(), Duration::from_millis(300)));
         let clients = Arc::new(Clients::new(store.clone(), tmp.path().join("clients")));
         let host = OutsideHost::new(
             "127.0.0.1:0",
@@ -1574,6 +1576,46 @@ mod asking {
         let session = w.transcript("ledger")[0].1.clone();
         assert!(session.starts_with("run-ask-claude-code-"), "{session}");
         assert_eq!(session.len(), "run-ask-claude-code-".len() + 32);
+    }
+
+    /// One piece of work at a time per agent: an ask waits for a scheduled run of the same
+    /// agent, goes before the next one, and is told the agent is busy after its wait.
+    #[tokio::test]
+    async fn an_ask_takes_turns_with_the_agents_scheduled_runs() {
+        let w = asking(
+            "",
+            vec![ScriptedModel::say("Paid."), ScriptedModel::say("Paid.")],
+            Duration::from_millis(100),
+        )
+        .await;
+        let ledger = w.convs.get("ledger").unwrap().unwrap();
+        let turns = w.jobs.turns().clone();
+        // A scheduled run of Ledger is going: the ask waits, and past its wait is refused
+        // with a clear error; nothing ran.
+        assert!(turns.try_run("ledger"));
+        let e = w
+            .runner
+            .ask(&ledger, "Is October paid?", "client:claude-code")
+            .await
+            .unwrap_err();
+        assert!(e.contains("Ledger is busy with other work"), "{e}");
+        assert!(w.transcript("ledger").is_empty());
+        // The run ends while an ask waits: the ask goes, and no run starts until it is done.
+        let asking = tokio::spawn({
+            let (runner, ledger) = (w.runner.clone(), ledger.clone());
+            async move { runner.ask(&ledger, "Is October paid?", "agent:ghost").await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        turns.release("ledger");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(turns.busy("ledger"));
+        assert!(!turns.try_run("ledger"), "a run waits for the ask");
+        assert_eq!(asking.await.unwrap().unwrap(), "Paid.");
+        assert!(!turns.busy("ledger"));
+        assert!(turns.try_run("ledger"));
+        turns.release("ledger");
+        // Another agent was never held up.
+        assert!(turns.try_run("ghost"));
     }
 
     #[tokio::test]

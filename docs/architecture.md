@@ -353,7 +353,9 @@ there, and the instruction is never taken for the operator's yes.
 
 The scheduler (`ghost_core::schedules::Scheduler`, started by `ghostd::schedules`) looks
 every 15 seconds and when something is queued: it claims what is due, writes the run's row
-(`schedule_runs`) before the run starts, and runs one job at a time per agent. With a
+(`schedule_runs`) before the run starts, and runs one job at a time per agent, taking
+turns with the asks of that agent (`agent_ask`, `ask_agent`), which go first and give up
+as busy after 60 seconds (`ghost_core::schedules::turns`). With a
 check, it first calls the app's read-only tool through the watches' read path
 (`AppReader`, the permissions' `block` rules apply), hashes the result with its keys in
 order, and runs the agent only when the hash changed, telling it which lines did. After

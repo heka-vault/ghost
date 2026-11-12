@@ -99,6 +99,8 @@ pub struct Jobs {
     /// Told when a run was queued or a schedule changed, so the scheduler looks now.
     wake: Notify,
     on_change: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// One piece of work at a time per agent, asks first (`super::turns`).
+    turns: Arc<super::turns::AgentTurns>,
 }
 
 fn col_dt(raw: Option<String>) -> Option<DateTime<Utc>> {
@@ -194,7 +196,13 @@ impl Jobs {
             agents: None,
             wake: Notify::new(),
             on_change: Mutex::new(None),
+            turns: super::turns::AgentTurns::new(),
         }
+    }
+
+    /// Which agents are working with nobody there, shared by the scheduler and every ask.
+    pub fn turns(&self) -> &Arc<super::turns::AgentTurns> {
+        &self.turns
     }
 
     /// The zone a schedule is read in when it names none; the machine's unless given.

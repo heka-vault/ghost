@@ -33,7 +33,7 @@ use ghost_core::ghost_app::clients::{AuthError, CLIENT_SOURCE, ClientId, Clients
 use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, Said};
 use ghost_core::ghost_app::{AGENT_SOURCE, GhostServer};
 use ghost_core::routes::{Delivery, RouteName, RoutePolicy};
-use ghost_core::schedules::{DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended};
+use ghost_core::schedules::{ASK_WAIT, AgentTurns, DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended};
 use ghost_core::store::Item;
 use ghost_core::time::utcnow;
 use ghost_core::waiting::WaitingList;
@@ -286,6 +286,10 @@ pub struct AskRunner {
     stop: CancellationToken,
     max_turns: u32,
     max_runtime: Duration,
+    /// One piece of work at a time per agent, shared with the scheduler: an ask waits for
+    /// a run of the same agent to finish, and goes before the next one.
+    turns: Option<Arc<AgentTurns>>,
+    ask_wait: Duration,
 }
 
 impl AskRunner {
@@ -295,7 +299,16 @@ impl AskRunner {
             stop,
             max_turns: DEFAULT_MAX_TURNS,
             max_runtime: Duration::from_secs(DEFAULT_MAX_RUNTIME_SECS),
+            turns: None,
+            ask_wait: ASK_WAIT,
         }
+    }
+
+    /// Take turns with the scheduler's runs (`Jobs::turns`), waiting `wait` at the most.
+    pub fn with_turns(mut self, turns: Arc<AgentTurns>, wait: Duration) -> Self {
+        self.turns = Some(turns);
+        self.ask_wait = wait;
+        self
     }
 
     pub fn with_limits(mut self, max_turns: u32, max_runtime: Duration) -> Self {
@@ -326,6 +339,33 @@ impl AgentRunner for AskRunner {
         let cancel = self.stop.child_token();
         // The request this turn is for (`ghost_app::outside` runs a change under it).
         let request = ghost_core::apps::current_cancel();
+        // The agent's turn: after a scheduled run of it that is going, before the next.
+        let turn = match &self.turns {
+            None => None,
+            Some(turns) => {
+                let waiting = turns.ask(&agent.slug, self.ask_wait);
+                let got = match &request {
+                    Some(request) => tokio::select! {
+                        got = waiting => got,
+                        () = request.cancelled() => {
+                            return Err(format!("stopped before {} answered", agent.name));
+                        }
+                    },
+                    None => waiting.await,
+                };
+                match got {
+                    Ok(turn) => Some(turn),
+                    Err(busy) => {
+                        return Err(format!(
+                            "{} is busy with other work and was still busy after {} seconds; \
+                             ask again in a few minutes",
+                            agent.name,
+                            busy.waited.as_secs()
+                        ));
+                    }
+                }
+            }
+        };
         let asked = Asked {
             id,
             agent: agent.slug.clone(),
@@ -339,7 +379,13 @@ impl AgentRunner for AskRunner {
         // Its own task, stopped through its token and never dropped where it stands: a
         // change the agent has in the gate still gets its outcome.
         let runner = self.runner.clone();
-        let run = tokio::spawn(async move { runner.ask(asked).await });
+        // The turn goes with the run, so the agent is free only once the run has ended,
+        // even when the request that asked for it is gone first.
+        let run = tokio::spawn(async move {
+            let out = runner.ask(asked).await;
+            drop(turn);
+            out
+        });
         tokio::pin!(run);
         let _gone = cancel.clone().drop_guard();
         let out = match request {

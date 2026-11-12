@@ -40,7 +40,10 @@ check.
 
 **The scheduler** (`ghost_core::schedules::Scheduler`) looks every 15 seconds and when
 something is queued. It claims what is due, runs one job at a time per agent, and records
-a run's row before the run starts.
+a run's row before the run starts. An outside tool's `agent_ask` and another agent's
+`ask_agent` take the same per-agent turn (`schedules::turns`, built 2026-11-12): an ask
+waits for a run of that agent to end and goes before the next, since someone is waiting,
+and is refused as "busy" after 60 seconds. A voice session is not in this queue.
 
 - **After Ghost was off**, a schedule runs once if its time was missed by less than its
   grace window (two hours unless set), however many times were missed, and not at all

@@ -25,6 +25,7 @@ pub mod jobs;
 pub mod scheduler;
 #[cfg(test)]
 mod tests;
+pub mod turns;
 pub mod when;
 
 use std::time::Duration;
@@ -37,6 +38,7 @@ use tokio_util::sync::CancellationToken;
 
 pub use jobs::{JobEdit, Jobs, ScheduleError};
 pub use scheduler::{Scheduler, SchedulerParts};
+pub use turns::{ASK_WAIT, AgentTurns, Busy, Turn};
 pub use when::{ActiveHours, Schedule, Written};
 
 /// Who made a schedule when it was the operator (the desktop); an agent is `agent:<slug>`.

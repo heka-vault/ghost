@@ -1379,10 +1379,14 @@ impl Daemon {
         let _ = d.questions.set(questions.clone());
         // ADR 0047, ADR 0052: a written turn with an agent, with nobody there: what an
         // agent's `ask_agent` and an outside tool's `agent_ask` run.
-        let ask_runner = Arc::new(crate::outside::AskRunner::new(
-            Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
-            d.stop.child_token(),
-        ));
+        // One at a time per agent with its scheduled runs, asks first (ADR 0047).
+        let ask_runner = Arc::new(
+            crate::outside::AskRunner::new(
+                Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
+                d.stop.child_token(),
+            )
+            .with_turns(jobs.turns().clone(), ghost_core::schedules::ASK_WAIT),
+        );
         // Made a moment later; Ghost's own app reads them from then on (ADR 0052).
         let late_watches: ghost_app::Late<WatchRunner> = Arc::default();
         let late_routes: ghost_app::Late<RouteEngine> = Arc::default();
