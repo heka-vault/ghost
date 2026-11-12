@@ -14,7 +14,10 @@
 //! A model's score at or above its threshold is a hit, decided the moment its phrase ends:
 //!
 //! - a weak hit, a score under the threshold but at the model's `checked_from` (the
-//!   operator's "Hey Ghost" under music), is checked by Parakeet whatever the rule below;
+//!   operator's "Hey Ghost" under music), is checked by Parakeet whatever the rule below,
+//!   and Parakeet's usual spelling of the operator's "hey" passes it ("A ghost.",
+//!   `match_heys_spelling`). The first frame at the floor decides, so a score that rises
+//!   through the band to the threshold is checked too;
 //! - with the check on (`GHOST_WAKE_VERIFY`, the default), Parakeet transcribes from where
 //!   the operator started talking (at least from just before the phrase) to their first
 //!   pause, or 1 s after the hit if they keep talking, and the model's phrase must be in it:
@@ -239,6 +242,12 @@ impl DetectorWakeProcessor {
             return;
         };
         let hit = pick_hit(&scores, &self.d.models);
+        // The first score at a model's floor decides, though it may still be rising: one
+        // that enters the checked band first is a weak hit, read by Parakeet. Waiting a few
+        // frames for the peak heard one more of the operator's takes in 21 but let the
+        // near-misses that climb past the threshold wake unchecked: 13 false wakes for 10 on
+        // the replay's voices, 15 for 9 in the room (2026-11-12,
+        // docs/benchmarks/2026-11-12-wake-check.md).
         let Some((score, model)) = hit else {
             // A near miss, for the operator tuning the detector against the room: the best
             // score of this stretch, at most twice a second.
@@ -289,15 +298,13 @@ impl DetectorWakeProcessor {
                 if final_ { " (final)" } else { "" }
             )
         });
+        let fuzzy = if self.weak {
+            self.fuzzy.min(WEAK_FUZZY)
+        } else {
+            self.fuzzy
+        };
         if self.d.models[self.model]
-            .matches(
-                &text,
-                if self.weak {
-                    self.fuzzy.min(WEAK_FUZZY)
-                } else {
-                    self.fuzzy
-                },
-            )
+            .confirms(&text, fuzzy, self.weak)
             .is_some()
         {
             info!(
@@ -352,7 +359,7 @@ impl DetectorWakeProcessor {
         // the replay, ahead of the opener's own model): what follows the name is the
         // request.
         let m = model
-            .matches(&text, fuzzy)
+            .request(&text, fuzzy)
             .or_else(|| match_opening(&text, ADDRESS_PHRASE, fuzzy, OPENERS));
         let name = model.name.clone();
         debug::audio(|| format!("passive: woken by {name}, heard {text:?}"));
@@ -435,10 +442,9 @@ mod tests {
         }
     }
 
-    /// `model` fires on the given 1-based score calls.
+    /// `model` scores as given on the given 1-based score calls, 0 otherwise.
     struct FakeScorer {
-        hits: Vec<usize>,
-        score: f32,
+        hits: Vec<(usize, f32)>,
         model: String,
         calls: usize,
     }
@@ -448,9 +454,12 @@ mod tests {
             Self::with(hits, 0.9, "hey_ghost")
         }
         fn with(hits: &[usize], score: f32, model: &str) -> Self {
+            Self::rising(&hits.iter().map(|&h| (h, score)).collect::<Vec<_>>(), model)
+        }
+        /// A score that changes from call to call, as a real one rises over "ghost".
+        fn rising(hits: &[(usize, f32)], model: &str) -> Self {
             Self {
                 hits: hits.to_vec(),
-                score,
                 model: model.into(),
                 calls: 0,
             }
@@ -460,11 +469,11 @@ mod tests {
     impl Scorer for FakeScorer {
         fn score(&mut self, _window: &[i16]) -> ghost_infer::Result<Vec<(String, f32)>> {
             self.calls += 1;
-            let s = if self.hits.contains(&self.calls) {
-                self.score
-            } else {
-                0.0
-            };
+            let s = self
+                .hits
+                .iter()
+                .find(|(c, _)| *c == self.calls)
+                .map_or(0.0, |(_, s)| *s);
             Ok(vec![(self.model.clone(), s)])
         }
     }
@@ -873,6 +882,106 @@ mod tests {
         .await;
         assert!(events.is_empty());
         assert_eq!(recognize.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_a_score_that_rises_through_the_band_is_checked() {
+        // The first frame at the floor decides, though the next may pass the threshold:
+        // a near miss climbing past it ("Hey coach") is read and turned down. A
+        // hold for the peak let those wake unchecked on the replay (2026-11-12).
+        let rising = |texts: &[&str]| {
+            let recognize = Recognizer::new(texts);
+            let mut d = detector(
+                FakeScorer::rising(&[(3, 0.33), (4, 0.92), (5, 0.95)], "hey_ghost"),
+                &recognize,
+                false,
+            );
+            d.models[0].checked_from = Some(0.3);
+            (d, recognize)
+        };
+        let said = || {
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ])
+        };
+        let (d, r) = rising(&["Hey coach.", "Hey coach, what time is practice?"]);
+        assert!(run(d, said()).await.is_empty());
+        assert_eq!(r.calls(), 2);
+        // the operator's take climbing the same way, as Parakeet reads it, wakes
+        let (d, _r) = rising(&["A ghost."]);
+        assert_eq!(run(d, said()).await, vec!["heard", "match:hey ghost|"]);
+    }
+
+    #[tokio::test]
+    async fn test_a_weak_hit_read_as_a_ghost_wakes() {
+        // 2026-11-12: the operator's "Hey Ghost" scored 0.32-0.59, Parakeet read it "A
+        // ghost." five times in a row and every one was turned down.
+        let weak = |texts: &[&str]| {
+            let recognize = Recognizer::new(texts);
+            let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+            d.models[0].checked_from = Some(0.3);
+            (d, recognize)
+        };
+        let said = || {
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ])
+        };
+        let (d, _r) = weak(&["A ghost."]);
+        assert_eq!(run(d, said()).await, vec!["heard", "match:hey ghost|"]);
+        let (d, _r) = weak(&["A ghost. A ghost."]);
+        assert_eq!(run(d, said()).await, vec!["heard", "match:hey ghost|"]);
+        let (d, _r) = weak(&["A ghost, list the open pull requests."]);
+        assert_eq!(
+            run(d, said()).await,
+            vec!["heard", "match:hey ghost|list the open pull requests."]
+        );
+        // room talk the detector half liked is still turned down
+        for talk in ["I saw a ghost.", "It goes.", "The ghost story was long."] {
+            let (d, r) = weak(&[talk]);
+            assert!(run(d, said()).await.is_empty(), "{talk}");
+            assert_eq!(r.calls(), 2, "{talk}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_a_hit_read_as_a_ghost_keeps_the_request() {
+        // A strong hit wakes with the check off; the request after "A ghost," is the
+        // first turn, not dropped for want of a "hey".
+        let recognize = Recognizer::new(&["A ghost, what needs my sign-off?"]);
+        let events = run(
+            detector(FakeScorer::new(&[3]), &recognize, false),
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        assert_eq!(
+            events,
+            vec!["heard", "match:hey ghost|what needs my sign-off?"]
+        );
+        // the phrase said twice is not a request
+        let recognize = Recognizer::new(&["A ghost a ghost"]);
+        let events = run(
+            detector(FakeScorer::new(&[3]), &recognize, false),
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        assert_eq!(events, vec!["heard", "match:hey ghost|"]);
     }
 
     #[tokio::test]
