@@ -33,6 +33,21 @@ use crate::latency::{LatencyProbe, null_probe};
 
 pub type OnCall = Arc<dyn Fn(&str, &Map<String, Value>) + Send + Sync>;
 /// The operator's words since Ghost last spoke, and that reply.
+/// A call the model made and what it was given back (ADR 0058), for the desktop's
+/// preview of an opened call: the result as the model got it, already bounded and
+/// redacted by `ghost_core::apps` on its way in.
+#[derive(Debug, Clone)]
+pub struct CallSeen {
+    pub id: String,
+    pub name: String,
+    /// A read (an app's read tool or one of Ghost's own); else a change through the gate.
+    pub read: bool,
+    pub result: Map<String, Value>,
+}
+
+/// Called with each call of a session once it came back. Must not block.
+pub type OnResult = Arc<dyn Fn(CallSeen) + Send + Sync>;
+
 pub type LastRequest = Arc<dyn Fn() -> (String, String) + Send + Sync>;
 
 /// What a call hands back to the model, and what follows it.
@@ -106,6 +121,8 @@ pub struct ToolDispatcher {
     /// Tools by name that this dispatcher neither offers nor calls (a run's
     /// `RunRequest::withheld`).
     withheld: std::sync::Mutex<Vec<String>>,
+    /// Each call and what it returned, for the desktop (`set_on_result`).
+    on_result: std::sync::OnceLock<OnResult>,
 }
 
 /// The sources as they are now.
@@ -176,6 +193,7 @@ impl ToolDispatcher {
             alone,
             live,
             withheld: std::sync::Mutex::new(Vec::new()),
+            on_result: std::sync::OnceLock::new(),
         });
         if let Some(c) = &this.conversations {
             let me = this.clone();
@@ -264,9 +282,30 @@ impl ToolDispatcher {
         )
     }
 
+    /// Hand each call and what it returned to `on` (ADR 0058); the first one set holds.
+    pub fn set_on_result(&self, on: OnResult) {
+        let _ = self.on_result.set(on);
+    }
+
     /// One call by the model: `name` with `args`; `call_id` labels its steps in the
     /// latency record.
     pub async fn call(&self, name: &str, args: Map<String, Value>, call_id: &str) -> CallResult {
+        let r = self.call_inner(name, args, call_id).await;
+        // The session's own tools (hang up, hold, a transfer) return nothing to see.
+        if let Some(on) = self.on_result.get()
+            && !matches!(name, SWITCH_TOOL | BRING_UP_TOOL | HANG_UP_TOOL | HOLD_TOOL)
+        {
+            on(CallSeen {
+                id: call_id.to_string(),
+                name: name.to_string(),
+                read: self.is_read(name),
+                result: r.result.clone(),
+            });
+        }
+        r
+    }
+
+    async fn call_inner(&self, name: &str, args: Map<String, Value>, call_id: &str) -> CallResult {
         if self.alone.is_some()
             && matches!(name, SWITCH_TOOL | BRING_UP_TOOL | HANG_UP_TOOL | HOLD_TOOL)
         {

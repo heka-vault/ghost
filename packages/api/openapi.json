@@ -576,6 +576,49 @@
         ],
         "type": "object"
       },
+      "CallPreview": {
+        "description": "What a call of the live session returned, as the model was given it (ADR 0058):\nbounded and redacted by the apps' limits on its way in (ADR 0046), then cut to\n`CALL_PREVIEW_CHARS` here. Kept in memory for the last calls only.",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "dropped": {
+            "description": "Characters cut from the end; 0 when it is whole.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "description": "The tool as the model called it.",
+            "type": "string"
+          },
+          "preview": {
+            "description": "The result as JSON text, pretty-printed, cut at `CALL_PREVIEW_CHARS`.",
+            "type": "string"
+          },
+          "read": {
+            "description": "A read; else a change through the gate (the audit has what it did).",
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "name",
+          "read",
+          "at",
+          "preview",
+          "dropped"
+        ],
+        "type": "object"
+      },
       "CatalogEntryView": {
         "description": "An app in the catalog. Its text is the registry's: shown to the operator, never to the\nmodel.",
         "properties": {
@@ -2382,6 +2425,46 @@
           "extra"
         ],
         "type": "string"
+      },
+      "HeardEvent": {
+        "description": "The operator's spoken turn as it closed, with the words the model was given (ADR 0058).",
+        "properties": {
+          "heard": {
+            "$ref": "#/components/schemas/HeardView"
+          },
+          "type": {
+            "default": "heard",
+            "type": "string"
+          }
+        },
+        "required": [
+          "heard"
+        ],
+        "type": "object"
+      },
+      "HeardView": {
+        "description": "The operator's spoken turn as it closed (`Event::Heard`, ADR 0058): the words the\nmodel was given for it, read whole (ADR 0044), in place of the pieces `turn` events\nshowed. `reopened`: the last one closed was taken back before its answer was heard;\nits words come back in the turn that goes on, and `text` is empty.",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reopened": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "at",
+          "text"
+        ],
+        "type": "object"
       },
       "HookInfo": {
         "description": "A webhook in hooks.json (ADR 0027, ADR 0035): on or off, and what came of deliveries\nsince the daemon started. Counts only; never a body.",
@@ -4203,6 +4286,52 @@
         ],
         "type": "object"
       },
+      "SayingEvent": {
+        "description": "Which words of Ghost's reply are heard now (ADR 0058).",
+        "properties": {
+          "saying": {
+            "$ref": "#/components/schemas/SayingView"
+          },
+          "type": {
+            "default": "saying",
+            "type": "string"
+          }
+        },
+        "required": [
+          "saying"
+        ],
+        "type": "object"
+      },
+      "SayingView": {
+        "description": "Which words of Ghost's reply are being heard now (`Event::Saying`, ADR 0058): the\nwords `from` up to `to` of the reply numbered `reply` in the session, counted as runs\nof text with a letter or a digit in them, a line's list marker left out. Sent when the\npiece being heard changes, in step with `voice`.",
+        "properties": {
+          "from": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reply": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "to": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "reply",
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
       "ScheduleCheck": {
         "description": "A look that runs first, with no model: one of a connected app's read-only tools. The\nagent runs only when what it returns has changed.",
         "properties": {
@@ -5906,6 +6035,52 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/activity": {
+      "get": {
+        "description": "What the sessions did between their turns, oldest first per session: calls, handovers, cuts and failed turns, by name. Kept as long as the session's transcript.",
+        "operationId": "activity_activity_get",
+        "parameters": [
+          {
+            "description": "Session ids, comma separated, at most 40.",
+            "in": "query",
+            "name": "sessions",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activity",
+        "tags": [
+          "session"
+        ]
+      }
+    },
     "/apps": {
       "get": {
         "description": "Every app in apps.json: connected or not, and what each tool may do.",
@@ -6224,6 +6399,42 @@
         "summary": "Audit",
         "tags": [
           "writes"
+        ]
+      }
+    },
+    "/calls/{id}": {
+      "get": {
+        "description": "What one call of the live session returned, as the model was given it (bounded and redacted), cut to 2,000 characters. 404 once it is no longer kept.",
+        "operationId": "call_calls_id_get",
+        "parameters": [
+          {
+            "description": "The call's id, as `activity` carries it",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not kept"
+          }
+        },
+        "summary": "Call",
+        "tags": [
+          "session"
         ]
       }
     },
@@ -7047,10 +7258,12 @@
                       "apps": "#/components/schemas/AppsEvent",
                       "conversation": "#/components/schemas/ConversationEvent",
                       "hear": "#/components/schemas/HearEvent",
+                      "heard": "#/components/schemas/HeardEvent",
                       "log": "#/components/schemas/LogEvent",
                       "outcome": "#/components/schemas/OutcomeEvent",
                       "pending": "#/components/schemas/PendingEvent",
                       "question": "#/components/schemas/QuestionEvent",
+                      "saying": "#/components/schemas/SayingEvent",
                       "status": "#/components/schemas/StatusEvent",
                       "turn": "#/components/schemas/TurnEvent",
                       "voice": "#/components/schemas/VoiceEvent",
@@ -7091,6 +7304,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/ActivityEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HeardEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SayingEvent"
                     },
                     {
                       "$ref": "#/components/schemas/HearEvent"

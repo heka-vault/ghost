@@ -229,7 +229,37 @@ CREATE TABLE IF NOT EXISTS model_checks (
     report      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS model_checks_route ON model_checks(route, at);
+-- What a session did between its turns (ADR 0058): a tool called and come back, a handover
+-- from the fast model, a cut, a failed turn, by name only, never words, arguments or
+-- results. Kept as long as the session's turns are (`prune_turns`).
+CREATE TABLE IF NOT EXISTS session_activity (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    at          TEXT NOT NULL,
+    name        TEXT,
+    call_id     TEXT,
+    names       TEXT,
+    secs        REAL
+);
+CREATE INDEX IF NOT EXISTS session_activity_session ON session_activity(session_id, id);
 "#;
+
+/// One thing a session did, as kept (ADR 0058): names, ids and a duration, never words.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivityRow {
+    pub session_id: String,
+    /// `call`, `result`, `handover`, `cut` or `error`.
+    pub kind: String,
+    pub at: DateTime<Utc>,
+    pub name: Option<String>,
+    pub call_id: Option<String>,
+    pub names: Vec<String>,
+    pub secs: Option<f64>,
+}
+
+/// How many activities one session keeps: the screen's own bound.
+pub const ACTIVITY_PER_SESSION: i64 = 400;
 
 /// One model's provider check as kept (ADR 0056).
 #[derive(Debug, Clone, PartialEq)]
@@ -835,6 +865,50 @@ impl Store {
         Ok(())
     }
 
+    // --- what a session did (ADR 0058) ------------------------------------------------
+
+    pub fn add_activity(&self, a: &ActivityRow) -> Result<()> {
+        let names =
+            (!a.names.is_empty()).then(|| serde_json::to_string(&a.names).unwrap_or_default());
+        self.conn().execute(
+            "INSERT INTO session_activity (session_id, kind, at, name, call_id, names, secs) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![a.session_id, a.kind, iso(&a.at), a.name, a.call_id, names, a.secs],
+        )?;
+        Ok(())
+    }
+
+    /// The sessions' activity, oldest first, at most [`ACTIVITY_PER_SESSION`] each (the
+    /// newest).
+    pub fn session_activity(&self, sessions: &[String]) -> Result<Vec<ActivityRow>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT session_id, kind, at, name, call_id, names, secs FROM (\
+               SELECT * FROM session_activity WHERE session_id = ? ORDER BY id DESC LIMIT ?\
+             ) ORDER BY id",
+        )?;
+        let mut out = Vec::new();
+        for s in sessions {
+            let rows = st.query_map(params![s, ACTIVITY_PER_SESSION], |r| {
+                let names: Option<String> = r.get(5)?;
+                Ok(ActivityRow {
+                    session_id: r.get(0)?,
+                    kind: r.get(1)?,
+                    at: parse_iso(&r.get::<_, String>(2)?).unwrap_or_else(utcnow),
+                    name: r.get(3)?,
+                    call_id: r.get(4)?,
+                    names: names
+                        .and_then(|n| serde_json::from_str(&n).ok())
+                        .unwrap_or_default(),
+                    secs: r.get(6)?,
+                })
+            })?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
+    }
+
     // --- outside clients (ADR 0048) --------------------------------------------------
 
     /// A new client; false when the name is taken.
@@ -1223,6 +1297,12 @@ impl Store {
                 [iso(&before)],
             )?;
         }
+        // A session's activity goes with the last of its turns (ADR 0058). Only past the
+        // hidden window, so a session that has not said anything yet keeps what it did.
+        conn.execute(
+            "DELETE FROM session_activity WHERE at < ? AND session_id NOT IN (SELECT session_id FROM turns)",
+            [iso(&hidden_before)],
+        )?;
         Ok(n)
     }
 
@@ -1408,6 +1488,63 @@ mod tests {
     use super::*;
     use crate::models::*;
     use serde_json::json;
+
+    fn activity(session: &str, kind: &str, at: DateTime<Utc>) -> ActivityRow {
+        ActivityRow {
+            session_id: session.into(),
+            kind: kind.into(),
+            at,
+            name: Some("github_issue_read".into()),
+            call_id: Some("c1".into()),
+            names: vec!["github_issue_write".into()],
+            secs: Some(0.4),
+        }
+    }
+
+    #[test]
+    fn a_sessions_activity_is_kept_and_read_back_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("ghost.db")).unwrap();
+        let now = utcnow();
+        s.add_activity(&activity("s1", "call", now)).unwrap();
+        s.add_activity(&activity("s2", "cut", now)).unwrap();
+        s.add_activity(&activity("s1", "result", now)).unwrap();
+        let got = s.session_activity(&["s1".into()]).unwrap();
+        assert_eq!(
+            got.iter().map(|a| a.kind.as_str()).collect::<Vec<_>>(),
+            vec!["call", "result"]
+        );
+        assert_eq!(
+            got[0],
+            activity("s1", "call", parse_iso(&iso(&now)).unwrap())
+        );
+        for _ in 0..ACTIVITY_PER_SESSION + 5 {
+            s.add_activity(&activity("s3", "call", now)).unwrap();
+        }
+        assert_eq!(
+            s.session_activity(&["s3".into()]).unwrap().len() as i64,
+            ACTIVITY_PER_SESSION
+        );
+    }
+
+    #[test]
+    fn a_sessions_activity_goes_with_the_last_of_its_turns() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("ghost.db")).unwrap();
+        let old = utcnow() - Duration::days(400);
+        s.add_activity(&activity("kept", "call", old)).unwrap();
+        s.add_activity(&activity("gone", "call", old)).unwrap();
+        s.add_activity(&activity("new", "call", utcnow())).unwrap();
+        s.add_turn("ghost", "kept", Role::User, "hello").unwrap();
+        s.prune_turns(None, utcnow() - Duration::days(30)).unwrap();
+        assert_eq!(s.session_activity(&["kept".into()]).unwrap().len(), 1);
+        assert!(s.session_activity(&["gone".into()]).unwrap().is_empty());
+        assert_eq!(
+            s.session_activity(&["new".into()]).unwrap().len(),
+            1,
+            "a session not yet in the transcript"
+        );
+    }
 
     #[test]
     fn the_recent_tools_are_kept_in_order_and_replaced_whole() {
