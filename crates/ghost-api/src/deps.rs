@@ -294,6 +294,8 @@ pub struct Deps {
     pub model_sign_in: ModelSignIn,
     /// The Hearing test (ADR 0042); None in a daemon without the desk's models.
     pub hear: Option<Arc<dyn crate::hear::HearPort>>,
+    /// The schedules and their runs (ADR 0047); None in a daemon without them.
+    pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,
 }
 
 impl Deps {
@@ -339,6 +341,7 @@ impl Deps {
             model_net: Arc::new(LiveModelNet),
             model_sign_in: ModelSignIn::default(),
             hear: None,
+            schedules: None,
         }
     }
 

@@ -238,7 +238,8 @@ impl Jobs {
         }
     }
 
-    fn agent_state(&self, slug: &str) -> AgentState {
+    /// What Ghost knows of the agent a schedule or a watch names.
+    pub fn agent_state(&self, slug: &str) -> AgentState {
         match &self.agents {
             Some(f) => f(slug),
             None => AgentState::Known,

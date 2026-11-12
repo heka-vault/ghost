@@ -73,13 +73,15 @@ pub fn describe_watches(folder: &Folder) -> Vec<String> {
             if w.model.is_some() {
                 steps.push_str(", model");
             }
+            // `"response": "act"` keeps the item and tells only what the run answers.
+            let response = match (w.response, w.act.is_some()) {
+                (ghost_core::watches::Choice::Tell, true) => "tell and act",
+                (_, true) => "act",
+                (r, false) => r.as_str(),
+            };
             format!(
-                "watch {}: {}.{} every {}s, {steps}, {}",
-                w.name,
-                w.app,
-                w.read,
-                w.every,
-                w.response.as_str()
+                "watch {}: {}.{} every {}s, {steps}, {response}",
+                w.name, w.app, w.read, w.every
             )
         })
         .collect()
@@ -444,6 +446,8 @@ pub async fn check_command(
         }
     };
     problems.extend(check_folder(&cfg.config_dir, &env, out).await);
+    // The schedules and the watches that act (ADR 0047): each one's agent and time.
+    problems.extend(crate::schedules::check_schedules(&cfg, out));
 
     let apps_file = load_apps(&cfg.config_dir.join(APPS_FILE));
     for problem in &apps_file.problems {

@@ -309,6 +309,32 @@ impl Store {
         Self::from_connection(Connection::open_in_memory()?)
     }
 
+    /// The database as it is, for a look that must leave it alone (`ghostd check`):
+    /// never created, migrated or written, and readable beside a running daemon.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    /// Whether the database has `table`: one from before a migration may not.
+    pub fn has_table(&self, table: &str) -> bool {
+        self.conn()
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                [table],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
     fn from_connection(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;

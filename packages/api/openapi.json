@@ -3500,6 +3500,524 @@
         ],
         "type": "object"
       },
+      "ScheduleCheck": {
+        "description": "A look that runs first, with no model: one of a connected app's read-only tools. The\nagent runs only when what it returns has changed.",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "args": {
+            "type": "object"
+          },
+          "read": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "read"
+        ],
+        "type": "object"
+      },
+      "ScheduleHours": {
+        "description": "The hours of the day a schedule may run in, in its time zone (`08:00` to `18:00`).",
+        "properties": {
+          "end": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "ScheduleInfo": {
+        "description": "One schedule: what an agent does on its own, and when.",
+        "properties": {
+          "active_hours": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleHours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent": {
+            "description": "The agent's slug.",
+            "type": "string"
+          },
+          "at": {
+            "description": "The time of a one-off.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "description": "`operator`, or `agent:<slug>`.",
+            "type": "string"
+          },
+          "cron": {
+            "description": "Five cron fields.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delete_after_run": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "every": {
+            "description": "An interval as written: `30m`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grace_minutes": {
+            "description": "A run missed by less than this is run once when Ghost is back.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "Which of the three kinds a schedule is.",
+            "enum": [
+              "at",
+              "every",
+              "cron"
+            ],
+            "type": "string"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_outcome": {
+            "oneOf": [
+              {
+                "description": "Where a run is, or how it ended.",
+                "enum": [
+                  "queued",
+                  "running",
+                  "ok",
+                  "unchanged",
+                  "failed",
+                  "timed_out",
+                  "cancelled",
+                  "interrupted",
+                  "missed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_run": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_runtime_minutes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_turns": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_run": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notify_failure": {
+            "description": "Whether a run that fails tells the operator.",
+            "type": "boolean"
+          },
+          "running": {
+            "description": "A run of it is waiting or going now.",
+            "type": "boolean"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "description": "The schedule in a few words: `every 30m`, `0 9 * * 1-5 (Europe/London)`.",
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "urgency": {
+            "enum": [
+              "digest",
+              "notify",
+              "call"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "agent",
+          "instruction",
+          "kind",
+          "time_zone",
+          "summary",
+          "enabled",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "running",
+          "grace_minutes",
+          "max_runtime_minutes",
+          "max_turns",
+          "delete_after_run",
+          "skills",
+          "urgency",
+          "notify_failure"
+        ],
+        "type": "object"
+      },
+      "ScheduleRequest": {
+        "description": "A new schedule, or a change to one: what is left out stays as it is (or takes its\ndefault in a new one). When is exactly one of `at`, `every` and `cron`.",
+        "properties": {
+          "active_hours": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleHours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent": {
+            "description": "The agent's slug; Ghost when left out of a new schedule.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at": {
+            "description": "Once: `2026-11-12T09:00` in the schedule's time zone, a time with an offset, or a\ndelay such as `20m`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clear_active_hours": {
+            "description": "Run at any hour again.",
+            "type": "boolean"
+          },
+          "clear_check": {
+            "description": "Run every time again, without looking first.",
+            "type": "boolean"
+          },
+          "cron": {
+            "description": "Five fields: `0 9 * * 1-5`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delete_after_run": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "every": {
+            "description": "`30m`, `2h`, `1d`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grace_minutes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "instruction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_runtime_minutes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_turns": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notify_failure": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "time_zone": {
+            "description": "An IANA name; the machine's when left out.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "urgency": {
+            "oneOf": [
+              {
+                "enum": [
+                  "digest",
+                  "notify",
+                  "call"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ScheduleRunInfo": {
+        "description": "One run of an agent with nobody there.",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "answer": {
+            "description": "What the agent answered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "description": "What came of the answer: delivered, silent, empty, by_agent, failure,\nfailure_not_told or none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "model_calls": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "retries": {
+            "description": "Model calls tried again after the model could not be reached.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedule": {
+            "description": "The schedule's id; none for a watch that acted.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduled_for": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "source": {
+            "description": "`schedule`, `run_now`, or `watch:<name>`.",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "Where a run is, or how it ended.",
+            "enum": [
+              "queued",
+              "running",
+              "ok",
+              "unchanged",
+              "failed",
+              "timed_out",
+              "cancelled",
+              "interrupted",
+              "missed"
+            ],
+            "type": "string"
+          },
+          "tool_calls": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "agent",
+          "name",
+          "status",
+          "scheduled_for",
+          "retries",
+          "model_calls",
+          "tool_calls"
+        ],
+        "type": "object"
+      },
+      "ScheduleRunsView": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRunInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "type": "object"
+      },
+      "SchedulesView": {
+        "description": "The schedules, the zone a time is read in when none is named, and what is wrong with\nany of them.",
+        "properties": {
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleInfo"
+            },
+            "type": "array"
+          },
+          "time_zone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schedules",
+          "time_zone",
+          "problems"
+        ],
+        "type": "object"
+      },
       "SecretState": {
         "properties": {
           "name": {
@@ -4513,6 +5031,13 @@
       "WatchInfo": {
         "description": "A watch in watches.json (ADR 0028, ADR 0035) and how its last look went.",
         "properties": {
+          "acts_through": {
+            "description": "The agent a run starts for on each new item, when the watch acts (ADR 0047).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "app": {
             "type": "string"
           },
@@ -7077,6 +7602,438 @@
         "summary": "Add Rule",
         "tags": [
           "rules"
+        ]
+      }
+    },
+    "/runs": {
+      "get": {
+        "operationId": "runs_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRunsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recent runs",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_run_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such run, or it has ended"
+          }
+        },
+        "summary": "Stop a run",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/schedules": {
+      "get": {
+        "description": "What each agent does on its own, and when: every schedule with its next run and how\nthe last one ended, and what is wrong with any of them (ADR 0047).",
+        "operationId": "schedules_schedules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "description": "Schedules are not running"
+          }
+        },
+        "summary": "Schedules",
+        "tags": [
+          "schedules"
+        ]
+      },
+      "post": {
+        "operationId": "add_schedule_schedules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Schedules are not running"
+          }
+        },
+        "summary": "Add a schedule",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/schedules/{schedule_id}": {
+      "delete": {
+        "operationId": "remove_schedule_schedules__schedule_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such schedule"
+          }
+        },
+        "summary": "Remove a schedule",
+        "tags": [
+          "schedules"
+        ]
+      },
+      "get": {
+        "operationId": "schedule_schedules__schedule_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such schedule"
+          }
+        },
+        "summary": "A schedule",
+        "tags": [
+          "schedules"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_schedule_schedules__schedule_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such schedule"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change a schedule",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/schedules/{schedule_id}/pause": {
+      "post": {
+        "operationId": "pause_schedule_schedules__schedule_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such schedule"
+          }
+        },
+        "summary": "Pause a schedule",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/schedules/{schedule_id}/resume": {
+      "post": {
+        "operationId": "resume_schedule_schedules__schedule_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such schedule"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Its time has passed"
+          }
+        },
+        "summary": "Resume a schedule",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/schedules/{schedule_id}/run": {
+      "post": {
+        "operationId": "run_schedule_schedules__schedule_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRunInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such schedule"
+          }
+        },
+        "summary": "Run a schedule now",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/schedules/{schedule_id}/runs": {
+      "get": {
+        "operationId": "schedule_runs_schedules__schedule_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRunsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such schedule"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "A schedule's runs",
+        "tags": [
+          "schedules"
         ]
       }
     },

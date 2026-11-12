@@ -941,6 +941,45 @@ async fn a_run_that_fails_is_told_and_noted_for_the_agent() {
     );
 }
 
+/// ADR 0018: what the two schedule tools cost on every turn of every session, in the
+/// cached prefix. Run with `--no-capture` to read the numbers; the bound keeps a later
+/// argument from growing it unnoticed.
+#[tokio::test]
+async fn what_the_schedule_tools_add_to_every_turn() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let ghost = w.convs.get("ghost").unwrap().unwrap();
+    let tools = ToolDispatcher::new(ToolsParams {
+        sources: (w.reach)(&ghost),
+        gate: w.gate.clone(),
+        session_id: "s".into(),
+        on_hang_up: no_action(),
+        on_hold: None,
+        turns: None,
+        events: None,
+        conversations: None,
+        on_call: None,
+        last_request: None,
+        probe: None,
+    })
+    .schemas();
+    let bytes = |name: &str| {
+        serde_json::to_string(&tools.get(name).expect(name).anthropic())
+            .unwrap()
+            .len()
+    };
+    let (list, manage) = (
+        bytes("ghost_schedules_list"),
+        bytes("ghost_schedule_manage"),
+    );
+    println!(
+        "ghost_schedules_list: {list} bytes; ghost_schedule_manage: {manage} bytes; \
+         +2 tools, +{} bytes",
+        list + manage
+    );
+    assert!(list + manage < 3_200, "{}", list + manage);
+}
+
 #[tokio::test]
 async fn an_agent_sets_up_its_own_schedule_from_a_run_or_a_session() {
     let tmp = tempfile::tempdir().unwrap();
