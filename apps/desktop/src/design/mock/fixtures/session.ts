@@ -2,7 +2,7 @@
  * Owner: session. The live session: transcript, the pending change, and how the mock
  * answers typed turns. Extend freely; keep the exported shape.
  */
-import type { ActivityView, AuditEntry, PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
+import type { ActivityView, AuditEntry, CallPreview, PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
 
 import { ago, type Scenario } from "../scenarios";
 
@@ -65,6 +65,8 @@ export interface SessionFixture {
   questions: QuestionView[];
   /** Audit rows of this session's changes that ran without asking. */
   audit: AuditEntry[];
+  /** What the story's calls returned, by call id (`GET /calls/{id}`, ADR 0058). */
+  results: Record<string, Omit<CallPreview, "id" | "session_id">>;
   /** Canned replies for typed turns: first rule whose pattern matches wins. */
   replies: { match: RegExp; reply: string; calls?: string[]; propose?: Omit<PendingProposal, "id" | "expires_at" | "expires_in_secs"> }[];
   fallbackReply: string;
@@ -110,6 +112,7 @@ export default function session(s: Scenario): SessionFixture {
     activity: story?.activity ?? [],
     questions: story?.questions ?? [],
     audit: story?.audit ?? [],
+    results: story?.results ?? {},
     replies: [
       {
         match: /\bclose\b/i,
@@ -135,7 +138,16 @@ export default function session(s: Scenario): SessionFixture {
 
 // ---------------------------------------------------------------- conversation-screen stories
 
-type Story = { turns: Turn[]; activity: ActivityView[]; questions: QuestionView[]; audit: AuditEntry[] };
+type Story = { turns: Turn[]; activity: ActivityView[]; questions: QuestionView[]; audit: AuditEntry[]; results?: SessionFixture["results"] };
+
+const json = (v: unknown) => JSON.stringify(v, null, 2);
+const LONG_COMMENTS = json({
+  comments: Array.from({ length: 14 }, (_, i) => ({
+    author: ["dana", "priya", "marco"][i % 3],
+    at: `2026-11-0${(i % 9) + 1}T1${i % 10}:0${i % 6}:00Z`,
+    body: ["Reproduced on Safari 18.2 after a password reset; the session cookie is set on the wrong domain.", "Same console error as 148: `refresh token missing`.", "Fix for 148 is in review, it moves the cookie to the parent domain."][i % 3],
+  })),
+}).slice(0, 2000);
 
 const t = (session: string, role: Turn["role"], text: string, m: number, via: Turn["via"] = "voice"): Turn => ({ role, text, at: ago(m), session_id: session, via });
 const a = (session: string, kind: ActivityView["kind"], m: number, extra: Partial<ActivityView> = {}): ActivityView => ({ kind, session_id: session, at: ago(m), names: [], ...extra });
@@ -191,6 +203,14 @@ const STORIES: Record<NonNullable<Scenario["story"]>, (sid: string) => Story> = 
         events: [{ at: ago(12.15), event: "prepared" }, { at: ago(12.1), event: "finished", detail: { status: "success" } }],
       },
     ],
+    results: {
+      c1: { name: "github_issue_list", read: true, at: ago(13.8), dropped: 0, preview: json({ issues: [{ number: 151, title: "Login loops on Safari after a password reset", age_days: 9 }, { number: 156, title: "Dark mode toggle forgets its setting" }, { number: 160, title: "Export button does nothing on Firefox" }, { number: 163, title: "Typo in the footer" }] }) },
+      c2: { name: "github_issue_read", read: true, at: ago(13.7), dropped: 0, preview: json({ number: 151, title: "Login loops on Safari after a password reset", state: "open", author: "dana", labels: ["bug", "auth"], body: "After resetting a password on Safari 18, signing in goes back to the login page. Console: refresh token missing." }) },
+      c3: { name: "github_issue_read", read: true, at: ago(12.9), dropped: 0, preview: json({ number: 148, title: "Safari drops the session cookie", state: "open", linked_pr: 4412, review: "in review" }) },
+      c4: { name: "github_issue_comments", read: true, at: ago(12.85), dropped: 3140, preview: LONG_COMMENTS },
+      c5: { name: "github_issue_write", read: false, at: ago(12.1), dropped: 0, preview: json({ ok: true, status: "success", applied: ["labels: duplicate", "comment: Duplicate of #148"] }) },
+      c6: { name: "ghost_ask_agent", read: true, at: ago(2.7), dropped: 0, preview: json({ agent: "accounting", answer: "Final except the Stripe fees line. I asked the operator whether to send the summary now." }) },
+    },
   }),
   you: (sid) => ({ turns: opening(sid), activity: [a(sid, "you_started", 0.02)], questions: [], audit: [] }),
   cut: (sid) => ({ turns: opening(sid), activity: [], questions: [], audit: [] }),

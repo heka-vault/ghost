@@ -176,6 +176,13 @@ impl AudioOutput {
         self
     }
 
+    /// Report which words of the reply are heard (`crate::level::OnSaid`, ADR 0058); after
+    /// `with_level`, whose meter carries them.
+    pub fn with_said(mut self, on: crate::level::OnSaid) -> Self {
+        self.meter = self.meter.take().map(|m| m.with_said(on));
+        self
+    }
+
     /// The voice stopped at the speaker: played out, or cut.
     fn silence(&mut self) {
         if let Some(m) = &mut self.meter {
@@ -186,6 +193,9 @@ impl AudioOutput {
     /// Write in frames, stopping the moment the turn is cancelled.
     async fn play(&mut self, audio: &Audio, turn: &CancellationToken) -> bool {
         let step = (f64::from(audio.rate) * FRAME_SECS) as usize;
+        if let Some(m) = &mut self.meter {
+            m.saying(audio.spoken);
+        }
         for chunk in audio.samples.chunks(step.max(1)) {
             if turn.is_cancelled() {
                 self.speaking_now.set(false);

@@ -10,7 +10,8 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useState
 
 import { type Activity, addActivity } from "./activity";
 import { createHearLive, type HearLive } from "./hearLive";
-import { type Captions, captionPhase, captionTurn, noCaptions } from "./turns";
+import { createSaidWords, type SaidWords } from "./said";
+import { type Captions, captionHeard, captionPhase, captionTurn, noCaptions } from "./turns";
 import { createVoiceLevel, type VoiceLevel } from "./voiceLevel";
 
 export interface GhostState {
@@ -39,6 +40,8 @@ export interface GhostState {
   voice: VoiceLevel;
   /** The Hearing test's recorder and the mic's level while it is open, outside React state (see hearLive.ts). Stable for the provider's life. */
   hear: HearLive;
+  /** Which words of Ghost's reply are heard now (ADR 0058), outside React state. Stable for the provider's life. */
+  said: SaidWords;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -57,6 +60,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [appsVersion, setAppsVersion] = useState(0);
   const [voice] = useState(createVoiceLevel);
   const [hear] = useState(createHearLive);
+  const [said] = useState(createSaidWords);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -87,18 +91,30 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
             hear.set(m.hear, m.level, m.speaking);
             return;
           }
+          // About one a second while Ghost speaks: the words being heard (ADR 0058).
+          if (m.type === "saying") {
+            said.set(m.saying);
+            return;
+          }
           setLastEvent(m);
           switch (m.type) {
             case "status":
               setStatus(m.status);
               setPending(m.status.pending ?? null);
               setCaptions((c) => captionPhase(c, m.status.phase));
-              if (m.status.phase === "passive" || m.status.phase === "starting") setActivity([]);
+              if (m.status.phase === "passive" || m.status.phase === "starting") {
+                setActivity([]);
+                said.set(null);
+              }
               // The voice's last 0 can be lost with a dropped stream; the phase is the backstop.
               if (m.status.phase !== "speaking" && voice.get().level > 0) voice.set(0);
               break;
             case "turn":
               setCaptions((c) => captionTurn(c, m.turn));
+              break;
+            case "heard":
+              // The operator's turn closed with the words the model was given (ADR 0058).
+              setCaptions((c) => captionHeard(c, m.heard));
               break;
             case "pending":
               setPending(m.pending ?? null);
@@ -154,11 +170,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
       if (timer) clearTimeout(timer);
       stop?.();
     };
-  }, [client, voice, hear]);
+  }, [client, voice, hear, said]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear }),
-    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear],
+    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said }),
+    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

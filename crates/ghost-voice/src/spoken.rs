@@ -15,6 +15,14 @@ static CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+([^`]*)`+").unwra
 static MARKER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s+)").unwrap());
 
+/// How many words `text` has as the screen counts them (ADR 0058): runs between spaces
+/// with a letter or a digit in them, so a list marker or a lone `**` is not one.
+pub fn word_count(text: &str) -> u32 {
+    text.split_whitespace()
+        .filter(|w| w.chars().any(char::is_alphanumeric))
+        .count() as u32
+}
+
 fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
@@ -105,6 +113,16 @@ impl SpokenTextFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_words_are_counted_as_the_screen_counts_them() {
+        assert_eq!(word_count("- **Three** are waiting: 151, 148."), 5);
+        assert_eq!(word_count("  ** -- "), 0);
+        // What the voice says of a Markdown reply counts the same as the reply; a line's
+        // list marker (`1. `) is dropped by the screen as by `spoken` (`@ghost/ui` said.ts).
+        let reply = "See [the login loop](https://x.test/151) **now**";
+        assert_eq!(word_count(&spoken(reply)), word_count(reply));
+    }
 
     #[test]
     fn test_drops_lines_with_nothing_to_say() {
