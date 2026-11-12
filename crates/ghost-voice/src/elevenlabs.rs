@@ -342,9 +342,8 @@ struct Shared {
 /// `KeepContextAlive`, an empty text), well inside the 180 s `inactivity_timeout`.
 pub const KEEP_ALIVE: Duration = Duration::from_secs(60);
 
-type Ws = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 struct Socket {
     tx: mpsc::Sender<String>,
@@ -375,8 +374,8 @@ pub struct ElevenLabsTts {
 
 impl ElevenLabsTts {
     pub fn new(cfg: ElevenLabsConfig) -> Self {
-        let aggregator = ClauseAggregator::new(cfg.clause_min_words)
-            .with_first_clause(cfg.first_clause_words);
+        let aggregator =
+            ClauseAggregator::new(cfg.clause_min_words).with_first_clause(cfg.first_clause_words);
         Self {
             cfg,
             shared: Arc::new(Shared {
@@ -565,7 +564,8 @@ impl ElevenLabsTts {
         let (tx, mut rx) = mpsc::channel::<String>(64);
         let alive = self.shared.clone();
         let writer = tokio::spawn(async move {
-            let mut keep = tokio::time::interval_at(tokio::time::Instant::now() + KEEP_ALIVE, KEEP_ALIVE);
+            let mut keep =
+                tokio::time::interval_at(tokio::time::Instant::now() + KEEP_ALIVE, KEEP_ALIVE);
             loop {
                 let text = tokio::select! {
                     t = rx.recv() => match t {
@@ -758,7 +758,10 @@ impl Stage for ElevenLabsTts {
             }
             return;
         }
-        if !matches!(frame, Frame::End | Frame::Cancel | Frame::VoiceChange { .. }) {
+        if !matches!(
+            frame,
+            Frame::End | Frame::Cancel | Frame::VoiceChange { .. }
+        ) {
             self.warm();
         }
         match &frame {

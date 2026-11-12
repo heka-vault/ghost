@@ -164,8 +164,7 @@ impl Halves {
         let (_, nn) = session::output_f32(&outputs, "n")?;
         let durations = session::output_i64(&outputs, "durations")?;
         let frames = *shape.last().unwrap_or(&0) as usize;
-        if asr.len() != ASR_CHANNELS * frames || f0.len() != 2 * frames || nn.len() != 2 * frames
-        {
+        if asr.len() != ASR_CHANNELS * frames || f0.len() != 2 * frames || nn.len() != 2 * frames {
             return Err(InferError::Model(format!(
                 "the encoder's outputs do not agree: asr {shape:?}, f0 {}, n {}",
                 f0.len(),

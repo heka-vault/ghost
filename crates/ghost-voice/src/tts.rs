@@ -313,7 +313,13 @@ impl Prerender {
         // Off the runtime, behind the model's own lock: a clause the stage is rendering
         // for the reply before goes first. A window at a time when the model streams, so
         // the first window is ready soonest; dropped, it stops at the next window.
-        let rx = render_chunks(&self.0.synth, text.clone(), voice.clone(), speed as f32, None);
+        let rx = render_chunks(
+            &self.0.synth,
+            text.clone(),
+            voice.clone(),
+            speed as f32,
+            None,
+        );
         self.0.probe.prerender("rendered");
         let mut p = self.0.pending.lock().unwrap();
         self.drop_ahead(&mut p);
@@ -328,12 +334,7 @@ impl Prerender {
     /// The audio for `text` in this voice, when it is what was rendered ahead: ready, or
     /// on its way (the caller waits for the one render rather than starting another).
     /// Anything else rendered ahead was for other words, and is dropped.
-    pub fn take(
-        &self,
-        text: &str,
-        voice: &str,
-        speed: f64,
-    ) -> Option<Chunks> {
+    pub fn take(&self, text: &str, voice: &str, speed: f64) -> Option<Chunks> {
         let mut p = self.0.pending.lock().unwrap();
         let ahead = p.ahead.take()?;
         if ahead.text == text && ahead.voice == voice && (ahead.speed - speed).abs() < 1e-9 {
@@ -1134,7 +1135,10 @@ in app, and the Redis versus Postgres call for the session cache.";
             }
         };
         assert_eq!(first.samples.len(), 100);
-        assert!(made.lock().unwrap().1 < 5, "all windows made before the first frame");
+        assert!(
+            made.lock().unwrap().1 < 5,
+            "all windows made before the first frame"
+        );
         // The echo filter heard the words before any audio existed.
         assert_eq!(*announced.lock().unwrap(), vec!["Closed it."]);
         speaking.await.unwrap();
@@ -1195,7 +1199,10 @@ in app, and the Redis versus Postgres call for the session cache.";
         pre.cancel();
         let deadline = Instant::now() + std::time::Duration::from_secs(2);
         while made.lock().unwrap().2 == 0 {
-            assert!(Instant::now() < deadline, "the dropped clause kept rendering");
+            assert!(
+                Instant::now() < deadline,
+                "the dropped clause kept rendering"
+            );
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
     }

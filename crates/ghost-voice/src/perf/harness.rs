@@ -427,8 +427,8 @@ impl Bench {
             w.tts_stream = crate::config::TtsStream::Windowed;
             match crate::pipeline::windowed_halves(&w) {
                 (Some((halves, plan)), _) => {
-                    let k = ghost_infer::Kokoro::load(&base.kokoro_paths())?
-                        .with_windows(halves, plan);
+                    let k =
+                        ghost_infer::Kokoro::load(&base.kokoro_paths())?.with_windows(halves, plan);
                     Some(Arc::new(std::sync::Mutex::new(k)) as crate::tts::SharedSynth)
                 }
                 _ => None,

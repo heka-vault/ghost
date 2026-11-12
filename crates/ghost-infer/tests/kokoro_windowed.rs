@@ -100,7 +100,10 @@ fn a_window_with_the_whole_as_context_is_the_whole_render_there() {
         // Every frame from `s` to the end: the whole render's samples from `s` on.
         let late = halves.decode(&enc, s, enc.frames, &style).unwrap();
         let want = &whole[s * HOP..];
-        let d = rms(&late[HOP * 4..want.len() - HOP * 4], &want[HOP * 4..want.len() - HOP * 4]);
+        let d = rms(
+            &late[HOP * 4..want.len() - HOP * 4],
+            &want[HOP * 4..want.len() - HOP * 4],
+        );
         let peak = want.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         eprintln!("{text:?}: from frame {s}, RMS difference {d:.4} (peak {peak:.2})");
         // The AdaIN layers see fewer frames, so the samples are near, not equal; the bound

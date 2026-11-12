@@ -1775,7 +1775,11 @@ async fn a_windowed_voice_plays_its_first_window_before_the_piece_is_rendered() 
     // The rest arrives in time: the clause plays out whole, with no window lost.
     let deadline = Instant::now() + Duration::from_secs(6);
     while w.ear.seconds_played() < 2.99 {
-        assert!(Instant::now() < deadline, "played {}", w.ear.seconds_played());
+        assert!(
+            Instant::now() < deadline,
+            "played {}",
+            w.ear.seconds_played()
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(w.rendering.get().1, 1);

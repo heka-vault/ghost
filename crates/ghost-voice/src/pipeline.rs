@@ -1147,7 +1147,10 @@ mod tests {
         assert!(halves.is_none());
         let problem = problem.expect("a problem for the waiting list");
         assert!(problem.contains("kokoro-encoder.onnx"), "{problem}");
-        assert!(problem.contains("scripts/models.sh kokoro-windowed"), "{problem}");
+        assert!(
+            problem.contains("scripts/models.sh kokoro-windowed"),
+            "{problem}"
+        );
         assert!(problem.contains("whole render"), "{problem}");
         // Present but not a model: the same fallback, never a panic.
         std::fs::write(dir.path().join("kokoro-encoder.onnx"), b"not a model").unwrap();
