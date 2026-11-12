@@ -94,8 +94,8 @@ on an interval itself; nothing about noticing needs a model.
 
 - **`app` and `read`**: a connected app and one of its read-only tools. The permissions'
   `block` rules apply as for the model's reads; a change is never a watch's read. The
-  result is not trimmed for speech, but is capped. (`server` is the older word; it still
-  reads.)
+  result is not cut to the model's budget, but is capped. An app whose connection died is
+  opened again first. (`server` is the older word; it still reads.)
 - **`fields`**: what to keep from each result (`items` is the path to the list), each a
   dotted path with a `type` (`str`, `int`, `float`, `bool`) and optionally a `pattern`, a
   `max` length or an `enum`. A result whose field breaks its constraint, or that lacks a

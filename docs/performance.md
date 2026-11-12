@@ -19,7 +19,7 @@ starts, broken into stages:
 | hold | final transcript → turn closed (Smart Turn, the turn grace) |
 | intercept | quick intents, the gate's request check, Jev or regex on a yes |
 | model | each model call: request → first token, and → last token; tokens in, out, cached |
-| tools | each tool call by name, including the app behind it (a Mobbin search through the fleet proxy is 3 to 9 s, all of it the app's) |
+| tools | each tool call by name, including the app behind it (a Mobbin search through the fleet proxy is 3 to 9 s, all of it the app's). A call may take up to its timeout, 300 s by default (ADR 0046); the operator can talk over it or hang up, and it is stopped |
 | write | the gate: the level, the call, the audit |
 | voice | text to Ghost → first audio out → Ghost heard (bot started speaking) |
 | transport | phone only: WebRTC each way |
