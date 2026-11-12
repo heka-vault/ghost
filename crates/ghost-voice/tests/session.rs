@@ -225,6 +225,9 @@ impl Setup {
             sources: Vec::new(),
             windows: 0,
         }
+        // Asking the main model beside the fast one (GHOST_LLM_RACE) is off here, so
+        // "the main model was asked" means it was needed; the race has its own tests.
+        .set("GHOST_LLM_RACE", "false")
     }
 
     fn set(mut self, name: &'static str, value: &str) -> Self {
@@ -1765,6 +1768,54 @@ async fn a_change_from_the_fast_model_still_hands_the_turn_over() {
     assert_eq!(w.fast_asked.lock().unwrap().len(), 1);
     assert_eq!(reads.load(Ordering::SeqCst), 0);
     assert_eq!(said_by_ghost(&w), vec!["Yeah?", "I couldn't close it."]);
+    finish(&w).await;
+}
+
+#[tokio::test]
+async fn with_the_race_a_hand_over_asks_the_main_model_once_and_its_change_runs_once() {
+    // GHOST_LLM_RACE: the main model is asked beside the fast one. A change handed over
+    // takes the main model's reply already on its way: asked once, not again after the
+    // hand-over, its call made once through the dispatcher, and nothing of either model
+    // said twice. On the next turn, a plain answer of the fast model's drops the race.
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut setup = fast_reads(
+        Setup::new(
+            &["close the redis one", "what is a good name for a cat"],
+            vec![
+                vec![
+                    ScriptedModel::call("", "github_close_issue", Map::new())
+                        .after(Duration::from_millis(300)),
+                    ScriptedModel::say("I couldn't close it."),
+                ],
+                vec![ScriptedModel::say("The main model's words.")],
+            ],
+        ),
+        2000,
+    )
+    .set("GHOST_LLM_RACE", "true");
+    setup.fast = Some(vec![
+        vec![ScriptedModel::call("", "github_close_issue", Map::new())],
+        vec![ScriptedModel::say("Any time.")],
+    ]);
+    setup.sources = vec![app_with_a_change(reads.clone(), 200)];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    assert_eq!(rec["handover"]["n"], json!(1), "{rec}");
+    // As without the race: the held answer's call (withdrawn at its tool call, the turn
+    // not yet closed), the confirmed turn's own, and the answer after the result. The
+    // race adds no request: the hand-over takes the one already made.
+    let asked = w.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 3, "{asked:?}");
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+    say(&w, 0.3).await;
+    voice_records(&w, 2).await;
+    assert_eq!(
+        said_by_ghost(&w),
+        vec!["Yeah?", "I couldn't close it.", "Any time."]
+    );
     finish(&w).await;
 }
 

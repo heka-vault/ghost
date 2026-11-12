@@ -77,6 +77,10 @@ pub struct Options {
     pub thinking: Option<String>,
     /// The cache marker on the system prompt (the harness turns it off to measure).
     pub cache_system: bool,
+    /// The Messages API's `output_config.effort` (`low`, `medium`, `high`); None sends
+    /// none and the model's default holds (`medium` on Haiku 5.5, `high` on Sonnet 5.5).
+    /// It sets how much a thinking model thinks before its first word or call.
+    pub effort: Option<String>,
 }
 
 impl Default for Options {
@@ -85,6 +89,7 @@ impl Default for Options {
             max_tokens: LLM_MAX_TOKENS,
             thinking: Some(DEFAULT_THINKING.into()),
             cache_system: true,
+            effort: None,
         }
     }
 }
@@ -258,6 +263,8 @@ pub fn retry_after(headers: &HeaderMap, body: &[u8]) -> Option<Duration> {
 enum Refused {
     Thinking(String),
     Effort,
+    /// The Messages API's `output_config.effort`.
+    OutputEffort,
     CacheMarkers,
 }
 
@@ -266,6 +273,7 @@ impl Refused {
         match self {
             Refused::Thinking(t) => format!("thinking {t}"),
             Refused::Effort => REASONING_EFFORT.into(),
+            Refused::OutputEffort => "the effort setting".into(),
             Refused::CacheMarkers => "the cache markers".into(),
         }
     }
@@ -274,6 +282,7 @@ impl Refused {
         match self {
             Refused::Thinking(t) => c.rejects_thinking = Some(t.clone()),
             Refused::Effort => c.rejects_thinking = Some(REASONING_EFFORT.into()),
+            Refused::OutputEffort => c.rejects_effort = true,
             Refused::CacheMarkers => c.rejects_cache_markers = true,
         }
     }
@@ -289,6 +298,11 @@ fn refused_field(e: &LlmError, body: &Value) -> Option<Refused> {
         return None;
     };
     let d = detail.to_lowercase();
+    // Before the thinking setting: a refused effort's message may name thinking too.
+    if body.get("output_config").is_some() && (d.contains("effort") || d.contains("output_config"))
+    {
+        return Some(Refused::OutputEffort);
+    }
     if let Some(t) = body["thinking"]["type"].as_str()
         && (d.contains("thinking") || d.contains(t))
     {
@@ -513,6 +527,11 @@ impl Model {
                     && caps.takes_thinking(thinking)
                 {
                     p.insert("thinking".into(), json!({"type": thinking}));
+                }
+                if let Some(effort) = &options.effort
+                    && !caps.rejects_effort
+                {
+                    p.insert("output_config".into(), json!({"effort": effort}));
                 }
                 let conv = context.anthropic(markers, !prefill_supported(&t.model));
                 if !context.system.is_empty() {
@@ -1116,6 +1135,40 @@ mod tests {
         );
         assert_eq!(host("http://user:pw@proxy:8317/x"), "http://proxy:8317");
         assert_eq!(host("nonsense"), "it");
+    }
+
+    fn anthropic_target(model: &str) -> Target {
+        let mut env = std::collections::HashMap::new();
+        env.insert("GHOST_LLM_PROVIDER".to_string(), "anthropic".to_string());
+        env.insert("GHOST_LLM_MODEL".to_string(), model.to_string());
+        ghost_core::connection::ModelConnection::from_env(&env).target(&env)
+    }
+
+    #[test]
+    fn an_effort_goes_out_as_output_config_and_a_route_that_refuses_it_learns() {
+        // The fast model's thinking depth (`Options::effort`, 2026-11-12): sent as the
+        // Messages API's `output_config.effort`, left out when unset, and dropped for good
+        // on a route that answers it with a 400, as a refused thinking setting is.
+        let model = Model::new(anthropic_target("claude-haiku-5-5")).unwrap();
+        let mut ctx = Context::new("You are Ghost.");
+        ctx.push(Message::user("hi"));
+        let mut options = Options::default();
+        let body = model.body(&ctx, &Tools::default(), &options);
+        assert!(body.get("output_config").is_none(), "{body}");
+        options.effort = Some("low".into());
+        let body = model.body(&ctx, &Tools::default(), &options);
+        assert_eq!(body["output_config"], json!({"effort": "low"}));
+        let refused = LlmError::Status {
+            status: 400,
+            detail: "output_config.effort: not supported for this model".into(),
+        };
+        let r = refused_field(&refused, &body).expect("the effort is the field refused");
+        assert_eq!(r, Refused::OutputEffort);
+        let mut caps = Capabilities::default();
+        r.apply(&mut caps);
+        let shaped = model.shaped_body(&ctx, &[], &options, &caps);
+        assert!(shaped.get("output_config").is_none(), "{shaped}");
+        assert_eq!(shaped["thinking"], json!({"type": "between_tools"}));
     }
 
     #[test]
