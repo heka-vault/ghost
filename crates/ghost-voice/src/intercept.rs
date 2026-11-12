@@ -109,6 +109,25 @@ impl InterceptorProcessor {
 
     /// A transcript the interceptors should see: any while Ghost is quiet, a barge-in's
     /// while it speaks.
+    /// Whether an interceptor would take `text` as a turn of its own (early words, ADR
+    /// 0054): asked and answered, nothing done.
+    async fn would_take(&self, text: &str) -> bool {
+        let turn = UserTurn {
+            text: text.to_string(),
+            pending: self.gate.pending(&self.session_id),
+            last_assistant: (self.last_assistant)(),
+            barged_in: self.barged_in(),
+        };
+        for interceptor in &self.interceptors {
+            let fut = std::panic::AssertUnwindSafe(interceptor.on_user_turn(&turn));
+            match futures::FutureExt::catch_unwind(fut).await {
+                Ok(Some(_)) | Err(_) => return true, // taken, or unknown: wait for the stop
+                Ok(None) => {}
+            }
+        }
+        false
+    }
+
     fn offered(&self, text: &str) -> bool {
         !self.bot_speaking()
             || (self.barge_in_min_words > 0
@@ -189,9 +208,15 @@ impl Stage for InterceptorProcessor {
             Frame::BotStopped => self.bot_speaking = false,
             // a new turn, or this one has gone to the model
             Frame::UserStarted | Frame::UserStopped => self.turn_pieces.clear(),
-            // Words an interceptor might take never start an answer early: they wait for
-            // the stop's transcript, which the interceptors see (ADR 0054).
-            Frame::EarlyTranscript(text) if !self.interceptors.is_empty() && self.offered(text) => {
+            // Words an interceptor would take never start an answer early: they wait for
+            // the stop's transcript, which the interceptors see and act on (ADR 0054). The
+            // interceptors only decide here (`on_user_turn` returns what it would do; this
+            // stage does it), and nothing of the decision is carried out.
+            Frame::EarlyTranscript(text)
+                if !self.interceptors.is_empty()
+                    && self.offered(text)
+                    && self.would_take(text).await =>
+            {
                 return;
             }
             Frame::Transcript(text) if !self.interceptors.is_empty() && self.offered(text) => {
@@ -307,6 +332,33 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    async fn test_early_words_an_interceptor_would_take_go_nowhere_and_do_nothing() {
+        // ADR 0054: "goodbye" read early is not an answer to start, and nothing is done
+        // for it here; the stop's transcript hangs up as ever.
+        let (mut p, slept) = make(vec![Arc::new(QuickIntents)], FakeGate::new(false));
+        let (out, mut rx) = Out::capture();
+        p.process(
+            Frame::EarlyTranscript("okay goodbye".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        let pushed = drain(&mut rx).await;
+        assert!(pushed.is_empty(), "{pushed:?}");
+        assert!(slept.lock().unwrap().is_empty());
+        // Words no interceptor wants go on to the turn.
+        p.process(
+            Frame::EarlyTranscript("what's waiting for triage".into()),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        let pushed = drain(&mut rx).await;
+        assert!(matches!(pushed.last(), Some(Frame::EarlyTranscript(_))));
+        assert!(spoken(&pushed).is_empty());
     }
 
     fn has_transcript(frames: &[Frame]) -> bool {
