@@ -56,7 +56,7 @@ const FAILED: Record<Action, string> = {
 };
 
 export default function SessionScreen(_: RouteProps) {
-  const { client, status, turns, pending, activity } = useGhost();
+  const { client, status, turns, heldTurns, pending, activity } = useGhost();
   // The shell's state: the same words as the sidebar card, and `online` gates every write.
   const { phase, online, loadingModels: loading, setupNeeded, setupLocked = false, setupHref } = useLive();
   const design = useDesign();
@@ -98,7 +98,8 @@ export default function SessionScreen(_: RouteProps) {
   }, [history.turns, turns, line, lines, switches, decisions, activity, announced, held, questions, apps.join(",")]);
   const speed = lines.find((l) => l.slug === line)?.speed ?? 1;
   const saying = useSaying(turns, phase === "speaking", activity, speed);
-  const youTalking = inSession && youSpeaking(activity);
+  // The operator is mid-turn: the turn opened (ADR 0055), or pieces of it are held until it closes (#73).
+  const youTalking = inSession && (youSpeaking(activity) || heldTurns > 0);
   const calls = useMemo(() => callsOf(activity, apps), [activity, apps.join(",")]);
   const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
   const { room, toggle: toggleRoom, leave: leaveRoom } = useRoomView(inSession && !onPhone);

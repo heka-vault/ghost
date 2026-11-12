@@ -243,6 +243,8 @@ export class MockDaemon {
     this.options = options;
     this.script = f.session;
     this.turns = f.session.turns;
+    // The sentence it plays is a turn of its own: the session waits after Ghost's last reply.
+    if (scenario.pieces) while (this.turns.length && this.turns[this.turns.length - 1].role === "user") this.turns = this.turns.slice(0, -1);
     this.pending = f.session.pending;
     for (const l of f.conversations.agents) this.agents.set(l.detail.slug, l);
     this.rules = f.rules;
@@ -349,6 +351,7 @@ export class MockDaemon {
       this.storyPlayed = true;
       this.playStory();
     }
+    this.playPieces();
     return () => this.listeners.delete(l);
   }
   /**
@@ -405,6 +408,28 @@ export class MockDaemon {
         });
         break;
     }
+  }
+  /**
+   * `?mock=pieces`: one spoken sentence the way the daemon sends it, a turn event per stretch
+   * of speech read at each pause, the status's `thinking` when the turn closes, then the reply.
+   */
+  private piecesPlayed = false;
+  private playPieces() {
+    if (!this.scenario.pieces || this.piecesPlayed) return;
+    this.piecesPlayed = true;
+    const pieces: [number, string][] = [
+      [800, "Can you check on the deploy"],
+      [2600, "for the billing service"],
+      [4200, "and tell me if it finished."],
+    ];
+    // The operator's turn opens at their first word and closes with it (ADR 0055).
+    this.later(600, () => this.act("you_started"));
+    for (const [ms, text] of pieces) this.later(ms, () => this.addTurn("user", text, "voice"));
+    this.later(5200, () => {
+      this.act("you_stopped");
+      this.pushStatus({ phase: "thinking" });
+    });
+    this.later(6100, () => this.reply("It finished at 3:12 PM, and every check passed."));
   }
   private emit(e: GhostEvent) {
     for (const l of this.listeners) l(e);
