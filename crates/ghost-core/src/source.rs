@@ -228,6 +228,10 @@ pub struct ToolSource {
     /// the connected apps have too many between them, so these are found by search first
     /// (ADR 0046). They are still here for the gate and for a call.
     pub deferred: Vec<String>,
+    /// Other connected apps that reach the same service with the same tools (two accounts
+    /// on GitHub, `apps::twins`), in `apps.json` order. A read this app says it cannot find
+    /// is read through them (`ghost_voice::tools`): two accounts may see different things.
+    pub twins: Vec<String>,
 }
 
 impl ToolSource {

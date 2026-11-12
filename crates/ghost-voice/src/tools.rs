@@ -416,7 +416,7 @@ impl ToolDispatcher {
                     args.insert(SESSION_ARG.into(), Value::String(self.session_id.clone()));
                 }
                 let began = Instant::now();
-                let (result, status) = match (tool.handler)(args).await {
+                let (result, mut status) = match (tool.handler)(args.clone()).await {
                     Ok(r) => (r, "ok"),
                     Err(e) => {
                         let mut m = Map::new();
@@ -424,12 +424,83 @@ impl ToolDispatcher {
                         (m, "error")
                     }
                 };
+                let result =
+                    if status == "error" && !source.twins.is_empty() && cannot_find(&result) {
+                        let r = self
+                            .through_twins(&reach_now, &source.twins, operation, &args, result)
+                            .await;
+                        if !r.contains_key("error") {
+                            status = "ok";
+                        }
+                        r
+                    } else {
+                        result
+                    };
                 self.probe
                     .tool_step(call_id, "read", began.elapsed().as_secs_f64());
                 self.probe.tool_status(call_id, status);
                 CallResult::plain(result)
             }
         }
+    }
+
+    /// A read the app said it cannot find, read through its twins (`ToolSource::twins`:
+    /// another connection to the same service, perhaps another account) with the same
+    /// arguments, each as a read is (the operator's block rules hold), until one finds it.
+    /// The first that does answers, saying which connection read it; when none does, the
+    /// first answer stands, saying which were tried. Live, 2026-11-12: an issue only the
+    /// second GitHub account could see was answered as not found.
+    async fn through_twins(
+        &self,
+        reach: &[ToolSource],
+        twins: &[String],
+        operation: &str,
+        args: &Map<String, Value>,
+        first: Map<String, Value>,
+    ) -> Map<String, Value> {
+        let mut tried = Vec::new();
+        for twin in twins {
+            let Some(other) = reach.iter().find(|s| &s.name == twin) else {
+                continue;
+            };
+            let Some(tool) = other.read_tools.iter().find(|t| {
+                let op = if t.operation.is_empty() {
+                    t.name.as_str()
+                } else {
+                    t.operation.as_str()
+                };
+                op == operation
+            }) else {
+                continue;
+            };
+            if self.gate.blocks_read(&other.name, operation, args) {
+                continue;
+            }
+            (self.record)(&tool.name, args);
+            tried.push(other.name.clone());
+            match (tool.handler)(args.clone()).await {
+                Ok(mut found) => {
+                    found.insert(
+                        "read_through".into(),
+                        Value::String(format!(
+                            "{}: the first connection could not find it",
+                            other.name
+                        )),
+                    );
+                    return found;
+                }
+                // Not there either, or failing: the next twin, else the first answer.
+                Err(_) => {}
+            }
+        }
+        let mut first = first;
+        if !tried.is_empty() {
+            first.insert(
+                "also_tried".into(),
+                Value::String(format!("{}: not found there either", tried.join(", "))),
+            );
+        }
+        first
     }
 
     async fn change(&self, a: Map<String, Value>, call_id: &str) -> CallResult {
@@ -818,4 +889,28 @@ fn py_str(v: &Value) -> String {
         Value::Null => String::new(),
         other => other.to_string(),
     }
+}
+
+/// Words an app's error uses for something it cannot see or find: GitHub's 404, a
+/// repository it cannot resolve, a thing that does not exist. A fixed check on the error's
+/// text, never a model.
+fn cannot_find_text(text: &str) -> bool {
+    let t = text.to_lowercase();
+    [
+        "not found",
+        "404",
+        "does not exist",
+        "could not resolve",
+        "no such",
+    ]
+    .iter()
+    .any(|w| t.contains(w))
+}
+
+/// A read's result that is an error saying the thing was not found.
+fn cannot_find(result: &Map<String, Value>) -> bool {
+    result
+        .get("error")
+        .and_then(Value::as_str)
+        .is_some_and(cannot_find_text)
 }
