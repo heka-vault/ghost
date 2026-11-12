@@ -179,7 +179,9 @@ export type GhostEvent =
   /** Which words of Ghost's reply are heard now (ADR 0058). Desktop only. */
   | Schemas["SayingEvent"]
   /** The Hearing test's recorder, ~20/s while it is open: its view, the mic's level 0..1, whether the VAD hears speech; then one `closed`. */
-  | Schemas["HearEvent"];
+  | Schemas["HearEvent"]
+  /** "Ghost, open the app" in a session (ADR 0059): the desktop brings its window to the operator. */
+  | Schemas["ShowAppEvent"];
 
 export type Unsubscribe = () => void;
 
