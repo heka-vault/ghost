@@ -6,7 +6,8 @@
   "scripts": {
     "start": "expo start --dev-client",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "15.0.2",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^3.0.0"
   }
 }

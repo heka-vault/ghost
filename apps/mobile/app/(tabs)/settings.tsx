@@ -1,17 +1,21 @@
 /**
- * Settings for this phone: the desk it's paired with, how a session behaves in the car, and
- * the one privacy fact that matters (the mic opens only after Start). The whole row is the
- * control.
+ * Settings for this phone: the desk it's paired with, the live connection that brings
+ * questions and calls with the app closed (ADR 0051) and the permissions behind it, how a
+ * session behaves in the car, and the one privacy fact that matters (the mic opens only after
+ * Start). The whole row is the control.
  */
 import { relativeTime } from "@ghost/ui";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { Lock, Monitor, Mic } from "lucide-react-native";
+import { Bell, Lock, Monitor, Mic, PhoneIncoming } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { ScrollView, View } from "react-native";
 
+import { openFullScreenSettings, retryLink, setLinkBootStart, setLinkEnabled } from "../../modules/ghost-call/link";
 import { useDesk } from "../../src/desk/context";
-import { forgetPairing } from "../../src/phone/pairing";
+import { liveLine } from "../../src/desk/waiting";
+import { askForNotifications, usePermissions } from "../../src/phone/notify";
+import { forgetPairing, MOCK_DESK } from "../../src/phone/pairing";
 import { setPref, usePhone } from "../../src/phone/store";
 import { space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
@@ -22,7 +26,8 @@ import { version as packageVersion } from "../../package.json";
 export default function Settings() {
   const c = useColors();
   const router = useRouter();
-  const { link, via, address, lastCall } = useDesk();
+  const { link, via, address, lastCall, live } = useDesk();
+  const [perms, refreshPerms] = usePermissions();
   const { pairing, prefs } = usePhone();
   const { tone, title } = linkLabel(link);
   const [asking, setAsking] = useState(false);
@@ -78,6 +83,91 @@ export default function Settings() {
           />
         </Group>
 
+        <Group title="Questions and calls with the app closed">
+          <Row
+            top
+            title={<Text size="xl">Connection to your desk</Text>}
+            support={
+              <View style={{ gap: space[0.5] }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: space[2] }}>
+                  <LinkDot tone={live.state === "connected" ? "ok" : live.state === "refused" || live.state === "offline" ? "danger" : "neutral"} />
+                  <Text size="md" color="text2" style={{ flexShrink: 1 }}>{liveLine(live)}</Text>
+                </View>
+                {live.heardAt && live.state !== "connected" ? <Text size="md" color="text3">Last heard {relativeTime(live.heardAt)}</Text> : null}
+              </View>
+            }
+            trailing={
+              live.state !== "connected" && live.state !== "unavailable" ? (
+                <TouchButton size="md" variant="ghost" onPress={retryLink}>
+                  Retry
+                </TouchButton>
+              ) : null
+            }
+          />
+          <Divider />
+          <SwitchRow
+            title="Stay connected"
+            support="Questions, changes to confirm and calls from Ghost reach this phone with the app closed. Android shows a quiet notification while it’s on. Off, they arrive only while the app is open."
+            value={live.enabled}
+            onChange={(v) => setLinkEnabled(v)}
+          />
+          <Divider />
+          <SwitchRow
+            title="Start when the phone starts"
+            support="Reconnect after a restart without opening the app."
+            value={live.bootStart}
+            onChange={(v) => setLinkBootStart(v)}
+          />
+          <Divider />
+          <Row
+            top
+            leading={<Bell size={20} color={c.text2} />}
+            title={<Text size="xl">Notifications</Text>}
+            support={
+              <Text size="md" color="text2">
+                {perms == null
+                  ? "Not available in this build."
+                  : perms.notifications
+                    ? perms.asks
+                      ? "On. Each kind can be changed in Android’s settings."
+                      : "On, but questions and changes are turned off in Android’s settings."
+                    : "Off. Ghost can’t tell you when something needs you, so your desk tries its next way to reach you."}
+              </Text>
+            }
+            trailing={
+              perms && (!perms.notifications || !perms.asks) ? (
+                <TouchButton size="md" onPress={() => void askForNotifications().then(refreshPerms)}>
+                  Turn on
+                </TouchButton>
+              ) : null
+            }
+          />
+          <Divider />
+          <Row
+            top
+            leading={<PhoneIncoming size={20} color={c.text2} />}
+            title={<Text size="xl">Calls over the lock screen</Text>}
+            support={
+              <Text size="md" color="text2">
+                {perms == null
+                  ? "Not available in this build."
+                  : perms.fullScreen && perms.calls
+                    ? "Allowed. When your desk rings, the call fills the screen even when the phone is locked."
+                    : !perms.calls
+                      ? "Calls from Ghost are turned off in Android’s settings."
+                      : "Not allowed. A call from Ghost shows as a notification only, and the phone won’t light up for it."}
+              </Text>
+            }
+            trailing={
+              perms && (!perms.fullScreen || !perms.calls) ? (
+                <TouchButton size="md" onPress={openFullScreenSettings}>
+                  Allow
+                </TouchButton>
+              ) : null
+            }
+          />
+        </Group>
+
         <Group title="Hands-free">
           <SwitchRow
             title="Start talking when Ghost opens"
@@ -96,7 +186,12 @@ export default function Settings() {
         </Group>
 
         <Group title="Ghost’s questions">
-          <Row top leading={<Mic size={20} color={c.text2} />} title="Answer out loud" support={<Text size="md" color="text2">Ghost asks before a change you’ve set to ask first. Say yes or no; there is no button for it on the phone.</Text>} />
+          <Row
+            top
+            leading={<Mic size={20} color={c.text2} />}
+            title="Out loud, or here"
+            support={<Text size="md" color="text2">In a session, say yes or no when Ghost asks. Outside one, a change waiting for your yes is on Home and in a notification with Yes and No, and an agent’s question takes a tap or your own words.</Text>}
+          />
         </Group>
 
         <Group title="Microphone">
@@ -107,7 +202,7 @@ export default function Settings() {
           <TouchButton variant="danger-ghost" fullWidth onPress={() => setAsking(true)}>
             Unpair this phone
           </TouchButton>
-          <Text size="md" color="text2" align="center">Ghost for Android {version} · mock desk</Text>
+          <Text size="md" color="text2" align="center">Ghost for Android {version}{MOCK_DESK ? " · mock desk" : ""}</Text>
         </View>
       </ScrollView>
 

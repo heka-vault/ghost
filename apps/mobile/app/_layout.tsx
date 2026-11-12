@@ -24,7 +24,7 @@ export default function RootLayout() {
   // The paired desk over the LAN, or the mock one on the web and in mock builds. A new pairing
   // gets a new desk.
   const desk = useMemo(
-    () => (!MOCK_DESK && pairing && secret ? new LiveDesk({ addresses: pairing.addresses, deviceId: pairing.deviceId, secret }) : new MockDesk()),
+    () => (!MOCK_DESK && pairing && secret ? new LiveDesk({ addresses: pairing.addresses, deviceId: pairing.deviceId, secret, workstation: pairing.workstation }) : new MockDesk()),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new list of addresses is a new desk
     [pairing?.deviceId, pairing?.addresses.join(","), secret],
   );

@@ -12,8 +12,20 @@ android {
     versionCode 1
     versionName '2026.10.0'
   }
+  testOptions {
+    unitTests.all {
+      // The protocol's shared vectors, written by the daemon (crates/ghostd/src/phone/vectors.rs).
+      systemProperty 'ghost.vectors', file('../../../../../packages/api/phone-vectors.json').absolutePath
+    }
+  }
 }
 
 dependencies {
   implementation "androidx.core:core-ktx:1.13.1"
+  // The live stream and the signed actions; the version React Native itself ships.
+  implementation "com.squareup.okhttp3:okhttp:4.9.2"
+
+  testImplementation "junit:junit:4.13.2"
+  // Android's org.json is a stub in local unit tests; the real one stands in.
+  testImplementation "org.json:json:20240303"
 }

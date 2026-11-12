@@ -8,6 +8,7 @@ export interface LiveDeskConfig {
   addresses: string[];
   deviceId: string;
   secret: Uint8Array;
+  workstation: string;
 }
 
 export class LiveDesk implements Desk {
@@ -20,12 +21,19 @@ export class LiveDesk implements Desk {
   subscribe(): never {
     throw new Error("unreachable");
   }
-  async start(_conversation?: string) {}
+  async start(_conversation?: string, _item?: string) {}
   async end() {}
   async retry() {}
   async loadAudit() {}
   async acknowledge(_key: string) {}
   async snooze(_key: string, _minutes: number) {}
+  async answer(_key: string, _text: string) {}
+  async decline(_key: string) {}
+  async confirmChange(_key: string, _changeId: string) {}
+  async cancelChange(_key: string, _changeId: string) {}
+  async answerRing(_ringId: string) {
+    return false;
+  }
   setMuted() {}
   setRoute() {}
   dispose() {}

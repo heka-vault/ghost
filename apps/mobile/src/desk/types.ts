@@ -6,12 +6,16 @@
  * arrives over that connection. Screens read only this interface: `MockDesk` stands in
  * until the transport exists, then a WebRTC desk replaces it without touching a screen.
  *
- * There is no confirm() here on purpose. The phone confirms by voice: the operator says
- * yes, the pipeline hears it, Jev classifies it, the gate writes. There is no undo either:
+ * In a session the phone confirms by voice: the operator says yes, the pipeline hears it,
+ * Jev classifies it, the gate writes. Outside one (ADR 0051), a change waiting for a yes is
+ * on the waiting list as a question, and Yes or No there is a signed request from the paired
+ * phone (`confirmChange`, `cancelChange`), the gate's own confirm by id. There is no undo:
  * to change something back the operator asks Ghost, which makes the opposite change through
  * the gate like any other.
  */
-import type { AuditEntry, ConversationView, OutcomeView, PendingProposal, Status, Turn, WaitingItemView } from "@ghost/client-ts";
+import type { AuditEntry, ConversationView, OutcomeView, PendingProposal, QuestionView, Status, Turn, WaitingItemView } from "@ghost/client-ts";
+
+import type { LiveLink } from "./waiting";
 
 /** How the phone reaches the desk right now. */
 export type Link = "connecting" | "online" | "reconnecting" | "offline";
@@ -63,27 +67,42 @@ export interface DeskState {
   auditTotal: number;
   /** Outcomes by proposal id, as the gate reports them. */
   outcomes: Record<string, OutcomeView>;
-  /** What needs the operator (ADR 0029), oldest first; null until the first read. Read
-   *  while the app is open: there is no push (2026-10-27). */
+  /** What needs the operator (ADR 0029), from the live stream (ADR 0051); null until the
+   *  first snapshot. Kept on the phone, so it shows at once on open (see `live.heardAt`). */
   waiting: WaitingItemView[] | null;
+  /** Every question as the stream last said it: the open ones and those settled in the last day. */
+  questions: QuestionView[];
+  /** The live connection: its state, the address in use, when it last heard the desk. */
+  live: LiveLink;
 }
 
 export interface Desk {
   getState(): DeskState;
   subscribe(listener: () => void): () => void;
-  /** Open the phone's mic into a session on the desk, in Ghost or in the thread named. */
-  start(conversation?: string): Promise<void>;
+  /** Open the phone's mic into a session on the desk, in Ghost or in the agent named; `item`
+   *  is the waiting-list key of a ring the operator answered, and the session opens with it. */
+  start(conversation?: string, item?: string): Promise<void>;
   /** Close the session and the phone's mic. */
   end(): Promise<void>;
   /** Ask the desk once, now; the link also keeps retrying on its own. */
   retry(): Promise<void>;
   /** Ask for more of the audit log. */
   loadAudit(limit: number): Promise<void>;
-  /** The operator heard it: it stops reminding until it changes. Not a write anywhere, so a
-   *  tap is fine; a change waiting for a yes is still answered by voice. */
+  /** The operator heard it: it stops reminding until it changes. Not a write anywhere. */
   acknowledge(key: string): Promise<void>;
   /** Not now: it comes back after `minutes`. */
   snooze(key: string, minutes: number): Promise<void>;
+  /** Answer a question: a choice as written, or the operator's own words. Rejects with why
+   *  when the desk refuses it (already settled, an answer that doesn't fit). */
+  answer(key: string, text: string): Promise<void>;
+  /** The operator won't answer this question. */
+  decline(key: string): Promise<void>;
+  /** Yes to a change waiting for one: the gate's confirm by its proposal id. */
+  confirmChange(key: string, changeId: string): Promise<void>;
+  /** No to it: cancelled, nothing ran. */
+  cancelChange(key: string, changeId: string): Promise<void>;
+  /** The operator answered a ring: true while it was still live at the desk. */
+  answerRing(ringId: string): Promise<boolean>;
   /** Stop or resume sending the phone's mic; the session stays open. */
   setMuted(muted: boolean): void;
   /** Send the call's audio somewhere else (speaker, Bluetooth, headset, earpiece). */
