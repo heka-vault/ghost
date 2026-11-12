@@ -112,23 +112,55 @@ The phone drops any response whose signature doesn't check. Above all, it never 
 answer that doesn't verify. A 401 for an unknown device carries no signature, because the desk has no
 secret to sign it with; to the phone it is the same as any unverified response.
 
-Errors are `{error: <code>}`: `unauthorized` (401), `bad_code` (403, `/pair`), `bad_request` (422, a body
-or query that doesn't fit), `bad_offer` and `bad_candidate` (400), `not_found` (404, including an unknown
-`pc_id`), `busy` (409), `not_ready` (503), `internal` (500).
+The live stream (`GET /stream`, below) is the one exception to signing the response's body: its head is
+signed as above over an empty body (the hash of the empty string), and every message on it carries its
+own signature. A non-200 answer to `/stream` is an ordinary signed JSON error.
+
+Errors are `{error: <code>}`:
+
+| Code | Status | When |
+|---|---|---|
+| `unauthorized` | 401 | Not signed, signed wrong, a stale time or a replayed nonce, or a device that isn't paired. |
+| `bad_code` | 403 | `/pair` only: a wrong or spent code. |
+| `bad_request` | 422 | A body or query that doesn't fit (a missing `id`, a key too long, an unknown `answer`). |
+| `bad_offer`, `bad_candidate` | 400 | `/offer` and `PATCH /offer`. |
+| `not_found` | 404 | No such route, question or `pc_id`. |
+| `no_such_line` | 404 | `/offer` names an agent that is not a live one. |
+| `method_not_allowed` | 405 | A route with another method. |
+| `busy` | 409 | `/offer` while any session runs. |
+| `settled` | 409 | A question already answered, declined, expired or taken back: `{error: "settled", state: "answered"}`. |
+| `not_waiting` | 409 | `/changes/*` for a change that is no longer waiting for a yes. |
+| `bad_answer` | 422 | An answer that doesn't fit the question (none of its choices when only they will do): `{error: "bad_answer", detail}`. |
+| `not_ready` | 503 | `/offer` until the models load; `/stream` while the desk has no feed yet. |
+| `internal` | 500 | Anything else. |
 
 ## Routes
+
+Every route below is signed both ways ([Signing](#signing)).
 
 | Route | Body | Result |
 |---|---|---|
 | `GET /hello` | | `{workstation, addresses, status: Status}`. `Status` is the control API's, including `session_origin: "desk" \| "phone" \| null`. `addresses` is the current list; the phone replaces its saved one when it differs. |
 | `GET /audit?limit=N&offset=M` | | the control API's `AuditPage` |
-| `GET /waiting` | | the control API's `WaitingView`: what needs the operator (ADR 0029). There is no push: the app reads it while it is open (with `/hello` when `status.waiting` moves, and every ~30 s), and a read in the last minute is what the desk counts as the phone route having delivered. |
+| `GET /waiting` | | the control API's `WaitingView`: what needs the operator (ADR 0029). An item that is a question, or a change waiting for a yes, carries `question: QuestionView`. A read is not a delivery (ADR 0051): only `POST /seen` is. |
 | `POST /waiting/ack` | `{key}` | `{ok}`. The operator heard it; it stops reminding until it changes. Not a gate write. |
 | `POST /waiting/snooze` | `{key, minutes}` | `{ok}`. Back after `minutes` (1 to 10080). |
-| `GET /conversations` | | the control API's `ConversationView` list: every thread a call can start in, Ghost first, settled ones left out (ADR 0014, ADR 0019). |
-| `POST /offer` | `{sdp, type: "offer", pc_id?, restart_pc?, conversation?}` | `{sdp, type: "answer", pc_id}`. `conversation` is a slug from `/conversations`: the session opens in that thread, which greets as itself; absent, in Ghost. 404 `{error: "no_such_line"}` for a slug that is not a live thread. 409 `{error: "busy"}` while any session runs, desk or phone. 503 `{error: "not_ready"}` until the models load. |
+| `GET /conversations` | | the control API's `ConversationView` list: every agent a call can start with, Ghost first, retired ones left out (ADR 0014, ADR 0019). |
+| `POST /offer` | `{sdp, type: "offer", pc_id?, restart_pc?, conversation?, item?}` | `{sdp, type: "answer", pc_id}`. `conversation` is a slug from `/conversations`: the session opens with that agent, which greets as itself; absent, with Ghost. `item` is the `key` of a ring the phone answered ([The ring](#the-ring)): the session opens with it. 404 `{error: "no_such_line"}` for a slug that is not a live agent. 409 `{error: "busy"}` while any session runs, desk or phone. 503 `{error: "not_ready"}` until the models load. |
 | `PATCH /offer` | `{pc_id, candidates: [{candidate, sdp_mid, sdp_mline_index}]}` | `{ok: true}` (trickle ICE). `candidate` may keep its `candidate:` prefix; an empty one means end of candidates. |
 | `POST /end` | | `{ok: true}`. Ends the phone's session if one is running. |
+| `GET /stream?cursor=C` | | The live stream, Server-Sent Events ([The live stream](#the-live-stream)). `cursor` is optional; it is part of the signed path. |
+| `GET /questions` | | `QuestionsView`: `{questions: QuestionView[]}`, the open ones oldest first (changes waiting for a yes among them), then the ones settled in the last day. |
+| `POST /questions/answer` | `{id, key, text}` | `{ok: true, question: QuestionView}`. The operator's answer, their words or a choice as written, recorded with the route `phone`. `text` is 1 to 2,000 characters. 404 `not_found`, 409 `settled`, 422 `bad_answer`. A change's key is refused: confirm or cancel it at `/changes`. |
+| `POST /questions/decline` | `{id, key}` | `{ok: true, question: QuestionView}`. The operator will not answer it. |
+| `POST /changes/confirm` | `{id, change}` | `{ok: true, outcome: OutcomeView}`. `change` is `question.change_id` (the proposal's id). The gate's own confirm by id; the audit records the yes with `classifier: "phone"`. It is evidence only because the request is signed by the paired device. 409 `not_waiting`. |
+| `POST /changes/cancel` | `{id, change}` | `{ok: true}`. The change is cancelled; nothing ran. 409 `not_waiting`. |
+| `POST /seen` | `{alert_id}` | `{ok}`. The phone showed an `alert`'s notification. This, and only this, is the phone route delivering (ADR 0051). `ok` is false for an alert the desk stopped waiting for. |
+| `POST /ring` | `{ring_id, answer: "answered" \| "declined"}` | `{ok}`. The operator answered or declined a `ring`. `ok` is false once the ring is over. |
+
+`id` is chosen by the phone, 1 to 64 characters (a UUID will do), one per action the operator took.
+The desk remembers it for ten minutes: the same `id` again gets exactly the answer it got the first time
+and does nothing twice, so a request the tunnel dropped is simply sent again with its `id`.
 
 A `POST /offer` without `pc_id` starts a session; with the live session's `pc_id` it renegotiates. A
 second `POST /offer` without `pc_id` while the phone's own session is still running gets 409 `busy` too:
@@ -169,3 +201,223 @@ Ghost has stopped speaking. The desk drops a transcript heard during Ghost's spe
 under three words always pass, so a spoken yes is never mistaken for echo.
 
 End sends `disconnect-bot` on the data channel, then `POST /end`, then closes the peer.
+
+## The live stream
+
+ADR 0051. One long-lived signed stream from the paired phone to the desk, so the phone hears at once
+what it used to poll for. It carries the waiting list's changes, every question as it is asked and
+settled, alerts, rings and a heartbeat. It never carries audio, a transcript, a turn or a log line.
+
+### Opening it
+
+`GET /stream` (or `GET /stream?cursor=<cursor>`), signed like any request, with `Accept:
+text/event-stream`. The answer is `200` with `Content-Type: text/event-stream` and the headers
+`X-Ghost-Time` and `X-Ghost-Signature` signed over an empty body:
+
+```
+ghost-v1-response
+200
+<the request's X-Ghost-Nonce>
+<X-Ghost-Time>
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+```
+
+The phone keeps that nonce: every message on this stream is signed over it. Anything but 200 is an
+ordinary signed JSON error (401, 503).
+
+### Each message
+
+Each is one Server-Sent Event:
+
+```
+event: question
+id: 3fa9c2d1.42
+data: {"msg":"{\"type\":\"question\",\"question\":{...},\"seq\":42,\"cursor\":\"3fa9c2d1.42\"}","sig":"q3Vb…"}
+
+```
+
+`data` is a JSON object with two strings: `msg`, the message as JSON text, and `sig`, base64url without
+padding of HMAC-SHA256(secret, string), where the string is these lines joined by `\n`:
+
+```
+ghost-v1-event
+<the stream request's X-Ghost-Nonce>
+<hex sha256 of the exact bytes of msg>
+```
+
+The phone checks `sig` over `msg` exactly as received, then parses `msg`. A message that does not
+verify is dropped, and the phone closes the stream and opens a new one. `event:` repeats `msg.type`.
+`id:` is present on numbered messages and is their `cursor`.
+
+### The cursor, the snapshot, and nothing lost
+
+A numbered message has `seq` (1, 2, 3 … in this run of the desk) and `cursor`, `<epoch>.<seq>`, where
+`epoch` names this run of the desk. The phone keeps the cursor of the last numbered message it
+handled.
+
+On connect:
+
+1. `hello` first, always.
+2. Without a cursor, or with one the desk cannot resume (another epoch: the desk restarted; or older
+   than the 512 changes it keeps), `hello.resumed` is `false` and a `snapshot` follows: the whole
+   waiting list and every question as they are now, with the cursor they stand at. The phone replaces
+   its state with the snapshot.
+3. With a cursor the desk can resume, `hello.resumed` is `true` and the numbered messages after that
+   cursor follow, in order, then live ones. No snapshot.
+4. Then every change as it happens, and a `heartbeat` after 15 seconds without one.
+
+A change between the cursor a snapshot reports and the snapshot itself may arrive again after it. Every
+message says the whole of what changed, so applying one twice is harmless.
+
+The phone treats the stream as dead after 35 seconds without any message (two heartbeats and a margin),
+closes it and opens it again with its cursor, backing off 1, 2, 4 … up to 30 seconds while the desk does
+not answer. Both listen addresses (home and tunnel) serve the same stream.
+
+### Message types
+
+```json
+{"type": "hello", "epoch": "3fa9c2d1", "resumed": false, "heartbeat_secs": 15}
+```
+
+```json
+{"type": "snapshot", "cursor": "3fa9c2d1.41",
+ "items": [WaitingItemView, …], "questions": [QuestionView, …]}
+```
+
+`items` are the control API's `WaitingItemView`s, as `GET /waiting` gives them; `questions` as
+`GET /questions` gives them.
+
+```json
+{"type": "item", "change": "added", "key": "watch:ci:main", "item": {WaitingItemView},
+ "seq": 42, "cursor": "3fa9c2d1.42"}
+{"type": "item", "change": "changed", "key": "watch:ci:main", "item": {WaitingItemView},
+ "seq": 43, "cursor": "3fa9c2d1.43"}
+{"type": "item", "change": "resolved", "key": "watch:ci:main", "seq": 44, "cursor": "3fa9c2d1.44"}
+```
+
+`added` and `changed` carry the item whole (a new title, acknowledged, snoozed, delivered). `resolved`
+means it left the list: remove it, and take down its notification.
+
+```json
+{"type": "question", "question": {
+   "key": "question:0b00bdd56307", "kind": "question",
+   "asked_by": "Ledger", "source": "agent:ledger",
+   "question": "Should the October invoice go out today?", "detail": null,
+   "choices": ["Yes", "No"], "choices_only": false, "urgency": "notify",
+   "asked_at": "2026-11-11T09:00:00Z", "expires_at": "2026-11-12T09:00:00Z",
+   "state": "open", "answer": null, "choice": null,
+   "answered_via": null, "answered_at": null, "change_id": null},
+ "seq": 45, "cursor": "3fa9c2d1.45"}
+```
+
+Sent when a question is asked and again when it is answered, declined, expired or taken back. `kind`
+is `question`, or `change` for a change waiting for a yes (its `choices` are `Yes` and `No`, its
+`change_id` the proposal's id). `state` is `open`, `answered`, `declined`, `expired` or `cancelled`.
+`answered_via` is `desktop`, `phone`, `voice` or `ghost` (an expiry, or an app's question that ran out
+of time). An answer given by voice is shown by `choice` and `state` only: its `answer` is always null on
+the phone, since those are the operator's words from a session. `question`, `detail` and `choices` are
+the asker's words: show them as text, never as markup, and always with who asked.
+
+```json
+{"type": "alert", "alert_id": "9c1e04a7b2d3", "keys": ["question:0b00bdd56307"],
+ "titles": ["Ledger asks: Should the October invoice go out today?"], "count": 1,
+ "seq": 46, "cursor": "3fa9c2d1.46"}
+```
+
+The phone route delivering (ADR 0031): show a notification for these items now, then send
+`POST /seen {alert_id}`. The desk waits 15 seconds for it; without it, the items go to the next route.
+Send `seen` only once the notification is actually shown. An alert replayed after a reconnect may be
+shown and `seen` like a live one; `seen` for one the desk stopped waiting for answers `{ok: false}`.
+
+```json
+{"type": "ring", "ring_id": "5d2f8e0c41aa", "key": "question:0b00bdd56307", "agent": "ledger",
+ "title": "Ledger asks: Should the October invoice go out today?",
+ "question": "Ledger asks: Should the October invoice go out today? Yes or no?",
+ "ring_secs": 30, "seq": 47, "cursor": "3fa9c2d1.47"}
+{"type": "ring_over", "ring_id": "5d2f8e0c41aa", "why": "answered", "seq": 48, "cursor": "3fa9c2d1.48"}
+```
+
+`question` is null when the item is not a question. `why` is `answered`, `declined` or `timed_out`. A
+ring is live from its arrival until its `ring_over` or `ring_secs` later, whichever is first; a ring
+replayed after a reconnect whose `ring_over` is already in the log, or that is older than `ring_secs`,
+is not shown.
+
+```json
+{"type": "heartbeat", "cursor": "3fa9c2d1.48", "at": "2026-11-11T09:01:15Z"}
+```
+
+Not numbered; its cursor is where the stream stands.
+
+### Answering from the phone
+
+- A question: `POST /questions/answer {id, key, text}` with a choice as written or the operator's own
+  words (unless `choices_only`), or `POST /questions/decline {id, key}`.
+- A change waiting for a yes (`kind: "change"`): `POST /changes/confirm {id, change: change_id}` for
+  Yes, `POST /changes/cancel {id, change}` for No. Never `/questions/answer`.
+- An item: `POST /waiting/ack {key}` or `POST /waiting/snooze {key, minutes}` as before.
+
+What came of it arrives on the stream as well (`question` with its new state, `item` resolved), so the
+phone may update its screen from either.
+
+## The ring
+
+ADR 0051, issue #22. The desk rings the phone for an item at `call` urgency, when the operator enabled
+the `call` route, within the operator's call caps.
+
+```
+desk                                                  phone
+ |-- stream: ring {ring_id, key, agent, question} --->|  full-screen incoming call
+ |                                                    |
+ |   (answered)                                       |
+ |<-- POST /ring {ring_id, answer: "answered"} -------|
+ |-- 200 {ok: true} --------------------------------->|
+ |-- stream: ring_over {why: "answered"} ------------>|
+ |<-- POST /offer {sdp, type, conversation: agent,    |
+ |                 item: key} ------------------------|
+ |-- 200 {sdp, type: "answer", pc_id} --------------->|  the call connects as any call does
+ |   Ghost opens with the item: a question is put in  |
+ |   its asker's words ("Ledger asks: …? Yes or no?") |
+ |                                                    |
+ |   (declined)                                       |
+ |<-- POST /ring {ring_id, answer: "declined"} -------|  "not now": the item is snoozed 30 min
+ |-- stream: ring_over {why: "declined"} ------------>|
+ |                                                    |
+ |   (nothing for 30 s)                               |
+ |-- stream: ring_over {why: "timed_out"} ----------->|  stop ringing; the item goes to the next route
+```
+
+Answering the ring is the acknowledgment. The call itself is an ordinary phone session: the operator's
+spoken answer to the question is recorded by Ghost as they said it, and a spoken yes to a change is
+judged as any spoken yes is. If the offer is refused (`busy`, `not_ready`), the phone says so on its call
+screen; the item stays on the list.
+
+## Types
+
+`WaitingItemView`, `QuestionView`, `QuestionsView`, `OutcomeView`, `Status`, `AuditPage` and
+`ConversationView` are the control API's, defined in `packages/api/openapi.json` (generated from
+`crates/ghost-api`), and `packages/client-ts` has them as TypeScript types. The phone uses the same
+names.
+
+## What the phone app must do
+
+- Hold the stream in a foreground service: the microphone service it already has during a call, and a
+  connection service (`connectedDevice` or `dataSync` type, with a quiet persistent notification) the
+  rest of the time. Open it when the app starts, when the network changes, and when the tunnel comes up.
+- Keep the stream's request nonce, verify every message's `sig` before parsing `msg`, and drop and
+  reopen on a failure.
+- Keep the last cursor; reconnect with it; replace the state on a snapshot.
+- Treat 35 seconds without a message as a dead stream; reopen with backoff up to 30 seconds; try every
+  address from `/hello` in order.
+- On `alert`: post a local notification per item (a question with its choices as notification actions,
+  a change with Yes and No, anything else with Got it and Later), then `POST /seen {alert_id}`.
+- On `ring`: a full-screen incoming-call notification (`CATEGORY_CALL`, full-screen intent) showing who
+  asks and the question, ringing for `ring_secs` at most. Answer: `POST /ring answered`, then
+  `POST /offer` with `conversation: agent` and `item: key`, through the existing call path. Decline:
+  `POST /ring declined`. Stop ringing on `ring_over`.
+- On `item resolved` or a question that is no longer open: take its notification down.
+- Every action from a notification or a screen (answer, decline, confirm, cancel, acknowledge, snooze)
+  is a signed `POST` with a fresh `id`, sent again with the same `id` until it gets a signed answer.
+- Show a question's words and an item's title as text, with who asked. Never show or keep an answer
+  given by voice (the stream does not send one).
+- Never record or send audio outside a call, and never ask the desk for a transcript: there is no route
+  for one.
