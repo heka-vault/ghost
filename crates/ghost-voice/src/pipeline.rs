@@ -960,6 +960,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 runtime.clone(),
             )
             .with_fast(p.fast_model.clone())
+            .with_fast_thinking(settings.llm_fast_thinking.clone())
             .with_fast_reads(
                 (settings.llm_fast_reads && p.fast_model.is_some()).then(|| {
                     let d = dispatcher.clone();

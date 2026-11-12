@@ -71,6 +71,9 @@ pub struct VoiceSettings {
     /// greeting plays (`Frame::WarmCache`), unless that prompt was sent in the last four
     /// minutes. On by default.
     pub llm_warm: bool,
+    /// `GHOST_LLM_FAST_THINKING`: the fast model's thinking setting (ADR 0050), `disabled`
+    /// by default; `none` leaves the field out (Haiku 5.5 then thinks adaptively).
+    pub llm_fast_thinking: Option<String>,
 
     // STT
     pub stt_model: String,
@@ -294,6 +297,8 @@ impl VoiceSettings {
             llm_fast_read_max_chars: usize_or("GHOST_LLM_FAST_READ_MAX_CHARS", 4000)?,
             llm_fast_read_rounds: usize_or("GHOST_LLM_FAST_READ_ROUNDS", 2)?,
             llm_warm: flag("GHOST_LLM_WARM", true),
+            llm_fast_thinking: Some(string("GHOST_LLM_FAST_THINKING", crate::llm::FAST_THINKING))
+                .filter(|t| !t.is_empty() && t != "none"),
             stt_model: string("GHOST_STT_MODEL", "nemo-parakeet-tdt-0.6b-v3"),
             stt_quantization: get("GHOST_STT_QUANTIZATION")
                 .map(|v| v.trim().to_string())
@@ -568,6 +573,7 @@ mod tests {
             "with a fast model set, it makes reads itself"
         );
         assert!(s.llm_warm, "the prompt cache is warmed as a session opens");
+        assert_eq!(s.llm_fast_thinking.as_deref(), Some("disabled"));
         assert!(s.turn_speculate);
         assert!(s.turn_reread);
         assert_eq!(s.turn_stop_secs, 1.6);

@@ -84,16 +84,23 @@ pub fn fast_tools(tools: &Tools) -> Tools {
     Tools::new(all)
 }
 
-/// How the fast model is asked: as the main model is, without the thinking setting.
-/// A small model answers small talk and needs none, and it may refuse the main model's:
+/// How the fast model is asked: as the main model is, with its own thinking setting
+/// (`GHOST_LLM_FAST_THINKING`; None leaves the field out). It may refuse the main model's:
 /// Haiku 5.5 answers `between_tools`, Ghost's default, with HTTP 400 ("not supported for
-/// this model", 2026-11-12), and every turn was handed over for it.
-pub fn fast_options(options: &Options) -> Options {
+/// this model", 2026-11-12), and every turn was handed over for it. Left out, Haiku 5.5
+/// thinks anyway (adaptive is its default), unseen: through the proxy it began a tool call
+/// 1.17 s after the request (p50, n=9) against 0.84 s with `disabled`, and with thinking
+/// off it writes a few words first ("I'll read issue 142 from the app repo."), which are
+/// what Ghost says while the call runs.
+pub fn fast_options(options: &Options, thinking: Option<&str>) -> Options {
     Options {
-        thinking: None,
+        thinking: thinking.map(str::to_string),
         ..options.clone()
     }
 }
+
+/// The fast model's thinking setting unless the operator sets another.
+pub const FAST_THINKING: &str = "disabled";
 
 pub const COMPACTION_PROMPT: &str =
     "You are condensing the older part of a spoken conversation between an \
@@ -524,6 +531,8 @@ pub struct LlmStage {
     last_results_chars: usize,
     /// Rounds of reads the fast model made in this turn.
     fast_rounds: usize,
+    /// The fast model's thinking setting (`with_fast_thinking`).
+    fast_thinking: Option<String>,
 }
 
 impl LlmStage {
@@ -556,7 +565,14 @@ impl LlmStage {
             fast_reads: None,
             last_results_chars: 0,
             fast_rounds: 0,
+            fast_thinking: Some(FAST_THINKING.to_string()),
         }
+    }
+
+    /// The fast model's thinking setting; None leaves the field out of its requests.
+    pub fn with_fast_thinking(mut self, thinking: Option<String>) -> Self {
+        self.fast_thinking = thinking;
+        self
     }
 
     /// Let the fast model make reads itself and answer from short results (see the
@@ -591,7 +607,7 @@ impl LlmStage {
             (
                 fast.clone(),
                 fast_tools(&self.tools),
-                fast_options(&self.options),
+                fast_options(&self.options, self.fast_thinking.as_deref()),
             )
         });
         Call {
@@ -623,7 +639,7 @@ impl LlmStage {
             jobs.push((
                 fast.clone(),
                 fast_tools(&self.tools),
-                fast_options(&self.options),
+                fast_options(&self.options, self.fast_thinking.as_deref()),
             ));
         }
         for (model, tools, options) in jobs {
@@ -1573,18 +1589,20 @@ mod tests {
                 "m-warm-test",
                 &ctx,
                 &tools,
-                &fast_options(&Options::default())
+                &fast_options(&Options::default(), Some(FAST_THINKING))
             )
         );
     }
 
     #[test]
-    fn the_fast_model_is_asked_without_the_thinking_setting() {
+    fn the_fast_model_is_asked_with_its_own_thinking_setting() {
         // Haiku 5.5 refuses `between_tools` with a 400, so every turn was handed over.
         let main = Options::default();
         assert_eq!(main.thinking.as_deref(), Some("between_tools"));
-        let fast = fast_options(&main);
-        assert_eq!(fast.thinking, None);
+        let fast = fast_options(&main, Some(FAST_THINKING));
+        // Left out, Haiku 5.5 thinks anyway (adaptive), and starts its calls later.
+        assert_eq!(fast.thinking.as_deref(), Some("disabled"));
+        assert_eq!(fast_options(&main, None).thinking, None);
         assert_eq!(fast.max_tokens, main.max_tokens);
         assert_eq!(fast.cache_system, main.cache_system);
     }
