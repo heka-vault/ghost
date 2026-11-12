@@ -99,7 +99,14 @@ pub struct ToolDispatcher {
     /// The agent of a run with nobody there (`crate::headless`, ADR 0047); None in a
     /// session, whose agent is the one it is with.
     alone: Option<String>,
+    /// What that agent reaches now, asked for on every listing and every call: a run has
+    /// no conversation runtime to ask, and the apps change under it as under a session
+    /// (ADR 0046).
+    live: Option<LiveSources>,
 }
+
+/// The sources as they are now.
+pub type LiveSources = Arc<dyn Fn() -> Vec<ToolSource> + Send + Sync>;
 
 pub struct ToolsParams {
     pub sources: Vec<ToolSource>,
@@ -121,7 +128,7 @@ impl ToolDispatcher {
     /// `submit` (the call itself below `confirm`) and the `request` check that may
     /// execute it.
     pub fn new(p: ToolsParams) -> Arc<Self> {
-        Self::build(p, None)
+        Self::build(p, None, None)
     }
 
     /// The same tools for `agent` working with nobody there (ADR 0047): no hang up, hold,
@@ -130,10 +137,18 @@ impl ToolDispatcher {
     /// waiting on a turn that will not come, and nothing here is taken for the
     /// operator's yes.
     pub fn alone(p: ToolsParams, agent: &str) -> Arc<Self> {
-        Self::build(p, Some(agent.to_string()))
+        Self::build(p, Some(agent.to_string()), None)
     }
 
-    fn build(p: ToolsParams, alone: Option<String>) -> Arc<Self> {
+    /// `alone`, over sources that are asked for each time (ADR 0046): an app that
+    /// connected, dropped, changed its tools or had one found by search during the run
+    /// is what the next model call is offered and what a call goes to. `p.sources` is
+    /// not used.
+    pub fn alone_live(p: ToolsParams, agent: &str, live: LiveSources) -> Arc<Self> {
+        Self::build(p, Some(agent.to_string()), Some(live))
+    }
+
+    fn build(p: ToolsParams, alone: Option<String>, live: Option<LiveSources>) -> Arc<Self> {
         let session = SessionTools {
             conversations: p.conversations.is_some(),
             hold: p.on_hold.is_some(),
@@ -156,6 +171,7 @@ impl ToolDispatcher {
             probe: p.probe.unwrap_or_else(null_probe),
             offering,
             alone,
+            live,
         });
         if let Some(c) = &this.conversations {
             let me = this.clone();
@@ -167,6 +183,9 @@ impl ToolDispatcher {
     /// What the active agent reaches (ADR 0035): every connected app and Ghost's own
     /// sources, or every source given when the session was built without a reach.
     pub fn active_sources(&self) -> Vec<ToolSource> {
+        if let Some(live) = &self.live {
+            return live();
+        }
         match &self.conversations {
             Some(c) if c.has_reach() => c.sources_for(None),
             _ => self.sources.clone(),

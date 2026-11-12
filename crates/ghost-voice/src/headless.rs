@@ -15,7 +15,12 @@
 //! The loop runs until the model stops calling tools, bounded by a number of model calls
 //! (the last one is offered no tools, so the run ends with an answer) and by wall-clock
 //! time, and stops when cancelled. A model that cannot be reached is tried again after
-//! 30 s, then 60 s, then 120 s. A change that resolves to `ask` has nobody to answer: the
+//! 30 s, then 60 s, then 120 s. The tools are asked for before every model call, as a
+//! session asks (ADR 0046): an app that connected, dropped or changed its tools during
+//! the run, or a tool found by search, is offered from the next call, and the apps'
+//! paragraphs of the prompt follow. A run that is stopped or out of time stops its calls
+//! to apps too: each app is told, each call still has a result, and a change still has
+//! its outcome in the audit. A change that resolves to `ask` has nobody to answer: the
 //! dispatcher sets it aside on the waiting list (ADR 0030) and the run carries on.
 //!
 //! What is kept: the run's turns go into the agent's transcript when it ends, marked
@@ -59,6 +64,9 @@ pub const RETRIES: u32 = 3;
 /// What a run is shown of a skill it was told to start with.
 pub const SKILL_SHOWN: usize = 12_000;
 /// What the model is told before its last allowed call, which is offered no tools.
+/// How long a stopped run's calls have to come back before they are dropped. A call to
+/// an app returns as soon as it is told to stop; this is for a tool that does not listen.
+pub const STOP_GRACE: Duration = Duration::from_secs(5);
 pub const LAST_STEP: &str =
     "[system] This is your last step: no more tools. Write your answer now.";
 
@@ -273,39 +281,67 @@ impl HeadlessRunner {
         Ok(reply)
     }
 
-    /// The loop: the model, its calls, the model again, until a reply has no call.
+    /// The loop: the model, its calls, the model again, until a reply has no call or
+    /// `stop` is cancelled. A stopped run returns no answer; `run` knows why it stopped.
+    #[allow(clippy::too_many_arguments)]
     async fn work(
         &self,
         r: &RunRequest,
+        agent: &Profile,
         model: Arc<dyn ModelPort>,
         dispatcher: Arc<ToolDispatcher>,
         mut context: Context,
+        stop: &CancellationToken,
         tally: &mut Tally,
     ) -> Result<String, LlmError> {
         let max_turns = r.max_turns.max(1);
+        let mut offered = dispatcher.schemas();
         for turn in 1..=max_turns {
+            if stop.is_cancelled() {
+                break;
+            }
             let last = turn == max_turns && max_turns > 1;
             let tools = if last {
                 context.push(Message::user(LAST_STEP));
                 Tools::default()
             } else {
-                dispatcher.schemas()
+                // The list as it is now (ADR 0046). The prompt's paragraphs are replaced
+                // only when it differs, so the cached prompt is lost once per change.
+                let now = dispatcher.schemas();
+                if now != offered {
+                    info!(
+                        "run {}: the tools changed ({} to {}); offered from this call",
+                        r.name,
+                        offered.len(),
+                        now.len()
+                    );
+                    context.system = self.system_prompt(agent, &dispatcher.active_sources());
+                    offered = now;
+                }
+                offered.clone()
             };
-            let reply = self.reply(&model, &mut context, &tools, tally).await?;
+            let reply = tokio::select! {
+                biased;
+                () = stop.cancelled() => break,
+                reply = self.reply(&model, &mut context, &tools, tally) => reply?,
+            };
             if reply.calls.is_empty() || last {
                 return Ok(reply.text);
             }
             context.push_reply(reply.text.clone(), reply.calls.clone());
-            // Every call of the reply, together, as a session makes them.
-            let results: Vec<(ToolCall, CallResult)> =
+            // Every call of the reply, together, as a session makes them, and stopped
+            // when the run is: a call to an app ends with an error the gate records.
+            let results: Vec<(ToolCall, CallResult)> = ghost_core::apps::with_cancel(
+                stop.clone(),
                 futures::future::join_all(reply.calls.iter().map(|c| {
                     let dispatcher = dispatcher.clone();
                     async move {
                         let result = dispatcher.call(&c.name, c.arguments.clone(), &c.id).await;
                         (c.clone(), result)
                     }
-                }))
-                .await;
+                })),
+            )
+            .await;
             for (call, result) in results {
                 tally.tool_calls += 1;
                 tally.calls.push(call_line(&call.name, &call.arguments));
@@ -395,7 +431,13 @@ impl AgentRunner for HeadlessRunner {
             Err(e) => return RunOutcome::ended(Ended::Failed(e)),
         };
         let sources = (self.parts.reach)(&agent);
-        let dispatcher = ToolDispatcher::alone(
+        // What the agent reaches is asked for each time, not once (ADR 0046).
+        let live: crate::tools::LiveSources = {
+            let reach = self.parts.reach.clone();
+            let agent = agent.clone();
+            Arc::new(move || reach(&agent))
+        };
+        let dispatcher = ToolDispatcher::alone_live(
             ToolsParams {
                 sources: sources.clone(),
                 gate: self.parts.gate.clone(),
@@ -411,6 +453,7 @@ impl AgentRunner for HeadlessRunner {
                 probe: None,
             },
             &agent.slug,
+            live,
         );
         let mut context = Context::new(self.system_prompt(&agent, &sources));
         context.messages = self.seed(&agent);
@@ -418,17 +461,41 @@ impl AgentRunner for HeadlessRunner {
 
         let mut tally = Tally::default();
         let cancel: CancellationToken = r.cancel.clone();
+        // Cancelled when the run is stopped or out of time. The work observes it, and so
+        // does every app call in flight (`ghost_core::apps::with_cancel`); the future is
+        // not simply dropped, which would leave a change in the gate with no outcome.
+        let stop = CancellationToken::new();
         let worked = {
-            let work = self.work(&r, model, dispatcher, context, &mut tally);
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => Err(Ended::Cancelled),
-                out = tokio::time::timeout(r.max_runtime, work) => match out {
-                    Err(_) => Err(Ended::TimedOut),
-                    Ok(Ok(answer)) => Ok(answer),
-                    Ok(Err(e)) if transient(&e) => Err(Ended::Transient(e.to_string())),
-                    Ok(Err(e)) => Err(Ended::Failed(e.to_string())),
-                },
+            let work = self.work(&r, &agent, model, dispatcher, context, &stop, &mut tally);
+            tokio::pin!(work);
+            let deadline = tokio::time::sleep(r.max_runtime);
+            tokio::pin!(deadline);
+            let mut why: Option<Ended> = None;
+            let mut grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+            loop {
+                tokio::select! {
+                    biased;
+                    () = cancel.cancelled(), if why.is_none() => {
+                        why = Some(Ended::Cancelled);
+                    }
+                    () = &mut deadline, if why.is_none() => {
+                        why = Some(Ended::TimedOut);
+                    }
+                    () = async { grace.as_mut().expect("armed").await }, if grace.is_some() => {
+                        warn!("run {}: a call did not stop when told; left behind", r.name);
+                        break Err(why.take().expect("stopped for a reason"));
+                    }
+                    out = &mut work => break match (why.take(), out) {
+                        (Some(why), _) => Err(why),
+                        (None, Ok(answer)) => Ok(answer),
+                        (None, Err(e)) if transient(&e) => Err(Ended::Transient(e.to_string())),
+                        (None, Err(e)) => Err(Ended::Failed(e.to_string())),
+                    },
+                }
+                if why.is_some() && grace.is_none() {
+                    stop.cancel();
+                    grace = Some(Box::pin(tokio::time::sleep(STOP_GRACE)));
+                }
             }
         };
         let (ended, answer) = match worked {

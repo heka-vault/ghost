@@ -596,6 +596,162 @@ async fn a_run_is_bounded_by_the_clock_and_can_be_stopped() {
     assert!(w.transcript("ghost").is_empty());
 }
 
+/// A source with one read, `name`, run by `handler`.
+fn one_read(
+    source: &str,
+    name: &str,
+    handler: impl Fn() -> BoxFuture<'static, Result<Map<String, Value>, String>> + Send + Sync + 'static,
+) -> ToolSource {
+    let handler = Arc::new(handler);
+    ToolSource {
+        name: source.into(),
+        prompt: format!("{} FRAGMENT", source.to_uppercase()),
+        read_tools: vec![ReadTool {
+            name: name.into(),
+            description: "Look.".into(),
+            properties: json!({}),
+            required: vec![],
+            handler: Arc::new(move |_| {
+                let handler = handler.clone();
+                Box::pin(async move { handler().await.map_err(|e| anyhow::anyhow!(e)) })
+            }),
+            operation: String::new(),
+        }],
+        ..Default::default()
+    }
+}
+
+fn runner_over(w: &World, model: &Arc<Watched>, reach: Reach) -> HeadlessRunner {
+    let model = model.clone();
+    HeadlessRunner::new(HeadlessParts {
+        conversations: w.convs.clone(),
+        gate: w.gate.clone(),
+        reach,
+        model: Arc::new(move || Ok(model.clone() as Arc<dyn ModelPort>)),
+        options: Options::default(),
+        skills: None,
+    })
+}
+
+#[tokio::test]
+async fn a_stopped_run_stops_its_calls_to_apps_and_each_still_has_a_result() {
+    // ADR 0046 gave a call 300 seconds and a way to stop it. A run's calls are made under
+    // the run's own token, so a run that is cancelled tells the app and gets the call's
+    // result back at once, where dropping the run would leave it with no outcome.
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let began = Arc::new(AtomicUsize::new(0));
+    let told = Arc::new(AtomicUsize::new(0));
+    let slow = {
+        let (began, told) = (began.clone(), told.clone());
+        one_read("slow", "slow_report", move || {
+            let (began, told) = (began.clone(), told.clone());
+            Box::pin(async move {
+                // What a call to a connected app does: it waits on the app and on this.
+                let stop = ghost_core::apps::current_cancel().expect("the run's token");
+                began.fetch_add(1, Ordering::SeqCst);
+                stop.cancelled().await;
+                told.fetch_add(1, Ordering::SeqCst);
+                Err("the call was stopped".to_string())
+            })
+        })
+    };
+    let reach: Reach = Arc::new(move |_p| vec![slow.clone()]);
+    let model = Watched::new(vec![
+        ScriptedModel::call("", "slow_report", Map::new()),
+        ScriptedModel::say("Never said."),
+    ]);
+    let cancel = CancellationToken::new();
+    let run = {
+        let runner = runner_over(&w, &model, reach);
+        let r = RunRequest {
+            cancel: cancel.clone(),
+            ..request("ghost", "Fetch the report.")
+        };
+        tokio::spawn(async move { runner.run(r).await })
+    };
+    while began.load(Ordering::SeqCst) == 0 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let at = std::time::Instant::now();
+    cancel.cancel();
+    let out = run.await.unwrap();
+    assert_eq!(out.ended, Ended::Cancelled);
+    assert_eq!(told.load(Ordering::SeqCst), 1, "the call was told to stop");
+    assert_eq!(out.tool_calls, 1, "and came back with a result");
+    assert_eq!(model.calls(), 1, "the model is not called again");
+    assert!(
+        at.elapsed() < ghost_voice::headless::STOP_GRACE,
+        "nothing waited out the grace"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_call_that_does_not_stop_when_told_is_left_behind_after_the_grace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let deaf = one_read("deaf", "deaf_wait", || {
+        Box::pin(async {
+            std::future::pending::<()>().await;
+            Ok(Map::new())
+        })
+    });
+    let reach: Reach = Arc::new(move |_p| vec![deaf.clone()]);
+    let model = Watched::new(vec![ScriptedModel::call("", "deaf_wait", Map::new())]);
+    let out = runner_over(&w, &model, reach)
+        .run(RunRequest {
+            max_runtime: Duration::from_secs(60),
+            ..request("ghost", "Wait for it.")
+        })
+        .await;
+    assert_eq!(out.ended, Ended::TimedOut);
+    assert_eq!(out.model_calls, 1);
+}
+
+#[tokio::test]
+async fn a_run_is_offered_the_tools_as_they_are_before_each_model_call() {
+    // ADR 0046: an app that connects in the middle of a run is offered from the next
+    // model call, its paragraph joins the prompt, and a call to it goes through.
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let looked = Arc::new(AtomicUsize::new(0));
+    let late = {
+        let looked = looked.clone();
+        one_read("late", "late_look", move || {
+            looked.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(Map::new()) })
+        })
+    };
+    let reach: Reach = {
+        let (inner, reads) = (w.reach.clone(), w.reads.clone());
+        Arc::new(move |p| {
+            let mut out = inner(p);
+            // It connects once the run has made its first read.
+            if reads.load(Ordering::SeqCst) > 0 {
+                out.push(late.clone());
+            }
+            out
+        })
+    };
+    let model = Watched::new(vec![
+        ScriptedModel::call("", "echo", args(json!({"x": "one"}))),
+        ScriptedModel::call("", "late_look", Map::new()),
+        ScriptedModel::say("Looked at both."),
+    ]);
+    let out = runner_over(&w, &model, reach)
+        .run(request("ghost", "Look around."))
+        .await;
+    assert_eq!(out.ended, Ended::Done);
+    assert_eq!(out.answer, "Looked at both.");
+    assert!(!model.tools_at(0).contains(&"late_look".to_string()));
+    assert!(model.tools_at(1).contains(&"late_look".to_string()));
+    assert!(!model.context_at(0).system.contains("LATE FRAGMENT"));
+    assert!(model.context_at(1).system.contains("LATE FRAGMENT"));
+    // Unchanged after that: the prompt is not rebuilt on every call.
+    assert_eq!(model.context_at(1).system, model.context_at(2).system);
+    assert_eq!(looked.load(Ordering::SeqCst), 1);
+}
+
 #[tokio::test]
 async fn a_model_that_cannot_be_reached_is_tried_again_three_times_at_the_most() {
     let tmp = tempfile::tempdir().unwrap();
