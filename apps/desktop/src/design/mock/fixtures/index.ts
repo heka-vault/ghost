@@ -6,7 +6,7 @@ import type { Scenario } from "../scenarios";
 import apps, { CATALOG } from "./apps";
 import audit from "./audit";
 import conversations from "./conversations";
-import { outputs, rules, watching } from "./folder";
+import { outputs, rules, schedules, watching } from "./folder";
 import hear from "./hear";
 import mobile from "./mobile";
 import onboarding from "./onboarding";
@@ -30,6 +30,8 @@ export function composeFixtures(s: Scenario) {
     rules: rules(s),
     outputs: outputs(s),
     watching: watching(s),
+    /** What the agents do on their own (GET /schedules) and what each run said, ADR 0047. */
+    schedules: schedules(s),
     /** The apps in apps.json (GET /apps) and the catalog to connect more from (GET /catalog), ADR 0034. */
     apps: appList,
     catalog: structuredClone(CATALOG),

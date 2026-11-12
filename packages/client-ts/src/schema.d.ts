@@ -2573,7 +2573,9 @@ export interface components {
          */
         ScheduleCheck: {
             app: string;
-            args?: Record<string, never>;
+            args?: {
+                [key: string]: unknown;
+            };
             read: string;
         };
         /** @description The hours of the day a schedule may run in, in its time zone (`08:00` to `18:00`). */

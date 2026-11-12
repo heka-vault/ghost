@@ -50,6 +50,7 @@ import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
+import { MockSchedules } from "./schedules";
 import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
@@ -215,6 +216,8 @@ export class MockDaemon {
   private timers = new Set<ReturnType<typeof setTimeout>>();
   /** The Hearing test (ADR 0042): the recorder, its takes, sessions and runs. */
   private hear: MockHear;
+  /** What the agents do on their own (ADR 0047): the schedules and their runs. */
+  private schedules: MockSchedules;
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
@@ -290,6 +293,18 @@ export class MockDaemon {
         conversation: this.status.conversation ?? null,
       });
     }
+    this.schedules = new MockSchedules(f.schedules, {
+      agent: (slug) => {
+        const a = this.agents.get(slug)?.detail;
+        return !a ? "unknown" : a.retired_at != null ? "retired" : "known";
+      },
+      deliver: (agent, key, title) => {
+        const at = new Date().toISOString();
+        this.waitingItems = [{ key, source: `agent:${agent}`, title, state: "new", first_seen: at, changed_at: at, age_secs: 0 }, ...this.waitingItems.filter((x) => x.key !== key)];
+        this.waitingChanged();
+      },
+      later: (fn, ms) => this.later(ms, fn),
+    });
     this.hear = new MockHear(
       f.hear,
       {
@@ -1208,6 +1223,10 @@ export class MockDaemon {
     if (method === "POST" && path === "/rules") return this.addRule(String(b.text ?? ""));
     if (method === "GET" && path === "/outputs") return structuredClone(this.outputs);
     if (method === "GET" && path === "/watches") return structuredClone(this.watching);
+    {
+      const answer = this.schedules.handle(method, path, query, b);
+      if (answer !== undefined) return answer;
+    }
 
     if (method === "GET" && path === "/phone") return this.phone;
     if (method === "POST" && path === "/phone/pairing") return this.newPairing();

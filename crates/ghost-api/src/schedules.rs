@@ -85,7 +85,6 @@ pub struct ScheduleCheck {
     pub app: String,
     pub read: String,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub args: Map<String, Value>,
 }
 

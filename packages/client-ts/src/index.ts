@@ -100,6 +100,12 @@ export type WatchInfo = Schemas["WatchInfo"];
 export type HookInfo = Schemas["HookInfo"];
 export type RoutesView = Schemas["RoutesView"];
 export type OutputInfo = Schemas["OutputInfo"];
+/** Schedules (ADR 0047): what an agent does on its own and when, and what each run said. */
+export type SchedulesView = Schemas["SchedulesView"];
+export type ScheduleInfo = Schemas["ScheduleInfo"];
+export type ScheduleRequest = Schemas["ScheduleRequest"];
+export type ScheduleRunInfo = Schemas["ScheduleRunInfo"];
+export type ScheduleRunsView = Schemas["ScheduleRunsView"];
 /** The Hearing test (ADR 0042): the recorder, a take's check, the take list, sessions and score runs. */
 export type HearView = Schemas["HearView"];
 export type HearState = Schemas["HearState"];
@@ -411,6 +417,45 @@ export class GhostClient {
    *  addresses, and what is wrong in watches.json, hooks.json or left from an older layout. */
   watches() {
     return unwrap(this.api.GET("/watches"));
+  }
+
+  // --- schedules (ADR 0047) ------------------------------------------------------------------
+  /** What each agent does on its own, and when: every schedule with its next run and how the
+   *  last one ended, the time zone a time is read in, and what is wrong with any of them. */
+  schedules() {
+    return unwrap(this.api.GET("/schedules"));
+  }
+  /** Add a schedule; it is the operator's. When is exactly one of `at`, `every` and `cron`.
+   *  422 with a sentence when it doesn't hold. */
+  addSchedule(body: Schemas["ScheduleRequest"]) {
+    return unwrap(this.api.POST("/schedules", { body }));
+  }
+  /** Change a schedule: what is left out stays as it is. */
+  editSchedule(id: string, body: Schemas["ScheduleRequest"]) {
+    return unwrap(this.api.PATCH("/schedules/{schedule_id}", { params: { path: { schedule_id: id } }, body }));
+  }
+  removeSchedule(id: string) {
+    return unwrap(this.api.DELETE("/schedules/{schedule_id}", { params: { path: { schedule_id: id } } }));
+  }
+  /** Pause a schedule: it keeps its time and does not run. */
+  pauseSchedule(id: string) {
+    return unwrap(this.api.POST("/schedules/{schedule_id}/pause", { params: { path: { schedule_id: id } } }));
+  }
+  /** Resume a schedule, counting from now. */
+  resumeSchedule(id: string) {
+    return unwrap(this.api.POST("/schedules/{schedule_id}/resume", { params: { path: { schedule_id: id } } }));
+  }
+  /** Run a schedule now, paused or not; the run that was started (or the one already going). */
+  runSchedule(id: string) {
+    return unwrap(this.api.POST("/schedules/{schedule_id}/run", { params: { path: { schedule_id: id } } }));
+  }
+  /** A schedule's runs, newest first, with what each answered. */
+  scheduleRuns(id: string, limit = 20) {
+    return unwrap(this.api.GET("/schedules/{schedule_id}/runs", { params: { path: { schedule_id: id }, query: { limit } } }));
+  }
+  /** Stop a run that is waiting or going. */
+  cancelRun(id: string) {
+    return unwrap(this.api.POST("/runs/{run_id}/cancel", { params: { path: { run_id: id } } }));
   }
 
   // --- phone (ADR 0016) ----------------------------------------------------------------

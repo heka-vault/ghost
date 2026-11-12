@@ -3507,6 +3507,10 @@
             "type": "string"
           },
           "args": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
             "type": "object"
           },
           "read": {
