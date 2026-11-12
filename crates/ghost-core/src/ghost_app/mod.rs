@@ -14,6 +14,7 @@
 //! listener.
 
 pub mod docs;
+pub mod schedules;
 #[cfg(test)]
 mod tests;
 pub mod tools_search;
@@ -216,6 +217,8 @@ pub struct GhostServer {
     parts: Arc<Parts>,
     docs: &'static Docs,
     caller: Caller,
+    /// The schedules and their two tools (ADR 0047), when the daemon gives them.
+    schedules: Option<Arc<crate::schedules::Jobs>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -226,6 +229,7 @@ impl GhostServer {
             parts: Arc::new(parts),
             docs: Docs::built_in(),
             caller: Caller::Session,
+            schedules: None,
             tool_router: Self::tool_router() + Self::tools_search_router(),
         }
     }

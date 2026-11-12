@@ -129,6 +129,52 @@ CREATE TABLE IF NOT EXISTS deliveries (
     checked     INTEGER,
     PRIMARY KEY (source, id)
 );
+
+-- Schedules (ADR 0047): what an agent does on its own, and when. ``schedule`` and
+-- ``options`` are JSON; ``created_by`` is 'operator' or 'agent:<slug>'.
+CREATE TABLE IF NOT EXISTS schedules (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    agent        TEXT NOT NULL,
+    instruction  TEXT NOT NULL,
+    schedule     TEXT NOT NULL,
+    options      TEXT NOT NULL DEFAULT '{}',
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    created_by   TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    next_run_at  TEXT,
+    last_run_at  TEXT,
+    last_outcome TEXT,
+    last_error   TEXT,
+    check_hash   TEXT,
+    check_last   TEXT
+);
+
+-- One run of an agent with nobody there (ADR 0047): a schedule's (``job``), one the
+-- operator asked for now, or a watch's act (``source`` 'watch:<name>', ``item_key``).
+-- A row is written before the run starts, so a restart never runs or delivers it twice.
+CREATE TABLE IF NOT EXISTS schedule_runs (
+    id            TEXT PRIMARY KEY,
+    job           TEXT,
+    source        TEXT NOT NULL,
+    item_key      TEXT,
+    agent         TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    request       TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    scheduled_for TEXT NOT NULL,
+    started_at    TEXT,
+    finished_at   TEXT,
+    answer        TEXT,
+    error         TEXT,
+    delivery      TEXT,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    model_calls   INTEGER NOT NULL DEFAULT 0,
+    tool_calls    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS schedule_runs_job ON schedule_runs(job, scheduled_for);
+CREATE INDEX IF NOT EXISTS schedule_runs_source ON schedule_runs(source, item_key);
 "#;
 
 /// The three tables the lines (ADR 0014 to 0023) lived in. ADR 0024 started over: they
@@ -274,7 +320,7 @@ impl Store {
         })
     }
 
-    fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 

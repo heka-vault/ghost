@@ -34,6 +34,7 @@ pub mod redact;
 pub mod request;
 pub mod routes;
 pub mod rules;
+pub mod schedules;
 pub mod scripts_server;
 pub mod signin;
 pub mod skill_catalog;
