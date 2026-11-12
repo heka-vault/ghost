@@ -154,6 +154,7 @@ fn world(tmp: &std::path::Path) -> World {
             silero: s.silero_model.clone(),
             voices: vec!["af_heart".into()],
             acks: ghost_voice::acks::Acks::new(None),
+            problem: None,
         })
     });
     ports.model = {

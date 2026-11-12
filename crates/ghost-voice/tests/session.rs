@@ -297,6 +297,7 @@ fn world_setup(setup: Setup) -> World {
         silero: "/nonexistent/silero.onnx".into(),
         voices: vec!["af_heart".into()],
         acks: rendered_acks(),
+        problem: None,
     });
     let gate = Arc::new(
         WriteGate::new(Arc::new(Store::in_memory().unwrap()))

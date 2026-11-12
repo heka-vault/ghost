@@ -1,0 +1,29 @@
+# One-off measurement and conversion scripts for the third round of voice speed
+# (docs/benchmarks/perf/2026-11-12-voice-speed.md, ADR 0053): Kokoro's graph cut in two so
+# its vocoder can run a window at a time, and the timing of each half. Nothing here runs in
+# the daemon. Its own lock: `uv sync --project tools/voice-trial`, then
+# `uv run --project tools/voice-trial python -I <script>`.
+[project]
+name = "ghost-voice-trial"
+version = "2026.11.0"
+description = "Kokoro split for windowed decoding, and the measurements behind it"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+dependencies = [
+    "numpy>=1.26",
+    "onnx==1.19.1",
+    # The runtime Ghost ships (ADR 0039).
+    "onnxruntime==1.24.4",
+    # Pocket TTS's measurement only (Apache-2.0; it carries its own ONNX Runtime).
+    "sherpa-onnx>=1.12",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["voice_trial"]

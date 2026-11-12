@@ -81,6 +81,9 @@ pub struct Models {
     pub voices: Vec<String>,
     /// The acknowledgments, rendered per voice from `tts` (`crate::acks`).
     pub acks: Arc<Acks>,
+    /// What the load could not do as asked but worked around, for the waiting list: the
+    /// windowed voice's files missing, so Kokoro renders whole (ADR 0053).
+    pub problem: Option<String>,
 }
 
 impl Models {
@@ -92,7 +95,15 @@ impl Models {
             s.stt_quantization.as_deref().unwrap_or("fp32")
         );
         let parakeet = Parakeet::load(&paths, s.stt_threads)?;
-        let kokoro = Kokoro::load(&s.kokoro_paths())?;
+        let mut kokoro = Kokoro::load(&s.kokoro_paths())?;
+        let (halves, problem) = windowed_halves(s);
+        if let Some((halves, plan)) = halves {
+            info!(
+                "Kokoro renders a window at a time (first {} frames, context {})",
+                plan.first, plan.context
+            );
+            kokoro = kokoro.with_windows(halves, plan);
+        }
         let voices: Vec<String> = kokoro.voices().into_iter().map(String::from).collect();
         let turn = SmartTurn::load(&s.smart_turn_model, s.smart_turn_threads)?;
         Ok(Self {
@@ -102,6 +113,7 @@ impl Models {
             silero: s.silero_model.clone(),
             voices,
             acks: Acks::new(Some(&s.cache_dir)),
+            problem,
         })
     }
 
@@ -114,6 +126,44 @@ impl Models {
                 warn!("Silero: {e}; no VAD in this session");
                 None
             }
+        }
+    }
+}
+
+/// Kokoro's two halves and its window plan, when loaded.
+pub type WindowedHalves = (
+    ghost_infer::kokoro_windowed::Halves,
+    ghost_infer::kokoro_windowed::WindowPlan,
+);
+
+/// Kokoro's two halves when the settings ask for the windowed voice (ADR 0053), else none.
+/// Asked for and missing or broken, none and the problem: Kokoro renders whole, as it did,
+/// and the waiting list says why (a trial model never stops Ghost speaking).
+pub fn windowed_halves(s: &VoiceSettings) -> (Option<WindowedHalves>, Option<String>) {
+    if s.tts_stream != crate::config::TtsStream::Windowed {
+        return (None, None);
+    }
+    let paths = s.kokoro_halves_paths();
+    if !paths.exist() {
+        let problem = format!(
+            "GHOST_TTS_STREAM=windowed, but Kokoro's halves are not there ({}, {}); Ghost \
+             speaks with the whole render. scripts/models.sh kokoro-windowed makes them \
+             (docs/releasing.md, \"The speech models\")",
+            paths.encoder.display(),
+            paths.decoder.display()
+        );
+        warn!("{problem}");
+        return (None, Some(problem));
+    }
+    match ghost_infer::kokoro_windowed::Halves::load(&paths) {
+        Ok(h) => (Some((h, s.window_plan())), None),
+        Err(e) => {
+            let problem = format!(
+                "GHOST_TTS_STREAM=windowed, but Kokoro's halves did not load ({e}); Ghost \
+                 speaks with the whole render"
+            );
+            warn!("{problem}");
+            (None, Some(problem))
         }
     }
 }

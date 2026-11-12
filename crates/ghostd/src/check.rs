@@ -223,6 +223,24 @@ pub fn check_models(
         ));
     }
 
+    // ADR 0053: the windowed voice, when asked for. Missing, Ghost speaks with the whole
+    // render, so it is a problem to fix and not a reason to stop.
+    if voice.tts_stream == ghost_voice::config::TtsStream::Windowed {
+        let halves = voice.kokoro_halves_paths();
+        if halves.exist() {
+            let dir = halves.encoder.parent().unwrap_or(&halves.encoder);
+            let _ = writeln!(out, "kokoro windowed: {}", dir.display());
+        } else {
+            problems.push(format!(
+                "GHOST_TTS_STREAM=windowed but Kokoro's halves are not there ({}, {}); \
+                 scripts/models.sh kokoro-windowed makes them, and until then Ghost speaks \
+                 with the whole render",
+                halves.encoder.display(),
+                halves.decoder.display()
+            ));
+        }
+    }
+
     if cfg.wake_mode == "onnx" {
         let (hey, address) = wake_model_paths(cfg, voice);
         if hey.is_file() {

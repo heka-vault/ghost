@@ -41,6 +41,21 @@ pub trait Synth: Send {
     fn voices(&self) -> Vec<String>;
     /// 24 kHz mono s16 for `text` in `voice` at `speed`.
     fn synthesize(&mut self, text: &str, voice: &str, speed: f32) -> ghost_infer::Result<Vec<i16>>;
+
+    /// The same audio handed to `emit` as it is made (ADR 0053): a piece at a time for a
+    /// model that renders whole, which is the default, or a window at a time for one that
+    /// streams. `emit` returning false stops the render (a barge-in, a dropped clause).
+    fn render(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+        emit: &mut dyn FnMut(Vec<i16>) -> bool,
+    ) -> ghost_infer::Result<()> {
+        let pcm = self.synthesize(text, voice, speed)?;
+        emit(pcm);
+        Ok(())
+    }
 }
 
 impl Synth for Kokoro {
@@ -52,6 +67,49 @@ impl Synth for Kokoro {
         let audio = Kokoro::synthesize(self, text, voice, speed, LANG)?;
         Ok(ghost_infer::audio::to_i16(&audio))
     }
+
+    fn render(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+        emit: &mut dyn FnMut(Vec<i16>) -> bool,
+    ) -> ghost_infer::Result<()> {
+        Kokoro::stream_render(self, text, voice, speed, LANG, &mut |audio| {
+            emit(ghost_infer::audio::to_i16(&audio))
+        })
+    }
+}
+
+/// A piece's audio as it is made: the receiving end of a render running on a blocking
+/// thread behind the model's lock. Dropping it stops the render at its next window.
+pub type Chunks = tokio::sync::mpsc::UnboundedReceiver<Vec<i16>>;
+
+/// Start rendering `text` off the runtime; its audio arrives on the returned channel a
+/// window at a time (or whole, for a model that renders whole), and the channel closes when
+/// the render ends, fails, or `stop` is cancelled. A failure is logged and yields nothing.
+pub fn render_chunks(
+    synth: &SharedSynth,
+    text: String,
+    voice: String,
+    speed: f32,
+    stop: Option<tokio_util::sync::CancellationToken>,
+) -> Chunks {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let synth = synth.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut s = synth.lock().unwrap_or_else(|e| e.into_inner());
+        let result = s.render(&text, &voice, speed, &mut |pcm| {
+            if stop.as_ref().is_some_and(|t| t.is_cancelled()) {
+                return false;
+            }
+            tx.send(pcm).is_ok()
+        });
+        if let Err(e) = result {
+            warn!("tts: Kokoro failed: {e}");
+        }
+    });
+    rx
 }
 
 pub type SharedSynth = Arc<Mutex<dyn Synth>>;
@@ -112,7 +170,7 @@ struct Ahead {
     text: String,
     voice: String,
     speed: f64,
-    audio: tokio::sync::oneshot::Receiver<Option<Vec<i16>>>,
+    audio: Chunks,
 }
 
 struct Pending {
@@ -252,18 +310,10 @@ impl Prerender {
             let s = self.0.settings.lock().unwrap();
             (s.voice.clone(), s.speed)
         };
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let synth = self.0.synth.clone();
-        let (say, in_voice) = (text.clone(), voice.clone());
         // Off the runtime, behind the model's own lock: a clause the stage is rendering
-        // for the reply before goes first.
-        tokio::task::spawn_blocking(move || {
-            let pcm = {
-                let mut s = synth.lock().unwrap_or_else(|e| e.into_inner());
-                s.synthesize(&say, &in_voice, speed as f32)
-            };
-            let _ = tx.send(pcm.ok());
-        });
+        // for the reply before goes first. A window at a time when the model streams, so
+        // the first window is ready soonest; dropped, it stops at the next window.
+        let rx = render_chunks(&self.0.synth, text.clone(), voice.clone(), speed as f32, None);
         self.0.probe.prerender("rendered");
         let mut p = self.0.pending.lock().unwrap();
         self.drop_ahead(&mut p);
@@ -283,7 +333,7 @@ impl Prerender {
         text: &str,
         voice: &str,
         speed: f64,
-    ) -> Option<tokio::sync::oneshot::Receiver<Option<Vec<i16>>>> {
+    ) -> Option<Chunks> {
         let mut p = self.0.pending.lock().unwrap();
         let ahead = p.ahead.take()?;
         if ahead.text == text && ahead.voice == voice && (ahead.speed - speed).abs() < 1e-9 {
@@ -448,67 +498,70 @@ impl KokoroTts {
             self.first_audio = true;
             out.push(Frame::TtsStarted).await;
         }
-        let synth = self.synth.clone();
-        let (voice, speed) = (self.settings.voice.clone(), self.settings.speed as f32);
         let began = Instant::now();
         // Rendered ahead while the reply was held: that audio, without rendering it again.
         let ahead = match &self.prerender {
             Some(p) if reply => p.take(&text, &self.settings.voice, self.settings.speed),
             _ => None,
         };
-        let ahead = match ahead {
-            Some(audio) => {
-                let pcm = audio.await.ok().flatten();
-                if let Some(p) = &self.prerender {
-                    // Played, or made for a turn the operator has since taken back.
-                    p.count(if pcm.is_some() && !turn.is_cancelled() {
-                        "used"
-                    } else {
-                        "dropped"
-                    });
-                }
-                pcm
+        if let Some(chunks) = ahead {
+            let played = self.play(chunks, &turn, began, out).await;
+            if let Some(p) = &self.prerender {
+                // Played, or made for a turn the operator has since taken back.
+                p.count(if played && !turn.is_cancelled() {
+                    "used"
+                } else {
+                    "dropped"
+                });
             }
-            None => None,
-        };
-        if turn.is_cancelled() {
-            return;
+            if played || turn.is_cancelled() {
+                return;
+            }
+            // Nothing came of it (the render failed): render the clause now.
         }
-        let pcm = match ahead {
-            Some(pcm) => pcm,
-            None => {
-                let text_for_model = text.clone();
-                let rendered = tokio::task::spawn_blocking(move || {
-                    let mut s = synth.lock().unwrap_or_else(|e| e.into_inner());
-                    s.synthesize(&text_for_model, &voice, speed)
-                })
+        let chunks = render_chunks(
+            &self.synth,
+            text,
+            self.settings.voice.clone(),
+            self.settings.speed as f32,
+            Some(turn.clone()),
+        );
+        self.play(chunks, &turn, began, out).await;
+    }
+
+    /// A piece's audio to the speaker as it arrives, each window as its own frame under the
+    /// reply's token. Whether any of it was played.
+    async fn play(
+        &mut self,
+        mut chunks: Chunks,
+        turn: &tokio_util::sync::CancellationToken,
+        began: Instant,
+        out: &Out,
+    ) -> bool {
+        let mut any = false;
+        while let Some(pcm) = chunks.recv().await {
+            if turn.is_cancelled() {
+                return any; // dropping the channel stops the render
+            }
+            if pcm.is_empty() {
+                continue;
+            }
+            if self.first_audio {
+                self.first_audio = false;
+                out.push(Frame::Metrics(Metric::Ttfb {
+                    value: began.elapsed().as_secs_f64(),
+                    model: None,
+                }))
                 .await;
-                match rendered {
-                    Ok(Ok(pcm)) => pcm,
-                    Ok(Err(e)) => {
-                        warn!("tts: Kokoro failed: {e}");
-                        return;
-                    }
-                    Err(_) => return,
-                }
             }
-        };
-        if turn.is_cancelled() {
-            return;
-        }
-        if self.first_audio {
-            self.first_audio = false;
-            out.push(Frame::Metrics(Metric::Ttfb {
-                value: began.elapsed().as_secs_f64(),
-                model: None,
-            }))
+            any = true;
+            out.push(Frame::TtsAudio {
+                audio: Audio::new(pcm, SAMPLE_RATE),
+                turn: turn.clone(),
+            })
             .await;
         }
-        out.push(Frame::TtsAudio {
-            audio: Audio::new(pcm, SAMPLE_RATE),
-            turn,
-        })
-        .await;
+        any
     }
 
     async fn stop_speaking(&mut self, out: &Out) {
