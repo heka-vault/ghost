@@ -96,7 +96,7 @@ pub fn parse_duration(text: &str) -> Result<u64, WhenError> {
 /// `1800` as `30m`.
 pub fn say_duration(secs: u64) -> String {
     for (per, unit) in [(7 * 86400, "w"), (86400, "d"), (3600, "h"), (60, "m")] {
-        if secs >= per && secs % per == 0 {
+        if secs >= per && secs.is_multiple_of(per) {
             return format!("{}{unit}", secs / per);
         }
     }
