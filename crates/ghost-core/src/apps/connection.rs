@@ -69,7 +69,8 @@ pub async fn with_cancel<F: Future>(cancel: CancellationToken, work: F) -> F::Ou
     CANCEL.scope(cancel, work).await
 }
 
-fn current_cancel() -> Option<CancellationToken> {
+/// The token the call being made here stops on, when it was made inside `with_cancel`.
+pub fn current_cancel() -> Option<CancellationToken> {
     CANCEL.try_with(Clone::clone).ok()
 }
 

@@ -662,6 +662,7 @@ fn watch_info(deps: &Deps, w: &ghost_core::watches::Watch) -> WatchInfo {
             ghost_core::waiting::Response::Tell => WatchResponse::Tell,
             ghost_core::waiting::Response::Record => WatchResponse::Record,
         },
+        acts_through: w.act.as_ref().map(|a| a.agent.clone()),
         urgency: urgency_of(&w.urgency),
         last_run: st.as_ref().and_then(|s| s.last_run),
         last_ok: st.as_ref().and_then(|s| s.last_ok),
@@ -1414,6 +1415,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::skill_catalog::router())
         .merge(crate::conversations::router())
         .merge(crate::hear::router())
+        .merge(crate::schedules::router())
         .routes(routes!(get_status))
         .routes(routes!(wake))
         .routes(routes!(sleep))

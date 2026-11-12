@@ -15,6 +15,18 @@
 //! `drop` (not an item). No step can pick anything else or grant anything. Every item has
 //! a stable key from a template over the fields, so one failure is one item.
 //!
+//! A watch may also **act** (ADR 0029, ADR 0047): with an `act` block, each new item
+//! starts a run of the agent it names on the instruction it declares, with the item's
+//! typed fields as data. `"response": "act"` keeps the item off the waiting list (the
+//! run's answer is what the operator is told); `tell` with an `act` block does both. The
+//! operator declares it; no step and no model picks it. It is limited: once per item, and
+//! twelve runs an hour per watch, unless the block says otherwise.
+//!
+//! ```json
+//! "response": "act",
+//! "act": {"agent": "ghost", "instruction": "Read the failed run's log and say what broke."}
+//! ```
+//!
 //! Example, `watches.json`:
 //!
 //! ```json
@@ -80,7 +92,17 @@ pub(crate) static NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{0,40}$").expect("a fixed pattern"));
 static FIELD_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]{0,40}$").expect("a fixed pattern"));
-const WATCH_KEYS: [&str; 16] = [
+const ACT_KEYS: [&str; 5] = [
+    "agent",
+    "instruction",
+    "per_hour",
+    "once_per_item",
+    "skills",
+];
+/// A watch acts at most this often in an hour unless its `act` block says otherwise.
+pub const ACT_PER_HOUR: u32 = 12;
+pub const ACT_INSTRUCTION_MAX: usize = 4000;
+const WATCH_KEYS: [&str; 17] = [
     "app",
     "server", // the older word for app (ADR 0034), still read
     "read",
@@ -94,6 +116,7 @@ const WATCH_KEYS: [&str; 16] = [
     "title",
     "link",
     "response",
+    "act",
     "urgency",
     "jev",
     "model",
@@ -369,6 +392,27 @@ pub struct Ask {
     pub default: Choice,
 }
 
+/// What a watch does about a new item besides keeping it (ADR 0029, ADR 0047): a run of
+/// `agent` on `instruction`, the item's typed fields given as data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Act {
+    /// The agent's slug.
+    pub agent: String,
+    pub instruction: String,
+    /// Runs an hour, at the most.
+    pub per_hour: u32,
+    /// One run per item key, ever; false runs again when a resolved item comes back.
+    pub once_per_item: bool,
+    /// Skills whose text the run starts with.
+    pub skills: Vec<String>,
+}
+
+/// What starts a run for a watch that acts: the scheduler (`ghost_core::schedules`).
+/// It only queues; the run happens on its own, never inside a poll.
+pub trait Actor: Send + Sync {
+    fn act(&self, watch: &Watch, item: &ItemDraft);
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Watch {
     pub name: String,
@@ -384,6 +428,8 @@ pub struct Watch {
     pub when: Vec<Check>,
     pub for_minutes: i64,
     pub response: Choice,
+    /// A run for each new item, when declared.
+    pub act: Option<Act>,
     /// For the route policy (ADR 0031).
     pub urgency: String,
     pub jev: Option<Ask>,
@@ -785,10 +831,24 @@ pub fn parse_watch(name: &str, body: &Value, where_: &str) -> Result<Watch, Watc
             "{where_}: key must name at least one field, or every result is one item"
         )));
     }
+    let act = parse_act(body.get("act"), &format!("{where_}: act"))?;
     let response = match get_or(body, "response", &Value::String("tell".into())) {
         Value::String(s) if s == "tell" => Choice::Tell,
         Value::String(s) if s == "record" => Choice::Record,
-        _ => return Err(declaration(format!("{where_}: response is tell or record"))),
+        // The run's answer is what the operator is told; the item itself is only kept.
+        Value::String(s) if s == "act" => {
+            if act.is_none() {
+                return Err(declaration(format!(
+                    "{where_}: response act needs an act block naming the agent and the instruction"
+                )));
+            }
+            Choice::Record
+        }
+        _ => {
+            return Err(declaration(format!(
+                "{where_}: response is tell, record or act"
+            )));
+        }
     };
     let urgency = parse_urgency(body, where_)?;
     Ok(Watch {
@@ -804,11 +864,83 @@ pub fn parse_watch(name: &str, body: &Value, where_: &str) -> Result<Watch, Watc
         when,
         for_minutes,
         response,
+        act,
         urgency,
         jev: parse_ask(body.get("jev"), &fields, &format!("{where_}: jev"))?,
         model: parse_ask(body.get("model"), &fields, &format!("{where_}: model"))?,
         fields,
     })
+}
+
+fn parse_act(body: Option<&Value>, where_: &str) -> Result<Option<Act>, WatchError> {
+    let body = match body {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Object(m)) => m,
+        Some(_) => return Err(declaration(format!("{where_}: must be an object"))),
+    };
+    let unknown = unknown_keys(body, &ACT_KEYS);
+    if !unknown.is_empty() {
+        return Err(declaration(format!(
+            "{where_}: unknown key(s) {}",
+            unknown.join(", ")
+        )));
+    }
+    let agent = match get_or(body, "agent", &Value::String("ghost".into())) {
+        Value::String(s) if NAME.is_match(s) => s.clone(),
+        _ => {
+            return Err(declaration(format!(
+                "{where_}: agent is an agent's slug (ghost when left out)"
+            )));
+        }
+    };
+    let instruction = match body.get("instruction") {
+        Some(Value::String(s))
+            if !s.trim().is_empty() && s.chars().count() <= ACT_INSTRUCTION_MAX =>
+        {
+            s.trim().to_string()
+        }
+        _ => {
+            return Err(declaration(format!(
+                "{where_}: instruction says what the agent is to do (up to {ACT_INSTRUCTION_MAX} characters)"
+            )));
+        }
+    };
+    let per_hour = get_or(body, "per_hour", &Value::from(ACT_PER_HOUR))
+        .as_u64()
+        .filter(|n| (1..=60).contains(n))
+        .ok_or_else(|| declaration(format!("{where_}: per_hour is 1 to 60")))?
+        as u32;
+    let once_per_item = match get_or(body, "once_per_item", &Value::Bool(true)) {
+        Value::Bool(b) => *b,
+        _ => {
+            return Err(declaration(format!(
+                "{where_}: once_per_item is true or false"
+            )));
+        }
+    };
+    let skills = match body.get("skills") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a))
+            if a.len() <= 8 && a.iter().all(|s| s.as_str().is_some_and(|s| !s.is_empty())) =>
+        {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        }
+        Some(_) => {
+            return Err(declaration(format!(
+                "{where_}: skills is up to eight skill names"
+            )));
+        }
+    };
+    Ok(Some(Act {
+        agent,
+        instruction,
+        per_hour,
+        once_per_item,
+        skills,
+    }))
 }
 
 pub(crate) fn parse_urgency(body: &Map<String, Value>, where_: &str) -> Result<String, WatchError> {
@@ -1185,6 +1317,7 @@ pub struct WatchRunner {
     jev: Option<Arc<dyn Decider>>,
     model: Option<Arc<dyn Decider>>,
     on_change: Option<OnChange>,
+    actor: Mutex<Option<Arc<dyn Actor>>>,
     sleep: Sleep,
     decisions: Mutex<Decisions>,
     tasks: Mutex<HashMap<String, JoinHandle<()>>>,
@@ -1200,6 +1333,7 @@ impl WatchRunner {
             jev: None,
             model: None,
             on_change: None,
+            actor: Mutex::new(None),
             sleep: tokio_sleep(),
             decisions: Mutex::new(Decisions::default()),
             tasks: Mutex::new(HashMap::new()),
@@ -1221,6 +1355,12 @@ impl WatchRunner {
     pub fn with_on_change(mut self, on_change: OnChange) -> Self {
         self.on_change = Some(on_change);
         self
+    }
+
+    /// What starts a run for a watch that declares `act` (ADR 0047). Without one, such a
+    /// watch only keeps its items.
+    pub fn set_actor(&self, actor: Arc<dyn Actor>) {
+        *lock(&self.actor) = Some(actor);
     }
 
     /// How the loop waits between polls; tests pass their own.
@@ -1445,6 +1585,15 @@ impl WatchRunner {
             st.open = drafts.len();
             st.seconds = Some(began.elapsed().as_secs_f64());
         }
+        // A new item of a watch that acts starts a run (queued; it happens on its own).
+        if w.act.is_some()
+            && !found.new.is_empty()
+            && let Some(actor) = lock(&self.actor).clone()
+        {
+            for d in drafts.iter().filter(|d| found.new.contains(&d.key)) {
+                actor.act(w, d);
+            }
+        }
         if found.any() {
             info!(
                 "watch {source}: {} new, {} changed, {} resolved",
@@ -1558,7 +1707,24 @@ mod tests {
                 "not a field",
             ),
             (json!({"when": [{"field": "id", "op": "~="}]}), "op"),
-            (json!({"response": "act"}), "response"),
+            (json!({"response": "act"}), "needs an act block"),
+            (
+                json!({"response": "page"}),
+                "response is tell, record or act",
+            ),
+            (json!({"act": {"agent": "ghost"}}), "instruction"),
+            (
+                json!({"act": {"agent": "Not A Slug", "instruction": "x"}}),
+                "agent",
+            ),
+            (
+                json!({"act": {"instruction": "x", "per_hour": 0}}),
+                "per_hour",
+            ),
+            (
+                json!({"act": {"instruction": "x", "model": "big"}}),
+                "unknown",
+            ),
             (json!({"surprise": 1}), "unknown"),
             (
                 json!({"jev": {"question": "q", "fields": ["id"], "choices": {"tell": "x"}}}),

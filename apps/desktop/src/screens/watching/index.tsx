@@ -1,5 +1,7 @@
 /**
- * Owner: watching. What Ghost watches (ADR 0035, ADR 0027, ADR 0028), from GET /watches:
+ * Owner: watching. What Ghost does and watches while the operator is away. The schedules
+ * (ADR 0047, `Schedules.tsx`, from GET /schedules) lead the page; then what Ghost watches
+ * (ADR 0035, ADR 0027, ADR 0028), from GET /watches:
  *   #/watching          the watches in watches.json (each read, its schedule, how it decides,
  *                       its last look and counts), the webhooks in hooks.json (how each is
  *                       verified, its events, on or off and why, what it took and refused),
@@ -14,8 +16,9 @@ import { Fragment, useEffect, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
 import { navigate, usePath } from "../../app/router";
-import { Badge, Button, Card, EmptyState, ListRow, Notice, Page, Section, Skeleton, errorText, relativeTime, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, ListRow, Notice, Page, Section, Skeleton, agentName, errorText, relativeTime, useToast } from "../../ui";
 import { CONFIG_DIR, RESPONSE, URGENCY, VERIFY, count, everyWords, folderOf, listWords, reasonWords, revealFolder, stepWords, sumOf } from "./model";
+import { Schedules } from "./Schedules";
 import "./watching.css";
 
 export default function WatchingScreen(_: RouteProps) {
@@ -60,7 +63,7 @@ export default function WatchingScreen(_: RouteProps) {
     <Page
       width="default"
       title="Watching"
-      description={<>What Ghost keeps an eye on and the webhooks it takes, from watches.json and hooks.json in its folder. Each look is a plain read and a check; a watch asks Jev or the model only where it says so.</>}
+      description={<>What your agents do on a schedule, what Ghost keeps an eye on and the webhooks it takes. Each look is a plain read and a check; the model is asked only when a schedule is due or a watch says so.</>}
       actions={
         // With nothing watched yet the empty state carries Open folder; one place for it.
         empty ? undefined : (
@@ -70,6 +73,8 @@ export default function WatchingScreen(_: RouteProps) {
         )
       }
     >
+      <Schedules />
+      <div className="wat-rest">
       {loadError && view != null && (
         <Notice tone="danger" title="Couldn’t refresh what Ghost watches" onDismiss={() => setLoadError(null)} className="wat-notice">
           {loadError} This is the list as it was.
@@ -216,6 +221,7 @@ export default function WatchingScreen(_: RouteProps) {
           </p>
         </>
       )}
+      </div>
     </Page>
   );
 }
@@ -256,6 +262,7 @@ function WatchRow({ w }: { w: WatchInfo }) {
           <span className="t-3">
             {RESPONSE[w.response]}
             {w.response === "tell" ? ` ${URGENCY[w.urgency]}` : ""}
+            {w.acts_through ? `, and ${agentName(w.acts_through)} looks into each new one` : ""}
           </span>
           {w.error && (
             <span className="wat-error" data-user-content>

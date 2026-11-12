@@ -1004,6 +1004,9 @@ pub struct WatchInfo {
     pub steps: Vec<String>,
     #[schema(inline)]
     pub response: Response,
+    /// The agent a run starts for on each new item, when the watch acts (ADR 0047).
+    #[serde(default)]
+    pub acts_through: Option<String>,
     #[schema(inline)]
     pub urgency: Urgency,
     #[serde(default)]

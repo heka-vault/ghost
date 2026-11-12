@@ -21,6 +21,7 @@ pub mod phone_host;
 pub mod players;
 pub mod push;
 pub mod routes;
+pub mod schedules;
 pub mod session;
 pub mod wake;
 

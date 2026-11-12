@@ -23,3 +23,21 @@
 .wat-end__when { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 .wat-files { margin-top: var(--space-10); max-width: 64ch; overflow-wrap: anywhere; }
+
+/* Schedules lead the page (ADR 0047); what Ghost watches follows, a section's space below. */
+.wat-rest { margin-top: var(--space-10); }
+/* A schedule's row ends with its next run, its switch and its menu, on the title's line. */
+.wat-sched-end { display: inline-flex; align-items: flex-start; gap: var(--space-3); }
+.wat-sched-end > .wat-end { margin-right: var(--space-1); }
+
+/* The add form: one column of fields; the kind and its value side by side. */
+.wat-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.wat-when { display: flex; align-items: center; gap: var(--space-3); }
+.wat-when > :last-child { flex: 1 1 auto; min-width: 0; }
+
+/* What a schedule's runs said: one block per run, hairlines between. */
+.wat-runs { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.wat-run { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3) 0; }
+.wat-run + .wat-run { border-top: 1px solid var(--border-subtle); }
+.wat-run__head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.wat-run__answer { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-1); }

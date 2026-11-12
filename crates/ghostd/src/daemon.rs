@@ -324,6 +324,8 @@ pub struct Late {
     pub deps: OnceLock<Arc<Deps>>,
     pub models: OnceLock<Arc<Models>>,
     pub desktop_route: OnceLock<Arc<DesktopRoute>>,
+    /// The schedules and their runs (ADR 0047).
+    pub schedules: OnceLock<Arc<ghost_core::schedules::Scheduler>>,
     /// The Hearing test's recorder (ADR 0042).
     pub hear: OnceLock<Arc<crate::hear::HearDesk>>,
 }
@@ -1206,6 +1208,8 @@ impl Daemon {
         let outputs = Arc::new(Outputs::new(&cfg.config_dir)); // ADR 0033: what Ghost makes
         gate.register(OUTPUTS, outputs.operations());
         d.late.outputs.set(outputs.clone()).ok();
+        // ADR 0047: what the agents do on their own, and when.
+        let jobs = crate::schedules::jobs(&store, &conversations);
         // ADR 0029: what needs the operator, with the changes waiting for a yes (ADR 0030).
         let on_change: ghost_core::waiting::OnChange = {
             let weak = Arc::downgrade(d);
@@ -1224,6 +1228,7 @@ impl Daemon {
                     let vault = passwords.clone();
                     let cfg = cfg.clone();
                     let weak = Arc::downgrade(d);
+                    let jobs = jobs.clone();
                     move || {
                         let folder_problems = lock(&folder).problems.clone();
                         let mut out = ghost_problems(
@@ -1231,6 +1236,7 @@ impl Daemon {
                             &folder_problems,
                             &password_problems(Some(&vault), &cfg),
                         );
+                        out.extend(crate::schedules::problems(&jobs, &lock(&folder)));
                         if let Some(d) = weak.upgrade()
                             && let Some(problem) = lock(&d.models_problem).clone()
                         {
@@ -1251,7 +1257,8 @@ impl Daemon {
                 waiting: waiting.clone(),
                 apps: Arc::downgrade(&apps),
                 status: crate::ghost_app::status_fn(d),
-            }),
+            })
+            .with_schedules(jobs.clone()),
         )
         .await
         {
@@ -1371,6 +1378,18 @@ impl Daemon {
             })
         };
         *lock(&d.reach) = Some(reach);
+        // ADR 0047: the schedules run from here on, beside any session, with no audio.
+        let schedules = crate::schedules::start(
+            d,
+            jobs,
+            &gate,
+            &waiting,
+            read_for.clone(),
+            &conversations,
+            &skills,
+            &watch_runner,
+        );
+        d.late.schedules.set(schedules.scheduler.clone()).ok();
         match conversations.prune() {
             Ok(n) if n > 0 => info!("conversations: pruned {n} summarized turns past retention"),
             Ok(_) => {}
@@ -1428,6 +1447,7 @@ impl Daemon {
                     .unwrap_or_default(),
                 passwords: passwords.clone(),
                 conversations: conversations.clone(),
+                schedules: schedules.scheduler.clone(),
             })
             .await;
         d.start_phone_listener().await;
@@ -1561,6 +1581,7 @@ impl Daemon {
             v.abort();
         }
         follower.abort();
+        schedules.close().await;
         watch_runner.close().await;
         desktop_route.close().await;
         if let Some(h) = &hooks_listener {
@@ -1812,6 +1833,7 @@ impl Daemon {
             model_net: Arc::new(LiveModelNet),
             model_sign_in: ghost_api::deps::ModelSignIn::default(),
             hear: Some(self.hear_desk()),
+            schedules: Some(p.schedules),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {
@@ -1940,6 +1962,7 @@ struct StartApi {
     hooks_listening: Vec<String>,
     passwords: Arc<Passwords>,
     conversations: Arc<Conversations>,
+    schedules: Arc<ghost_core::schedules::Scheduler>,
 }
 
 /// The control API as started: stop it and wait for it.
@@ -2229,6 +2252,16 @@ pub(crate) mod tests {
             db_path: tmp.join("data/ghost.db"),
             policy_path: tmp.join("config/policy.toml"),
             chime: false,
+            // Every path that defaults under the operator's home, in the temp folder.
+            catalog_path: tmp.join("cache/catalog.json"),
+            skills_dir: tmp.join("config/skills"),
+            home_skills_dir: tmp.join("home-skills"),
+            api_socket: Some(tmp.join("ghost.sock")),
+            settings_path: tmp.join("config/settings.env"),
+            env_path: tmp.join("config/env"),
+            vault_env_path: tmp.join("no-heka"),
+            infra_dir: tmp.join("infra"),
+            dictation_flag: tmp.join("rt/dictation"),
             ..GhostdSettings::default()
         };
         let voice = VoiceSettings::from_vars(|name| {

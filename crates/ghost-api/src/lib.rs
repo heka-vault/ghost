@@ -22,6 +22,7 @@ pub mod model;
 pub mod models;
 pub mod openapi;
 pub mod passwords;
+pub mod schedules;
 pub mod server;
 pub mod skill_catalog;
 pub mod state;

@@ -291,13 +291,7 @@ impl ConversationRuntime {
     }
 
     pub fn record_call(&self, name: &str, args: &Map<String, Value>) {
-        let mut keys: Vec<&String> = args.keys().filter(|k| !k.starts_with('_')).collect();
-        keys.sort();
-        let shown: Vec<String> = keys
-            .iter()
-            .map(|k| format!("{k}={}", short(&args[*k])))
-            .collect();
-        self.record("call", &format!("{name}({})", shown.join(", ")));
+        self.record("call", &call_line(name, args));
     }
 
     /// Save-as: what was said in this session so far moves to `target`.
@@ -478,6 +472,18 @@ fn summary_text(messages: &[Message]) -> Option<String> {
             .filter(|s| !s.is_empty());
     }
     None
+}
+
+/// A tool call as the transcript keeps it: the name and its arguments, each cut short;
+/// never what the tool returned.
+pub fn call_line(name: &str, args: &Map<String, Value>) -> String {
+    let mut keys: Vec<&String> = args.keys().filter(|k| !k.starts_with('_')).collect();
+    keys.sort();
+    let shown: Vec<String> = keys
+        .iter()
+        .map(|k| format!("{k}={}", short(&args[*k])))
+        .collect();
+    format!("{name}({})", shown.join(", "))
 }
 
 fn short(v: &Value) -> String {

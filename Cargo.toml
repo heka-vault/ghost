@@ -99,6 +99,11 @@ rubato = "5"
 # ghost-voice: a CancellationToken per session and per turn, so a barge-in or an end
 # drains every stage without a stale frame reaching the speaker (ADR 0039).
 tokio-util = { version = "0.7", features = ["rt"] }
+# Schedules (ADR 0047): cron expressions evaluated in a named time zone, the IANA database
+# for chrono, and the machine's own zone as the default.
+croner = "4"
+chrono-tz = "0.10"
+iana-time-zone = "0.1"
 
 [profile.release]
 debug = 1 # line tables, so a panic in the journal has a location

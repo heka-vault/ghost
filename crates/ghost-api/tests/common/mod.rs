@@ -620,6 +620,7 @@ pub struct World {
     pub passwords: Option<Arc<Passwords>>,
     pub devices: Option<Arc<dyn DevicesPort>>,
     pub model_net: Option<Arc<dyn ModelNet>>,
+    pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,
 }
 
 impl World {
@@ -715,6 +716,7 @@ impl World {
             passwords: None,
             devices: None,
             model_net: None,
+            schedules: None,
             tmp,
         }
     }
@@ -767,6 +769,7 @@ impl World {
         deps.skills = self.skills.clone();
         deps.skill_catalog = self.skill_catalog.clone();
         deps.hooks_listening = self.hooks_listening.clone();
+        deps.schedules = self.schedules.clone();
         if let Some(d) = &self.devices {
             deps.devices = d.clone();
         }

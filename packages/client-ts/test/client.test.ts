@@ -139,6 +139,48 @@ describe("GhostClient", () => {
     expect(watching.listening).toEqual(["127.0.0.1:8766"]);
   });
 
+  it("lists, adds, pauses, runs and removes a schedule (ADR 0047)", async () => {
+    const sent: Record<string, string> = {};
+    const schedule = {
+      id: "s1", name: "morning check", agent: "ledger", instruction: "Check the build.", kind: "cron", at: null, every: null, cron: "0 9 * * 1-5",
+      time_zone: "America/Detroit", summary: "0 9 * * 1-5 (America/Detroit)", enabled: true, created_by: "operator", created_at: "x", updated_at: "x",
+      next_run: "x", last_run: null, last_outcome: null, last_error: null, running: false, active_hours: null, grace_minutes: 120,
+      max_runtime_minutes: 10, max_turns: 30, delete_after_run: false, skills: [], urgency: "notify", notify_failure: true, check: null,
+    };
+    const run = { id: "r1", schedule: "s1", source: "run_now", agent: "ledger", name: "morning check", status: "ok", scheduled_for: "x", started_at: "x", finished_at: "x", answer: "Green.", error: null, delivery: "delivered", retries: 0, model_calls: 1, tool_calls: 0 };
+    const client = new GhostClient(
+      fakeTransport({
+        "GET /schedules": () => ({ schedules: [schedule], time_zone: "America/Detroit", problems: [] }),
+        "POST /schedules": (body) => {
+          sent.add = body;
+          return schedule;
+        },
+        "PATCH /schedules/s1": (body) => {
+          sent.edit = body;
+          return { ...schedule, name: "build check" };
+        },
+        "POST /schedules/s1/pause": () => ({ ...schedule, enabled: false, next_run: null }),
+        "POST /schedules/s1/resume": () => schedule,
+        "POST /schedules/s1/run": () => ({ ...run, status: "queued", answer: null }),
+        "GET /schedules/s1/runs": () => ({ runs: [run] }),
+        "POST /runs/r1/cancel": () => ({ ok: true, detail: null }),
+        "DELETE /schedules/s1": () => ({ ok: true, detail: null }),
+      }),
+    );
+    const listed = await client.schedules();
+    expect(listed.schedules[0].summary).toBe("0 9 * * 1-5 (America/Detroit)");
+    expect((await client.addSchedule({ instruction: "Check the build.", cron: "0 9 * * 1-5", agent: "ledger" })).id).toBe("s1");
+    expect(JSON.parse(sent.add)).toEqual({ instruction: "Check the build.", cron: "0 9 * * 1-5", agent: "ledger" });
+    expect((await client.editSchedule("s1", { name: "build check" })).name).toBe("build check");
+    expect(JSON.parse(sent.edit)).toEqual({ name: "build check" });
+    expect((await client.pauseSchedule("s1")).enabled).toBe(false);
+    expect((await client.resumeSchedule("s1")).enabled).toBe(true);
+    expect((await client.runSchedule("s1")).status).toBe("queued");
+    expect((await client.scheduleRuns("s1", 5)).runs[0].answer).toBe("Green.");
+    expect((await client.cancelRun("r1")).ok).toBe(true);
+    expect((await client.removeSchedule("s1")).ok).toBe(true);
+  });
+
   it("posts a typed turn and surfaces errors", async () => {
     let sent = "";
     const client = new GhostClient(

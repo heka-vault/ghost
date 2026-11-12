@@ -170,6 +170,8 @@ impl Offers for OfferAll {
 pub struct SessionTools {
     pub conversations: bool,
     pub hold: bool,
+    /// None of the session's own tools: an agent working with nobody there (ADR 0047).
+    pub none: bool,
 }
 
 /// What a tool name the model calls stands for: a source's read tool, or an app's change
@@ -234,6 +236,9 @@ impl Offering {
     /// hang up, hold (when the session can be held).
     pub fn session_schemas(&self) -> Vec<ToolSchema> {
         let mut out = Vec::new();
+        if self.session.none {
+            return out;
+        }
         if self.session.conversations {
             out.push(ToolSchema::new(
                 SWITCH_TOOL,

@@ -1005,6 +1005,149 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent runs */
+        get: operations["runs_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop a run */
+        post: operations["cancel_run_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Schedules
+         * @description What each agent does on its own, and when: every schedule with its next run and how
+         *     the last one ended, and what is wrong with any of them (ADR 0047).
+         */
+        get: operations["schedules_schedules_get"];
+        put?: never;
+        /** Add a schedule */
+        post: operations["add_schedule_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A schedule */
+        get: operations["schedule_schedules__schedule_id__get"];
+        put?: never;
+        post?: never;
+        /** Remove a schedule */
+        delete: operations["remove_schedule_schedules__schedule_id__delete"];
+        options?: never;
+        head?: never;
+        /** Change a schedule */
+        patch: operations["edit_schedule_schedules__schedule_id__patch"];
+        trace?: never;
+    };
+    "/schedules/{schedule_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause a schedule */
+        post: operations["pause_schedule_schedules__schedule_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{schedule_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a schedule */
+        post: operations["resume_schedule_schedules__schedule_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{schedule_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a schedule now */
+        post: operations["run_schedule_schedules__schedule_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{schedule_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A schedule's runs */
+        get: operations["schedule_runs_schedules__schedule_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/session/say": {
         parameters: {
             query?: never;
@@ -2424,6 +2567,166 @@ export interface components {
             /** @description 1 to 4000 characters. */
             text: string;
         };
+        /**
+         * @description A look that runs first, with no model: one of a connected app's read-only tools. The
+         *     agent runs only when what it returns has changed.
+         */
+        ScheduleCheck: {
+            app: string;
+            args?: {
+                [key: string]: unknown;
+            };
+            read: string;
+        };
+        /** @description The hours of the day a schedule may run in, in its time zone (`08:00` to `18:00`). */
+        ScheduleHours: {
+            end: string;
+            start: string;
+        };
+        /** @description One schedule: what an agent does on its own, and when. */
+        ScheduleInfo: {
+            active_hours?: components["schemas"]["ScheduleHours"] | null;
+            /** @description The agent's slug. */
+            agent: string;
+            /**
+             * Format: date-time
+             * @description The time of a one-off.
+             */
+            at?: string | null;
+            check?: components["schemas"]["ScheduleCheck"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** @description `operator`, or `agent:<slug>`. */
+            created_by: string;
+            /** @description Five cron fields. */
+            cron?: string | null;
+            delete_after_run: boolean;
+            enabled: boolean;
+            /** @description An interval as written: `30m`. */
+            every?: string | null;
+            /**
+             * Format: int64
+             * @description A run missed by less than this is run once when Ghost is back.
+             */
+            grace_minutes: number;
+            id: string;
+            instruction: string;
+            /**
+             * @description Which of the three kinds a schedule is.
+             * @enum {string}
+             */
+            kind: "at" | "every" | "cron";
+            last_error?: string | null;
+            last_outcome?: ("queued" | "running" | "ok" | "unchanged" | "failed" | "timed_out" | "cancelled" | "interrupted" | "missed") | null;
+            /** Format: date-time */
+            last_run?: string | null;
+            /** Format: int64 */
+            max_runtime_minutes: number;
+            /** Format: int32 */
+            max_turns: number;
+            name: string;
+            /** Format: date-time */
+            next_run?: string | null;
+            /** @description Whether a run that fails tells the operator. */
+            notify_failure: boolean;
+            /** @description A run of it is waiting or going now. */
+            running: boolean;
+            skills: string[];
+            /** @description The schedule in a few words: `every 30m`, `0 9 * * 1-5 (Europe/London)`. */
+            summary: string;
+            time_zone: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @enum {string} */
+            urgency: "digest" | "notify" | "call";
+        };
+        /**
+         * @description A new schedule, or a change to one: what is left out stays as it is (or takes its
+         *     default in a new one). When is exactly one of `at`, `every` and `cron`.
+         */
+        ScheduleRequest: {
+            active_hours?: components["schemas"]["ScheduleHours"] | null;
+            /** @description The agent's slug; Ghost when left out of a new schedule. */
+            agent?: string | null;
+            /**
+             * @description Once: `2026-11-12T09:00` in the schedule's time zone, a time with an offset, or a
+             *     delay such as `20m`.
+             */
+            at?: string | null;
+            check?: components["schemas"]["ScheduleCheck"] | null;
+            /** @description Run at any hour again. */
+            clear_active_hours?: boolean;
+            /** @description Run every time again, without looking first. */
+            clear_check?: boolean;
+            /** @description Five fields: `0 9 * * 1-5`. */
+            cron?: string | null;
+            delete_after_run?: boolean | null;
+            /** @description `30m`, `2h`, `1d`. */
+            every?: string | null;
+            /** Format: int64 */
+            grace_minutes?: number | null;
+            instruction?: string | null;
+            /** Format: int64 */
+            max_runtime_minutes?: number | null;
+            /** Format: int32 */
+            max_turns?: number | null;
+            name?: string | null;
+            notify_failure?: boolean | null;
+            skills?: string[] | null;
+            /** @description An IANA name; the machine's when left out. */
+            time_zone?: string | null;
+            urgency?: ("digest" | "notify" | "call") | null;
+        };
+        /** @description One run of an agent with nobody there. */
+        ScheduleRunInfo: {
+            agent: string;
+            /** @description What the agent answered. */
+            answer?: string | null;
+            /**
+             * @description What came of the answer: delivered, silent, empty, by_agent, failure,
+             *     failure_not_told or none.
+             */
+            delivery?: string | null;
+            error?: string | null;
+            /** Format: date-time */
+            finished_at?: string | null;
+            id: string;
+            /** Format: int32 */
+            model_calls: number;
+            name: string;
+            /**
+             * Format: int32
+             * @description Model calls tried again after the model could not be reached.
+             */
+            retries: number;
+            /** @description The schedule's id; none for a watch that acted. */
+            schedule?: string | null;
+            /** Format: date-time */
+            scheduled_for: string;
+            /** @description `schedule`, `run_now`, or `watch:<name>`. */
+            source: string;
+            /** Format: date-time */
+            started_at?: string | null;
+            /**
+             * @description Where a run is, or how it ended.
+             * @enum {string}
+             */
+            status: "queued" | "running" | "ok" | "unchanged" | "failed" | "timed_out" | "cancelled" | "interrupted" | "missed";
+            /** Format: int32 */
+            tool_calls: number;
+        };
+        ScheduleRunsView: {
+            runs: components["schemas"]["ScheduleRunInfo"][];
+        };
+        /**
+         * @description The schedules, the zone a time is read in when none is named, and what is wrong with
+         *     any of them.
+         */
+        SchedulesView: {
+            problems: string[];
+            schedules: components["schemas"]["ScheduleInfo"][];
+            time_zone: string;
+        };
         SecretState: {
             name: string;
             set: boolean;
@@ -2737,6 +3040,8 @@ export interface components {
         };
         /** @description A watch in watches.json (ADR 0028, ADR 0035) and how its last look went. */
         WatchInfo: {
+            /** @description The agent a run starts for on each new item, when the watch acts (ADR 0047). */
+            acts_through?: string | null;
             app: string;
             error?: string | null;
             /** Format: int64 */
@@ -2880,6 +3185,13 @@ export type SchemaRuleSet = components['schemas']['RuleSet'];
 export type SchemaRulesView = components['schemas']['RulesView'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayRequest = components['schemas']['SayRequest'];
+export type SchemaScheduleCheck = components['schemas']['ScheduleCheck'];
+export type SchemaScheduleHours = components['schemas']['ScheduleHours'];
+export type SchemaScheduleInfo = components['schemas']['ScheduleInfo'];
+export type SchemaScheduleRequest = components['schemas']['ScheduleRequest'];
+export type SchemaScheduleRunInfo = components['schemas']['ScheduleRunInfo'];
+export type SchemaScheduleRunsView = components['schemas']['ScheduleRunsView'];
+export type SchemaSchedulesView = components['schemas']['SchedulesView'];
 export type SchemaSecretState = components['schemas']['SecretState'];
 export type SchemaSettingsResult = components['schemas']['SettingsResult'];
 export type SchemaSettingsUpdate = components['schemas']['SettingsUpdate'];
@@ -4848,6 +5160,369 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OutcomeView"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    runs_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRunsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_run_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such run, or it has ended */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    schedules_schedules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulesView"];
+                };
+            };
+            /** @description Schedules are not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_schedule_schedules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Schedules are not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    schedule_schedules__schedule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleInfo"];
+                };
+            };
+            /** @description No such schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_schedule_schedules__schedule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    edit_schedule_schedules__schedule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleInfo"];
+                };
+            };
+            /** @description No such schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_schedule_schedules__schedule_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleInfo"];
+                };
+            };
+            /** @description No such schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resume_schedule_schedules__schedule_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleInfo"];
+                };
+            };
+            /** @description No such schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Its time has passed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_schedule_schedules__schedule_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRunInfo"];
+                };
+            };
+            /** @description No such schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    schedule_runs_schedules__schedule_id__runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRunsView"];
+                };
+            };
+            /** @description No such schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
