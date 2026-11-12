@@ -251,6 +251,9 @@ enum Held {
         names: Vec<String>,
         secs: f64,
     },
+    /// The model wrote its first word of this reply (`Frame::ModelWriting`): sent as it
+    /// comes, even while the fast model's reply itself is held.
+    Writing,
     /// A tool call began (`Event::ToolStarting`); `said` is what the fast model wrote
     /// before it, held here and not passed on as text.
     Starting {
@@ -349,6 +352,10 @@ impl Call {
                     Ok(ev) => {
                         if let Event::Text(t) = &ev {
                             first.get_or_insert_with(|| began.elapsed().as_secs_f64());
+                            if !spoke && !t.trim().is_empty() && tx.send(Ok(Held::Writing)).is_err()
+                            {
+                                return;
+                            }
                             spoke |= !t.trim().is_empty();
                             written.push_str(t);
                             if let Some(p) = pre {
@@ -433,6 +440,7 @@ impl Call {
         let mut stream = self.main.stream(self.context, &self.tools, &self.options);
         let mut first = true;
         let mut called = false;
+        let mut writing = false;
         loop {
             let ev = tokio::select! {
                 biased;
@@ -446,6 +454,15 @@ impl Call {
                     model: self.main.model_name(),
                     secs: began.elapsed().as_secs_f64(),
                 }));
+            }
+            if !writing
+                && let Ok(Event::Text(t)) = &ev
+                && !t.trim().is_empty()
+            {
+                writing = true;
+                if tx.send(Ok(Held::Writing)).is_err() {
+                    return;
+                }
             }
             if let Ok(Event::ToolStarting(name)) = &ev {
                 // The main model's words before it were passed on as they came.
@@ -823,6 +840,7 @@ impl LlmStage {
                     reply.by_fast = false;
                     out.push(Frame::HandOver { names, secs }).await;
                 }
+                Ok(Held::Writing) => out.push(Frame::ModelWriting).await,
                 Ok(Held::Starting { name, said }) => {
                     out.push(Frame::ToolStarting { name, said }).await;
                 }
@@ -1573,6 +1591,7 @@ fn async_stream_words(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn a_prefix_sent_lately_is_not_warmed_again() {
@@ -1616,5 +1635,70 @@ mod tests {
         assert_eq!(fast_options(&main, None).thinking, None);
         assert_eq!(fast.max_tokens, main.max_tokens);
         assert_eq!(fast.cache_system, main.cache_system);
+    }
+
+    async fn held_of(call: Call) -> Vec<String> {
+        let (mut rx, _task) = call.start();
+        let mut seen = Vec::new();
+        while let Some(ev) = rx.recv().await {
+            seen.push(match ev {
+                Ok(Held::Writing) => "writing".to_string(),
+                Ok(Held::First { .. }) => "first".into(),
+                Ok(Held::Event(Event::Text(t))) => format!("text {}", t.trim()),
+                Ok(Held::Event(_)) => continue,
+                Ok(other) => format!("{other:?}"),
+                Err(e) => format!("error {e}"),
+            });
+        }
+        seen
+    }
+
+    fn call_with(fast: Option<Arc<dyn ModelPort>>, main: Arc<dyn ModelPort>) -> Call {
+        let mut context = Context::new("You are Ghost.");
+        context.push(Message::user("How's it going?"));
+        Call {
+            main,
+            fast: fast.map(|f| (f, Tools::default(), Options::default())),
+            context,
+            tools: Tools::default(),
+            options: Options::default(),
+            prerender: None,
+            held: None,
+            handed: Handed::default(),
+            reads: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_first_word_is_announced_even_while_the_fast_models_reply_is_held() {
+        // The first sound (`crate::acks::FirstSound`) must know the model is not silent
+        // while the fast model's plain reply is still held whole, or a quick one-word
+        // answer would get a "One sec." in front of it.
+        let reply = |t: &str| ScriptedReply {
+            text: t.into(),
+            ..Default::default()
+        };
+        let fast = ScriptedModel::new(vec![vec![reply("Doing well.")]], Duration::ZERO);
+        let main = ScriptedModel::new(vec![vec![reply("Main.")]], Duration::ZERO);
+        let seen = held_of(call_with(Some(fast), main.clone())).await;
+        assert_eq!(
+            seen.first().map(String::as_str),
+            Some("writing"),
+            "{seen:?}"
+        );
+        assert_eq!(
+            seen.iter().filter(|s| *s == "writing").count(),
+            1,
+            "{seen:?}"
+        );
+        assert!(seen.iter().any(|s| s.starts_with("text Doing")), "{seen:?}");
+        // The main model alone: announced once, before its words.
+        let seen = held_of(call_with(None, main)).await;
+        let w = seen.iter().position(|s| s == "writing").expect("announced");
+        let t = seen
+            .iter()
+            .position(|s| s.starts_with("text"))
+            .expect("text");
+        assert!(w < t, "{seen:?}");
     }
 }

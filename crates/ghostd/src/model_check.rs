@@ -35,6 +35,9 @@ const KEEP: i64 = 20;
 /// Recent spoken turns read for the live measure, and how many it needs.
 const LIVE_TURNS: usize = 10;
 const LIVE_LEAST: usize = 5;
+/// The tail of `latency.jsonl` a session reads for its first sound: a spoken turn's record
+/// is about 1 to 2 KB, so this holds well over the last ten.
+const FIRST_WORD_TAIL_BYTES: u64 = 64 * 1024;
 
 /// "claude-haiku-5-5 via cliproxy".
 fn label(row: &ModelCheckRow) -> String {
@@ -235,6 +238,27 @@ impl Daemon {
         if changed {
             self.refresh_waiting_now();
         }
+    }
+
+    /// How soon the model that answers a spoken turn first usually writes (seconds after
+    /// the call): the median of the operator's last spoken turns when there are enough,
+    /// else that route's latest check. What the first sound waits on
+    /// (`ghost_voice::acks::FirstSound::for_connection`). Reads the tail of
+    /// `latency.jsonl` only, so a session opening pays the same however long it has grown.
+    pub(crate) fn first_word_secs(&self) -> Option<f64> {
+        let records =
+            crate::latency::tail_records(&self.cfg().latency_path(), FIRST_WORD_TAIL_BYTES);
+        if let Some((median, _)) = live_first_token(&records) {
+            return Some(median);
+        }
+        let (main, fast) = self.saved_targets();
+        let first = fast.unwrap_or(main);
+        self.latest_checks()
+            .iter()
+            .find(|r| r.route == route_key(&first))
+            .and_then(parsed)
+            .filter(|c| c.reachable)
+            .and_then(|c| c.first_word.median)
     }
 
     pub(crate) fn slow_problem(&self) -> Option<String> {

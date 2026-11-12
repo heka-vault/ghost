@@ -153,6 +153,39 @@ Measured with the real models on the harness's deferred apps: a lookup's first s
 before, 2.4 s in one after. The floor is the grace the acknowledgment waits (1.2 s from
 the end of speech), then the model's first sign of a call.
 
+## Amended 2026-11-12: a first sound per connection, and the acknowledgment follows the close
+
+The bench now pads the prompt to the operator's size and can add a slow provider's first byte
+([the benchmark](../benchmarks/perf/2026-11-12-first-sound.md); `perf::shaped`). With about 15,000
+tokens of prompt the fast model's first byte was 1.1 to 1.9 s through the proxy, and 1.5 to 1.9 s on
+the operator's OpenRouter records. A turn that answered in words, or a model slow to begin anything,
+left that silence, and the acknowledgment of a call waited out the full grace after any close.
+
+- **The acknowledgment follows the close the turn got** (ADR 0049's amendment): "waits until the
+  turn's grace has run from the end of their speech" above now holds only for a frame seen before
+  the turn closed.
+- **A first sound** (`ghost_voice::acks::FirstSound`): when a turn's reply has begun and the model
+  has written no word (`Frame::ModelWriting`, sent even while the fast model's reply is held) and
+  started no call within a wait, Ghost says "One sec." or "Let's see." once, from the
+  acknowledgment's rendered clips. Not before an answer whose first word is written, not for a
+  goodbye or a hold, never twice with a call's acknowledgment, never once any of the answer was
+  said, and not if the turn is cut.
+- **The wait is the connection's** (`FirstSound::for_connection`), from its usual first word (the
+  median of the operator's last ten spoken turns, else its latest check, ADR 0056): on a quick
+  connection (0.75 s or less) 0.25 s past it, so only a slow turn hears it; on a slow one 0.8 s
+  ahead of it, so it lands well before the answer and never a moment before it; between 0.7 and
+  1.4 s after the reply begins. Measured first with a later word on slow connections, it would have
+  come about 0.35 s before a plain answer. `GHOST_FIRST_SOUND_SECS` sets it, 0 turns it off.
+- **Words, not the thinking sound.** The thinking sound is off for leaking through the echo
+  canceller (2026-10-30). The words are two of the acknowledgment's own, which the echo filter
+  already knows.
+
+Measured with the real models, the prompt padded to the operator's size: the first sound of every
+turn but an issue asked for by number came at 1.30 to 1.33 s, against 2.4 to 3.1 s before, and at
+1.68 to 2.06 s with 0.5 or 1.0 s added to every first byte, against 2.7 to 5.2 s. The word came
+before small talk in most padded runs, 0.75 s or more ahead of the answer, and not when the model
+was quick. Whether that sounds better than silence is the voice rubric's part D.
+
 ## Considered options
 
 - **The fast model's own tool calls run.** A read is safe to run (it is called directly,

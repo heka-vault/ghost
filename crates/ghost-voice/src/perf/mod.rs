@@ -20,4 +20,5 @@ pub mod micro;
 pub mod providers;
 pub mod report;
 pub mod scenarios;
+pub mod shaped;
 pub mod turns;
