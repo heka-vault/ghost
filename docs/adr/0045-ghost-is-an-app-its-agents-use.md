@@ -1,6 +1,6 @@
 # 0045: Ghost is an app its agents use
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR 0048 (the same server is served to outside clients)
 - **Date:** 2026-11-11
 - **Amends:** ADR 0034 and ADR 0035 (the agents, the rules, the outputs, the skills and
   Ghost's fixed intents are no longer the only in-tree tool sources), ADR 0013 (the model

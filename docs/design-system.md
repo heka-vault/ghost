@@ -47,7 +47,7 @@ apps/desktop/src/
 | `src/screens/skills` | skills | `#/settings/skills` (`#/skills` redirects) |
 | `src/screens/routes` | routes | `#/settings/notifications` (`#/routes` redirects): how Ghost reaches you (ADR 0031) |
 | `src/screens/watching` | watching | `#/watching` (`#/departments/…` redirects here): the watches in `watches.json` and the webhooks in `hooks.json`, each with its last look and counts, whether the webhook listener is on, and the problems in those files (ADR 0035); and, leading the page, the schedules (`Schedules.tsx`, ADR 0047): each with its agent, when it runs, its next run and how the last one ended, a switch to pause it, a menu (Run now, What it said…, Remove…) and Add schedule |
-| `src/screens/settings` | settings | `#/settings/general`, `/model`, `/passwords`, `/sound`, `/phone` (`#/settings` goes to General): one screen, so the pages share one draft and one save bar |
+| `src/screens/settings` | settings | `#/settings/general`, `/model`, `/passwords`, `/sound`, `/phone`, `/tools` (`#/settings` goes to General): one screen, so the pages share one draft and one save bar. `/tools` is Outside tools (ADR 0048): the tools connected to Ghost, connecting one (its token shown once) and removing one |
 | `src/prototypes/onboarding` | onboarding | `#/welcome` |
 | `src/prototypes/review` | review | `#/review` |
 | `src/prototypes/tray` | tray | `#/tray`, rendered without the shell |

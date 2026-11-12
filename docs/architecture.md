@@ -94,9 +94,9 @@ result budget, since what it returns is the apps' text). The calling agent is ne
 model writes: the session's dispatcher sets `_agent` to the agent the session is with.
 And where no rule names a `ghost.*` change and the mode is `open`, it runs at `quiet`,
 since an item on the waiting list is its own announcement; `ask = ["ghost.schedule_manage"]`
-has Ghost ask before an agent sets up a schedule. Nothing listens for outside
-clients yet; the handler keeps nothing per connection, so the same one can be served
-over HTTP with a token later.
+has Ghost ask before an agent sets up a schedule. The handler keeps nothing per
+connection, and the same one is served to the operator's other tools
+([below](#the-listener-for-outside-tools)).
 
 ### Permissions
 
@@ -127,13 +127,63 @@ An accepted offer is answered by the media crate (`crates/ghost-rtc`, str0m by d
 
 The data channel carries RTVI (`ghost_rtc::rtvi`, `ghost_voice::rtvi`): the desk acts only on `client-ready` and `disconnect-bot` (no typed text, raw audio or function results), and sends `bot-ready` and the speaking events but no transcripts, LLM text, metrics or logs. The daemon forwards its own event bus (`status`, `turn`, `pending`, `outcome`, `conversation`, `waiting`, `apps`; never `log`) to the phone as `server-message`s, the same JSON the control API's WebSocket sends.
 
+### The listener for outside tools
+
+`ghostd` serves Ghost's own app to the tools on this computer the operator connected
+(Claude Code, Cursor, Codex; ADR 0048, [connect-ghost.md](connect-ghost.md)): a fourth
+HTTP app (`ghostd::outside`) on its own addresses (`GHOST_MCP_LISTEN`, `127.0.0.1:47824`
+unless set, off when empty), one path, `/mcp`, through rmcp's Streamable HTTP service,
+which answers the session-based clients and the stateless ones alike. It is not the
+control API and shares no route with it, the phone listener or the webhook listener. It
+starts after Ghost's own app is attached; an address that will not bind is an item on the
+waiting list. An address that is not loopback is used only when the operator set it, and
+is logged.
+
+Before a request reaches the server, a guard refuses any that carries an `Origin` (a
+browser sends one, a tool does not: the DNS-rebinding defence, with rmcp's `Host`
+allow-list behind it) and any without a client's token. A client is a name and a token
+(`ghost_core::ghost_app::clients`): made by `ghostd mcp add <name>` or
+`POST /clients` (Settings › Outside tools), shown once, kept as its SHA-256 in the store's
+`outside_clients` table with when it was made and last used, compared in constant time.
+Five wrong tokens for a name refuse it for five minutes. A removed client is refused at
+its next request, since the listener reads the store each time.
+
+The server names the caller from what the guard authenticated (`client:<name>`, in the
+request's extensions), never from an argument, and does for a call with no session what
+the dispatcher and the gate do in process (`ghost_core::ghost_app::outside`): each client
+has a budget (60 calls a minute, 10 of them `notify` or `say`); a read is checked against
+the `block` rules and logged at debug level; every other tool is a change through the
+gate's `submit` as `ghost.<tool>`, so `block` refuses it, `ask` leaves it on the waiting
+list for the operator's yes while the client is told "waiting for the operator", and the
+audit has the row under the session `client:<name>`. A client's `notify` is an item under
+`client:<name>`, its title led by "From Claude Code:", and a client resolves only its own.
+
+Outside clients have the nine tools above (without the `ghost_` prefix, which is the
+session's naming) and four of their own, which Ghost's agents are not offered:
+
+| Tool | Kind | |
+|---|---|---|
+| `agents_list` | read | The agents, their jobs, whether one is in a session |
+| `agent_ask` | change | A written turn for an agent and its written answer. The run is behind `ghost_app::outside::AgentRunner`, which answers "not available yet" until a headless run is plugged in; the typed turn (`POST /session/say`) cannot serve it, since it opens or uses a voice session |
+| `say` | change | One sentence through desk voice (ADR 0032, `ghostd::outside::Desk`): only with `desk` in `[routes].enabled`, outside quiet hours and do-not-disturb, with the desk idle; always an item on the waiting list first |
+| `events_wait` | read | A long poll (60 s at most) over a numbered ring the daemon fills from its own event bus through a tap (`EventBus::tap`, not counted as the desktop being open): waiting-list items added, changed, acknowledged, snoozed or resolved, a change's outcome, a session starting or ending; never a log line, a turn or audio |
+
+The documentation and the status are also resources (`ghost://docs/<name>`,
+`ghost://status`). Nothing here reaches a password, the policy file, a transcript or
+audio, or changes a permission, an app or a client.
+
+`ghostd mcp serve --client <name>` is the bridge for a tool that can only start a
+command (`ghostd::mcp`): stdin and stdout to the listener, with that client's token from
+`~/.local/share/ghost/clients/<name>.token` (0600). It waits 15 s for a daemon that is not
+up and says the client's hello again to one that restarted.
+
 ## Components
 
 One Cargo workspace (ADR 0039): the crates under `crates/` and the desktop app's shell.
 
 | Crate | Responsibility |
 |---|---|
-| `ghostd` | The daemon (`crates/ghostd`). Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010, or the trained detectors, ADR 0025), and on wake runs a session over the desk's audio; ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021). Serves the control API, the phone listener and the webhook listener, runs the watches, the routes and the schedules (ADR 0047: an agent's run with nobody there, beside any session), and is the desktop's `Controller`. `ghostd check`, `passwords`, `latency`, `perf`, `push`, `restore-volumes` and `api-schema` are its subcommands |
+| `ghostd` | The daemon (`crates/ghostd`). Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010, or the trained detectors, ADR 0025), and on wake runs a session over the desk's audio; ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021). Serves the control API, the phone listener, the webhook listener and the listener for outside tools (ADR 0048), runs the watches, the routes and the schedules (ADR 0047: an agent's run with nobody there, beside any session), and is the desktop's `Controller`. `ghostd check`, `passwords`, `mcp`, `latency`, `perf`, `push`, `restore-volumes` and `api-schema` are its subcommands |
 | `ghost-voice` | Ghost's own pipeline, written for one session and one transport at a time (ADR 0039; Pipecat's ideas, not its code): typed frames over bounded channels, one task per stage, a cancellation token per session and per turn. The speech-in stage (Silero VAD, Parakeet with interim re-reads), the user's turn (Smart Turn, the patient stop with the grace, the speculative answer, barge-in), the interceptors and the confirmation processor, the model stage with compaction, the narration cut and the spoken filter, Kokoro a clause at a time or ElevenLabs with failover, the echo filter, hold, the latency timeline, and the harness behind `make perf`. Also the one thing with no audio in it: `ghost_voice::headless`, an agent's run with nobody there, over the same model port and tool dispatcher (ADR 0047) |
 | `ghost-llm` | The one model client (ADR 0037): the session's streamed reply, a one-shot completion and a first-token probe, for the Anthropic Messages API and for OpenAI-compatible Chat Completions. Every tool call of a reply is delivered; a reply cut at the output cap is redone once in smaller steps and flagged `cut_off` |
 | `ghost-infer` | The local models on ONNX Runtime (ADR 0004): Parakeet TDT v3 for speech to text, Silero for voice activity, Smart Turn v3 for the end of a turn, the trained wake detectors with the transcript matcher behind them, and Kokoro for speech. The runtime is loaded at start (ONNX Runtime 1.24.4, the one the parity fixtures were recorded on: in the bundle, or `~/.cache/ghost/onnxruntime/`, or `ORT_DYLIB_PATH`), and the four small model files are found the same way (`GHOST_MODELS_DIR`, the bundle, `~/.cache/ghost/models/`, where `scripts/models.sh` puts them) |
@@ -167,7 +217,8 @@ What needs the operator is one list (`ghost_core::waiting`): items with stable k
 isn't connected or wants a new sign-in, a file in Ghost's folder with a problem) and from
 the agents (`ghost_notify`, ADR 0045: one item at a time under `agent:<slug>`, cleared by
 that agent's `ghost_resolve`, as loud as the urgency it was given; and what a scheduled
-run answered, ADR 0047, one item per schedule). A watch or Ghost syncs the whole set it
+run answered, ADR 0047, one item per schedule), and from the outside
+tools the operator connected (ADR 0048: under `client:<name>`, the same way). A watch or Ghost syncs the whole set it
 sees; a new key is news, a key that is gone is resolved. An item is delivered when a route
 passed it on and acknowledged when the operator heard it; only acknowledged or snoozed stops
 the alerting, and a changed item alerts again. `GET /waiting`, `POST /waiting/ack` and
@@ -290,7 +341,7 @@ asking is the operator's call (ADR 0011, ADR 0034); by default, everything:
 ```text
 ghost/
 ├── crates/
-│   ├── ghostd/          # the daemon: wake, sessions, apps, the control API server, the phone and hooks listeners
+│   ├── ghostd/          # the daemon: wake, sessions, apps, the control API server, the phone, hooks and outside-tools listeners
 │   ├── ghost-voice/     # Ghost's pipeline: the stages, the harness behind make perf
 │   ├── ghost-llm/       # the model client, both protocols
 │   ├── ghost-infer/     # the local models on ONNX Runtime
