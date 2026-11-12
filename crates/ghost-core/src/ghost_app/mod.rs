@@ -13,14 +13,26 @@
 //! same one is served to outside clients over HTTP (ADR 0048: `clients`, `outside`,
 //! `outside_tools`). Nothing here opens a listener; the daemon's does.
 
+pub mod agents;
+pub mod apps_tools;
 pub mod clients;
 pub mod docs;
+pub mod more;
+pub mod outputs_tools;
 pub mod outside;
 pub mod outside_tools;
+pub mod questions;
+pub mod recall;
 pub mod schedules;
+pub mod settings;
 #[cfg(test)]
 mod tests;
 pub mod tools_search;
+pub mod watches;
+#[cfg(test)]
+mod wide_tests;
+
+pub use more::{CORE, Late, More, NOT_FOR_OUTSIDE, asks_by_default, ready};
 
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -61,10 +73,14 @@ const RESTART_PAUSE: Duration = Duration::from_secs(1);
 /// prompt, in place of the one a connected app gets.
 pub const PROMPT: &str = "Ghost is an app too, and you have its tools. For a question about what Ghost is or how it \
 works (apps, permissions, agents, skills, the waiting list, routes, watches, the phone), look it \
-up with ghost_docs_search and answer from that, not from memory. A tool you don't have shows \
-this session's limits, not Ghost's: check the docs before saying Ghost can't do something. To \
+up with ghost_docs_search and answer from that, not from memory. Most of Ghost's own tools \
+(watches, apps, quiet, permissions, outputs, skills, your memory, asking another agent) are not \
+listed until you find them with ghost_tools_search; check there and the docs before saying Ghost \
+can't do something. To \
 tell the operator something later, or when they are away, use ghost_notify, and ghost_resolve \
-once the matter is done.";
+once the matter is done. When the operator is here, just ask them aloud; to ask something they \
+may answer later, use ghost_ask. When they answer a question Ghost put to them, record it with \
+ghost_answer in their exact words.";
 
 /// What the daemon alone knows for `status`: the version and commit, the phase, the
 /// session and its origin, the agent, the model connection's provider and model (never a
@@ -99,8 +115,8 @@ pub struct DocsSearch {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DocsRead {
-    /// readme, glossary, architecture, apps, connect-ghost, skills, folder, performance or
-    /// phone-protocol.
+    /// readme, glossary, architecture, apps, connect-ghost, tools, skills, folder,
+    /// performance or phone-protocol.
     pub name: String,
     /// A heading of that document; leave out for its list of headings.
     #[serde(default)]
@@ -231,9 +247,15 @@ pub struct GhostServer {
     caller: Caller,
     /// The schedules and their two tools (ADR 0047), when the daemon gives them.
     schedules: Option<Arc<crate::schedules::Jobs>>,
+    /// The questions and their tools (ADR 0051), when the daemon gives them.
+    questions: Option<Arc<crate::questions::Questions>>,
     tool_router: ToolRouter<Self>,
     /// What only a server for outside clients has (ADR 0048).
     outside: Option<Arc<outside::Outside>>,
+    /// What the wider tools reach (ADR 0052), each when the daemon gives it.
+    more: Arc<More>,
+    /// How many `ask_agent` turns each session has running (ADR 0052: three at most).
+    asking: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
 }
 
 #[tool_router]
@@ -244,8 +266,11 @@ impl GhostServer {
             docs: Docs::built_in(),
             caller: Caller::Session,
             schedules: None,
-            tool_router: Self::tool_router() + Self::tools_search_router(),
+            questions: None,
+            tool_router: Self::tool_router() + Self::tools_search_router() + Self::recall_router(),
             outside: None,
+            more: Arc::new(More::default()),
+            asking: Arc::default(),
         }
     }
 
@@ -324,11 +349,17 @@ impl GhostServer {
         }
         let results: Vec<Value> = hits
             .into_iter()
-            .map(|h| json!({"document": h.document, "heading": h.heading, "excerpt": h.excerpt}))
+            .map(|h| {
+                if h.whole {
+                    json!({"document": h.document, "heading": h.heading, "section": h.excerpt})
+                } else {
+                    json!({"document": h.document, "heading": h.heading, "excerpt": h.excerpt})
+                }
+            })
             .collect();
         Ok(json!({
             "results": results,
-            "note": "Read a whole section with ghost_docs_read (name, section).",
+            "note": "A result with `section` is the whole section. One with `excerpt` is the best sentences of a longer one: read it whole with ghost_docs_read (name, section).",
         }))
     }
 
@@ -518,7 +549,7 @@ impl GhostServer {
     }
 
     #[tool(
-        description = "Search Ghost's own documentation: what Ghost is and how it works. Returns the best sections with a short excerpt each.",
+        description = "Search Ghost's own documentation: what Ghost is and how it works. Returns the best sections: a short one whole, a longer one as its best sentences.",
         annotations(read_only_hint = true)
     )]
     fn docs_search(&self, Parameters(p): Parameters<DocsSearch>) -> CallToolResult {

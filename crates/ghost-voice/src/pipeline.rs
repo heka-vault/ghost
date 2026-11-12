@@ -394,6 +394,9 @@ pub struct SessionParams {
     pub greeting: Greeting,
     /// What the operator said right after the wake phrase: the first user turn, no greeting.
     pub first_utterance: Option<String>,
+    /// The first utterance was typed in the desktop app, not spoken (ADR 0052): it gets the
+    /// written style's note.
+    pub first_typed: bool,
     pub hooks: SessionHooks,
     /// What brings a session back from hold (ADR 0021); the desk's wake phrases by default.
     pub wake_phrases: Option<Vec<String>>,
@@ -485,7 +488,7 @@ impl GhostSession {
             c.record("user", text);
         }
         self.control
-            .inject(vec![Frame::ThinkingStart, Frame::user_text(text, true)])
+            .inject(vec![Frame::ThinkingStart, Frame::typed_text(text)])
             .await;
     }
 
@@ -997,7 +1000,11 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             rt.record("user", first);
         }
         opening.push(Frame::ThinkingStart);
-        opening.push(Frame::user_text(first, true));
+        opening.push(if p.first_typed {
+            Frame::typed_text(first)
+        } else {
+            Frame::user_text(first, true)
+        });
     } else {
         match &p.greeting {
             Greeting::Varied => {

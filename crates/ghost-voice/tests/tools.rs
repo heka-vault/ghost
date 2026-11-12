@@ -1240,6 +1240,7 @@ mod ghosts_own_app {
     use ghost_core::apps::Apps;
     use ghost_core::ghost_app::{self, GhostServer, Parts, item_key};
     use ghost_core::outputs::Outputs;
+    use ghost_core::questions::Questions;
     use ghost_core::rules::{Rules, rules_source};
     use ghost_core::skills::Skills;
     use ghost_core::waiting::{Items, WaitingList, waiting_source};
@@ -1259,6 +1260,17 @@ mod ghosts_own_app {
     /// A session as the daemon builds it, with no app the operator connected: Ghost's own
     /// app in process, then Ghost's in-tree sources.
     async fn own(tmp: &Path) -> Own {
+        own_with(tmp, None, None).await
+    }
+
+    type MakeQuestions = dyn Fn(Arc<Store>, Arc<WaitingList>) -> Arc<Questions>;
+
+    /// The same, with the questions (ADR 0051) and what the operator last said.
+    async fn own_with(
+        tmp: &Path,
+        questions: Option<&MakeQuestions>,
+        heard: Option<Arc<Mutex<String>>>,
+    ) -> Own {
         let store = Arc::new(Store::in_memory().unwrap());
         let cfg = layout(tmp, RULES);
         let convs = Arc::new(
@@ -1279,17 +1291,16 @@ mod ghosts_own_app {
             None,
         ));
         let waiting = Arc::new(WaitingList::new(Items::new(store.clone())));
-        let attached = ghost_app::attach(
-            &apps,
-            GhostServer::new(Parts {
-                store,
-                waiting: waiting.clone(),
-                apps: Arc::downgrade(&apps),
-                status: Arc::new(Map::new),
-            }),
-        )
-        .await
-        .unwrap();
+        let mut server = GhostServer::new(Parts {
+            store: store.clone(),
+            waiting: waiting.clone(),
+            apps: Arc::downgrade(&apps),
+            status: Arc::new(Map::new),
+        });
+        if let Some(make) = questions {
+            server = server.with_questions(make(store.clone(), waiting.clone()));
+        }
+        let attached = ghost_app::attach(&apps, server).await.unwrap();
         gate.register(ghost_app::NAME, attached.app.operations());
         let skills = Arc::new(Skills::new(&cfg.join("skills"), None));
         let rules = Arc::new(Rules::new(&cfg));
@@ -1333,7 +1344,10 @@ mod ghosts_own_app {
             events: None,
             conversations: Some(rt.clone()),
             on_call: Some(record_call(&rt)),
-            last_request: None,
+            last_request: heard.map(|h| {
+                Arc::new(move || (h.lock().unwrap().clone(), String::new()))
+                    as ghost_voice::tools::LastRequest
+            }),
             probe: None,
         });
         Own {
@@ -1453,6 +1467,61 @@ mod ghosts_own_app {
         assert!(open(&o).is_empty());
     }
 
+    /// ADR 0051: in a session, an answer is recorded only with words the operator said in
+    /// their last turn; the model cannot make one up, nor write `_heard` itself.
+    #[tokio::test]
+    async fn an_answer_in_a_session_is_the_operators_own_words_or_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let made: Arc<Mutex<Option<Arc<Questions>>>> = Arc::new(Mutex::new(None));
+        let heard = Arc::new(Mutex::new(String::new()));
+        let make = {
+            let made = made.clone();
+            move |store: Arc<Store>, waiting: Arc<WaitingList>| {
+                let q = Arc::new(Questions::new(store, waiting));
+                *made.lock().unwrap() = Some(q.clone());
+                q
+            }
+        };
+        let o = own_with(tmp.path(), Some(&make), Some(heard.clone())).await;
+        let qs = made.lock().unwrap().clone().unwrap();
+        let mut a = ghost_core::questions::Ask::new("agent:ledger", "Ledger", "Send it today?");
+        a.choices = vec!["Yes".into(), "No".into()];
+        let q = qs.ask(a, None).unwrap();
+
+        // The operator said something else; the model claims an answer and forges _heard.
+        *heard.lock().unwrap() = "what's on my calendar".into();
+        let r = o
+            .tools
+            .call(
+                "ghost_answer",
+                args(json!({"key": q.key, "text": "yes", "_heard": "s1"})),
+                "c1",
+            )
+            .await;
+        let said = Value::Object(r.result.clone()).to_string();
+        assert!(
+            said.contains("not in what the operator just said"),
+            "{said}"
+        );
+        assert!(qs.get(&q.key).unwrap().unwrap().is_open());
+
+        // They answered: their words are recorded as they said them.
+        *heard.lock().unwrap() = "yeah, send it today".into();
+        let r = o
+            .tools
+            .call(
+                "ghost_answer",
+                args(json!({"key": q.key, "text": "yeah, send it today"})),
+                "c2",
+            )
+            .await;
+        assert_eq!(r.status(), Some("done"), "{:?}", r.result);
+        let done = qs.get(&q.key).unwrap().unwrap();
+        assert_eq!(done.answer.as_deref(), Some("yeah, send it today"));
+        assert_eq!(done.choice.as_deref(), Some("Yes"));
+        assert_eq!(done.answered_via.as_deref(), Some("voice"));
+    }
+
     /// ADR 0018: what the nine tools cost on every turn. Run with `--no-capture` to read
     /// the numbers; the bound keeps a later tool from growing it unnoticed.
     #[tokio::test]
@@ -1475,8 +1544,9 @@ mod ghosts_own_app {
             after_n - before_n,
             after_bytes - before_bytes
         );
-        assert_eq!(after_n - before_n, 9);
+        // Its core (ADR 0052): the rest are found with ghost_tools_search.
+        assert_eq!(after_n - before_n, 7);
         assert!(after_bytes - before_bytes < 3_500, "{after_bytes}");
-        assert!(paragraph < 700);
+        assert!(paragraph < 900);
     }
 }

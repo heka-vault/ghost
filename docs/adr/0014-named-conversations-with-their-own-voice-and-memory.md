@@ -28,7 +28,7 @@ that are never summarized. Compaction is Pipecat's in-session summarizer with ge
 settings (tokens only, 24k trigger, last 20 messages kept, summary up to 3k, all
 tunable). Every applied summary is recorded as a version; the file holds the current one
 and is the source of truth on resume, so an edit by hand is folded into the next version.
-Summarized turns stay in SQLite, flagged, and are pruned by a retention setting (90 days).
+Summarized turns stay in SQLite, flagged, and are pruned by a retention setting (90 days; since ADR 0041 they are kept for recall unless the operator sets one).
 Raw tool results are not stored: only spoken turns and one-line call records re-enter a
 later session, so old untrusted text is never replayed.
 

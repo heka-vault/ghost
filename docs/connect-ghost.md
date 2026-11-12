@@ -71,7 +71,17 @@ you, and the tool's config holds a command and no token:
 For Claude Code that is `claude mcp add ghost -- ghostd mcp serve --client codex`.
 `ghostd mcp add` prints the full path of `ghostd` in place of the bare name.
 `ghostd mcp serve` forwards to the running Ghost. If Ghost is not up yet it waits 15
-seconds, and it carries on across a restart of Ghost.
+seconds, and it carries on across a restart of Ghost. A call it has to send again (the
+first send failed part way, and Ghost may have run it) is not run twice: the bridge puts a
+key of its own on every tool call (`_meta` `ghost/idempotency-key`), and Ghost answers a
+change sent again with the same key, from the same tool, within five minutes, with the
+first call's result. Any tool may set that key itself for the same effect.
+
+When Ghost runs from the AppImage, there is no such command: the AppImage is mounted at a
+new path each time it starts, and its launcher opens the desktop app rather than
+`ghostd`. Asked for a command there (`--command`, or the desktop's option for a tool that
+can only start one), Ghost says so and gives the address and the token instead, as for any
+other tool. A tool that can only start a command needs Ghost installed from the .deb.
 
 ## See and remove them
 
@@ -97,13 +107,18 @@ is refused from its next request.
 | `agent_ask(agent, text)` | A written question for an agent, and its written answer. The agent works as it does on a schedule: its own memory and tools, nothing spoken, ten minutes at the most. A change your permissions ask about is not made; it waits on your waiting list. The question and the answer are kept in that agent's transcript, marked as asked by the tool |
 | `schedules_list(id?)`, `schedule_manage(action, …)` | The schedules, and setting one up: an instruction an agent carries out on its own at a time. What a tool sets up is marked as its own and runs as the agent it names (Ghost when it names none); it changes, pauses and removes only its own, and of the others sees only that they are there |
 | `waiting_ack(keys)`, `waiting_snooze(keys, minutes)` | Marks items on the waiting list as heard, or quiet for a while |
+| `recall(query, agent?, since?, limit?)`, `transcript_read(agent?, before?, limit?)` | Searches, or pages back through, what was said in the turns of the runs that tool started (its `agent_ask` questions and its schedules' runs), and nothing else an agent said |
+| `watches_list()` | What Ghost watches, how often, and how the last check went |
+| `routes_read()` | How Ghost reaches you now: the routes that are on, quiet hours, do-not-disturb |
 
 `say` speaks only when desk voice is on: `desk` in `[routes].enabled` of
 `~/.config/ghost/policy.toml` (Settings › Notifications), outside your quiet hours and
 do-not-disturb, with no session, hold or call under way.
 
-A tool cannot read your passwords, the policy file, a transcript or anything Ghost hears,
-and cannot change a permission, an app or another tool.
+A tool cannot read your passwords, the policy file, your settings or permissions, an
+agent's memory, a transcript of yours or anything Ghost hears, and cannot change a
+permission, an app, a watch, a skill, quiet hours or another tool. The full list of
+Ghost's own tools, and which a tool is offered, is [tools.md](tools.md).
 
 ## Your permissions apply
 

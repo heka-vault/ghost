@@ -46,7 +46,9 @@ mod tools;
 use std::collections::{BTreeMap, HashMap};
 
 pub use ask::{Answer, Asker, AskerSlot, DeclineAll, QUESTION_MAX, Question};
-pub use bridge::{AppWriter, CALLER_ARG, source_of, source_without};
+pub use bridge::{
+    AppWriter, CALLER_ARG, HEARD_ARG, OWN_ARGS, SESSION_ARG, own_args, source_of, source_without,
+};
 pub use collection::{Apps, ChangeHook, Recent, SEARCH_RESULTS};
 pub use connection::{
     About, App, AuthFor, CALL_TIMEOUT, CONNECT_TIMEOUT, Connector, SIGN_IN_TIMEOUT, Session,
@@ -59,10 +61,12 @@ pub use limits::{
 };
 pub(crate) use spec::truthy as spec_truthy;
 pub use spec::{
-    APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, GHOST_APP, RESERVED_NAMES, app_name_problem,
-    edit_apps, extract_secrets, fill_secrets, load_apps, looks_like_secret, parse_app,
-    parse_apps_json, render_app, render_apps_json, secret_name, secret_names, write_apps,
+    APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, GHOST_APP, RESERVED_NAMES, address_spec,
+    app_name_problem, edit_apps, extract_secrets, fill_secrets, free_name, host_to_name, load_apps,
+    looks_like_secret, parse_app, parse_apps_json, render_app, render_apps_json, secret_name,
+    secret_names, write_apps,
 };
+pub(crate) use spec::{edit_keyed, write_folder_file};
 pub(crate) use tools::fit;
 pub use tools::{
     ALSO_RETURNED, BRIEF_MAX, CUT_NOTE, MAX_FIELD_CHARS, MAX_LIST_ITEMS, MAX_RESULT_ITEMS,

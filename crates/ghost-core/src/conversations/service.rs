@@ -202,13 +202,19 @@ fn merge_adjacent(msgs: Vec<Message>) -> Vec<Message> {
 }
 
 /// The keyword arguments `Conversations` took in Python, with their defaults.
+/// How long a hidden turn (a reset or a delete) is kept before it is pruned: long enough
+/// for a reset said by mistake to be looked into, not so long that a reset leaves a
+/// transcript on disk for years (ADR 0041). Recall never returns one either way.
+pub const HIDDEN_RETENTION_DAYS: i64 = 7;
+
 #[derive(Debug, Clone)]
 pub struct ConversationsOptions {
     pub default_voice: String,
     pub default_speed: f64,
     pub voices: Vec<String>,
     pub recent_limit: i64,
-    pub retention: Duration,
+    /// How long a summarized turn is kept; None keeps it for recall (ADR 0041).
+    pub retention: Option<Duration>,
 }
 
 impl Default for ConversationsOptions {
@@ -218,7 +224,7 @@ impl Default for ConversationsOptions {
             default_speed: 1.0,
             voices: Vec::new(),
             recent_limit: 40,
-            retention: Duration::days(90),
+            retention: None,
         }
     }
 }
@@ -233,7 +239,7 @@ pub struct Conversations {
     pub default_speed: f64,
     voices: Vec<String>,
     recent_limit: i64,
-    retention: Duration,
+    retention: Option<Duration>,
 }
 
 impl Conversations {
@@ -600,9 +606,16 @@ impl Conversations {
         Ok(self.store.last_turn_id(&self.id(slug)?)?)
     }
 
-    /// Drop summarized turns older than the retention window.
+    /// Drop hidden turns (a reset or a delete) past [`HIDDEN_RETENTION_DAYS`], and
+    /// summarized ones past the retention window when one is set (ADR 0041: by default
+    /// they are kept, so recall finds them; the prompt still loads only the summary and
+    /// what it does not cover). The daemon runs this daily.
     pub fn prune(&self) -> Result<usize> {
-        Ok(self.store.prune_turns(utcnow() - self.retention)?)
+        let now = utcnow();
+        Ok(self.store.prune_turns(
+            self.retention.map(|r| now - r),
+            now - Duration::days(HIDDEN_RETENTION_DAYS),
+        )?)
     }
 
     // --- operations for the gate --------------------------------------------------
@@ -1747,8 +1760,11 @@ delete = 'announce'\nforget = 'announce'\n"
             .unwrap();
         assert!(convs.resume(GHOST).unwrap().memory.contains("Sam owes"));
 
-        // pruning drops only summarized turns older than the window
-        assert_eq!(store.prune_turns(utcnow()).unwrap(), 4);
+        // By default summarized turns are kept for recall (ADR 0041): the daily prune
+        // leaves them; with a window set, they go once they are older than it.
+        assert_eq!(convs.prune().unwrap(), 0);
+        assert_eq!(convs.turns(GHOST, 200).unwrap().len(), 4);
+        assert_eq!(store.prune_turns(Some(utcnow()), utcnow()).unwrap(), 4);
         assert!(convs.turns(GHOST, 200).unwrap().is_empty());
     }
 
@@ -1843,7 +1859,7 @@ delete = 'announce'\nforget = 'announce'\n"
             store,
             &layout(tmp.path()),
             ConversationsOptions {
-                retention: Duration::days(1),
+                retention: Some(Duration::days(1)),
                 ..Default::default()
             },
         );

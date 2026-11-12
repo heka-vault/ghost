@@ -1,9 +1,15 @@
-/** Paired: what this phone can now do, and the three facts that matter. */
+/**
+ * Paired: what this phone can now do, and the facts that matter. Leaving this screen is the
+ * moment Ghost asks for notifications (Android 13+), with the reason on screen: so questions
+ * and calls from the desk reach the phone with the app closed.
+ */
 import { useRouter } from "expo-router";
-import { Check, Lock, Mic, ScrollText } from "lucide-react-native";
+import { Bell, Check, Lock, Mic, ScrollText } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 
+import { askForNotifications } from "../../src/phone/notify";
+import { MOCK_DESK } from "../../src/phone/pairing";
 import { usePhone } from "../../src/phone/store";
 import { radius, space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
@@ -34,13 +40,24 @@ export default function Paired() {
           <Fact icon={<Mic size={20} color={c.text2} />} lead="Ghost asks out loud before it changes anything you’ve set to ask first.">
             Answer yes or no, the way you’d say it.
           </Fact>
+          <Fact icon={<Bell size={20} color={c.text2} />} lead="Ghost reaches this phone with the app closed.">
+            Questions, changes waiting for your yes and calls arrive as notifications. Android asks you to allow them next; you can change it in Settings.
+          </Fact>
           <Fact icon={<ScrollText size={20} color={c.text2} />} lead="Everything Ghost does is in Activity,">
             on this phone and at your desk.
           </Fact>
         </View>
       </ScrollView>
       <Cta>
-        <TouchButton variant="primary" size="xl" fullWidth onPress={() => router.replace("/home")}>
+        <TouchButton
+          variant="primary"
+          size="xl"
+          fullWidth
+          onPress={() => {
+            // Asked here, where the reason is on screen; refused, the app still works.
+            void (MOCK_DESK ? Promise.resolve(false) : askForNotifications()).finally(() => router.replace("/home"));
+          }}
+        >
           Start using Ghost
         </TouchButton>
       </Cta>

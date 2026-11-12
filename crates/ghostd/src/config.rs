@@ -94,7 +94,8 @@ pub struct GhostdSettings {
     pub skills_dir: PathBuf,
     pub home_skills_dir: PathBuf,
 
-    /// Summarized turns older than the retention window are pruned daily.
+    /// Summarized turns older than this many days are pruned daily; 0 (the default) keeps
+    /// them for recall (ADR 0041). Hidden turns go after a fixed week either way.
     pub turn_retention_days: i64,
 
     /// Control API (ADR 0013): a user-owned Unix socket; no TCP. The desktop app, the
@@ -194,7 +195,7 @@ impl Default for GhostdSettings {
             catalog_path: home.join(".cache/ghost/catalog.json"),
             skills_dir: home.join(".config/ghost/skills"),
             home_skills_dir: home.join(".agents/skills"),
-            turn_retention_days: 90,
+            turn_retention_days: 0,
             api_socket: None,
             settings_path: home.join(".config/ghost/settings.env"),
             env_path: home.join(".config/ghost/env"),
@@ -507,7 +508,7 @@ mod tests {
         assert_eq!(s.jev_threshold, 0.95);
         assert_eq!(s.jev_deadline_secs, 0.5);
         assert_eq!(s.signin_port, 47823);
-        assert_eq!(s.turn_retention_days, 90);
+        assert_eq!(s.turn_retention_days, 0);
         assert_eq!(s.wake_mode, "transcript");
         assert_eq!(s.wake_fuzzy, 0.9);
         assert!(s.wake_verify);

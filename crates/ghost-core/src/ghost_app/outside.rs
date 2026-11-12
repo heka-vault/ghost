@@ -62,7 +62,8 @@ pub const TELLING: [&str; 2] = ["notify", "say"];
 pub const INSTRUCTIONS: &str = "Ghost is the operator's voice assistant on this computer. Use notify to tell the operator \
 something (it goes on their waiting list and reaches them by voice, on the desktop or on the \
 phone), resolve once it no longer matters, and events_wait to wait for them to acknowledge \
-it. status, docs_search and docs_read say what Ghost is and how it is now. A change the \
+it. ask puts a question to the operator; events_wait says when it is settled and question \
+reads the answer, which is theirs alone. status, docs_search and docs_read say what Ghost is and how it is now. A change the \
 operator's permissions ask about answers \"waiting for the operator\": it has not run yet.";
 
 pub const DOCS_URI: &str = "ghost://docs/";
@@ -338,6 +339,23 @@ impl Feed {
                 }));
                 self.waiting_changed(); // a change that was waiting is no longer
             }
+            // A question was asked or settled (ADR 0051): who asked it, its state, and for
+            // the asker alone its words and the answer (`events_wait` strips them for others).
+            Some("question") => {
+                let q = &event["question"];
+                if q["kind"] == "change" {
+                    return; // a change's own events say what came of it
+                }
+                self.log.push(json!({
+                    "type": "question",
+                    "key": q["key"],
+                    "source": q["source"],
+                    "state": q["state"],
+                    "title": q["question"],
+                    "answer": q["answer"],
+                    "choice": q["choice"],
+                }));
+            }
             Some("status") => {
                 let s = &event["status"];
                 let phase = s["phase"].as_str().unwrap_or_default();
@@ -421,6 +439,100 @@ pub struct Outside {
     limiter: Limiter,
     pub(super) runner: Arc<dyn AgentRunner>,
     pub(super) desk: Arc<dyn DeskVoice>,
+    calls: Once,
+}
+
+// --- a change sent twice --------------------------------------------------------------------
+
+/// The `_meta` key of a tool call that may be sent again (`ghostd mcp serve` sets it on
+/// every call it forwards): the same key from the same client within [`ONCE_KEPT`] gets
+/// the first call's result, and the change is not made twice. The phone's signed `POST`s
+/// do the same by their `id` (ADR 0051).
+pub const IDEMPOTENCY_KEY: &str = "ghost/idempotency-key";
+/// How long a call's result is kept for a resend, from when it finished.
+pub const ONCE_KEPT: Duration = Duration::from_secs(300);
+const KEY_MAX: usize = 128;
+
+type Outcome = Result<Value, String>;
+
+enum Slot {
+    /// Still running: a resend waits for it.
+    Going(tokio::sync::watch::Receiver<Option<Outcome>>),
+    Done(Instant, Outcome),
+}
+
+/// What each client's keyed calls came to.
+#[derive(Default)]
+struct Once {
+    slots: Mutex<HashMap<(String, String), Slot>>,
+}
+
+/// The first call with a key: what it came to is recorded here, for a resend.
+pub(super) struct First {
+    key: (String, String),
+    tx: tokio::sync::watch::Sender<Option<Outcome>>,
+}
+
+enum Begun {
+    First(First),
+    Again(tokio::sync::watch::Receiver<Option<Outcome>>),
+    Done(Outcome),
+}
+
+impl Once {
+    fn begin(&self, client: &str, key: &str) -> Begun {
+        let mut slots = lock(&self.slots);
+        slots.retain(|_, s| match s {
+            // A first call whose task is gone without a result is not waited on.
+            Slot::Going(rx) => rx.has_changed().is_ok(),
+            Slot::Done(at, _) => at.elapsed() < ONCE_KEPT,
+        });
+        let k = (client.to_string(), key.to_string());
+        match slots.get(&k) {
+            Some(Slot::Going(rx)) => Begun::Again(rx.clone()),
+            Some(Slot::Done(_, out)) => Begun::Done(out.clone()),
+            None => {
+                let (tx, rx) = tokio::sync::watch::channel(None);
+                slots.insert(k.clone(), Slot::Going(rx));
+                Begun::First(First { key: k, tx })
+            }
+        }
+    }
+
+    fn finish(&self, first: First, out: &Outcome) {
+        lock(&self.slots).insert(first.key, Slot::Done(Instant::now(), out.clone()));
+        let _ = first.tx.send(Some(out.clone()));
+    }
+}
+
+/// Cancelled when the HTTP response a request is answered on is dropped: the tool closed
+/// the connection. The listener (`ghostd::outside`) puts it in the request's extensions.
+/// On the protocol's stateful sessions the server keeps a call running when its
+/// connection goes, so this, not the call's future being dropped, is what stops a change
+/// that takes long (`agent_ask`) when the tool that asked for it is gone.
+#[derive(Clone, Debug)]
+pub struct RequestGone(pub CancellationToken);
+
+fn request_gone(context: &RequestContext<RoleServer>) -> Option<CancellationToken> {
+    context
+        .extensions
+        .get::<http::request::Parts>()
+        .and_then(|parts| parts.extensions.get::<RequestGone>())
+        .map(|g| g.0.clone())
+}
+
+/// The key a client sent with a call, when it is a usable one.
+fn idempotency_key(
+    request: &CallToolRequestParams,
+    context: &RequestContext<RoleServer>,
+) -> Option<String> {
+    request
+        .meta
+        .as_ref()
+        .and_then(|m| m.get(IDEMPOTENCY_KEY).cloned())
+        .or_else(|| context.meta.get(IDEMPOTENCY_KEY).cloned())
+        .and_then(|v| v.as_str().map(str::to_string))
+        .filter(|k| (1..=KEY_MAX).contains(&k.chars().count()))
 }
 
 impl Outside {
@@ -434,6 +546,7 @@ impl Outside {
             },
             runner: Arc::new(NoRunner),
             desk: Arc::new(NoDesk),
+            calls: Once::default(),
         }
     }
 
@@ -513,8 +626,15 @@ impl GhostServer {
         let mut tool_router = self.tool_router.clone();
         tool_router.merge(Self::outside_router());
         // Finding a connected app's tool (ADR 0046) is for an agent, which can call it. An
-        // outside tool cannot, and what the search returns is the apps' own text.
-        tool_router.remove_route("tools_search");
+        // outside tool cannot, and what the search returns is the apps' own text. And what
+        // ADR 0052 keeps from outside tools: an agent's memory, the operator's settings and
+        // permissions, the apps' own text, and every change to apps, watches, quiet,
+        // outputs and skills (`more::NOT_FOR_OUTSIDE`).
+        for name in super::NOT_FOR_OUTSIDE {
+            tool_router.remove_route(name);
+        }
+        // Only the operator answers a question (ADR 0051): an outside tool never can.
+        tool_router.remove_route("answer");
         let server = Self {
             tool_router,
             outside: Some(Arc::new(outside)),
@@ -635,11 +755,36 @@ impl GhostServer {
         let Some(tool) = self.tool_router.get(&name).cloned() else {
             return Err(ErrorData::invalid_params("tool not found", None));
         };
+        // A change sent again with the key it was first sent with gets the first one's
+        // result, and is not made again (`say` is not said twice). A read is safe to
+        // repeat and is not kept.
+        let first = match idempotency_key(&request, &context).filter(|_| !is_read(&tool)) {
+            None => None,
+            Some(key) => match outside.calls.begin(&client, &key) {
+                Begun::Done(out) => return Ok(reply(out).into()),
+                Begun::Again(mut rx) => {
+                    debug!("outside: {client} sent {NAME}.{name} again; the first call answers");
+                    let out = tokio::select! {
+                        got = rx.wait_for(Option::is_some) => match got {
+                            Ok(v) => v.clone().unwrap_or_else(|| Err("the first call did not finish".into())),
+                            Err(_) => Err("the first call did not finish".into()),
+                        },
+                        () = context.ct.cancelled() => Err("cancelled".into()),
+                    };
+                    return Ok(reply(out).into());
+                }
+                Begun::First(first) => Some(first),
+            },
+        };
         if let Err(e) = outside
             .limiter
             .take(&client, TELLING.contains(&name.as_str()))
         {
-            return Ok(reply(Err(e)).into());
+            let out: Outcome = Err(e);
+            if let Some(first) = first {
+                outside.calls.finish(first, &out);
+            }
+            return Ok(reply(out).into());
         }
         let args = request.arguments.clone().unwrap_or_default();
         if is_read(&tool) {
@@ -662,13 +807,24 @@ impl GhostServer {
         let work = {
             let (me, outside) = (self.clone(), outside.clone());
             tokio::spawn(crate::apps::with_cancel(stop.clone(), async move {
-                me.change(&outside, &client, &name, args).await
+                let out = me.change(&outside, &client, &name, args).await;
+                // Recorded by the task, so a resend gets it even when this request is gone.
+                if let Some(first) = first {
+                    outside.calls.finish(first, &out);
+                }
+                out
             }))
         };
         tokio::pin!(work);
+        let gone_away = request_gone(&context).unwrap_or_default();
         let out = tokio::select! {
             out = &mut work => out,
             () = context.ct.cancelled() => {
+                stop.cancel();
+                work.await
+            }
+            () = gone_away.cancelled() => {
+                debug!("outside: a change's connection closed; stopping it");
                 stop.cancel();
                 work.await
             }

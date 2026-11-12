@@ -1,6 +1,6 @@
 # 0046: Apps keep up with what they offer
 
-- **Status:** accepted (decided 2026-11-11; built on the `feat/apps-parity` branch, heka-vault/ghost#65: the live tool list, calls that can be stopped, reconnection, the result budget, descriptions and instructions, resources and prompts as reads, safe names and deferred tools; what is not built is listed below)
+- **Status:** accepted (decided 2026-11-11; built on the `feat/apps-parity` branch, heka-vault/ghost#65: the live tool list, calls that can be stopped, reconnection, the result budget, descriptions and instructions, resources and prompts as reads, safe names and deferred tools; what is not built is listed below; 2026-11-12 on `feat/polish-1`: the four per-app settings are shown and set on an app's page, through `PUT /apps/{name}/limits`)
 - **Date:** 2026-11-11
 - **Amends:** ADR 0034 (what the model reads of an app: a description up to a cap and not
   its first sentence, the app's own instructions, a result held to one budget and not cut
@@ -196,8 +196,10 @@ Other consequences:
 - **Sampling.** An app cannot ask Ghost's model to write for it. The protocol has
   deprecated it.
 - **Images and sound.** They are named with their size, not shown to the model.
-- **The desktop.** `timeout`, `connect_timeout`, `result_chars` and `pinned` are keys in
-  `apps.json`; there is no control for them on the app's page, and no API type changed.
+- **The desktop.** Built since (2026-11-12): `timeout`, `connect_timeout`, `result_chars`
+  and `pinned` are shown in `AppView.limits` with Ghost's defaults and set on the app's
+  page through `PUT /apps/{name}/limits` (a call 1 to 3,600 s, connecting 1 to 600 s, a
+  result 1,000 to 100,000 characters, 40 pinned tools); the app connects again with them.
 - **Which tools were used, across restarts.** Could be read from the audit at start.
 
 ## Alternatives considered

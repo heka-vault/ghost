@@ -12,8 +12,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ghost_api::models::{AuditPage, ConversationView, Status, WaitingView};
+use ghost_api::models::{
+    AuditPage, ConversationView, OutcomeView, QuestionView, QuestionsView, Status, WaitingView,
+};
+use ghost_api::questions::question_view;
 use ghost_api::{audit_page, conversation_view, status_snapshot, waiting_view};
+use ghost_core::questions::{QuestionError, via};
+
+use crate::phone::listener::ActionError;
+use crate::phone::stream::{PhoneFeed, phone_safe_item};
+
+fn action_error(e: QuestionError) -> ActionError {
+    match e {
+        QuestionError::NotFound(_) => ActionError::NotFound,
+        QuestionError::NotOpen(state) => ActionError::Settled(state.to_string()),
+        QuestionError::Invalid(why) => ActionError::BadAnswer(why),
+        other => ActionError::BadAnswer(other.to_string()),
+    }
+}
 use ghost_rtc::{Frames, Media as RtcMedia, MediaConfig, MediaError, Outbound, Sink};
 use ghost_voice::VoiceSettings;
 use ghost_voice::frames::Audio;
@@ -241,9 +257,10 @@ impl PhoneHost for Daemon {
         audit_page(store, limit, offset, None, None, None).unwrap_or(empty)
     }
 
-    /// The phone's read of the waiting list; the fetch is the phone route's delivery.
+    /// The phone's read of the waiting list. Since ADR 0051 a read is not a delivery: only
+    /// a `seen` on the live stream is.
     fn waiting_view(&self) -> WaitingView {
-        let view = match self.deps() {
+        let mut view = match self.deps() {
             Some(deps) => waiting_view(&deps).unwrap_or(WaitingView {
                 items: Vec::new(),
                 count: 0,
@@ -253,8 +270,83 @@ impl PhoneHost for Daemon {
                 count: 0,
             },
         };
-        self.phone_route.fetched();
+        view.items = view.items.into_iter().map(phone_safe_item).collect();
         view
+    }
+
+    fn questions(&self) -> QuestionsView {
+        self.deps()
+            .and_then(|deps| ghost_api::questions::questions_view(&deps).ok())
+            .unwrap_or(QuestionsView {
+                questions: Vec::new(),
+            })
+    }
+
+    /// The operator's answer from the paired phone (ADR 0051): their words, recorded
+    /// with the route `phone`. A change's key is answered by `confirm_change` instead.
+    fn answer_question(&self, key: &str, text: &str) -> Result<QuestionView, ActionError> {
+        if key.starts_with("change:") {
+            return Err(ActionError::BadAnswer(
+                "a change is confirmed or cancelled at /changes".into(),
+            ));
+        }
+        let qs = self.questions().ok_or(ActionError::NotFound)?;
+        qs.answer(key, text, via::PHONE, None)
+            .map(|q| question_view(&q))
+            .map_err(action_error)
+    }
+
+    fn decline_question(&self, key: &str) -> Result<QuestionView, ActionError> {
+        let qs = self.questions().ok_or(ActionError::NotFound)?;
+        qs.decline(key, via::PHONE, None)
+            .map(|q| question_view(&q))
+            .map_err(action_error)
+    }
+
+    /// A change confirmed from the paired phone: the gate's confirm by id, its evidence
+    /// recorded with the classifier `phone`. What counts as a yes is the gate's, as ever.
+    async fn confirm_change(&self, id: &str) -> Option<OutcomeView> {
+        let gate = self.gate()?;
+        let live = self
+            .state
+            .session_id()
+            .and_then(|s| gate.pending(&s, None).ok().flatten());
+        let outcome = gate.confirm_id(id, "phone", None).await.ok().flatten()?;
+        let view = ghost_api::outcome_view(&outcome);
+        self.state
+            .outcome(view.clone(), ghost_api::models::OutcomeVia::Ui);
+        if live.is_some_and(|p| p.id == id) {
+            self.state.set_pending(None);
+        }
+        self.refresh_waiting_now();
+        Some(view)
+    }
+
+    async fn cancel_change(&self, id: &str) -> bool {
+        let Some(gate) = self.gate() else {
+            return false;
+        };
+        let live = self
+            .state
+            .session_id()
+            .and_then(|s| gate.pending(&s, None).ok().flatten());
+        if gate
+            .cancel_id(id, "cancelled from the phone")
+            .ok()
+            .flatten()
+            .is_none()
+        {
+            return false;
+        }
+        if live.is_some_and(|p| p.id == id) {
+            self.state.set_pending(None);
+        }
+        self.refresh_waiting_now();
+        true
+    }
+
+    fn feed(&self) -> Option<Arc<PhoneFeed>> {
+        Some(self.phone_feed.clone())
     }
 
     fn acknowledge_item(&self, key: &str) -> bool {
@@ -292,6 +384,7 @@ impl PhoneHost for Daemon {
         &self,
         sdp: &str,
         conversation: Option<&str>,
+        item: Option<&str>,
     ) -> Result<Answer, OfferError> {
         let line = conversation.unwrap_or(ghost_core::conversations::GHOST);
         if line != ghost_core::conversations::GHOST {
@@ -334,7 +427,7 @@ impl PhoneHost for Daemon {
             pc_id: pc_id.clone(),
             media: media.clone(),
         });
-        if let Some(r) = self.queue_phone(media.clone(), Some(line)) {
+        if let Some(r) = self.queue_phone_for(media.clone(), Some(line), item) {
             *lock(&self.live_phone) = None;
             media.close().await;
             return Err(OfferError::Refused(r));
@@ -479,6 +572,81 @@ pub(crate) mod tests {
         assert_eq!(sent.len(), 2);
         assert!(matches!(&sent[0], Outbound::ServerMessage(v) if v["type"] == "status"));
         assert_eq!(sent[1], Outbound::BotStartedSpeaking);
+    }
+
+    /// ADR 0051: a change waiting for a yes, answered from the paired phone. Yes is the
+    /// gate's own confirm by id, audited with the classifier `phone`; No cancels it.
+    #[tokio::test]
+    async fn a_change_confirmed_from_the_phone_is_applied_and_audited_as_the_phones() {
+        use ghost_core::fakes::{FakeWriter, changeset, issue, register_fake};
+        use ghost_core::gate::Request;
+        use ghost_core::models::{Change, ProposalStatus, SetLabels, Target};
+        use ghost_core::{Store, WriteGate};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let d = crate::daemon::tests::daemon(tmp.path());
+        let target = issue("acme", "app", 42);
+        let writer = Arc::new(FakeWriter::default());
+        writer.seed(&target);
+        let store = Arc::new(Store::in_memory().unwrap());
+        let gate = Arc::new(WriteGate::new(store.clone()));
+        register_fake(&gate, writer.clone(), "acme/app");
+        d.late.gate.set(gate.clone()).ok();
+        let waiting_change = |session: &'static str| {
+            let gate = gate.clone();
+            let target = target.clone();
+            async move {
+                let p = gate
+                    .prepare(Request::new(
+                        session,
+                        "github_issues",
+                        "approve",
+                        Target::FakeIssue(target),
+                        changeset(vec![Change::SetLabels(SetLabels {
+                            add: vec!["approved".into()],
+                            remove: vec![],
+                        })]),
+                        "operator asked",
+                    ))
+                    .await
+                    .unwrap();
+                gate.set_aside(session, "hung up").unwrap();
+                p
+            }
+        };
+        let p = waiting_change("s1").await;
+        let outcome = PhoneHost::confirm_change(&*d, &p.id).await.unwrap();
+        assert_eq!(outcome.status, ghost_api::models::OutcomeStatus::Success);
+        assert!(
+            writer
+                .issue(&target)
+                .labels
+                .contains(&"approved".to_string())
+        );
+        let said: Vec<_> = store
+            .events(&p.id)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.event == "user_turn")
+            .collect();
+        assert_eq!(said[0].detail.as_ref().unwrap()["classifier"], "phone");
+        // Twice is once: it is no longer waiting.
+        assert!(PhoneHost::confirm_change(&*d, &p.id).await.is_none());
+
+        let no = waiting_change("s2").await;
+        assert!(PhoneHost::cancel_change(&*d, &no.id).await);
+        assert_eq!(
+            store.get_proposal(&no.id).unwrap().unwrap().status,
+            ProposalStatus::Cancelled
+        );
+        assert_eq!(
+            writer
+                .call_names()
+                .iter()
+                .filter(|c| **c != "fetch")
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]

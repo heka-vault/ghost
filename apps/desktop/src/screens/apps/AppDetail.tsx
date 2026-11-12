@@ -4,7 +4,8 @@
  * first or Block, with Quiet in the row's menu; a read is Allow or Block. A choice moves the
  * tool's own rule in the operator's permissions (`PUT /permissions`, `set`); choosing what
  * the tool would get without a rule clears it, so the file holds only exceptions. A broader
- * rule that still decides the tool is named under it.
+ * rule that still decides the tool is named under it. Under the tools, its own limits in
+ * apps.json (`AppLimits.tsx`, ADR 0046), committed with the page's save bar.
  */
 import type { AppAction, AppView, PermissionsView } from "@ghost/client-ts";
 import { permissionLabel, useGhost } from "@ghost/ui";
@@ -14,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, hrefFor, navigate } from "../../app/router";
 import { Badge, Button, Card, EmptyState, Field, IconButton, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, errorText, quoted, useLive, useToast } from "../../ui";
 import { useAppActions } from "./actions";
+import { useAppLimits } from "./AppLimits";
 import { AppIcon } from "./AppIcon";
 import { type Level, appConditionalRules, choose, conditionalRules, coversWholeApp, decidingRule, kindWords, listOf, listVerb, sentence, stateWords, toolLabel } from "./model";
 
@@ -48,6 +50,7 @@ export function AppDetail({ name }: { name: string }) {
   }, [load, appsVersion]);
 
   const actions = useAppActions({ onChanged: () => void load(), onDisconnected: () => navigate("/settings/apps") });
+  const limits = useAppLimits(app, setApp);
 
   /** Move one rule, then read the app back: its levels are the gate's, not this screen's guess. */
   const setRule = async (rule: string, level: Level | null, opts: { what: string; undo?: Level | null }) => {
@@ -105,6 +108,7 @@ export function AppDetail({ name }: { name: string }) {
     <Page
       width="default"
       title={title}
+      dock={limits.dock}
       leading={<AppIcon title={title} icon={app?.icon} size="lg" />}
       crumb={
         <Link to="/settings/apps">
@@ -253,6 +257,8 @@ export function AppDetail({ name }: { name: string }) {
               </Card>
             )}
           </Section>
+
+          {limits.section}
 
           <p className="apps-foot t-small t-3">
             Rules call it <span className="t-mono">{name}</span>, and a tool <span className="t-mono">{name}.&lt;tool&gt;</span>.{" "}

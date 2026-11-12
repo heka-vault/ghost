@@ -234,13 +234,15 @@ impl GhostServer {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string();
-                    if kind == "waiting" || kind == "change" {
+                    if kind == "waiting" || kind == "change" || kind == "question" {
                         let mine = o.get("source").and_then(Value::as_str) == Some(me.as_str());
                         o.insert("yours".into(), json!(mine));
                         if !mine {
                             o.remove("title");
                             o.remove("target");
                             o.remove("summary");
+                            o.remove("answer");
+                            o.remove("choice");
                         }
                         if kind == "change" {
                             o.remove("source");

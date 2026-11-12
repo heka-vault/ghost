@@ -33,6 +33,7 @@ export type ReadToolInfo = Schemas["ReadToolInfo"];
 /** A connected app (ADR 0034): how it is reached, whether it is up, what each tool may do. */
 export type AppView = Schemas["AppView"];
 export type AppAction = Schemas["AppAction"];
+export type AppLimits = Schemas["AppLimits"];
 export type AppConnect = Schemas["AppConnect"];
 export type AppConnectResult = Schemas["AppConnectResult"];
 export type CatalogPage = Schemas["CatalogPage"];
@@ -101,6 +102,10 @@ export type RuleAdd = Schemas["RuleAdd"];
 export type WatchingView = Schemas["WatchingView"];
 export type WaitingItemView = Schemas["WaitingItemView"];
 export type WaitingView = Schemas["WaitingView"];
+/** Questions for the operator (ADR 0051): who asked, the choices, the answer. */
+export type QuestionView = Schemas["QuestionView"];
+export type QuestionsView = Schemas["QuestionsView"];
+export type QuestionResult = Schemas["QuestionResult"];
 export type WatchInfo = Schemas["WatchInfo"];
 export type HookInfo = Schemas["HookInfo"];
 export type RoutesView = Schemas["RoutesView"];
@@ -148,6 +153,8 @@ export type GhostEvent =
   | Schemas["LogEvent"]
   | Schemas["ConversationEvent"]
   | Schemas["WaitingEvent"]
+  /** A question for the operator asked or settled (ADR 0051). */
+  | Schemas["QuestionEvent"]
   | Schemas["AppsEvent"]
   /** Ghost's own voice at the speaker, 0..1, ~20/s while it speaks, then one 0. */
   | Schemas["VoiceEvent"]
@@ -234,6 +241,17 @@ export class GhostClient {
   snooze(key: string, minutes: number) {
     return unwrap(this.api.POST("/waiting/snooze", { body: { key, minutes } }));
   }
+  /** The questions for the operator (ADR 0051): open ones, then the last day's. */
+  questions() {
+    return unwrap(this.api.GET("/questions"));
+  }
+  /** The operator's answer, in their words or as one of the choices. */
+  answerQuestion(key: string, text: string) {
+    return unwrap(this.api.POST("/questions/answer", { body: { key, text } }));
+  }
+  declineQuestion(key: string) {
+    return unwrap(this.api.POST("/questions/decline", { body: { key } }));
+  }
   audit(query: paths["/audit"]["get"]["parameters"]["query"] = {}) {
     return unwrap(this.api.GET("/audit", { params: { query } }));
   }
@@ -270,6 +288,11 @@ export class GhostClient {
   }
   disconnectApp(name: string) {
     return unwrap(this.api.DELETE("/apps/{name}", { params: { path: { name } } }));
+  }
+  /** An app's own limits and pinned tools in apps.json (ADR 0046); null is Ghost's default.
+   *  The app connects again with them. */
+  setAppLimits(name: string, body: Schemas["AppLimitsUpdate"]) {
+    return unwrap(this.api.PUT("/apps/{name}/limits", { params: { path: { name } }, body }));
   }
   permissions() {
     return unwrap(this.api.GET("/permissions"));
@@ -422,6 +445,17 @@ export class GhostClient {
    *  addresses, and what is wrong in watches.json, hooks.json or left from an older layout. */
   watches() {
     return unwrap(this.api.GET("/watches"));
+  }
+  /** Pause a watch an agent made (ADR 0052); the operator's own are edited in watches.json. */
+  pauseWatch(name: string) {
+    return unwrap(this.api.POST("/watches/{name}/pause", { params: { path: { name } } }));
+  }
+  resumeWatch(name: string) {
+    return unwrap(this.api.POST("/watches/{name}/resume", { params: { path: { name } } }));
+  }
+  /** Remove a watch an agent made. */
+  removeWatch(name: string) {
+    return unwrap(this.api.DELETE("/watches/{name}", { params: { path: { name } } }));
   }
 
   // --- schedules (ADR 0047) ------------------------------------------------------------------

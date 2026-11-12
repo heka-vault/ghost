@@ -39,7 +39,8 @@ use crate::phone::routes::{
 };
 use crate::phone_host::{PhoneEventsSink, PhoneRtvi, phone_media};
 use crate::routes::{
-    GREETING_SECS, REPLY_WINDOW_SECS, Raised, ReplySession, context_note, digest_note, reply_window,
+    GREETING_SECS, REPLY_WINDOW_SECS, Raised, ReplySession, context_note, digest_note,
+    reply_window, ring_greeting, ring_note,
 };
 use crate::wake::Event;
 
@@ -156,13 +157,25 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             (Some(r), false) => Some(SpokenDigest::new(r.clone(), &waiting_now)),
             _ => None,
         }));
+    // A call the phone made because Ghost rang it (ADR 0051): it opens with the item, a
+    // question put in its asker's words.
+    let rang_for = phone
+        .as_ref()
+        .and_then(|p| p.item.as_deref())
+        .and_then(|key| d.waiting().and_then(|w| w.items.get(key).ok().flatten()))
+        .filter(|i| i.resolved_at.is_none());
     let (greeting, context_note) = if let Some(r) = &raised {
         (
             Greeting::Text(r.policy.greeting.clone()),
             Some(context_note(&r.items)),
         )
+    } else if let Some(item) = &rang_for {
+        (Greeting::Text(ring_greeting(item)), Some(ring_note(item)))
     } else if let Some(dg) = lock(&digest).as_ref() {
-        (Greeting::Text(dg.text.clone()), Some(digest_note()))
+        (
+            Greeting::Text(dg.text.clone()),
+            Some(digest_note(&dg.questions())),
+        )
     } else {
         (Greeting::Varied, None)
     };
@@ -299,6 +312,8 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         media,
         greeting,
         first_utterance: first_utterance.clone(),
+        // Typed in the desktop app (ADR 0052): the reply may be written.
+        first_typed: first_utterance.is_some() && *lock(&d.first_via) == TurnVia::Text,
         hooks: SessionHooks {
             on_turn: Some(on_turn),
             on_phase: Some(on_phase),
@@ -613,6 +628,7 @@ pub fn pending_phone(media: Arc<dyn RtcMedia>, line: &str) -> PendingPhone {
     PendingPhone {
         media,
         line: line.to_string(),
+        item: None,
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "platforms": ["android"],
   "android": {
-    "modules": ["dev.heka.ghost.call.GhostCallModule"]
+    "modules": ["dev.heka.ghost.call.GhostCallModule", "dev.heka.ghost.call.link.GhostLinkModule"]
   }
 }

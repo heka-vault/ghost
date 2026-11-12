@@ -273,6 +273,10 @@ pub enum Event {
     Waiting {
         count: u64,
     },
+    /// A question was asked, answered, declined, expired or taken back (ADR 0051).
+    Question {
+        question: QuestionView,
+    },
     /// An app was connected, disconnected or changed state: read `GET /apps`. With
     /// `sign_in_url`, the app is waiting for the operator to sign in there.
     Apps {
@@ -335,6 +339,100 @@ pub struct WaitingItemView {
     pub snoozed_until: Option<DateTime<Utc>>,
     #[serde(default)]
     pub change: Option<PendingProposal>,
+    /// Set for a question (ADR 0051), and for a change waiting for a yes, shown as the
+    /// question it is.
+    #[serde(default)]
+    pub question: Option<QuestionView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum QuestionKind {
+    /// Someone asked the operator something.
+    Question,
+    /// A change waiting for the operator's yes (ADR 0030): Yes confirms it, No cancels it.
+    Change,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum QuestionState {
+    Open,
+    Answered,
+    Declined,
+    Expired,
+    Cancelled,
+}
+
+/// A question for the operator (ADR 0051). `question`, `detail` and `choices` are the
+/// asker's words (an agent, an outside tool, an app): show them as text, never as markup.
+/// `answer` is the operator's own words, as they gave them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionView {
+    /// The waiting-list key: `question:<id>`, or `change:<proposal>` for a change.
+    pub key: String,
+    #[schema(inline)]
+    pub kind: QuestionKind,
+    /// Who asked, as the operator knows them: `Ledger`, `Claude Code`, `GitHub`.
+    pub asked_by: String,
+    /// `agent:<slug>`, `client:<name>`, `app:<name>`, or `gate` for a change.
+    pub source: String,
+    pub question: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// Up to four; empty for a free answer.
+    pub choices: Vec<String>,
+    /// Only one of the choices will do.
+    pub choices_only: bool,
+    #[schema(inline)]
+    pub urgency: Urgency,
+    pub asked_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    #[schema(inline)]
+    pub state: QuestionState,
+    #[serde(default)]
+    pub answer: Option<String>,
+    /// The choice the answer clearly is, when it is one.
+    #[serde(default)]
+    pub choice: Option<String>,
+    /// `desktop`, `phone`, `voice`, or `ghost` for an expiry.
+    #[serde(default)]
+    pub answered_via: Option<String>,
+    #[serde(default)]
+    pub answered_at: Option<DateTime<Utc>>,
+    /// The change's id, for a change.
+    #[serde(default)]
+    pub change_id: Option<String>,
+    /// Asked from a scheduled run or a watch's run, with nobody there (ADR 0047): its answer
+    /// starts one more run of the agent that asked.
+    #[serde(default)]
+    #[schema(required)]
+    pub in_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionsView {
+    /// The open ones first, oldest first; then those settled in the last day, newest first.
+    pub questions: Vec<QuestionView>,
+}
+
+/// An answer from the operator: their words, or one of the choices as it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionAnswer {
+    pub key: String,
+    pub text: String,
+}
+
+/// What came of an answer or a decline. For a change, `outcome` is what the gate did.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionResult {
+    pub ok: bool,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub question: Option<QuestionView>,
+    #[serde(default)]
+    pub outcome: Option<OutcomeView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -555,6 +653,49 @@ pub struct AppView {
     #[serde(default)]
     #[schema(required)]
     pub settings: Vec<String>,
+    /// Its own limits and pinned tools in apps.json (ADR 0046).
+    #[serde(default)]
+    #[schema(required)]
+    pub limits: AppLimits,
+}
+
+/// An app's own limits in apps.json (ADR 0046). None is Ghost's default, given beside it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppLimits {
+    /// Seconds a call may take.
+    #[schema(required)]
+    pub timeout: Option<i64>,
+    /// Seconds connecting may take.
+    #[schema(required)]
+    pub connect_timeout: Option<i64>,
+    /// Characters of a result the model is given whole.
+    #[schema(required)]
+    pub result_chars: Option<i64>,
+    /// Tools offered by name on every turn even past the limits on how many tools a turn
+    /// carries.
+    #[serde(default)]
+    #[schema(required)]
+    pub pinned: Vec<String>,
+    pub default_timeout: i64,
+    pub default_connect_timeout: i64,
+    pub default_result_chars: i64,
+}
+
+/// What `PUT /apps/{name}/limits` sets: all four at once; null is Ghost's default.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct AppLimitsUpdate {
+    /// 1 to 3,600 seconds.
+    #[serde(default)]
+    pub timeout: Option<i64>,
+    /// 1 to 600 seconds.
+    #[serde(default)]
+    pub connect_timeout: Option<i64>,
+    /// 1,000 to 100,000 characters.
+    #[serde(default)]
+    pub result_chars: Option<i64>,
+    /// Tool names, as the app gives them (`search`, not `github_search`); 40 at the most.
+    #[serde(default)]
+    pub pinned: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1023,6 +1164,14 @@ pub struct WatchInfo {
     #[serde(default)]
     #[schema(required)]
     pub open: i64,
+    /// `agent:<slug>` for a watch an agent made (ADR 0052); None for the operator's own.
+    #[serde(default)]
+    #[schema(required)]
+    pub made_by: Option<String>,
+    /// Declared and not polled: an agent's watch paused by it or by the operator.
+    #[serde(default)]
+    #[schema(required)]
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1124,6 +1273,7 @@ pub enum RouteName {
     Call,
     Sms,
     Whatsapp,
+    Ntfy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1159,6 +1309,13 @@ pub struct RoutesView {
     #[schema(inline)]
     #[schema(required)]
     pub available: Vec<RouteName>,
+    /// The password in Ghost's vault that holds the ntfy topic's address (ADR 0051); the
+    /// address itself never crosses the API.
+    #[serde(default)]
+    pub ntfy: Option<String>,
+    /// The password that holds the topic's access token, when it needs one.
+    #[serde(default)]
+    pub ntfy_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

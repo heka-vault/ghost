@@ -86,11 +86,12 @@ use crate::passwords::{
     wait_for_vault,
 };
 use crate::phone::{PhoneListener, PhoneServers, PhoneStore};
-use crate::routes::{DeskRoute, DesktopRoute, PhoneRoute, Raised};
+use crate::routes::{CallRoute, DeskRoute, DesktopRoute, NtfyRoute, PhoneRoute, Raised};
 use crate::wake::{
     DetectorSpec, Event, FileWakeDetector, MediaFactory, SpokenWakeDetector, SttFactory, WAKE_FILE,
     WakeDetector, WakeListener, desk_capture, detector_phrases, wake_model_paths, wake_resources,
 };
+use ghost_core::questions::{AppAsker, Question, Questions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -101,6 +102,8 @@ pub const WAITING_REFRESH_SECS: u64 = 15;
 pub const AT_DESK_SECS: u64 = 15 * 60;
 /// How long the wind-down waits for the control API to close.
 pub const API_STOP_WAIT: Duration = Duration::from_secs(5);
+/// How often the transcript is pruned (ADR 0041).
+pub const PRUNE_EVERY: Duration = Duration::from_secs(24 * 3600);
 
 /// The model connection's settings (ADR 0037).
 pub fn llm_env_keys() -> BTreeSet<&'static str> {
@@ -304,6 +307,8 @@ async fn play_live(samples: Vec<i16>, rate: u32, device: Option<String>) -> Resu
 pub struct PendingPhone {
     pub media: Arc<dyn ghost_rtc::Media>,
     pub line: String,
+    /// The waiting-list key of the ring this call answers (ADR 0051), when it is one.
+    pub item: Option<String>,
 }
 
 /// The live peer, for a renegotiation and trickled candidates.
@@ -374,6 +379,11 @@ pub struct Daemon {
     pub(crate) session: Mutex<Option<Arc<GhostSession>>>,
     pub(crate) last_desk_session: Mutex<Option<Instant>>,
     pub(crate) phone_route: Arc<PhoneRoute>,
+    /// The phone's live stream (ADR 0051): what it is told and what waits on its word.
+    pub(crate) phone_feed: Arc<crate::phone::stream::PhoneFeed>,
+    /// The questions for the operator (ADR 0051); set once in `run`, and read by the
+    /// connected apps' asker before then (it declines until they are there).
+    pub(crate) questions: Arc<OnceLock<Arc<Questions>>>,
     pub(crate) first_via: Mutex<TurnVia>,
     pub(crate) heard: Mutex<Option<Heard>>,
     pub(crate) start_in: Mutex<String>,
@@ -417,6 +427,7 @@ impl Daemon {
             build,
         ));
         let (raise_tx, raise_rx) = mpsc::unbounded_channel();
+        let phone_feed = Arc::new(crate::phone::stream::PhoneFeed::new());
         Self {
             cfg: Mutex::new(cfg),
             voice: Mutex::new(Arc::new(voice)),
@@ -434,7 +445,9 @@ impl Daemon {
             reach: Mutex::new(None),
             session: Mutex::new(None),
             last_desk_session: Mutex::new(None),
-            phone_route: Arc::new(PhoneRoute::new()),
+            phone_route: Arc::new(PhoneRoute::new(phone_feed.clone())),
+            phone_feed,
+            questions: Arc::new(OnceLock::new()),
             first_via: Mutex::new(TurnVia::Voice),
             heard: Mutex::new(None),
             start_in: Mutex::new(GHOST.to_string()),
@@ -543,6 +556,11 @@ impl Daemon {
         self.late.routes.get().cloned()
     }
 
+    /// The questions for the operator (ADR 0051).
+    pub fn questions(&self) -> Option<Arc<Questions>> {
+        self.questions.get().cloned()
+    }
+
     pub fn deps(&self) -> Option<Arc<Deps>> {
         self.late.deps.get().cloned()
     }
@@ -637,12 +655,74 @@ impl Daemon {
         }
     }
 
+    /// A question was asked or settled (ADR 0051): the event stream says so, and the
+    /// phone's stream with it.
+    pub(crate) fn question_changed(&self, q: &Question) {
+        let view = ghost_api::questions::question_view(q);
+        self.state.bus.publish(&ghost_api::models::Event::Question {
+            question: view.clone(),
+        });
+        self.phone_feed.question(view);
+    }
+
+    /// The phone's live stream follows the waiting list (ADR 0051): its snapshot is the
+    /// list and the questions as the phone sees them, and each change on the bus is said
+    /// to it. A tap beside the bus, so it is not the desktop being open (ADR 0031).
+    pub(crate) fn start_phone_feed(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        let view = move || -> (Vec<ghost_api::models::WaitingItemView>, Vec<ghost_api::models::QuestionView>) {
+            let Some(d) = weak.upgrade() else {
+                return (Vec::new(), Vec::new());
+            };
+            let Some(deps) = d.deps() else {
+                return (Vec::new(), Vec::new());
+            };
+            let items = ghost_api::waiting_view(&deps)
+                .map(|v| v.items)
+                .unwrap_or_default();
+            let questions = ghost_api::questions::questions_view(&deps)
+                .map(|v| v.questions)
+                .unwrap_or_default();
+            (items, questions)
+        };
+        let view: crate::phone::stream::Snapshot = Arc::new(view);
+        self.phone_feed.set_snapshot(view.clone());
+        let mut bus = self.state.bus.tap();
+        let feed = self.phone_feed.clone();
+        let stop = self.stop.clone();
+        tokio::spawn(async move {
+            loop {
+                let text = tokio::select! {
+                    () = stop.cancelled() => return,
+                    t = bus.recv() => match t {
+                        Ok(t) => t,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(_) => return,
+                    },
+                };
+                let kind = serde_json::from_str::<serde_json::Value>(&text)
+                    .ok()
+                    .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(String::from));
+                if matches!(kind.as_deref(), Some("waiting" | "pending" | "outcome")) {
+                    let (items, _) = view();
+                    feed.waiting_now(&items);
+                }
+            }
+        });
+    }
+
     /// Re-read Ghost's own items now and then (a change's time running out, a server
     /// that went away; watches sync their own), and let the routes send what is due
     /// (ADR 0031).
     async fn refresh_waiting(self: Arc<Self>) {
         loop {
             tokio::time::sleep(Duration::from_secs(WAITING_REFRESH_SECS)).await;
+            // A question past its time is expired, and leaves the list (ADR 0051).
+            if let Some(q) = self.questions()
+                && let Err(e) = q.expire(None)
+            {
+                error!("questions: {e}");
+            }
             if let Some(w) = self.waiting()
                 && let Err(e) = w.refresh(None)
             {
@@ -666,6 +746,18 @@ impl Daemon {
             && self.phone_q_empty()
             && self.raise_q_empty()
             && !is_dictating(&self.cfg().dictation_flag)
+    }
+
+    /// The phone's own session is running, or is about to start: the phone route does
+    /// not alert over it.
+    pub(crate) fn on_the_phone(&self) -> bool {
+        *lock(&self.origin) == Some(SessionOrigin::Phone) || !self.phone_q_empty()
+    }
+
+    /// Any session is running, or a phone session is about to: the call route does not
+    /// ring over it.
+    pub(crate) fn in_session(&self) -> bool {
+        self.session().is_some() || self.on_the_phone()
     }
 
     /// The operator is at the desk: a desk session ran lately, or the desktop app is
@@ -1135,6 +1227,10 @@ impl Daemon {
             )
             .with_limits(app_limits),
         );
+        // ADR 0051: an app's question becomes a question from that app. Set before the
+        // apps connect, so they are told Ghost takes questions; until the questions exist
+        // (a moment later) one is declined.
+        apps.set_asker(Arc::new(AppAsker::new(d.questions.clone())));
         apps.connect().await;
         apps.supervise(); // ADR 0046: a connection that dies is opened again
         let catalog = Arc::new(Catalog::new(&cfg.catalog_path));
@@ -1226,7 +1322,8 @@ impl Daemon {
             ConversationsOptions {
                 default_voice: voice.tts_voice.clone(),
                 default_speed: voice.tts_speed,
-                retention: chrono::Duration::days(cfg.turn_retention_days),
+                retention: (cfg.turn_retention_days > 0)
+                    .then(|| chrono::Duration::days(cfg.turn_retention_days)),
                 ..ConversationsOptions::default()
             },
         )?);
@@ -1284,15 +1381,73 @@ impl Daemon {
                 .with_on_change(on_change.clone()),
         );
         d.late.waiting.set(waiting.clone()).ok();
+        // ADR 0051: questions for the operator, on the waiting list. A question asked from
+        // a run is followed up by a run of the same agent once it is answered.
+        let questions =
+            Arc::new(Questions::new(store.clone(), waiting.clone()).with_jobs(jobs.clone()));
+        match questions.recover(None) {
+            Ok(n) if n > 0 => info!("questions: {n} from an app, open at the last stop, declined"),
+            Ok(_) => {}
+            Err(e) => warn!("questions: {e}"),
+        }
+        questions.on_change({
+            let weak = Arc::downgrade(d);
+            Arc::new(move |q| {
+                if let Some(d) = weak.upgrade() {
+                    d.question_changed(q);
+                }
+            })
+        });
+        let _ = d.questions.set(questions.clone());
+        // ADR 0047, ADR 0052: a written turn with an agent, with nobody there: what an
+        // agent's `ask_agent` and an outside tool's `agent_ask` run.
+        // One at a time per agent with its scheduled runs, asks first (ADR 0047).
+        let ask_runner = Arc::new(
+            crate::outside::AskRunner::new(
+                Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
+                d.stop.child_token(),
+            )
+            .with_turns(jobs.turns().clone(), ghost_core::schedules::ASK_WAIT),
+        );
+        // Made a moment later; Ghost's own app reads them from then on (ADR 0052).
+        let late_watches: ghost_app::Late<WatchRunner> = Arc::default();
+        let late_routes: ghost_app::Late<RouteEngine> = Arc::default();
         // ADR 0045: Ghost is an app its own agents use, served in process before any
-        // session can open. It needs no vault, no network and no sign-in.
-        let ghost_server = GhostServer::new(ghost_app::Parts {
-            store: store.clone(),
-            waiting: waiting.clone(),
-            apps: Arc::downgrade(&apps),
-            status: crate::ghost_app::status_fn(d),
-        })
-        .with_schedules(jobs.clone());
+        // session can open. It needs no vault, no network and no sign-in. ADR 0052: and it
+        // reaches all of Ghost, through the same gate.
+        let ghost_server =
+            GhostServer::new(ghost_app::Parts {
+                store: store.clone(),
+                waiting: waiting.clone(),
+                apps: Arc::downgrade(&apps),
+                status: crate::ghost_app::status_fn(d),
+            })
+            .with_schedules(jobs.clone())
+            .with_questions(questions.clone())
+            .with_more(ghost_app::More {
+                agents: Some(conversations.clone()),
+                config_dir: Some(cfg.config_dir.clone()),
+                catalog: Some(catalog.clone()),
+                forget: Some(crate::ghost_app::forget_app(&apps, &signins, &passwords)),
+                watches: Some(late_watches.clone()),
+                refresh: Some({
+                    let folder = folder.clone();
+                    Arc::new(move || lock(&folder).refresh())
+                }),
+                routes: Some(late_routes.clone()),
+                policy: Some({
+                    let gate = gate.clone();
+                    Arc::new(move || gate.autonomy())
+                }),
+                settings: Some({
+                    let path = cfg.settings_path.clone();
+                    Arc::new(move || ghost_core::envfile::read_env(&path).unwrap_or_default())
+                }),
+                skills: Some(skills.clone()),
+                runner: Some(
+                    ask_runner.clone() as Arc<dyn ghost_core::ghost_app::outside::AgentRunner>
+                ),
+            });
         let ghost_app = match ghost_app::attach(&apps, ghost_server.clone()).await {
             Ok(attached) => {
                 gate.register(GHOST_APP, attached.app.operations());
@@ -1328,6 +1483,7 @@ impl Daemon {
                 .with_on_change(on_change.clone()),
         );
         d.late.watch_runner.set(watch_runner.clone()).ok();
+        let _ = late_watches.set(watch_runner.clone());
         // ADR 0027: webhooks, signed and parsed by declaration, checked through read_for.
         let hook_intake = Arc::new(
             HookIntake::new(
@@ -1374,18 +1530,58 @@ impl Daemon {
             },
             d.raise_tx.clone(),
         )));
-        let desktop_route = Arc::new(DesktopRoute::new({
-            let waiting = waiting.clone();
-            Arc::new(move |key: &str, now| {
-                waiting
-                    .acknowledge(key, Some(now), Some(now))
-                    .unwrap_or(false)
+        let desktop_route = Arc::new(
+            DesktopRoute::new({
+                let waiting = waiting.clone();
+                Arc::new(move |key: &str, now| {
+                    waiting
+                        .acknowledge(key, Some(now), Some(now))
+                        .unwrap_or(false)
+                })
             })
-        }));
+            // ADR 0051: a question's choices are the notification's buttons.
+            .with_questions(
+                {
+                    let questions = questions.clone();
+                    Arc::new(move |key: &str| questions.get(key).ok().flatten())
+                },
+                {
+                    let questions = questions.clone();
+                    Arc::new(move |key: &str, choice: &str| {
+                        questions
+                            .answer(key, choice, ghost_core::questions::via::DESKTOP, None)
+                            .is_ok()
+                    })
+                },
+            ),
+        );
         routes.add_route(desktop_route.clone());
+        d.phone_route.set_on_the_phone({
+            let weak = Arc::downgrade(d);
+            Arc::new(move || weak.upgrade().is_some_and(|d| d.on_the_phone()))
+        });
         routes.add_route(d.phone_route.clone());
-        *lock(&d.route_names) = vec![RouteName::Desk, RouteName::Desktop, RouteName::Phone];
+        // ADR 0051: the desk rings the phone, and ntfy for when the phone is off the tunnel.
+        routes.add_route(Arc::new(
+            CallRoute::new(d.phone_feed.clone(), Items::new(store.clone())).with_in_session({
+                let weak = Arc::downgrade(d);
+                Arc::new(move || weak.upgrade().is_some_and(|d| d.in_session()))
+            }),
+        ));
+        routes.add_route(Arc::new(NtfyRoute::new({
+            let weak = Arc::downgrade(d);
+            Arc::new(move |name: &str| weak.upgrade().and_then(|d| d.env().get(name).cloned()))
+        })));
+        *lock(&d.route_names) = vec![
+            RouteName::Desk,
+            RouteName::Desktop,
+            RouteName::Phone,
+            RouteName::Call,
+            RouteName::Ntfy,
+        ];
+        d.start_phone_feed();
         d.late.routes.set(routes.clone()).ok();
+        let _ = late_routes.set(routes.clone());
         d.late.desktop_route.set(desktop_route.clone()).ok();
         // What a session with any agent reaches (ADR 0034, ADR 0035): every connected
         // app (the operator's permissions apply in the gate), the skills, the agents' own
@@ -1422,11 +1618,25 @@ impl Daemon {
             &watch_runner,
         );
         d.late.schedules.set(schedules.scheduler.clone()).ok();
-        match conversations.prune() {
-            Ok(n) if n > 0 => info!("conversations: pruned {n} summarized turns past retention"),
-            Ok(_) => {}
-            Err(e) => warn!("conversations: prune failed: {e}"),
-        }
+        // ADR 0041: hidden turns past a week, and summarized ones past the window when the
+        // operator set one, pruned now and then daily for as long as Ghost runs.
+        tokio::spawn({
+            let conversations = conversations.clone();
+            let stop = d.stop.child_token();
+            async move {
+                loop {
+                    match conversations.prune() {
+                        Ok(n) if n > 0 => info!("conversations: pruned {n} turns past retention"),
+                        Ok(_) => {}
+                        Err(e) => warn!("conversations: prune failed: {e}"),
+                    }
+                    tokio::select! {
+                        () = stop.cancelled() => break,
+                        () = tokio::time::sleep(PRUNE_EVERY) => {}
+                    }
+                }
+            }
+        });
         d.state
             .set_apps(lock(&registered).iter().cloned().collect());
         let mut events = Events::default();
@@ -1457,10 +1667,7 @@ impl Daemon {
             Outside::new(gate.clone())
                 .with_desk(Arc::new(crate::outside::Desk(Arc::downgrade(d))))
                 // ADR 0047's run with nobody there is what `agent_ask` runs.
-                .with_runner(Arc::new(crate::outside::AskRunner::new(
-                    Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
-                    d.stop.child_token(),
-                ))),
+                .with_runner(ask_runner.clone()),
         ));
         d.late.outside.set(outside.clone()).ok();
         // The hooks listener is made now (its addresses are in the API's status) and
@@ -1821,7 +2028,8 @@ impl Daemon {
                 default_voice: voice.tts_voice.clone(),
                 default_speed: voice.tts_speed,
                 voices,
-                retention: chrono::Duration::days(cfg.turn_retention_days),
+                retention: (cfg.turn_retention_days > 0)
+                    .then(|| chrono::Duration::days(cfg.turn_retention_days)),
                 ..ConversationsOptions::default()
             },
         ) {
@@ -1890,6 +2098,8 @@ impl Daemon {
             schedules: Some(p.schedules),
             clients: Some(p.clients),
             clients_listening: p.clients_listening,
+            questions: self.questions(),
+            in_appimage: ghost_core::ghost_app::clients::in_appimage(|k| std::env::var(k).ok()),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {

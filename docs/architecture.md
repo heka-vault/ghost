@@ -27,7 +27,7 @@ flowchart LR
   SK -->|signed in, or a key| EXT[GitHub, Linear, ...]
 ```
 
-The phone app (`apps/mobile`, Expo, Android) is a second transport into the same pipeline (ADR 0005, ADR 0013), so the gate, the policy and Jev apply unchanged. It never uses the control API. A question from Ghost is answered by voice on the phone: there is no Confirm button there. Its screens read a small `Desk` interface (`apps/mobile/src/desk/types.ts`). With the screen off a session keeps the mic through a microphone foreground service (`apps/mobile/modules/ghost-call`, a local Expo module) with an End action in its notification, and routes audio to a car or headset when one is connected. It reaches the house through the phone listener below (ADR 0016): on the LAN directly, and from anywhere else through the operator's own WireGuard network, where the desk and the phone are peers of a hub that forwards only between the two (ADR 0020). Nothing public is added: no STUN, no TURN, no relay; the tunnel is the operator's.
+The phone app (`apps/mobile`, Expo, Android) is a second transport into the same pipeline (ADR 0005, ADR 0013), so the gate, the policy and Jev apply unchanged. It never uses the control API. In a call, a question from Ghost is answered by voice. Outside a call the phone holds a signed live stream and answers questions, and confirms or cancels a change waiting for a yes, with signed requests (ADR 0051; [phone-protocol.md](phone-protocol.md)). The stream is read natively, in Kotlin, by a foreground service of type `connectedDevice` (`apps/mobile/modules/ghost-call/android/.../link/`), so it lives with the app's screen closed and its JavaScript not running: it keeps the list and the cursor (encrypted with a Keystore key), posts a notification per item when the desk's phone route alerts (Got it and Later; a question's choices and an inline answer; Yes and No for a change), sends `seen` only once a notification is really up, raises a full-screen incoming call for a ring, and sends every action signed with its `id` until the desk signs an answer, taking a notification down only on the stream's word. It never holds the microphone, has its own quiet notification, can be turned off in Settings, and starts at boot only when the operator says so. Home lists what is waiting from the same state. Its screens read a small `Desk` interface (`apps/mobile/src/desk/types.ts`). With the screen off a session keeps the mic through a separate microphone foreground service (`apps/mobile/modules/ghost-call`, a local Expo module) with an End action in its notification, and routes audio to a car or headset when one is connected; during a session the connection keeps running, posts silently and shows no ring. It reaches the house through the phone listener below (ADR 0016): on the LAN directly, and from anywhere else through the operator's own WireGuard network, where the desk and the phone are peers of a hub that forwards only between the two (ADR 0020). Nothing public is added: no STUN, no TURN, no relay; the tunnel is the operator's.
 
 ### The app and the daemon
 
@@ -59,8 +59,9 @@ for is cancelled, the operator hangs up or its time is up; the app is sent
 `TurnControl::stop_calls`). A connection that died is opened again by the next call and
 in the background with backoff (`Apps::supervise`). An app that advertises documents or
 prompts gets reads over them (`<app>_list_resources`, `<app>_read_resource`,
-`<app>_list_prompts`, `<app>_get_prompt`). An app's question for the operator goes to an
-`Asker`, which today declines. Past 40 tools or 30,000 bytes of schema, most tools are
+`<app>_list_prompts`, `<app>_get_prompt`). An app's question for the operator (a form of
+one field) becomes a question from the app on the waiting list, held until the app's own
+limit and declined then (`ghost_core::questions::AppAsker`, ADR 0051). Past 40 tools or 30,000 bytes of schema, most tools are
 found with `ghost_tools_search` and not offered by name. See [apps.md](apps.md).
 
 ### Ghost's own app
@@ -77,15 +78,29 @@ a change goes through the gate, and the operator's `ghost.*` rules apply.
 
 | Tool | Kind | |
 |---|---|---|
-| `ghost_docs_search`, `ghost_docs_read` | read | Ghost's own documentation, built into the binary (the README, the glossary, this page, `apps.md`, `skills.md`, `folder.md`, `performance.md`, `phone-protocol.md`), split by heading; no model, no network |
+| `ghost_docs_search`, `ghost_docs_read` | read | Ghost's own documentation, built into the binary (the README, the glossary, this page, `apps.md`, `connect-ghost.md`, `tools.md`, `skills.md`, `folder.md`, `performance.md`, `phone-protocol.md`), split by heading; no model, no network |
 | `ghost_status` | read | Version, phase, the session and its agent, the apps and their state, how much is waiting, the model connection's provider and model, Ghost's own problems; built from the control API's `Status` |
 | `ghost_audit_recent` | read | Recent changes from the audit: what, which agent, when, how it ended |
 | `ghost_apps_list` | read | The connected apps, their state, and how many reads and changes each offers |
 | `ghost_notify`, `ghost_resolve` | change | An item from the calling agent on the waiting list, under `agent:<slug>`, and its clearing; an agent clears only its own |
 | `ghost_waiting_ack`, `ghost_waiting_snooze` | change | What `POST /waiting/ack` and `/waiting/snooze` do |
-| `ghost_tools_search` | read | The connected apps' tools that match a few words, with the name to call each by; offered only past the limits on how many tools a turn carries (ADR 0046) |
+| `ghost_tools_search` | read | The connected apps' tools, and Ghost's own past its core, that match a few words, with the name to call each by (ADR 0046, ADR 0052) |
 | `ghost_schedules_list` | read | The schedules: each one's agent, when it runs next and how the last run ended; with an id or a name, its instruction and what its last runs said (ADR 0047) |
 | `ghost_schedule_manage` | change | Create, update, pause, resume, remove or run a schedule now. When is one of `at`, `every` or `cron`. An agent manages its own; Ghost manages all |
+| `ghost_ask` | change | A question for the operator on the waiting list, up to four choices, returning its key (ADR 0051). In a session it does not wait; from a run it may wait up to two minutes, and otherwise its answer starts one more run of the same agent |
+| `ghost_question`, `ghost_questions_list` | read | A question the caller asked and its answer; the open ones and the last day's. Ghost reads every asker's |
+| `ghost_question_cancel` | change | Take back an open question the caller asked |
+| `ghost_answer` | change | The operator's answer to a question, in their exact words: only in a live session, and only when the session's dispatcher found the words in the operator's last turn (`_heard`). Never in a run, never for an outside tool |
+| `ghost_recall`, `ghost_transcript_read` | read | The stored turns, searched with SQLite FTS5 (`ghost_core::recall`, an index over `turns` kept in step by triggers, ADR 0041) or paged back through: the caller's own; Ghost's (agent zero) any agent's or all; an outside client's only those of runs it started (ADR 0052) |
+| `ghost_memory_read` | read | An agent's memory, notes and persona; its own, or any for Ghost |
+| `ghost_apps_catalog_search`, `ghost_app_tools` | read | Ghost's copy of the catalog, never queried live on a turn; one connected app's tools |
+| `ghost_app_connect`, `ghost_app_disconnect` | change | The desktop's connect and disconnect (`catalog::connect`, `apps::address_spec`, `apps::edit_apps`, `Apps::add`). They ask by default. A sign-in or a key is the operator's: the app is left with an item on the waiting list saying what to do |
+| `ghost_watches_list`, `ghost_watch_manage` | read, change | The watches, and one validated writer of `watches.json`: a polled watch only, recorded as `made_by` the agent, refused whole when the file would not pass `ghostd check`. Making or changing one asks by default |
+| `ghost_routes_read`, `ghost_quiet_until`, `ghost_quiet_off` | read, change | The routes and do-not-disturb, as "nothing until two" sets it |
+| `ghost_permissions_read`, `ghost_settings_read` | read | The mode and the rules; the settings that are not passwords or addresses, and the model in use. No tool changes either |
+| `ghost_output_read`, `ghost_output_delete` | read, change | A file in `out/`, a part at a time within the result budget, and its deletion |
+| `ghost_ask_agent` | change | A written task for another agent, through the run with nobody there (ADR 0047), marked `[asked by <agent>, another agent]` under `run-agentask-<id>`; depth 1, three running per session |
+| `ghost_skill_write` | change | A `SKILL.md` in Ghost's own skills folder, the one file and nothing else; asks by default |
 
 Three things differ from an app the operator connected. Its text is Ghost's own, so
 descriptions reach the model whole and results are not cut on the way out (the tools cap
@@ -94,9 +109,22 @@ result budget, since what it returns is the apps' text). The calling agent is ne
 model writes: the session's dispatcher sets `_agent` to the agent the session is with.
 And where no rule names a `ghost.*` change and the mode is `open`, it runs at `quiet`,
 since an item on the waiting list is its own announcement; `ask = ["ghost.schedule_manage"]`
-has Ghost ask before an agent sets up a schedule. The handler keeps nothing per
+has Ghost ask before an agent sets up a schedule. Four kinds of change ask by default
+instead (ADR 0052, `ghost_app::asks_by_default`): connecting or disconnecting an app,
+writing a skill, and making or changing a watch. The handler keeps nothing per
 connection, and the same one is served to the operator's other tools
-([below](#the-listener-for-outside-tools)).
+([below](#the-listener-for-outside-tools)), less what `ghost_app::NOT_FOR_OUTSIDE` names.
+
+Only a core of these tools is offered by name on every turn (`ghost_app::CORE`: `notify`,
+`resolve`, `ask`, `answer`, `waiting_ack`, `status`, `docs_search`, `recall`,
+`schedule_manage`, `tools_search`); the rest are found with `ghost_tools_search` and
+offered by name from the next model call, through the same deferral ADR 0046 made for
+connected apps (`Apps::hidden`, `Recent`). Measured by
+`what_ghosts_own_app_costs_every_turn`: 10 tools and 7,051 bytes of schema on every turn,
+where before ADR 0052 it was 16 tools and 8,397 bytes; all 35 offered by name would be
+17,169. `ghost_docs_search` returns a section under 1,200 characters whole and a longer
+one as its best whole sentences or list items (400 characters at most), so an answer
+rarely needs `ghost_docs_read` after it. [tools.md](tools.md) lists every tool with its default level.
 
 ### Permissions
 
@@ -121,11 +149,13 @@ Everything the operator edits is in `~/.config/ghost/` (ADR 0035; there are no d
 
 ### The phone listener
 
-`ghostd` serves a second, narrow HTTP app for the phone when `GHOST_PHONE_LISTEN` is set (one or more `host:port`, comma separated, bound to exactly those addresses: the LAN one first, then the tunnel one; off when empty). The first must bind at start; a later one whose interface isn't up yet is retried every few seconds. `/pair` and `/hello` carry the whole list, so the phone keeps every address and uses the first that answers. It is not the control API, shares no routes with it, and doesn't proxy it (`ghostd::phone`). Six routes: `POST /pair` spends a six-digit code the desktop app got from the control API's `POST /phone/pairing`; `GET /hello`, `GET /audit` and `GET /conversations` return the control API's `Status`, `AuditPage` and the live threads, built by the same functions; `POST`/`PATCH /offer` is WebRTC signalling, and the offer may name the thread the session opens in (the phone's Home lists them under the ghost; a thread called directly greets as itself); `POST /end` ends the phone's session. Every route but `/pair` is HMAC-signed both ways by a middleware, with a 60 s clock window and a nonce cache; the paired device and its secret are in `~/.local/share/ghost/phone.json` (0600). The wire format is [phone-protocol.md](phone-protocol.md).
+`ghostd` serves a second, narrow HTTP app for the phone when `GHOST_PHONE_LISTEN` is set (one or more `host:port`, comma separated, bound to exactly those addresses: the LAN one first, then the tunnel one; off when empty). The first must bind at start; a later one whose interface isn't up yet is retried every few seconds. `/pair` and `/hello` carry the whole list, so the phone keeps every address and uses the first that answers. It is not the control API, shares no routes with it, and doesn't proxy it (`ghostd::phone`). Six routes: `POST /pair` spends a six-digit code the desktop app got from the control API's `POST /phone/pairing`; `GET /hello`, `GET /audit` and `GET /conversations` return the control API's `Status`, `AuditPage` and the live threads, built by the same functions; `POST`/`PATCH /offer` is WebRTC signalling, and the offer may name the thread the session opens in (the phone's Home lists them under the ghost; a thread called directly greets as itself); `POST /end` ends the phone's session; `/stream`, `/questions`, `/changes/*`, `/seen` and `/ring` are the live channel (ADR 0051, below). Every route but `/pair` is HMAC-signed both ways by a middleware (the stream's messages each signed on their own), with a 60 s clock window and a nonce cache; the paired device and its secret are in `~/.local/share/ghost/phone.json` (0600). The wire format is [phone-protocol.md](phone-protocol.md).
 
 An accepted offer is answered by the media crate (`crates/ghost-rtc`, str0m by default, measured against webrtc-rs and libwebrtc; no ICE servers, the socket bound on the listener's own address), which the listener hands to the daemon. The passive loop waits on it next to the wake detector: it cancels the wake task, which releases the desk mic, and runs a session whose transport is the phone's media (16 kHz in, Kokoro's 24 kHz out, the thinking sound mixed into the phone's track). A phone session doesn't duck music or chime on the desk, and `Status.session_origin` is `phone`. An offer while any session runs, or while the models load, is refused (409 `busy`, 503 `not_ready`). The session ends when the peer closes or stops its keepalive, on `POST /end`, or on RTVI `disconnect-bot`, and its ending closes the peer. A phone session is ended, not cancelled: the end is queued behind whatever is being said, and the shared TTS stage is left as it was for the next session.
 
 The data channel carries RTVI (`ghost_rtc::rtvi`, `ghost_voice::rtvi`): the desk acts only on `client-ready` and `disconnect-bot` (no typed text, raw audio or function results), and sends `bot-ready` and the speaking events but no transcripts, LLM text, metrics or logs. The daemon forwards its own event bus (`status`, `turn`, `pending`, `outcome`, `conversation`, `waiting`, `apps`; never `log`) to the phone as `server-message`s, the same JSON the control API's WebSocket sends.
+
+Outside a call the phone holds one live stream (ADR 0051, `ghostd::phone::stream`): `GET /stream`, Server-Sent Events, the request signed like any other and each message signed over its nonce. The desk's `PhoneFeed` keeps a numbered log of what the phone is told (the waiting list's changes, found by comparing the list after each `waiting`, `pending` or `outcome` on the bus; every question as it is asked and settled; alerts; rings) and its last 512 entries, so a phone that reconnects with its cursor gets what it missed, and one that cannot gets a snapshot. A heartbeat goes out every 15 seconds. The phone answers with signed `POST`s, each done once per client `id`: `/questions/answer` and `/questions/decline` (route `phone`), `/changes/confirm` and `/changes/cancel` (the gate's confirm by id with `classifier: phone`), `/seen` and `/ring`. A question answered by voice reaches the phone by its choice only; the stream never carries a transcript, a turn, a log line or audio.
 
 ### The listener for outside tools
 
@@ -159,8 +189,13 @@ audit has the row under the session `client:<name>`. A client's `notify` is an i
 `client:<name>`, its title led by "From Claude Code:", and a client resolves only its own.
 
 Outside clients have the tools above (without the `ghost_` prefix, which is the
-session's naming; not `tools_search`, since a client cannot call an app's tool) and four
-of their own, which Ghost's agents are not offered. The schedules are theirs through the
+session's naming) less `answer` and what `ghost_app::NOT_FOR_OUTSIDE` names (ADR 0052:
+`tools_search`, since a client cannot call an app's tool; an agent's memory; the
+permissions and the settings; the catalog and an app's own tools; and every change to apps,
+watches, quiet, outputs, skills and other agents), and four of their own, which Ghost's
+agents are not offered. A client's `recall` and `transcript_read` reach only the turns of
+the runs it started: its `agent_ask` turns (`run-ask-<client>-<id>`) and its schedules'
+runs. The schedules are theirs through the
 same gate: what a client sets up is made by `client:<name>` and runs as the agent it
 names, Ghost when it names none; a client manages only its own, and of the others reads
 only that they are there and when they run.
@@ -168,7 +203,8 @@ only that they are there and when they run.
 | Tool | Kind | |
 |---|---|---|
 | `agents_list` | read | The agents, their jobs, whether one is in a session |
-| `agent_ask` | change | A written turn for an agent and its written answer, through the run with nobody there (ADR 0047: `ghostd::outside::AskRunner` over `ghost_voice::headless`, behind `ghost_app::outside::AgentRunner`). The same dispatcher and gate; a change that resolves to `ask` in it is set aside on the waiting list, since nothing a client writes is the operator's yes; 30 model calls and ten minutes at the most; kept in the agent's transcript as `[asked by <tool>, an outside tool]` under a run's session id; stopped when the client cancels the request or drops the connection |
+| `agent_ask` | change | A written turn for an agent and its written answer, through the run with nobody there (ADR 0047: `ghostd::outside::AskRunner` over `ghost_voice::headless`, behind `ghost_app::outside::AgentRunner`). The same dispatcher and gate; a change that resolves to `ask` in it is set aside on the waiting list, since nothing a client writes is the operator's yes; 30 model calls and ten minutes at the most; kept in the agent's transcript as `[asked by <tool>, an outside tool]` under the session `run-ask-<client>-<id>`; stopped when the client cancels the request or drops the connection |
+| `ask`, `question`, `questions_list`, `question_cancel` | change, read, read, change | A question for the operator from the tool (ADR 0051): `ask` returns its key at once or holds the request up to two minutes (`wait_s`); `events_wait` says when it is settled and `question` reads the answer. A client reads only its own. There is no `answer` for an outside tool |
 | `say` | change | One sentence through desk voice (ADR 0032, `ghostd::outside::Desk`): only with `desk` in `[routes].enabled`, outside quiet hours and do-not-disturb, with the desk idle; always an item on the waiting list first |
 | `events_wait` | read | A long poll (60 s at most) over a numbered ring the daemon fills from its own event bus through a tap (`EventBus::tap`, not counted as the desktop being open): waiting-list items added, changed, acknowledged, snoozed or resolved, a change's outcome, a session starting or ending; never a log line, a turn or audio |
 
@@ -199,7 +235,7 @@ One Cargo workspace (ADR 0039): the crates under `crates/` and the desktop app's
 | `ghost-core` | The write gate and what feeds it (ADR 0007, 0011, 0034, 0035): tool sources (`ghost_core::source::ToolSource`), the apps (`ghost_core::apps`), their catalog and sign-in (`ghost_core::catalog`, `ghost_core::signin`), the model connection (`ghost_core::connection`: the providers, which password holds the key, the settings from before it, ADR 0037), Ghost's folder and its rules (`ghost_core::folder`, `ghost_core::rules`), the operator's permissions (`ghost_core::permissions`, `ghost_core::policy`), proposals over typed targets and change sets, the confirmation classifier and Jev, the audit store, the vault (`ghost_core::passwords`) and redaction, the waiting list, watches, webhooks, routes, skills and outputs, the agents (ADR 0014), the schedules and their scheduler (`ghost_core::schedules`, ADR 0047), and Ghost's own app (`ghost_core::ghost_app`, ADR 0045). Depends on no other crate of the workspace. Its two binaries, `ghost-mock-github` and `ghost-scripts`, are the two apps `infra/example/apps.json` names |
 | `ghost-core::conversations` | The agents (ADR 0014, ADR 0035): the registry mirrored from the folders, the transcript, every compaction version, and the files per agent under `~/.config/ghost/agents/<slug>/` (`agent.json`, `persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | `heka-ghost-desktop` | The shell (`apps/desktop/src-tauri`): the window, the tray, autostart, and the daemon's supervision (above); the window's bridge to the socket is typed by the same structs the daemon serializes |
-| SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions, the items, the webhook deliveries, the schedules and their runs |
+| SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions, the items, the questions, the webhook deliveries, the schedules and their runs |
 
 ## Conversation flow
 
@@ -232,6 +268,25 @@ the alerting, and a changed item alerts again. `GET /waiting`, `POST /waiting/ac
 sends a `waiting` event, and the model reads it with `waiting_list` ("what needs me?"),
 typed fields only.
 
+### Questions (ADR 0051)
+
+A question is an item with an answer (`ghost_core::questions`): on the waiting list under
+its asker (`agent:<slug>`, `client:<name>`, `app:<name>`), with the rest in the
+`questions` table: who asked, the words, up to four choices and whether only they will
+do, the urgency, when it expires, and what came of it (answered with the operator's words,
+the choice they clearly are, the route and when; declined; expired; taken back).
+Answering is its acknowledgment and its resolution. An agent asks with `ghost_ask`, an
+outside tool with `ask`, and a connected app with a one-field form (`AppAsker`). The
+answer comes only from the operator: a click or their typed words in the desktop (route
+`desktop`, `/questions/answer`, or the desktop notification's buttons), a signed request
+from the paired phone (`phone`), or their voice in a session (`voice`, `ghost_answer`,
+whose words the dispatcher checks against the operator's last turn). A choice is matched
+by fixed rules, never by a model. A question asked from a run is followed up: its answer
+queues one more run of the same agent with the question and the answer (once per
+question, through the scheduler's once-per-key rule). A change waiting for a yes is shown
+as the question Yes or No; Yes is the gate's own confirm by id (`ui` from the desktop,
+`phone` from the phone). The bus sends a `question` event; `GET /questions` lists them.
+
 ### Routes (ADR 0031)
 
 `ghost_core::routes::RouteEngine` ticks with the waiting list's refresh (every 15 s): for each
@@ -256,7 +311,25 @@ items, which wait in the context (the first five titles). The phase is `asking`.
 within 15 seconds acknowledges those five; "not now" snoozes them for 30 minutes; silence
 ends the session with nothing kept, and the engine hands the items to the next route at
 once. A desktop notification's button acknowledges what it showed, unless the item changed
-after.
+after; a question alone in its notification has its choices as the buttons, and a click
+is the operator's answer.
+
+A question in the digest or in desk voice's note is put, not announced (ADR 0051): "Ledger
+asks: should the October invoice go out today? Yes or no?", last in the line, and the
+model's note carries its key and says to record the operator's exact words.
+
+The phone route (`ghostd::routes::PhoneRoute`) sends an `alert` on the phone's live stream
+and is delivered only when the phone answers `POST /seen` within 15 seconds; with no
+stream open it is unavailable at once. The call route (`CallRoute`, `call` in
+`[routes].enabled`, the call caps apply) rings the phone for the first item at `call`
+urgency: answered, the phone opens a session through `/offer` with the agent and the
+item, which Ghost opens with, and that is the acknowledgment; declined, the item is
+snoozed; unanswered after 30 seconds, nobody heard. The ntfy route (`NtfyRoute`, `ntfy` in
+`[routes].enabled`, the topic's address and token named as passwords in `[routes]`) posts
+a count and the kinds of source to the operator's ntfy topic, titles only with
+`carry = "title"`, at most `ntfy_per_hour` (4); it can never be acknowledged and is last on
+any ladder louder than the digest. It is plain HTTPS from the routes code: the one
+deliberate exception to "never a bespoke client" (ADR 0051).
 
 ### Schedules and runs (ADR 0047)
 
@@ -282,7 +355,9 @@ there, and the instruction is never taken for the operator's yes.
 
 The scheduler (`ghost_core::schedules::Scheduler`, started by `ghostd::schedules`) looks
 every 15 seconds and when something is queued: it claims what is due, writes the run's row
-(`schedule_runs`) before the run starts, and runs one job at a time per agent. With a
+(`schedule_runs`) before the run starts, and runs one job at a time per agent, taking
+turns with the asks of that agent (`agent_ask`, `ask_agent`), which go first and give up
+as busy after 60 seconds (`ghost_core::schedules::turns`). With a
 check, it first calls the app's read-only tool through the watches' read path
 (`AppReader`, the permissions' `block` rules apply), hashes the result with its keys in
 order, and runs the agent only when the hash changed, telling it which lines did. After
@@ -305,7 +380,7 @@ shares nothing mutable with it: no microphone, no speaker, no listener on the ev
 
 ### Memory and compaction
 
-Each conversation loads only its own persona, memory and notes. The memory is a rolling summary kept in `memory.md`, produced by the session's own summarizer (`ghost_voice::llm::Compaction`) with a tokens-only trigger (24k estimated tokens, last 20 messages kept raw, summary up to 3k; `GHOST_COMPACT_*`). Each applied summary is recorded as a version and written to the file through the gate; the file is the source of truth on resume, so an edit by hand is folded into the next version. Summarized turns stay in SQLite, flagged, and are pruned after `GHOST_TURN_RETENTION_DAYS` (90). Raw tool results are never stored, so old untrusted text does not re-enter a later session.
+Each conversation loads only its own persona, memory and notes. The memory is a rolling summary kept in `memory.md`, produced by the session's own summarizer (`ghost_voice::llm::Compaction`) with a tokens-only trigger (24k estimated tokens, last 20 messages kept raw, summary up to 3k; `GHOST_COMPACT_*`). Each applied summary is recorded as a version and written to the file through the gate; the file is the source of truth on resume, so an edit by hand is folded into the next version. Summarized turns stay in SQLite, flagged, and are kept for recall unless `GHOST_TURN_RETENTION_DAYS` sets a window (0, keep, by default); hidden turns (a reset or a delete) are pruned after a week, and pruning runs at start and then daily (ADR 0041). Raw tool results are never stored, so old untrusted text does not re-enter a later session. Every stored turn is in a full-text index (`turns_fts`, FTS5, kept in step by triggers, built once when an older database opens; ADR 0041), which `ghost_recall` searches: a turn added is found at once, a compacted one until it is pruned, a hidden one never.
 
 ## Writes
 

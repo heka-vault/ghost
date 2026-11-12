@@ -247,6 +247,7 @@ function ConnectDialog({ open, taken, onClose, onConnected }: { open: boolean; t
         }
       >
         <div className="set-tools__made">
+          {made.note ? <Notice tone="info">{made.note}</Notice> : null}
           <CopyBlock label="For Claude Code, run" text={made.claude_code} />
           <CopyBlock label="For Cursor and other tools, add to their config" text={made.config_json} multiline />
           <CopyBlock label="Token" text={made.token} />

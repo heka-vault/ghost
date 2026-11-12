@@ -60,8 +60,12 @@ pub const GHOST_SOURCE: &str = SKILLS_GHOST_SOURCE;
 /// The operator's `~/.agents/skills`.
 pub const HOME_SOURCE: &str = "home";
 pub const DEFAULT_HOME: &str = "~/.agents/skills";
-pub const MAX_BODY_CHARS: usize = 6000;
-pub const MAX_FILE_CHARS: usize = 6000;
+/// What `read_skill` returns of a skill's body or one of its files: the budget an app's
+/// result has (ADR 0046, ADR 0052; it was 6,000 characters, which cut working skills off).
+pub const MAX_BODY_CHARS: usize = crate::apps::MAX_RESULT_TEXT;
+pub const MAX_FILE_CHARS: usize = crate::apps::MAX_RESULT_TEXT;
+/// The longest description a skill an agent writes may have.
+pub const WRITTEN_DESCRIPTION_MAX: usize = 300;
 pub const MAX_INDEX_SKILLS: usize = 30;
 pub const MAX_DESCRIPTION_CHARS: usize = 140;
 pub const MAX_FILES_LISTED: usize = 40;
@@ -1059,6 +1063,91 @@ impl Skills {
         out.insert("file".into(), Value::String(file.to_string()));
         out.insert("text".into(), Value::String(clip(&text, MAX_FILE_CHARS)));
         Ok(out)
+    }
+
+    /// A skill an agent wrote (ADR 0052's `skill_write`, after the gate let it through):
+    /// one `SKILL.md` in Ghost's own folder and nothing else, so never a script. Checked as
+    /// `skills.add` checks a folder: the name, the front matter, the result loading as a
+    /// skill. A skill of the operator's own (`~/.agents/skills`) or one installed from
+    /// GitHub is never replaced; neither is one of Ghost's unless `replace` says so.
+    pub fn write_skill(
+        &self,
+        name: &str,
+        description: &str,
+        body: &str,
+        replace: bool,
+        by: &str,
+    ) -> anyhow::Result<Skill> {
+        let name = name.trim().to_lowercase();
+        if !NAME_RE.is_match(&name) {
+            return Err(SkillsError::Invalid(format!(
+                "{} is not a skill name (letters, digits, dots, dashes)",
+                py_repr(&name)
+            ))
+            .into());
+        }
+        let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
+        if description.is_empty() || description.chars().count() > WRITTEN_DESCRIPTION_MAX {
+            return Err(SkillsError::Invalid(format!(
+                "a skill's description is one line, {WRITTEN_DESCRIPTION_MAX} characters at most"
+            ))
+            .into());
+        }
+        let body = body.trim();
+        if body.is_empty() || body.chars().count() > MAX_BODY_CHARS {
+            return Err(SkillsError::Invalid(format!(
+                "a skill's body is its instructions, {MAX_BODY_CHARS} characters at most"
+            ))
+            .into());
+        }
+        if let Some(there) = self.all().into_iter().find(|s| s.name == name) {
+            if there.source != GHOST_SOURCE {
+                return Err(SkillsError::Invalid(format!(
+                    "{name} is the operator's own skill; pick another name"
+                ))
+                .into());
+            }
+            if read_origins(&self.ghost_dir).contains_key(&name) {
+                return Err(SkillsError::Invalid(format!(
+                    "{name} was installed from GitHub; the operator updates it from there"
+                ))
+                .into());
+            }
+            if !replace {
+                return Err(SkillsError::Invalid(format!(
+                    "there is already a skill called {name}: say replace, or pick another name"
+                ))
+                .into());
+            }
+        }
+        let text = format!(
+            "---\nname: {name}\ndescription: {}\n---\n\n{body}\n\n<!-- written by {by} through Ghost -->\n",
+            serde_json::to_string(&description)?
+        );
+        parse_front_matter(&text)?;
+        fs::create_dir_all(&self.ghost_dir)?;
+        let tag = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        let staged = self.ghost_dir.join(format!(".{name}.write-{tag}"));
+        fs::create_dir(&staged)?;
+        let written = fs::write(staged.join(SKILL_FILE), &text)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| {
+                self.writer.install(
+                    &self.ghost_dir.join(&name),
+                    &staged,
+                    true,
+                    &format!("the skill {name}"),
+                )
+            });
+        let _ = fs::remove_dir_all(&staged);
+        written?;
+        write_origin(&self.ghost_dir, &name, None)?;
+        self.refresh();
+        self.all()
+            .into_iter()
+            .find(|s| s.name == name && s.source == GHOST_SOURCE)
+            .filter(Skill::usable)
+            .ok_or_else(|| SkillsError::Invalid(format!("{name} did not load as a skill")).into())
     }
 
     // --- operations through the gate ---------------------------------------------------

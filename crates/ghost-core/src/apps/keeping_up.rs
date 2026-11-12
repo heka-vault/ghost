@@ -962,6 +962,106 @@ async fn a_decline_reaches_the_app() {
     assert_eq!(DeclineAll.ask(question).await, Answer::Declined);
 }
 
+/// ADR 0051: the real asker. The app's form becomes a question from the app on the
+/// operator's waiting list, the operator's answer goes back as the form's field, and a
+/// question nobody answers in the app's time is declined.
+async fn asking_the_operator(timeout: Duration) -> (Arc<App>, Arc<crate::questions::Questions>) {
+    use crate::questions::{AppAsker, Questions};
+    let store = Arc::new(Store::in_memory().unwrap());
+    let waiting = Arc::new(WaitingList::new(Items::new(store.clone())));
+    let questions = Arc::new(Questions::new(store, waiting));
+    let cell = Arc::new(std::sync::OnceLock::new());
+    let _ = cell.set(questions.clone());
+    let state = Arc::new(Mutex::new(State {
+        tools: vec![tool("ask", "Ask.", true)],
+        ..State::default()
+    }));
+    let pipe = Arc::new(Pipe {
+        state,
+        servers: Mutex::new(Vec::new()),
+        opens: AtomicUsize::new(0),
+        down: Mutex::new(false),
+    });
+    let app = App::new(spec("shifty"), Arc::new(BTreeMap::new()), None)
+        .with_limits(Limits {
+            ask_timeout: timeout,
+            ..Limits::default()
+        })
+        .with_connector(pipe)
+        .with_asker(Arc::new(AskerSlot::with(Arc::new(AppAsker::new(cell)))));
+    let app = Arc::new(app);
+    app.connect(false).await.unwrap();
+    (app, questions)
+}
+
+#[tokio::test]
+async fn an_apps_question_is_put_to_the_operator_and_their_answer_goes_back() {
+    let (app, questions) = asking_the_operator(Duration::from_secs(10)).await;
+    let call = tokio::spawn({
+        let app = app.clone();
+        async move { app.call("ask", Map::new(), true).await.unwrap() }
+    });
+    let mut q = None;
+    until("the question is asked", || {
+        q = questions.open(None).unwrap().pop();
+        q.is_some()
+    })
+    .await;
+    let q = q.unwrap();
+    // The app's question, as the app's: attributed, its choices, only those will do.
+    assert_eq!(q.asker, "app:shifty");
+    assert_eq!(q.who, "Shifty");
+    assert!(q.spoken().starts_with("Shifty asks: Which environment?"));
+    assert_eq!(q.choices, vec!["staging", "production"]);
+    assert!(q.choices_only);
+    // Nothing answers it but the operator: it waits.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!call.is_finished());
+    questions
+        .answer(&q.key, "production", crate::questions::via::DESKTOP, None)
+        .unwrap();
+    let out = call.await.unwrap();
+    assert_eq!(out["action"], "accept");
+    assert_eq!(out["answer"], json!({"env": "production"}));
+}
+
+#[tokio::test]
+async fn an_apps_question_not_answered_in_its_time_is_declined() {
+    let (app, questions) = asking_the_operator(Duration::from_millis(1_300)).await;
+    let out = app.call("ask", Map::new(), true).await.unwrap();
+    assert_eq!(out["action"], "decline");
+    let settled = questions.recent(Some("app:shifty"), None, 5).unwrap();
+    assert_eq!(settled[0].state, crate::questions::QState::Declined);
+    assert_eq!(settled[0].answered_via.as_deref(), Some("ghost"));
+    assert!(questions.open(None).unwrap().is_empty());
+}
+
+#[test]
+fn a_form_of_more_than_one_answer_is_declined_with_why() {
+    use crate::questions::{AppForm, app_form};
+    let q = |schema: Value| Question {
+        app: "a".into(),
+        title: "A".into(),
+        message: "m".into(),
+        choices: super::ask::choices_of(&schema),
+        schema,
+        timeout: Duration::from_secs(1),
+    };
+    assert!(matches!(
+        app_form(&q(json!({"properties": {"name": {"type": "string"}}}))),
+        Ok(AppForm::Text { .. })
+    ));
+    assert!(matches!(
+        app_form(&q(json!({"properties": {"ok": {"type": "boolean"}}}))),
+        Ok(AppForm::YesNo { .. })
+    ));
+    let two = app_form(&q(
+        json!({"properties": {"a": {"type": "string"}, "b": {"type": "string"}}}),
+    ));
+    assert!(two.unwrap_err().contains("2 fields"));
+    assert!(app_form(&q(json!({"properties": {"n": {"type": "number"}}}))).is_err());
+}
+
 #[tokio::test]
 async fn an_asker_that_never_answers_counts_as_a_decline() {
     struct Silent;
@@ -1141,13 +1241,16 @@ async fn search(apps: &Apps, query: &str) -> Map<String, Value> {
 }
 
 #[tokio::test]
-async fn below_the_threshold_every_tool_is_offered_and_there_is_no_search() {
+async fn below_the_threshold_every_apps_tool_is_offered() {
     let m = many(6, Limits::default(), &[]).await;
     assert!(!m.apps.deferring());
     let names = advertised(&m.apps);
     assert_eq!(names.iter().filter(|n| n.starts_with("shifty_")).count(), 6);
-    assert!(!names.contains(&"ghost_tools_search".to_string()));
+    // Ghost's own past its core are found by search whatever the limits (ADR 0052), so the
+    // search is there; the core is offered by name.
+    assert!(names.contains(&"ghost_tools_search".to_string()));
     assert!(names.contains(&"ghost_docs_search".to_string()));
+    assert!(!names.contains(&"ghost_audit_recent".to_string()));
     let shifty = &m.apps.sources()[1];
     assert!(shifty.deferred.is_empty());
     assert!(!shifty.prompt.contains("ghost_tools_search"));

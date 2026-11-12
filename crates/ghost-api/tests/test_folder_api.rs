@@ -183,6 +183,45 @@ async fn watches_lists_the_watches_and_hooks_and_what_is_wrong() {
 }
 
 #[tokio::test]
+async fn the_operator_pauses_resumes_and_removes_an_agents_watch_and_sees_who_made_it() {
+    let w = World::new();
+    let mut agents = watch();
+    agents["made_by"] = json!("agent:ledger");
+    std::fs::write(
+        w.config.join("watches.json"),
+        serde_json::to_string_pretty(&json!({"ci": watch(), "books": agents})).unwrap(),
+    )
+    .unwrap();
+    let c = w.client();
+    let row = |v: &Value, name: &str| -> Value {
+        v["watches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["name"] == name)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let v = c.get("/watches").await.json;
+    assert_eq!(row(&v, "ci")["made_by"], Value::Null);
+    assert_eq!(row(&v, "books")["made_by"], "agent:ledger");
+    assert_eq!(row(&v, "books")["paused"], false);
+    let r = c.post("/watches/books/pause", None).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(row(&r.json, "books")["paused"], true);
+    let r = c.post("/watches/books/resume", None).await;
+    assert_eq!(row(&r.json, "books")["paused"], false);
+    // The operator's own watch is theirs to edit in the file.
+    let r = c.post("/watches/ci/pause", None).await;
+    assert_eq!(r.status, 409, "{}", r.text);
+    assert_eq!(c.post("/watches/nope/pause", None).await.status, 404);
+    let r = c.delete("/watches/books").await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(row(&r.json, "books"), Value::Null);
+    assert_ne!(row(&r.json, "ci"), Value::Null);
+}
+
+#[tokio::test]
 async fn the_department_routes_are_gone() {
     let w = World::new();
     let c = w.client();

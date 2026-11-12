@@ -66,7 +66,13 @@ what Ghost made. The Audit log shows every change and the agent that made it.
 ## Watches
 
 Ghost can watch an outside system (ADR 0028): `watches.json`, one object per watch, keyed
-by its name, written by the operator, never by the model. The daemon calls the read
+by its name, written by the operator, or by an agent through `ghost_watch_manage` (ADR
+0052): a polled watch only, recorded with `"made_by": "agent:<slug>"`, made or changed
+only with your yes unless a rule says otherwise, refused whole when the file would not pass
+`ghostd check`, and with your other entries kept as they are. `"paused": true` keeps a
+watch declared and not polled. An agent changes only the watches it made (Ghost any
+agent's); yours are yours. No Jev or model step comes from an agent, and `hooks.json` is
+never an agent's. The daemon calls the read
 on an interval itself; nothing about noticing needs a model.
 
 ```json
@@ -269,11 +275,13 @@ show each hook's counts. A local sender signs with `ghostd push <hook> <event> '
 What Ghost makes (ADR 0033), a page, a summary, a table, a small script, lands in
 `~/.config/ghost/out/`. `outputs.write` creates a file and `outputs.replace` replaces one,
 each through the gate with an audit row; both run and Ghost says so unless the permissions
-ask first (`ask = ["outputs.replace"]`). A name is a plain file name ending in `.html`,
-`.md`, `.txt`, `.csv`, `.json`, `.svg`, `.py` or `.sh`; nothing goes through a link; a file
-is at most 256 KB and is never made executable. Ghost never runs what it makes. The model
-sees the list with `list_outputs`; the desktop's Agents screen lists them with Reveal and
-Open.
+ask first (`ask = ["outputs.replace"]`). A name is a plain file name ending in a text
+kind: `.html`, `.htm`, `.css`, `.js`, `.mjs`, `.md`, `.txt`, `.rst`, `.tex`, `.csv`, `.tsv`,
+`.json`, `.xml`, `.yaml`, `.yml`, `.toml`, `.ics`, `.svg`, `.sql`, `.py` or `.sh`; nothing
+goes through a link; a file is at most 1 MB (ADR 0052; it was 256 KB) and is never made
+executable. Ghost never runs what it makes. The model sees the list with `list_outputs`,
+reads one with `ghost_output_read` (a part at a time) and deletes one with
+`ghost_output_delete`; the desktop's Agents screen lists them with Reveal and Open.
 
 ## Scripts: run only through the gate
 

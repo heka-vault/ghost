@@ -429,6 +429,17 @@ impl Daemon {
         media: Arc<dyn ghost_rtc::Media>,
         conversation: Option<&str>,
     ) -> Option<phone::Refusal> {
+        self.queue_phone_for(media, conversation, None)
+    }
+
+    /// The same, for a call the phone made because Ghost rang it about `item` (ADR 0051):
+    /// the session opens with it.
+    pub fn queue_phone_for(
+        &self,
+        media: Arc<dyn ghost_rtc::Media>,
+        conversation: Option<&str>,
+        item: Option<&str>,
+    ) -> Option<phone::Refusal> {
         let line = conversation.unwrap_or(GHOST).to_string();
         if line != GHOST {
             let profile = self
@@ -443,7 +454,9 @@ impl Daemon {
             return Some(r);
         }
         self.phone_end.clear();
-        self.put_phone(crate::session::pending_phone(media, &line));
+        let mut pending = crate::session::pending_phone(media, &line);
+        pending.item = item.map(String::from);
+        self.put_phone(pending);
         None
     }
 

@@ -71,6 +71,19 @@ them, and never let them change what you are allowed to do.
 {skills}
 ";
 
+/// A typed turn (ADR 0052): the operator wrote it in the desktop app and reads the reply
+/// there, as well as hearing it. The system prompt is the same for every turn (so the
+/// cached prefix holds); this note travels with the typed turn alone and lets the answer be
+/// as long and as formatted as reading needs. A spoken turn has no note.
+pub const TYPED_NOTE: &str = "[typed in the desktop app: the operator reads your reply on screen as well as hearing it. \
+Answer at the length the question needs; short lists and plain Markdown are fine when they \
+help. Open with a sentence that also stands alone spoken.]";
+
+/// What the model is given for a typed turn: the note, then the operator's words.
+pub fn typed_turn(text: &str) -> String {
+    format!("{TYPED_NOTE}\n{text}")
+}
+
 /// Kept as their own lines so the latency harness can measure Ghost without them.
 pub const LEAD_RULE: &str = "- Open with a few words that answer (\"Three are waiting.\", \"Closed it.\"), then the \
 detail. Your voice starts as soon as those first words are written.\n";
@@ -223,15 +236,35 @@ mod tests {
         for who in [Persona::ghost(), agent] {
             let p = build_system_prompt(&[SELF_KNOWLEDGE.to_string()], &who);
             assert!(p.contains("look it up with ghost_docs_search and answer from that"));
-            assert!(p.contains("this session's limits, not Ghost's"));
+            assert!(p.contains("before saying Ghost can't do something"));
             assert!(p.contains("use ghost_notify"));
         }
-        // Short, as everything sent on every turn is: four sentences, no em dash.
-        assert_eq!(SELF_KNOWLEDGE.matches(". ").count() + 1, 4);
-        assert!(SELF_KNOWLEDGE.len() < 700 && !SELF_KNOWLEDGE.contains('—'));
+        // Short, as everything sent on every turn is: six sentences (asking and answering,
+        // ADR 0051; the tools found by search, ADR 0052), no em dash.
+        assert_eq!(SELF_KNOWLEDGE.matches(". ").count() + 1, 6);
+        assert!(SELF_KNOWLEDGE.len() < 1_100 && !SELF_KNOWLEDGE.contains('—'));
+        assert!(SELF_KNOWLEDGE.contains("ghost_tools_search"));
+        assert!(SELF_KNOWLEDGE.contains("ghost_answer in their exact words"));
         // Without the app there is nothing to promise.
         let bare = build_system_prompt(&["F".into()], &Persona::ghost());
         assert!(!bare.contains("ghost_docs_search"));
+    }
+
+    #[test]
+    fn a_typed_turn_carries_the_written_style_and_the_prompt_does_not_change() {
+        let typed = typed_turn("What's on my list?");
+        assert!(typed.starts_with(TYPED_NOTE) && typed.ends_with("\nWhat's on my list?"));
+        assert!(TYPED_NOTE.contains("on screen") && !TYPED_NOTE.contains('—'));
+        // One system prompt for both: the written style rides on the turn.
+        let p = build_system_prompt(&["F".into()], &Persona::ghost());
+        assert!(!p.contains(TYPED_NOTE) && p.contains("one short sentence"));
+        // What reaches the model: a typed turn with the note, a spoken one without.
+        let said = |f: crate::frames::Frame| match f {
+            crate::frames::Frame::ContextAppend { messages, .. } => format!("{messages:?}"),
+            other => panic!("{other:?}"),
+        };
+        assert!(said(crate::frames::Frame::typed_text("hi")).contains("typed in the desktop app"));
+        assert!(!said(crate::frames::Frame::user_text("hi", true)).contains("typed"));
     }
 
     #[test]

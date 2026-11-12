@@ -4,14 +4,18 @@
 //! pairing route and `PhoneHost`, what the daemon gives the listener. `routes` mounts the
 //! signed routes (`/hello`, `/audit`, `/waiting`, `/conversations`, `/offer`, `/end`) and
 //! runs one server per configured address; the media (the WebRTC peer, the data channel)
-//! is the daemon's, behind `PhoneHost` and `PhoneEvents`. `networks` tells home from
-//! tunnel.
+//! is the daemon's, behind `PhoneHost` and `PhoneEvents`. `stream` is the live channel
+//! (ADR 0051): `/stream`, the questions, the changes, `/seen` and `/ring`. `networks`
+//! tells home from tunnel.
 
 pub mod listener;
 pub mod networks;
 pub mod pairing;
 pub mod routes;
 pub mod signing;
+pub mod stream;
+#[cfg(test)]
+mod vectors;
 
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;

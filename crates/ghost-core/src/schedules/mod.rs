@@ -25,6 +25,7 @@ pub mod jobs;
 pub mod scheduler;
 #[cfg(test)]
 mod tests;
+pub mod turns;
 pub mod when;
 
 use std::time::Duration;
@@ -37,6 +38,7 @@ use tokio_util::sync::CancellationToken;
 
 pub use jobs::{JobEdit, Jobs, ScheduleError};
 pub use scheduler::{Scheduler, SchedulerParts};
+pub use turns::{ASK_WAIT, AgentTurns, Busy, Turn};
 pub use when::{ActiveHours, Schedule, Written};
 
 /// Who made a schedule when it was the operator (the desktop); an agent is `agent:<slug>`.
@@ -313,6 +315,9 @@ pub struct RunRequest {
     pub max_turns: u32,
     pub max_runtime: Duration,
     pub cancel: CancellationToken,
+    /// Tools by the name the model sees that this run is not offered and may not call:
+    /// a follow-up to an answer is not offered `ghost_answer` or `ghost_ask` (ADR 0051).
+    pub withheld: Vec<String>,
 }
 
 /// How a run ended, as the runner saw it.
