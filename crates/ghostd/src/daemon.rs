@@ -1231,6 +1231,20 @@ impl Daemon {
         // apps connect, so they are told Ghost takes questions; until the questions exist
         // (a moment later) one is declined.
         apps.set_asker(Arc::new(AppAsker::new(d.questions.clone())));
+        // ADR 0046: the tools the model used or found are offered by name past the limits;
+        // kept in SQLite so a daemon started again does not search for them first.
+        let kept = store.recent_tools().unwrap_or_else(|e| {
+            warn!("apps: the tools used lately could not be read: {e}");
+            Vec::new()
+        });
+        apps.remember(kept, {
+            let store = store.clone();
+            Arc::new(move |names: &[String]| {
+                if let Err(e) = store.set_recent_tools(names) {
+                    warn!("apps: the tools used lately could not be kept: {e}");
+                }
+            })
+        });
         apps.connect().await;
         apps.supervise(); // ADR 0046: a connection that dies is opened again
         let catalog = Arc::new(Catalog::new(&cfg.catalog_path));
