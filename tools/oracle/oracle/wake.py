@@ -187,3 +187,30 @@ def match_opening(
             if shaped and _opener_follows(words[i + 1 :], openers):
                 return WakeMatch(phrase=phrase, remainder=_after(text, i + 1))
     return None
+
+
+# What Parakeet writes for the "hey" of the operator's "Hey Ghost" on ghost.mic, "A ghost."
+# most of all. The Rust port is ``matcher::HEY_SPELLINGS``.
+HEY_SPELLINGS = (
+    "a", "ah", "eh", "uh", "oh", "ay", "aye", "hey", "hay", "hi", "he", "yo", "ok", "okay",
+)  # fmt: skip
+
+
+def match_heys_spelling(text: str) -> WakeMatch | None:
+    """The phrase "hey ghost" as Parakeet reads the operator saying it: a sentence opening with the
+    word "ghost", after one of ``HEY_SPELLINGS`` at most; the request is what follows, past
+    a repeat of the phrase. Confirms only a weak "hey ghost" hit (``matcher::
+    match_heys_spelling``)."""
+    words = _words(text)
+    sentences = [0] + [len(_words(text[: m.end()])) for m in re.finditer(r"[.!?]+\s+", text)]
+
+    def opens_at(s: int) -> int | None:
+        lead = 1 if s < len(words) and words[s] in HEY_SPELLINGS else 0
+        return s + lead + 1 if s + lead < len(words) and words[s + lead] == "ghost" else None
+
+    end = next((e for s in sentences if (e := opens_at(s)) is not None), None)
+    if end is None:
+        return None
+    while (more := opens_at(end)) is not None:
+        end = more
+    return WakeMatch(phrase="hey ghost", remainder=_after(text, end))
