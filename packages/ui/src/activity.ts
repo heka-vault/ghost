@@ -33,6 +33,25 @@ export function addActivity<T extends Activity>(list: readonly T[], a: T): T[] {
   return [...list, a].slice(-KEPT);
 }
 
+/**
+ * The session's stored activity (`GET /activity`, ADR 0058) and what arrived live, as one list
+ * in time order, each once: a reload mid-session reads back what the screen saw before it.
+ * Two are the same when they share a kind, a call id and a moment (to the millisecond: the
+ * store and the event write the time differently).
+ */
+export function mergeActivity<T extends Activity>(stored: readonly T[], live: readonly T[]): T[] {
+  const key = (a: Activity) => `${a.kind}|${a.id ?? ""}|${a.kind === "call" || a.kind === "result" ? "" : new Date(a.at).getTime()}`;
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const a of [...stored, ...live]) {
+    const k = key(a);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(a);
+  }
+  return out.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+}
+
 /** The operator is speaking now: their turn opened and hasn't closed. */
 export function youSpeaking(list: readonly Activity[]): boolean {
   for (let i = list.length - 1; i >= 0; i--) {

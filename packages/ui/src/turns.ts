@@ -27,15 +27,23 @@ function spoken(t: { role: string; via?: string | null }): boolean {
  * as a turn the moment it is read, at every short pause, so a sentence said with a pause
  * arrived on screen in pieces while the operator was still talking, and that hurried them.
  * Pieces are held while the operator speaks (the screen shows Ghost listening, nothing that
- * reads as words arriving) and shown together once the turn closes: the daemon's status
- * leaves `listening` (`thinking` when the turn ends, `speaking` when Ghost answers), or a
- * turn that isn't the operator's voice arrives (Ghost's reply, a note, a typed message).
- * A typed turn is never held. The daemon sends no whole-turn text when it reads a turn again
- * (ADR 0044): the pieces as heard are what there is, joined by `joinSpoken`.
+ * reads as words arriving) and replaced, once the turn closes, by the words the model was
+ * given for it: the daemon reads a turn of several pieces again whole (ADR 0044) and says so
+ * with a `heard` event (ADR 0058). A turn taken back before its answer was heard (`heard`
+ * with `reopened`) goes back to being held, and the next `heard` has its words too.
+ * A typed turn is never held. If a `heard` never comes (an older daemon), the pieces show
+ * joined when anything else arrives: Ghost's reply, a note, a typed message.
  */
 export interface Captions<T> {
   shown: T[];
   held: T[];
+}
+
+/** The daemon's word on a closed turn (`HeardView`). */
+export interface Heard {
+  text: string;
+  at: string;
+  reopened?: boolean;
 }
 
 /** How many live turns are kept, as before: the last 200. */
@@ -51,11 +59,32 @@ export function captionTurn<T extends { role: string; via?: string | null }>(c: 
   return { shown: [...c.shown, ...c.held, turn].slice(-KEPT), held: [] };
 }
 
-/** A status event's phase: anything but `listening` closes the operator's turn. */
+/**
+ * A `heard` event: the operator's turn closed with these words (they replace its pieces, at
+ * the first piece's time), or was taken back (its words wait with the turn that goes on).
+ * The pieces are the held ones; a page that loaded mid-turn shows them already, as the last
+ * spoken turns after the last thing that wasn't one, and those are replaced instead.
+ */
+export function captionHeard<T extends { role: string; text: string; via?: string | null }>(c: Captions<T>, heard: Heard): Captions<T> {
+  const spoken = (t: T) => t.role === "user" && t.via === "voice";
+  if (heard.reopened) {
+    const last = c.shown[c.shown.length - 1];
+    if (!last || !spoken(last)) return c;
+    return { shown: c.shown.slice(0, -1), held: [last, ...c.held] };
+  }
+  const text = heard.text.trim();
+  if (!text) return c;
+  if (c.held.length) return { shown: [...c.shown, { ...c.held[0], text }].slice(-KEPT), held: [] };
+  let from = c.shown.length;
+  while (from > 0 && spoken(c.shown[from - 1])) from--;
+  if (from === c.shown.length) return c; // nothing of it is on screen: a typed turn's, or one already replaced
+  return { shown: [...c.shown.slice(0, from), { ...c.shown[from], text }], held: [] };
+}
+
+/** A status event's phase: a session's end drops everything. The turn's close is `heard`'s. */
 export function captionPhase<T>(c: Captions<T>, phase: string): Captions<T> {
   if (phase === "passive" || phase === "starting") return noCaptions();
-  if (phase === "listening" || c.held.length === 0) return c;
-  return { shown: [...c.shown, ...c.held].slice(-KEPT), held: [] };
+  return c;
 }
 
 /**

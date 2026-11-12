@@ -187,6 +187,9 @@ struct World {
     fast_warmed: Arc<Mutex<Vec<Warmed>>>,
     /// The windowed fake's counts (ADR 0053).
     rendering: Rendering,
+    /// What the desktop's screen is told (ADR 0058): `heard:<text>`, `reopened`,
+    /// `said:<reply>:<from>-<to>`, `result:<name>:<json>`.
+    screen: Arc<Mutex<Vec<String>>>,
 }
 
 /// What a session's world is made of. `Setup::new` is the plain one.
@@ -397,6 +400,7 @@ fn world_setup(setup: Setup) -> World {
             warmed: fast_warmed.clone(),
         }) as Arc<dyn ModelPort>
     });
+    let screen = Arc::new(Mutex::new(Vec::new()));
     let session = build_session(SessionParams {
         settings: Arc::new(settings),
         models,
@@ -420,8 +424,37 @@ fn world_setup(setup: Setup) -> World {
             on_hang_up: None,
             on_conversation: None,
             on_latency: Some(Arc::new(move |rec| r.lock().unwrap().push(rec.clone()))),
-            on_level: None,
+            on_level: Some(Arc::new(|_| {})),
             on_activity: None,
+            on_heard: Some({
+                let screen = screen.clone();
+                Arc::new(move |rec| {
+                    screen.lock().unwrap().push(match rec {
+                        ghost_voice::tap::TurnRecord::Closed(t) => format!("heard:{t}"),
+                        ghost_voice::tap::TurnRecord::Reopened => "reopened".into(),
+                    });
+                    Box::pin(async {})
+                })
+            }),
+            on_said: Some({
+                let screen = screen.clone();
+                Arc::new(move |s| {
+                    screen
+                        .lock()
+                        .unwrap()
+                        .push(format!("said:{}:{}-{}", s.reply, s.from, s.to))
+                })
+            }),
+            on_result: Some({
+                let screen = screen.clone();
+                Arc::new(move |c| {
+                    screen.lock().unwrap().push(format!(
+                        "result:{}:{}",
+                        c.name,
+                        Value::Object(c.result)
+                    ))
+                })
+            }),
         },
         wake_phrases: None,
         wake_fuzzy: 0.0,
@@ -445,6 +478,7 @@ fn world_setup(setup: Setup) -> World {
         warmed,
         fast_warmed,
         rendering,
+        screen,
     }
 }
 
@@ -746,6 +780,57 @@ async fn voice_records(w: &World, n: usize) -> Vec<Value> {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+#[tokio::test]
+async fn the_screen_is_told_the_turns_words_what_a_call_returned_and_which_words_are_heard() {
+    // ADR 0058: the closed turn's words, once; each call's result as the model got it;
+    // and the reply's words as each piece of it plays, numbered as the screen counts.
+    let w = world_with(
+        &["any critical issues in quotient"],
+        vec![vec![
+            ScriptedModel::call("", "github_search_issues", Map::new()),
+            ScriptedModel::say("Two are critical, both in the login flow."),
+        ]],
+        0.2,
+        0.1,
+        40,
+        vec![github_app()],
+    );
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    voice_records(&w, 1).await;
+    tokio::time::sleep(Duration::from_millis(600)).await; // the last piece plays out
+    let screen = w.screen.lock().unwrap().clone();
+    assert!(
+        screen.contains(&"heard:any critical issues in quotient".to_string()),
+        "{screen:?}"
+    );
+    assert!(
+        screen
+            .iter()
+            .any(|s| s.starts_with("result:github_search_issues:") && s.contains("Redis")),
+        "{screen:?}"
+    );
+    // The greeting is reply 0 (one word); the call's reply said nothing (no stamp), and
+    // the answer's pieces follow from its first word to its last.
+    let said: Vec<&String> = screen.iter().filter(|s| s.starts_with("said:")).collect();
+    assert_eq!(
+        said.first().map(|s| s.as_str()),
+        Some("said:0:0-1"),
+        "{screen:?}"
+    );
+    let answer: Vec<&&String> = said.iter().filter(|s| !s.starts_with("said:0:")).collect();
+    assert!(!answer.is_empty(), "{screen:?}");
+    assert!(answer[0].starts_with("said:2:0-"), "{screen:?}");
+    assert!(
+        answer.last().unwrap().ends_with("-8"),
+        "the whole answer: {screen:?}"
+    );
+    w.session.end().await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), w.session.run()).await;
+    let _ = (&w.mouth, &w.ear, &w.spoken);
 }
 
 #[tokio::test]

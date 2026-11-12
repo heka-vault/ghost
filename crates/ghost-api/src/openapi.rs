@@ -127,6 +127,24 @@ pub struct ActivityEvent {
     pub activity: crate::models::ActivityView,
 }
 
+/// The operator's spoken turn as it closed, with the words the model was given (ADR 0058).
+#[derive(ToSchema)]
+pub struct HeardEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "heard")]
+    pub r#type: String,
+    pub heard: crate::models::HeardView,
+}
+
+/// Which words of Ghost's reply are heard now (ADR 0058).
+#[derive(ToSchema)]
+pub struct SayingEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "saying")]
+    pub r#type: String,
+    pub saying: crate::models::SayingView,
+}
+
 /// The Hearing test's recorder (ADR 0042), about twenty a second while it is open: what
 /// it is doing, the microphone's level 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to
 /// 0 dBFS) and whether the VAD hears speech; then one with the state `closed`. Only while
@@ -156,6 +174,8 @@ pub struct HearEvent {
     ("apps" = "#/components/schemas/AppsEvent"),
     ("voice" = "#/components/schemas/VoiceEvent"),
     ("activity" = "#/components/schemas/ActivityEvent"),
+    ("heard" = "#/components/schemas/HeardEvent"),
+    ("saying" = "#/components/schemas/SayingEvent"),
     ("hear" = "#/components/schemas/HearEvent"),
 )))]
 pub enum Event {
@@ -170,6 +190,8 @@ pub enum Event {
     Apps(AppsEvent),
     Voice(VoiceEvent),
     Activity(ActivityEvent),
+    Heard(HeardEvent),
+    Saying(SayingEvent),
     Hear(HearEvent),
 }
 
@@ -207,6 +229,10 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("AppsEvent", AppsEvent::schema()),
         ("VoiceEvent", VoiceEvent::schema()),
         ("ActivityEvent", ActivityEvent::schema()),
+        ("HeardEvent", HeardEvent::schema()),
+        ("SayingEvent", SayingEvent::schema()),
+        ("HeardView", crate::models::HeardView::schema()),
+        ("SayingView", crate::models::SayingView::schema()),
         ("HearEvent", HearEvent::schema()),
         ("HearView", crate::hear::HearView::schema()),
         ("ActivityView", crate::models::ActivityView::schema()),

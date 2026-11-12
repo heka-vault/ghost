@@ -77,14 +77,18 @@ is in docs/design-system.md, “The conversation screen”.
 - Google's and Meta's voice screens give the state one large word and one large sign:
   the stage, and room view.
 
-### Still to do on this screen
+### The second pass (ADR 0058)
 
-- What came back from a read: needs a bounded, redacted preview from the model stage
-  (`ghost_voice::llm`, another agent's area today), within ADR 0046's limits.
-- An exact word clock: the TTS stage stamping audio with its text, if the estimate shows
-  wrong in use.
-- A cut, a call or an error are live only; a reload shows turns, the audit's changes and the
-  questions. Storing activity per session would need the store's schema.
+- Ghost's voice is a presence: Wisp on a halo in the agent's color, its mouth and the halo
+  following the real voice level, in a band that opens over the composer while anyone speaks;
+  the operator speaking draws rings flowing in toward Wisp, never words.
+- A closed turn shows the words the model was given (`heard`), not the pieces joined.
+- The clause being said is exact (`saying`, stamped by the TTS stage).
+- A call opens to what it returned (`GET /calls/{id}`), bounded and redacted; a change shows
+  the audit's line.
+- Calls, handovers and cuts are kept beside the transcript (`GET /activity`), so history and a
+  reload show them.
+- Every state says when the mic is off, with Listen again in reach.
 
 ## 2. The audit: every other screen against the same bar
 

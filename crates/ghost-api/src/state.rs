@@ -18,6 +18,8 @@ use crate::models::{
 
 /// How many events a slow client may fall behind before its oldest are dropped.
 pub const BUS_CAPACITY: usize = 256;
+/// How many calls' results are kept for `GET /calls/{id}` (ADR 0058).
+pub const CALLS_KEPT: usize = 64;
 /// How many of a session's turns are kept for `GET /session/turns`.
 pub const TURNS_KEPT: usize = 200;
 
@@ -104,6 +106,8 @@ struct Fields {
 /// read through the getters, so the lock is never held across an `await`.
 pub struct DaemonState {
     fields: Mutex<Fields>,
+    /// What the last calls returned, newest last (ADR 0058): memory only, never stored.
+    calls: Mutex<VecDeque<crate::models::CallPreview>>,
     started: Instant,
     pub bus: EventBus,
     provider: RwLock<Option<StatusProvider>>,
@@ -147,6 +151,7 @@ impl DaemonState {
                 waiting: 0,
                 turns: VecDeque::with_capacity(TURNS_KEPT),
             }),
+            calls: Mutex::new(VecDeque::new()),
             started: Instant::now(),
             bus: EventBus::default(),
             provider: RwLock::new(None),
@@ -335,6 +340,77 @@ impl DaemonState {
     /// The loudness of Ghost's own voice as it plays (`Event::Voice`); never the microphone.
     pub fn publish_voice(&self, level: f32) {
         self.bus.publish(&Event::Voice { level });
+    }
+
+    /// The operator's spoken turn closed, or was taken back (`Event::Heard`, ADR 0058);
+    /// dropped outside a session.
+    pub fn publish_heard(&self, text: Option<&str>) {
+        let Some(session_id) = self.session_id() else {
+            return;
+        };
+        let heard = crate::models::HeardView {
+            session_id,
+            at: now(),
+            text: text.map(|t| t.trim().to_string()).unwrap_or_default(),
+            reopened: text.is_none(),
+        };
+        if !heard.reopened && heard.text.is_empty() {
+            return;
+        }
+        self.bus.publish(&Event::Heard { heard });
+    }
+
+    /// Which words of the reply are heard now (`Event::Saying`, ADR 0058); dropped outside
+    /// a session.
+    pub fn publish_saying(&self, reply: u32, from: u32, to: u32) {
+        let Some(session_id) = self.session_id() else {
+            return;
+        };
+        self.bus.publish(&Event::Saying {
+            saying: crate::models::SayingView {
+                session_id,
+                reply,
+                from,
+                to,
+            },
+        });
+    }
+
+    /// Keep what a call of the live session returned (ADR 0058): `result` is what the
+    /// model was given, already bounded and redacted; it is redacted again and cut here.
+    pub fn keep_call(&self, id: &str, name: &str, read: bool, result: &serde_json::Value) {
+        let Some(session_id) = self.session_id() else {
+            return;
+        };
+        let text = serde_json::to_string_pretty(result).unwrap_or_default();
+        let text = ghost_core::redact::redact_text(&text);
+        let total = text.chars().count();
+        let keep = crate::models::CALL_PREVIEW_CHARS;
+        let preview: String = text.chars().take(keep).collect();
+        let mut calls = self.calls.lock().unwrap_or_else(|e| e.into_inner());
+        calls.retain(|c| c.id != id);
+        if calls.len() >= CALLS_KEPT {
+            calls.pop_front();
+        }
+        calls.push_back(crate::models::CallPreview {
+            id: id.to_string(),
+            session_id,
+            name: name.to_string(),
+            read,
+            at: now(),
+            preview,
+            dropped: total.saturating_sub(keep) as u64,
+        });
+    }
+
+    /// A call's preview, while it is still kept.
+    pub fn call(&self, id: &str) -> Option<crate::models::CallPreview> {
+        self.calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|c| c.id == id)
+            .cloned()
     }
 
     /// What the live session is doing (`Event::Activity`, ADR 0055); dropped outside one.

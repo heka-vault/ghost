@@ -30,16 +30,38 @@ pub enum Direction {
     Up,
 }
 
+/// Which words of a reply a piece of Ghost's voice says (ADR 0058): the TTS stage's
+/// count of the reply's words, `from` up to `to`, in the reply numbered `reply` (one
+/// more for each model reply and each line spoken directly, from 0 in a session). A word
+/// is a run of text with a letter or a digit in it, as the screen counts them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Spoken {
+    pub reply: u32,
+    pub from: u32,
+    pub to: u32,
+}
+
 /// Mono s16: 16 kHz from the microphone, 24 kHz to the speaker.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Audio {
     pub samples: Vec<i16>,
     pub rate: u32,
+    /// The words this audio says, when the TTS stage knows them (ADR 0058).
+    pub spoken: Option<Spoken>,
 }
 
 impl Audio {
     pub fn new(samples: Vec<i16>, rate: u32) -> Self {
-        Self { samples, rate }
+        Self {
+            samples,
+            rate,
+            spoken: None,
+        }
+    }
+
+    pub fn saying(mut self, spoken: Option<Spoken>) -> Self {
+        self.spoken = spoken;
+        self
     }
 
     pub fn seconds(&self) -> f64 {
