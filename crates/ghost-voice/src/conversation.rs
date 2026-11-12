@@ -78,6 +78,17 @@ pub struct ConversationRuntime {
     settled: watch::Sender<bool>,
     turns: Mutex<Option<Arc<TurnControl>>>,
     lines: PromptLines,
+    /// The last spoken turn, as `(agent, words)`, until something follows it: a turn the
+    /// operator goes on with before any answer is heard is reopened (`TurnControl`), and
+    /// its words come back whole at its next close. Held, the store keeps one user turn
+    /// per closed turn, with its final words (`hold_user`).
+    held_user: Mutex<Option<(String, String)>>,
+}
+
+impl Drop for ConversationRuntime {
+    fn drop(&mut self) {
+        self.flush_user(); // the session's last turn
+    }
 }
 
 impl ConversationRuntime {
@@ -118,6 +129,7 @@ impl ConversationRuntime {
             active: Mutex::new(p),
             settled,
             turns: Mutex::new(None),
+            held_user: Mutex::new(None),
             lines: PromptLines::default(),
         })
     }
@@ -272,6 +284,7 @@ impl ConversationRuntime {
     /// the one that was speaking when it was generated (see the marker).
     pub fn record(&self, role: &str, text: &str) {
         let Some(r) = Role::parse(role) else { return };
+        self.flush_user(); // what was said before this comes before it
         let active = self.active().slug;
         let slug = if role == "assistant" {
             self.speaking_as.lock().unwrap().clone()
@@ -286,6 +299,43 @@ impl ConversationRuntime {
         }
     }
 
+    /// A spoken turn closed with these words: held until something follows it (anything
+    /// recorded, the next turn, the session's end), so a reopened turn can take it back
+    /// (`withdraw_user`) and the store has the turn once, as it was finally heard.
+    pub fn hold_user(&self, text: &str) {
+        let slug = self.active().slug;
+        let before = self
+            .held_user
+            .lock()
+            .unwrap()
+            .replace((slug, text.to_string()));
+        if let Some((slug, text)) = before {
+            self.write_user(&slug, &text);
+        }
+    }
+
+    /// The held turn was reopened: its words come back with the rest of it.
+    pub fn withdraw_user(&self) {
+        self.held_user.lock().unwrap().take();
+    }
+
+    /// Write the held turn, if any.
+    pub fn flush_user(&self) {
+        let held = self.held_user.lock().unwrap().take();
+        if let Some((slug, text)) = held {
+            self.write_user(&slug, &text);
+        }
+    }
+
+    fn write_user(&self, slug: &str, text: &str) {
+        if let Err(e) = self
+            .conversations
+            .record(slug, &self.session_id, Role::User, text)
+        {
+            warn!("conversation {slug}: turn not recorded: {e}");
+        }
+    }
+
     pub fn on_marker(&self, slug: &str) {
         *self.speaking_as.lock().unwrap() = slug.to_string();
     }
@@ -296,6 +346,7 @@ impl ConversationRuntime {
 
     /// Save-as: what was said in this session so far moves to `target`.
     pub fn carry_session_turns(&self, target: &Profile) -> usize {
+        self.flush_user();
         self.conversations
             .carry(&self.session_id, &self.active().slug, &target.slug)
             .unwrap_or(0)
@@ -511,6 +562,76 @@ pub fn default_start() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn runtime(dir: &std::path::Path) -> (Arc<Conversations>, Arc<ConversationRuntime>) {
+        use ghost_core::Store;
+        use ghost_core::conversations::ConversationsOptions;
+        let store = Arc::new(Store::in_memory().unwrap());
+        let convs = Arc::new(
+            Conversations::new(
+                store.clone(),
+                dir,
+                ConversationsOptions {
+                    default_voice: "af_heart".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        );
+        let gate = Arc::new(WriteGate::new(store));
+        let rt = ConversationRuntime::new(
+            convs.clone(),
+            gate,
+            "s1",
+            Vec::new(),
+            24000,
+            2,
+            GHOST,
+            None,
+            None,
+        );
+        (convs, rt)
+    }
+
+    fn stored(convs: &Conversations) -> Vec<(String, String)> {
+        convs
+            .turns(GHOST, 50)
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.role.as_str().to_string(), t.text))
+            .collect()
+    }
+
+    #[test]
+    fn test_a_turn_is_stored_once_with_its_final_words() {
+        // 2026-11-12: a wrong first read and the pieces after it were four user turns.
+        // The turn is held until something follows it; a reopened turn takes it back,
+        // and its words come back whole when it closes again.
+        let tmp = tempfile::tempdir().unwrap();
+        let (convs, rt) = runtime(tmp.path());
+        rt.hold_user("What's going on with the other");
+        assert!(stored(&convs).is_empty(), "held: it may yet be reopened");
+        rt.withdraw_user(); // the operator went on before the answer was heard
+        rt.hold_user("What's going on with app one forty two?");
+        rt.record("assistant", "It's waiting on review.");
+        rt.hold_user("Thanks.");
+        rt.flush_user(); // the session ended
+        assert_eq!(
+            stored(&convs),
+            vec![
+                (
+                    "user".into(),
+                    "What's going on with app one forty two?".into()
+                ),
+                ("assistant".into(), "It's waiting on review.".into()),
+                ("user".into(), "Thanks.".into()),
+            ]
+        );
+        // The last turn of a session is kept when the runtime goes away.
+        rt.hold_user("Bye.");
+        drop(rt);
+        assert_eq!(stored(&convs).last().unwrap().1, "Bye.");
+    }
 
     #[test]
     fn test_transfer_tone_is_short_mono_pcm() {

@@ -28,6 +28,7 @@ use crate::debug;
 use crate::frames::{Direction, Frame, Out, Stage};
 use crate::latency::{LatencyProbe, null_probe};
 use crate::speaking::Speaking;
+use crate::tap::{OnTurnRecord, TurnRecord, no_record};
 
 pub type SessionAction = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
@@ -54,6 +55,8 @@ pub struct InterceptorProcessor {
     /// when its final arrives after the cut (2026-10-30: "Okay, that's good. Stop." went to
     /// the model because Ghost had already stopped).
     turns: Option<Arc<crate::turns::TurnControl>>,
+    /// The record of a turn an interceptor took: its words, once (`crate::tap`).
+    record: OnTurnRecord,
 }
 
 impl InterceptorProcessor {
@@ -77,6 +80,7 @@ impl InterceptorProcessor {
             speaking: Speaking::new(),
             barge_in_min_words: 2,
             turns: None,
+            record: no_record(),
         }
     }
 
@@ -89,6 +93,12 @@ impl InterceptorProcessor {
     /// GHOST_BARGE_IN_MIN_WORDS, as the aggregator has it; 0 means nothing interrupts.
     pub fn with_barge_in_min_words(mut self, words: usize) -> Self {
         self.barge_in_min_words = words;
+        self
+    }
+
+    /// Where a turn an interceptor takes is recorded (the aggregator records the rest).
+    pub fn with_record(mut self, record: OnTurnRecord) -> Self {
+        self.record = record;
         self
     }
 
@@ -254,11 +264,20 @@ impl Stage for InterceptorProcessor {
                             let name = interceptor.name().to_string();
                             debug::audio(|| format!("intercepted by {name}: {t:?} -> {handled:?}"));
                             self.probe.intercepted(&name, began.elapsed().as_secs_f64());
+                            // The turn, once: with the earlier pieces it takes back.
+                            let said = if self.turn_pieces.is_empty() {
+                                t.clone()
+                            } else {
+                                let mut whole = self.turn_pieces.clone();
+                                whole.push(text.clone());
+                                whole.join(" ")
+                            };
                             if !self.turn_pieces.is_empty() {
                                 // the earlier pieces never run the model
                                 out.push(Frame::ResetAggregation).await;
                             }
                             self.turn_pieces.clear();
+                            (self.record)(TurnRecord::Closed(said)).await;
                             self.handle(handled, out).await;
                             return; // the model never sees this turn
                         }
@@ -548,5 +567,29 @@ mod tests {
         let pushed = drain(&mut rx).await;
         assert!(slept.lock().unwrap().is_empty() && !dropped(&pushed));
         assert!(matches!(pushed.last(), Some(Frame::Transcript(_))));
+    }
+
+    #[tokio::test]
+    async fn test_a_turn_an_interceptor_takes_is_recorded_once_whole() {
+        // The store keeps the turn it took, the pieces joined, not each piece (the pieces
+        // that go on to the model are the aggregator's to record when the turn closes).
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let r = records.clone();
+        let record: OnTurnRecord = Arc::new(move |rec| {
+            r.lock().unwrap().push(rec);
+            Box::pin(async {})
+        });
+        let (p, _) = make(vec![Arc::new(QuickIntents)], FakeGate::new(false));
+        let mut p = p.with_record(record);
+        let (out, _rx) = Out::capture();
+        p.process(Frame::UserStarted, Direction::Down, &out).await;
+        p.process(said("I will talk to you"), Direction::Down, &out)
+            .await;
+        assert!(records.lock().unwrap().is_empty());
+        p.process(said("later."), Direction::Down, &out).await;
+        assert_eq!(
+            *records.lock().unwrap(),
+            vec![TurnRecord::Closed("I will talk to you later.".into())]
+        );
     }
 }
