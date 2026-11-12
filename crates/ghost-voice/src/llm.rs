@@ -85,13 +85,14 @@ pub fn fast_tools(tools: &Tools) -> Tools {
 }
 
 /// How the fast model is asked: as the main model is, with its own thinking setting
-/// (`GHOST_LLM_FAST_THINKING`; None leaves the field out). It may refuse the main model's:
-/// Haiku 5.5 answers `between_tools`, Ghost's default, with HTTP 400 ("not supported for
-/// this model", 2026-11-12), and every turn was handed over for it. Left out, Haiku 5.5
-/// thinks anyway (adaptive is its default), unseen: through the proxy it began a tool call
-/// 1.17 s after the request (p50, n=9) against 0.84 s with `disabled`, and with thinking
-/// off it writes a few words first ("I'll read issue 142 from the app repo."), which are
-/// what Ghost says while the call runs.
+/// (`GHOST_LLM_FAST_THINKING`; None, the default, leaves the field out). It may refuse
+/// the main model's: Haiku 5.5 answers `between_tools`, Ghost's default, with HTTP 400
+/// ("not supported for this model", 2026-11-12), and every turn was handed over for it.
+/// Left out, Haiku 5.5 thinks adaptively, unseen. With `disabled` it began a tool call
+/// sooner (0.84 s against 1.17 s, p50, n=9) and wrote a few words first, but looked less
+/// far: asked what was waiting for triage it read Ghost's own status and answered in 3 of
+/// 3 runs, where with its thinking it went on to the issues in 3 of 3 (2026-11-12, the
+/// harness's deferred apps). Right later beats wrong sooner, so it is left out.
 pub fn fast_options(options: &Options, thinking: Option<&str>) -> Options {
     Options {
         thinking: thinking.map(str::to_string),
@@ -99,8 +100,9 @@ pub fn fast_options(options: &Options, thinking: Option<&str>) -> Options {
     }
 }
 
-/// The fast model's thinking setting unless the operator sets another.
-pub const FAST_THINKING: &str = "disabled";
+/// The thinking setting that turns the fast model's thinking off, when the operator
+/// chooses speed over how far it looks (`GHOST_LLM_FAST_THINKING=disabled`).
+pub const FAST_THINKING_OFF: &str = "disabled";
 
 pub const COMPACTION_PROMPT: &str =
     "You are condensing the older part of a spoken conversation between an \
@@ -565,7 +567,7 @@ impl LlmStage {
             fast_reads: None,
             last_results_chars: 0,
             fast_rounds: 0,
-            fast_thinking: Some(FAST_THINKING.to_string()),
+            fast_thinking: None,
         }
     }
 
@@ -1589,7 +1591,7 @@ mod tests {
                 "m-warm-test",
                 &ctx,
                 &tools,
-                &fast_options(&Options::default(), Some(FAST_THINKING))
+                &fast_options(&Options::default(), Some(FAST_THINKING_OFF))
             )
         );
     }
@@ -1599,9 +1601,9 @@ mod tests {
         // Haiku 5.5 refuses `between_tools` with a 400, so every turn was handed over.
         let main = Options::default();
         assert_eq!(main.thinking.as_deref(), Some("between_tools"));
-        let fast = fast_options(&main, Some(FAST_THINKING));
-        // Left out, Haiku 5.5 thinks anyway (adaptive), and starts its calls later.
+        let fast = fast_options(&main, Some(FAST_THINKING_OFF));
         assert_eq!(fast.thinking.as_deref(), Some("disabled"));
+        // The default leaves the field out: Haiku 5.5 then thinks as it chooses.
         assert_eq!(fast_options(&main, None).thinking, None);
         assert_eq!(fast.max_tokens, main.max_tokens);
         assert_eq!(fast.cache_system, main.cache_system);

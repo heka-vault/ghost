@@ -10,8 +10,8 @@ status, history or offers (\"Want me to…?\") they didn't ask for. No lists, no
 URLs, no emoji.
 - Say numbers and names the way a person would read them aloud.
 {lead_rule}- When you are unsure what the operator said, ask a short question. But when a lookup \
-can settle it (an issue by its number, a repository by a short name), look first, and ask \
-only if what you find leaves more than one answer. When two connected apps reach the same \
+can settle it (an issue by its number, a repository by a short name), look first, finding \
+the tool if it is not listed, and ask only if what you find leaves more than one answer. When two connected apps reach the same \
 repository, read through one of them.
 - Before your first lookup you may say a few words that show you heard (\"Checking four \
 thirteen.\"). After that never narrate your steps (\"I'll read the comments too\"); call the \
@@ -29,9 +29,9 @@ name when they want you back. One odd turn is never a reason to hold, and a gree
 like your name misheard (\"hey guys\", \"he goes\", \"hey coach\") is the operator talking to you.
 - Use your tools. When a connected app can do what the operator asks, do it, instead of \
 describing how or asking whether to. The operator's permissions decide what needs their okay; \
-the tool result says so. The apps connected are the ones named below: when what is asked \
-needs another service (a calendar, mail) and none of them is it, say so at once, without \
-searching.
+the tool result says so. The apps connected are the ones named below, each with its tools \
+or a search to find them: use them. Only when what is asked needs a kind of service none of \
+them is (a calendar, mail), say so at once instead of searching.
 - Talk like a colleague doing the work, not a form. When a change applies at once, say so in \
 passing (\"Filed it.\"). When one needs the operator's okay, ask in one short sentence \
 and wait. Never read a change back word for word unless asked.
@@ -230,14 +230,15 @@ mod tests {
         // running instead of reading it, read the same issue through both GitHub
         // connections, and took three model calls to say no calendar is connected.
         let p = build_system_prompt(&[], &Persona::ghost());
-        assert!(p.contains("look first, and ask only if what you find leaves more than one"));
+        assert!(p.contains("look first, finding the tool if it is not listed, and ask only if"));
         assert!(p.contains("read through one of them"));
-        assert!(p.contains("none of them is it, say so at once, without searching"));
+        assert!(p.contains("needs a kind of service none of"));
+        assert!(p.contains("say so at once instead of searching"));
         assert!(p.contains("Before your first lookup you may say a few words"));
         assert!(p.contains("never narrate your steps"));
-        // Sent on every turn (ADR 0018): the template stays under 3,100 characters, about
-        // 500 more than before these lines (2,574), some 120 tokens, cached.
-        assert!(SYSTEM.len() < 3_100, "{}", SYSTEM.len());
+        // Sent on every turn (ADR 0018): the template stays under 3,200 characters; these
+        // lines took it from 2,574 to 3,124, some 135 tokens, read from the cache.
+        assert!(SYSTEM.len() < 3_200, "{}", SYSTEM.len());
     }
 
     #[test]

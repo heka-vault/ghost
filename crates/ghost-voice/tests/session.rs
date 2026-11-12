@@ -1936,11 +1936,7 @@ async fn each_models_prompt_cache_is_warmed_as_the_session_opens_with_its_first_
         main[0].2.is_some(),
         "with the main model's thinking setting"
     );
-    assert_eq!(
-        fast[0].2.as_deref(),
-        Some("disabled"),
-        "the fast model's own setting"
-    );
+    assert_eq!(fast[0].2, None, "the fast model's own setting, left out");
     say(&w, 0.3).await;
     voice_records(&w, 1).await;
     // What each was warmed with is what its first call was offered, in the same order.
