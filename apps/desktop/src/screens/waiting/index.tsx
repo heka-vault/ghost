@@ -7,13 +7,13 @@
  *
  * Titles come from outside systems: they are shown as text, never as markup.
  */
-import type { GhostClient, WaitingItemView, WaitingView } from "@ghost/client-ts";
+import type { GhostClient, QuestionView, WaitingItemView, WaitingView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { BellOff, Check, ExternalLink, Eye, GitPullRequestArrow, Inbox, ShieldAlert, Webhook } from "lucide-react";
+import { BellOff, Check, ExternalLink, Eye, GitPullRequestArrow, Inbox, MessageCircleQuestion, ShieldAlert, Webhook } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
-import { Badge, Button, Card, EmptyState, IconButton, ListRow, Menu, Notice, Page, Skeleton, errorText, relativeTime, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, IconButton, Input, ListRow, Menu, Notice, Page, Skeleton, errorText, relativeTime, useToast } from "../../ui";
 import "./waiting.css";
 
 const STATE: Record<WaitingItemView["state"], { label: string; tone: "warn" | "info" | "neutral" }> = {
@@ -23,17 +23,40 @@ const STATE: Record<WaitingItemView["state"], { label: string; tone: "warn" | "i
   snoozed: { label: "Later", tone: "neutral" },
 };
 
-/** Where an item came from, in plain words: a watch, a webhook, a change, Ghost itself. */
+/** Where an item came from, in plain words: a watch, a webhook, a change, an agent, an outside tool, an app, Ghost itself. */
 export function sourceLabel(item: WaitingItemView): string {
   const [kind, rest] = item.source.includes(":") ? item.source.split(/:(.*)/s, 2) : [item.source, ""];
   if (kind === "watch") return `Watch ${rest}`;
   if (kind === "hook") return `Webhook ${rest}`;
   if (kind === "gate") return "A change";
+  if (item.question && item.question.kind === "question") return `Asked by ${item.question.asked_by}`;
+  if (kind === "agent") return `Agent ${rest}`;
+  if (kind === "client") return `Outside tool ${rest}`;
+  if (kind === "app") return `App ${rest}`;
   return "Ghost";
+}
+
+/** When an open question stops waiting, in a few words: "expires in 3 h", "expires in 20 min". */
+export function expiresIn(q: QuestionView, now: number = Date.now()): string {
+  const mins = Math.round((new Date(q.expires_at).getTime() - now) / 60000);
+  if (mins <= 0) return "expiring now";
+  if (mins < 60) return `expires in ${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `expires in ${hours} h`;
+  return `expires in ${Math.round(hours / 24)} days`;
+}
+
+/** Whether a typed answer may be sent: any words, unless only the choices will do. */
+export function canSend(q: QuestionView, text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (!q.choices_only) return true;
+  return q.choices.some((c) => c.toLowerCase() === t.toLowerCase());
 }
 
 function SourceIcon({ item }: { item: WaitingItemView }) {
   if (item.change) return <GitPullRequestArrow aria-hidden />;
+  if (item.question) return <MessageCircleQuestion aria-hidden />;
   if (item.source.startsWith("hook:")) return <Webhook aria-hidden />;
   if (item.source.startsWith("watch:")) return <Eye aria-hidden />;
   return <ShieldAlert aria-hidden />;
@@ -102,7 +125,7 @@ export default function WaitingScreen(_: RouteProps) {
   return (
     <Page
       title="What needs you"
-      description="Everything Ghost is keeping track of for you: what your watches and webhooks found, and changes waiting for your yes. “Got it” stops the reminders until something changes; nothing here writes anywhere."
+      description="Everything Ghost is keeping track of for you: what your watches and webhooks found, questions your agents and tools asked, and changes waiting for your yes. “Got it” stops the reminders until something changes; an answer goes back to whoever asked."
     >
       {error && (
         <Notice
@@ -159,6 +182,7 @@ export default function WaitingScreen(_: RouteProps) {
                         <span>first seen {relativeTime(item.first_seen)}</span>
                         {item.delivered_via && item.state === "delivered" && <span>sent by {item.delivered_via}</span>}
                         {item.change && <span>until {new Date(item.change.expires_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
+                        {item.question && !item.change && <span>{expiresIn(item.question)}</span>}
                       </span>
                     }
                     meta={
@@ -168,6 +192,9 @@ export default function WaitingScreen(_: RouteProps) {
                     }
                     trailing={<Actions item={item} busy={busy === item.key} act={act} client={client} />}
                   />
+                  {item.question && !item.change && item.question.state === "open" && (
+                    <Answer question={item.question} busy={busy === item.key} act={act} client={client} />
+                  )}
                 </li>
               ))}
             </ul>
@@ -179,6 +206,45 @@ export default function WaitingScreen(_: RouteProps) {
 }
 
 type Act = (key: string, run: () => Promise<unknown>, done?: string) => Promise<void>;
+
+/**
+ * A question's answer (ADR 0051): its choices as buttons, and a field for the operator's
+ * own words unless only the choices will do. The question and its choices are the asker's
+ * words, shown as text. What is sent is recorded as the operator gave it.
+ */
+function Answer({ question, busy, act, client }: { question: QuestionView; busy: boolean; act: Act; client: GhostClient }) {
+  const [text, setText] = useState("");
+  const send = (words: string) => void act(question.key, () => client.answerQuestion(question.key, words), "Answered");
+  return (
+    <div className="wait-answer" role="group" aria-label={`Answer ${question.asked_by}`}>
+      {question.detail && <p className="wait-answer__detail t-small t-2">{question.detail}</p>}
+      <div className="wait-answer__row">
+        {question.choices.map((c) => (
+          <Button key={c} size="sm" variant="secondary" loading={busy} onClick={() => send(c)}>
+            {c}
+          </Button>
+        ))}
+        {!question.choices_only && (
+          <form
+            className="wait-answer__form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (canSend(question, text)) send(text.trim());
+            }}
+          >
+            <Input size="sm" value={text} placeholder={question.choices.length ? "Or in your own words" : "Your answer"} aria-label="Your answer" onChange={(e) => setText(e.target.value)} maxLength={2000} />
+            <Button size="sm" type="submit" disabled={!canSend(question, text)} loading={busy}>
+              Send
+            </Button>
+          </form>
+        )}
+        <Button size="sm" variant="ghost" loading={busy} onClick={() => void act(question.key, () => client.declineQuestion(question.key), "Declined")}>
+          Decline
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /** A change: Cancel and Confirm, as in the session. Anything else: Got it, and Later. */
 function Actions({ item, busy, act, client }: { item: WaitingItemView; busy: boolean; act: Act; client: GhostClient }) {

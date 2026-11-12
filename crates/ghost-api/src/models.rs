@@ -273,6 +273,10 @@ pub enum Event {
     Waiting {
         count: u64,
     },
+    /// A question was asked, answered, declined, expired or taken back (ADR 0051).
+    Question {
+        question: QuestionView,
+    },
     /// An app was connected, disconnected or changed state: read `GET /apps`. With
     /// `sign_in_url`, the app is waiting for the operator to sign in there.
     Apps {
@@ -335,6 +339,95 @@ pub struct WaitingItemView {
     pub snoozed_until: Option<DateTime<Utc>>,
     #[serde(default)]
     pub change: Option<PendingProposal>,
+    /// Set for a question (ADR 0051), and for a change waiting for a yes, shown as the
+    /// question it is.
+    #[serde(default)]
+    pub question: Option<QuestionView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum QuestionKind {
+    /// Someone asked the operator something.
+    Question,
+    /// A change waiting for the operator's yes (ADR 0030): Yes confirms it, No cancels it.
+    Change,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum QuestionState {
+    Open,
+    Answered,
+    Declined,
+    Expired,
+    Cancelled,
+}
+
+/// A question for the operator (ADR 0051). `question`, `detail` and `choices` are the
+/// asker's words (an agent, an outside tool, an app): show them as text, never as markup.
+/// `answer` is the operator's own words, as they gave them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionView {
+    /// The waiting-list key: `question:<id>`, or `change:<proposal>` for a change.
+    pub key: String,
+    #[schema(inline)]
+    pub kind: QuestionKind,
+    /// Who asked, as the operator knows them: `Ledger`, `Claude Code`, `GitHub`.
+    pub asked_by: String,
+    /// `agent:<slug>`, `client:<name>`, `app:<name>`, or `gate` for a change.
+    pub source: String,
+    pub question: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// Up to four; empty for a free answer.
+    pub choices: Vec<String>,
+    /// Only one of the choices will do.
+    pub choices_only: bool,
+    #[schema(inline)]
+    pub urgency: Urgency,
+    pub asked_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    #[schema(inline)]
+    pub state: QuestionState,
+    #[serde(default)]
+    pub answer: Option<String>,
+    /// The choice the answer clearly is, when it is one.
+    #[serde(default)]
+    pub choice: Option<String>,
+    /// `desktop`, `phone`, `voice`, or `ghost` for an expiry.
+    #[serde(default)]
+    pub answered_via: Option<String>,
+    #[serde(default)]
+    pub answered_at: Option<DateTime<Utc>>,
+    /// The change's id, for a change.
+    #[serde(default)]
+    pub change_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionsView {
+    /// The open ones first, oldest first; then those settled in the last day, newest first.
+    pub questions: Vec<QuestionView>,
+}
+
+/// An answer from the operator: their words, or one of the choices as it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionAnswer {
+    pub key: String,
+    pub text: String,
+}
+
+/// What came of an answer or a decline. For a change, `outcome` is what the gate did.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct QuestionResult {
+    pub ok: bool,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub question: Option<QuestionView>,
+    #[serde(default)]
+    pub outcome: Option<OutcomeView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -1124,6 +1217,7 @@ pub enum RouteName {
     Call,
     Sms,
     Whatsapp,
+    Ntfy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1159,6 +1253,13 @@ pub struct RoutesView {
     #[schema(inline)]
     #[schema(required)]
     pub available: Vec<RouteName>,
+    /// The password in Ghost's vault that holds the ntfy topic's address (ADR 0051); the
+    /// address itself never crosses the API.
+    #[serde(default)]
+    pub ntfy: Option<String>,
+    /// The password that holds the topic's access token, when it needs one.
+    #[serde(default)]
+    pub ntfy_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

@@ -17,6 +17,7 @@ pub mod clients;
 pub mod docs;
 pub mod outside;
 pub mod outside_tools;
+pub mod questions;
 pub mod schedules;
 #[cfg(test)]
 mod tests;
@@ -64,7 +65,9 @@ works (apps, permissions, agents, skills, the waiting list, routes, watches, the
 up with ghost_docs_search and answer from that, not from memory. A tool you don't have shows \
 this session's limits, not Ghost's: check the docs before saying Ghost can't do something. To \
 tell the operator something later, or when they are away, use ghost_notify, and ghost_resolve \
-once the matter is done.";
+once the matter is done. When the operator is here, just ask them aloud; to ask something they \
+may answer later, use ghost_ask. When they answer a question Ghost put to them, record it with \
+ghost_answer in their exact words.";
 
 /// What the daemon alone knows for `status`: the version and commit, the phase, the
 /// session and its origin, the agent, the model connection's provider and model (never a
@@ -231,6 +234,8 @@ pub struct GhostServer {
     caller: Caller,
     /// The schedules and their two tools (ADR 0047), when the daemon gives them.
     schedules: Option<Arc<crate::schedules::Jobs>>,
+    /// The questions and their tools (ADR 0051), when the daemon gives them.
+    questions: Option<Arc<crate::questions::Questions>>,
     tool_router: ToolRouter<Self>,
     /// What only a server for outside clients has (ADR 0048).
     outside: Option<Arc<outside::Outside>>,
@@ -244,6 +249,7 @@ impl GhostServer {
             docs: Docs::built_in(),
             caller: Caller::Session,
             schedules: None,
+            questions: None,
             tool_router: Self::tool_router() + Self::tools_search_router(),
             outside: None,
         }

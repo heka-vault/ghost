@@ -77,11 +77,13 @@ fn refuse(status: StatusCode, error: &str) -> Response {
 
 /// The bus's events the feed reads; a turn, a log line or the voice's level is not even
 /// parsed.
-const FED: [&str; 4] = [
+const FED: [&str; 5] = [
     r#"{"type":"waiting""#,
     r#"{"type":"pending""#,
     r#"{"type":"outcome""#,
     r#"{"type":"status""#,
+    // A question asked or settled (ADR 0051): its asker reads the answer.
+    r#"{"type":"question""#,
 ];
 
 /// Every request, before the server sees it: no browser, and a client's token.

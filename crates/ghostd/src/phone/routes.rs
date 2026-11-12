@@ -206,6 +206,10 @@ pub struct OfferRequest {
     pub restart_pc: Option<bool>,
     /// The agent to start with (a slug from `/conversations`); Ghost when absent.
     pub conversation: Option<String>,
+    /// The waiting-list key of a ring the phone answered (ADR 0051): the session opens
+    /// with it.
+    #[serde(default)]
+    pub item: Option<String>,
 }
 
 impl OfferRequest {
@@ -216,6 +220,10 @@ impl OfferRequest {
                 .conversation
                 .as_ref()
                 .is_none_or(|c| c.chars().count() <= MAX_CONVERSATION)
+            && self
+                .item
+                .as_ref()
+                .is_none_or(|k| (1..=MAX_KEY).contains(&k.chars().count()))
     }
 }
 
@@ -266,6 +274,7 @@ pub fn routes(listener: Arc<PhoneListener>) -> Router {
         .route("/waiting/snooze", post(snooze))
         .route("/offer", post(offer).patch(candidates))
         .route("/end", post(end))
+        .merge(super::stream::routes())
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(listener)
 }
@@ -350,7 +359,7 @@ async fn offer(State(l): Listener, body: Bytes) -> Response {
     }
     match l
         .host
-        .start_phone(&req.sdp, req.conversation.as_deref())
+        .start_phone(&req.sdp, req.conversation.as_deref(), req.item.as_deref())
         .await
     {
         Ok(answer) => {
@@ -599,6 +608,10 @@ mod tests {
         fetched: AtomicUsize,
         acked: Mutex<Vec<String>>,
         snoozed: Mutex<Option<(String, i64)>>,
+        rang_for: Mutex<Option<String>>,
+        feed: Arc<super::super::stream::PhoneFeed>,
+        answers: Mutex<Vec<(String, String)>>,
+        confirmed: Mutex<Vec<String>>,
     }
 
     impl FakeHost {
@@ -667,11 +680,13 @@ mod tests {
             &self,
             sdp: &str,
             conversation: Option<&str>,
+            item: Option<&str>,
         ) -> Result<Answer, OfferError> {
             if let Some(r) = *lock(&self.refusal) {
                 return Err(OfferError::Refused(r));
             }
             lock(&self.started).push((sdp.to_string(), conversation.map(String::from)));
+            *lock(&self.rang_for) = item.map(String::from);
             Ok(Answer::new(
                 "v=0\r\na=fingerprint:sha-256 AA:BB:CC\r\n",
                 PC_ID,
@@ -707,6 +722,66 @@ mod tests {
         async fn end_phone(&self) -> bool {
             self.ended.fetch_add(1, Ordering::SeqCst);
             true
+        }
+
+        fn feed(&self) -> Option<Arc<super::super::stream::PhoneFeed>> {
+            Some(self.feed.clone())
+        }
+
+        fn answer_question(
+            &self,
+            key: &str,
+            text: &str,
+        ) -> Result<ghost_api::models::QuestionView, super::super::listener::ActionError> {
+            if key != "question:1" {
+                return Err(super::super::listener::ActionError::NotFound);
+            }
+            lock(&self.answers).push((key.to_string(), text.to_string()));
+            Ok(question_view_of(key, Some(text), "phone"))
+        }
+
+        async fn confirm_change(&self, id: &str) -> Option<ghost_api::models::OutcomeView> {
+            lock(&self.confirmed).push(id.to_string());
+            Some(ghost_api::models::OutcomeView {
+                proposal_id: id.to_string(),
+                target: "acme/app#1".into(),
+                status: ghost_api::models::OutcomeStatus::Success,
+                applied: vec!["flag".into()],
+                failed_step: None,
+                error: None,
+                state_now: None,
+                summary: "Applied.".into(),
+            })
+        }
+    }
+
+    fn question_view_of(
+        key: &str,
+        answer: Option<&str>,
+        via: &str,
+    ) -> ghost_api::models::QuestionView {
+        ghost_api::models::QuestionView {
+            key: key.to_string(),
+            kind: ghost_api::models::QuestionKind::Question,
+            asked_by: "Ledger".into(),
+            source: "agent:ledger".into(),
+            question: "Send the invoice today?".into(),
+            detail: None,
+            choices: vec!["Yes".into(), "No".into()],
+            choices_only: false,
+            urgency: ghost_api::models::Urgency::Notify,
+            asked_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now(),
+            state: if answer.is_some() {
+                ghost_api::models::QuestionState::Answered
+            } else {
+                ghost_api::models::QuestionState::Open
+            },
+            answer: answer.map(String::from),
+            choice: answer.map(|_| "Yes".to_string()),
+            answered_via: answer.map(|_| via.to_string()),
+            answered_at: None,
+            change_id: None,
         }
     }
 
@@ -1215,6 +1290,399 @@ mod tests {
         assert_eq!(kinds, ["turn", "pending", "status", "waiting"]);
         let sent = lock(&sink.sent);
         assert_eq!(sent[2]["status"]["apps"], json!(["fake"])); // a fresh one, not the old
+    }
+
+    // --- the live stream (ADR 0051) -----------------------------------------------------
+
+    use super::super::signing::verify_event;
+    use super::super::stream::{PhoneFeed, phone_safe};
+    use crate::routes::{CallRoute, PhoneRoute};
+    use futures::StreamExt;
+    use ghost_core::routes::{Delivery, Route, RoutePolicy};
+
+    struct Live {
+        body: futures::stream::BoxStream<'static, Result<Bytes, axum::Error>>,
+        buf: String,
+        creds: Creds,
+        nonce: String,
+    }
+
+    impl Live {
+        /// The next message, its signature checked over this stream's nonce.
+        async fn next(&mut self) -> Value {
+            loop {
+                if let Some(at) = self.buf.find("\n\n") {
+                    let frame: String = self.buf.drain(..at + 2).collect();
+                    let data = frame
+                        .lines()
+                        .find_map(|l| l.strip_prefix("data: "))
+                        .expect("a data line");
+                    let outer: Value = serde_json::from_str(data).unwrap();
+                    let msg = outer["msg"].as_str().unwrap();
+                    let sig = outer["sig"].as_str().unwrap();
+                    assert!(verify_event(
+                        &self.creds.secret,
+                        &self.nonce,
+                        msg.as_bytes(),
+                        sig
+                    ));
+                    assert!(!verify_event(
+                        &self.creds.secret,
+                        &new_nonce(),
+                        msg.as_bytes(),
+                        sig
+                    ));
+                    let event = frame
+                        .lines()
+                        .find_map(|l| l.strip_prefix("event: "))
+                        .unwrap();
+                    let msg: Value = serde_json::from_str(msg).unwrap();
+                    assert_eq!(msg["type"], event);
+                    return msg;
+                }
+                let chunk = tokio::time::timeout(Duration::from_secs(5), self.body.next())
+                    .await
+                    .expect("a message in time")
+                    .expect("the stream is open")
+                    .unwrap();
+                self.buf.push_str(std::str::from_utf8(&chunk).unwrap());
+            }
+        }
+
+        /// Messages until one of `kind`.
+        async fn until(&mut self, kind: &str) -> Value {
+            loop {
+                let m = self.next().await;
+                if m["type"] == kind {
+                    return m;
+                }
+            }
+        }
+    }
+
+    async fn live(p: &Phone, creds: &Creds, path: &str) -> (StatusCode, Option<Live>) {
+        let h = signed_headers(
+            &creds.secret,
+            &creds.device_id,
+            "GET",
+            path,
+            b"",
+            None,
+            None,
+        );
+        let mut req = Request::builder().method("GET").uri(path);
+        for (k, v) in h.pairs() {
+            req = req.header(k, v);
+        }
+        let resp = p
+            .app
+            .clone()
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        if status != StatusCode::OK {
+            return (status, None);
+        }
+        assert_eq!(resp.headers()["content-type"], "text/event-stream");
+        // The head is signed as if its body were empty.
+        let ts = resp.headers()[H_TIME].to_str().unwrap().to_string();
+        let sig = resp.headers()[H_SIGNATURE].to_str().unwrap().to_string();
+        assert!(verify_response(
+            &creds.secret,
+            200,
+            &h.nonce,
+            &ts,
+            b"",
+            &sig
+        ));
+        let body = resp.into_body().into_data_stream().boxed();
+        (
+            status,
+            Some(Live {
+                body,
+                buf: String::new(),
+                creds: creds.clone(),
+                nonce: h.nonce,
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn the_stream_is_signed_and_gives_a_snapshot_then_changes_and_resumes_from_a_cursor() {
+        let p = phone();
+        let creds = pair(&p).await;
+        // Unsigned, or by a phone that is not paired: refused before anything is said.
+        let r = send(
+            &p.app,
+            Request::builder()
+                .uri("/stream")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+        p.host.feed.set_snapshot(Arc::new(|| {
+            (Vec::new(), vec![question_view_of("question:1", None, "")])
+        }));
+        let (status, s) = live(&p, &creds, "/stream").await;
+        assert_eq!(status, StatusCode::OK);
+        let mut s = s.unwrap();
+        let hello = s.next().await;
+        assert_eq!(hello["type"], "hello");
+        assert_eq!(hello["resumed"], false);
+        let snap = s.next().await;
+        assert_eq!(snap["type"], "snapshot");
+        assert_eq!(snap["questions"][0]["key"], "question:1");
+        assert_eq!(p.host.feed.streams(), 1);
+        // A change, at once: a question answered by voice goes out by its choice only.
+        p.host.feed.question(question_view_of(
+            "question:1",
+            Some("yeah, send it"),
+            "voice",
+        ));
+        let q = s.next().await;
+        assert_eq!(q["type"], "question");
+        assert_eq!(q["question"]["choice"], "Yes");
+        assert_eq!(q["question"]["answer"], Value::Null);
+        let cursor = q["cursor"].as_str().unwrap().to_string();
+        // The tunnel drops; meanwhile another change; the phone comes back with its cursor.
+        drop(s);
+        p.host
+            .feed
+            .question(question_view_of("question:1", Some("Yes"), "desktop"));
+        let (_, s) = live(&p, &creds, &format!("/stream?cursor={cursor}")).await;
+        let mut s = s.unwrap();
+        let hello = s.next().await;
+        assert_eq!(hello["resumed"], true);
+        let missed = s.next().await;
+        assert_eq!(missed["type"], "question");
+        assert_eq!(missed["question"]["answer"], "Yes");
+        // A cursor the desk does not have: a snapshot again, nothing lost.
+        let (_, s) = live(&p, &creds, "/stream?cursor=other.99").await;
+        let mut s = s.unwrap();
+        assert_eq!(s.next().await["resumed"], false);
+        assert_eq!(s.next().await["type"], "snapshot");
+    }
+
+    #[tokio::test]
+    async fn the_phone_route_is_delivered_only_when_the_phone_says_it_showed_it() {
+        let p = phone();
+        let creds = pair(&p).await;
+        let items = ghost_core::waiting::Items::new(Arc::new(
+            ghost_core::store::Store::in_memory().unwrap(),
+        ));
+        items
+            .sync(
+                "watch:ci",
+                &[ghost_core::waiting::ItemDraft::new("ci:1", "CI failed")],
+                None,
+            )
+            .unwrap();
+        let open = items.open(None).unwrap();
+        let route = PhoneRoute::new(p.host.feed.clone()).with_wait(Duration::from_secs(5));
+        // No stream: the next route, at once.
+        assert_eq!(
+            route.deliver(&open, &RoutePolicy::default()).await.unwrap(),
+            Delivery::Unavailable
+        );
+        let (_, s) = live(&p, &creds, "/stream").await;
+        let mut s = s.unwrap();
+        let going = tokio::spawn({
+            let (route, open) = (Arc::new(route), open.clone());
+            async move { route.deliver(&open, &RoutePolicy::default()).await.unwrap() }
+        });
+        let alert = s.until("alert").await;
+        assert_eq!(alert["keys"], json!(["ci:1"]));
+        let (r, _) = signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/seen",
+            Some(json!({"alert_id": alert["alert_id"]})),
+        )
+        .await;
+        assert_eq!(r.json(), json!({"ok": true}));
+        assert_eq!(going.await.unwrap(), Delivery::Delivered);
+        // Not seen in time: not delivered.
+        let quick = PhoneRoute::new(p.host.feed.clone()).with_wait(Duration::from_millis(50));
+        assert_eq!(
+            quick.deliver(&open, &RoutePolicy::default()).await.unwrap(),
+            Delivery::Unavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn a_ring_answered_opens_the_call_on_the_item_and_one_not_answered_hands_on() {
+        let p = phone();
+        let creds = pair(&p).await;
+        let items = ghost_core::waiting::Items::new(Arc::new(
+            ghost_core::store::Store::in_memory().unwrap(),
+        ));
+        items
+            .sync(
+                "agent:ledger",
+                &[ghost_core::waiting::ItemDraft::new(
+                    "question:abc",
+                    "Ledger asks: Pay it?",
+                )],
+                None,
+            )
+            .unwrap();
+        let open = items.open(None).unwrap();
+        let route = Arc::new(
+            CallRoute::new(p.host.feed.clone(), items.clone()).with_wait(Duration::from_secs(5)),
+        );
+        assert_eq!(route.names(), Some(1));
+        let (_, s) = live(&p, &creds, "/stream").await;
+        let mut s = s.unwrap();
+        let ringing = tokio::spawn({
+            let (route, open) = (route.clone(), open.clone());
+            async move { route.deliver(&open, &RoutePolicy::default()).await.unwrap() }
+        });
+        let ring = s.until("ring").await;
+        assert_eq!(ring["key"], "question:abc");
+        assert_eq!(ring["agent"], "ledger");
+        assert_eq!(ring["ring_secs"], 5);
+        let (r, _) = signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/ring",
+            Some(json!({"ring_id": ring["ring_id"], "answer": "answered"})),
+        )
+        .await;
+        assert_eq!(r.json(), json!({"ok": true}));
+        assert_eq!(ringing.await.unwrap(), Delivery::Heard);
+        assert_eq!(s.until("ring_over").await["why"], "answered");
+        // The phone opens the call through /offer, naming the agent and the item.
+        let body = json!({"sdp": "v=0", "type": "offer", "conversation": "ledger", "item": "question:abc"});
+        let (r, _) = signed(&p.app, &creds, "POST", "/offer", Some(body)).await;
+        assert_eq!(r.status, StatusCode::OK);
+        assert_eq!(lock(&p.host.rang_for).as_deref(), Some("question:abc"));
+
+        // Declined: "not now", snoozed.
+        let ringing = tokio::spawn({
+            let (route, open) = (route.clone(), open.clone());
+            async move { route.deliver(&open, &RoutePolicy::default()).await.unwrap() }
+        });
+        let ring = s.until("ring").await;
+        signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/ring",
+            Some(json!({"ring_id": ring["ring_id"], "answer": "declined"})),
+        )
+        .await;
+        assert_eq!(ringing.await.unwrap(), Delivery::Delivered);
+        assert_eq!(s.until("ring_over").await["why"], "declined");
+        assert_eq!(
+            items.get("question:abc").unwrap().unwrap().state(None),
+            ghost_core::waiting::State::Snoozed
+        );
+
+        // Not answered in time: nobody heard, the next route at once.
+        let quick =
+            CallRoute::new(p.host.feed.clone(), items.clone()).with_wait(Duration::from_millis(50));
+        assert_eq!(
+            quick.deliver(&open, &RoutePolicy::default()).await.unwrap(),
+            Delivery::NotHeard
+        );
+        assert_eq!(s.until("ring_over").await["why"], "timed_out");
+        // With no stream there is nobody to ring.
+        drop(s);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            quick.deliver(&open, &RoutePolicy::default()).await.unwrap(),
+            Delivery::Unavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn the_phones_answers_are_signed_and_done_once_per_id() {
+        let p = phone();
+        let creds = pair(&p).await;
+        let body = json!({"id": "a1", "key": "question:1", "text": "yes"});
+        let (first, nonce) = signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/questions/answer",
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(first.status, StatusCode::OK);
+        assert!(response_ok(&first, &creds, &nonce));
+        assert_eq!(first.json()["question"]["answered_via"], "phone");
+        let (again, _) = signed(&p.app, &creds, "POST", "/questions/answer", Some(body)).await;
+        assert_eq!(again.json(), first.json());
+        assert_eq!(lock(&p.host.answers).len(), 1);
+        let (none, _) = signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/questions/answer",
+            Some(json!({"id": "a2", "key": "question:nope", "text": "yes"})),
+        )
+        .await;
+        assert_eq!(none.status, StatusCode::NOT_FOUND);
+        assert_eq!(none.json(), json!({"error": "not_found"}));
+        let (bad, _) = signed(
+            &p.app,
+            &creds,
+            "POST",
+            "/questions/answer",
+            Some(json!({"key": "question:1", "text": "yes"})),
+        )
+        .await;
+        assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
+        for _ in 0..2 {
+            let (r, _) = signed(
+                &p.app,
+                &creds,
+                "POST",
+                "/changes/confirm",
+                Some(json!({"id": "c1", "change": "p1"})),
+            )
+            .await;
+            assert_eq!(r.json()["outcome"]["status"], "success");
+        }
+        assert_eq!(*lock(&p.host.confirmed), vec!["p1"]);
+    }
+
+    #[tokio::test]
+    async fn the_phone_surface_carries_no_transcript_and_no_audio() {
+        // ADR 0016, ADR 0051: no route reads a turn, a transcript, the event stream or
+        // audio, and an answer given by voice reaches the phone by its choice only.
+        let p = phone();
+        let creds = pair(&p).await;
+        for path in [
+            "/turns",
+            "/session/turns",
+            "/transcript",
+            "/events",
+            "/audio",
+            "/hear",
+            "/conversations/ghost/turns",
+            "/status",
+        ] {
+            let (r, _) = signed(&p.app, &creds, "GET", path, None).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
+        }
+        let voiced = phone_safe(question_view_of(
+            "question:1",
+            Some("yes, the business one"),
+            "voice",
+        ));
+        assert_eq!(voiced.answer, None);
+        assert_eq!(voiced.choice.as_deref(), Some("Yes"));
+        // What the stream may say, and nothing else.
+        let feed = PhoneFeed::new();
+        feed.question(question_view_of("question:1", None, ""));
+        let text = serde_json::to_string(&feed.cursor()).unwrap();
+        assert!(!text.contains("turn"));
+        let _ = p.host.feed.streams();
     }
 
     #[tokio::test]

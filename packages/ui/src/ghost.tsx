@@ -96,6 +96,8 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
               setConversationsVersion((v) => v + 1);
               break;
             case "waiting":
+            case "question":
+              // A question asked or settled changes what the waiting list shows (ADR 0051).
               setWaitingVersion((v) => v + 1);
               break;
             case "apps":

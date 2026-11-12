@@ -12,6 +12,7 @@ use ghost_core::ghost_app::outside::AgentRunner;
 use ghost_core::ghost_app::{self, Attached, NAME, Parts};
 use ghost_core::models::ProposalStatus;
 use ghost_core::policy::AutonomyPolicy;
+use ghost_core::questions::{Questions, via};
 use ghost_core::store::{ProposalQuery, Store};
 use ghost_core::waiting::{Items, Response as Tell};
 use rmcp::model::{CallToolRequestParams, ProtocolVersion, ReadResourceRequestParams};
@@ -34,6 +35,7 @@ struct World {
     clients: Arc<Clients>,
     host: OutsideHost,
     url: String,
+    questions: Option<Arc<Questions>>,
     _attached: Attached,
     _apps: Arc<Apps>,
 }
@@ -71,6 +73,15 @@ impl AgentRunner for Echo {
 }
 
 async fn world_with(policy: &str, listen: &str, shape: impl FnOnce(Outside) -> Outside) -> World {
+    world_full(policy, listen, shape, false).await
+}
+
+async fn world_full(
+    policy: &str,
+    listen: &str,
+    shape: impl FnOnce(Outside) -> Outside,
+    asking: bool,
+) -> World {
     let tmp = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::in_memory().unwrap());
     let gate = Arc::new(
@@ -82,8 +93,11 @@ async fn world_with(policy: &str, listen: &str, shape: impl FnOnce(Outside) -> O
     let waiting = Arc::new(
         WaitingList::new(Items::new(store.clone()))
             .with_changes(gate.clone())
-            .with_on_change(Arc::new(move || {
-                let _ = bus.send(r#"{"type":"waiting","count":0}"#.to_string());
+            .with_on_change(Arc::new({
+                let bus = bus.clone();
+                move || {
+                    let _ = bus.send(r#"{"type":"waiting","count":0}"#.to_string());
+                }
             })),
     );
     let apps = Arc::new(Apps::new(
@@ -91,12 +105,26 @@ async fn world_with(policy: &str, listen: &str, shape: impl FnOnce(Outside) -> O
         Arc::new(HashMap::<String, String>::new()),
         None,
     ));
-    let server = GhostServer::new(Parts {
+    let mut server = GhostServer::new(Parts {
         store: store.clone(),
         waiting: waiting.clone(),
         apps: Arc::downgrade(&apps),
         status: Arc::new(status),
     });
+    let questions = asking.then(|| {
+        // As the daemon does (ADR 0051): a question asked or settled is a bus event.
+        let q = Arc::new(Questions::new(store.clone(), waiting.clone()));
+        q.on_change(Arc::new(move |q| {
+            let event = ghost_api::models::Event::Question {
+                question: ghost_api::questions::question_view(q),
+            };
+            let _ = bus.send(serde_json::to_string(&event).unwrap());
+        }));
+        q
+    });
+    if let Some(q) = &questions {
+        server = server.with_questions(q.clone());
+    }
     let attached = ghost_app::attach(&apps, server.clone()).await.unwrap();
     gate.register(NAME, attached.app.operations());
     for (slug, name, job) in [("ghost", "Ghost", ""), ("ledger", "Ledger", "The books")] {
@@ -121,6 +149,7 @@ async fn world_with(policy: &str, listen: &str, shape: impl FnOnce(Outside) -> O
         clients,
         host,
         url,
+        questions,
         _attached: attached,
         _apps: apps,
     }
@@ -547,6 +576,135 @@ async fn each_client_has_a_budget_of_calls_and_a_smaller_one_of_things_told() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn a_client_asks_and_learns_the_answer_and_never_reads_anothers_question() {
+    // ADR 0051: ask returns the key at once; events_wait says the question was settled;
+    // question reads the answer. Another client learns only that one was asked, and no
+    // client can answer one.
+    let w = world_full("", "127.0.0.1:0", |o| o, true).await;
+    let qs = w.questions.clone().unwrap();
+    let claude = w
+        .client("claude-code", ClientLifecycleMode::Initialize)
+        .await;
+    let cursor_tool = w.client("cursor", ClientLifecycleMode::Initialize).await;
+    let names: BTreeSet<String> = claude
+        .list_all_tools()
+        .await
+        .unwrap()
+        .iter()
+        .map(|t| t.name.to_string())
+        .collect();
+    for t in ["ask", "question", "questions_list", "question_cancel"] {
+        assert!(names.contains(t), "{t}");
+    }
+    assert!(!names.contains("answer"), "an outside tool never answers");
+    let refused = call(
+        &claude,
+        "answer",
+        json!({"key": "question:x", "text": "yes"}),
+    )
+    .await;
+    assert!(refused.is_err());
+
+    let start = call(&claude, "events_wait", json!({"timeout_s": 0.1}))
+        .await
+        .unwrap()["cursor"]
+        .as_u64()
+        .unwrap();
+    let asked = call(
+        &claude,
+        "ask",
+        json!({"question": "Deploy the release branch now?", "choices": ["Yes", "No"]}),
+    )
+    .await
+    .unwrap();
+    let key = asked["key"].as_str().unwrap().to_string();
+    assert_eq!(asked["state"], "open");
+    assert_eq!(asked["asked_by"], "Claude Code");
+    // On the operator's list, said as the tool's.
+    let item = w.waiting.items.get(&key).unwrap().unwrap();
+    assert_eq!(item.source, "client:claude-code");
+    assert!(item.title.starts_with("Claude Code asks: Deploy"));
+
+    // The operator answers from the phone.
+    qs.answer(&key, "yes, go", via::PHONE, None).unwrap();
+    let got = call(
+        &claude,
+        "events_wait",
+        json!({"since": start, "timeout_s": 5}),
+    )
+    .await
+    .unwrap();
+    let settled = got["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "question" && e["state"] == "answered")
+        .cloned()
+        .unwrap_or_else(|| panic!("{got}"));
+    assert_eq!(settled["key"], key.as_str());
+    assert_eq!(settled["yours"], true);
+    assert_eq!(settled["answer"], "yes, go");
+    let read = call(&claude, "question", json!({"key": key}))
+        .await
+        .unwrap();
+    assert_eq!(read["state"], "answered");
+    assert_eq!(read["answer"], "yes, go");
+    assert_eq!(read["choice"], "Yes");
+    assert_eq!(read["answered_via"], "phone");
+
+    // Another client: that it happened, never its words or the answer.
+    let other = call(
+        &cursor_tool,
+        "events_wait",
+        json!({"since": start, "timeout_s": 5}),
+    )
+    .await
+    .unwrap();
+    for e in other["events"].as_array().unwrap() {
+        if e["type"] == "question" {
+            assert_eq!(e["yours"], false);
+            assert!(e.get("answer").is_none() && e.get("title").is_none(), "{e}");
+        }
+    }
+    let theirs = call(&cursor_tool, "question", json!({"key": key})).await;
+    assert!(theirs.unwrap_err().contains("that you asked"));
+    let list = call(&cursor_tool, "questions_list", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(list["questions"], json!([]));
+
+    // A client that waits holds the request until the answer comes.
+    let waiting = tokio::spawn({
+        let peer = claude.peer().clone();
+        async move {
+            let params = CallToolRequestParams::new("ask").with_arguments(
+                json!({"question": "Merge it?", "wait_s": 30})
+                    .as_object()
+                    .cloned()
+                    .unwrap(),
+            );
+            peer.call_tool(params).await.unwrap()
+        }
+    });
+    let mut open = None;
+    for _ in 0..200 {
+        open = qs.open(None).unwrap().pop();
+        if open.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    qs.answer(&open.unwrap().key, "not yet", via::DESKTOP, None)
+        .unwrap();
+    let got = waiting.await.unwrap();
+    let got: Value = serde_json::from_str(&got.content[0].as_text().unwrap().text).unwrap();
+    assert_eq!(got["answer"], "not yet");
+    let _ = claude.cancel().await;
+    let _ = cursor_tool.cancel().await;
+    w.host.stop().await;
 }
 
 #[tokio::test]

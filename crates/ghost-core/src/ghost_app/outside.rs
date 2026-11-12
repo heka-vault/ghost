@@ -62,7 +62,8 @@ pub const TELLING: [&str; 2] = ["notify", "say"];
 pub const INSTRUCTIONS: &str = "Ghost is the operator's voice assistant on this computer. Use notify to tell the operator \
 something (it goes on their waiting list and reaches them by voice, on the desktop or on the \
 phone), resolve once it no longer matters, and events_wait to wait for them to acknowledge \
-it. status, docs_search and docs_read say what Ghost is and how it is now. A change the \
+it. ask puts a question to the operator; events_wait says when it is settled and question \
+reads the answer, which is theirs alone. status, docs_search and docs_read say what Ghost is and how it is now. A change the \
 operator's permissions ask about answers \"waiting for the operator\": it has not run yet.";
 
 pub const DOCS_URI: &str = "ghost://docs/";
@@ -338,6 +339,23 @@ impl Feed {
                 }));
                 self.waiting_changed(); // a change that was waiting is no longer
             }
+            // A question was asked or settled (ADR 0051): who asked it, its state, and for
+            // the asker alone its words and the answer (`events_wait` strips them for others).
+            Some("question") => {
+                let q = &event["question"];
+                if q["kind"] == "change" {
+                    return; // a change's own events say what came of it
+                }
+                self.log.push(json!({
+                    "type": "question",
+                    "key": q["key"],
+                    "source": q["source"],
+                    "state": q["state"],
+                    "title": q["question"],
+                    "answer": q["answer"],
+                    "choice": q["choice"],
+                }));
+            }
             Some("status") => {
                 let s = &event["status"];
                 let phase = s["phase"].as_str().unwrap_or_default();
@@ -515,6 +533,8 @@ impl GhostServer {
         // Finding a connected app's tool (ADR 0046) is for an agent, which can call it. An
         // outside tool cannot, and what the search returns is the apps' own text.
         tool_router.remove_route("tools_search");
+        // Only the operator answers a question (ADR 0051): an outside tool never can.
+        tool_router.remove_route("answer");
         let server = Self {
             tool_router,
             outside: Some(Arc::new(outside)),

@@ -226,9 +226,11 @@ mod tests {
             assert!(p.contains("this session's limits, not Ghost's"));
             assert!(p.contains("use ghost_notify"));
         }
-        // Short, as everything sent on every turn is: four sentences, no em dash.
-        assert_eq!(SELF_KNOWLEDGE.matches(". ").count() + 1, 4);
-        assert!(SELF_KNOWLEDGE.len() < 700 && !SELF_KNOWLEDGE.contains('—'));
+        // Short, as everything sent on every turn is: six sentences (the last two are
+        // asking and answering, ADR 0051), no em dash.
+        assert_eq!(SELF_KNOWLEDGE.matches(". ").count() + 1, 6);
+        assert!(SELF_KNOWLEDGE.len() < 900 && !SELF_KNOWLEDGE.contains('—'));
+        assert!(SELF_KNOWLEDGE.contains("ghost_answer in their exact words"));
         // Without the app there is nothing to promise.
         let bare = build_system_prompt(&["F".into()], &Persona::ghost());
         assert!(!bare.contains("ghost_docs_search"));

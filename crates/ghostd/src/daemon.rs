@@ -86,11 +86,12 @@ use crate::passwords::{
     wait_for_vault,
 };
 use crate::phone::{PhoneListener, PhoneServers, PhoneStore};
-use crate::routes::{DeskRoute, DesktopRoute, PhoneRoute, Raised};
+use crate::routes::{CallRoute, DeskRoute, DesktopRoute, NtfyRoute, PhoneRoute, Raised};
 use crate::wake::{
     DetectorSpec, Event, FileWakeDetector, MediaFactory, SpokenWakeDetector, SttFactory, WAKE_FILE,
     WakeDetector, WakeListener, desk_capture, detector_phrases, wake_model_paths, wake_resources,
 };
+use ghost_core::questions::{AppAsker, Question, Questions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -288,6 +289,8 @@ async fn play_live(samples: Vec<i16>, rate: u32, device: Option<String>) -> Resu
 pub struct PendingPhone {
     pub media: Arc<dyn ghost_rtc::Media>,
     pub line: String,
+    /// The waiting-list key of the ring this call answers (ADR 0051), when it is one.
+    pub item: Option<String>,
 }
 
 /// The live peer, for a renegotiation and trickled candidates.
@@ -358,6 +361,11 @@ pub struct Daemon {
     pub(crate) session: Mutex<Option<Arc<GhostSession>>>,
     pub(crate) last_desk_session: Mutex<Option<Instant>>,
     pub(crate) phone_route: Arc<PhoneRoute>,
+    /// The phone's live stream (ADR 0051): what it is told and what waits on its word.
+    pub(crate) phone_feed: Arc<crate::phone::stream::PhoneFeed>,
+    /// The questions for the operator (ADR 0051); set once in `run`, and read by the
+    /// connected apps' asker before then (it declines until they are there).
+    pub(crate) questions: Arc<OnceLock<Arc<Questions>>>,
     pub(crate) first_via: Mutex<TurnVia>,
     pub(crate) heard: Mutex<Option<Heard>>,
     pub(crate) start_in: Mutex<String>,
@@ -401,6 +409,7 @@ impl Daemon {
             build,
         ));
         let (raise_tx, raise_rx) = mpsc::unbounded_channel();
+        let phone_feed = Arc::new(crate::phone::stream::PhoneFeed::new());
         Self {
             cfg: Mutex::new(cfg),
             voice: Mutex::new(Arc::new(voice)),
@@ -418,7 +427,9 @@ impl Daemon {
             reach: Mutex::new(None),
             session: Mutex::new(None),
             last_desk_session: Mutex::new(None),
-            phone_route: Arc::new(PhoneRoute::new()),
+            phone_route: Arc::new(PhoneRoute::new(phone_feed.clone())),
+            phone_feed,
+            questions: Arc::new(OnceLock::new()),
             first_via: Mutex::new(TurnVia::Voice),
             heard: Mutex::new(None),
             start_in: Mutex::new(GHOST.to_string()),
@@ -527,6 +538,11 @@ impl Daemon {
         self.late.routes.get().cloned()
     }
 
+    /// The questions for the operator (ADR 0051).
+    pub fn questions(&self) -> Option<Arc<Questions>> {
+        self.questions.get().cloned()
+    }
+
     pub fn deps(&self) -> Option<Arc<Deps>> {
         self.late.deps.get().cloned()
     }
@@ -621,12 +637,74 @@ impl Daemon {
         }
     }
 
+    /// A question was asked or settled (ADR 0051): the event stream says so, and the
+    /// phone's stream with it.
+    pub(crate) fn question_changed(&self, q: &Question) {
+        let view = ghost_api::questions::question_view(q);
+        self.state.bus.publish(&ghost_api::models::Event::Question {
+            question: view.clone(),
+        });
+        self.phone_feed.question(view);
+    }
+
+    /// The phone's live stream follows the waiting list (ADR 0051): its snapshot is the
+    /// list and the questions as the phone sees them, and each change on the bus is said
+    /// to it. A tap beside the bus, so it is not the desktop being open (ADR 0031).
+    pub(crate) fn start_phone_feed(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        let view = move || -> (Vec<ghost_api::models::WaitingItemView>, Vec<ghost_api::models::QuestionView>) {
+            let Some(d) = weak.upgrade() else {
+                return (Vec::new(), Vec::new());
+            };
+            let Some(deps) = d.deps() else {
+                return (Vec::new(), Vec::new());
+            };
+            let items = ghost_api::waiting_view(&deps)
+                .map(|v| v.items)
+                .unwrap_or_default();
+            let questions = ghost_api::questions::questions_view(&deps)
+                .map(|v| v.questions)
+                .unwrap_or_default();
+            (items, questions)
+        };
+        let view: crate::phone::stream::Snapshot = Arc::new(view);
+        self.phone_feed.set_snapshot(view.clone());
+        let mut bus = self.state.bus.tap();
+        let feed = self.phone_feed.clone();
+        let stop = self.stop.clone();
+        tokio::spawn(async move {
+            loop {
+                let text = tokio::select! {
+                    () = stop.cancelled() => return,
+                    t = bus.recv() => match t {
+                        Ok(t) => t,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(_) => return,
+                    },
+                };
+                let kind = serde_json::from_str::<serde_json::Value>(&text)
+                    .ok()
+                    .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(String::from));
+                if matches!(kind.as_deref(), Some("waiting" | "pending" | "outcome")) {
+                    let (items, _) = view();
+                    feed.waiting_now(&items);
+                }
+            }
+        });
+    }
+
     /// Re-read Ghost's own items now and then (a change's time running out, a server
     /// that went away; watches sync their own), and let the routes send what is due
     /// (ADR 0031).
     async fn refresh_waiting(self: Arc<Self>) {
         loop {
             tokio::time::sleep(Duration::from_secs(WAITING_REFRESH_SECS)).await;
+            // A question past its time is expired, and leaves the list (ADR 0051).
+            if let Some(q) = self.questions()
+                && let Err(e) = q.expire(None)
+            {
+                error!("questions: {e}");
+            }
             if let Some(w) = self.waiting()
                 && let Err(e) = w.refresh(None)
             {
@@ -1116,6 +1194,10 @@ impl Daemon {
             )
             .with_limits(app_limits),
         );
+        // ADR 0051: an app's question becomes a question from that app. Set before the
+        // apps connect, so they are told Ghost takes questions; until the questions exist
+        // (a moment later) one is declined.
+        apps.set_asker(Arc::new(AppAsker::new(d.questions.clone())));
         apps.connect().await;
         apps.supervise(); // ADR 0046: a connection that dies is opened again
         let catalog = Arc::new(Catalog::new(&cfg.catalog_path));
@@ -1265,6 +1347,24 @@ impl Daemon {
                 .with_on_change(on_change.clone()),
         );
         d.late.waiting.set(waiting.clone()).ok();
+        // ADR 0051: questions for the operator, on the waiting list. A question asked from
+        // a run is followed up by a run of the same agent once it is answered.
+        let questions =
+            Arc::new(Questions::new(store.clone(), waiting.clone()).with_jobs(jobs.clone()));
+        match questions.recover(None) {
+            Ok(n) if n > 0 => info!("questions: {n} from an app, open at the last stop, declined"),
+            Ok(_) => {}
+            Err(e) => warn!("questions: {e}"),
+        }
+        questions.on_change({
+            let weak = Arc::downgrade(d);
+            Arc::new(move |q| {
+                if let Some(d) = weak.upgrade() {
+                    d.question_changed(q);
+                }
+            })
+        });
+        let _ = d.questions.set(questions.clone());
         // ADR 0045: Ghost is an app its own agents use, served in process before any
         // session can open. It needs no vault, no network and no sign-in.
         let ghost_server = GhostServer::new(ghost_app::Parts {
@@ -1273,7 +1373,8 @@ impl Daemon {
             apps: Arc::downgrade(&apps),
             status: crate::ghost_app::status_fn(d),
         })
-        .with_schedules(jobs.clone());
+        .with_schedules(jobs.clone())
+        .with_questions(questions.clone());
         let ghost_app = match ghost_app::attach(&apps, ghost_server.clone()).await {
             Ok(attached) => {
                 gate.register(GHOST_APP, attached.app.operations());
@@ -1355,17 +1456,50 @@ impl Daemon {
             },
             d.raise_tx.clone(),
         )));
-        let desktop_route = Arc::new(DesktopRoute::new({
-            let waiting = waiting.clone();
-            Arc::new(move |key: &str, now| {
-                waiting
-                    .acknowledge(key, Some(now), Some(now))
-                    .unwrap_or(false)
+        let desktop_route = Arc::new(
+            DesktopRoute::new({
+                let waiting = waiting.clone();
+                Arc::new(move |key: &str, now| {
+                    waiting
+                        .acknowledge(key, Some(now), Some(now))
+                        .unwrap_or(false)
+                })
             })
-        }));
+            // ADR 0051: a question's choices are the notification's buttons.
+            .with_questions(
+                {
+                    let questions = questions.clone();
+                    Arc::new(move |key: &str| questions.get(key).ok().flatten())
+                },
+                {
+                    let questions = questions.clone();
+                    Arc::new(move |key: &str, choice: &str| {
+                        questions
+                            .answer(key, choice, ghost_core::questions::via::DESKTOP, None)
+                            .is_ok()
+                    })
+                },
+            ),
+        );
         routes.add_route(desktop_route.clone());
         routes.add_route(d.phone_route.clone());
-        *lock(&d.route_names) = vec![RouteName::Desk, RouteName::Desktop, RouteName::Phone];
+        // ADR 0051: the desk rings the phone, and ntfy for when the phone is off the tunnel.
+        routes.add_route(Arc::new(CallRoute::new(
+            d.phone_feed.clone(),
+            Items::new(store.clone()),
+        )));
+        routes.add_route(Arc::new(NtfyRoute::new({
+            let weak = Arc::downgrade(d);
+            Arc::new(move |name: &str| weak.upgrade().and_then(|d| d.env().get(name).cloned()))
+        })));
+        *lock(&d.route_names) = vec![
+            RouteName::Desk,
+            RouteName::Desktop,
+            RouteName::Phone,
+            RouteName::Call,
+            RouteName::Ntfy,
+        ];
+        d.start_phone_feed();
         d.late.routes.set(routes.clone()).ok();
         d.late.desktop_route.set(desktop_route.clone()).ok();
         // What a session with any agent reaches (ADR 0034, ADR 0035): every connected
@@ -1868,6 +2002,7 @@ impl Daemon {
             schedules: Some(p.schedules),
             clients: Some(p.clients),
             clients_listening: p.clients_listening,
+            questions: self.questions(),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {
