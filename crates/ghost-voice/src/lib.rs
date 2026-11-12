@@ -24,6 +24,7 @@ pub mod debug;
 pub mod echo;
 pub mod elevenlabs;
 pub mod frames;
+pub mod headless;
 pub mod hold;
 pub mod intents;
 pub mod intercept;

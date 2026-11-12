@@ -96,6 +96,9 @@ pub struct ToolDispatcher {
     last_request: LastRequest,
     probe: Arc<dyn LatencyProbe>,
     offering: Offering,
+    /// The agent of a run with nobody there (`crate::headless`, ADR 0047); None in a
+    /// session, whose agent is the one it is with.
+    alone: Option<String>,
 }
 
 pub struct ToolsParams {
@@ -118,9 +121,23 @@ impl ToolDispatcher {
     /// `submit` (the call itself below `confirm`) and the `request` check that may
     /// execute it.
     pub fn new(p: ToolsParams) -> Arc<Self> {
+        Self::build(p, None)
+    }
+
+    /// The same tools for `agent` working with nobody there (ADR 0047): no hang up, hold,
+    /// transfer or bringing up a change, since there is no operator to do them for; a
+    /// change that would ask is set aside on the waiting list (ADR 0030) instead of
+    /// waiting on a turn that will not come, and nothing here is taken for the
+    /// operator's yes.
+    pub fn alone(p: ToolsParams, agent: &str) -> Arc<Self> {
+        Self::build(p, Some(agent.to_string()))
+    }
+
+    fn build(p: ToolsParams, alone: Option<String>) -> Arc<Self> {
         let session = SessionTools {
             conversations: p.conversations.is_some(),
             hold: p.on_hold.is_some(),
+            none: alone.is_some(),
         };
         let offering = Offering::new(p.gate.clone(), session);
         let this = Arc::new(Self {
@@ -138,6 +155,7 @@ impl ToolDispatcher {
                 .unwrap_or_else(|| Arc::new(|| (String::new(), String::new()))),
             probe: p.probe.unwrap_or_else(null_probe),
             offering,
+            alone,
         });
         if let Some(c) = &this.conversations {
             let me = this.clone();
@@ -184,6 +202,11 @@ impl ToolDispatcher {
     /// One call by the model: `name` with `args`; `call_id` labels its steps in the
     /// latency record.
     pub async fn call(&self, name: &str, args: Map<String, Value>, call_id: &str) -> CallResult {
+        if self.alone.is_some()
+            && matches!(name, SWITCH_TOOL | BRING_UP_TOOL | HANG_UP_TOOL | HOLD_TOOL)
+        {
+            return CallResult::error(format!("{name} is not available here"));
+        }
         match name {
             CHANGE_TOOL => self.change(args, call_id).await,
             SWITCH_TOOL if self.conversations.is_some() => self.switch(args).await,
@@ -232,6 +255,14 @@ impl ToolDispatcher {
             }
             _ => self.dispatch(name, args, call_id).await,
         }
+    }
+
+    /// The agent a call is from: the one the session is with, or the one working alone.
+    fn agent(&self) -> Option<String> {
+        self.conversations
+            .as_ref()
+            .map(|c| c.active().slug)
+            .or_else(|| self.alone.clone())
     }
 
     /// Every read tool and every app's change is one catch-all: a call goes to the
@@ -338,9 +369,9 @@ impl ToolDispatcher {
             .tool_operation(call_id, &format!("{aname}.{op_name}"));
         (self.record)(&format!("{aname}.{op_name}"), &args);
         if aname == CONVERSATIONS
-            && let Some(c) = &self.conversations
+            && let Some(active) = self.agent()
         {
-            args.insert("_active".into(), Value::String(c.active().slug));
+            args.insert("_active".into(), Value::String(active));
         }
         if aname == RULES {
             // a rule must be the operator's words
@@ -349,10 +380,7 @@ impl ToolDispatcher {
         if aname == GHOST_APP {
             // Ghost's own app is told which agent is calling (ADR 0045): the session's,
             // over anything the model wrote there.
-            let agent = self
-                .conversations
-                .as_ref()
-                .map_or_else(|| GHOST.to_string(), |c| c.active().slug);
+            let agent = self.agent().unwrap_or_else(|| GHOST.to_string());
             args.insert(CALLER_ARG.into(), Value::String(agent));
         }
         let began = Instant::now();
@@ -377,7 +405,7 @@ impl ToolDispatcher {
                 rationale
             },
         );
-        req.conversation = self.conversations.as_ref().map(|c| c.active().slug);
+        req.conversation = self.agent();
         req.asked_by = prepared.asked_by.clone();
         let began = Instant::now();
         let sub = match self.gate.submit(req).await {
@@ -453,6 +481,34 @@ impl ToolDispatcher {
             return CallResult::plain(result);
         }
         info!("pending {}: {}", sub.proposal.id, sub.proposal.preview);
+        if self.alone.is_some() {
+            // Nobody is here to say yes, and nothing in a run is the operator's words:
+            // the change waits on the waiting list, as one a session left unanswered
+            // does (ADR 0030), and the run carries on.
+            if let Err(e) = self
+                .gate
+                .set_aside(&self.session_id, "nobody was there to ask")
+            {
+                warn!("gate: {} was not set aside: {e}", sub.proposal.id);
+            }
+            self.probe.tool_status(call_id, "set_aside");
+            let mut result = Map::new();
+            result.insert("status".into(), json!("set_aside"));
+            result.insert("summary".into(), json!(sub.proposal.preview));
+            result.insert(
+                "waits_minutes".into(),
+                json!(self.gate.pending_ttl().num_seconds() / 60),
+            );
+            result.insert(
+                "note".into(),
+                json!(
+                    "Not done: it needs the operator's yes and nobody is here. It is on \
+                     their waiting list. Carry on without it, and say in your answer that \
+                     it is waiting."
+                ),
+            );
+            return CallResult::plain(result);
+        }
         // The operator may already have said yes by asking for it: "close infra 17".
         let (request, before) = (self.last_request)();
         let began = Instant::now();

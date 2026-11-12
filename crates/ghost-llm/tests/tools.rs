@@ -115,6 +115,7 @@ fn test_no_undo_tool() {
         SessionTools {
             conversations: true,
             hold: true,
+            none: false,
         },
     );
     let schemas = offering.schemas(&[fake_source()]);
@@ -178,6 +179,7 @@ fn test_session_tools_follow_the_session() {
         SessionTools {
             conversations: true,
             hold: true,
+            none: false,
         },
     );
     assert_eq!(
