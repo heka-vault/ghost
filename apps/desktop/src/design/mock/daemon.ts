@@ -1317,7 +1317,8 @@ export class MockDaemon {
     if (method === "POST" && path === "/passwords/import") return this.importPasswords();
     if (method === "GET" && path === "/model") return this.model.view();
     if (method === "POST" && path === "/model/models") return await sleep(300), this.model.list(b as ModelDraft);
-    if (method === "POST" && path === "/model/test") return await sleep(900), this.model.test(b as ModelDraft);
+    if (method === "POST" && path === "/model/check") return await sleep(1400), this.model.check(b as ModelDraft);
+    if (method === "GET" && path === "/model/check") return { check: this.model.last };
     if (method === "POST" && path === "/model/sign-in") return this.model.startSignIn();
     if (method === "GET" && path === "/devices") return this.devices;
     if (method === "POST" && path === "/setup/echo-cancel") {

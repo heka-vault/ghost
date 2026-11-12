@@ -40,6 +40,8 @@
 //! A key is sent in a header and nowhere else: never in a `Debug`, never in an error. A
 //! non-2xx body is never logged whole: an error carries its first line, redacted.
 
+pub mod capabilities;
+pub mod check;
 pub mod context;
 pub mod model;
 mod reply;
@@ -51,7 +53,8 @@ pub use context::{
 };
 pub use model::{
     ANTHROPIC_BETA, CUT_OFF_LINE, CUT_OFF_NOTE, DEFAULT_THINKING, Event, FinishReason,
-    LLM_MAX_TOKENS, LlmError, Model, Options, Probe, Usage, prefill_supported, shared,
+    LLM_MAX_TOKENS, LlmError, MOST_WAIT, Measured, Model, Options, Probe, REASONING_EFFORT, Usage,
+    comes_back, prefill_supported, retry_after, shared, spoken_failure,
 };
 pub use tools::{
     BRING_UP_TOOL, CHANGE_TOOL, HANG_UP_TOOL, HOLD_TOOL, OfferAll, Offered, Offering, Offers,

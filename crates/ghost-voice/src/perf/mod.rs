@@ -17,6 +17,7 @@ pub mod hear;
 pub mod join;
 pub mod llm;
 pub mod micro;
+pub mod providers;
 pub mod report;
 pub mod scenarios;
 pub mod turns;

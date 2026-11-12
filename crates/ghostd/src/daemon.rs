@@ -371,6 +371,8 @@ pub struct Daemon {
     followed_vault: AtomicBool,
     /// The last model load's failure while it is tried again; on the waiting list meanwhile.
     models_problem: Mutex<Option<String>>,
+    /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
+    pub(crate) model_slow: Mutex<Option<String>>,
     models_retry: std::time::Duration,
     pub late: Late,
     /// The agents, with the voices once Kokoro is loaded.
@@ -439,6 +441,7 @@ impl Daemon {
             passwords: Mutex::new(None),
             followed_vault: AtomicBool::new(false),
             models_problem: Mutex::new(None),
+            model_slow: Mutex::new(None),
             models_retry: MODELS_RETRY,
             late: Late::default(),
             conversations: Mutex::new(None),
@@ -933,48 +936,6 @@ impl Daemon {
         }
     }
 
-    /// Test connection (ADR 0037): one tiny streamed request through the connection
-    /// the desktop is editing, timed like `make perf-llm`. The saved connection goes
-    /// over the client sessions share (warm, as a session finds it); another is tried
-    /// on a client of its own that isn't kept.
-    pub(crate) async fn probe_model(
-        &self,
-        env: HashMap<String, String>,
-        prompt: &str,
-        max_tokens: u32,
-    ) -> ghost_api::Probe {
-        let target = ghost_core::connection::ModelConnection::from_env(&env).target(&env);
-        let voice = self.voice();
-        let mine = self.env();
-        let share = target.fingerprint() == voice.llm_target(Some(&mine)).fingerprint();
-        let client = if share {
-            ghost_llm::model::shared(&target)
-        } else {
-            ghost_llm::model::Model::new(target.clone()).map(Arc::new)
-        };
-        let client = match client {
-            Ok(c) => c,
-            Err(e) => {
-                return ghost_api::Probe {
-                    error: Some(e.to_string()),
-                    ..ghost_api::Probe::default()
-                };
-            }
-        };
-        let thinking = (target.protocol == ghost_core::connection::Protocol::Anthropic
-            && !target.model.contains("haiku")
-            && !voice.llm_thinking.is_empty())
-        .then(|| voice.llm_thinking.clone());
-        let p = client.probe(prompt, max_tokens, thinking.as_deref()).await;
-        ghost_api::Probe {
-            ttft: p.ttft,
-            total: p.total,
-            text: p.text,
-            model: p.model,
-            error: p.error,
-        }
-    }
-
     // --- the wake ------------------------------------------------------------------------
 
     fn stt_factory(models: &Arc<Models>) -> SttFactory {
@@ -1371,6 +1332,9 @@ impl Daemon {
                             if let Some(problem) = lock(&d.models_problem).clone() {
                                 out.push((MODELS_PROBLEM_KEY.to_string(), problem));
                             }
+                            if let Some(slow) = d.slow_problem() {
+                                out.push((crate::model_check::SLOW_PROBLEM_KEY.to_string(), slow));
+                            }
                             if let Some(problem) = d.late.outside.get().and_then(|o| o.problem()) {
                                 out.push((crate::outside::PROBLEM_KEY.to_string(), problem));
                             }
@@ -1381,6 +1345,8 @@ impl Daemon {
                 .with_on_change(on_change.clone()),
         );
         d.late.waiting.set(waiting.clone()).ok();
+        // ADR 0056: what each model route has shown, before the first turn.
+        d.seed_capabilities();
         // ADR 0051: questions for the operator, on the waiting list. A question asked from
         // a run is followed up by a run of the same agent once it is answered.
         let questions =

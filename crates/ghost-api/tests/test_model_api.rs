@@ -9,10 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::{FakeModelNet, FakeSignIns, World, by};
-use ghost_api::controller::Probe;
+use ghost_api::controller::ModelCheckRun;
 use ghost_core::apps::AppError;
 use ghost_core::connection::{ConnectionError, ModelOption};
 use ghost_core::passwords::{MemoryKeyring, Passwords};
+use ghost_llm::check::{ModelCheck, State, Timing, Verdict};
 use serde_json::{Value, json};
 
 const OR_KEY: &str = "sk-or-v1-fedcba9876543210";
@@ -274,27 +275,55 @@ async fn a_draft_takes_only_connection_settings() {
     assert_eq!(r.status, 422);
 }
 
+fn found(role: &str, model: &str, first_word: &[f64]) -> ModelCheck {
+    let yes = Verdict {
+        state: State::Yes,
+        detail: None,
+    };
+    ModelCheck {
+        role: role.into(),
+        model: model.into(),
+        answered_by: Some(format!("{model}-2026")),
+        reachable: true,
+        error: None,
+        first_byte: Timing::of(&[0.3]),
+        first_word: Timing::of(first_word),
+        samples: first_word.len(),
+        streaming: yes.clone(),
+        tools: yes.clone(),
+        caching: Verdict {
+            state: State::NotReported,
+            detail: Some("the provider doesn't report it".into()),
+        },
+        thinking: Verdict {
+            state: State::No,
+            detail: Some("refuses between_tools".into()),
+        },
+        thinking_mode: Some("between_tools".into()),
+    }
+}
+
 #[tokio::test]
-async fn test_connection_times_the_first_token() {
+async fn the_check_reports_each_model_with_the_key_used_and_never_shown() {
     let w = World::new();
-    type Seen = Option<(HashMap<String, String>, String, u32)>;
+    type Seen = Option<HashMap<String, String>>;
     let seen: Arc<std::sync::Mutex<Seen>> = Arc::new(std::sync::Mutex::new(None));
     let seen2 = seen.clone();
-    w.control
-        .set_probe(Arc::new(move |env, prompt, max_tokens| {
-            *seen2.lock().unwrap() = Some((env, prompt, max_tokens));
-            Probe {
-                ttft: Some(0.4123),
-                total: Some(0.61),
-                text: "Hello there, nice to meet.".into(),
-                model: "gpt-5-2026".into(),
-                error: None,
-            }
-        }));
+    w.control.set_check(Arc::new(move |env| {
+        *seen2.lock().unwrap() = Some(env);
+        ModelCheckRun {
+            at: chrono::Utc::now(),
+            models: vec![
+                found("main", "gpt-5", &[0.4123, 0.9, 0.5]),
+                found("fast", "gpt-5-mini", &[0.2]),
+            ],
+            advice: None,
+        }
+    }));
     let c = w.client();
     let r = c
         .post(
-            "/model/test",
+            "/model/check",
             Some(json!({
                 "values": {"GHOST_LLM_PROVIDER": "openai", "GHOST_LLM_MODEL": "gpt-5"},
                 "password_value": TYPED_KEY,
@@ -303,45 +332,65 @@ async fn test_connection_times_the_first_token() {
         .await;
     assert_eq!(r.status, 200, "{}", r.text);
     let v = &r.json;
-    assert_eq!(v["ok"], true);
+    let main = &v["models"][0];
+    assert_eq!(main["role"], "main");
+    assert_eq!(main["reachable"], true);
     assert_eq!(
-        (v["ttft_ms"].clone(), v["total_ms"].clone()),
-        (json!(412), json!(610))
+        main["first_word"],
+        json!({"median_ms": 500, "worst_ms": 900})
     );
-    assert_eq!(v["model"], "gpt-5");
-    assert_eq!(v["answered_by"], "gpt-5-2026");
+    assert_eq!(main["samples"], 3);
+    assert_eq!(main["answered_by"], "gpt-5-2026");
+    assert_eq!(main["thinking"]["state"], "no");
+    assert_eq!(main["caching"]["state"], "not_reported");
+    assert_eq!(v["models"][1]["role"], "fast");
     assert!(
         v["where"]
             .as_str()
             .unwrap()
             .starts_with("openai (openai, https://api.openai.com")
     );
-    let (env, _, max_tokens) = seen.lock().unwrap().clone().unwrap();
+    let env = seen.lock().unwrap().clone().unwrap();
     assert_eq!(env["OPENAI_API_KEY"], TYPED_KEY);
-    assert!(max_tokens <= 64);
     assert!(!r.text.contains(TYPED_KEY));
     assert!(!w.env().contains_key("OPENAI_API_KEY")); // tried, not kept
 }
 
 #[tokio::test]
-async fn a_failed_test_says_why() {
+async fn a_failed_check_says_why_in_plain_words() {
     let w = World::new();
-    w.control.set_probe(Arc::new(|_env, _prompt, _max| Probe {
-        ttft: None,
-        total: None,
-        text: String::new(),
-        model: String::new(),
-        error: Some("AuthenticationError (HTTP 401)".into()),
+    w.control.set_check(Arc::new(|_env| {
+        let mut m = found("main", "claude-sonnet-5-5", &[]);
+        m.reachable = false;
+        m.error = Some("The model provider refused Ghost's key. (HTTP 401)".into());
+        ModelCheckRun {
+            at: chrono::Utc::now(),
+            models: vec![m],
+            advice: None,
+        }
     }));
     let c = w.client();
     let v = c
         .post(
-            "/model/test",
+            "/model/check",
             Some(json!({"values": {"GHOST_LLM_PROVIDER": "anthropic"}})),
         )
         .await;
-    assert_eq!(v["ok"], false);
-    assert_eq!(v["error"], "AuthenticationError (HTTP 401)");
+    assert_eq!(v["models"][0]["reachable"], false);
+    assert!(
+        v["models"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("refused Ghost's key")
+    );
+}
+
+#[tokio::test]
+async fn no_check_yet_is_none() {
+    let w = World::new();
+    let v = w.client().get("/model/check").await;
+    assert_eq!(v.status, 200);
+    assert_eq!(v.json["check"], Value::Null);
 }
 
 /// `GET /model` until the sign-in is no longer pending.
