@@ -1072,6 +1072,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                     turns.clone(),
                 )
                 .with_settle(settings.turn_grace_secs)
+                .with_first_sound(settings.first_sound())
                 .with_on_ack(on_ack),
             ),
         ));

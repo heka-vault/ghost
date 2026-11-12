@@ -59,6 +59,34 @@ pub fn read_records(path: &Path) -> Vec<Value> {
     out
 }
 
+/// The records in the last `bytes` of `path` (its rotated generation left alone), oldest
+/// first: what a session reads as it opens, so it costs the same however long the file has
+/// grown. The first line, likely cut, is skipped.
+pub fn tail_records(path: &Path, bytes: u64) -> Vec<Value> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let from = len.saturating_sub(bytes);
+    if f.seek(SeekFrom::Start(from)).is_err() {
+        return Vec::new();
+    }
+    let mut text = String::new();
+    let mut raw = Vec::new();
+    if f.read_to_end(&mut raw).is_err() {
+        return Vec::new();
+    }
+    text.push_str(&String::from_utf8_lossy(&raw));
+    let mut lines = text.lines();
+    if from > 0 {
+        lines.next();
+    }
+    lines
+        .filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok())
+        .collect()
+}
+
 /// Nearest-rank-with-interpolation percentile, `q` in [0, 100].
 pub fn percentile(values: &[f64], q: f64) -> Option<f64> {
     let mut xs: Vec<f64> = values.iter().copied().filter(|v| !v.is_nan()).collect();
@@ -594,5 +622,41 @@ mod tests {
                 .iter()
                 .any(|l| l == "  llm_calls     1       1       1")
         );
+    }
+
+    #[test]
+    fn the_tail_holds_the_last_records_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("latency.jsonl");
+        let lines: Vec<String> = (0..200)
+            .map(|i| {
+                serde_json::json!({"kind": "voice", "turn": i, "pad": "x".repeat(40)}).to_string()
+            })
+            .collect();
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        let tail = tail_records(&path, 1024);
+        assert!(!tail.is_empty() && tail.len() < 200, "{}", tail.len());
+        assert_eq!(tail.last().unwrap()["turn"], 199);
+        assert!(tail.iter().all(|r| r["kind"] == "voice"), "no cut line");
+        assert_eq!(tail_records(&path, 1 << 20).len(), 200);
+        assert!(tail_records(&dir.path().join("none"), 1024).is_empty());
+    }
+
+    #[test]
+    fn reading_the_tail_costs_the_same_however_long_the_file() {
+        // A session opening reads it (`Daemon::first_word_secs`): it must stay a few
+        // milliseconds when the file is at its 5 MB rotation size.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("latency.jsonl");
+        let rec = serde_json::json!({"kind": "voice", "llm": {"calls": [{"ttfb": 1.2, "pad": "x".repeat(1200)}]}})
+            .to_string();
+        let n = 5 * 1024 * 1024 / rec.len();
+        std::fs::write(&path, vec![rec; n].join("\n") + "\n").unwrap();
+        let began = std::time::Instant::now();
+        let tail = tail_records(&path, 64 * 1024);
+        let took = began.elapsed();
+        println!("tail of a 5 MB file: {} records in {took:?}", tail.len());
+        assert!(tail.len() >= 40, "{}", tail.len());
+        assert!(took < std::time::Duration::from_millis(100), "{took:?}");
     }
 }

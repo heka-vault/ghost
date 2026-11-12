@@ -36,6 +36,22 @@
 //! for the turn at that point, so the operator may still be going on after a pause
 //! (ADR 0049): the acknowledgment waits until the turn's grace has run from the end of
 //! their speech, and is not said if they went on first.
+//!
+//! **It follows the close the turn got** (2026-11-12, first sound). A held answer's
+//! frames reach this stage only once the turn has closed (`TurnControl`, ADR 0049), so
+//! waiting a further 1.2 s from the end of speech cost up to 0.85 s on a confident close
+//! and protected nothing the close had not: the operator going on before the
+//! acknowledgment plays still cuts the turn, and with it the word; speech over it takes
+//! the turn back as words in silence do. Only a frame seen before the turn closed (none
+//! does today) still waits out the grace (`with_settle`).
+//!
+//! **A first sound when the model is slow** ([`FirstSound`]). When a turn's reply has
+//! begun and, `after` it, the model has written no word ([`Frame::ModelWriting`]),
+//! started no call, and nothing has been said, Ghost says one of [`WAIT`] then, once.
+//! An answer on its way (its first word written) is never preceded by it, so a one-word
+//! reply is not given a "Sure." first. `after` is chosen per connection from its measured
+//! first word ([`FirstSound::for_connection`]), so a quick connection hears it only on a
+//! turn that is slow for it and a slow connection never sits silent past the cap.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -55,6 +71,10 @@ use crate::turns::TurnControl;
 pub const READ: &[&str] = &["Sure.", "Let's see.", "One sec.", "Checking."];
 /// Ghost going to change something.
 pub const CHANGE: &[&str] = &["On it.", "Will do.", "Okay.", "Sure thing."];
+/// Said when the model has been silent too long (`FirstSound`): words that promise
+/// nothing about what comes next, a lookup or a plain answer. Both are in [`READ`], so
+/// they are rendered with it.
+pub const WAIT: &[&str] = &["One sec.", "Let's see."];
 /// Kokoro's rate, and the playback's.
 pub const RATE: u32 = 24_000;
 /// The cache folder; a new list or a new way of rendering is a new version.
@@ -306,6 +326,51 @@ impl Picker {
     }
 }
 
+/// When Ghost says a word because the model has been silent (see the module doc).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FirstSound {
+    /// From the start of the turn's first reply.
+    pub after: std::time::Duration,
+}
+
+impl FirstSound {
+    /// Never sooner than this after the reply begins.
+    pub const FLOOR_SECS: f64 = 0.7;
+    /// Never later: past this the silence is long whatever the connection.
+    pub const CAP_SECS: f64 = 1.4;
+    /// A connection whose first word usually comes within this is quick: the word waits
+    /// until it is late for it, and is said only on a turn slower than usual.
+    pub const QUICK_SECS: f64 = 0.75;
+    /// On a quick connection, past its usual first word by this.
+    pub const MARGIN_SECS: f64 = 0.25;
+    /// On a slow one, this far ahead of its usual first word: said well before the answer,
+    /// never a moment before it (measured 2026-11-12: at 0.8 s after the reply began the
+    /// word came about 0.9 s before a plain answer; at the slow connection's own first
+    /// word it would have come 0.35 s before it, "One sec. Doing well.").
+    pub const AHEAD_SECS: f64 = 0.8;
+    /// With no measure of the connection.
+    pub const UNKNOWN_SECS: f64 = 1.0;
+
+    /// The wait for a connection whose first word usually comes `first_word` seconds
+    /// after the call (the median of its last spoken turns, or of its latest check).
+    ///
+    /// The word must not land just before an answer. On a quick connection that means
+    /// late: after its usual first word, so it is said only when this turn is slow. On a
+    /// slow one (OpenRouter's Haiku 5.5, 1.5 to 1.9 s; a real-size prompt through the
+    /// proxy, 1.5 s) it means early: most turns are long enough to need it, and said
+    /// `AHEAD_SECS` before the usual answer it is a word and a pause, then the answer.
+    pub fn for_connection(first_word: Option<f64>) -> Self {
+        let secs = match first_word.filter(|s| s.is_finite() && *s > 0.0) {
+            None => Self::UNKNOWN_SECS,
+            Some(s) if s <= Self::QUICK_SECS => (s + Self::MARGIN_SECS).max(Self::FLOOR_SECS),
+            Some(s) => (s - Self::AHEAD_SECS).clamp(Self::FLOOR_SECS, Self::CAP_SECS),
+        };
+        Self {
+            after: std::time::Duration::from_secs_f64(secs),
+        }
+    }
+}
+
 /// Whether a tool the model called goes to an app, and as a read or a change.
 pub type Outside = Arc<dyn Fn(&str) -> Option<AckKind> + Send + Sync>;
 
@@ -320,8 +385,9 @@ pub struct AckStage {
     turns: Arc<TurnControl>,
     reply_turn: Option<CancellationToken>,
     on_ack: Option<OnSay>,
-    /// This turn has been acknowledged.
-    acked: bool,
+    /// This turn has been acknowledged: by a call, a hand-over or the first sound,
+    /// whichever came first (the first sound's timer sets it from its own task).
+    acked: Arc<std::sync::atomic::AtomicBool>,
     /// Something of this turn's reply went to the voice.
     spoke: bool,
     picker: Picker,
@@ -329,6 +395,15 @@ pub struct AckStage {
     /// soonest (`with_settle`), and when that speech ended.
     settle: std::time::Duration,
     segment_ended: Option<std::time::Instant>,
+    /// The operator's turn has closed (`UserStopped`, or a turn the session queued).
+    closed: bool,
+    /// The first sound (`with_first_sound`); None, nothing is said for a silent model.
+    first_sound: Option<FirstSound>,
+    /// Cancelled when the model shows it is not silent, or the turn moves on: the first
+    /// sound's timer for this turn is then not said.
+    quiet: Option<CancellationToken>,
+    /// The first sound's timer was started for this turn.
+    armed: bool,
 }
 
 impl AckStage {
@@ -350,11 +425,15 @@ impl AckStage {
             turns,
             reply_turn: None,
             on_ack: None,
-            acked: false,
+            acked: Arc::default(),
             spoke: false,
             picker: Picker::default(),
             settle: std::time::Duration::ZERO,
             segment_ended: None,
+            closed: false,
+            first_sound: None,
+            quiet: None,
+            armed: false,
         }
     }
 
@@ -365,6 +444,12 @@ impl AckStage {
         self
     }
 
+    /// Say one of [`WAIT`] when the model has been silent this long (`FirstSound`).
+    pub fn with_first_sound(mut self, first_sound: Option<FirstSound>) -> Self {
+        self.first_sound = first_sound;
+        self
+    }
+
     /// Told the words as the acknowledgment goes out: the echo filter (`EchoFilter::acked`).
     pub fn with_on_ack(mut self, on_ack: OnSay) -> Self {
         self.on_ack = Some(on_ack);
@@ -372,8 +457,82 @@ impl AckStage {
     }
 
     fn new_turn(&mut self) {
-        self.acked = false;
+        self.acked = Arc::default();
         self.spoke = false;
+        self.armed = false;
+        self.not_quiet();
+    }
+
+    fn acked(&self) -> bool {
+        self.acked.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The model is not silent, or the turn moved on: no first sound for it.
+    fn not_quiet(&mut self) {
+        if let Some(q) = self.quiet.take() {
+            q.cancel();
+        }
+    }
+
+    /// A turn's first reply began: unless the model writes or calls within the first
+    /// sound's wait, one of [`WAIT`] is said then.
+    fn arm(&mut self, out: &Out) {
+        let Some(first) = self.first_sound else {
+            return;
+        };
+        if self.armed || self.spoke || self.acked() {
+            return;
+        }
+        self.armed = true;
+        let quiet = CancellationToken::new();
+        self.quiet = Some(quiet.clone());
+        let turn = self
+            .reply_turn
+            .clone()
+            .unwrap_or_else(|| self.turns.current());
+        let clip = match self.acks.get(&self.voice, self.speed) {
+            Some(voiced) => {
+                let waits: Vec<Clip> = voiced
+                    .read
+                    .iter()
+                    .filter(|c| WAIT.contains(&c.text))
+                    .cloned()
+                    .collect();
+                self.picker.pick(&waits).cloned()
+            }
+            None => None,
+        };
+        let Some(clip) = clip else {
+            return;
+        };
+        let (out, on_ack, acked) = (out.clone(), self.on_ack.clone(), self.acked.clone());
+        tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                () = turn.cancelled() => return,
+                () = quiet.cancelled() => return,
+                () = tokio::time::sleep(first.after) => {}
+            }
+            if acked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            debug::audio(|| {
+                format!(
+                    "ack: {:?}, the model silent {:.2}s",
+                    clip.text,
+                    first.after.as_secs_f64()
+                )
+            });
+            if let Some(on_ack) = &on_ack {
+                on_ack(clip.text);
+            }
+            out.push(Frame::Ack {
+                text: clip.text.to_string(),
+                audio: Audio::new((*clip.pcm).clone(), RATE),
+                turn,
+            })
+            .await;
+        });
     }
 
     /// What a call sends Ghost to: an app's read or change, Ghost's own `change`, or any
@@ -408,9 +567,13 @@ impl AckStage {
             .await;
     }
 
-    /// No later than the turn's grace from the end of the operator's speech: before that
-    /// they may only be pausing (ADR 0049).
+    /// Once the turn has closed, nothing: the close the turn got (the short grace or the
+    /// full one, ADR 0049) is the wait. Before it closed, no sooner than the turn's grace
+    /// from the end of the operator's speech: they may only be pausing.
     fn settle_wait(&self) -> std::time::Duration {
+        if self.closed {
+            return std::time::Duration::ZERO;
+        }
         self.segment_ended.map_or(std::time::Duration::ZERO, |at| {
             self.settle.saturating_sub(at.elapsed())
         })
@@ -456,13 +619,17 @@ impl AckStage {
         wait: std::time::Duration,
         out: &Out,
     ) {
-        if self.acked || self.spoke {
+        self.not_quiet(); // a call or a hand-over is acknowledged on its own
+        if self.acked() || self.spoke {
             return;
         }
         let Some(kind) = kind else {
             return;
         };
-        self.acked = true; // once per turn, said or not
+        // Once per turn, said or not; the first sound's timer may have taken it.
+        if self.acked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         if turn.is_cancelled() {
             return;
         }
@@ -539,13 +706,33 @@ impl Stage for AckStage {
             match &frame {
                 // A new turn: the operator's (its end, or a barge-in) or one the session
                 // queued (the wake's own request, a typed turn).
-                Frame::UserStarted
-                | Frame::UserStopped
-                | Frame::ThinkingStart
-                | Frame::Interruption => self.new_turn(),
-                Frame::ReplyTurn(t) => self.reply_turn = Some(t.clone()),
-                Frame::VadStopped { .. } => self.segment_ended = Some(std::time::Instant::now()),
-                Frame::LlmText(_) | Frame::Speak(_) => self.spoke = true,
+                Frame::UserStarted | Frame::Interruption => {
+                    self.new_turn();
+                    self.closed = false;
+                }
+                Frame::UserStopped | Frame::ThinkingStart => {
+                    self.new_turn();
+                    self.closed = true;
+                }
+                Frame::ReplyTurn(t) => {
+                    self.reply_turn = Some(t.clone());
+                    self.arm(out);
+                }
+                Frame::VadStopped { .. } => {
+                    self.segment_ended = Some(std::time::Instant::now());
+                    self.closed = false;
+                }
+                Frame::ModelWriting => self.not_quiet(),
+                Frame::LlmText(_) | Frame::Speak(_) => {
+                    self.spoke = true;
+                    self.not_quiet();
+                }
+                // A goodbye's or a hold's call: its own words follow, never a first sound.
+                Frame::ToolStarting { name, .. }
+                    if crate::narration::SPOKEN_WITH.contains(&name.as_str()) =>
+                {
+                    self.not_quiet();
+                }
                 Frame::VoiceChange { voice, speed } => {
                     self.voice = voice.clone();
                     self.speed = *speed;
@@ -751,10 +938,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_a_hand_over_waits_out_the_grace_and_is_not_said_if_the_operator_went_on() {
-        // The turn closed after the short grace (ADR 0049) and nothing was done for it:
-        // the operator may be pausing. The acknowledgment waits until the grace has run
-        // from the end of their speech; going on first takes the turn, and the word.
+    async fn test_a_hand_over_before_the_close_waits_out_the_grace_and_is_not_said_if_the_operator_went_on()
+     {
+        // Seen before the turn closed, the operator may be pausing: the acknowledgment
+        // waits until the grace has run from the end of their speech; going on first
+        // takes the turn, and the word.
         for goes_on in [false, true] {
             let said = Arc::new(Mutex::new(Vec::new()));
             let turns = TurnControl::new(CancellationToken::new());
@@ -762,7 +950,6 @@ mod tests {
             let (out, mut rx) = Out::capture();
             for f in [
                 Frame::VadStopped { stop_secs: 0.2 },
-                Frame::UserStopped,
                 handed(&["github_issue_read"]),
             ] {
                 s.process(f, Direction::Down, &out).await;
@@ -914,14 +1101,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_call_start_waits_out_the_grace_and_is_not_said_if_the_operator_went_on() {
+    async fn a_call_start_before_the_close_waits_out_the_grace_and_is_not_said_if_the_operator_went_on()
+     {
         for goes_on in [false, true] {
             let turns = TurnControl::new(CancellationToken::new());
             let mut s = stage_with(Arc::default(), turns.clone()).with_settle(0.3);
             let (out, mut rx) = Out::capture();
             for f in [
                 Frame::VadStopped { stop_secs: 0.2 },
-                Frame::UserStopped,
                 starting("github_issue_read", Some("Checking.")),
             ] {
                 s.process(f, Direction::Down, &out).await;
@@ -966,5 +1153,194 @@ mod tests {
         );
         let none = run(&mut s, vec![Frame::UserStopped, calls(&["github_x"])]).await;
         assert!(none.is_empty());
+    }
+
+    // --- the close the turn got, and the first sound (2026-11-12) ----------------------
+
+    #[tokio::test]
+    async fn after_a_close_the_acknowledgment_waits_no_more_grace() {
+        // The turn closed on the short grace (0.35 s, ADR 0049); the call starts at once.
+        // It used to wait until 1.2 s from the end of speech whatever the close was.
+        for frame in [
+            starting("github_issue_read", None),
+            handed(&["github_issue_read"]),
+        ] {
+            let mut s = stage(Arc::default()).with_settle(1.2);
+            let (out, mut rx) = Out::capture();
+            for f in [
+                Frame::VadStopped { stop_secs: 0.2 },
+                Frame::UserStopped,
+                frame.clone(),
+            ] {
+                s.process(f, Direction::Down, &out).await;
+            }
+            assert_eq!(acks_within(&mut rx, 30).await.len(), 1, "{frame:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn after_a_close_the_models_words_are_not_said_if_the_operator_goes_on_first() {
+        // The protection the grace gave is the turn's own: going on cuts it, and the
+        // acknowledgment still on its way (its words being rendered) goes with it.
+        struct Slow;
+        impl Synth for Slow {
+            fn voices(&self) -> Vec<String> {
+                vec!["af_heart".into()]
+            }
+            fn synthesize(&mut self, text: &str, _: &str, _: f32) -> ghost_infer::Result<Vec<i16>> {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                Ok(vec![1000; 100 * text.len()])
+            }
+        }
+        let turns = TurnControl::new(CancellationToken::new());
+        let acks = Acks::new(None);
+        acks.insert("af_heart", 1.0, acks.render(&synth(), "af_heart", 1.0));
+        let mut s = AckStage::new(
+            acks,
+            Arc::new(Mutex::new(Slow)),
+            Arc::new(|_: &str| Some(AckKind::Read)),
+            "af_heart",
+            1.0,
+            turns.clone(),
+        );
+        let (out, mut rx) = Out::capture();
+        for f in [
+            Frame::VadStopped { stop_secs: 0.2 },
+            Frame::UserStopped,
+            starting("github_issue_read", Some("Checking four thirteen.")),
+        ] {
+            s.process(f, Direction::Down, &out).await;
+        }
+        turns.interrupt(); // the operator goes on while the words render
+        assert!(acks_within(&mut rx, 200).await.is_empty());
+    }
+
+    fn first_sound(said: Arc<Mutex<Vec<String>>>, ms: u64) -> AckStage {
+        stage(said).with_first_sound(Some(FirstSound {
+            after: std::time::Duration::from_millis(ms),
+        }))
+    }
+
+    fn reply_begins() -> Vec<Frame> {
+        let turn = CancellationToken::new();
+        vec![Frame::UserStopped, Frame::LlmStart, Frame::ReplyTurn(turn)]
+    }
+
+    #[tokio::test]
+    async fn a_silent_model_gets_one_wait_line_and_no_second_acknowledgment() {
+        let said = Arc::new(Mutex::new(Vec::new()));
+        let mut s = first_sound(said.clone(), 60);
+        let (out, mut rx) = Out::capture();
+        for f in reply_begins() {
+            s.process(f, Direction::Down, &out).await;
+        }
+        assert!(acks_within(&mut rx, 20).await.is_empty(), "not yet");
+        let first = acks_within(&mut rx, 80).await;
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert!(WAIT.contains(&first[0].as_str()), "{first:?}");
+        assert_eq!(*said.lock().unwrap(), first, "the echo filter was told");
+        // The call the slow model then starts is not acknowledged again.
+        s.process(
+            starting("github_issue_read", Some("Checking.")),
+            Direction::Down,
+            &out,
+        )
+        .await;
+        assert!(acks_within(&mut rx, 50).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_model_that_has_begun_writing_or_calling_gets_no_wait_line() {
+        // A one-word answer on its way is never given a "One sec." first; a call is
+        // acknowledged as a call; a goodbye's or a hold's own words follow; an answer
+        // already spoken needs nothing; a cut turn says nothing.
+        let cases: Vec<(&str, Vec<Frame>, usize)> = vec![
+            ("writing", vec![Frame::ModelWriting], 0),
+            ("spoken", vec![Frame::LlmText("Yes.".into())], 0),
+            ("call", vec![starting("github_issue_read", None)], 1),
+            ("goodbye", vec![starting("hang_up", None)], 0),
+            ("hold", vec![starting("hold", None)], 0),
+            ("operator went on", vec![Frame::UserStarted], 0),
+        ];
+        for (what, frames, n) in cases {
+            let mut s = first_sound(Arc::default(), 60);
+            let (out, mut rx) = Out::capture();
+            for f in reply_begins().into_iter().chain(frames) {
+                s.process(f, Direction::Down, &out).await;
+            }
+            let acks = acks_within(&mut rx, 150).await;
+            assert_eq!(acks.len(), n, "{what}: {acks:?}");
+            if n == 1 {
+                assert!(!WAIT.contains(&acks[0].as_str()) || READ.contains(&acks[0].as_str()));
+            }
+        }
+        // The reply's turn cut (a barge-in) before the wait ends.
+        let mut s = first_sound(Arc::default(), 60);
+        let (out, mut rx) = Out::capture();
+        let turn = CancellationToken::new();
+        for f in [
+            Frame::UserStopped,
+            Frame::LlmStart,
+            Frame::ReplyTurn(turn.clone()),
+        ] {
+            s.process(f, Direction::Down, &out).await;
+        }
+        turn.cancel();
+        assert!(acks_within(&mut rx, 150).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_first_sound_unless_asked_for_and_never_on_a_later_round() {
+        let mut s = stage(Arc::default());
+        let (out, mut rx) = Out::capture();
+        for f in reply_begins() {
+            s.process(f, Direction::Down, &out).await;
+        }
+        assert!(acks_within(&mut rx, 100).await.is_empty(), "off by default");
+        // Acknowledged at the call; the round after the call's result is not timed.
+        let mut s = first_sound(Arc::default(), 40);
+        let (out, mut rx) = Out::capture();
+        for f in reply_begins()
+            .into_iter()
+            .chain([starting("github_issue_read", None), Frame::LlmEnd])
+            .chain([Frame::LlmStart, Frame::ReplyTurn(CancellationToken::new())])
+        {
+            s.process(f, Direction::Down, &out).await;
+        }
+        assert_eq!(acks_within(&mut rx, 120).await.len(), 1);
+    }
+
+    #[test]
+    fn the_first_sound_follows_the_connections_first_word() {
+        let secs = |w: Option<f64>| FirstSound::for_connection(w).after.as_secs_f64();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        // Quick: past its usual first word, so only a slow turn hears it.
+        assert!(near(secs(Some(0.3)), FirstSound::FLOOR_SECS));
+        assert!(near(secs(Some(0.6)), 0.85));
+        // Slow: well ahead of its usual first word, never just before the answer.
+        assert!(
+            near(secs(Some(1.47)), FirstSound::FLOOR_SECS),
+            "{}",
+            secs(Some(1.47))
+        );
+        assert!(near(secs(Some(1.9)), 1.1), "{}", secs(Some(1.9)));
+        assert!(near(secs(Some(3.0)), FirstSound::CAP_SECS));
+        assert!(near(secs(None), FirstSound::UNKNOWN_SECS));
+        assert!(near(secs(Some(f64::NAN)), FirstSound::UNKNOWN_SECS));
+        // Never later than the cap, never sooner than the floor.
+        for w in [0.1, 0.5, 0.75, 0.76, 1.0, 1.5, 2.0, 2.5, 5.0] {
+            let s = secs(Some(w));
+            assert!(
+                (FirstSound::FLOOR_SECS..=FirstSound::CAP_SECS).contains(&s),
+                "{w}: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_wait_line_is_rendered_with_the_reads() {
+        for w in WAIT {
+            assert!(READ.contains(w), "{w}");
+        }
     }
 }

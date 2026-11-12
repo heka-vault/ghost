@@ -8,6 +8,8 @@
 //!                   [--llm-url URL --llm-model M [--llm-fast-model M] [--llm-key-env NAME]
 //!                    [--llm-protocol anthropic|openai]]  (a real model; `fast=real`)
 //!                   [--apps one|deferred|deferred-kept]  (`apps=` in a variant)
+//!                   [--pad-tokens N] [--first-byte-ms N]  (a real model shaped as real use
+//!                    is, `perf::shaped`; `pad=` and `delay=` in a variant)
 //! ghost-perf micro  [--only stt,tts,jev,turn] [--n N] [--out DIR]
 //! ghost-perf llm    [--model a,b] [--endpoint current,proxy,openrouter+sysbp,<provider>]
 //!                   [--openrouter-models a,b] [--thinking between_tools] [--n N] [--out DIR]
@@ -314,7 +316,15 @@ type Variant = (
     Option<Profile>,
     bool,
     AppSet,
+    Shape,
 );
+
+/// How a real model is shaped as real use is (`perf::shaped`).
+#[derive(Debug, Clone, Copy, Default)]
+struct Shape {
+    pad_tokens: usize,
+    first_byte_ms: u64,
+}
 
 /// `--fast haiku`, or `none`.
 fn fast_profile(name: &str) -> Result<Option<Profile>, String> {
@@ -544,6 +554,22 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
             return 2;
         }
     };
+    let pad_tokens: usize = args
+        .one("pad-tokens")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let first_byte_ms: u64 = args
+        .one("first-byte-ms")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    if real.is_none() && (pad_tokens > 0 || first_byte_ms > 0) {
+        eprintln!("--pad-tokens and --first-byte-ms shape a real model (--llm-url)");
+        return 2;
+    }
+    let shape0 = Shape {
+        pad_tokens,
+        first_byte_ms,
+    };
     // Named sets of overrides, compared in one run: `before:turn_grace_secs=1.2+fast=haiku`.
     let mut variants: Vec<Variant> = Vec::new();
     for spec in args.flags.get("variant").cloned().unwrap_or_default() {
@@ -552,6 +578,7 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
         let mut fast = fast.clone();
         let mut fast_real = fast_real_default;
         let mut app_set = app_set;
+        let mut shape = shape0;
         for kv in sets.split('+').map(str::trim).filter(|s| !s.is_empty()) {
             match kv.split_once('=') {
                 // The apps the session reaches, not a voice setting.
@@ -559,6 +586,25 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                     Some(a) => app_set = a,
                     None => {
                         eprintln!("unknown apps={v}; known: {}", AppSet::NAMES.join(", "));
+                        return 2;
+                    }
+                },
+                // The real model shaped as real use is (`perf::shaped`).
+                Some(("pad", v)) | Some(("delay", v)) if real.is_none() => {
+                    eprintln!("pad= and delay= shape a real model (--llm-url), got {v:?}");
+                    return 2;
+                }
+                Some(("pad", v)) => match v.parse() {
+                    Ok(n) => shape.pad_tokens = n,
+                    Err(_) => {
+                        eprintln!("pad= wants a number of tokens, got {v:?}");
+                        return 2;
+                    }
+                },
+                Some(("delay", v)) => match v.parse() {
+                    Ok(n) => shape.first_byte_ms = n,
+                    Err(_) => {
+                        eprintln!("delay= wants milliseconds, got {v:?}");
                         return 2;
                     }
                 },
@@ -588,7 +634,14 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                 }
             }
         }
-        variants.push((Some(name.to_string()), over, fast, fast_real, app_set));
+        variants.push((
+            Some(name.to_string()),
+            over,
+            fast,
+            fast_real,
+            app_set,
+            shape,
+        ));
     }
     if variants.is_empty() {
         variants.push((
@@ -597,11 +650,12 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
             fast.clone(),
             fast_real_default,
             app_set,
+            shape0,
         ));
     }
     let mut configs: Vec<RunConfig> = Vec::new();
     for ablate in ablations {
-        for (variant, over, fast, fast_real, app_set) in &variants {
+        for (variant, over, fast, fast_real, app_set, shape) in &variants {
             for profile in &profiles {
                 configs.push(RunConfig {
                     history,
@@ -617,6 +671,8 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                     real: real.clone(),
                     fast_real: *fast_real,
                     apps: *app_set,
+                    pad_tokens: shape.pad_tokens,
+                    first_byte: Duration::from_millis(shape.first_byte_ms),
                 });
             }
         }
@@ -688,11 +744,23 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
     }
     let described: Vec<String> = variants
         .iter()
-        .filter_map(|(name, over, fast, fast_real, app_set)| {
+        .filter_map(|(name, over, fast, fast_real, app_set, shape)| {
             name.as_ref().map(|n| {
                 let mut sets: Vec<String> = over.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 if *app_set != AppSet::One {
                     sets.push(format!("apps={}", app_set.name()));
+                }
+                if shape.pad_tokens > 0 {
+                    sets.push(format!(
+                        "the prompt padded by about {} tokens",
+                        shape.pad_tokens
+                    ));
+                }
+                if shape.first_byte_ms > 0 {
+                    sets.push(format!(
+                        "every model call's first byte {} ms later",
+                        shape.first_byte_ms
+                    ));
                 }
                 if let Some(f) = fast {
                     sets.push(format!("a fast model in front ({})", f.name));

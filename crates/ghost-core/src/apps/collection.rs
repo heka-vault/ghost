@@ -394,8 +394,30 @@ impl Apps {
         self.claim_names();
         let apps = self.in_order();
         let hidden = self.hidden(&apps);
+        // Two connections to the same service say so, by name, once (`twins`).
+        let twins = super::twins::twins(
+            &apps
+                .iter()
+                .filter(|a| !a.is_own())
+                .map(|a| super::twins::Seen {
+                    name: a.name().to_string(),
+                    shown: a.spec.shown(),
+                    service: super::twins::service_of(
+                        a.spec.url.as_deref(),
+                        a.spec.command.as_deref(),
+                    ),
+                    tools: a.offered().into_iter().map(|(tool, _)| tool).collect(),
+                })
+                .collect::<Vec<_>>(),
+        );
         apps.iter()
-            .map(|a| source_without(a, &hidden))
+            .map(|a| {
+                let mut source = source_without(a, &hidden);
+                if let Some(line) = twins.get(a.name()) {
+                    source.prompt.push_str(line);
+                }
+                source
+            })
             .filter(|s| !s.read_tools.is_empty() || !s.operations.is_empty())
             .collect()
     }
