@@ -32,9 +32,9 @@ use crate::deps::{Deps, SharedDeps};
 use crate::error::{ApiError, ApiResult, Body, HTTPValidationError, check_len, check_range};
 use crate::models::{
     Ack, AppAction, AppConnect, AppConnectResult, AppKind, AppLimits, AppLimitsUpdate, AppState,
-    AppView, CatalogEntryView,
-    CatalogMaker, CatalogOption, CatalogOptionKind, CatalogPage, CatalogPublisher, CatalogSetting,
-    HostOwner, Level, MakerEvidence, PermissionsUpdate, PermissionsView, Registry, Verified,
+    AppView, CatalogEntryView, CatalogMaker, CatalogOption, CatalogOptionKind, CatalogPage,
+    CatalogPublisher, CatalogSetting, HostOwner, Level, MakerEvidence, PermissionsUpdate,
+    PermissionsView, Registry, Verified,
 };
 use crate::passwords::{check_passwords, save_passwords};
 
@@ -193,7 +193,12 @@ async fn set_limits(
     spec.result_chars =
         within("result_chars", req.result_chars, 1_000, 100_000)?.map(|n| n as usize);
     let mut pinned: Vec<String> = Vec::new();
-    for p in req.pinned.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+    for p in req
+        .pinned
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+    {
         if p.chars().count() > 128 {
             return Err(ApiError::invalid(
                 &["body", "pinned"],

@@ -1245,8 +1245,16 @@ async fn a_change_sent_again_with_its_key_is_made_once() {
             .filter_map(|c| c.as_text().map(|t| t.text.clone()))
             .collect()
     };
-    let first = text(c.call_tool(keyed("k-1", "the build finished")).await.unwrap());
-    let again = text(c.call_tool(keyed("k-1", "the build finished")).await.unwrap());
+    let first = text(
+        c.call_tool(keyed("k-1", "the build finished"))
+            .await
+            .unwrap(),
+    );
+    let again = text(
+        c.call_tool(keyed("k-1", "the build finished"))
+            .await
+            .unwrap(),
+    );
     assert_eq!(first, again);
     let notified = |w: &World| {
         let (rows, _) = w.store.list_proposals(&ProposalQuery::page(50, 0)).unwrap();
@@ -1254,9 +1262,13 @@ async fn a_change_sent_again_with_its_key_is_made_once() {
     };
     assert_eq!(notified(&w), 1, "made once");
     // Another key, or none, is another call.
-    c.call_tool(keyed("k-2", "the build finished")).await.unwrap();
+    c.call_tool(keyed("k-2", "the build finished"))
+        .await
+        .unwrap();
     assert_eq!(notified(&w), 2);
-    call(&c, "notify", json!({"title": "and again"})).await.unwrap();
+    call(&c, "notify", json!({"title": "and again"}))
+        .await
+        .unwrap();
     assert_eq!(notified(&w), 3);
     // Another client's same key is its own.
     let other = connect(&w.url, &w.token("cursor"), ClientLifecycleMode::Initialize)
@@ -1336,7 +1348,10 @@ fn inside_an_appimage_a_command_client_is_given_the_address_instead() {
     // token, as for any tool that connects to one.
     assert!(!out.contains("mcp serve"), "{out}");
     assert!(!out.contains(".mount_"), "{out}");
-    assert!(out.contains("--transport http ghost http://127.0.0.1:47824/mcp"), "{out}");
+    assert!(
+        out.contains("--transport http ghost http://127.0.0.1:47824/mcp"),
+        "{out}"
+    );
     assert!(!cfg.clients_dir().join("codex.token").exists());
     // Outside an AppImage the same command is the stdio bridge.
     let (code, out, _) = cli(&["add", "cursor", "--command"], &cfg);
@@ -1550,19 +1565,21 @@ mod asking {
             Arc::new(move |_p| apps.sources())
         };
         let model = ScriptedModel::new(vec![replies], ttfb);
-        let runner = Arc::new(AskRunner::new(
-            Arc::new(HeadlessRunner::new(HeadlessParts {
-                conversations: convs.clone(),
-                gate: gate.clone(),
-                reach,
-                model: Arc::new(move || Ok(model.clone() as Arc<dyn ModelPort>)),
-                options: Options::default(),
-                skills: None,
-            })),
-            CancellationToken::new(),
-        )
-        // The scheduler's queue: a short wait, so a test of a busy agent is quick.
-        .with_turns(jobs.turns().clone(), Duration::from_millis(300)));
+        let runner = Arc::new(
+            AskRunner::new(
+                Arc::new(HeadlessRunner::new(HeadlessParts {
+                    conversations: convs.clone(),
+                    gate: gate.clone(),
+                    reach,
+                    model: Arc::new(move || Ok(model.clone() as Arc<dyn ModelPort>)),
+                    options: Options::default(),
+                    skills: None,
+                })),
+                CancellationToken::new(),
+            )
+            // The scheduler's queue: a short wait, so a test of a busy agent is quick.
+            .with_turns(jobs.turns().clone(), Duration::from_millis(300)),
+        );
         let clients = Arc::new(Clients::new(store.clone(), tmp.path().join("clients")));
         let host = OutsideHost::new(
             "127.0.0.1:0",
@@ -1699,7 +1716,12 @@ mod asking {
             Duration::from_secs(600),
         )
         .await;
-        let token = w.clients.create("claude-code", false).unwrap().token.to_string();
+        let token = w
+            .clients
+            .create("claude-code", false)
+            .unwrap()
+            .token
+            .to_string();
         let http = reqwest::Client::new();
         let send = |body: Value, session: Option<String>| {
             let mut req = http
@@ -1781,7 +1803,11 @@ mod asking {
             format!("{} the total? (not answered)", asked_mark("Claude Code"))
         );
         // Within moments, not at the run's own ten-minute limit.
-        assert!(began.elapsed() < Duration::from_secs(20), "{:?}", began.elapsed());
+        assert!(
+            began.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            began.elapsed()
+        );
         let ask = started().unwrap();
         let mut events = Vec::new();
         for _ in 0..100 {

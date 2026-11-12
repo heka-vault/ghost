@@ -178,11 +178,16 @@ async fn an_apps_own_limits_and_pinned_tools_are_shown_and_set_in_its_entry() {
         .await;
     assert_eq!(r.status, 422, "{}", r.text);
     let r = c
-        .put("/apps/github/limits", json!({"result_chars": 10, "pinned": []}))
+        .put(
+            "/apps/github/limits",
+            json!({"result_chars": 10, "pinned": []}),
+        )
         .await;
     assert_eq!(r.status, 422, "{}", r.text);
     assert_eq!(
-        c.put("/apps/nope/limits", json!({"pinned": []})).await.status,
+        c.put("/apps/nope/limits", json!({"pinned": []}))
+            .await
+            .status,
         404
     );
     // Back to the defaults: the keys leave the entry.

@@ -288,6 +288,24 @@ pub fn operator_sets_agents_watch(
     write_folder_file(watches_path, &new_text).map_err(|e| e.to_string())
 }
 
+#[tool_router(router = watches_router, vis = "pub(super)")]
+impl GhostServer {
+    #[tool(
+        description = "The watches: what each one polls and how often, what it does with what it finds, who made it, and its last check and item counts.",
+        annotations(read_only_hint = true)
+    )]
+    fn watches_list(&self) -> CallToolResult {
+        reply(self.do_watches_list())
+    }
+
+    #[tool(
+        description = "Create, change, pause, resume or remove a watch: a connected app's read-only tool that Ghost polls with no model and checks by fixed rules, then tells the operator, records, or has an agent act. Making or changing one waits for the operator's yes unless their permissions say otherwise. See ghost_docs_search 'watches' for the declaration."
+    )]
+    fn watch_manage(&self, Parameters(p): Parameters<WatchManage>) -> CallToolResult {
+        reply(self.do_watch_manage(p))
+    }
+}
+
 #[cfg(test)]
 mod operator_tests {
     use super::*;
@@ -313,10 +331,15 @@ mod operator_tests {
         }))
         .unwrap();
         std::fs::write(&path, &text).unwrap();
-        let read = || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+        let read =
+            || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
         operator_sets_agents_watch(&path, "ledgers", "pause").unwrap();
         assert_eq!(read()["ledgers"]["paused"], json!(true));
-        assert_eq!(read()["mine"], decl(None), "the operator's own is untouched");
+        assert_eq!(
+            read()["mine"],
+            decl(None),
+            "the operator's own is untouched"
+        );
         operator_sets_agents_watch(&path, "ledgers", "resume").unwrap();
         assert!(read()["ledgers"].get("paused").is_none());
         let e = operator_sets_agents_watch(&path, "mine", "pause").unwrap_err();
@@ -325,23 +348,5 @@ mod operator_tests {
         operator_sets_agents_watch(&path, "ledgers", "remove").unwrap();
         assert!(read().get("ledgers").is_none());
         assert!(read().get("mine").is_some());
-    }
-}
-
-#[tool_router(router = watches_router, vis = "pub(super)")]
-impl GhostServer {
-    #[tool(
-        description = "The watches: what each one polls and how often, what it does with what it finds, who made it, and its last check and item counts.",
-        annotations(read_only_hint = true)
-    )]
-    fn watches_list(&self) -> CallToolResult {
-        reply(self.do_watches_list())
-    }
-
-    #[tool(
-        description = "Create, change, pause, resume or remove a watch: a connected app's read-only tool that Ghost polls with no model and checks by fixed rules, then tells the operator, records, or has an agent act. Making or changing one waits for the operator's yes unless their permissions say otherwise. See ghost_docs_search 'watches' for the declaration."
-    )]
-    fn watch_manage(&self, Parameters(p): Parameters<WatchManage>) -> CallToolResult {
-        reply(self.do_watch_manage(p))
     }
 }

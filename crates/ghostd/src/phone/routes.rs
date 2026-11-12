@@ -1624,8 +1624,7 @@ mod tests {
             let on_call = on_call.clone();
             Arc::new(move || on_call.load(Ordering::SeqCst))
         };
-        let phone_route =
-            PhoneRoute::new(p.host.feed.clone()).with_wait(Duration::from_millis(50));
+        let phone_route = PhoneRoute::new(p.host.feed.clone()).with_wait(Duration::from_millis(50));
         phone_route.set_on_the_phone(busy.clone());
         let call_route = CallRoute::new(p.host.feed.clone(), items.clone())
             .with_wait(Duration::from_millis(50))

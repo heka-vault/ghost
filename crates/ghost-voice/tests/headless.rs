@@ -1314,7 +1314,10 @@ async fn a_follow_up_with_nothing_left_to_do_delivers_nothing() {
         ScriptedModel::say("[SILENT]"),
     ]);
     w.runner(&model)
-        .run(request("ledger", "Deploy the release if the operator agrees."))
+        .run(request(
+            "ledger",
+            "Deploy the release if the operator agrees.",
+        ))
         .await;
     let q = w.questions.open(None).unwrap().pop().unwrap();
     w.questions.answer(&q.key, "no", via::PHONE, None).unwrap();

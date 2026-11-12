@@ -1607,12 +1607,7 @@ mod tests {
                 .collect()
         };
         // The default: no window for summarized turns, a week for hidden ones.
-        assert_eq!(
-            store
-                .prune_turns(None, now - Duration::days(7))
-                .unwrap(),
-            1
-        );
+        assert_eq!(store.prune_turns(None, now - Duration::days(7)).unwrap(), 1);
         assert_eq!(left(&store), vec![summarized, open, hidden_new]);
         // The operator set a year: the summarized turn goes, the open one never does.
         assert_eq!(

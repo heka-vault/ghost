@@ -522,7 +522,10 @@ fn request_gone(context: &RequestContext<RoleServer>) -> Option<CancellationToke
 }
 
 /// The key a client sent with a call, when it is a usable one.
-fn idempotency_key(request: &CallToolRequestParams, context: &RequestContext<RoleServer>) -> Option<String> {
+fn idempotency_key(
+    request: &CallToolRequestParams,
+    context: &RequestContext<RoleServer>,
+) -> Option<String> {
     request
         .meta
         .as_ref()

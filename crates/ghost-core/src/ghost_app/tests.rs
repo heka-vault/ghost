@@ -181,7 +181,11 @@ async fn the_app_attaches_and_its_tools_are_offered_under_ghosts_name() {
         .iter()
         .find(|t| t.name == "ghost_docs_search")
         .unwrap();
-    assert!(search.description.ends_with("a longer one as its best sentences."));
+    assert!(
+        search
+            .description
+            .ends_with("a longer one as its best sentences.")
+    );
     assert_eq!(src.prompt, PROMPT);
     assert!(!src.prompt.contains("is connected"));
     // Not a call that leaves the machine: nothing is acknowledged aloud before it.

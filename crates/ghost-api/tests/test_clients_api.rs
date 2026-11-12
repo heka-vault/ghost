@@ -104,7 +104,12 @@ async fn inside_an_appimage_a_command_tool_is_given_the_address_and_told_why() {
     assert_eq!(made.status, 200, "{}", made.text);
     let token = made["token"].as_str().unwrap();
     assert!(made["note"].as_str().unwrap().contains("AppImage"));
-    assert!(made["claude_code"].as_str().unwrap().contains("--transport http"));
+    assert!(
+        made["claude_code"]
+            .as_str()
+            .unwrap()
+            .contains("--transport http")
+    );
     assert!(made["config_json"].as_str().unwrap().contains(token));
     assert!(!w.tmp.path().join("clients/codex.token").exists());
     // Outside one, no note.

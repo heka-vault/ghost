@@ -22,19 +22,21 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
+use futures::StreamExt;
 use ghost_core::conversations::models::Profile;
 use ghost_core::ghost_app::clients::{AuthError, CLIENT_SOURCE, ClientId, Clients, shown};
 use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, RequestGone, Said};
 use ghost_core::ghost_app::{AGENT_SOURCE, GhostServer};
 use ghost_core::routes::{Delivery, RouteName, RoutePolicy};
-use ghost_core::schedules::{ASK_WAIT, AgentTurns, DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended};
+use ghost_core::schedules::{
+    ASK_WAIT, AgentTurns, DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended,
+};
 use ghost_core::store::Item;
 use ghost_core::time::utcnow;
 use ghost_core::waiting::WaitingList;

@@ -325,7 +325,8 @@ fn sentences(text: &str) -> Vec<&str> {
             continue;
         }
         let mut j = i + 1;
-        while j < chars.len() && matches!(chars[j].1, ')' | '"' | '\'' | '”' | '’' | '*' | '_') {
+        while j < chars.len() && matches!(chars[j].1, ')' | '"' | '\'' | '”' | '’' | '*' | '_')
+        {
             j += 1;
         }
         let starts = chars.get(j + 1).map(|&(_, c)| c).is_some_and(|n| {
@@ -491,11 +492,7 @@ fn clause_around(text: &str, terms: &[String]) -> String {
     // Lower-casing can move a byte offset; a word is looked for in the text itself too.
     let hit = terms
         .iter()
-        .filter_map(|t| {
-            lower
-                .find(t.as_str())
-                .filter(|&i| text.is_char_boundary(i))
-        })
+        .filter_map(|t| lower.find(t.as_str()).filter(|&i| text.is_char_boundary(i)))
         .min()
         .unwrap_or(0);
     let mut cuts: Vec<usize> = vec![0, text.len()];
@@ -534,7 +531,11 @@ fn clause_around(text: &str, terms: &[String]) -> String {
         }
         cut_start |= from > 0;
         cut_end |= to < chars.len();
-        body = chars[from..to].iter().collect::<String>().trim().to_string();
+        body = chars[from..to]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
     }
     let body = body.trim_end_matches([',', ';', ':', '|', ' ']);
     let mut out = String::new();
@@ -655,8 +656,14 @@ mod tests {
         assert!(e.chars().count() <= EXCERPT_MAX, "{e}");
         // The best sentence and its neighbours, from a sentence's start to a sentence's
         // end; "e.g. 0.4 s." is not a sentence end.
-        assert!(e.contains("When the operator keeps talking, the turn reopens."), "{e}");
-        assert!(e.contains("A turn ends after a short grace, e.g. 0.4 s."), "{e}");
+        assert!(
+            e.contains("When the operator keeps talking, the turn reopens."),
+            "{e}"
+        );
+        assert!(
+            e.contains("A turn ends after a short grace, e.g. 0.4 s."),
+            "{e}"
+        );
         assert!(e.ends_with('.') && !e.contains('…'), "{e}");
         assert!(
             e.starts_with("This sentence") || e.starts_with("A turn"),

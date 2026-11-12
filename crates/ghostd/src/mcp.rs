@@ -16,11 +16,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ghost_core::envfile::read_env;
-use ghost_core::ghost_app::outside::IDEMPOTENCY_KEY;
 use ghost_core::ghost_app::clients::{
     APPIMAGE_NOTE, Clients, DEFAULT_LISTEN, http_snippets, read_token, stable_ghostd,
     stdio_snippets,
 };
+use ghost_core::ghost_app::outside::IDEMPOTENCY_KEY;
 use ghost_core::store::Store;
 use rmcp::RoleServer;
 use rmcp::model::{

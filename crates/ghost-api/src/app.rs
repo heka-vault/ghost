@@ -760,7 +760,6 @@ async fn watching(State(deps): State<SharedDeps>) -> Json<WatchingView> {
 }
 
 fn watching_view(deps: &Deps) -> Json<WatchingView> {
-
     let Some(folder) = &deps.folder else {
         return Json(WatchingView {
             listening: deps.hooks_listening.clone(),
