@@ -9,9 +9,9 @@
  */
 const PAGE_PARAMS = ["tab", "open"];
 
-/** Where an agent's conversation is: Ghost's is the home screen, every other agent's is its page. */
+/** Where an agent’s conversation is: Ghost’s is the conversation screen, every other agent’s is its page. */
 export function agentPath(slug: string): string {
-  return slug === "ghost" ? "/" : `/agents/${slug}`;
+  return slug === "ghost" ? "/session" : `/agents/${slug}`;
 }
 let owner: string | null = null;
 

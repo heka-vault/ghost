@@ -516,6 +516,10 @@ export class GhostClient {
   scheduleRuns(id: string, limit = 20) {
     return unwrap(this.api.GET("/schedules/{schedule_id}/runs", { params: { path: { schedule_id: id }, query: { limit } } }));
   }
+  /** The latest runs of every agent, newest first: scheduled, for a watch, or asked for. */
+  runs(limit = 20) {
+    return unwrap(this.api.GET("/runs", { params: { query: { limit } } }));
+  }
   /** Stop a run that is waiting or going. */
   cancelRun(id: string) {
     return unwrap(this.api.POST("/runs/{run_id}/cancel", { params: { path: { run_id: id } } }));

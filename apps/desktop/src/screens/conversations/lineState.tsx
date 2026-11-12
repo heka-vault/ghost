@@ -2,7 +2,7 @@
  * Owner: conversations. An agent's state in words, the way the sidebar's agent rows say it:
  * "Waiting on your okay" on the live agent while a change waits (amber, the one state that
  * needs the operator), "Live · listening" on the live agent otherwise, else when it was last
- * used. The sidebar computes the same mapping inline (src/app/Sidebar.tsx); keep the two in
+ * used. The rail computes its own words (src/app/Rail.tsx); keep the two in
  * step until the foundation exports one helper for both (shared request).
  */
 import { type ConnectionState, type GhostPhase, StatusDot, phaseText, relativeTime } from "../../ui";
