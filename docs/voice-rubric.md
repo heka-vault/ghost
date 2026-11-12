@@ -82,6 +82,14 @@ count is fine on turns where you paused (part B). With a fast model set (ADR 005
 good morning" should come from it (`model` in the record) and the lookups should show
 `handover` and an acknowledgment before the answer.
 
+Then, for the second round's changes (2026-11-12, ADR 0049 and 0050 amended):
+
+| | Do | Pass |
+|---|---|---|
+| D2 | "Say this back to me word for word: I found three issues waiting and two of them need your sign-off today." Then again with `GHOST_TTS_FIRST_CLAUSE_WORDS=0` in settings.env and `make reload` | The first time Ghost starts sooner (the latency line's `tts`), cut before "and two". Listen at that join: no gap you notice, no restart that sounds like a new sentence. Fail: a hitch or a rushed "and" you can hear; set it to 0 and note it. |
+| D3 | With a fast model (`GHOST_LLM_FAST_MODEL=claude-haiku-5-5`, `GHOST_LLM_FAST_READS` on, its default): "What's waiting for triage?", "What's going on with app one forty two?", then "Mark app one fifty one ready for agent." | The two questions: `model` is the fast one in the record, no `handover`, an acknowledgment, then the right issues (the right repository and number). The change: `handover` 1 and `fast model: handed the turn over` in the log; the main model makes it. Fail: a wrong repository or number from the fast model; set `GHOST_LLM_FAST_READS=false` and note what it got wrong. |
+| D4 | Optional, one session with `GHOST_STT_EARLY_READ=verify` | `early read differs` lines in the debug log, one per segment the early read would have heard differently. Count them against the segments: under one in twenty, and none where it matters (a number, a name, a full stop for a comma), is the evidence for turning it `on`. |
+
 ## Part E: interrupting still works
 
 | | Do | Pass |

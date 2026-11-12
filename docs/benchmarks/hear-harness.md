@@ -80,6 +80,13 @@ make perf-hear TAKES=latest BASELINE=.scratch/perf/<baseline>-hear/results.json
 ```
 
 and the same on the rendered takes, against the committed baseline in [hear/](hear/).
+
+The read from the VAD's first quiet frame (`GHOST_STT_EARLY_READ`, ADR 0049 amended) is
+measured the same way: `ARGS="--set stt_early_read=verify"` reads each segment both ways,
+keeps the stop's words, and prints how many early reads said the same, differed, or were
+thrown away when speech came back, with the model's seconds on each (`GHOST_DEBUG_AUDIO=1`
+logs what each differing read heard, to the terminal only); `stt_early_read=on` scores the
+early words against a baseline.
 `ARGS="--set vad_stop_secs=0.4"` tries a setting without a code change; `--set` takes
 the same `GHOST_*` names as `make perf`, `stt_dir` and `stt_quantization` included.
 

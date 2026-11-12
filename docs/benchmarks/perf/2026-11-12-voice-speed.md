@@ -369,3 +369,283 @@ rejected option) would take a main-model call off a lookup instead of adding a f
 and is the next thing worth measuring with a real model. A held answer that reaches a
 tool call inside the grace is still made again at the close (9 of 51 with a quick model);
 keeping it instead would save that call.
+
+## Second round: real models, first audio sooner, the fast model reads
+
+Run the same day, on branch `feat/voice-speed-2`. The first section's numbers came from a
+scripted model with assumed delays; this one starts from the real models and then goes
+after what is left. Load averages are given beside each run; other sessions were building
+on the workstation, and a run taken while a build of this branch was going says so.
+
+### The answer to the owner's question
+
+End of the operator's speech to Ghost's voice, the real models through the default
+connection, the mock GitHub app, everything else as it ships on this branch:
+
+| | plain spoken reply p50 / p95 | reply after one lookup p50 / p95 |
+|---|---|---|
+| (a) main model alone (Sonnet 5.5) | 2.62 / 2.86 s (real, n=8) | 5.67 / 8.07 s (real, n=10) |
+| (b) fast model in front (Haiku 5.5), reading for itself, as it ships | 1.67 / 2.06 s (real, n=8) | 3.45 / 4.19 s (real, n=10) |
+| (b') fast model in front, every call handed over (ADR 0050 as first written) | 2.05 / 2.33 s (real, n=8) | 6.94 / 10.53 s (real, n=10) |
+| the bar: good pipelines | under 0.8 s | |
+| the bar: speech-to-speech products | 1.0 to 1.3 s | |
+
+Real means the real models, measured: `ghost-perf run --llm-url ... --llm-model
+claude-sonnet-5-5 --llm-fast-model claude-haiku-5-5`, two passes of two runs a scenario
+(load 1.5 to 5, then about 2). A plain reply is the greeting and small-talk scenarios; a
+reply after one lookup is the lookup scenarios' answers. With the scripted model at the
+measured times (`sonnet55`, `haiku55`, below; three runs a scenario) the same cells are
+2.52 / 2.71 s and 6.01 / 6.25 s for (a), 1.38 / 1.51 s and 2.93 / 3.19 s for (b), and
+1.29 / 1.64 s and 2.87 / 3.06 s for (b) with the early read on.
+
+So a plain reply is about 1.7 s with a fast model in front and 2.6 s without one, and
+neither meets either bar. A reply after a lookup is 3.5 s with the fast model reading,
+down from 5.7 s with the main model alone.
+
+### What was built
+
+1. **The harness drives a real model** (`ghost-perf run --llm-url URL --llm-model M
+   [--llm-fast-model M] [--llm-key-env NAME]`, `fast=real` in a variant). It reaches the
+   address as Ghost's default connection does (`custom`, the Anthropic protocol), with no
+   vault and no settings file; the key is read from the one variable named and never
+   printed. The default connection, when no provider is set, is `ANTHROPIC_BASE_URL` with
+   `ANTHROPIC_AUTH_TOKEN` (`ghost_core::connection::ModelConnection::from_env`); on this
+   machine that is a proxy on the operator's network, which lists 39 models on
+   `/v1/models`, Haiku 5.5 among them. The lines now also check the arguments of their
+   calls against what they expect, from the run's own agent record. `sonnet55` and
+   `haiku55` are scripted profiles at the measured times.
+2. **The fast model is asked without the thinking setting.** Haiku 5.5 answers
+   `between_tools`, Ghost's default, with HTTP 400 ("not supported for this model"), so with
+   it as the fast model every turn failed in about 0.3 s and was handed over.
+3. **A reply's first piece may be cut early** (`GHOST_TTS_FIRST_CLAUSE_WORDS`, 4): before
+   a phrase's first word ("and", "but", "so", "because", ...) once four words are pending,
+   never after a capitalized word or a number.
+4. **The read at the VAD's first quiet** (`GHOST_STT_EARLY_READ`, off): built, measured,
+   not turned on.
+5. **The fast model reads for itself** (`GHOST_LLM_FAST_READS`, on whenever a fast model
+   is set; `GHOST_LLM_FAST_READ_MAX_CHARS` 4,000, `GHOST_LLM_FAST_READ_ROUNDS` 2).
+6. **The VAD's stop**: measured, not changed.
+
+### Step 1: the real models
+
+`ghost-perf llm --endpoint proxy --model claude-sonnet-5-5,claude-haiku-5-5 --n 6`
+(Ghost's prompt and tools, six rounds, load 3.8):
+
+| model | hello first token p50 / p95 | streamed | tool call complete p50 / p95 | answer after the result, first token | tool chosen |
+|---|---|---|---|---|---|
+| Sonnet 5.5 (thinking `between_tools`) | 1.73 / 1.91 s | all at once (88 tokens in 2 ms) | 3.12 / 3.12 s | 1.70 s | 1 of 6 |
+| Haiku 5.5 (no thinking) | 0.52 / 0.54 s | about 290 tokens/s | 1.11 / 1.69 s | 0.51 s | 4 of 6 |
+
+Through Ghost's own pipeline the main model's first token was 1.4 to 1.8 s (p50 by
+scenario, 84% of the prompt from the cache), and a reply that opens with a call took 2.3
+to 3.2 s to the call. The assumed `sonnet` profile (1.2 s, 60 tokens/s) was optimistic by
+half a second on words and by a second and more on calls; the assumed `haiku` (0.45 s) was
+close on words and optimistic on calls (1.1 s, not about 0.55).
+
+Every scenario, real models, p50 / p95 over both passes:
+
+| scenario | main | fast, hand-over | fast, reads |
+|---|---|---|---|
+| greeting | 2.50 / 2.76 (n=4) | 1.63 / 2.12 (n=4) | 1.61 / 1.68 (n=4) |
+| small_talk | 2.72 / 2.86 (n=4) | 2.09 / 2.33 (n=4) | 1.77 / 2.06 (n=4) |
+| lookup | 5.36 / 5.84 (n=4) | 6.64 / 7.18 (n=4) | 3.35 / 3.70 (n=4) |
+| lookup_pause | 7.33 / 8.07 (n=4) | 8.41 / 10.53 (n=4) | 3.69 / 4.19 (n=4) |
+| chain | 7.05 / 8.21 (n=4) | 8.47 / 9.78 (n=4) | 3.84 / 4.02 (n=4) |
+| announce | 12.03 / 12.61 (n=2) | 11.59 / 13.43 (n=2) | 11.00 / 13.04 (n=2) |
+| confirm_plain | 6.45 / 7.06 (n=2) | 6.04 / 6.31 (n=2) | 6.04 / 6.11 (n=2) |
+| bye_model | 3.22 / 3.23 (n=2) | 4.01 / 4.21 (n=2) | 4.02 / 4.11 (n=2) |
+| session (four turns) | 3.90 / 6.11 (n=8) | 4.67 / 7.08 (n=8) | 3.14 / 5.12 (n=8) |
+| every voice turn | 5.15 / 8.21 (n=34) | 6.36 / 9.78 (n=34) | 3.45 / 6.11 (n=34) |
+
+The acknowledgment before a lookup was heard at 3.2 s with the main model alone and 2.0 s
+with a fast model in front. The change scenarios (`announce`, `confirm_plain`) are slow
+for every configuration: the main model looks the issue up before it writes, two to four
+calls of 1.5 to 2.5 s each. A hand-over took 1.35 s on average (22 of them), not the 0.67 s
+assumed: the fast model writes a call before it can hand over.
+
+The same, scripted at the measured times (`--profile sonnet55`, fast `haiku55`, three
+runs, load 1 to 6, a debug build of this branch's tests running for the first minutes):
+
+| scenario | main | fast, hand-over | fast, reads | fast, reads, early read |
+|---|---|---|---|---|
+| greeting | 2.36 / 2.40 | 1.26 / 1.32 | 1.16 / 1.26 | 1.16 / 1.18 |
+| small_talk | 2.66 / 2.70 | 1.49 / 1.50 | 1.49 / 1.51 | 1.61 / 1.64 |
+| lookup | 5.85 / 6.02 | 7.08 / 7.22 | 2.74 / 2.92 | 2.87 / 2.89 |
+| lookup_pause | 6.02 / 6.23 | 7.26 / 7.43 | 3.05 / 3.18 | 2.88 / 3.04 |
+| chain | 6.46 / 6.80 | 7.81 / 7.83 | 3.87 / 3.87 | 3.79 / 3.81 |
+| confirm_plain | 5.63 / 5.75 | 6.86 / 6.99 | 6.87 / 6.99 | 6.78 / 6.78 |
+| every voice turn | 5.80 / 6.51 | 7.00 / 7.82 | 2.93 / 6.89 | 2.87 / 6.78 |
+
+| stage, p50 | main | fast, hand-over | fast, reads | fast, reads, early read |
+|---|---|---|---|---|
+| hear (end of speech to the turn released) | 0.62 | 0.61 | 0.62 | 0.62 |
+| of it the read | 0.17 | 0.17 | 0.17 | 0.09 |
+| of it the hold | 0.35 | 0.35 | 0.35 | 0.35 |
+| model's first token | 3.12 | 3.12 | 1.21 | 1.21 |
+| voice (Kokoro to first audio) | 0.57 | 0.56 | 0.54 | 0.57 |
+
+### Step 2: first audio sooner
+
+Kokoro on this machine (ONNX Runtime's default threads, 12 CPUs, load about 7), words to
+audio:
+
+| words | render p50 / p95 | audio |
+|---|---|---|
+| 2 | 258 / 299 ms | 0.94 s |
+| 4 | 336 / 350 ms | 1.41 s |
+| 8 | 647 / 657 ms | 2.65 s |
+| 16 | 1,298 / 1,328 ms | 5.48 s |
+| 32 | 2,632 / 2,667 ms | 11.11 s |
+
+0.24 s of render per second of speech, nearly linear, and about 0.15 s of it whatever the
+length. So the first piece's words are what the operator waits for, and a first sentence
+with no comma (the usual rule's only cut) waited for its whole render.
+
+On seven measured first sentences (`perf micro --only tts-len,tts-join`, cut at three
+words in this run; the default of four cuts the same two sentences that have no comma),
+cutting early started the first audio 0.57 s sooner than the whole sentence on average,
+and 0.15 s sooner than the usual rule, because most already had a comma after four words; the two
+with no comma ("I found three issues waiting | and two of them ...", "The build failed
+last night | because the cache was cold ...") started 0.50 and 0.59 s sooner. The rest of
+the sentence rendered in 0.40 to 0.65 s while the first piece played for 1.4 to 2.5 s,
+never late. The join, measured with nobody listening:
+
+| at the join, mean of 7 | two pieces | the whole render |
+|---|---|---|
+| silence | 161 ms | 366 ms (Kokoro's own pause there) |
+| loudness of the 60 ms before, against the whole | -1.3 dB | |
+| loudness of the 60 ms after | -1.0 dB | |
+| pitch step across the join | 6.1 semitones | 1.8 semitones |
+| voice, both pieces together | 3.7 s | 4.0 s |
+
+The pieces leave less silence than the whole render does, so nothing is inserted; the
+first piece ends a little lower and quieter, as the end of a sentence does, which is the
+seam every clause cut already has; and the pieces speak about 7% faster. One sentence
+showed where the rule must not cut: "once you confirm | which repository" put 130 ms of
+silence where Kokoro leaves none, so "which" is not a word to cut before. Whether it
+sounds rushed is not something a measurement says: `GHOST_TTS_FIRST_CLAUSE_WORDS=0` is the
+old rule, and the voice rubric's D2 is the operator's check. A test holds that the pieces
+meet at the speaker with no gap over 40 ms when the rest renders in time, and another that
+the harness sees the gap when it does not. The harness scenarios' scripted replies all
+have an early comma or a short first sentence, so this change does not show in the tables
+above.
+
+### Step 3: the read overlaps the silence, measured and left off
+
+`make perf-hear` on Kokoro's rendered takes (three voices, 141 takes; load 3 to 7):
+
+| | stage WER | turn WER | close p95 | early reads: same / differ / thrown away |
+|---|---|---|---|---|
+| read at the stop (today, the default) | 3.7% | 3.0% | 0.23 s | |
+| read from the first quiet frame | 3.4% | 3.0% | 0.22 s | 159 / 17 / 136 |
+| ... from 0.06 s of quiet | | | | 166 / 10 / 54 |
+| ... from 0.10 s of quiet | | | | 162 / 14 / 21 |
+| ... from 0.14 s of quiet | | | | 166 / 10 / 11 |
+
+The early read passes the pass rule (no measure worse beyond noise, the close no slower),
+but its words are not today's: in 10 to 17 of 176 segments they differ, because the last
+0.1 to 0.2 s of room quiet is replaced by silence ("the wake were" for "the wake word",
+"the latest book" for "the latest bug", a comma for a full stop; and the other way,
+"Stop." where the stop's read heard "Stapen."). A full stop where there was a comma
+changes how the turn closes. The requirement was identical words, so it stays off;
+`verify` is there to measure it on the operator's voice (rubric D4). What it would buy:
+the read at the close falls from 0.17 s to 0.09 s with a 0.1 s start, about 0.1 s off a
+plain reply in the scripted runs. What it costs in model time is 3.8 s over the 141 takes
+for the reads thrown away with a 0.1 s start, against 21 s from the first quiet frame,
+where the VAD dips between words. With the branch's defaults the speech-in path is
+unchanged, so `make perf-hear` scores the first row.
+
+### Step 4: the fast model reads for itself
+
+With the real models, the fast model made its reads in every lookup, chain and session
+turn, and handed over every change and every goodbye (`hang_up`). Correctness, from the
+harness's checks over both passes:
+
+| check | main | fast, reads |
+|---|---|---|
+| lookup: the list tool called, both repositories | 4 of 4 | 4 of 4 |
+| lookup: the triage label as the mock names it (`needs-triage`) | 0 of 8 (it called `triage`) | 0 of 8 (the same calls) |
+| chain: issue 142 and its comments in the app repository | 4 of 4 | 4 of 4 |
+| session: "the dark mode one" read by number | 0 of 2 (searched instead) | 0 of 2 (the same) |
+| changes made through the gate, by the main model | 4 of 4 | 4 of 4 (all handed over) |
+| mock state after the change scenarios | right in every run | right in every run |
+
+Where the main model went wrong, the fast model went wrong the same way, with the same
+calls; it did not go wrong anywhere the main model was right. That is a small sample (two
+passes, mock data), and lookups are what a small model handles well, so the default rests
+on it only because a fast model is off unless the operator sets one.
+
+The results it answered from were 28 to 525 characters (mock data, ten reads). The
+threshold is 4,000 characters, about a thousand tokens, eight times the largest seen, so a
+real app's long list is what goes to the main model. With the real models the fast model's
+reads took a lookup from 5.4 s (main alone) to 3.4 s and an issue with its comments from
+7.1 s to 3.8 s. A change pays the hand-over: `confirm_plain` 5.6 s main alone against 6.9 s
+scripted with a fast model in front (the real runs showed no difference in two runs).
+
+### Step 5: the VAD's stop, measured and left
+
+Smart Turn's verdict and the words both come at the VAD's stop, so a confident end closing
+on less quiet is, in close time, a shorter short grace. The operator's recorded takes are in
+his data folder and were not read for this round; Kokoro's rendered takes were (111 takes,
+65 pauses mid-turn, `make perf-turns` and `turns-report`):
+
+| total quiet before a confident close | closed early | still closed when the voice starts, 0.8 s after today's stop and moving with the close | ... 1.0 s |
+|---|---|---|---|
+| 0.55 s (stop 0.2 + short grace 0.35; today) | 12 / 65 | 8 | 2 |
+| 0.45 s (short grace 0.25, or a stop of 0.1 for sure ends) | 15 / 65 | 9 | 4 |
+| 0.35 s (short grace 0.15) | 17 / 65 | 9 | 8 |
+| a VAD stop of 0.1 s for every turn, short grace 0.35 | 14 / 87 | 9 (0.8 s after its stop) | |
+
+Each step closes more pauses early and leaves more of them closed when Ghost's voice would
+start, so the rule (no more pauses closed early and not reopened) says no. The stop stays
+0.2 s and the short grace 0.35 s. On the operator's takes: `make perf-turns TAKES=latest`,
+then `ghostd perf turns-report <run>/turns.json --set turn_confident_grace_secs=0.25`.
+
+### What the quick paths cost
+
+| config, real models, first pass | answers started early | kept | withdrawn | clauses rendered ahead | played | dropped | reopened unheard | hand-overs, mean s |
+|---|---|---|---|---|---|---|---|---|
+| main | 24 | 18 | 6 | 22 | 14 | 8 | 2 | - |
+| fast, hand-over | 24 | 18 | 6 | 25 | 14 | 11 | 2 | 12, 1.35 |
+| fast, reads | 24 | 18 | 6 | 20 | 14 | 6 | 2 | 6, 1.39 |
+
+The second pass's counts were alike. Clauses dropped are mostly narration before a call,
+rendered and thrown away. With the fast model reading, half as many turns are handed over
+(only changes and goodbyes), and fewer clauses are dropped.
+
+The safety numbers: the cut-off count is unchanged, because no default of the close moved
+(on Kokoro's takes 12 of 65 pauses close early, 8 still closed 0.8 s after the stop, none
+at 1.2 s), and so is the hearing score (3.7% stage, 3.0% turn on Kokoro's takes; the early
+read, off, would be 3.4% and 3.0%).
+
+### What is left, and 0.8 s
+
+A plain reply with the fast model in front, 1.7 s with the real models:
+
+| | s | what would cut it |
+|---|---|---|
+| the VAD's stop | 0.20 | nothing safe: a shorter one closes more pauses early (step 5) |
+| the read | 0.17 | the early read, if its words can be made the stop's (0.08 to 0.17) |
+| the short grace, beyond the read | 0.18 | the model already starts inside it; it costs only when the model is quicker |
+| the fast model's first token | 0.5 to 0.9 | a faster model; nothing in Ghost |
+| writing the first clause | 0.1 to 0.2 | |
+| Kokoro's first clause | 0.25 to 0.6 | the early cut where it applies; a voice that streams |
+
+To reach 0.8 s at the p50, the parts Ghost owns would have to fit in about 0.3 s beside a
+model that answers in 0.5 s, and today they take about 1.0 s (the stop, the read, the rest
+of the grace, the render). Three things would each take a large step, and none is a
+setting:
+
+- **A streaming recogniser and turn detector**, so the words and the verdict are ready as
+  the speech ends rather than 0.2 to 0.4 s after it: the stop, the read and most of the
+  grace go together.
+- **A streaming voice**, so the first audio leaves 50 to 100 ms after the first words
+  instead of after a whole clause (Kokoro renders whole; the cloud voice streams, at a
+  network hop and a price).
+- **A model with a first token near 0.3 s**, local or a realtime API.
+
+A speech-to-speech front end does all three at once, which is why those products answer in
+1.0 to 1.3 s. It is not the only way, but the pipeline way needs all three, and Ghost has
+none of them today; the good pipelines' 0.8 s is streaming recognition, streaming
+synthesis and a fast first token together. Without them Ghost's floor with a fast model is
+about 1.3 to 1.5 s: the scripted `instant` model's 1.15 s plus a fast model's half second.

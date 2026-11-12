@@ -29,7 +29,9 @@ its `stop_secs`) to `BotStartedSpeaking`, and the parts tile that interval:
 | `tts` | last model call ends -> Ghost's voice | narration release (`wait`), Kokoro to first audio (`synth`), transport (`out`) |
 | `other` | the rest | frame hops: release -> model, tool result -> next model call |
 
-Beside the parts: `prerender` counts a reply's first clause `rendered` ahead of its
+Beside the parts: `early_read` counts segments read from the VAD's first quiet frame
+(`GHOST_STT_EARLY_READ`: `used`, `discarded` when speech came back, `same` or `differs`
+when verified) and the model's seconds on them; `prerender` counts a reply's first clause `rendered` ahead of its
 release, then `used` or `dropped` (ADR 0049), and `handover` the turns a fast model handed
 to the main one, with the seconds it took to ask (ADR 0050; `model` is the model that
 answered first).
@@ -70,8 +72,19 @@ headless:
   word is 1.3 tokens, a tool call 12 and its arguments). Those times are assumed, from
   2026-10-19's measurements, not measured in the run. `--fast haiku` puts a fast model in
   front (ADR 0050), scripted from each line's first reply, so a line that opens with a tool
-  call is handed over. The real model connection is measured by `ghostd perf llm` (below),
-  with Ghost's real system prompt and tool schemas.
+  call is handed over (from the whole line when `llm_fast_reads` is set, so it makes the
+  reads itself). `sonnet55` and `haiku55` are the models as `perf llm` measured them on
+  2026-11-12 (Sonnet 5.5: 1.73 s to words, 3.12 s to a tool call, its text at once; Haiku
+  5.5: 0.52 s, 1.11 s, 290 tokens a second). The real model connection is measured by
+  `ghostd perf llm` (below), with Ghost's real system prompt and tool schemas.
+- **A real model:** `--llm-url URL --llm-model M` drives the scenarios with a real model
+  instead of the script, reached as Ghost's default connection reaches one (`custom`, the
+  Anthropic protocol unless `--llm-protocol openai`), with no vault and no settings file;
+  `--llm-fast-model M` and `fast=real` in a variant put a real fast model in front. A key,
+  when the address wants one, is read from the one variable `--llm-key-env NAME` names and
+  never printed. Every line then also checks the arguments of its calls against what it
+  expects (`Line::args`, from the run's own agent record), which is where a real model can
+  go wrong.
 - **Before and after:** `--ablate` turns the 2026-10-19 changes off one by one, so a change
   can be measured against Ghost without it in the same run: `tts_clauses` (whole sentences
   to Kokoro), `speculate` (the model waits out the turn grace, 2026-10-22); `prompt_lines`,
@@ -103,7 +116,9 @@ make perf ARGS="--ttfb-ms 800"                   # the scripted model's time to 
 make perf ARGS="--profile sonnet,haiku,instant"  # ... or a real model's assumed time, one config each
 make perf ARGS="--profile sonnet --variant before:turn_confident_grace_secs=1.2+tts_prerender=false --variant after: --variant fast:fast=haiku"
 make perf ARGS="--history 8"                     # seed earlier turns into the record
+make perf ARGS="--llm-url http://host:8317 --llm-model claude-sonnet-5-5 --llm-fast-model claude-haiku-5-5 --llm-key-env ANTHROPIC_AUTH_TOKEN --variant main: --variant reads:fast=real"
 make perf-micro                                  # STT by length, Kokoro first audio, Smart Turn, Jev
+make perf-micro ARGS="--only tts-len,tts-join"   # Kokoro by words; a first sentence whole against cut early, at the join
 make perf-llm                                    # the model connection as configured: hello TTFB, the tool call, the answer
 make perf-llm ARGS="--endpoint proxy,openrouter --model claude-sonnet-5-5,claude-haiku-5-5 --n 4"
 make perf-llm ARGS="--openrouter-models google/gemini-3.8-flash,openai/gpt-5.6-luna"

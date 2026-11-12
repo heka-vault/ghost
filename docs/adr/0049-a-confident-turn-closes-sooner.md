@@ -110,6 +110,49 @@ taking a small model's time, a plain reply's p50 goes from 2.05 s to about 1.5 s
 taking the main model's 1.2 s to a first token, almost nothing, because the model and not
 the grace was already the wait.
 
+## Amended 2026-11-12: the first piece is shorter; the read and the VAD's stop stay
+
+The second round ([the benchmark, second section](../benchmarks/perf/2026-11-12-voice-speed.md#second-round-real-models-first-audio-sooner-the-fast-model-reads))
+went after what is left between the end of speech and Ghost's voice.
+
+**A reply's first piece may be cut before a phrase's first word**
+(`ghost_infer::clauses::ClauseAggregator::with_first_clause`,
+`GHOST_TTS_FIRST_CLAUSE_WORDS`, 4). Kokoro renders a piece whole before any of it plays,
+0.24 s per second of speech on this machine (2 words 0.26 s, 8 words 0.65 s, 16 words
+1.3 s). A first sentence with no comma was rendered whole; now, once four words are
+pending, it may end before "and", "but", "so", "because" and the like, never after a
+capitalized word or a number, so "I found three issues waiting | and two of them need your
+sign-off today." starts 0.5 s sooner. The rest renders while the first piece plays; on the
+measured sentences it was ready with 0.8 s to spare and the speaker never ran dry. The join
+is shorter than the pause Kokoro leaves at the same place in a whole render (0.16 s against
+0.37 s), and the first piece ends lower and quieter, as a sentence's end does (1.3 dB, and a
+pitch step of 6 semitones across the join against 2 in the whole render): the same seam
+every clause cut already has. Whether it sounds rushed is for the operator's ear (the voice
+rubric's D2); `GHOST_TTS_FIRST_CLAUSE_WORDS=0` is the old rule. The clause rendered ahead
+is cut by the same rule.
+
+**The read at the VAD's first quiet is built and off** (`GHOST_STT_EARLY_READ`). The stage
+can read a segment from the first quiet frame, with silence where the rest of the VAD's
+stop would be, so the words are ready when the stop is confirmed (`on`); `verify` reads it
+both ways and counts. On Kokoro's rendered takes the early words differed from the stop's
+in 10 to 17 segments of 176 ("wake were" for "wake word", "book" for "bug", a comma for a
+full stop), however long the quiet that starts it (0 to 0.14 s); the word error rate was no
+worse (3.4% against 3.7%, the pass rule held). The words the turn closes on must be the
+words Ghost hears today, and a full stop where there was a comma changes how the turn
+closes, so it stays off. It would save the read, 0.17 s, on every turn.
+
+**The VAD's stop stays 0.2 s for every turn.** A confident end cannot close sooner by
+shortening the VAD's stop alone: Smart Turn's verdict and the words both come at the stop,
+so a shorter stop for a sure end is, in close time, the same as a shorter short grace. On
+Kokoro's rendered takes (65 pauses mid-turn; the operator's recorded takes live in his data
+folder and were not read for this) 0.1 s less quiet before a confident close (a short grace
+of 0.25 s) closes 15 pauses early against 12, and with Ghost's voice starting 0.1 s sooner
+too, 9 of them are still closed when it starts against 8. A VAD stop of 0.1 s for every turn
+does the same: 14 of 87 pauses early, 9 still closed at 0.8 s. Either raises the count of
+pauses closed early and not reopened, so neither is the default. To run it on the recorded
+takes: `make perf-turns TAKES=latest`, then `ghostd perf turns-report <run>/turns.json --set
+turn_confident_grace_secs=0.25`.
+
 ## Considered options
 
 - **A shorter grace for every turn.** 0.35 s for every end Smart Turn calls done would

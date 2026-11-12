@@ -80,6 +80,48 @@ the fast model takes to ask, and its acknowledgment comes 0.75 s sooner. Of 90 s
 turns in those runs 65 were handed over (the scenarios are mostly lookups and changes),
 and none spoke a word of the fast model's.
 
+## Amended 2026-11-12: the fast model reads for itself, measured with the real models
+
+The first numbers above came from a scripted model. The second round measured the real
+ones, through the default connection with Ghost's prompt and tools
+([the benchmark, second section](../benchmarks/perf/2026-11-12-voice-speed.md#second-round-real-models-first-audio-sooner-the-fast-model-reads)),
+and found two things.
+
+**The fast model never answered.** Haiku 5.5 refuses the session's thinking setting
+(`between_tools`) with HTTP 400, so with it as the fast model every turn failed in 0.3 s
+and was handed over. The fast model is now asked without the thinking setting
+(`ghost_voice::llm::fast_options`); a small model answering small talk needs none.
+
+**The hand-over costs more than assumed.** A real Haiku 5.5 takes 1.1 s to write a tool
+call, against 0.5 s to its first words, so a turn that goes to an app paid about 1.5 s for
+the fast model to ask, not 0.67 s: a lookup 5.1 s with the main model alone, 6.6 s with a
+fast model handing it over.
+
+So the first rejected option below is taken, behind a setting:
+
+**The fast model may make reads itself** (`GHOST_LLM_FAST_READS`). A reply of the fast
+model's whose calls are all reads (an app's read tools, Ghost's own reads;
+`ToolDispatcher::is_read`) is the turn's reply, as the main model's would be: its calls
+run through the dispatcher as any read does, after the turn's grace has run
+(`TurnControl::settles`, ADR 0049), and the answer after their results is the fast
+model's too while the results are no longer than `GHOST_LLM_FAST_READ_MAX_CHARS` (4,000
+characters) and it has made no more than `GHOST_LLM_FAST_READ_ROUNDS` (2) rounds of reads.
+It hands over, as before, for a change of any kind, for `think_harder`, for `hang_up` and
+the session's other tools, for anything after a longer result, and for a read past its
+rounds. A held answer keeps the fast model's reads for the confirmed turn instead of
+withdrawing and asking again. What reaches the gate is still always the main model's:
+a change is never the fast model's to make.
+
+Measured with the real models, two runs a scenario on the mock app, p50 end of speech to
+Ghost's voice: a lookup 5.08 s main alone, 6.59 s handed over, 3.19 s read by the fast
+model; an issue and its comments 7.53, 8.47 and 3.93 s; plain speech 2.5, 1.5 to 2.0 and
+1.6 to 1.9 s. The fast model made the same calls as the main model in every lookup run
+(the same tools, the same count, the same repository and issue numbers where the harness
+checks them; the label check failed for both models alike), and every change still went
+through the main model. With so few runs that is no proof of equal judgement; the setting
+is on by default only because the fast model itself is off by default, and the voice
+rubric's part D is what confirms it.
+
 ## Considered options
 
 - **The fast model's own tool calls run.** A read is safe to run (it is called directly,
@@ -87,7 +129,8 @@ and none spoke a word of the fast model's.
   call off every lookup instead of adding one. But a wrong repository or a wrong number
   from the small model becomes the main model's premise, and for a change the small model
   would be what reaches the gate. Hand-over keeps one rule: the main model does the work.
-  Worth measuring with a real model before deciding again.
+  Worth measuring with a real model before deciding again. Taken for reads on 2026-11-12
+  (above); a change still goes to the main model.
 - **Both models asked at once, the slower one dropped.** No hand-over wait at all, for
   the main model's input tokens on every plain turn. It doubles the calls for the turns
   that needed it least.
