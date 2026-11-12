@@ -1,6 +1,6 @@
 # 0046: Apps keep up with what they offer
 
-- **Status:** proposed
+- **Status:** accepted (decided 2026-11-11; built on the `feat/apps-parity` branch, heka-vault/ghost#65: the live tool list, calls that can be stopped, reconnection, the result budget, descriptions and instructions, resources and prompts as reads, safe names and deferred tools; what is not built is listed below)
 - **Date:** 2026-11-11
 - **Amends:** ADR 0034 (what the model reads of an app: a description up to a cap and not
   its first sentence, the app's own instructions, a result held to one budget and not cut
