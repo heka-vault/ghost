@@ -31,6 +31,7 @@ pub mod permissions;
 pub mod policy;
 pub mod provenance;
 pub mod questions;
+pub mod recall;
 pub mod redact;
 pub mod request;
 pub mod routes;

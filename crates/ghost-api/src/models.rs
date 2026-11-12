@@ -403,6 +403,11 @@ pub struct QuestionView {
     /// The change's id, for a change.
     #[serde(default)]
     pub change_id: Option<String>,
+    /// Asked from a scheduled run or a watch's run, with nobody there (ADR 0047): its answer
+    /// starts one more run of the agent that asked.
+    #[serde(default)]
+    #[schema(required)]
+    pub in_run: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -648,6 +653,49 @@ pub struct AppView {
     #[serde(default)]
     #[schema(required)]
     pub settings: Vec<String>,
+    /// Its own limits and pinned tools in apps.json (ADR 0046).
+    #[serde(default)]
+    #[schema(required)]
+    pub limits: AppLimits,
+}
+
+/// An app's own limits in apps.json (ADR 0046). None is Ghost's default, given beside it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AppLimits {
+    /// Seconds a call may take.
+    #[schema(required)]
+    pub timeout: Option<i64>,
+    /// Seconds connecting may take.
+    #[schema(required)]
+    pub connect_timeout: Option<i64>,
+    /// Characters of a result the model is given whole.
+    #[schema(required)]
+    pub result_chars: Option<i64>,
+    /// Tools offered by name on every turn even past the limits on how many tools a turn
+    /// carries.
+    #[serde(default)]
+    #[schema(required)]
+    pub pinned: Vec<String>,
+    pub default_timeout: i64,
+    pub default_connect_timeout: i64,
+    pub default_result_chars: i64,
+}
+
+/// What `PUT /apps/{name}/limits` sets: all four at once; null is Ghost's default.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct AppLimitsUpdate {
+    /// 1 to 3,600 seconds.
+    #[serde(default)]
+    pub timeout: Option<i64>,
+    /// 1 to 600 seconds.
+    #[serde(default)]
+    pub connect_timeout: Option<i64>,
+    /// 1,000 to 100,000 characters.
+    #[serde(default)]
+    pub result_chars: Option<i64>,
+    /// Tool names, as the app gives them (`search`, not `github_search`); 40 at the most.
+    #[serde(default)]
+    pub pinned: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1116,6 +1164,14 @@ pub struct WatchInfo {
     #[serde(default)]
     #[schema(required)]
     pub open: i64,
+    /// `agent:<slug>` for a watch an agent made (ADR 0052); None for the operator's own.
+    #[serde(default)]
+    #[schema(required)]
+    pub made_by: Option<String>,
+    /// Declared and not polled: an agent's watch paused by it or by the operator.
+    #[serde(default)]
+    #[schema(required)]
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

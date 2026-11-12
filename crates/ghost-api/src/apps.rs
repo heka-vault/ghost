@@ -15,8 +15,7 @@ use axum::Json;
 use axum::extract::{Path as PathArg, State};
 use chrono::{DateTime, Utc};
 use ghost_core::apps::{
-    APPS_FILE, AppSpec, RESERVED_NAMES, app_name_problem, edit_apps, extract_secrets,
-    parse_apps_json, secret_name,
+    APPS_FILE, AppSpec, app_name_problem, edit_apps, extract_secrets, parse_apps_json, secret_name,
 };
 use ghost_core::catalog::{self, CatalogEntry, Found, Kind, Registry as CoreRegistry};
 use ghost_core::models::{py_repr, py_str};
@@ -32,9 +31,10 @@ use crate::app::{Qs, core_mode, level_of, permissions_view};
 use crate::deps::{Deps, SharedDeps};
 use crate::error::{ApiError, ApiResult, Body, HTTPValidationError, check_len, check_range};
 use crate::models::{
-    Ack, AppAction, AppConnect, AppConnectResult, AppKind, AppState, AppView, CatalogEntryView,
-    CatalogMaker, CatalogOption, CatalogOptionKind, CatalogPage, CatalogPublisher, CatalogSetting,
-    HostOwner, Level, MakerEvidence, PermissionsUpdate, PermissionsView, Registry, Verified,
+    Ack, AppAction, AppConnect, AppConnectResult, AppKind, AppLimits, AppLimitsUpdate, AppState,
+    AppView, CatalogEntryView, CatalogMaker, CatalogOption, CatalogOptionKind, CatalogPage,
+    CatalogPublisher, CatalogSetting, HostOwner, Level, MakerEvidence, PermissionsUpdate,
+    PermissionsView, Registry, Verified,
 };
 use crate::passwords::{check_passwords, save_passwords};
 
@@ -142,7 +142,97 @@ pub fn app_view(deps: &Deps, name: &str) -> ApiResult<AppView> {
         actions: action_views(deps, name),
         sign_in_url: url,
         settings: spec.secrets(),
+        limits: limits_view(&spec),
     })
+}
+
+fn limits_view(spec: &AppSpec) -> AppLimits {
+    use ghost_core::apps::{CALL_TIMEOUT, CONNECT_TIMEOUT, RESULT_CHARS};
+    AppLimits {
+        timeout: spec.timeout.map(|n| n as i64),
+        connect_timeout: spec.connect_timeout.map(|n| n as i64),
+        result_chars: spec.result_chars.map(|n| n as i64),
+        pinned: spec.pinned.clone(),
+        default_timeout: CALL_TIMEOUT.as_secs() as i64,
+        default_connect_timeout: CONNECT_TIMEOUT.as_secs() as i64,
+        default_result_chars: RESULT_CHARS as i64,
+    }
+}
+
+/// Set an app's own limits and pinned tools in apps.json (ADR 0046). It connects again
+/// with them, since a connection is made with its limits.
+#[utoipa::path(put, path = "/apps/{name}/limits", operation_id = "set_app_limits_apps__name__limits_put",
+    tag = "apps", summary = "Set App Limits",
+    description = "Set an app's own limits and pinned tools in apps.json (ADR 0046): how long a call\nand connecting may take, how much of a result the model is given whole, and the tools\noffered by name on every turn. Null is Ghost's default. The app connects again with them.",
+    params(("name" = String, Path)),
+    request_body = AppLimitsUpdate,
+    responses((status = 200, description = "Successful Response", body = AppView),
+              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
+async fn set_limits(
+    State(deps): State<SharedDeps>,
+    PathArg(name): PathArg<String>,
+    Body(req): Body<AppLimitsUpdate>,
+) -> ApiResult<Json<AppView>> {
+    let apps = need_apps(&deps)?;
+    let mut spec = apps
+        .spec(&name)
+        .ok_or_else(|| ApiError::not_found(format!("no app called {}", py_repr(&name))))?;
+    let within = |field: &str, v: Option<i64>, lo: i64, hi: i64| -> ApiResult<Option<u64>> {
+        match v {
+            None => Ok(None),
+            Some(n) if (lo..=hi).contains(&n) => Ok(Some(n as u64)),
+            Some(_) => Err(ApiError::invalid(
+                &["body", field],
+                format!("{field} is {lo} to {hi}"),
+                "value_error",
+            )),
+        }
+    };
+    spec.timeout = within("timeout", req.timeout, 1, 3_600)?;
+    spec.connect_timeout = within("connect_timeout", req.connect_timeout, 1, 600)?;
+    spec.result_chars =
+        within("result_chars", req.result_chars, 1_000, 100_000)?.map(|n| n as usize);
+    let mut pinned: Vec<String> = Vec::new();
+    for p in req
+        .pinned
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+    {
+        if p.chars().count() > 128 {
+            return Err(ApiError::invalid(
+                &["body", "pinned"],
+                "a tool's name is 128 characters at most".to_string(),
+                "value_error",
+            ));
+        }
+        if !pinned.iter().any(|q| q == p) {
+            pinned.push(p.to_string());
+        }
+    }
+    if pinned.len() > 40 {
+        return Err(ApiError::invalid(
+            &["body", "pinned"],
+            "40 pinned tools at the most".to_string(),
+            "value_error",
+        ));
+    }
+    spec.pinned = pinned;
+    save(&deps, std::slice::from_ref(&spec), None)?; // first: the file is the record
+    // A connection is made with its limits: connect again, in the background.
+    {
+        let deps = deps.clone();
+        let spec = spec.clone();
+        tokio::spawn(async move {
+            if let Some(apps) = &deps.apps {
+                apps.add(spec.clone(), false).await;
+            }
+            deps.state.publish_apps(Some(&spec.name), None);
+        });
+    }
+    let mut view = app_view(&deps, &name)?;
+    view.limits = limits_view(&spec);
+    Ok(Json(view))
 }
 
 fn need_apps(deps: &Deps) -> ApiResult<&Arc<dyn crate::deps::AppsPort>> {
@@ -280,20 +370,12 @@ fn entry_view(
 
 /// `base`, or `base-2` and on when an app has it or Ghost's own tools do.
 fn free_name(deps: &Deps, base: &str) -> String {
-    let mut taken: Vec<String> = deps
+    let taken: Vec<String> = deps
         .apps
         .as_ref()
         .map(|a| a.specs().into_iter().map(|s| s.name).collect())
         .unwrap_or_default();
-    taken.extend(RESERVED_NAMES.iter().map(|s| (*s).to_string()));
-    if !taken.iter().any(|t| t == base) {
-        return base.to_string();
-    }
-    let mut n = 2;
-    while taken.iter().any(|t| *t == format!("{base}-{n}")) {
-        n += 1;
-    }
-    format!("{base}-{n}")
+    ghost_core::apps::free_name(&taken, base)
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -492,22 +574,6 @@ fn values_of(req: &AppConnect) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-/// The host as `re.sub(r"[^a-z0-9]+", "-", host.lower())`.
-fn host_to_name(host: &str) -> String {
-    let mut out = String::new();
-    let mut dash = false;
-    for c in host.to_lowercase().chars() {
-        if c.is_ascii_lowercase() || c.is_ascii_digit() {
-            out.push(c);
-            dash = false;
-        } else if !dash {
-            out.push('-');
-            dash = true;
-        }
-    }
-    out
-}
-
 /// What a connect request asks for: the apps to connect, the secrets to keep, and what
 /// to tell the operator.
 struct Asked {
@@ -554,24 +620,13 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
         });
     }
     if let Some(url) = &req.url {
-        let parsed = url::Url::parse(url).ok();
-        let host = parsed
-            .as_ref()
-            .filter(|u| matches!(u.scheme(), "https" | "http"))
-            .and_then(|u| u.host_str().map(String::from))
-            .ok_or_else(|| ApiError::unprocessable("the address must start with https://"))?;
         if let Some(name) = &req.name {
             check_len(&["body", "name"], name, 0, 40)?;
         }
-        let name = req.name.clone().unwrap_or_else(|| host_to_name(&host));
-        let name = name.strip_prefix("mcp-").unwrap_or(&name).to_string();
-        let name = name.strip_suffix("-com").unwrap_or(&name).to_string();
-        let name: String = name.trim_matches('-').chars().take(40).collect();
-        let name = if name.is_empty() {
-            "app".to_string()
-        } else {
-            name
-        };
+        // The same naming an agent's connect uses (ADR 0052).
+        let base = ghost_core::apps::address_spec(url, req.name.as_deref())
+            .map_err(ApiError::unprocessable)?;
+        let name = base.name.clone();
         let mut headers = indexmap::IndexMap::new();
         let mut secrets = BTreeMap::new();
         let key = values.get("key").map(|k| k.trim()).unwrap_or("");
@@ -588,12 +643,10 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
             headers.insert("Authorization".to_string(), format!("${{{env}}}"));
         }
         let spec = AppSpec {
-            name,
             title: values.get("title").cloned().unwrap_or_default(),
-            url: Some(url.clone()),
             headers,
             sign_in: key.is_empty(),
-            ..AppSpec::default()
+            ..base
         };
         return Ok(Asked {
             specs: vec![spec],
@@ -837,6 +890,7 @@ pub fn router() -> OpenApiRouter<SharedDeps> {
         .routes(routes!(list_apps, connect_app))
         .routes(routes!(get_app, disconnect))
         .routes(routes!(sign_in))
+        .routes(routes!(set_limits))
         .routes(routes!(catalog_page))
         .routes(routes!(get_permissions, put_permissions))
 }

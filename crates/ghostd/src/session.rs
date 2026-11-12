@@ -311,6 +311,8 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         media,
         greeting,
         first_utterance: first_utterance.clone(),
+        // Typed in the desktop app (ADR 0052): the reply may be written.
+        first_typed: first_utterance.is_some() && *lock(&d.first_via) == TurnVia::Text,
         hooks: SessionHooks {
             on_turn: Some(on_turn),
             on_phase: Some(on_phase),

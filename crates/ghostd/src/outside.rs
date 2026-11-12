@@ -28,12 +28,15 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
+use futures::StreamExt;
 use ghost_core::conversations::models::Profile;
-use ghost_core::ghost_app::GhostServer;
 use ghost_core::ghost_app::clients::{AuthError, CLIENT_SOURCE, ClientId, Clients, shown};
-use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, Said};
+use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, RequestGone, Said};
+use ghost_core::ghost_app::{AGENT_SOURCE, GhostServer};
 use ghost_core::routes::{Delivery, RouteName, RoutePolicy};
-use ghost_core::schedules::{DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended};
+use ghost_core::schedules::{
+    ASK_WAIT, AgentTurns, DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended,
+};
 use ghost_core::store::Item;
 use ghost_core::time::utcnow;
 use ghost_core::waiting::WaitingList;
@@ -111,7 +114,19 @@ async fn guard(
     match checked {
         Ok(Ok(name)) => {
             req.extensions_mut().insert(ClientId(name));
-            next.run(req).await
+            // The response's body going away before its end is the tool closing the
+            // connection: a change it asked for and still running is stopped
+            // (`RequestGone`). A body that ended normally cancels it too, by then harmlessly.
+            let gone = CancellationToken::new();
+            req.extensions_mut().insert(RequestGone(gone.clone()));
+            let resp = next.run(req).await;
+            let guard = gone.drop_guard();
+            resp.map(|body| {
+                Body::from_stream(body.into_data_stream().map(move |chunk| {
+                    let _held = &guard;
+                    chunk
+                }))
+            })
         }
         Ok(Err(AuthError::Locked { retry_after })) => {
             let mut resp = refuse(StatusCode::TOO_MANY_REQUESTS, "locked_out");
@@ -286,6 +301,10 @@ pub struct AskRunner {
     stop: CancellationToken,
     max_turns: u32,
     max_runtime: Duration,
+    /// One piece of work at a time per agent, shared with the scheduler: an ask waits for
+    /// a run of the same agent to finish, and goes before the next one.
+    turns: Option<Arc<AgentTurns>>,
+    ask_wait: Duration,
 }
 
 impl AskRunner {
@@ -295,7 +314,16 @@ impl AskRunner {
             stop,
             max_turns: DEFAULT_MAX_TURNS,
             max_runtime: Duration::from_secs(DEFAULT_MAX_RUNTIME_SECS),
+            turns: None,
+            ask_wait: ASK_WAIT,
         }
+    }
+
+    /// Take turns with the scheduler's runs (`Jobs::turns`), waiting `wait` at the most.
+    pub fn with_turns(mut self, turns: Arc<AgentTurns>, wait: Duration) -> Self {
+        self.turns = Some(turns);
+        self.ask_wait = wait;
+        self
     }
 
     pub fn with_limits(mut self, max_turns: u32, max_runtime: Duration) -> Self {
@@ -308,14 +336,56 @@ impl AskRunner {
 #[async_trait]
 impl AgentRunner for AskRunner {
     async fn ask(&self, agent: &Profile, text: &str, from: &str) -> Result<String, String> {
-        let who = shown(from.strip_prefix(CLIENT_SOURCE).unwrap_or(from));
+        // Who asks: an outside tool (`client:<name>`, ADR 0048) or another of the
+        // operator's agents (`agent:<slug>`, ADR 0052's `ask_agent`). The run's id says
+        // which, so recall can tell an outside tool's own turns from everyone else's:
+        // `ask-<client>-<32 hex>`, or `agentask-<32 hex>`.
+        let run = uuid::Uuid::new_v4().simple().to_string();
+        let (id, who, by_agent) = match from.strip_prefix(AGENT_SOURCE) {
+            Some(slug) => {
+                let name = self.runner.agent_name(slug).unwrap_or_else(|| shown(slug));
+                (format!("agentask-{run}"), name, true)
+            }
+            None => {
+                let client = from.strip_prefix(CLIENT_SOURCE).unwrap_or(from);
+                (format!("ask-{client}-{run}"), shown(client), false)
+            }
+        };
         let cancel = self.stop.child_token();
         // The request this turn is for (`ghost_app::outside` runs a change under it).
         let request = ghost_core::apps::current_cancel();
+        // The agent's turn: after a scheduled run of it that is going, before the next.
+        let turn = match &self.turns {
+            None => None,
+            Some(turns) => {
+                let waiting = turns.ask(&agent.slug, self.ask_wait);
+                let got = match &request {
+                    Some(request) => tokio::select! {
+                        got = waiting => got,
+                        () = request.cancelled() => {
+                            return Err(format!("stopped before {} answered", agent.name));
+                        }
+                    },
+                    None => waiting.await,
+                };
+                match got {
+                    Ok(turn) => Some(turn),
+                    Err(busy) => {
+                        return Err(format!(
+                            "{} is busy with other work and was still busy after {} seconds; \
+                             ask again in a few minutes",
+                            agent.name,
+                            busy.waited.as_secs()
+                        ));
+                    }
+                }
+            }
+        };
         let asked = Asked {
-            id: format!("ask-{}", uuid::Uuid::new_v4().simple()),
+            id,
             agent: agent.slug.clone(),
             from: who,
+            by_agent,
             text: text.to_string(),
             max_turns: self.max_turns,
             max_runtime: self.max_runtime,
@@ -324,7 +394,13 @@ impl AgentRunner for AskRunner {
         // Its own task, stopped through its token and never dropped where it stands: a
         // change the agent has in the gate still gets its outcome.
         let runner = self.runner.clone();
-        let run = tokio::spawn(async move { runner.ask(asked).await });
+        // The turn goes with the run, so the agent is free only once the run has ended,
+        // even when the request that asked for it is gone first.
+        let run = tokio::spawn(async move {
+            let out = runner.ask(asked).await;
+            drop(turn);
+            out
+        });
         tokio::pin!(run);
         let _gone = cancel.clone().drop_guard();
         let out = match request {

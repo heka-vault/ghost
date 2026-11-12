@@ -302,6 +302,9 @@ pub struct Deps {
     pub clients_listening: Vec<String>,
     /// The questions for the operator (ADR 0051); None in a daemon without them.
     pub questions: Option<Arc<ghost_core::questions::Questions>>,
+    /// This daemon runs from an AppImage, whose `ghostd` is on a temporary mount: a tool
+    /// that only starts commands is given the address instead (ADR 0048).
+    pub in_appimage: bool,
 }
 
 impl Deps {
@@ -351,6 +354,7 @@ impl Deps {
             clients: None,
             clients_listening: Vec::new(),
             questions: None,
+            in_appimage: false,
         }
     }
 

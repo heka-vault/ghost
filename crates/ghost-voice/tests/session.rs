@@ -239,6 +239,7 @@ fn world_with(
         media,
         greeting: Greeting::Text("Yeah?".into()),
         first_utterance: None,
+        first_typed: false,
         hooks: SessionHooks {
             on_turn: Some(on_turn),
             on_phase: None,

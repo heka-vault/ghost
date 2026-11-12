@@ -1,19 +1,24 @@
 /**
  * Owner: watching. Schedules (ADR 0047), from GET /schedules: what each agent does on its
  * own and when, with its next run, how the last one ended, a switch to pause it, Run now,
- * what its last runs said, Remove, and a short form to add one. A schedule an agent set up
- * itself shows here too, with who made it. Every write waits for Ghost to be reachable.
+ * Stop for a run that is going, what its last runs said, Edit, Remove, and a form to add
+ * or change one (what to do, who, when, how loud, and under More: the hours it may run in,
+ * a check to look first, its time zone and the skills it starts with). A schedule an agent
+ * set up itself shows here too, with who made it. Every write waits for Ghost to be
+ * reachable.
  */
-import type { ConversationView, ScheduleInfo, ScheduleRunInfo, SchedulesView } from "@ghost/client-ts";
+import type { AppView, ConversationView, ScheduleInfo, ScheduleRequest, ScheduleRunInfo, SchedulesView, SkillInfo } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { CalendarClock, History, MoreHorizontal, Play, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, History, MoreHorizontal, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Dialog,
+  Disclosure,
   EmptyState,
   Field,
   IconButton,
@@ -51,6 +56,7 @@ export function Schedules() {
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<ScheduleInfo | null>(null);
   const [runsOf, setRunsOf] = useState<ScheduleInfo | null>(null);
   const [tick, setTick] = useState(0);
 
@@ -106,6 +112,17 @@ export function Schedules() {
       await client.runSchedule(s.id);
       put({ ...s, running: true });
       toast({ title: "Started", description: `${nameOf(s.agent)} is on it. The answer goes to What needs you.` });
+    });
+
+  /** Stop the run that is going (or waiting): it records that it was stopped. */
+  const stop = (s: ScheduleInfo) =>
+    act(s, "stop", async () => {
+      const { runs } = await client.scheduleRuns(s.id, 5);
+      const going = runs.find((r) => r.status === "running" || r.status === "queued");
+      if (!going) throw new Error("no run of it is going now");
+      await client.cancelRun(going.id);
+      put({ ...s, running: false });
+      toast({ title: "Stopped", description: `${nameOf(s.agent)} stops where it is. What it already changed is in the audit.` });
     });
 
   const remove = async (s: ScheduleInfo) => {
@@ -194,21 +211,29 @@ export function Schedules() {
               online={online}
               onToggle={(on) => void toggle(s, on)}
               onRun={() => void runNow(s)}
+              onStop={() => void stop(s)}
+              onEdit={() => setEditing(s)}
               onRuns={() => setRunsOf(s)}
               onRemove={() => void remove(s)}
             />
           ))}
         </Card>
       )}
-      <AddScheduleDialog
-        open={adding}
-        onClose={() => setAdding(false)}
+      <ScheduleDialog
+        open={adding || editing != null}
+        onClose={() => {
+          setAdding(false);
+          setEditing(null);
+        }}
         agents={agents}
         zone={view?.time_zone ?? ""}
-        onAdded={(s) => {
+        editing={editing}
+        onSaved={(s) => {
+          const added = editing == null;
           setAdding(false);
-          setView((v) => (v ? { ...v, schedules: [...v.schedules, s] } : v));
-          toast({ title: "Added", description: `${nameOf(s.agent)} runs it ${untilWords(s.next_run) || "at its time"}.` });
+          setEditing(null);
+          setView((v) => (v ? { ...v, schedules: added ? [...v.schedules, s] : v.schedules.map((x) => (x.id === s.id ? s : x)) } : v));
+          toast({ title: added ? "Added" : "Saved", description: `${nameOf(s.agent)} runs it ${untilWords(s.next_run) || "at its time"}.` });
         }}
       />
       <RunsDialog schedule={runsOf} onClose={() => setRunsOf(null)} />
@@ -226,11 +251,13 @@ interface RowProps {
   online: boolean;
   onToggle: (on: boolean) => void;
   onRun: () => void;
+  onStop: () => void;
+  onEdit: () => void;
   onRuns: () => void;
   onRemove: () => void;
 }
 
-function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onRuns, onRemove }: RowProps) {
+function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onStop, onEdit, onRuns, onRemove }: RowProps) {
   const when = whenWords(s, zone);
   const by = madeBy(s.created_by);
   const last = s.last_outcome ? OUTCOME[s.last_outcome] : null;
@@ -304,8 +331,11 @@ function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onR
             align="end"
             trigger={<IconButton label={`More for ${s.name}`} icon={<MoreHorizontal />} variant="ghost" size="sm" />}
             items={[
-              { label: "Run now", icon: <Play />, onSelect: onRun, disabled: busy || !online || s.running, reason: s.running ? "It is running" : undefined },
+              s.running
+                ? { label: "Stop this run", icon: <Square />, onSelect: onStop, disabled: busy || !online }
+                : { label: "Run now", icon: <Play />, onSelect: onRun, disabled: busy || !online },
               { label: "What it said…", icon: <History />, onSelect: onRuns },
+              { label: "Edit…", icon: <Pencil />, onSelect: onEdit, disabled: busy || !online },
               "separator",
               { label: "Remove…", icon: <Trash2 />, danger: true, onSelect: onRemove, disabled: busy || !online },
             ]}
@@ -316,47 +346,146 @@ function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onR
   );
 }
 
-interface AddProps {
+interface DialogProps {
   open: boolean;
   onClose: () => void;
   agents: ConversationView[];
   /** The zone a time is read in. */
   zone: string;
-  onAdded: (s: ScheduleInfo) => void;
+  /** The schedule being changed; none to add one. */
+  editing?: ScheduleInfo | null;
+  onSaved: (s: ScheduleInfo) => void;
 }
 
-function AddScheduleDialog({ open, onClose, agents, zone, onAdded }: AddProps) {
+type Urgency = ScheduleInfo["urgency"];
+
+/** What the form keeps: every field of a schedule the operator may set. */
+interface Draft {
+  instruction: string;
+  name: string;
+  agent: string;
+  kind: ScheduleKind;
+  when: string;
+  start: string;
+  end: string;
+  urgency: Urgency;
+  zone: string;
+  checkApp: string;
+  checkRead: string;
+  checkArgs: string;
+  skills: string[];
+}
+
+const URGENCIES: { value: Urgency; label: string }[] = [
+  { value: "digest", label: "In the summary" },
+  { value: "notify", label: "Notification" },
+  { value: "call", label: "Call" },
+];
+
+/** When a schedule runs, as the form writes it. */
+function whenOf(s: ScheduleInfo): string {
+  if (s.kind === "every") return s.every ?? "";
+  if (s.kind === "cron") return s.cron ?? "";
+  // A one-off's time, in this computer's local time, as the field takes it.
+  if (!s.at) return "";
+  const at = new Date(s.at);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+function draftOf(s: ScheduleInfo | null | undefined): Draft {
+  return {
+    instruction: s?.instruction ?? "",
+    name: s?.name ?? "",
+    agent: s?.agent ?? "ghost",
+    kind: s?.kind ?? "every",
+    when: s ? whenOf(s) : "",
+    start: s?.active_hours?.start ?? "",
+    end: s?.active_hours?.end ?? "",
+    urgency: s?.urgency ?? "notify",
+    zone: s?.time_zone ?? "",
+    checkApp: s?.check?.app ?? "",
+    checkRead: s?.check?.read ?? "",
+    checkArgs: s?.check && Object.keys(s.check.args ?? {}).length ? JSON.stringify(s.check.args, null, 2) : "",
+    skills: s?.skills ?? [],
+  };
+}
+
+const HOUR = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function ScheduleDialog({ open, onClose, agents, zone, editing, onSaved }: DialogProps) {
   const { client } = useGhost();
   const { online } = useLive();
-  const [instruction, setInstruction] = useState("");
-  const [name, setName] = useState("");
-  const [agent, setAgent] = useState("ghost");
-  const [kind, setKind] = useState<ScheduleKind>("every");
-  const [when, setWhen] = useState("");
+  const [d, setD] = useState<Draft>(() => draftOf(editing));
+  const [apps, setApps] = useState<AppView[]>([]);
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const first = useRef<HTMLTextAreaElement>(null);
+  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((x) => ({ ...x, [k]: v }));
 
   useEffect(() => {
     if (!open) return;
-    setInstruction("");
-    setName("");
-    setAgent("ghost");
-    setKind("every");
-    setWhen("");
+    setD(draftOf(editing));
     setError(null);
+    let on = true;
+    // What a check may read: a connected app's read-only tools. And the skills to start with.
+    client
+      .apps()
+      .then((a) => on && setApps(a.filter((x) => x.state === "connected" && x.actions.some((t) => t.reads))))
+      .catch(() => {});
+    client
+      .skills()
+      .then((k) => on && setSkills(k.filter((x) => !x.problem)))
+      .catch(() => {});
     // showModal() focuses the close button; the instruction is where the operator starts.
     const id = requestAnimationFrame(() => first.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, [open]);
+    return () => {
+      on = false;
+      cancelAnimationFrame(id);
+    };
+  }, [open, editing, client]);
 
-  const ready = instruction.trim() !== "" && when.trim() !== "";
+  const hoursProblem = (d.start || d.end) && !(HOUR.test(d.start) && HOUR.test(d.end)) ? "Both as 24-hour times, like 08:00 and 18:00, or both empty for any hour." : null;
+  let argsProblem: string | null = null;
+  let args: Record<string, unknown> = {};
+  if (d.checkArgs.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(d.checkArgs);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+      else argsProblem = "Its arguments are an object, like {“branch”: “main”}.";
+    } catch {
+      argsProblem = "That isn’t JSON. Its arguments are an object, like {“branch”: “main”}.";
+    }
+  }
+  const checkProblem = d.checkApp && !d.checkRead ? "Pick which of its reads to look at." : null;
+  const ready = d.instruction.trim() !== "" && d.when.trim() !== "" && !hoursProblem && !argsProblem && !checkProblem;
+
+  const body = (): ScheduleRequest => {
+    const was = editing ? draftOf(editing) : null;
+    const req: ScheduleRequest = {
+      instruction: d.instruction.trim(),
+      name: d.name.trim() || null,
+      agent: d.agent,
+      urgency: d.urgency,
+      skills: d.skills,
+    };
+    // A time is sent when it is new or changed: a one-off's time already past is not resent.
+    if (!was || was.kind !== d.kind || was.when.trim() !== d.when.trim()) req[d.kind] = d.when.trim();
+    if (d.zone.trim() && (!was || was.zone !== d.zone.trim())) req.time_zone = d.zone.trim();
+    if (d.start && d.end) req.active_hours = { start: d.start, end: d.end };
+    else if (was && was.start) req.clear_active_hours = true;
+    if (d.checkApp && d.checkRead) req.check = { app: d.checkApp, read: d.checkRead, args };
+    else if (was && was.checkApp) req.clear_check = true;
+    return req;
+  };
+
   const submit = async () => {
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
     try {
-      onAdded(await client.addSchedule({ instruction: instruction.trim(), name: name.trim() || null, agent, [kind]: when.trim() }));
+      onSaved(editing ? await client.editSchedule(editing.id, body()) : await client.addSchedule(body()));
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -365,6 +494,7 @@ function AddScheduleDialog({ open, onClose, agents, zone, onAdded }: AddProps) {
   };
 
   const options = [{ value: "ghost", label: "Ghost" }, ...agents.filter((a) => a.slug !== "ghost").map((a) => ({ value: a.slug, label: agentName(a.slug, a.name) }))];
+  const reads = apps.find((a) => a.name === d.checkApp)?.actions.filter((t) => t.reads) ?? [];
 
   return (
     <Dialog
@@ -372,21 +502,21 @@ function AddScheduleDialog({ open, onClose, agents, zone, onAdded }: AddProps) {
       onClose={onClose}
       dismissible={!busy}
       size="md"
-      title="Add schedule"
+      title={editing ? `Edit ${editing.name}` : "Add schedule"}
       description="An agent carries this out on its own at the times you give, and tells you what it found."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" form="wat-add-schedule" loading={busy} disabled={!ready || !online}>
-            Add schedule
+          <Button variant="primary" type="submit" form="wat-schedule-form" loading={busy} disabled={!ready || !online}>
+            {editing ? "Save" : "Add schedule"}
           </Button>
         </>
       }
     >
       <form
-        id="wat-add-schedule"
+        id="wat-schedule-form"
         className="wat-form"
         onSubmit={(e) => {
           e.preventDefault();
@@ -397,33 +527,85 @@ function AddScheduleDialog({ open, onClose, agents, zone, onAdded }: AddProps) {
           <Textarea
             ref={first}
             rows={4}
-            value={instruction}
+            value={d.instruction}
             maxLength={4000}
             placeholder="Check the build on main. If it is red, say which job failed. If it is green, there is nothing to tell."
-            onChange={(e) => setInstruction(e.target.value)}
+            onChange={(e) => set("instruction", e.target.value)}
           />
         </Field>
         <Field label="Who does it">
-          <Select value={agent} onChange={(e) => setAgent(e.target.value)} options={options} />
+          <Select value={d.agent} onChange={(e) => set("agent", e.target.value)} options={options} />
         </Field>
-        <Field label="When" error={error} help={`${KINDS[kind].help}${zone ? ` Times are in ${zone}.` : ""}`}>
+        <Field label="When" error={error} help={`${KINDS[d.kind].help}${zone ? ` Times are in ${d.zone.trim() || zone}.` : ""}`}>
           <div className="wat-when">
             <SegmentedControl
               aria-label="How often"
-              value={kind}
+              value={d.kind}
               onChange={(k) => {
-                setKind(k);
-                setWhen("");
+                setD((x) => ({ ...x, kind: k, when: editing && editing.kind === k ? whenOf(editing) : "" }));
                 setError(null);
               }}
               options={(Object.keys(KINDS) as ScheduleKind[]).map((k) => ({ value: k, label: KINDS[k].label }))}
             />
-            <Input mono value={when} placeholder={KINDS[kind].placeholder} aria-label={KINDS[kind].label} onChange={(e) => setWhen(e.target.value)} />
+            <Input mono value={d.when} placeholder={KINDS[d.kind].placeholder} aria-label={KINDS[d.kind].label} onChange={(e) => set("when", e.target.value)} />
           </div>
         </Field>
         <Field label="Name" optional help="A few words to call it by. Left empty, it is the start of what to do.">
-          <Input value={name} maxLength={80} placeholder="morning build check" onChange={(e) => setName(e.target.value)} />
+          <Input value={d.name} maxLength={80} placeholder="morning build check" onChange={(e) => set("name", e.target.value)} />
         </Field>
+        <Field label="How it tells you" help="How loud its answer may get. Your quiet hours still hold.">
+          <SegmentedControl aria-label="How it tells you" value={d.urgency} onChange={(u) => set("urgency", u)} options={URGENCIES} />
+        </Field>
+        <Disclosure key={editing?.id ?? "new"} summary="Hours, a check, the time zone and skills" defaultOpen={Boolean(editing && (editing.active_hours || editing.check || editing.skills.length))}>
+          <div className="wat-form wat-more">
+            <Field label="Only between" optional error={hoursProblem} help="Outside these hours a run waits for the next time inside them.">
+              <div className="wat-pair">
+                <Input mono value={d.start} placeholder="08:00" aria-label="From" onChange={(e) => set("start", e.target.value)} />
+                <span className="t-small t-2">and</span>
+                <Input mono value={d.end} placeholder="18:00" aria-label="Until" onChange={(e) => set("end", e.target.value)} />
+              </div>
+            </Field>
+            <Field label="Look first" optional error={checkProblem ?? argsProblem} help="One of an app’s reads, called with no model. The agent runs only when what it returns has changed.">
+              <div className="stack gap-2">
+                <div className="wat-pair">
+                  <Select
+                    aria-label="App"
+                    value={d.checkApp}
+                    onChange={(e) => setD((x) => ({ ...x, checkApp: e.target.value, checkRead: "" }))}
+                    options={[{ value: "", label: "No check" }, ...apps.map((a) => ({ value: a.name, label: a.title }))]}
+                  />
+                  <Select
+                    aria-label="Its read"
+                    value={d.checkRead}
+                    disabled={!d.checkApp}
+                    onChange={(e) => set("checkRead", e.target.value)}
+                    options={[{ value: "", label: d.checkApp ? "Pick a read" : "Pick an app first" }, ...reads.map((t) => ({ value: t.name, label: t.name }))]}
+                  />
+                </div>
+                {d.checkApp && <Textarea mono rows={2} value={d.checkArgs} aria-label="Its arguments, as JSON" placeholder={`{"branch": "main"}`} onChange={(e) => set("checkArgs", e.target.value)} />}
+              </div>
+            </Field>
+            <Field label="Time zone" optional help={`An IANA name, like Europe/London. Left empty, ${zone || "this computer’s"}.`}>
+              <Input mono value={d.zone} placeholder={zone || "America/Detroit"} onChange={(e) => set("zone", e.target.value)} />
+            </Field>
+            <fieldset className="wat-skills">
+              <legend className="t-body">Skills to start with</legend>
+              {skills.length === 0 ? (
+                <p className="t-small t-3">No skills yet. They are on Settings › Skills.</p>
+              ) : (
+                skills.map((k) => (
+                  <Checkbox
+                    key={k.name}
+                    label={k.name}
+                    description={k.description}
+                    checked={d.skills.includes(k.name)}
+                    onChange={(on) => set("skills", on ? [...d.skills, k.name] : d.skills.filter((x) => x !== k.name))}
+                  />
+                ))
+              )}
+            </fieldset>
+          </div>
+        </Disclosure>
       </form>
     </Dialog>
   );

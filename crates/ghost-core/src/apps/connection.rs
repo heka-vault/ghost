@@ -1227,8 +1227,10 @@ impl App {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
-            && !self.own
+            && (!self.own || !crate::ghost_app::CORE.contains(&name))
         {
+            // Ghost's own past its core is remembered too (ADR 0052): a tool called by
+            // name stays offered by name.
             recent.touch(&self.offered_name(name));
         }
         if self.live_session().is_none() {

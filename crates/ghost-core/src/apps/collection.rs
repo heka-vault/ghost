@@ -366,21 +366,33 @@ impl Apps {
     /// (`pinned` in `apps.json`) and the model has not used or found lately; those are
     /// found with the search tool, and stay callable by name.
     fn hidden(&self, apps: &[Arc<App>]) -> HashSet<String> {
-        let search = apps
-            .iter()
-            .find(|a| a.is_own())
-            .map(|a| a.public_name(TOOLS_SEARCH));
+        let own = apps.iter().find(|a| a.is_own());
+        let search = own.map(|a| a.public_name(TOOLS_SEARCH));
+        let recent = self.recent.names();
+        // Ghost's own tools past its core (ADR 0052) are found by search like an app's,
+        // whatever the limits: the core is offered by name, and the rest once used or
+        // found. The search itself is in the core.
+        let mut hidden: HashSet<String> = HashSet::new();
+        if let Some(own) = own {
+            for (tool, name) in own.offered() {
+                if !crate::ghost_app::CORE.contains(&tool.as_str()) && !recent.contains(&name) {
+                    hidden.insert(name);
+                }
+            }
+        }
         let outside: Vec<&Arc<App>> = apps.iter().filter(|a| !a.is_own()).collect();
         let count: usize = outside.iter().map(|a| a.offered().len()).sum();
         let bytes: usize = outside.iter().map(|a| a.bytes()).sum();
         let over = count > self.limits.tools_max || bytes > self.limits.tools_bytes;
-        // With no search tool to find them by (Ghost's own app is not running), every
-        // tool stays offered.
+        // Within the limits, or with no search tool to find them by (Ghost's own app is not
+        // running), every app's tool stays offered; the search is offered only when
+        // something is hidden.
         if !over || search.is_none() {
-            return search.into_iter().collect();
+            if hidden.is_empty() {
+                hidden.extend(search);
+            }
+            return hidden;
         }
-        let recent = self.recent.names();
-        let mut hidden = HashSet::new();
         for app in outside {
             for (tool, name) in app.offered() {
                 if !app.spec.pinned.contains(&tool) && !recent.contains(&name) {
@@ -391,23 +403,24 @@ impl Apps {
         hidden
     }
 
-    /// Whether most tools are found by search right now.
+    /// Whether most of the connected apps' tools are found by search right now (Ghost's
+    /// own past its core always are, ADR 0052).
     pub fn deferring(&self) -> bool {
         self.claim_names();
         let apps = self.in_order();
-        let search: HashSet<String> = apps
+        let own: HashSet<String> = apps
             .iter()
             .filter(|a| a.is_own())
-            .map(|a| a.public_name(TOOLS_SEARCH))
+            .flat_map(|a| a.offered().into_iter().map(|(_, n)| n))
             .collect();
-        self.hidden(&apps).iter().any(|n| !search.contains(n))
+        self.hidden(&apps).iter().any(|n| !own.contains(n))
     }
 
     /// The connected apps' tools that match `query`, best first: each with the name to
     /// call it by, what it does and the arguments it takes. Every word of the query is
     /// looked for in the tool's name (which counts three times), its app and its
     /// description. What is found is offered by name from the next model call. Ghost's
-    /// own tools are not searched: they are always offered.
+    /// own tools past the core are searched too (ADR 0052); the core is always offered.
     pub fn search_tools(&self, query: &str) -> Vec<Value> {
         self.claim_names();
         let words: Vec<String> = query
@@ -418,14 +431,22 @@ impl Apps {
             .collect();
         let mut hits: Vec<(usize, usize, Value, String)> = Vec::new();
         let mut order = 0;
-        for app in self.in_order().iter().filter(|a| !a.is_own()) {
+        for app in self.in_order().iter() {
             let offered = app.offered();
             for t in app.tools() {
                 let Some((_, name)) = offered.iter().find(|(n, _)| *n == t.name) else {
                     continue;
                 };
+                if app.is_own() && crate::ghost_app::CORE.contains(&t.name.as_str()) {
+                    continue; // always offered
+                }
                 order += 1;
-                let said = t.offered_description();
+                // Ghost's own description is Ghost's text, whole (ADR 0045).
+                let said = if app.is_own() {
+                    t.description.clone()
+                } else {
+                    t.offered_description()
+                };
                 let (in_name, in_app, in_text) = (
                     name.to_lowercase(),
                     app.spec.shown().to_lowercase(),

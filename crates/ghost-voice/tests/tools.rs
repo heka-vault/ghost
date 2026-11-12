@@ -1544,8 +1544,9 @@ mod ghosts_own_app {
             after_n - before_n,
             after_bytes - before_bytes
         );
-        assert_eq!(after_n - before_n, 9);
+        // Its core (ADR 0052): the rest are found with ghost_tools_search.
+        assert_eq!(after_n - before_n, 7);
         assert!(after_bytes - before_bytes < 3_500, "{after_bytes}");
-        assert!(paragraph < 700);
+        assert!(paragraph < 900);
     }
 }

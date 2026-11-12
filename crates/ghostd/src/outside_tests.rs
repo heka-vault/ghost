@@ -23,7 +23,7 @@ use rmcp::{RoleClient, ServiceExt};
 use serde_json::Map;
 
 use super::*;
-use crate::mcp::{Target, bridge, mcp_cli};
+use crate::mcp::{Target, bridge, with_idempotency_key};
 
 type Client = RunningService<RoleClient, ()>;
 
@@ -125,9 +125,37 @@ async fn world_full(
     if let Some(q) = &questions {
         server = server.with_questions(q.clone());
     }
+    // Everything Ghost's own agents reach (ADR 0052), so the line an outside client is
+    // held to is tested against all of it.
+    let cfg = tmp.path().join("config");
+    std::fs::create_dir_all(&cfg).unwrap();
+    server = server.with_more(ghost_app::More {
+        agents: Some(Arc::new(
+            ghost_core::conversations::Conversations::new(store.clone(), &cfg, Default::default())
+                .unwrap(),
+        )),
+        config_dir: Some(cfg.clone()),
+        catalog: Some(Arc::new(ghost_core::catalog::Catalog::new(
+            tmp.path().join("catalog.json"),
+        ))),
+        routes: Some(ghost_app::ready(Arc::new(
+            ghost_core::routes::RouteEngine::new(Items::new(store.clone())).unwrap(),
+        ))),
+        policy: Some(Arc::new(AutonomyPolicy::default)),
+        settings: Some(Arc::new(Default::default)),
+        skills: Some(Arc::new(ghost_core::skills::Skills::new(
+            &cfg.join("skills"),
+            None,
+        ))),
+        runner: Some(Arc::new(Echo)),
+        ..ghost_app::More::default()
+    });
     let attached = ghost_app::attach(&apps, server.clone()).await.unwrap();
     gate.register(NAME, attached.app.operations());
     for (slug, name, job) in [("ghost", "Ghost", ""), ("ledger", "Ledger", "The books")] {
+        if store.get_conversation(slug, true).unwrap().is_some() {
+            continue; // Ghost is made when its folder is read
+        }
         let mut p = Profile::new(slug, name);
         p.job = job.to_string();
         store.upsert_conversation(&p).unwrap();
@@ -309,7 +337,7 @@ async fn nothing_but_the_one_path_is_served() {
 }
 
 /// The tools an outside client has, and no other.
-const TOOLS: [&str; 13] = [
+const TOOLS: [&str; 17] = [
     "agent_ask",
     "agents_list",
     "apps_list",
@@ -318,11 +346,15 @@ const TOOLS: [&str; 13] = [
     "docs_search",
     "events_wait",
     "notify",
+    "recall",
     "resolve",
+    "routes_read",
     "say",
     "status",
+    "transcript_read",
     "waiting_ack",
     "waiting_snooze",
+    "watches_list",
 ];
 
 #[tokio::test]
@@ -798,8 +830,9 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
     assert_eq!(names, TOOLS);
     // No tool about passwords, the policy file, permissions, apps to connect, clients or
-    // their tokens, transcripts or audio: by its name, and by the name of any argument it
-    // takes.
+    // their tokens, memory, settings or audio: by its name, and by the name of any argument
+    // it takes. (`recall` and `transcript_read` are offered, over the turns of the runs the
+    // client itself started, ADR 0052: tested in `a_client_recalls_only_its_own_runs`.)
     let forbidden = [
         "password",
         "passwords",
@@ -812,10 +845,13 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "permissions",
         "token",
         "tokens",
-        "transcript",
         "transcripts",
         "turn",
         "turns",
+        "settings",
+        "skill",
+        "quiet",
+        "output",
         "audio",
         "microphone",
         "passive",
@@ -830,6 +866,7 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "memory",
         "watch",
         "hook",
+        "catalog",
         "confirm",
     ];
     for t in &tools {
@@ -865,14 +902,18 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
             "waiting_snooze"
         ]
     );
-    // A tool Ghost has for itself is not one a client can call.
+    // A tool Ghost has for itself is not one a client can call, the wider ones of
+    // ADR 0052 included.
     for tool in [
         "passwords_list",
         "policy_read",
         "clients_add",
         "change",
         "waiting_list",
-    ] {
+    ]
+    .into_iter()
+    .chain(ghost_app::NOT_FOR_OUTSIDE)
+    {
         assert!(call(&c, tool, json!({})).await.is_err(), "{tool}");
     }
     // Nothing a read says holds a token or its hash, and the status never a key.
@@ -1181,17 +1222,141 @@ async fn the_bridge_does_not_wait_on_a_token_ghost_refuses() {
     task.abort();
 }
 
+/// The bridge resends a call whose send failed part way, and the daemon may have run it:
+/// the key it puts on the call makes the resend answer with the first call's result.
+#[tokio::test]
+async fn a_change_sent_again_with_its_key_is_made_once() {
+    use ghost_core::ghost_app::outside::IDEMPOTENCY_KEY;
+    let w = world("").await;
+    let c = connect(&w.url, &w.token("codex"), ClientLifecycleMode::Initialize)
+        .await
+        .unwrap();
+    let keyed = |key: &str, title: &str| {
+        let mut meta = rmcp::model::RequestMetaObject::default();
+        meta.insert(IDEMPOTENCY_KEY.to_string(), json!(key));
+        let mut p = CallToolRequestParams::new("notify")
+            .with_arguments(json!({"title": title}).as_object().cloned().unwrap());
+        p.meta = Some(meta);
+        p
+    };
+    let text = |r: rmcp::model::CallToolResult| -> String {
+        r.content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect()
+    };
+    let first = text(
+        c.call_tool(keyed("k-1", "the build finished"))
+            .await
+            .unwrap(),
+    );
+    let again = text(
+        c.call_tool(keyed("k-1", "the build finished"))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(first, again);
+    let notified = |w: &World| {
+        let (rows, _) = w.store.list_proposals(&ProposalQuery::page(50, 0)).unwrap();
+        rows.iter().filter(|p| p.operation == "notify").count()
+    };
+    assert_eq!(notified(&w), 1, "made once");
+    // Another key, or none, is another call.
+    c.call_tool(keyed("k-2", "the build finished"))
+        .await
+        .unwrap();
+    assert_eq!(notified(&w), 2);
+    call(&c, "notify", json!({"title": "and again"}))
+        .await
+        .unwrap();
+    assert_eq!(notified(&w), 3);
+    // Another client's same key is its own.
+    let other = connect(&w.url, &w.token("cursor"), ClientLifecycleMode::Initialize)
+        .await
+        .unwrap();
+    other
+        .call_tool(keyed("k-1", "the build finished"))
+        .await
+        .unwrap();
+    assert_eq!(notified(&w), 4);
+    let _ = c.cancel().await;
+    let _ = other.cancel().await;
+    w.host.stop().await;
+}
+
+#[test]
+fn the_bridge_keys_every_tool_call_once_and_keeps_a_clients_own_key() {
+    let call: rmcp::model::ClientJsonRpcMessage = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+        "params": {"name": "say", "arguments": {"text": "hi"}}
+    }))
+    .unwrap();
+    let keyed = with_idempotency_key(call);
+    let key = |m: &rmcp::model::ClientJsonRpcMessage| {
+        serde_json::to_value(m).unwrap()["params"]["_meta"]["ghost/idempotency-key"].clone()
+    };
+    let k = key(&keyed);
+    assert!(k.as_str().is_some_and(|s| s.len() == 32), "{k}");
+    // A resend is the same message: the same key. Keying it again changes nothing.
+    assert_eq!(key(&with_idempotency_key(keyed.clone())), k);
+    // A key the client chose is kept; a message that is not a tool call is left alone.
+    let own: rmcp::model::ClientJsonRpcMessage = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+        "params": {"name": "say", "_meta": {"ghost/idempotency-key": "mine"}}
+    }))
+    .unwrap();
+    assert_eq!(key(&with_idempotency_key(own)), json!("mine"));
+    let list: rmcp::model::ClientJsonRpcMessage = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 9, "method": "tools/list"
+    }))
+    .unwrap();
+    assert_eq!(key(&with_idempotency_key(list)), Value::Null);
+}
+
 // --- the command line ---------------------------------------------------------------------------
 
 fn cli(args: &[&str], cfg: &crate::GhostdSettings) -> (i32, String, String) {
     let args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    let code = mcp_cli(&args, cfg, &mut out, &mut err);
+    let code = crate::mcp::mcp_cli_in(&args, cfg, &mut out, &mut err, &|_| None);
     (
         code,
         String::from_utf8(out).unwrap(),
         String::from_utf8(err).unwrap(),
     )
+}
+
+#[test]
+fn inside_an_appimage_a_command_client_is_given_the_address_instead() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = crate::GhostdSettings {
+        data_dir: tmp.path().join("data"),
+        db_path: tmp.path().join("data/ghost.db"),
+        ..crate::GhostdSettings::default()
+    };
+    let args: Vec<String> = ["add", "codex", "--command"]
+        .iter()
+        .map(|a| (*a).to_string())
+        .collect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let appimage = |k: &str| (k == "APPIMAGE").then(|| "/home/op/Ghost.AppImage".to_string());
+    let code = crate::mcp::mcp_cli_in(&args, &cfg, &mut out, &mut err, &appimage);
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(code, 0, "{}", String::from_utf8_lossy(&err));
+    assert!(out.contains("running from an AppImage"), "{out}");
+    // No command naming the temporary mount, and no token file: the address, with the
+    // token, as for any tool that connects to one.
+    assert!(!out.contains("mcp serve"), "{out}");
+    assert!(!out.contains(".mount_"), "{out}");
+    assert!(
+        out.contains("--transport http ghost http://127.0.0.1:47824/mcp"),
+        "{out}"
+    );
+    assert!(!cfg.clients_dir().join("codex.token").exists());
+    // Outside an AppImage the same command is the stdio bridge.
+    let (code, out, _) = cli(&["add", "cursor", "--command"], &cfg);
+    assert_eq!(code, 0);
+    assert!(out.contains("mcp serve --client cursor"), "{out}");
 }
 
 #[test]
@@ -1400,17 +1565,21 @@ mod asking {
             Arc::new(move |_p| apps.sources())
         };
         let model = ScriptedModel::new(vec![replies], ttfb);
-        let runner = Arc::new(AskRunner::new(
-            Arc::new(HeadlessRunner::new(HeadlessParts {
-                conversations: convs.clone(),
-                gate: gate.clone(),
-                reach,
-                model: Arc::new(move || Ok(model.clone() as Arc<dyn ModelPort>)),
-                options: Options::default(),
-                skills: None,
-            })),
-            CancellationToken::new(),
-        ));
+        let runner = Arc::new(
+            AskRunner::new(
+                Arc::new(HeadlessRunner::new(HeadlessParts {
+                    conversations: convs.clone(),
+                    gate: gate.clone(),
+                    reach,
+                    model: Arc::new(move || Ok(model.clone() as Arc<dyn ModelPort>)),
+                    options: Options::default(),
+                    skills: None,
+                })),
+                CancellationToken::new(),
+            )
+            // The scheduler's queue: a short wait, so a test of a busy agent is quick.
+            .with_turns(jobs.turns().clone(), Duration::from_millis(300)),
+        );
         let clients = Arc::new(Clients::new(store.clone(), tmp.path().join("clients")));
         let host = OutsideHost::new(
             "127.0.0.1:0",
@@ -1497,6 +1666,216 @@ mod asking {
         assert_eq!(ask.session_id, "client:claude-code");
         let _ = c.cancel().await;
         w.host.stop().await;
+    }
+
+    /// ADR 0052: the same run for one agent asking another: marked as asked by that
+    /// agent, under a session recall can tell from an outside tool's, and told it cannot
+    /// hand the task on.
+    #[tokio::test]
+    async fn an_agent_asks_another_through_the_same_run() {
+        let w = asking(
+            "",
+            vec![ScriptedModel::say("Paid on the 3rd.")],
+            Duration::ZERO,
+        )
+        .await;
+        let ledger = w.convs.get("ledger").unwrap().unwrap();
+        let answer = w
+            .runner
+            .ask(&ledger, "Is October paid?", "agent:ghost")
+            .await
+            .unwrap();
+        assert_eq!(answer, "Paid on the 3rd.");
+        let turns = w.transcript("ledger");
+        assert_eq!(
+            turns[0].2,
+            "[asked by Ghost, another agent] Is October paid?"
+        );
+        assert!(turns[0].1.starts_with("run-agentask-"), "{}", turns[0].1);
+        // An outside tool's run says whose it is.
+        let w = asking("", vec![ScriptedModel::say("Yes.")], Duration::ZERO).await;
+        let ledger = w.convs.get("ledger").unwrap().unwrap();
+        w.runner
+            .ask(&ledger, "Paid?", "client:claude-code")
+            .await
+            .unwrap();
+        let session = w.transcript("ledger")[0].1.clone();
+        assert!(session.starts_with("run-ask-claude-code-"), "{session}");
+        assert_eq!(session.len(), "run-ask-claude-code-".len() + 32);
+    }
+
+    /// A tool that goes away mid-`agent_ask`: the HTTP connection is closed with the run
+    /// still waiting on the model. The run is stopped, what was asked is kept as not
+    /// answered, and the audit records the ask as stopped, not done.
+    #[tokio::test]
+    async fn a_connection_closed_mid_ask_stops_the_run_and_it_is_recorded() {
+        // The model would take ten minutes to answer.
+        let w = asking(
+            "",
+            vec![ScriptedModel::say("Too late.")],
+            Duration::from_secs(600),
+        )
+        .await;
+        let token = w
+            .clients
+            .create("claude-code", false)
+            .unwrap()
+            .token
+            .to_string();
+        let http = reqwest::Client::new();
+        let send = |body: Value, session: Option<String>| {
+            let mut req = http
+                .post(&w.url)
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("authorization", format!("Bearer {token}"))
+                .body(body.to_string());
+            if let Some(s) = session {
+                req = req.header("mcp-session-id", s);
+            }
+            req.send()
+        };
+        let hello = send(
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "t", "version": "0"}}}),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(hello.status(), 200);
+        let session = hello
+            .headers()
+            .get("mcp-session-id")
+            .map(|v| v.to_str().unwrap().to_string());
+        let _ = hello.bytes().await;
+        let done = send(
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            session.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(done.status().is_success(), "{}", done.status());
+        // The ask: its response is a stream that would carry the answer. Once the run has
+        // started (its row in the gate), the tool goes away: the response is dropped and
+        // the connection with it.
+        let asked = send(
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                "name": "agent_ask", "arguments": {"agent": "ledger", "text": "the total?"}}}),
+            session,
+        )
+        .await
+        .unwrap();
+        assert_eq!(asked.status(), 200);
+        let started = || {
+            w.store
+                .list_proposals(&ProposalQuery::page(10, 0))
+                .unwrap()
+                .0
+                .into_iter()
+                .find(|p| p.operation == "agent_ask")
+        };
+        for _ in 0..100 {
+            if started().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(started().is_some(), "the ask reached the gate");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(asked);
+        drop(http);
+
+        // Stopped, not run to its ten minutes: what was asked is kept as not answered,
+        // and the ask's outcome in the audit is not a success.
+        let began = std::time::Instant::now();
+        let mut kept = Vec::new();
+        for _ in 0..1000 {
+            kept = w.transcript("ledger");
+            if !kept.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(
+            kept[0].2,
+            format!("{} the total? (not answered)", asked_mark("Claude Code"))
+        );
+        // Within moments, not at the run's own ten-minute limit.
+        assert!(
+            began.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            began.elapsed()
+        );
+        let ask = started().unwrap();
+        let mut events = Vec::new();
+        for _ in 0..100 {
+            events = w.store.events(&ask.id).unwrap();
+            if events.iter().any(|e| e.event == "finished") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let finished = events
+            .iter()
+            .find(|e| e.event == "finished")
+            .expect("the ask has an outcome");
+        assert_eq!(
+            finished.detail.as_ref().unwrap()["status"],
+            "failed",
+            "the ask is recorded as stopped: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| e
+                .detail
+                .as_ref()
+                .is_some_and(|d| d.to_string().contains("stopped before Ledger answered"))),
+            "{events:?}"
+        );
+        // And the agent is free again for the next.
+        assert!(!w.jobs.turns().busy("ledger"));
+        w.host.stop().await;
+    }
+
+    /// One piece of work at a time per agent: an ask waits for a scheduled run of the same
+    /// agent, goes before the next one, and is told the agent is busy after its wait.
+    #[tokio::test]
+    async fn an_ask_takes_turns_with_the_agents_scheduled_runs() {
+        let w = asking(
+            "",
+            vec![ScriptedModel::say("Paid."), ScriptedModel::say("Paid.")],
+            Duration::from_millis(100),
+        )
+        .await;
+        let ledger = w.convs.get("ledger").unwrap().unwrap();
+        let turns = w.jobs.turns().clone();
+        // A scheduled run of Ledger is going: the ask waits, and past its wait is refused
+        // with a clear error; nothing ran.
+        assert!(turns.try_run("ledger"));
+        let e = w
+            .runner
+            .ask(&ledger, "Is October paid?", "client:claude-code")
+            .await
+            .unwrap_err();
+        assert!(e.contains("Ledger is busy with other work"), "{e}");
+        assert!(w.transcript("ledger").is_empty());
+        // The run ends while an ask waits: the ask goes, and no run starts until it is done.
+        let asking = tokio::spawn({
+            let (runner, ledger) = (w.runner.clone(), ledger.clone());
+            async move { runner.ask(&ledger, "Is October paid?", "agent:ghost").await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        turns.release("ledger");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(turns.busy("ledger"));
+        assert!(!turns.try_run("ledger"), "a run waits for the ask");
+        assert_eq!(asking.await.unwrap().unwrap(), "Paid.");
+        assert!(!turns.busy("ledger"));
+        assert!(turns.try_run("ledger"));
+        turns.release("ledger");
+        // Another agent was never held up.
+        assert!(turns.try_run("ghost"));
     }
 
     #[tokio::test]
@@ -1725,4 +2104,55 @@ mod asking {
         let _ = cursor.cancel().await;
         w.host.stop().await;
     }
+}
+
+/// ADR 0052: a client recalls the turns of the runs it started, and nothing an agent said
+/// to the operator or to another client; it reads the watches and the routes; and asking
+/// for an agent's memory, or naming another agent's slug in `_agent`, gets it nothing.
+#[tokio::test]
+async fn a_client_recalls_only_its_own_runs() {
+    use ghost_core::conversations::models::Role;
+    let w = world("").await;
+    let c = w
+        .client("claude-code", ClientLifecycleMode::Initialize)
+        .await;
+    let ledger = w
+        .store
+        .get_conversation("ledger", false)
+        .unwrap()
+        .unwrap()
+        .id;
+    let hex = |c: char| c.to_string().repeat(32);
+    for (session, text) in [
+        (
+            format!("run-ask-claude-code-{}", hex('a')),
+            "the invoice went out",
+        ),
+        (
+            format!("run-ask-cursor-{}", hex('b')),
+            "the invoice for cursor",
+        ),
+        ("s1".to_string(), "the invoice is between us"),
+    ] {
+        w.store
+            .add_turn(&ledger, &session, Role::System, text)
+            .unwrap();
+    }
+    let found = call(&c, "recall", json!({"query": "invoice", "_agent": "ghost"}))
+        .await
+        .unwrap();
+    let results = found["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1, "{found}");
+    assert_eq!(results[0]["kind"], "asked by an outside tool");
+    let page = call(&c, "transcript_read", json!({"agent": "ledger"}))
+        .await
+        .unwrap();
+    assert_eq!(page["turns"].as_array().unwrap().len(), 1, "{page}");
+    assert!(call(&c, "watches_list", json!({})).await.is_ok());
+    assert!(call(&c, "routes_read", json!({})).await.is_ok());
+    assert!(
+        call(&c, "memory_read", json!({"agent": "ledger"}))
+            .await
+            .is_err()
+    );
 }

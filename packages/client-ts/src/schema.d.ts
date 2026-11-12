@@ -51,6 +51,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{name}/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set App Limits
+         * @description Set an app's own limits and pinned tools in apps.json (ADR 0046): how long a call
+         *     and connecting may take, how much of a result the model is given whole, and the tools
+         *     offered by name on every turn. Null is Ghost's default. The app connects again with them.
+         */
+        put: operations["set_app_limits_apps__name__limits_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{name}/sign-in": {
         parameters: {
             query?: never;
@@ -1658,6 +1680,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/watches/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Watch
+         * @description Remove a watch an agent made from watches.json. The operator's own are edited in the file.
+         */
+        delete: operations["remove_watch_watches__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/watches/{name}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause Watch
+         * @description Pause a watch an agent made: it stays declared and is not polled.
+         */
+        post: operations["pause_watch_watches__name__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/watches/{name}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Watch
+         * @description Resume a watch an agent made.
+         */
+        post: operations["resume_watch_watches__name__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1702,6 +1784,55 @@ export interface components {
             problems: string[];
             sign_in_url?: string | null;
         };
+        /** @description An app's own limits in apps.json (ADR 0046). None is Ghost's default, given beside it. */
+        AppLimits: {
+            /**
+             * Format: int64
+             * @description Seconds connecting may take.
+             */
+            connect_timeout: number | null;
+            /** Format: int64 */
+            default_connect_timeout: number;
+            /** Format: int64 */
+            default_result_chars: number;
+            /** Format: int64 */
+            default_timeout: number;
+            /**
+             * @description Tools offered by name on every turn even past the limits on how many tools a turn
+             *     carries.
+             */
+            pinned: string[];
+            /**
+             * Format: int64
+             * @description Characters of a result the model is given whole.
+             */
+            result_chars: number | null;
+            /**
+             * Format: int64
+             * @description Seconds a call may take.
+             */
+            timeout: number | null;
+        };
+        /** @description What `PUT /apps/{name}/limits` sets: all four at once; null is Ghost's default. */
+        AppLimitsUpdate: {
+            /**
+             * Format: int64
+             * @description 1 to 600 seconds.
+             */
+            connect_timeout?: number | null;
+            /** @description Tool names, as the app gives them (`search`, not `github_search`); 40 at the most. */
+            pinned?: string[];
+            /**
+             * Format: int64
+             * @description 1,000 to 100,000 characters.
+             */
+            result_chars?: number | null;
+            /**
+             * Format: int64
+             * @description 1 to 3,600 seconds.
+             */
+            timeout?: number | null;
+        };
         /**
          * @description An app was connected, disconnected or changed state: read `GET /apps`. With
          *     `sign_in_url`, the app is waiting for the operator to sign in there; the desktop opens
@@ -1724,6 +1855,8 @@ export interface components {
             icon?: string | null;
             /** @enum {string} */
             kind: "sign_in" | "key" | "local" | "custom";
+            /** @description Its own limits and pinned tools in apps.json (ADR 0046). */
+            limits: components["schemas"]["AppLimits"];
             /** @description Its short name: the rules' and the tools' prefix. */
             name: string;
             /** @description Not connected, or tools not offered, and why; never a secret. */
@@ -1883,6 +2016,11 @@ export interface components {
             clients: components["schemas"]["ClientsView"];
             /** @description The config other tools read, as JSON text. */
             config_json: string;
+            /**
+             * @description Why the snippets are not what was asked for, in a sentence: a command was asked for
+             *     and Ghost runs from an AppImage, so they connect by address.
+             */
+            note: string | null;
             /**
              * Format: password
              * @description The client's token. Shown once.
@@ -2707,6 +2845,11 @@ export interface components {
             detail?: string | null;
             /** Format: date-time */
             expires_at: string;
+            /**
+             * @description Asked from a scheduled run or a watch's run, with nobody there (ADR 0047): its answer
+             *     starts one more run of the agent that asked.
+             */
+            in_run: boolean;
             /** @description The waiting-list key: `question:<id>`, or `change:<proposal>` for a change. */
             key: string;
             /** @enum {string} */
@@ -3268,12 +3411,16 @@ export interface components {
             last_ok?: string | null;
             /** Format: date-time */
             last_run?: string | null;
+            /** @description `agent:<slug>` for a watch an agent made (ADR 0052); None for the operator's own. */
+            made_by: string | null;
             name: string;
             /**
              * Format: int64
              * @description Items it holds open now.
              */
             open: number;
+            /** @description Declared and not polled: an agent's watch paused by it or by the operator. */
+            paused: boolean;
             read: string;
             /** @enum {string} */
             response: "tell" | "record";
@@ -3309,6 +3456,8 @@ export type SchemaAck = components['schemas']['Ack'];
 export type SchemaAppAction = components['schemas']['AppAction'];
 export type SchemaAppConnect = components['schemas']['AppConnect'];
 export type SchemaAppConnectResult = components['schemas']['AppConnectResult'];
+export type SchemaAppLimits = components['schemas']['AppLimits'];
+export type SchemaAppLimitsUpdate = components['schemas']['AppLimitsUpdate'];
 export type SchemaAppsEvent = components['schemas']['AppsEvent'];
 export type SchemaAppView = components['schemas']['AppView'];
 export type SchemaAuditEntry = components['schemas']['AuditEntry'];
@@ -3556,6 +3705,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_app_limits_apps__name__limits_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppLimitsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppView"];
                 };
             };
             /** @description Validation Error */
@@ -6602,6 +6786,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WatchingView"];
+                };
+            };
+        };
+    };
+    remove_watch_watches__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_watch_watches__name__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_watch_watches__name__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

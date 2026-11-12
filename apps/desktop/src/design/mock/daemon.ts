@@ -53,7 +53,7 @@ import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockSchedules } from "./schedules";
-import { type AppFixture, type CatalogSeed, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
+import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
 import type { Fixtures } from "./fixtures";
@@ -785,13 +785,32 @@ export class MockDaemon {
       f.view.state === "connected"
         ? f.tools.map((t) => ({ name: t.name, description: t.description, reads: t.reads, level: levelOf(p, name, t.name, t.reads), rule: `${name}.${t.name}`, conditional: conditionalFor(p, name, t.name) }))
         : [];
-    return { ...structuredClone(f.view), actions };
+    return { ...structuredClone(f.view), limits: structuredClone(f.view.limits ?? DEFAULT_LIMITS), actions };
   }
   /** GET /sources: Ghost's own, then each connected app, every operation at the level its name gets. */
   private sourceList(): SourceInfo[] {
     const p = this.policy.permissions;
     const all = [...this.sources, ...this.apps.filter((a) => a.view.state === "connected").map(sourceOf)];
     return all.map((src) => ({ ...src, operations: src.operations.map((op) => ({ ...op, autonomy: AUTONOMY[levelOf(p, src.name, op.name, false)] })) }));
+  }
+  /** PUT /apps/{name}/limits: the four settings, checked as the daemon checks them. */
+  private setLimits(f: AppFixture, b: Record<string, unknown>): AppView {
+    const within = (key: string, lo: number, hi: number): number | null => {
+      const v = b[key];
+      if (v == null) return null;
+      if (typeof v !== "number" || v < lo || v > hi) throw new HttpError(422, `${key} is ${lo} to ${hi}`);
+      return v;
+    };
+    const pinned = [...new Set((Array.isArray(b.pinned) ? b.pinned : []).map((p) => String(p).trim()).filter(Boolean))];
+    f.view.limits = {
+      ...DEFAULT_LIMITS,
+      timeout: within("timeout", 1, 3600),
+      connect_timeout: within("connect_timeout", 1, 600),
+      result_chars: within("result_chars", 1000, 100000),
+      pinned,
+    };
+    this.appsChanged(f.view.name);
+    return this.appView(f);
   }
   private appsChanged(changed: string | null, sign_in_url: string | null = null) {
     this.emit({ type: "apps", changed, sign_in_url });
@@ -1130,12 +1149,13 @@ export class MockDaemon {
     if (method === "GET" && path === "/sources") return this.sourceList();
     if (method === "GET" && path === "/apps") return this.apps.map((a) => this.appView(a));
     if (method === "POST" && path === "/apps") return this.connect(b as AppConnect);
-    if ((r = m(/^\/apps\/([^/]+)(\/sign-in)?$/))) {
+    if ((r = m(/^\/apps\/([^/]+)(\/sign-in|\/limits)?$/))) {
       const name = decodeURIComponent(r[1]);
       const f = this.apps.find((a) => a.view.name === name);
       if (!f) throw new HttpError(404, `no app called '${name}'`);
       if (method === "GET" && !r[2]) return this.appView(f);
-      if (method === "POST" && r[2]) return this.signIn(f);
+      if (method === "POST" && r[2] === "/sign-in") return this.signIn(f);
+      if (method === "PUT" && path.endsWith("/limits")) return this.setLimits(f, b);
       if (method === "DELETE" && !r[2]) return this.disconnect(f);
     }
     if (method === "GET" && path === "/catalog") return this.catalogPage(query.get("search") ?? "", Number(query.get("offset") ?? 0), Number(query.get("limit") ?? 40));
@@ -1233,6 +1253,17 @@ export class MockDaemon {
     if (method === "POST" && path === "/rules") return this.addRule(String(b.text ?? ""));
     if (method === "GET" && path === "/outputs") return structuredClone(this.outputs);
     if (method === "GET" && path === "/watches") return structuredClone(this.watching);
+    if ((r = m(/^\/watches\/([^/]+)(\/pause|\/resume)?$/)) && (method === "POST" || method === "DELETE")) {
+      // ADR 0052: the operator's say over a watch an agent made; their own are the file's.
+      const name = decodeURIComponent(r[1]);
+      const w = this.watching.watches.find((x) => x.name === name);
+      if (!w) throw new HttpError(404, `there is no watch called ${name}`);
+      if (!w.made_by) throw new HttpError(409, `${name} is your own watch: change it in watches.json`);
+      if (method === "DELETE" && !r[2]) this.watching = { ...this.watching, watches: this.watching.watches.filter((x) => x !== w) };
+      else if (r[2] === "/pause") w.paused = true;
+      else if (r[2] === "/resume") w.paused = false;
+      return structuredClone(this.watching);
+    }
     {
       const answer = this.schedules.handle(method, path, query, b);
       if (answer !== undefined) return answer;
@@ -1260,6 +1291,7 @@ export class MockDaemon {
         token,
         claude_code: b.command ? `claude mcp add ghost -- ghostd mcp serve --client ${name}` : `claude mcp add --transport http ghost ${url} --header "Authorization: Bearer ${token}"`,
         config_json: JSON.stringify(config, null, 2),
+        note: null,
         clients: this.clientsView(),
       };
     }

@@ -290,11 +290,22 @@ change that no rule names runs quietly, because the item on your list is the
 announcement. `allow = ["ghost.notify"]` has Ghost say it each time, `ask` has it ask
 first, and `block` takes the tool away.
 
+Agents reach the rest of Ghost through it too (ADR 0052): what was said before
+(`ghost_recall`), the catalog and connecting an app (`ghost_app_connect`), watches, quiet,
+outputs, another agent (`ghost_ask_agent`) and writing a skill. Connecting or disconnecting
+an app, writing a skill, and making or changing a watch ask first unless a rule of yours
+says otherwise, since each runs or contacts code you did not write. An agent never
+completes a sign-in or types a key: an app that needs one is left on your waiting list
+("Linear needs you to sign in"), for you to finish on the Apps screen. Your permissions
+and settings can be read and explained, never changed. Every tool, its default and which
+outside tools see it: [tools.md](tools.md).
+
 Ghost's own text is not an outside system's, so these tools' descriptions and results
-reach the model whole; every other app's are held to the caps described above.
-`ghost_tools_search` is one of these tools; it is offered only when the connected apps
-have more tools than a turn should carry ([above](#many-tools)), and since what it returns
-is the apps' text, it holds itself to an app's result budget.
+reach the model whole; every other app's are held to the caps described above. Only a
+core of them is in an agent's list on every turn; the rest are found with
+`ghost_tools_search`, like an app's tools past the limits ([above](#many-tools)). Since
+what the search returns includes the apps' text, it holds itself to an app's result
+budget.
 
 The same app is what your other tools reach when you connect them to Ghost (Claude Code,
 Cursor, Codex): see [connect-ghost.md](connect-ghost.md). That is the other direction from

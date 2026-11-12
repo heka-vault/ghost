@@ -61,10 +61,12 @@ pub use limits::{
 };
 pub(crate) use spec::truthy as spec_truthy;
 pub use spec::{
-    APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, GHOST_APP, RESERVED_NAMES, app_name_problem,
-    edit_apps, extract_secrets, fill_secrets, load_apps, looks_like_secret, parse_app,
-    parse_apps_json, render_app, render_apps_json, secret_name, secret_names, write_apps,
+    APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, GHOST_APP, RESERVED_NAMES, address_spec,
+    app_name_problem, edit_apps, extract_secrets, fill_secrets, free_name, host_to_name, load_apps,
+    looks_like_secret, parse_app, parse_apps_json, render_app, render_apps_json, secret_name,
+    secret_names, write_apps,
 };
+pub(crate) use spec::{edit_keyed, write_folder_file};
 pub(crate) use tools::fit;
 pub use tools::{
     ALSO_RETURNED, BRIEF_MAX, CUT_NOTE, MAX_FIELD_CHARS, MAX_LIST_ITEMS, MAX_RESULT_ITEMS,

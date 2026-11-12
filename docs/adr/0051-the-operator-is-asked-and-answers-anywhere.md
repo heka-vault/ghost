@@ -36,7 +36,11 @@ says otherwise, as Ghost's own changes are, ADR 0045):
   otherwise the run is told to finish `[SILENT]`, and when the operator answers, one more
   run of the same agent is queued with the question and the answer as its instruction
   ("You asked the operator … The operator answered (phone): …"), delivered like any run.
-  One per answer: it is queued once for the question's key, through the scheduler's own
+  That instruction says the answer is already recorded and the question closed, to do what
+  the answer calls for, and to reply exactly `[SILENT]` when nothing remains (a "no" that
+  needs nothing), so the operator is not told what they just said. The follow-up is not
+  offered `ghost_answer` or `ghost_ask` (`questions::FOLLOW_UP_WITHHELD`, refused by name
+  too), and what it delivers is titled by the question it follows up. One per answer: it is queued once for the question's key, through the scheduler's own
   once-per-key rule, so neither a second answer nor a restart starts another. None for a
   decline or an expiry. The answer is never a yes to a change: the run's changes still go
   through the gate.
@@ -103,7 +107,9 @@ the Android app can hold in a foreground service, does this directly.
 **The phone route is delivered on the phone's word.** `PhoneRoute` sends an `alert` on the
 live stream and waits 15 seconds for `POST /seen`, which the phone sends once it has shown
 the notification: delivered. No stream, or no `seen`: unavailable, and the item goes to
-the next route at once. A read of `/waiting` is no longer a delivery.
+the next route at once. A read of `/waiting` is no longer a delivery. While the phone's own
+call is running, the route does not alert and hands on, as desk voice does for a desk
+session; the call route does not ring while any session runs.
 
 **The desk rings the phone** (issue #22). `CallRoute` (off unless `call` is in
 `[routes].enabled`, under the operator's call caps) sends a `ring` for the first item at

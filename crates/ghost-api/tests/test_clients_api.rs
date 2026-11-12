@@ -92,3 +92,31 @@ async fn a_tool_that_only_starts_commands_gets_a_command_and_no_token_in_its_con
     assert_eq!(c.delete("/clients/codex").await.status, 200);
     assert!(!file.exists());
 }
+
+#[tokio::test]
+async fn inside_an_appimage_a_command_tool_is_given_the_address_and_told_why() {
+    let mut w = World::new();
+    w.in_appimage = true;
+    let c = w.client();
+    let made = c
+        .post("/clients", Some(json!({"name": "codex", "command": true})))
+        .await;
+    assert_eq!(made.status, 200, "{}", made.text);
+    let token = made["token"].as_str().unwrap();
+    assert!(made["note"].as_str().unwrap().contains("AppImage"));
+    assert!(
+        made["claude_code"]
+            .as_str()
+            .unwrap()
+            .contains("--transport http")
+    );
+    assert!(made["config_json"].as_str().unwrap().contains(token));
+    assert!(!w.tmp.path().join("clients/codex.token").exists());
+    // Outside one, no note.
+    let w = World::new();
+    let made = w
+        .client()
+        .post("/clients", Some(json!({"name": "cursor"})))
+        .await;
+    assert_eq!(made["note"], Value::Null);
+}

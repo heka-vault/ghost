@@ -103,6 +103,9 @@ pub struct ToolDispatcher {
     /// no conversation runtime to ask, and the apps change under it as under a session
     /// (ADR 0046).
     live: Option<LiveSources>,
+    /// Tools by name that this dispatcher neither offers nor calls (a run's
+    /// `RunRequest::withheld`).
+    withheld: std::sync::Mutex<Vec<String>>,
 }
 
 /// The sources as they are now.
@@ -172,6 +175,7 @@ impl ToolDispatcher {
             offering,
             alone,
             live,
+            withheld: std::sync::Mutex::new(Vec::new()),
         });
         if let Some(c) = &this.conversations {
             let me = this.clone();
@@ -195,7 +199,32 @@ impl ToolDispatcher {
     /// The tools advertised for a list of sources: their reads, each app's changes under
     /// their own names, `change` for Ghost's own operations, and the session's own tools.
     pub fn schemas_for(&self, sources: &[ToolSource]) -> Tools {
-        self.offering.schemas(sources)
+        let tools = self.offering.schemas(sources);
+        let withheld = self.withheld.lock().unwrap_or_else(|e| e.into_inner());
+        if withheld.is_empty() {
+            return tools;
+        }
+        Tools::new(
+            tools
+                .iter()
+                .filter(|t| !withheld.contains(&t.name))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// Neither offer nor call these tools, by the name the model sees, from now on.
+    pub fn withhold(&self, names: &[String]) {
+        let mut withheld = self.withheld.lock().unwrap_or_else(|e| e.into_inner());
+        withheld.extend(names.iter().cloned());
+    }
+
+    fn is_withheld(&self, name: &str) -> bool {
+        self.withheld
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|n| n == name)
     }
 
     /// The tools the session starts with.
@@ -224,6 +253,9 @@ impl ToolDispatcher {
         if self.alone.is_some()
             && matches!(name, SWITCH_TOOL | BRING_UP_TOOL | HANG_UP_TOOL | HOLD_TOOL)
         {
+            return CallResult::error(format!("{name} is not available here"));
+        }
+        if self.is_withheld(name) {
             return CallResult::error(format!("{name} is not available here"));
         }
         match name {

@@ -168,6 +168,15 @@ fn first_line(text: &str) -> String {
 
 impl Scheduler {
     pub fn new(parts: SchedulerParts) -> Arc<Self> {
+        // An agent free again (a run or an ask done): look for what waited for it.
+        parts.jobs.turns().on_free({
+            let jobs = Arc::downgrade(&parts.jobs);
+            Arc::new(move || {
+                if let Some(jobs) = jobs.upgrade() {
+                    jobs.wake();
+                }
+            })
+        });
         Arc::new(Self {
             jobs: parts.jobs,
             runner: parts.runner,
@@ -255,18 +264,28 @@ impl Scheduler {
         self.dispatch(now)
     }
 
-    /// Start every queued run whose agent is free, oldest first.
+    /// Start every queued run whose agent is free, oldest first. An agent is not free
+    /// while an ask of it runs or waits (`super::turns`): asks go first.
     pub fn dispatch(self: &Arc<Self>, now: DateTime<Utc>) -> super::jobs::Result<usize> {
         let mut started = 0;
+        let turns = self.jobs.turns().clone();
         for run in self.jobs.queued()? {
             let cancel = CancellationToken::new();
             {
                 let mut going = lock(&self.going);
-                if going.contains_key(&run.agent) {
+                if going.contains_key(&run.agent) || !turns.try_run(&run.agent) {
                     continue;
                 }
-                if !self.jobs.start(&run.id, now)? {
-                    continue;
+                match self.jobs.start(&run.id, now) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        turns.release(&run.agent);
+                        continue;
+                    }
+                    Err(e) => {
+                        turns.release(&run.agent);
+                        return Err(e);
+                    }
                 }
                 going.insert(
                     run.agent.clone(),
@@ -282,7 +301,9 @@ impl Scheduler {
                 let agent = run.agent.clone();
                 me.execute(run, cancel).await;
                 lock(&me.going).remove(&agent);
-                me.jobs.wake(); // the next one waiting for this agent
+                // Free again: an ask waiting goes first, then the scheduler is woken for
+                // the next run waiting for this agent.
+                me.jobs.turns().release(&agent);
             });
             let mut tasks = lock(&self.tasks);
             tasks.retain(|t| !t.is_finished());
@@ -424,6 +445,14 @@ impl Scheduler {
             max_turns: spec.max_turns,
             max_runtime: limit,
             cancel: cancel.clone(),
+            withheld: if run.source == crate::questions::FOLLOW_UP_SOURCE {
+                crate::questions::FOLLOW_UP_WITHHELD
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            } else {
+                Vec::new()
+            },
         };
         info!(
             "schedule {}: {} is running ({})",

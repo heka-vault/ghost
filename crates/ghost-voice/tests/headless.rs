@@ -349,6 +349,7 @@ fn request(agent: &str, instruction: &str) -> RunRequest {
         max_turns: 30,
         max_runtime: Duration::from_secs(600),
         cancel: CancellationToken::new(),
+        withheld: Vec::new(),
     }
 }
 
@@ -1103,6 +1104,16 @@ async fn a_run_that_fails_is_told_and_noted_for_the_agent() {
     );
 }
 
+/// Every source the agent reaches, with nothing deferred: what a tool costs once it is
+/// found and offered by name (ADR 0052 defers most of Ghost's own until then).
+fn found(w: &World, agent: &ghost_core::conversations::Profile) -> Vec<ToolSource> {
+    let mut sources = (w.reach)(agent);
+    for s in &mut sources {
+        s.deferred.clear();
+    }
+    sources
+}
+
 /// ADR 0018: what the two schedule tools cost on every turn of every session, in the
 /// cached prefix. Run with `--no-capture` to read the numbers; the bound keeps a later
 /// argument from growing it unnoticed.
@@ -1112,7 +1123,7 @@ async fn what_the_schedule_tools_add_to_every_turn() {
     let w = world(tmp.path()).await;
     let ghost = w.convs.get("ghost").unwrap().unwrap();
     let tools = ToolDispatcher::new(ToolsParams {
-        sources: (w.reach)(&ghost),
+        sources: found(&w, &ghost),
         gate: w.gate.clone(),
         session_id: "s".into(),
         on_hang_up: no_action(),
@@ -1256,21 +1267,88 @@ async fn a_run_that_asks_ends_and_the_answer_starts_exactly_one_follow_up_run() 
     );
     assert!(asked.contains("The operator answered (desktop): \"business\""));
     assert!(asked.contains("That is the choice \"Business\"."));
-    // Its answer is delivered as any run's is, and there was exactly one.
+    // It is told the answer is recorded, to act on it, and to say [SILENT] if nothing is left.
+    assert!(asked.contains("already recorded"));
+    assert!(asked.contains("reply exactly [SILENT]"));
+    // Neither answering nor asking again is offered.
+    let offered = next.tools_at(0);
+    assert!(!offered.iter().any(|t| t == "ghost_answer"), "{offered:?}");
+    assert!(!offered.iter().any(|t| t == "ghost_ask"), "{offered:?}");
+    assert!(offered.iter().any(|t| t == "ghost_notify"), "{offered:?}");
+    // Its answer is delivered as any run's is, and there was exactly one, titled by the
+    // question it follows up.
     let runs = w.jobs.recent_runs(10).unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].status, RunStatus::Ok);
-    assert!(
-        w.waiting
-            .items
-            .open(None)
-            .unwrap()
-            .iter()
-            .any(|i| i.source == "agent:ledger"
-                && i.fields.get("detail").and_then(Value::as_str)
-                    == Some("Refunded from the business account."))
+    let delivered: Vec<_> = w
+        .waiting
+        .items
+        .open(None)
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.source == "agent:ledger" && !i.key.starts_with("question:"))
+        .collect();
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(
+        delivered[0].fields.get("detail").and_then(Value::as_str),
+        Some("Refunded from the business account.")
     );
+    assert_eq!(
+        delivered[0].title,
+        "Which account should the refund come from: Refunded from the business account."
+    );
+    assert!(!delivered[0].title.contains("answer from the operator"));
     assert!(w.jobs.queued().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_follow_up_with_nothing_left_to_do_delivers_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let model = Watched::new(vec![
+        ScriptedModel::call(
+            "",
+            "ghost_ask",
+            args(json!({"question": "Deploy the release now?", "choices": ["Yes", "No"]})),
+        ),
+        ScriptedModel::say("[SILENT]"),
+    ]);
+    w.runner(&model)
+        .run(request(
+            "ledger",
+            "Deploy the release if the operator agrees.",
+        ))
+        .await;
+    let q = w.questions.open(None).unwrap().pop().unwrap();
+    w.questions.answer(&q.key, "no", via::PHONE, None).unwrap();
+    assert_eq!(w.jobs.queued().unwrap().len(), 1);
+
+    // The answer was no: the agent has nothing to do and says so with [SILENT].
+    let next = Watched::new(vec![ScriptedModel::say("[SILENT]")]);
+    let scheduler = Scheduler::new(SchedulerParts {
+        jobs: w.jobs.clone(),
+        runner: Arc::new(w.runner(&next)),
+        waiting: w.waiting.clone(),
+        reader: None,
+        conversations: Some(w.convs.clone()),
+    });
+    scheduler.drain().await;
+    assert_eq!(next.calls(), 1);
+    let runs = w.jobs.recent_runs(10).unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, RunStatus::Ok);
+    assert_eq!(runs[0].delivery.as_deref(), Some("silent"));
+    // Nothing new for the operator: the question's own item is settled and nothing else
+    // of Ledger's is open.
+    let open: Vec<_> = w
+        .waiting
+        .items
+        .open(None)
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.source == "agent:ledger")
+        .collect();
+    assert!(open.is_empty(), "{open:?}");
 }
 
 #[tokio::test]
@@ -1319,7 +1397,7 @@ async fn what_the_question_tools_add_to_every_turn() {
     let w = world(tmp.path()).await;
     let ghost = w.convs.get("ghost").unwrap().unwrap();
     let tools = ToolDispatcher::new(ToolsParams {
-        sources: (w.reach)(&ghost),
+        sources: found(&w, &ghost),
         gate: w.gate.clone(),
         session_id: "s".into(),
         on_hang_up: no_action(),
@@ -1348,4 +1426,100 @@ async fn what_the_question_tools_add_to_every_turn() {
     let total: usize = each.iter().sum();
     println!("{names:?}: {each:?} bytes; +5 tools, +{total} bytes");
     assert!(total < 3_200, "{total}");
+}
+
+/// ADR 0018, ADR 0052: what Ghost's own app costs on every turn of every session and run,
+/// all of its advertised tools together, in the cached prefix, as the daemon builds it
+/// (the schedules, the questions and every wider part). Past its core its tools are found
+/// with `ghost_tools_search`, so this stays bounded however many it has. Before ADR 0052
+/// it was 16 tools and 8,397 bytes. Run with `--no-capture` to read the numbers.
+#[tokio::test]
+async fn what_ghosts_own_app_costs_every_turn() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let cfg = tmp.path().join("ghost");
+    // The daemon's own app, with everything it reaches.
+    let apps = Arc::new(Apps::new(
+        Vec::new(),
+        Arc::new(HashMap::<String, String>::new()),
+        None,
+    ));
+    let server = GhostServer::new(ghost_app::Parts {
+        store: w.store.clone(),
+        waiting: w.waiting.clone(),
+        apps: Arc::downgrade(&apps),
+        status: Arc::new(Map::new),
+    })
+    .with_schedules(w.jobs.clone())
+    .with_questions(w.questions.clone())
+    .with_more(ghost_app::More {
+        agents: Some(w.convs.clone()),
+        config_dir: Some(cfg.clone()),
+        catalog: Some(Arc::new(ghost_core::catalog::Catalog::new(
+            tmp.path().join("catalog.json"),
+        ))),
+        routes: Some(ghost_app::ready(Arc::new(
+            ghost_core::RouteEngine::new(Items::new(w.store.clone())).unwrap(),
+        ))),
+        policy: Some(Arc::new(AutonomyPolicy::default)),
+        settings: Some(Arc::new(Default::default)),
+        skills: Some(Arc::new(ghost_core::skills::Skills::new(
+            &cfg.join("skills"),
+            None,
+        ))),
+        runner: Some(Arc::new(ghost_core::ghost_app::outside::NoRunner)),
+        ..ghost_app::More::default()
+    });
+    let _attached = ghost_app::attach(&apps, server).await.unwrap();
+    let sources = apps.sources();
+    let size = |sources: &[ToolSource]| {
+        let tools = ToolDispatcher::new(ToolsParams {
+            sources: sources.to_vec(),
+            gate: w.gate.clone(),
+            session_id: "s".into(),
+            on_hang_up: no_action(),
+            on_hold: None,
+            turns: None,
+            events: None,
+            conversations: None,
+            on_call: None,
+            last_request: None,
+            probe: None,
+        })
+        .schemas();
+        let own: Vec<String> = tools
+            .names()
+            .into_iter()
+            .filter(|n| n.starts_with("ghost_"))
+            .map(String::from)
+            .collect();
+        let each: Vec<(String, usize)> = own
+            .iter()
+            .map(|n| {
+                let b = serde_json::to_string(&tools.get(n).unwrap().anthropic())
+                    .unwrap()
+                    .len();
+                (n.clone(), b)
+            })
+            .collect();
+        println!("EACH {each:?}");
+        (own, each.iter().map(|(_, b)| b).sum::<usize>())
+    };
+    let (advertised, bytes) = size(&sources);
+    let mut every = sources.clone();
+    for s in &mut every {
+        s.deferred.clear();
+    }
+    let (all, all_bytes) = size(&every);
+    println!(
+        "OWN advertised={} bytes={bytes}; if all were advertised: {} tools, {all_bytes} bytes; \
+         advertised: {advertised:?}",
+        advertised.len(),
+        all.len()
+    );
+    // The core and no more, and less than before this batch.
+    assert_eq!(advertised.len(), 10, "{advertised:?}");
+    assert!(bytes < 7_500, "{bytes}");
+    assert_eq!(all.len(), 35, "{all:?}");
+    assert!(all_bytes > bytes * 2);
 }

@@ -435,6 +435,15 @@ impl Permissions {
                 // Ghost's own app (ADR 0045): an item on the waiting list is its own
                 // announcement, so what no rule names runs without a sentence about it.
                 // `allow = ["ghost.notify"]` says it aloud; `ask` and `block` hold as ever.
+                // What runs or contacts code the operator did not write, or adds what every
+                // agent follows, asks first (ADR 0052): connecting an app, writing a skill,
+                // making or changing a watch.
+                Autonomy::Announce
+                    if source == crate::apps::GHOST_APP
+                        && crate::ghost_app::asks_by_default(operation, args) =>
+                {
+                    Autonomy::Confirm
+                }
                 Autonomy::Announce if source == crate::apps::GHOST_APP => Autonomy::Quiet,
                 level => level,
             })

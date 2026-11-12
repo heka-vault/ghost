@@ -102,7 +102,7 @@ const ACT_KEYS: [&str; 5] = [
 /// A watch acts at most this often in an hour unless its `act` block says otherwise.
 pub const ACT_PER_HOUR: u32 = 12;
 pub const ACT_INSTRUCTION_MAX: usize = 4000;
-const WATCH_KEYS: [&str; 17] = [
+const WATCH_KEYS: [&str; 19] = [
     "app",
     "server", // the older word for app (ADR 0034), still read
     "read",
@@ -120,6 +120,10 @@ const WATCH_KEYS: [&str; 17] = [
     "urgency",
     "jev",
     "model",
+    // ADR 0052: who made it (`agent:<slug>`; the operator's own have none), and a watch
+    // that is declared but not polled.
+    "made_by",
+    "paused",
 ];
 
 /// A watch declaration that does not read (`Declaration`, reported with Ghost's folder),
@@ -434,6 +438,10 @@ pub struct Watch {
     pub urgency: String,
     pub jev: Option<Ask>,
     pub model: Option<Ask>,
+    /// Who made it: `agent:<slug>` for an agent's (ADR 0052); None for the operator's.
+    pub made_by: Option<String>,
+    /// Declared, not polled.
+    pub paused: bool,
 }
 
 impl Watch {
@@ -851,7 +859,25 @@ pub fn parse_watch(name: &str, body: &Value, where_: &str) -> Result<Watch, Watc
         }
     };
     let urgency = parse_urgency(body, where_)?;
+    let made_by = match body.get("made_by") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if s.starts_with("agent:") && NAME.is_match(&s[6..]) => {
+            Some(s.clone())
+        }
+        Some(_) => {
+            return Err(declaration(format!(
+                "{where_}: made_by is agent:<slug>, written by Ghost"
+            )));
+        }
+    };
+    let paused = match body.get("paused") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(declaration(format!("{where_}: paused is true or false"))),
+    };
     Ok(Watch {
+        made_by,
+        paused,
         name: name.to_string(),
         app: app.clone(),
         read: read.clone(),
@@ -1383,8 +1409,12 @@ impl WatchRunner {
     /// The declared watches, again (the folder was re-read): new ones start, gone ones
     /// stop and their open items resolve, changed ones restart.
     pub fn set_watches(self: &Arc<Self>, watches: &[Watch]) -> anyhow::Result<()> {
-        let wanted: HashMap<String, Watch> =
-            watches.iter().map(|w| (w.source(), w.clone())).collect();
+        // A paused watch (ADR 0052) is declared and not polled: as if it were not there.
+        let wanted: HashMap<String, Watch> = watches
+            .iter()
+            .filter(|w| !w.paused)
+            .map(|w| (w.source(), w.clone()))
+            .collect();
         let sources: HashSet<String> = lock(&self.tasks)
             .keys()
             .chain(lock(&self.watches).keys())

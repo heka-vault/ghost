@@ -359,6 +359,7 @@ function question(key: string, askedBy: string, source: string, text: string, ch
   return {
     key,
     kind: change ? "change" : "question",
+    in_run: false,
     asked_by: askedBy,
     source,
     question: text,

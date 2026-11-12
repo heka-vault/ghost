@@ -968,3 +968,86 @@ fn keys_in_url(url: &str) -> Vec<(String, String)> {
     }
     out
 }
+
+// --- naming a new app (the desktop's connect and an agent's, ADR 0052) ----------------------
+
+/// `base`, or `base-2` and on when an app already has it or Ghost's own tools do.
+pub fn free_name(taken: &[String], base: &str) -> String {
+    let taken = |n: &str| taken.iter().any(|t| t == n) || RESERVED_NAMES.contains(&n);
+    if !taken(base) {
+        return base.to_string();
+    }
+    let mut n = 2;
+    while taken(&format!("{base}-{n}")) {
+        n += 1;
+    }
+    format!("{base}-{n}")
+}
+
+/// The host as a name: `re.sub(r"[^a-z0-9]+", "-", host.lower())`.
+pub fn host_to_name(host: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in host.to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            out.push(c);
+            dash = false;
+        } else if !dash {
+            out.push('-');
+            dash = true;
+        }
+    }
+    out
+}
+
+/// An app at an address, as the desktop connects one: its name from `name` or the host
+/// (`mcp.linear.app` is `linear-app`), signed in to unless a key is sent. Refuses an
+/// address that is not `https://` or `http://`.
+pub fn address_spec(url: &str, name: Option<&str>) -> Result<AppSpec, String> {
+    let host = url::Url::parse(url)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "https" | "http"))
+        .and_then(|u| u.host_str().map(String::from))
+        .ok_or("the address must start with https://")?;
+    let name = name.map_or_else(|| host_to_name(&host), String::from);
+    let name = name.strip_prefix("mcp-").unwrap_or(&name).to_string();
+    let name = name.strip_suffix("-com").unwrap_or(&name).to_string();
+    let name: String = name.trim_matches('-').chars().take(40).collect();
+    Ok(AppSpec {
+        name: if name.is_empty() { "app".into() } else { name },
+        url: Some(url.to_string()),
+        sign_in: true,
+        ..AppSpec::default()
+    })
+}
+
+/// A JSON file keyed by name (`watches.json`, ADR 0052) with one entry put or removed:
+/// every other entry, and the order the operator wrote them in, kept. Returns the text to
+/// write; a file that is not a JSON object is refused, never overwritten.
+pub(crate) fn edit_keyed(text: &str, name: &str, entry: Option<Value>) -> Result<String, String> {
+    let raw = if text.trim().is_empty() {
+        Ordered::Object(IndexMap::new())
+    } else {
+        serde_json::from_str::<Ordered>(text)
+            .map_err(|e| format!("it is not JSON ({e}); the operator fixes it by hand first"))?
+    };
+    let Ordered::Object(mut raw) = raw else {
+        return Err(
+            "it is not an object keyed by name; the operator fixes it by hand first".into(),
+        );
+    };
+    match entry {
+        Some(v) => {
+            raw.insert(name.to_string(), Ordered::from_value(v));
+        }
+        None => {
+            raw.shift_remove(name);
+        }
+    }
+    Ok(pretty(&Ordered::Object(raw)))
+}
+
+/// Write a file of Ghost's folder atomically, 0600.
+pub(crate) fn write_folder_file(path: &Path, text: &str) -> Result<(), AppError> {
+    write_private(path, text)
+}

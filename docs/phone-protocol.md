@@ -340,9 +340,10 @@ An `item` added is not a reason to notify: the alert is, since it comes after th
 batching and do-not-disturb. A `WaitingItemView` has no urgency of its own; only a question does
 (`urgency`), so that is what a notification's channel can follow.
 
-The desk does not hold alerts or rings back while a session runs, the phone's own included. The
-phone decides: during its own session it posts notifications silently and does not ring (the desk
-then hears nothing and moves on as for a ring nobody answered).
+While the phone's own call with Ghost is running (or about to start), the desk sends no `alert`, and
+while any session runs it sends no `ring`: the routes hand the items to the next route at once, as
+desk voice does during a desk session. The phone keeps its own guard as well: during its own session
+it posts any notification silently and does not ring.
 
 ```json
 {"type": "ring", "ring_id": "5d2f8e0c41aa", "key": "question:0b00bdd56307", "agent": "ledger",
@@ -380,7 +381,9 @@ phone may update its screen from either.
 ## The ring
 
 ADR 0051, issue #22. The desk rings the phone for an item at `call` urgency, when the operator enabled
-the `call` route, within the operator's call caps.
+the `call` route, within the operator's call caps. It never rings while a session is running, the
+phone's own call or one at the desk (an answered ring could not open a call beside it): the item goes
+to the next route, and rings again on a later tick once the session is over if it still needs to.
 
 ```
 desk                                                  phone

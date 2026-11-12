@@ -623,6 +623,8 @@ pub struct World {
     pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,
     /// Where Ghost listens for outside tools (ADR 0048); the clients are always there.
     pub clients_listening: Vec<String>,
+    /// The daemon runs from an AppImage.
+    pub in_appimage: bool,
 }
 
 impl World {
@@ -720,6 +722,7 @@ impl World {
             model_net: None,
             schedules: None,
             clients_listening: Vec::new(),
+            in_appimage: false,
             tmp,
         }
     }
@@ -782,6 +785,7 @@ impl World {
             self.tmp.path().join("clients"),
         )));
         deps.clients_listening = self.clients_listening.clone();
+        deps.in_appimage = self.in_appimage;
         if let Some(d) = &self.devices {
             deps.devices = d.clone();
         }

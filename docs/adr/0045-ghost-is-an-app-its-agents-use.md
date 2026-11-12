@@ -27,7 +27,7 @@ The first tools:
 
 | Tool | Kind | What it does |
 |---|---|---|
-| `docs_search(query)` | read | The best sections of Ghost's own documentation, with a short excerpt each |
+| `docs_search(query)` | read | The best sections of Ghost's own documentation: a section under 1,200 characters whole, a longer one as its best whole sentences or list items, up to 400 characters (2026-11-12) |
 | `docs_read(name, section?)` | read | One section, or a document's headings |
 | `status()` | read | Version, phase, the session and its agent, the apps and their state, how much is waiting, the model connection's provider and model, Ghost's own problems |
 | `audit_recent(limit?, since?)` | read | Recent changes: what, which agent, when, how it ended |

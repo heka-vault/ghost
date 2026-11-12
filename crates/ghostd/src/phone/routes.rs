@@ -782,6 +782,7 @@ mod tests {
             answered_via: answer.map(|_| via.to_string()),
             answered_at: None,
             change_id: None,
+            in_run: false,
         }
     }
 
@@ -1597,6 +1598,79 @@ mod tests {
             quick.deliver(&open, &RoutePolicy::default()).await.unwrap(),
             Delivery::Unavailable
         );
+    }
+
+    #[tokio::test]
+    async fn neither_an_alert_nor_a_ring_goes_out_over_the_phones_own_call() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let p = phone();
+        let creds = pair(&p).await;
+        let items = ghost_core::waiting::Items::new(Arc::new(
+            ghost_core::store::Store::in_memory().unwrap(),
+        ));
+        items
+            .sync(
+                "agent:ledger",
+                &[ghost_core::waiting::ItemDraft::new(
+                    "question:abc",
+                    "Ledger asks: Pay it?",
+                )],
+                None,
+            )
+            .unwrap();
+        let open = items.open(None).unwrap();
+        let on_call = Arc::new(AtomicBool::new(true));
+        let busy: crate::routes::Busy = {
+            let on_call = on_call.clone();
+            Arc::new(move || on_call.load(Ordering::SeqCst))
+        };
+        let phone_route = PhoneRoute::new(p.host.feed.clone()).with_wait(Duration::from_millis(50));
+        phone_route.set_on_the_phone(busy.clone());
+        let call_route = CallRoute::new(p.host.feed.clone(), items.clone())
+            .with_wait(Duration::from_millis(50))
+            .with_in_session(busy);
+        // The stream is open (the phone holds it through the call), and the phone is on a
+        // call with Ghost: both routes hand on at once, and nothing reaches the stream.
+        let (_, s) = live(&p, &creds, "/stream").await;
+        let mut s = s.unwrap();
+        assert_eq!(s.next().await["type"], "hello");
+        assert_eq!(s.next().await["type"], "snapshot");
+        assert_eq!(
+            phone_route
+                .deliver(&open, &RoutePolicy::default())
+                .await
+                .unwrap(),
+            Delivery::Unavailable
+        );
+        assert_eq!(
+            call_route
+                .deliver(&open, &RoutePolicy::default())
+                .await
+                .unwrap(),
+            Delivery::Unavailable
+        );
+        // The call ends: the next alert goes out as before.
+        on_call.store(false, Ordering::SeqCst);
+        let going = tokio::spawn({
+            let open = open.clone();
+            async move {
+                phone_route
+                    .deliver(&open, &RoutePolicy::default())
+                    .await
+                    .unwrap()
+            }
+        });
+        // The first message after the snapshot is this alert, not a ring or an alert
+        // from while the call ran (a heartbeat aside).
+        let m = loop {
+            let m = s.next().await;
+            if m["type"] != "heartbeat" {
+                break m;
+            }
+        };
+        assert_eq!(m["type"], "alert");
+        assert_eq!(m["keys"], json!(["question:abc"]));
+        assert_eq!(going.await.unwrap(), Delivery::Unavailable); // not seen in 50 ms
     }
 
     #[tokio::test]

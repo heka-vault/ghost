@@ -10,6 +10,7 @@ function question(key: string, patch: Partial<QuestionView> = {}): QuestionView 
   return {
     key,
     kind: "question",
+    in_run: false,
     asked_by: "Ledger",
     source: "agent:ledger",
     question: "Should the October invoice go out today?",

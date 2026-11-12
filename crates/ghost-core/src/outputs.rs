@@ -29,9 +29,14 @@ use crate::source::{Operation, PrepareFn, Prepared, ReadTool, ToolHandler, ToolS
 
 pub const SOURCE: &str = "outputs";
 pub const OUT_DIR: &str = "out";
-pub const MAX_BYTES: usize = 256 * 1024;
-pub const EXTENSIONS: [&str; 8] = [
-    ".html", ".md", ".txt", ".csv", ".json", ".svg", ".py", ".sh",
+/// What one output may be (ADR 0052, from 256 KB): a self-contained page with its styles,
+/// script and an inline chart or two, a long report, a data export.
+pub const MAX_BYTES: usize = 1024 * 1024;
+/// Documents, pages, data and small scripts: text Ghost writes and the operator opens.
+/// Never a binary, and never made executable.
+pub const EXTENSIONS: [&str; 21] = [
+    ".html", ".htm", ".css", ".js", ".mjs", ".md", ".txt", ".rst", ".tex", ".csv", ".tsv", ".json",
+    ".xml", ".yaml", ".yml", ".toml", ".ics", ".svg", ".sql", ".py", ".sh",
 ];
 static NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,100}$").unwrap());
@@ -66,6 +71,10 @@ pub enum OutputError {
     NothingToReplace(String),
     #[error("OutputWriter cannot apply {0}")]
     CannotApply(String),
+    #[error("there is no {0} in Ghost's outputs")]
+    NoSuch(String),
+    #[error("that output is not text")]
+    NotText,
     #[error("not an output: {0}")]
     NotAnOutput(String),
     #[error(transparent)]
@@ -211,6 +220,31 @@ fn write_then_rename(tmp: &Path, mut file: File, p: &Path, data: &[u8]) -> std::
     // readable; never executable: Ghost doesn't run it
     std::fs::set_permissions(tmp, Permissions::from_mode(0o644))?;
     std::fs::rename(tmp, p)
+}
+
+/// An output's path, checked as a write's is: a plain name with an allowed extension,
+/// directly in a real `out/`, never through a link.
+fn existing(config_dir: &Path, name: &str) -> Result<PathBuf, OutputError> {
+    let writer = OutputWriter::new(out_dir(config_dir));
+    let target = Target::Output(OutputTarget {
+        name: name.to_string(),
+    });
+    let path = writer.path(&target)?;
+    if !path.is_file() {
+        return Err(OutputError::NoSuch(name.trim().to_string()));
+    }
+    Ok(path)
+}
+
+/// An output's text (ADR 0052's `output_read`).
+pub fn read_output(config_dir: &Path, name: &str) -> Result<String, OutputError> {
+    let path = existing(config_dir, name)?;
+    String::from_utf8(std::fs::read(path)?).map_err(|_| OutputError::NotText)
+}
+
+/// Delete an output (ADR 0052's `output_delete`, after the gate let it through).
+pub fn delete_output(config_dir: &Path, name: &str) -> Result<(), OutputError> {
+    Ok(std::fs::remove_file(existing(config_dir, name)?)?)
 }
 
 /// One file in Ghost's outputs, as `GET /outputs` and the desktop list it.

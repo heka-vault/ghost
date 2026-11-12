@@ -1241,13 +1241,16 @@ async fn search(apps: &Apps, query: &str) -> Map<String, Value> {
 }
 
 #[tokio::test]
-async fn below_the_threshold_every_tool_is_offered_and_there_is_no_search() {
+async fn below_the_threshold_every_apps_tool_is_offered() {
     let m = many(6, Limits::default(), &[]).await;
     assert!(!m.apps.deferring());
     let names = advertised(&m.apps);
     assert_eq!(names.iter().filter(|n| n.starts_with("shifty_")).count(), 6);
-    assert!(!names.contains(&"ghost_tools_search".to_string()));
+    // Ghost's own past its core are found by search whatever the limits (ADR 0052), so the
+    // search is there; the core is offered by name.
+    assert!(names.contains(&"ghost_tools_search".to_string()));
     assert!(names.contains(&"ghost_docs_search".to_string()));
+    assert!(!names.contains(&"ghost_audit_recent".to_string()));
     let shifty = &m.apps.sources()[1];
     assert!(shifty.deferred.is_empty());
     assert!(!shifty.prompt.contains("ghost_tools_search"));
