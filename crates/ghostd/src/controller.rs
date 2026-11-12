@@ -63,6 +63,9 @@ impl Controller for Daemon {
         let Some(session) = self.session() else {
             return false;
         };
+        // Said, so an end nobody asked Ghost for by voice is not taken for a hang-up
+        // (2026-11-12: a session ended this way after a barge-in looked like one).
+        info!("session: ended from the control API");
         self.state.set_ending();
         session.end().await;
         true

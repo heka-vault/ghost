@@ -44,6 +44,7 @@ use crate::frames::{Direction, Frame, Metric, Out, Stage};
 use crate::latency::{LatencyProbe, null_probe};
 use crate::speaking::Speaking;
 use crate::stt::{PRE_ROLL_SECS, SAMPLE_RATE, SharedRecognizer, TRAILING_SECS, recognize};
+use crate::tap::{OnTurnRecord, TurnRecord, no_record};
 
 // --- the start -------------------------------------------------------------------------
 
@@ -356,6 +357,8 @@ struct StopInner {
     early: Option<String>,
     /// The stop's words for this segment arrived: early words after them are moot.
     final_seen: bool,
+    /// The hold under way began on a verdict Smart Turn was sure of (the short grace).
+    sure_voice: bool,
 }
 
 pub type TurnText = Arc<dyn Fn() -> String + Send + Sync>;
@@ -547,6 +550,38 @@ impl EndWords {
             sentence: ends_a_sentence(words),
             unfinished: sounds_unfinished(words),
             number: ends_with_number(words),
+        }
+    }
+
+    /// The turn's words at a segment's end, weighed with that segment's own read. The
+    /// whole-turn read (ADR 0044) writes a comma where it hears a pause, and sometimes at
+    /// the very end where the segment's own read had a full stop: "Say" then "Good
+    /// morning." read whole as "Say good morning," and held three seconds (2026-11-12).
+    /// When Smart Turn was sure of the end (`sure_voice`) and the segment's own read ends a
+    /// sentence that stops nowhere mid-thought, that last comma is the re-read's, and the
+    /// words end there. Anything else that stops mid-thought still does: a filler or a
+    /// conjunction before the comma, a word that wants its argument, the segment's own
+    /// read ending on a comma, or a voice Smart Turn was not sure of.
+    pub fn of_turn(whole: &str, own: &str, sure_voice: bool) -> Self {
+        let words = Self::of(whole);
+        if !words.unfinished || !sure_voice {
+            return words;
+        }
+        let Some(stem) = whole.trim_end().strip_suffix(',') else {
+            return words;
+        };
+        let own = Self::of(own);
+        if !own.sentence || own.unfinished {
+            return words;
+        }
+        let ended = format!("{stem}.");
+        if sounds_unfinished(&ended) {
+            return words;
+        }
+        Self {
+            sentence: true,
+            unfinished: false,
+            number: ends_with_number(&ended),
         }
     }
 
@@ -770,6 +805,13 @@ impl PatientTurnStopStrategy {
         let number = Duration::from_secs_f64(self.number_secs());
         let shared = self.shared.clone();
         shared.set_closing(true);
+        let own = self.text.clone();
+        let sure_voice = short.is_some();
+        self.inner.lock().unwrap().sure_voice = sure_voice;
+        let end_words = move |words: &str| {
+            let own = own.lock().unwrap().clone();
+            EndWords::of_turn(words, &own, sure_voice)
+        };
         let task = tokio::spawn(async move {
             let began = Instant::now();
             let mut band = Close::Grace;
@@ -782,7 +824,7 @@ impl PatientTurnStopStrategy {
                     tokio::time::sleep(WORDS_POLL).await;
                 }
                 let words = turn_text();
-                if inner.lock().unwrap().arrived && EndWords::of(&words).sure() {
+                if inner.lock().unwrap().arrived && end_words(&words).sure() {
                     debug::audio(|| {
                         format!(
                             "turn: {words:?} ends a sentence and Smart Turn is sure ({prob:.2}); closing after {:.2}s",
@@ -798,7 +840,8 @@ impl PatientTurnStopStrategy {
             if band != Close::Confident {
                 tokio::time::sleep(grace.saturating_sub(began.elapsed())).await;
                 let words = turn_text();
-                if sounds_unfinished(&words) {
+                let ends = end_words(&words);
+                if ends.unfinished {
                     debug::audio(|| format!("turn: {words:?} sounds unfinished, waiting"));
                     if inner.lock().unwrap().speculation.take().is_some() {
                         probe.speculation("unfinished");
@@ -806,7 +849,7 @@ impl PatientTurnStopStrategy {
                     }
                     band = Close::Unfinished;
                     tokio::time::sleep(rest).await;
-                } else if ends_with_number(&words) && !number.is_zero() {
+                } else if ends.number && !number.is_zero() {
                     // The answer started on the words stays; the close just waits a little.
                     debug::audio(|| {
                         format!(
@@ -972,7 +1015,9 @@ impl PatientTurnStopStrategy {
             self.withdraw().await; // an answer to other words
         }
         if self.holding() {
-            if !sounds_unfinished(&heard) {
+            let own = self.text.lock().unwrap().clone();
+            let sure_voice = self.inner.lock().unwrap().sure_voice;
+            if !EndWords::of_turn(&heard, &own, sure_voice).unfinished {
                 self.speculate_on(heard).await;
             }
         } else if self.in_fallback() && ends_a_sentence(&heard) && !sounds_unfinished(&heard) {
@@ -1402,11 +1447,18 @@ struct AggregatorSink {
     out: Mutex<Option<Out>>,
     state: Arc<Mutex<Aggregation>>,
     turns: Arc<TurnControl>,
+    /// The store's and the gate's record of the turn (`crate::tap::TurnRecord`).
+    record: Mutex<OnTurnRecord>,
 }
 
 impl AggregatorSink {
     fn out(&self) -> Option<Out> {
         self.out.lock().unwrap().clone()
+    }
+
+    async fn closed(&self, text: &str) {
+        let record = self.record.lock().unwrap().clone();
+        record(TurnRecord::Closed(text.to_string())).await;
     }
 
     fn take_text(&self) -> String {
@@ -1433,6 +1485,7 @@ impl TurnStopSink for AggregatorSink {
             out.push(Frame::ThinkingStop).await;
             return;
         }
+        self.closed(&text).await;
         self.turns.answering(&text);
         out.push(Frame::user_text(text, true)).await;
     }
@@ -1449,6 +1502,9 @@ impl TurnStopSink for AggregatorSink {
         let text = self.take_text();
         out.push_up(Frame::UserStopped).await;
         out.push(Frame::UserStopped).await;
+        if !text.trim().is_empty() {
+            self.closed(&text).await;
+        }
         if confirms_speculation {
             self.turns.answering(&text);
             out.push(Frame::SpeculationConfirmed(text)).await;
@@ -1466,6 +1522,10 @@ impl TurnStopSink for AggregatorSink {
 }
 
 // --- the turn, read whole --------------------------------------------------------------
+
+/// An empty read of a segment at least this loud is speech the model missed, not a breath
+/// or the room: the turn is read whole on it (`UserAggregator::heard_nothing`).
+pub const HEARD_NOTHING_MIN_DBFS: f64 = -45.0;
 
 /// A turn longer than this is handed over in pieces, as before: the tape stops growing.
 pub const TAPE_MAX_SECS: f64 = 30.0;
@@ -1675,6 +1735,7 @@ impl UserAggregator {
             out: Mutex::new(None),
             state: state.clone(),
             turns: turns.clone(),
+            record: Mutex::new(no_record()),
         });
         let mut stop = PatientTurnStopStrategy::new(analyzer, grace_secs, speculate, sink.clone());
         let s = state.clone();
@@ -1718,6 +1779,12 @@ impl UserAggregator {
     /// began, and those words are a barge-in as before.
     pub fn with_reopen_started(mut self, secs: f64) -> Self {
         self.reopen_started = Duration::from_secs_f64(secs.max(0.0));
+        self
+    }
+
+    /// Where a closed turn is recorded, once, with its final words (`crate::tap`).
+    pub fn with_record(self, record: OnTurnRecord) -> Self {
+        *self.sink.record.lock().unwrap() = record;
         self
     }
 
@@ -1842,6 +1909,8 @@ impl UserAggregator {
                     format!("turn: reopened, nothing of the answer heard: {text:?}")
                 }
             });
+            let record = self.sink.record.lock().unwrap().clone();
+            record(TurnRecord::Reopened).await;
             out.push(Frame::ReopenTurn(text)).await;
         }
         self.bot_speaking = false;
@@ -1863,6 +1932,48 @@ impl UserAggregator {
             && !self.start.bot_speaking()
             && self.turns.unheard()
             && self.speaking.silent_for().is_some_and(|d| d >= ECHO_TAIL)
+    }
+
+    /// A segment of the open turn was read as nothing, with speech's level in it: the turn
+    /// is read whole (ADR 0044), and its words, if any, are the turn's as a later
+    /// segment's would be. If the whole read hears nothing either, the turn keeps the
+    /// pieces it has and closes on them as before; the latency record and the log say so.
+    async fn heard_nothing(&mut self, secs: f64, dbfs: f64) {
+        let Some(model) = self.reader.clone() else {
+            return;
+        };
+        let Some(audio) = self.tape.whole() else {
+            debug::audio(|| {
+                format!(
+                    "turn: a {secs:.1}s segment at {dbfs:.0} dBFS read as nothing, and no earlier segment to read it with"
+                )
+            });
+            return;
+        };
+        debug::audio(|| {
+            format!(
+                "turn: a {secs:.1}s segment at {dbfs:.0} dBFS read as nothing; reading the turn whole"
+            )
+        });
+        match read_whole(&model, audio).await {
+            Some(whole) => {
+                {
+                    let mut s = self.state.lock().unwrap();
+                    s.pieces.truncate(self.tape.base);
+                    s.pieces.push(whole.clone());
+                }
+                // The words of the segment, as far as the close is concerned.
+                self.stop.process_frame(&Frame::Transcript(whole)).await;
+            }
+            None => {
+                let pieces = self.state.lock().unwrap().pieces.len();
+                debug::audio(|| {
+                    format!(
+                        "turn: the whole turn read as nothing too; closing on the {pieces} piece(s) heard"
+                    )
+                });
+            }
+        }
     }
 
     async fn apply_start_events(&mut self, out: &Out) {
@@ -1969,6 +2080,13 @@ impl Stage for UserAggregator {
                     self.apply_start_events(out).await;
                 }
                 return; // only the barge-in rule reads an interim
+            }
+            Frame::HeardNothing { secs, dbfs } => {
+                if self.turn_open() && *dbfs >= HEARD_NOTHING_MIN_DBFS {
+                    self.heard_nothing(*secs, *dbfs).await;
+                }
+                out.forward(frame, direction).await;
+                return;
             }
             Frame::EarlyTranscript(text) => {
                 // A turn's first segment only: a later one is read whole at its close
@@ -3032,6 +3150,169 @@ mod tests {
         assert_eq!(reads.lock().unwrap().last(), Some(&next));
     }
 
+    /// The aggregator over a whole-turn reader that says `text`, closing half a tenth of a
+    /// second after a VAD stop, with its records kept.
+    async fn reading(
+        text: &'static str,
+    ) -> (
+        UserAggregator,
+        Arc<Mutex<Vec<usize>>>,
+        Arc<Mutex<Vec<TurnRecord>>>,
+        Out,
+        mpsc_rx::Receiver<crate::frames::Pushed>,
+    ) {
+        let reads = Arc::new(Mutex::new(Vec::new()));
+        let model: SharedRecognizer = Arc::new(Mutex::new(WholeReader {
+            text,
+            reads: reads.clone(),
+        }));
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let r = records.clone();
+        let record: OnTurnRecord = Arc::new(move |rec| {
+            r.lock().unwrap().push(rec);
+            Box::pin(async {})
+        });
+        let mut agg = UserAggregator::new(
+            0,
+            None,
+            0.05,
+            false,
+            TurnControl::new(CancellationToken::new()),
+        )
+        .with_reader(Some(model))
+        .with_record(record);
+        let (out, rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(room(2.0), Direction::Down, &out).await;
+        (agg, reads, records, out, rx)
+    }
+
+    /// One segment of `secs`, its stop, then what its read said.
+    async fn segment_read(agg: &mut UserAggregator, out: &Out, secs: f64, read: Option<&str>) {
+        agg.process(vad_start(), Direction::Down, out).await;
+        agg.process(room(secs), Direction::Down, out).await;
+        agg.process(vad_stop(), Direction::Down, out).await;
+        let frame = match read {
+            Some(text) => Frame::Transcript(text.into()),
+            None => Frame::HeardNothing { secs, dbfs: -21.0 },
+        };
+        agg.process(frame, Direction::Down, out).await;
+    }
+
+    #[tokio::test]
+    async fn test_a_segment_read_as_nothing_inside_a_turn_reads_the_turn_whole() {
+        // 2026-11-12: a sentence split inside a word; the second piece, 3.6 s at -21 dBFS,
+        // read as nothing, and the turn closed on the first piece alone, never read whole.
+        let (mut agg, reads, records, out, mut rx) =
+            reading("say this back to me I found three issues waiting today").await;
+        segment_read(
+            &mut agg,
+            &out,
+            2.0,
+            Some("Say this back to me. I found three issues way"),
+        )
+        .await;
+        agg.process(room(0.1), Direction::Down, &out).await;
+        segment_read(&mut agg, &out, 1.5, None).await;
+        assert_eq!(
+            agg.aggregation(),
+            "say this back to me I found three issues waiting today"
+        );
+        assert_eq!(reads.lock().unwrap().len(), 1, "one read of the whole turn");
+        sleep(0.15).await; // the close
+        let pushed = drain(&mut rx).await;
+        assert_eq!(
+            user_turns(&pushed),
+            vec!["say this back to me I found three issues waiting today"]
+        );
+        assert_eq!(
+            *records.lock().unwrap(),
+            vec![TurnRecord::Closed(
+                "say this back to me I found three issues waiting today".into()
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a_whole_read_that_hears_nothing_too_closes_on_the_pieces() {
+        let (mut agg, reads, _, out, mut rx) = reading("").await;
+        segment_read(&mut agg, &out, 2.0, Some("Read me the first.")).await;
+        agg.process(room(0.1), Direction::Down, &out).await;
+        segment_read(&mut agg, &out, 1.5, None).await;
+        assert_eq!(reads.lock().unwrap().len(), 1, "the whole read was tried");
+        sleep(0.15).await;
+        assert_eq!(
+            user_turns(&drain(&mut rx).await),
+            vec!["Read me the first."]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_an_empty_read_of_a_quiet_segment_or_a_lone_one_is_not_read_again() {
+        // A breath or the room: nothing to read whole for.
+        let (mut agg, reads, _, out, _rx) = reading("anything").await;
+        segment_read(&mut agg, &out, 2.0, Some("Read me the first.")).await;
+        agg.process(room(0.1), Direction::Down, &out).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(room(0.5), Direction::Down, &out).await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        agg.process(
+            Frame::HeardNothing {
+                secs: 0.5,
+                dbfs: -60.0,
+            },
+            Direction::Down,
+            &out,
+        )
+        .await;
+        assert!(reads.lock().unwrap().is_empty());
+        // A turn's only segment read as nothing: the same audio read again says the same.
+        let (mut agg, reads, _, out, _rx) = reading("anything").await;
+        segment_read(&mut agg, &out, 2.0, None).await;
+        assert!(reads.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_a_turn_heard_in_pieces_is_recorded_once_with_its_final_words() {
+        // 2026-11-12: a wrong first read and three pieces were four user turns in the
+        // store. The record is the turn the model was given: the whole read's words.
+        let (mut agg, _, records, out, mut rx) =
+            reading("what's going on with app one forty two").await;
+        segment_read(
+            &mut agg,
+            &out,
+            1.0,
+            Some("What's going on with the other thing?"),
+        )
+        .await;
+        for piece in ["With app", "One", "Forty two."] {
+            agg.process(room(0.02), Direction::Down, &out).await;
+            segment_read(&mut agg, &out, 0.5, Some(piece)).await;
+        }
+        sleep(0.15).await;
+        let whole = "what's going on with app one forty two".to_string();
+        assert_eq!(user_turns(&drain(&mut rx).await), vec![whole.clone()]);
+        assert_eq!(*records.lock().unwrap(), vec![TurnRecord::Closed(whole)]);
+    }
+
+    #[tokio::test]
+    async fn test_a_reopened_turn_takes_its_record_back() {
+        let (mut agg, _, records, out, _rx) = reading("remind me tomorrow to review it").await;
+        segment_read(&mut agg, &out, 1.0, Some("Remind me tomorrow.")).await;
+        sleep(0.1).await; // closed, its answer not heard
+        agg.process(room(0.3), Direction::Down, &out).await;
+        segment_read(&mut agg, &out, 0.8, Some("To review it.")).await;
+        sleep(0.1).await;
+        assert_eq!(
+            *records.lock().unwrap(),
+            vec![
+                TurnRecord::Closed("Remind me tomorrow.".into()),
+                TurnRecord::Reopened,
+                TurnRecord::Closed("remind me tomorrow to review it".into()),
+            ]
+        );
+    }
+
     // --- going on as Ghost's voice begins (ADR 0049) ---------------------------------
 
     /// A turn handed over and closed, Ghost not yet heard: the aggregator, its control,
@@ -3592,6 +3873,60 @@ mod tests {
             seen(&t.events),
             vec!["answer:Can you count to three?", "confirmed"]
         );
+    }
+
+    #[test]
+    fn test_a_comma_the_whole_read_wrote_at_a_sure_end_is_not_mid_thought() {
+        // (the turn read whole, the last segment's own read, Smart Turn sure) -> unfinished
+        for (whole, own, sure, unfinished) in [
+            // 2026-11-12: "Say" + "Good morning." read whole with a comma, held 3 s
+            ("Say good morning,", "Good morning.", true, false),
+            ("Close it, then label it,", "Label it.", true, false),
+            // Smart Turn not sure of the end: the comma holds as before
+            ("Say good morning,", "Good morning.", false, true),
+            // the segment's own read stopped mid-thought too
+            ("Say good morning,", "Good morning,", true, true),
+            ("Can you count, um,", "Um.", true, true),
+            ("Tell me about the,", "The.", true, true),
+            // a word that wants its argument still wants it
+            ("Read me issue,", "Issue.", true, true),
+            // an ellipsis is not a comma
+            ("Can you check...", "Check.", true, true),
+        ] {
+            assert_eq!(
+                EndWords::of_turn(whole, own, sure).unfinished,
+                unfinished,
+                "{whole:?} / {own:?} / {sure}"
+            );
+        }
+        let ends = EndWords::of_turn("Say good morning,", "Good morning.", true);
+        assert!(ends.sure(), "the short grace");
+        assert!(EndWords::of_turn("Read me issue four one,", "Four one.", true).number);
+    }
+
+    #[tokio::test]
+    async fn test_a_sure_end_closes_on_the_short_grace_though_the_whole_read_ends_on_a_comma() {
+        // The strategy's own wait: the turn's words end on the re-read's comma, the last
+        // segment's own words on a full stop.
+        for (prob, quick) in [(0.98, true), (0.6, false)] {
+            let mut t = banded(prob);
+            t.s.process_frame(&vad_start()).await;
+            t.s.process_frame(&room(0.2)).await;
+            t.s.process_frame(&vad_stop()).await;
+            let stopped = Instant::now();
+            t.heard.lock().unwrap().push("Say good morning,".into());
+            t.s.process_frame(&said("Good morning.")).await;
+            let secs = closed_after(&t, stopped).await;
+            if quick {
+                assert!(secs < 0.25, "closed after {secs:.2}s");
+                assert_eq!(
+                    seen(&t.events),
+                    vec!["answer:Say good morning,", "confirmed"]
+                );
+            } else {
+                assert!(secs >= 0.7, "closed after {secs:.2}s: the unfinished wait");
+            }
+        }
     }
 
     // --- Smart Turn says not done ---------------------------------------------------

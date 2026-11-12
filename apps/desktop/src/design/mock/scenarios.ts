@@ -42,6 +42,12 @@ export interface Scenario {
    * ?phone=off|unpaired|paired|tunnel|tunnel-down|pairs|expires (see mock/index.ts).
    */
   phone?: "off" | "unpaired" | "paired" | "tunnel" | "tunnel-down";
+  /**
+   * Plays one spoken turn when the event stream opens, as the daemon sends it: three pieces
+   * read at the operator's pauses (0.8 s, 2.6 s, 4.2 s), the turn closing (thinking, 5.2 s),
+   * Ghost's reply (speaking, 6.1 s), then listening again (7.7 s).
+   */
+  pieces?: boolean;
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -57,6 +63,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "expiring", label: "Okay running out", description: "A confirm-level change that expires 8 seconds after load.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal", pendingExpiresIn: 8 },
   { name: "reconnecting", label: "Reconnecting", description: "A live session; the daemon drops 1.5 seconds after load and stays away.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal", dropAfterMs: 1500 },
   { name: "phone", label: "On the phone", description: "A live session the paired phone started; the desk can end it.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", origin: "phone", phone: "paired" },
+  { name: "pieces", label: "Said in pieces", description: "A live session; one spoken sentence arrives in three pieces with pauses, then Ghost answers.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", pieces: true },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, seven apps, one of them not connecting.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];
 
