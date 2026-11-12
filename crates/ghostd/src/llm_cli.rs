@@ -1,5 +1,5 @@
 //! `ghostd llm test`: the provider check of the saved connection, run by the daemon that
-//! holds the vault (ADR 0055). The password is read by the daemon at the point of use and
+//! holds the vault (ADR 0056). The password is read by the daemon at the point of use and
 //! never comes through here; this prints what the check found, in plain words, or the
 //! JSON with `--json`.
 

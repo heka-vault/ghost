@@ -356,7 +356,7 @@ export class GhostClient {
   modelList(draft: ModelDraft = { values: {} }) {
     return unwrap(this.api.POST("/model/models", { body: draft }));
   }
-  /** The provider check (ADR 0055) through a draft connection, or the saved one: each
+  /** The provider check (ADR 0056) through a draft connection, or the saved one: each
    *  model's first byte and first word, and whether streaming, tool calls, the prompt cache
    *  and the thinking setting work. Kept by the daemon. */
   checkModel(draft: ModelDraft = { values: {} }) {

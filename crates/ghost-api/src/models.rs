@@ -1874,7 +1874,7 @@ pub struct ModelListView {
     pub error: Option<String>,
 }
 
-/// One finding of the provider check (ADR 0055).
+/// One finding of the provider check (ADR 0056).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelCheckState {
@@ -1933,7 +1933,7 @@ pub struct ModelCheckModel {
     pub thinking_mode: Option<String>,
 }
 
-/// The provider check (ADR 0055): the connection's models with a fixed synthetic prompt,
+/// The provider check (ADR 0056): the connection's models with a fixed synthetic prompt,
 /// kept with a time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelCheckView {

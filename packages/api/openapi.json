@@ -2553,7 +2553,7 @@
             ]
           },
           "state": {
-            "description": "One finding of the provider check (ADR 0055).",
+            "description": "One finding of the provider check (ADR 0056).",
             "enum": [
               "yes",
               "no",
@@ -2570,7 +2570,7 @@
         "type": "object"
       },
       "ModelCheckView": {
-        "description": "The provider check (ADR 0055): the connection's models with a fixed synthetic prompt,\nkept with a time.",
+        "description": "The provider check (ADR 0056): the connection's models with a fixed synthetic prompt,\nkept with a time.",
         "properties": {
           "advice": {
             "description": "What would help when the connection is too slow for a good spoken reply; Ghost\nnever changes the connection itself.",
@@ -7697,7 +7697,7 @@
         ]
       },
       "post": {
-        "description": "Check the connection being edited, or the saved one (ADR 0055): for the main\nmodel and the fast one, whether it answers (or the error in plain words), the time\nto the first byte and the first word over a few short calls, and whether streaming,\ntool calls, prompt caching and the thinking setting work. A fixed synthetic prompt,\nnever anything of the operator's; the password is read from the vault by the daemon\nand never shown. The result is kept, and Ghost shapes its requests to it.",
+        "description": "Check the connection being edited, or the saved one (ADR 0056): for the main\nmodel and the fast one, whether it answers (or the error in plain words), the time\nto the first byte and the first word over a few short calls, and whether streaming,\ntool calls, prompt caching and the thinking setting work. A fixed synthetic prompt,\nnever anything of the operator's; the password is read from the vault by the daemon\nand never shown. The result is kept, and Ghost shapes its requests to it.",
         "operationId": "model_check_model_check_post",
         "requestBody": {
           "content": {

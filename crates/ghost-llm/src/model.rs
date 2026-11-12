@@ -300,7 +300,7 @@ fn refused_field(e: &LlmError, body: &Value) -> Option<Refused> {
 }
 
 /// What Ghost says when a turn's model call failed, in plain words for the operator:
-/// never silence (ADR 0055). Never a key, a body or an address.
+/// never silence (ADR 0056). Never a key, a body or an address.
 pub fn spoken_failure(e: &LlmError) -> String {
     match e {
         LlmError::Unreachable { kind, .. } if *kind == "ReadTimeout" => {
@@ -488,7 +488,7 @@ impl Model {
         self.shaped_body(context, tools, options, &Capabilities::default())
     }
 
-    /// The turn's body as the route takes it (ADR 0055): a thinking setting, a
+    /// The turn's body as the route takes it (ADR 0056): a thinking setting, a
     /// `reasoning_effort` or cache markers the route refused before are left out.
     fn shaped_body(
         &self,
@@ -612,7 +612,7 @@ impl Model {
     }
 
     /// One request, with one more try after a rate limit or an overloaded provider
-    /// (ADR 0055).
+    /// (ADR 0056).
     async fn send(&self, body: &Value) -> Result<reqwest::Response, LlmError> {
         match self.send_once(body).await {
             Ok(r) => Ok(r),
@@ -631,7 +631,7 @@ impl Model {
         Ok(Box::pin(resp.bytes_stream().map(|r| r.map(|b| b.to_vec()))))
     }
 
-    /// A turn's request as the route takes it (ADR 0055): what the route refused before
+    /// A turn's request as the route takes it (ADR 0056): what the route refused before
     /// is left out; a field it refuses now (HTTP 400 naming the thinking setting,
     /// `reasoning_effort` or the cache markers) is left out and the request sent again,
     /// once per field, and the route remembers; a rate limit or an overloaded provider is

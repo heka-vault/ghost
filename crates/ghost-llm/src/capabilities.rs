@@ -1,5 +1,5 @@
 //! What one route (a provider, its address and a model) has shown it takes, so every
-//! request is shaped to it (ADR 0055).
+//! request is shaped to it (ADR 0056).
 //!
 //! A route is learned two ways. The provider check (`check`, the desktop's Test and
 //! `ghostd llm test`) asks each thing once with a fixed synthetic prompt and the daemon

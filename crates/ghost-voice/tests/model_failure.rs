@@ -1,4 +1,4 @@
-//! A spoken turn whose model call fails is said, never silent (ADR 0055).
+//! A spoken turn whose model call fails is said, never silent (ADR 0056).
 //!
 //! Before, the stage logged the error and pushed `Frame::Error`, which no stage reads: the
 //! operator heard nothing, as if Ghost hadn't heard them. Now the stage says what failed in

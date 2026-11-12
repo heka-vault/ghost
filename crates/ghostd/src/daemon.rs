@@ -371,7 +371,7 @@ pub struct Daemon {
     followed_vault: AtomicBool,
     /// The last model load's failure while it is tried again; on the waiting list meanwhile.
     models_problem: Mutex<Option<String>>,
-    /// The connection is too slow for a good spoken reply (ADR 0055); on the waiting list.
+    /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
     pub(crate) model_slow: Mutex<Option<String>>,
     models_retry: std::time::Duration,
     pub late: Late,
@@ -1345,7 +1345,7 @@ impl Daemon {
                 .with_on_change(on_change.clone()),
         );
         d.late.waiting.set(waiting.clone()).ok();
-        // ADR 0055: what each model route has shown, before the first turn.
+        // ADR 0056: what each model route has shown, before the first turn.
         d.seed_capabilities();
         // ADR 0051: questions for the operator, on the waiting list. A question asked from
         // a run is followed up by a run of the same agent once it is answered.

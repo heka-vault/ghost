@@ -3,7 +3,7 @@
 //! the vault, Ghost's folder and the apps, with a problem as the exit code. `ghostd push`:
 //! a signed delivery to the webhook listener (ADR 0027). `ghostd latency`: where the
 //! turns' time went (ADR 0018). `ghostd llm test`: the provider check of the saved
-//! connection (ADR 0055). `ghostd api-schema`: the control API's document.
+//! connection (ADR 0056). `ghostd api-schema`: the control API's document.
 //! `ghostd mcp`: the outside tools connected to Ghost, and the bridge one of them runs
 //! (ADR 0048). `ghostd version`: what this build is. `ghostd restore-volumes`: what the shell runs
 //! before a start and after a stop (ADR 0038).
@@ -121,7 +121,7 @@ fn main() -> anyhow::Result<()> {
             ))
         }
         // The provider comparison reads keys only from the variables named on its
-        // command line (ADR 0055): the vault is not opened.
+        // command line (ADR 0056): the vault is not opened.
         Some("perf") if args.get(1).map(String::as_str) == Some("providers") => {
             std::process::exit(ghost_voice::perf::cli::main(&args[1..]))
         }
@@ -236,7 +236,7 @@ fn restore_volumes() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `ghostd llm test`: the provider check, run by the daemon that holds the vault (ADR 0055).
+/// `ghostd llm test`: the provider check, run by the daemon that holds the vault (ADR 0056).
 #[tokio::main]
 async fn llm(args: &[String]) -> i32 {
     let path = default_socket_path();

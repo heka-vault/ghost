@@ -37,7 +37,7 @@ conversations through the real pipeline without a person, the models real and th
 replies scripted, and reports each stage's p50 and p95; `make perf-micro` times the models one
 by one and `make perf-llm` the real model connection with Ghost's prompt and tools.
 `make perf-providers` runs the provider check the product runs (Settings › Model's Test,
-`ghostd llm test`; ADR 0055) against every provider named that the environment has a key for,
+`ghostd llm test`; ADR 0056) against every provider named that the environment has a key for,
 keys from the variables named on the command line and never the vault, and writes a dated
 comparison here (`docs/benchmarks/perf/<date>-providers.md`): `PROVIDERS="proxy
 anthropic:ANTHROPIC_API_KEY openrouter:OPENROUTER_API_KEY openrouter-openai"`. The model's

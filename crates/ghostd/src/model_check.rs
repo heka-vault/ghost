@@ -1,4 +1,4 @@
-//! The provider check, kept (ADR 0055): what the operator's connection does with each
+//! The provider check, kept (ADR 0056): what the operator's connection does with each
 //! thing a spoken turn needs, run by the desktop's Test or `ghostd llm test`, kept in
 //! SQLite with a time, and used three ways:
 //!
@@ -94,7 +94,7 @@ impl Daemon {
         made.map_err(|e| e.to_string())
     }
 
-    /// The provider check through `env` (ADR 0055): the main model, then the fast one,
+    /// The provider check through `env` (ADR 0056): the main model, then the fast one,
     /// one after the other so neither's timing is the other's. Kept, seeded, and the
     /// slow note brought up to date.
     pub(crate) async fn check_model(&self, env: HashMap<String, String>) -> ModelCheckRun {

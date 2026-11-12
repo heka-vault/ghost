@@ -5,7 +5,7 @@
 - **Amends:** ADR 0018's endpoint switch (`GHOST_LLM_ENDPOINT=proxy|openrouter`), which keeps
   working as the older form of the connection
 - **Builds on:** ADR 0036 (the connection's key is a password in Ghost's vault)
-- **Amended by:** ADR 0055 (Test connection is the provider check, kept per route; a field
+- **Amended by:** ADR 0056 (Test connection is the provider check, kept per route; a field
   a route refuses is left out of its requests; a failed turn is said)
 
 Ghost reached its model through whatever `ANTHROPIC_BASE_URL` pointed at, or OpenRouter's

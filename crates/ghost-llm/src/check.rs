@@ -1,4 +1,4 @@
-//! The provider check (ADR 0055): what the operator's connection does with each thing a
+//! The provider check (ADR 0056): what the operator's connection does with each thing a
 //! spoken turn needs, asked with a fixed synthetic prompt and nothing of the operator's.
 //!
 //! For one model of the connection: whether it answers at all (or the error, in plain

@@ -1,4 +1,4 @@
-# 0055: Each connection is checked, and every request is shaped to what it takes
+# 0056: Each connection is checked, and every request is shaped to what it takes
 
 - **Status:** proposed
 - **Date:** 2026-11-12

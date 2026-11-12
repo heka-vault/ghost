@@ -124,7 +124,7 @@ export class MockModel {
     return { models, default: fallback && models.some((m) => m.id === fallback) ? fallback : models[0]?.id ?? fallback, error: null };
   }
 
-  /** The kept check of the saved connection (ADR 0055). */
+  /** The kept check of the saved connection (ADR 0056). */
   last: ModelCheckView | null = null;
 
   check(draft: ModelDraft): ModelCheckView {

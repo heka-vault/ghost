@@ -1,6 +1,6 @@
 # Model providers compared, 2026-11-12
 
-`make perf-providers`: the provider check Ghost runs from Settings › Model and `ghostd llm test` (ADR 0055), with the same fixed synthetic prompts, against each provider the environment had a key for. 5 timed calls per model; first byte and first word are seconds from the call, median / worst. Keys came from the variables named, never from Ghost's vault, and are not in this file.
+`make perf-providers`: the provider check Ghost runs from Settings › Model and `ghostd llm test` (ADR 0056), with the same fixed synthetic prompts, against each provider the environment had a key for. 5 timed calls per model; first byte and first word are seconds from the call, median / worst. Keys came from the variables named, never from Ghost's vault, and are not in this file.
 
 | provider | key from | model | role | first byte | first word | streams | tools | cache | thinking |
 |---|---|---|---|---|---|---|---|---|---|
@@ -37,6 +37,6 @@ Run `make perf-providers PROVIDERS="proxy openrouter openrouter-openai anthropic
 machine was under heavy load (load average about 40) during this run; the waits are the
 network's and the provider's, not the CPU's.
 
-Haiku 5.5 refused `between_tools` through the proxy too. Its route remembers this (ADR 0055),
+Haiku 5.5 refused `between_tools` through the proxy too. Its route remembers this (ADR 0056),
 so the fast model's requests leave it out, and so would the main model's if Haiku were the
 main model.

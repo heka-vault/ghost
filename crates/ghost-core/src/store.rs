@@ -209,7 +209,7 @@ CREATE TABLE IF NOT EXISTS questions (
     follow_up_run TEXT
 );
 CREATE INDEX IF NOT EXISTS questions_open ON questions(state, asker);
--- The provider check (ADR 0055): what one route (provider, address, model) did with a
+-- The provider check (ADR 0056): what one route (provider, address, model) did with a
 -- fixed synthetic prompt, kept so Ghost shapes its requests to it and can say which of
 -- the operator's tried options answered faster. Never a key, never the operator's words.
 CREATE TABLE IF NOT EXISTS model_checks (
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS model_checks (
 CREATE INDEX IF NOT EXISTS model_checks_route ON model_checks(route, at);
 "#;
 
-/// One model's provider check as kept (ADR 0055).
+/// One model's provider check as kept (ADR 0056).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelCheckRow {
     pub at: DateTime<Utc>,
@@ -851,7 +851,7 @@ impl Store {
         Ok(())
     }
 
-    // --- the provider check (ADR 0055) ---------------------------------------------
+    // --- the provider check (ADR 0056) ---------------------------------------------
 
     /// Keep one model's check. `report` is the check's JSON.
     pub fn add_model_check(&self, row: &ModelCheckRow) -> Result<()> {

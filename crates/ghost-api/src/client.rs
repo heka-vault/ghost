@@ -156,7 +156,7 @@ impl GhostClient {
             .await
     }
 
-    /// The provider check of the saved connection (ADR 0055): a few short calls per
+    /// The provider check of the saved connection (ADR 0056): a few short calls per
     /// model, so it gets three minutes.
     pub async fn check_model(&self) -> Result<Value, ClientError> {
         let body = serde_json::json!({"values": {}});

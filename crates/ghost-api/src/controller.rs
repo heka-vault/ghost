@@ -36,7 +36,7 @@ impl Refusal {
 /// typed by the daemon (W9).
 pub type PhoneConnection = Box<dyn std::any::Any + Send>;
 
-/// What the provider check found (ADR 0055): each model of the connection, and what
+/// What the provider check found (ADR 0056): each model of the connection, and what
 /// would help when it is too slow for a good spoken reply.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelCheckRun {
@@ -68,7 +68,7 @@ pub trait Controller: Send + Sync {
     fn apply_settings(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String>;
     /// The model connection's keys, live (ADR 0037): the ones taken.
     fn apply_model(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String>;
-    /// The provider check (ADR 0055) through `env`: the main model and the fast one, kept
+    /// The provider check (ADR 0056) through `env`: the main model and the fast one, kept
     /// with a time. None when the daemon can't check one now.
     async fn check_model(&self, env: ModelEnv) -> Option<ModelCheckRun>;
     /// The latest kept check of the saved connection.

@@ -75,7 +75,7 @@ to copy. Its Test button (or `ghostd llm test`) checks the connection with a fix
 prompt: how soon each model's first word comes back, and whether streaming, tool calls, the
 prompt cache and the thinking setting work; Ghost keeps the result, leaves out of its requests
 whatever the connection refuses, and says on the waiting list when the connection is too slow
-for a good spoken reply, with what would help (ADR 0055). It never switches provider or model
+for a good spoken reply, with what would help (ADR 0056). It never switches provider or model
 for you. `make perf-providers` compares providers the same way. Every session, compaction and a
 watch's model step use it, over the Anthropic Messages API or an OpenAI-compatible one, and
 a saved change applies from the next session. Older settings still work: without a

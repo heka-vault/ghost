@@ -1,5 +1,5 @@
 //! `ghostd perf providers` (`make perf-providers`): the provider check the product runs
-//! (ADR 0055, `ghost_llm::check`), against every provider named on the command line that
+//! (ADR 0056, `ghost_llm::check`), against every provider named on the command line that
 //! the environment has a key for, written as a dated comparison under
 //! `docs/benchmarks/perf/`.
 //!
@@ -188,7 +188,7 @@ pub fn markdown(rows: &[Row], skipped: &[String], samples: usize, date: &str) ->
     let _ = writeln!(
         s,
         "`make perf-providers`: the provider check Ghost runs from Settings › Model and \
-         `ghostd llm test` (ADR 0055), with the same fixed synthetic prompts, against each \
+         `ghostd llm test` (ADR 0056), with the same fixed synthetic prompts, against each \
          provider the environment had a key for. {samples} timed calls per model; first \
          byte and first word are seconds from the call, median / worst. Keys came from the \
          variables named, never from Ghost's vault, and are not in this file.\n"

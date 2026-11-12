@@ -1,6 +1,6 @@
 /**
  * Owner: settings. The Model page (ADR 0037): which provider Ghost thinks with, picked like an
- * app, then its key, its model from the provider's own list, and its check (ADR 0055). The address,
+ * app, then its key, its model from the provider's own list, and its check (ADR 0056). The address,
  * extra headers, the timeout and the Password's name are folded away under Advanced.
  *
  * The settings are part of the screen's one draft and save with its save bar through
@@ -171,7 +171,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   const defaultModel = spec?.default_model ?? (protocol === "anthropic" ? "claude-sonnet-5-5" : models?.fallback ?? "");
   const listId = "set-model-list";
 
-  /* ------------------------------------------------- the connection's check (ADR 0055) */
+  /* ------------------------------------------------- the connection's check (ADR 0056) */
   const testKey = JSON.stringify([listKey, eff.GHOST_LLM_MODEL ?? "", eff.GHOST_LLM_FAST_MODEL ?? "", eff.GHOST_LLM_TIMEOUT_SECS ?? ""]);
   const [test, setTest] = useState<{ key: string; r?: ModelCheckView; error?: string } | null>(null);
   const [testing, setTesting] = useState(false);

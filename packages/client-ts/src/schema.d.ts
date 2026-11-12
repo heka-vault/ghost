@@ -727,7 +727,7 @@ export interface paths {
         put?: never;
         /**
          * Model Check
-         * @description Check the connection being edited, or the saved one (ADR 0055): for the main
+         * @description Check the connection being edited, or the saved one (ADR 0056): for the main
          *     model and the fast one, whether it answers (or the error in plain words), the time
          *     to the first byte and the first word over a few short calls, and whether streaming,
          *     tool calls, prompt caching and the thinking setting work. A fixed synthetic prompt,
@@ -2534,13 +2534,13 @@ export interface components {
             /** @description In plain words. */
             detail?: string | null;
             /**
-             * @description One finding of the provider check (ADR 0055).
+             * @description One finding of the provider check (ADR 0056).
              * @enum {string}
              */
             state: "yes" | "no" | "not_reported" | "not_applicable" | "untested";
         };
         /**
-         * @description The provider check (ADR 0055): the connection's models with a fixed synthetic prompt,
+         * @description The provider check (ADR 0056): the connection's models with a fixed synthetic prompt,
          *     kept with a time.
          */
         ModelCheckView: {

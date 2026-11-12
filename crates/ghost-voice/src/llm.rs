@@ -722,7 +722,7 @@ impl LlmStage {
                     out.push(Frame::LlmText(line)).await;
                 }
                 Err(e) => {
-                    // Never silence (ADR 0055): what failed, said in plain words.
+                    // Never silence (ADR 0056): what failed, said in plain words.
                     warn!("model: {e}");
                     let line = ghost_llm::spoken_failure(&e);
                     let line = if reply.text.is_empty() {

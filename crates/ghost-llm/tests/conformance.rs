@@ -1,4 +1,4 @@
-//! Every shape of model connection Ghost supports, through the same turns (ADR 0055):
+//! Every shape of model connection Ghost supports, through the same turns (ADR 0056):
 //! Anthropic direct, an Anthropic-compatible subscription proxy, OpenRouter on its
 //! Anthropic and its OpenAI API, OpenAI, Ollama, LM Studio and a URL of the operator's,
 //! each a local fake server speaking that provider's protocol at that provider's path with

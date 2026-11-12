@@ -355,7 +355,7 @@ fn where_of(conn: &ModelConnection) -> String {
         .to_string()
 }
 
-/// Check the connection being edited, or the saved one (ADR 0055): for the main model
+/// Check the connection being edited, or the saved one (ADR 0056): for the main model
 /// and the fast one, whether it answers (or the error in plain words), the time to the
 /// first byte and the first word over a few short calls, and whether streaming, tool
 /// calls, prompt caching and the thinking setting work. A fixed synthetic prompt, never
@@ -363,7 +363,7 @@ fn where_of(conn: &ModelConnection) -> String {
 /// never shown. The result is kept, and Ghost shapes its requests to it.
 #[utoipa::path(post, path = "/model/check", operation_id = "model_check_model_check_post", tag = "model",
     summary = "Model Check",
-    description = "Check the connection being edited, or the saved one (ADR 0055): for the main\nmodel and the fast one, whether it answers (or the error in plain words), the time\nto the first byte and the first word over a few short calls, and whether streaming,\ntool calls, prompt caching and the thinking setting work. A fixed synthetic prompt,\nnever anything of the operator's; the password is read from the vault by the daemon\nand never shown. The result is kept, and Ghost shapes its requests to it.",
+    description = "Check the connection being edited, or the saved one (ADR 0056): for the main\nmodel and the fast one, whether it answers (or the error in plain words), the time\nto the first byte and the first word over a few short calls, and whether streaming,\ntool calls, prompt caching and the thinking setting work. A fixed synthetic prompt,\nnever anything of the operator's; the password is read from the vault by the daemon\nand never shown. The result is kept, and Ghost shapes its requests to it.",
     request_body = ModelDraft,
     responses((status = 200, description = "Successful Response", body = ModelCheckView),
               (status = 422, description = "Validation Error", body = HTTPValidationError),
