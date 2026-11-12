@@ -270,6 +270,7 @@ export const ROUTES: RouteDef[] = [
     nav: { label: "Mascot", icon: Ghost, group: "prototype" },
     component: DEV ? lazy(() => import("../prototypes/mascot")) : null,
   },
+  { id: "concepts", patterns: ["/concepts/:name?"], path: "/concepts/instrument", owner: "design", title: "Concepts", kind: "prototype", chrome: "bare", needsDaemon: false, component: DEV ? lazy(() => import("../design/concepts")) : null }, // Two far concepts for review only (docs/design/concepts-2026-11.md).
   {
     id: "gallery",
     patterns: ["/gallery"],
