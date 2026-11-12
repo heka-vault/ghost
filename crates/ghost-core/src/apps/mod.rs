@@ -49,7 +49,7 @@ pub use ask::{Answer, Asker, AskerSlot, DeclineAll, QUESTION_MAX, Question};
 pub use bridge::{
     AppWriter, CALLER_ARG, HEARD_ARG, OWN_ARGS, SESSION_ARG, own_args, source_of, source_without,
 };
-pub use collection::{Apps, ChangeHook, Recent, SEARCH_RESULTS};
+pub use collection::{Apps, ChangeHook, Recent, SEARCH_RESULTS, SaveRecent};
 pub use connection::{
     About, App, AuthFor, CALL_TIMEOUT, CONNECT_TIMEOUT, Connector, SIGN_IN_TIMEOUT, Session,
     SessionError, StderrRelay, current_cancel, with_cancel,

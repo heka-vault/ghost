@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ghost_core::apps::{AppSpec, Apps, ProcessEnviron};
+use ghost_core::apps::{AppSpec, Apps, Limits, ProcessEnviron};
 use ghost_core::conversations::{
     Conversations, ConversationsOptions, GHOST, Role, SOURCE as CONVERSATIONS, conversations_source,
 };
@@ -200,7 +200,60 @@ pub struct RunConfig {
     pub real: Option<RealModel>,
     /// With `real`, the real fast model is in front (`fast=real`).
     pub fast_real: bool,
+    /// Which apps the session reaches (`--apps`, `apps=` in a variant).
+    pub apps: AppSet,
 }
+
+/// The apps a run's session reaches.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AppSet {
+    /// The mock GitHub app alone, every tool offered by name (the harness as it was).
+    #[default]
+    One,
+    /// As the operator's Ghost was on 2026-11-12: two GitHub connections (the mock, twice,
+    /// each with its own state), Ghost's own app, and more tools than a turn carries, so
+    /// the apps' tools are found with `ghost_tools_search` first (ADR 0046). The real set
+    /// had 106 app tools past the 40-tool limit; here the limit is set under the mocks'
+    /// ten, which hides them the same way. The tool list moves when a tool is found, as a
+    /// live session's does.
+    Deferred,
+    /// `Deferred`, with the tools a lookup needs kept from before (`Apps::remember`), as a
+    /// daemon started again finds them in its SQLite.
+    DeferredKept,
+}
+
+impl AppSet {
+    pub const NAMES: [&'static str; 3] = ["one", "deferred", "deferred-kept"];
+
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "one" => Some(Self::One),
+            "deferred" => Some(Self::Deferred),
+            "deferred-kept" => Some(Self::DeferredKept),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::One => "one",
+            Self::Deferred => "deferred",
+            Self::DeferredKept => "deferred-kept",
+        }
+    }
+
+    fn deferred(self) -> bool {
+        self != Self::One
+    }
+}
+
+/// What a `DeferredKept` run finds kept: the reads the scenarios' lookups use.
+pub const KEPT_TOOLS: [&str; 4] = [
+    "github_list_issues",
+    "github_issue_read",
+    "github_search_issues",
+    "github_other_issue_read",
+];
 
 impl Default for RunConfig {
     fn default() -> Self {
@@ -217,12 +270,22 @@ impl Default for RunConfig {
             fast: None,
             real: None,
             fast_real: false,
+            apps: AppSet::One,
         }
     }
 }
 
 impl RunConfig {
     pub fn label(&self) -> String {
+        let label = self.label_without_apps();
+        if self.apps == AppSet::One {
+            label
+        } else {
+            format!("{label} apps={}", self.apps.name())
+        }
+    }
+
+    fn label_without_apps(&self) -> String {
         if let Some(v) = &self.variant {
             // A variant's name stands for its overrides.
             let mut parts = vec![v.clone()];
@@ -658,7 +721,13 @@ impl Bench {
             conversations: Some(env.conversations.clone()),
             start_in: GHOST.into(),
             latency_log: Some(self.out.join("latency.jsonl")),
-            reach: None,
+            // A live tool list, as the daemon's sessions have (ADR 0046): what a search
+            // finds is offered from the next call.
+            reach: cfg.apps.deferred().then(|| {
+                let apps = env.apps.clone();
+                Arc::new(move |_: &ghost_core::conversations::models::Profile| apps.sources())
+                    as crate::conversation::Reach
+            }),
             context_note: None,
         });
         session.start(true).await;
@@ -804,6 +873,9 @@ impl Bench {
             }
         }
         let _ = tokio::time::timeout(Duration::from_secs(5), run_task).await;
+        if let Some(g) = &env.ghost {
+            g.stop();
+        }
         env.apps.close().await;
         drop(tmp);
         let all = records.lock().unwrap().clone();
@@ -867,11 +939,55 @@ impl Bench {
                 .to_string_lossy()
                 .into_owned(),
         ];
-        let apps = Arc::new(Apps::new([spec], Arc::new(ProcessEnviron), None));
+        let mut specs = vec![spec];
+        if cfg.apps.deferred() {
+            let mut other = AppSpec::runs("github_other", &Self::mock_github_command());
+            other.title = "GitHub (the other organization)".into();
+            other.args = vec![
+                "--state".into(),
+                tmp.join("data/mock-github-other.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            ];
+            specs.push(other);
+        }
+        let mut apps = Apps::new(specs, Arc::new(ProcessEnviron), None);
+        if cfg.apps.deferred() {
+            apps = apps.with_limits(Limits {
+                tools_max: 6,
+                ..Limits::default()
+            });
+        }
+        let apps = Arc::new(apps);
+        if cfg.apps == AppSet::DeferredKept {
+            apps.remember(
+                KEPT_TOOLS.iter().map(|t| t.to_string()).collect(),
+                Arc::new(|_: &[String]| {}),
+            );
+        }
         apps.connect().await;
         if !apps.apps().contains_key("github") {
             anyhow::bail!("mock GitHub server did not start: {:?}", apps.failed());
         }
+        // Ghost's own app, as the daemon attaches it (ADR 0045): its search finds the
+        // hidden tools.
+        let ghost = if cfg.apps.deferred() {
+            let server = ghost_core::ghost_app::GhostServer::new(ghost_core::ghost_app::Parts {
+                store: store.clone(),
+                waiting: Arc::new(ghost_core::waiting::WaitingList::new(
+                    ghost_core::waiting::Items::new(store.clone()),
+                )),
+                apps: Arc::downgrade(&apps),
+                status: Arc::new(serde_json::Map::new),
+            });
+            Some(
+                ghost_core::ghost_app::attach(&apps, server)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Ghost's own app: {}", e.reason()))?,
+            )
+        } else {
+            None
+        };
         let sources = apps.sources();
         let classifier: Arc<dyn ConfirmationClassifier> = if cfg.jev {
             let env: HashMap<String, String> = std::env::vars().collect();
@@ -896,6 +1012,9 @@ impl Bench {
         );
         for a in &sources {
             gate.register(&a.name, a.operations.clone());
+        }
+        if let Some(g) = &ghost {
+            gate.register("ghost", g.app.operations());
         }
         // Ghost's standing instructions name the repositories, as an operator's would: the
         // app's tools take owner and repo, and nothing else in the prompt says which.
@@ -929,6 +1048,7 @@ impl Bench {
             apps,
             gate,
             conversations,
+            ghost,
         })
     }
 }
@@ -936,6 +1056,8 @@ impl Bench {
 struct Env {
     sources: Vec<ghost_core::ToolSource>,
     apps: Arc<Apps>,
+    /// Ghost's own app, when the run's set has it.
+    ghost: Option<ghost_core::ghost_app::Attached>,
     gate: Arc<WriteGate>,
     conversations: Arc<Conversations>,
 }
