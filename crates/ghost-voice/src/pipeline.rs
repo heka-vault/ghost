@@ -424,6 +424,13 @@ pub struct SessionHooks {
     pub on_level: Option<crate::level::OnLevel>,
     /// What the session is doing, by name and never in words (`crate::activity`, ADR 0055).
     pub on_activity: Option<crate::activity::OnActivity>,
+    /// The operator's turn as it closed, with the words the model was given, or taken
+    /// back (`TurnRecord`, ADR 0058): the screen's and the phone's final words for it.
+    pub on_heard: Option<OnTurnRecord>,
+    /// Which words of Ghost's reply are heard now (`crate::level::OnSaid`, ADR 0058).
+    pub on_said: Option<crate::level::OnSaid>,
+    /// Each call and what it returned (`crate::tools::OnResult`, ADR 0058).
+    pub on_result: Option<crate::tools::OnResult>,
 }
 
 /// How a session opens.
@@ -640,6 +647,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     let on_turn_outer = p.hooks.on_turn.unwrap_or_else(no_turn);
     let on_phase = p.hooks.on_phase.unwrap_or_else(no_phase);
     let on_level = p.hooks.on_level;
+    let on_said = p.hooks.on_said;
+    let on_result = p.hooks.on_result;
 
     let runtime = p.conversations.map(|convs| {
         sources.push(ghost_core::conversations::conversations_source(&convs));
@@ -719,10 +728,12 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     // A spoken turn, once, with its final words: the store and the gate's request keep
     // that, not the pieces it was heard in (`crate::tap::TurnRecord`). The pieces still go
     // out as they come, to whatever shows them (`UserTap`).
+    let on_heard = p.hooks.on_heard.clone();
     let on_record: OnTurnRecord = {
         let heard = heard.clone();
         let runtime = runtime.clone();
         Arc::new(move |record| {
+            let told = on_heard.as_ref().map(|on| on(record.clone()));
             {
                 let mut h = heard.lock().unwrap();
                 match &record {
@@ -738,7 +749,11 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                     TurnRecord::Reopened => rt.withdraw_user(),
                 }
             }
-            Box::pin(async {})
+            Box::pin(async move {
+                if let Some(t) = told {
+                    t.await;
+                }
+            })
         })
     };
     let on_caption: OnTurn = {
@@ -828,6 +843,9 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         last_request: Some(last_request),
         probe: Some(probe.clone()),
     });
+    if let Some(on) = on_result {
+        dispatcher.set_on_result(on);
+    }
     let tools = dispatcher.schemas();
     let options = Options {
         max_tokens: settings.llm_max_tokens,
@@ -1094,6 +1112,9 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         .with_turns(turns.clone());
     if let Some(on) = on_level {
         audio_out = audio_out.with_level(on);
+        if let Some(said) = on_said {
+            audio_out = audio_out.with_said(said);
+        }
     }
     stages.push((None, Box::new(audio_out)));
 

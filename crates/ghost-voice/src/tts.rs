@@ -28,7 +28,7 @@ use ghost_infer::Kokoro;
 use ghost_infer::clauses::ClauseAggregator;
 use tracing::warn;
 
-use crate::frames::{Audio, Direction, Frame, Metric, Out, Stage};
+use crate::frames::{Audio, Direction, Frame, Metric, Out, Spoken, Stage};
 use crate::latency::{LatencyProbe, null_probe};
 use crate::spoken::spoken;
 use crate::turns::TurnControl;
@@ -372,6 +372,12 @@ pub struct KokoroTts {
     reply_turn: Option<tokio_util::sync::CancellationToken>,
     speaking: bool,
     first_audio: bool,
+    /// The reply being said, numbered from 0 in the session, and how many of its words
+    /// have gone to the voice: what each piece's audio says (`Spoken`, ADR 0058).
+    reply_no: u32,
+    words: u32,
+    /// No reply has started yet: the first one is number 0.
+    fresh: bool,
 }
 
 impl KokoroTts {
@@ -398,6 +404,9 @@ impl KokoroTts {
             reply_turn: None,
             speaking: false,
             first_audio: true,
+            reply_no: 0,
+            words: 0,
+            fresh: true,
         })
     }
 
@@ -449,6 +458,33 @@ impl KokoroTts {
             reply_turn: None,
             speaking: false,
             first_audio: true,
+            reply_no: 0,
+            words: 0,
+            fresh: true,
+        }
+    }
+
+    /// A new reply starts: its words count from 0.
+    fn next_reply(&mut self) {
+        if self.fresh {
+            self.fresh = false;
+        } else {
+            self.reply_no += 1;
+        }
+        self.words = 0;
+    }
+
+    /// The words `text` says, as the next piece of the reply.
+    fn stamp(&mut self, text: &str) -> Spoken {
+        if self.fresh {
+            self.next_reply();
+        }
+        let from = self.words;
+        self.words += crate::spoken::word_count(text);
+        Spoken {
+            reply: self.reply_no,
+            from,
+            to: self.words,
         }
     }
 
@@ -494,6 +530,7 @@ impl KokoroTts {
         if let Some(on_say) = &self.on_say {
             on_say(&text);
         }
+        let spoken = self.stamp(&text);
         if !self.speaking {
             self.speaking = true;
             self.first_audio = true;
@@ -506,7 +543,7 @@ impl KokoroTts {
             _ => None,
         };
         if let Some(chunks) = ahead {
-            let played = self.play(chunks, &turn, began, out).await;
+            let played = self.play(chunks, &turn, began, spoken, out).await;
             if let Some(p) = &self.prerender {
                 // Played, or made for a turn the operator has since taken back.
                 p.count(if played && !turn.is_cancelled() {
@@ -527,7 +564,7 @@ impl KokoroTts {
             self.settings.speed as f32,
             Some(turn.clone()),
         );
-        self.play(chunks, &turn, began, out).await;
+        self.play(chunks, &turn, began, spoken, out).await;
     }
 
     /// A piece's audio to the speaker as it arrives, each window as its own frame under the
@@ -537,6 +574,7 @@ impl KokoroTts {
         mut chunks: Chunks,
         turn: &tokio_util::sync::CancellationToken,
         began: Instant,
+        spoken: Spoken,
         out: &Out,
     ) -> bool {
         let mut any = false;
@@ -557,7 +595,7 @@ impl KokoroTts {
             }
             any = true;
             out.push(Frame::TtsAudio {
-                audio: Audio::new(pcm, SAMPLE_RATE),
+                audio: Audio::new(pcm, SAMPLE_RATE).saying(Some(spoken)),
                 turn: turn.clone(),
             })
             .await;
@@ -602,7 +640,9 @@ impl Stage for KokoroTts {
                 }
                 self.stop_speaking(out).await;
             }
+            Frame::LlmStart => self.next_reply(),
             Frame::Speak(text) => {
+                self.next_reply();
                 let mut pieces = self.aggregator.push(text);
                 pieces.extend(self.aggregator.flush());
                 for piece in pieces {
@@ -882,6 +922,77 @@ in app, and the Redis versus Postgres call for the session cache.";
         let said = said(&synth);
         assert!(said.len() > 1, "{said:?}");
         assert_eq!(*announced.lock().unwrap(), said);
+    }
+
+    /// The words each `TtsAudio` frame says, in order, once per piece.
+    fn spans(frames: &[Frame]) -> Vec<Spoken> {
+        let mut out: Vec<Spoken> = Vec::new();
+        for f in frames {
+            if let Frame::TtsAudio { audio, .. } = f {
+                let s = audio.spoken.expect("every piece of a reply is stamped");
+                if out.last() != Some(&s) {
+                    out.push(s);
+                }
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn test_each_piece_of_a_reply_says_which_of_its_words_it_is() {
+        // ADR 0058: the screen marks the words being heard from these, exactly.
+        let mut tts =
+            KokoroTts::new(FakeKokoro::shared(), TtsSettings::default(), Some(4)).unwrap();
+        let (out, mut rx) = Out::capture();
+        tts.process(Frame::LlmStart, Direction::Down, &out).await;
+        for tok in tokens(LIST) {
+            tts.process(Frame::LlmText(tok), Direction::Down, &out)
+                .await;
+        }
+        tts.process(Frame::LlmEnd, Direction::Down, &out).await;
+        let first = spans(&drain(&mut rx).await);
+        let clauses = chunks(LIST, Some(4));
+        assert_eq!(first.len(), clauses.len());
+        let mut at = 0;
+        for (s, clause) in first.iter().zip(&clauses) {
+            let n = crate::spoken::word_count(clause);
+            assert_eq!(
+                *s,
+                Spoken {
+                    reply: 0,
+                    from: at,
+                    to: at + n
+                }
+            );
+            at += n;
+        }
+        assert_eq!(
+            at,
+            crate::spoken::word_count(LIST),
+            "the whole reply, counted as the screen counts it"
+        );
+        // The next reply, and a line spoken directly, count from 0 again.
+        tts.process(Frame::LlmStart, Direction::Down, &out).await;
+        tts.process(Frame::LlmText("Done.".into()), Direction::Down, &out)
+            .await;
+        tts.process(Frame::LlmEnd, Direction::Down, &out).await;
+        tts.process(Frame::Speak("Bye now.".into()), Direction::Down, &out)
+            .await;
+        assert_eq!(
+            spans(&drain(&mut rx).await),
+            vec![
+                Spoken {
+                    reply: 1,
+                    from: 0,
+                    to: 1
+                },
+                Spoken {
+                    reply: 2,
+                    from: 0,
+                    to: 2
+                }
+            ]
+        );
     }
 
     #[test]

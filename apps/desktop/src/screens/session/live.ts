@@ -4,31 +4,45 @@
  * changes Ghost made and announced, the stretches on hold, and the questions asked.
  */
 import type { QuestionView, Turn } from "@ghost/client-ts";
-import { type Activity, createVoicedClock, saidChars, useGhost } from "@ghost/ui";
-import { useEffect, useRef, useState } from "react";
+import { type Activity, charsOfWords, createVoicedClock, mergeActivity, saidChars, type Span, useGhost } from "@ghost/ui";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Announced, Held } from "./timeline";
 
-/** How far Ghost got with a reply: characters said, and whether the operator cut in there. */
+/**
+ * How far Ghost got with a reply. `chars` were said; `now` is the piece being said at this
+ * moment (the clause the voice is on, from the daemon's stamp, ADR 0058), up to its end; the
+ * rest wasn't said yet, or ever when `cut`. `exact` when the daemon said which words: without
+ * its stamps (a cloud voice, an older daemon) the point is the estimate in `said.ts`.
+ */
 export interface Saying {
   chars: number;
+  now?: { end: number } | null;
   cut: boolean;
+  exact?: boolean;
 }
 
 /**
  * How much of each of Ghost's replies in this session was said, by the reply's time
- * (`turn.at`). A reply in progress moves word by word with Ghost's voice (`said.ts`); one the
- * operator cut off keeps the point it reached. A reply missing from the map was said whole
- * (or this window didn't see it being said).
+ * (`turn.at`). A reply in progress moves clause by clause with the daemon's `saying` stamps,
+ * or word by word with Ghost's voice when there are none (`said.ts`); one the operator cut off
+ * keeps the point it reached. A reply missing from the map was said whole (or this window
+ * didn't see it being said).
  *
- * Ghost's voice is counted only while one reply is being said: the newest assistant turn, from
- * when it arrives until the voice stops or the operator cuts in.
+ * The daemon numbers replies itself; a number is tied to the newest reply on screen the first
+ * time it is heard, never to one before a number already tied (a reply with nothing to say
+ * aloud gets no stamp, so numbers can skip). A stamp that comes before its reply's turn (a long
+ * reply still being written as it is spoken) waits for it.
  */
 export function useSaying(turns: readonly Turn[], speaking: boolean, activity: readonly Activity[], speed: number): Record<string, Saying> {
-  const { voice } = useGhost();
+  const { voice, said } = useGhost();
   const [saying, setSaying] = useState<Record<string, Saying>>({});
   const clock = useRef(createVoicedClock());
-  const current = useRef<{ at: string; text: string } | null>(null);
+  /** Voiced time since the piece being said began: where a cut falls inside it. */
+  const pieceClock = useRef(createVoicedClock());
+  const current = useRef<{ at: string; text: string; reply: number | null; span: { start: number; end: number } | null } | null>(null);
+  const tied = useRef(-1);
+  const waiting = useRef<Span | null>(null);
   const speedRef = useRef(speed);
   speedRef.current = speed;
   const reply = lastReply(turns);
@@ -38,13 +52,36 @@ export function useSaying(turns: readonly Turn[], speaking: boolean, activity: r
   useEffect(() => {
     setSaying({});
     current.current = null;
+    tied.current = -1;
+    waiting.current = null;
   }, [session]);
+
+  const apply = (span: Span) => {
+    const c = current.current;
+    if (!c) return;
+    if (c.reply == null) {
+      if (span.reply <= tied.current) return; // an earlier reply's
+      c.reply = span.reply;
+      tied.current = span.reply;
+    } else if (span.reply !== c.reply) {
+      if (span.reply > c.reply) waiting.current = span; // the next reply, whose turn hasn't come
+      return;
+    }
+    const start = charsOfWords(c.text, span.from);
+    const end = Math.max(start, charsOfWords(c.text, span.to));
+    c.span = { start, end };
+    pieceClock.current.reset();
+    setSaying((s) => (s[c.at]?.cut ? s : { ...s, [c.at]: { chars: start, now: { end }, cut: false, exact: true } }));
+  };
 
   // A new reply: the one before it is done, this one starts at nothing.
   useEffect(() => {
-    if (!reply || current.current?.at === reply.at) return;
+    if (!reply || current.current?.at === reply.at) {
+      if (reply && current.current) current.current.text = reply.text;
+      return;
+    }
     const was = current.current;
-    current.current = { at: reply.at, text: reply.text };
+    current.current = { at: reply.at, text: reply.text, reply: null, span: null };
     clock.current.reset();
     setSaying((s) => {
       const next = { ...s };
@@ -52,28 +89,52 @@ export function useSaying(turns: readonly Turn[], speaking: boolean, activity: r
       next[reply.at] = { chars: 0, cut: false };
       return next;
     });
+    const w = waiting.current;
+    waiting.current = null;
+    if (w && w.session_id === session) apply(w);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reply?.at, reply?.text]);
 
-  // Ghost's voice moves it on, word by word: a render only when a word is crossed.
+  // The daemon's stamps: which words are heard now.
+  useEffect(
+    () =>
+      said.subscribe((span) => {
+        if (span && span.session_id === session) apply(span);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [said, session],
+  );
+
+  // Ghost's voice: the estimate, word by word, until a stamp makes it exact.
   useEffect(
     () =>
       voice.subscribe((level) => {
         const c = current.current;
         if (!c) return;
         clock.current.level(level);
+        pieceClock.current.level(level);
+        if (c.span) return;
         const chars = saidChars(c.text, clock.current.secs, speedRef.current, true);
         setSaying((s) => (s[c.at] && !s[c.at].cut && s[c.at].chars !== chars ? { ...s, [c.at]: { chars, cut: false } } : s));
       }),
     [voice],
   );
 
-  // A cut freezes the reply where it got to; the voice stopping on its own finishes it.
+  // A cut freezes the reply where it got to (inside the piece being said, by its voiced time);
+  // the voice stopping on its own finishes it.
   const lastCut = [...activity].reverse().find((a) => a.kind === "cut")?.at ?? null;
   useEffect(() => {
     const c = current.current;
     if (!c || !lastCut || lastCut < c.at) return;
     current.current = null;
-    setSaying((s) => ({ ...s, [c.at]: { chars: s[c.at]?.chars ?? 0, cut: true } }));
+    setSaying((s) => {
+      let chars = s[c.at]?.chars ?? 0;
+      if (c.span) {
+        const into = saidChars(c.text.slice(c.span.start, c.span.end), pieceClock.current.secs, speedRef.current, true);
+        chars = c.span.start + into;
+      }
+      return { ...s, [c.at]: { chars, cut: true, exact: !!c.span } };
+    });
   }, [lastCut]);
   useEffect(() => {
     if (speaking) return;
@@ -175,4 +236,32 @@ export function useSessionQuestions(since: string | null): QuestionView[] {
     };
   }, [client, since, waitingVersion, connected]);
   return list;
+}
+
+/**
+ * What the sessions on screen did between their turns, kept by the daemon beside the
+ * transcript (`GET /activity`, ADR 0058): the earlier sessions' calls, handovers and cuts, and
+ * the live session's from before this page loaded, merged with what arrives live.
+ */
+export function useSessionActivity(sessions: readonly string[], live: readonly Activity[]): Activity[] {
+  const { client, connected } = useGhost();
+  const [stored, setStored] = useState<Activity[]>([]);
+  const ids = [...new Set(sessions.filter(Boolean))].slice(-40);
+  const key = ids.join(",");
+  useEffect(() => {
+    if (!connected || !ids.length) {
+      setStored([]);
+      return;
+    }
+    let on = true;
+    client
+      .activity(ids)
+      .then((list) => on && setStored(list))
+      .catch(() => on && setStored([]));
+    return () => {
+      on = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, connected, key]);
+  return useMemo(() => mergeActivity(stored, live), [stored, live]);
 }

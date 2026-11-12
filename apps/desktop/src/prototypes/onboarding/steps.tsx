@@ -98,8 +98,8 @@ function promises(w: Wizard): { icon: ReactNode; title: string; body: ReactNode 
     },
     {
       icon: <Hand />,
-      title: "It asks before it changes anything",
-      body: <>Ghost reads issues freely. Closing, labeling or commenting waits for your spoken yes, until you decide otherwise.</>,
+      title: "It does what you ask, and says what it did",
+      body: <>Ghost reads and acts on your apps and tells you each change. Your permissions decide what it may not do and what it asks you first. Every change is in the audit log.</>,
     },
     {
       icon: <KeyRound />,
@@ -340,7 +340,7 @@ export function DoneStep({ w }: { w: Wizard }) {
         centered
         lead={<HeroPresence phase={live.phase} size={96} ok />}
         title="You’re set"
-        description={`Say ${quoted(phrase)} whenever you need it. Ghost asks before it changes anything on GitHub, until you tell it otherwise.`}
+        description={`Say ${quoted(phrase)} whenever you need it. Ghost tells you every change it makes; set what it asks first in Permissions.`}
         primary={{ label: "Go to the session", onClick: () => navigate("/") }}
         onBack={w.back}
         autoFocus={w.focusOnOpen}

@@ -716,6 +716,7 @@ impl Bench {
                 on_latency: Some(sink),
                 on_level: None,
                 on_activity: None,
+                ..Default::default()
             },
             wake_phrases: None,
             wake_fuzzy: 0.0,

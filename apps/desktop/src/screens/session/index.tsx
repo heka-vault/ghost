@@ -19,9 +19,11 @@
  */
 import { callsOf, useGhost, youSpeaking } from "@ghost/ui";
 import type { QuestionView } from "@ghost/client-ts";
-import { ArrowDown, ArrowRight, AudioLines, Brain, Clock, Mic, MoreHorizontal, PhoneOff, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
+import { ArrowDown, ArrowRight, AudioLines, Brain, Clock, Mic, MicOff, MoreHorizontal, PhoneOff, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
+import { notListening, notListeningSub } from "../../app/listening";
+import { useListening } from "../../app/ListeningSwitch";
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
@@ -29,7 +31,7 @@ import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, Pendin
 import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
-import { useAnnounced, useHeld, useSaying, useSessionQuestions } from "./live";
+import { useAnnounced, useHeld, useSaying, useSessionActivity, useSessionQuestions } from "./live";
 import { RoomView, Stage, stageState, useRoomView } from "./Stage";
 import { activityItems, type ExtraItem, weave, withGaps } from "./timeline";
 import { Transcript } from "./Transcript";
@@ -86,21 +88,30 @@ export default function SessionScreen(_: RouteProps) {
   const held = useHeld(sessionId, phase);
   const questions = useSessionQuestions(inSession ? (turns[0]?.at ?? null) : null);
   const apps = status?.apps ?? [];
+  // What the sessions on screen did between turns, kept beside the transcript (ADR 0058): a
+  // reload or an earlier session still shows its calls, handovers and cuts.
+  const sessionIds = useMemo(() => [...new Set([...history.turns.map((t) => t.session_id), ...(sessionId ? [sessionId] : [])])], [history.turns, sessionId]);
+  const allActivity = useSessionActivity(sessionIds, activity);
   const items = useMemo(() => {
     const extras: ExtraItem[] = [
-      ...activityItems(activity, turns, apps),
+      ...activityItems(allActivity, [...history.turns, ...turns], apps),
       ...announced.map((a): ExtraItem => ({ kind: "change", key: `ch-${a.id}`, at: a.at, summary: a.summary, ok: a.ok })),
       ...held.map((h): ExtraItem => ({ kind: "hold", key: `hold-${h.at}`, at: h.at, back: h.back })),
       ...questions.map((q): ExtraItem => ({ kind: "question", key: `q-${q.key}`, at: q.asked_at, question: q })),
     ];
-    return withGaps([...buildHistory(history.turns, lines), ...weave(buildTranscript(turns, line, lines, switches, decisions), extras)]);
+    return withGaps(weave([...buildHistory(history.turns, lines), ...buildTranscript(turns, line, lines, switches, decisions)], extras));
     // apps is a fresh array per status; its contents are what matter.
-  }, [history.turns, turns, line, lines, switches, decisions, activity, announced, held, questions, apps.join(",")]);
+  }, [history.turns, turns, line, lines, switches, decisions, allActivity, announced, held, questions, apps.join(",")]);
   const speed = lines.find((l) => l.slug === line)?.speed ?? 1;
   const saying = useSaying(turns, phase === "speaking", activity, speed);
   // The operator is mid-turn: the turn opened (ADR 0055), or pieces of it are held until it closes (#73).
   const youTalking = inSession && (youSpeaking(activity) || heldTurns > 0);
   const calls = useMemo(() => callsOf(activity, apps), [activity, apps.join(",")]);
+  // The microphone is closed (ADR 0057): every state says so, with the way back in reach.
+  const listening = useListening();
+  const micOff = notListening(status);
+  const micOffText = micOff ? notListeningSub(micOff) : null;
+  const listenAgain = () => void listening.set(true);
   const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
   const { room, toggle: toggleRoom, leave: leaveRoom } = useRoomView(inSession && !onPhone);
   // Room view fills the panel from its top; leaving it goes back to the end of the record.
@@ -203,7 +214,7 @@ export default function SessionScreen(_: RouteProps) {
   const recording = phase === "recording";
   const canWrite = online && busy === null;
   const canType = online && modelsReady && !recording;
-  const canWake = canWrite && modelsReady && !recording;
+  const canWake = canWrite && modelsReady && !recording && !micOff;
 
   const send = async () => {
     const t = text.trim();
@@ -274,9 +285,16 @@ export default function SessionScreen(_: RouteProps) {
       ? { label: "End the phone session", icon: <PhoneOff />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
       : { label: "Hang up", icon: <PhoneOff />, onClick: sleep, loading: busy === "sleep", disabled: sleepOff }
     : showDock
-      ? { label: wakeWhy, icon: <AudioLines />, onClick: wake, loading: busy === "wake", disabled: wakeOff }
+      ? micOff
+        ? // Waking would open the mic the operator closed: the control is the way to open it again.
+          { label: "Mic off: listen again", icon: <MicOff />, onClick: listenAgain, loading: listening.busy, disabled: !online || listening.busy, tone: "danger" }
+        : { label: wakeWhy, icon: <AudioLines />, onClick: wake, loading: busy === "wake", disabled: wakeOff }
       : undefined;
-  const wakeButton = (
+  const wakeButton = micOff ? (
+    <Button variant="secondary" leadingIcon={<Mic />} loading={listening.busy} disabled={!online || listening.busy} onClick={listenAgain}>
+      Listen again
+    </Button>
+  ) : (
     <Button variant="ghost" leadingIcon={<Mic />} loading={busy === "wake"} disabled={wakeOff} onClick={wake}>
       Wake Ghost
     </Button>
@@ -315,7 +333,7 @@ export default function SessionScreen(_: RouteProps) {
       </Notice>
     ));
 
-  const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone, recording });
+  const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone, recording, micOff: micOffText });
   // The way back to the last agent used; Ghost's own sessions are this page.
   const showLast = startOnly && online && !loading && !needsSetup && lastSession && lastSession.slug !== "ghost";
   const newest = turns[turns.length - 1] ?? history.turns[history.turns.length - 1];
@@ -371,7 +389,21 @@ export default function SessionScreen(_: RouteProps) {
               />
             )}
             {!pending && errorEl}
-            {inSession && <Stage state={state} slug={line} name={lineLabel} calls={calls} room={room} onRoom={toggleRoom} />}
+            {inSession && (
+              <Stage
+                state={state}
+                slug={line}
+                name={lineLabel}
+                calls={calls}
+                room={room}
+                onRoom={toggleRoom}
+                micOff={micOff && !onPhone ? { text: micOffText ?? "Mic off", onListen: listenAgain, busy: listening.busy } : null}
+              />
+            )}
+            {/* Out of a session with the mic closed (ADR 0057): the strip says so, with the way back. */}
+            {!inSession && micOff && online && (
+              <Stage state="listening" slug="ghost" name="Ghost" calls={[]} room={false} micOff={{ text: micOffText ?? "Mic off", onListen: listenAgain, busy: listening.busy }} />
+            )}
             {composerEl}
             {pending && errorEl}
           </div>
@@ -381,7 +413,7 @@ export default function SessionScreen(_: RouteProps) {
       {hasTranscript ? (
         <>
           <div className={cx("session-record", room && "is-behind-room")}>
-            <Transcript items={items} nameOf={nameOf} thinkingAs={thinking ? line : null} saying={saying} lines={lines} canReplay={!inSession && online} onAnswer={answer} />
+            <Transcript items={items} nameOf={nameOf} thinkingAs={thinking ? line : null} saying={saying} lines={lines} canReplay={!inSession && online} onAnswer={answer} changes={announced} />
           </div>
           <div ref={end} />
           {room && inSession && (
@@ -402,7 +434,15 @@ export default function SessionScreen(_: RouteProps) {
         <div className={cx("session-start page-fill", !startOnly && "session-start--live")}>
           <div className="session-start__stack">
             {/* Presence only: it shows Ghost's state and is never a button, so a stray click can't open the mic. */}
-            {presencePhase === "speaking" ? <SpeakingWave size={96} /> : <VoicePresence size={96} phase={presencePhase} label="" />}
+            {micOff && !onPhone && !needsSetup && online ? (
+              <span className="session-start__mic-off" aria-hidden>
+                <MicOff />
+              </span>
+            ) : presencePhase === "speaking" ? (
+              <SpeakingWave size={96} />
+            ) : (
+              <VoicePresence size={96} phase={presencePhase} label="" />
+            )}
             <h2 className="session-start__title t-display">{start.title}</h2>
             {start.text && <p className="session-start__text">{start.text}</p>}
             {needsSetup ? (
@@ -447,17 +487,20 @@ export default function SessionScreen(_: RouteProps) {
 }
 
 /** The start state before the first turn: one presence, one line, one hint. Never promises what can’t happen yet. */
-function startCopy({ online, loading, needsSetup, locked, inSession, onPhone, recording }: { online: boolean; loading: boolean; needsSetup: boolean; locked: boolean; inSession: boolean; onPhone: boolean; recording: boolean }): { title: string; text?: string } {
+export function startCopy({ online, loading, needsSetup, locked, inSession, onPhone, recording, micOff }: { online: boolean; loading: boolean; needsSetup: boolean; locked: boolean; inSession: boolean; onPhone: boolean; recording: boolean; micOff?: string | null }): { title: string; text?: string } {
   if (!online) return { title: "Reconnecting", text: "This picks up again as soon as Ghost is back." };
   // The shell's banner and the status card already say the models are loading; this says
   // the next thing instead of repeating it.
-  if (loading) return { title: "Almost ready", text: `Say ${quoted("Hey Ghost")} once the models finish` };
+  // The mic is closed (ADR 0057): nothing here may tell the operator to speak.
+  if (loading) return micOff ? { title: "Almost ready", text: "Your mic is off. Type below once the models finish." } : { title: "Almost ready", text: `Say ${quoted("Hey Ghost")} once the models finish` };
   // A locked keyring (ADR 0036): the password is there, Ghost just can't read it yet.
   if (needsSetup && locked) return { title: "Unlock your keyring", text: "Ghost can’t read its passwords, the model’s included, until it’s unlocked." };
   if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model password before it can answer." };
   // The header already says “Listening”; this says what to do with it.
   if (onPhone) return { title: "On your phone", text: "Ghost hears you through your phone. You can end the session here." };
+  if (inSession && micOff) return { title: "Your mic is off", text: "Type below. Ghost can’t hear you until you turn listening on." };
   if (inSession) return { title: "Go ahead", text: "Ask what’s waiting on you." };
+  if (micOff) return { title: "Ghost isn’t listening", text: `${micOff}. Type below, or turn listening on to talk.` };
   // The Hearing test holds the mic (ADR 0042); closing it gives the mic back.
   if (recording) return { title: "The Hearing test has the mic", text: "Ghost isn’t listening for its name until you close it." };
   // The field under it reads the same in every state; this line carries “or type”.

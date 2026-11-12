@@ -12,6 +12,7 @@
 
 pub mod app;
 pub mod apps;
+pub mod calls;
 pub mod client;
 pub mod clients;
 pub mod controller;
