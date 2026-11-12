@@ -86,27 +86,37 @@ pub const PERF_POLICY: &str = "[permissions]\nask = [\"github.issue_write(state=
 pub struct Profile {
     pub name: String,
     pub ttfb: Duration,
+    /// A reply that opens with a tool call, from the call's start; None, `ttfb`.
+    pub call_ttfb: Option<Duration>,
     /// Output tokens a second; None writes the reply at once.
     pub tokens_per_sec: Option<f64>,
 }
 
 impl Profile {
-    pub const NAMES: [&'static str; 3] = ["sonnet", "haiku", "instant"];
+    pub const NAMES: [&'static str; 5] = ["sonnet", "haiku", "instant", "sonnet55", "haiku55"];
 
     /// `sonnet`: 1.2 s to the first token, 60 tokens a second (the main model as measured
     /// 2026-10-19 to 2026-10-29: first token 1.1 to 1.5 s). `haiku`: 0.45 s and 150 (a
     /// small model through the same connection: 0.6 s to "hello" on 2026-10-19).
     /// `instant`: no model time, the stages alone.
+    ///
+    /// `sonnet55` and `haiku55` are the models as measured through the default
+    /// connection on 2026-11-12 (`perf llm`, Ghost's prompt and tools): Sonnet 5.5 1.73 s
+    /// to its first words, 3.12 s to a tool call, its text arriving all at once; Haiku 5.5
+    /// 0.52 s to words, 1.11 s to a call, about 290 tokens a second.
     pub fn named(name: &str) -> Option<Self> {
-        let (ttfb_ms, rate) = match name {
-            "sonnet" => (1200, Some(60.0)),
-            "haiku" => (450, Some(150.0)),
-            "instant" => (0, None),
+        let (ttfb_ms, call_ms, rate) = match name {
+            "sonnet" => (1200, None, Some(60.0)),
+            "haiku" => (450, None, Some(150.0)),
+            "instant" => (0, None, None),
+            "sonnet55" => (1730, Some(3120), None),
+            "haiku55" => (520, Some(1110), Some(290.0)),
             _ => return None,
         };
         Some(Self {
             name: name.into(),
             ttfb: Duration::from_millis(ttfb_ms),
+            call_ttfb: call_ms.map(Duration::from_millis),
             tokens_per_sec: rate,
         })
     }
@@ -175,6 +185,8 @@ pub struct RunConfig {
     pub ablate: BTreeSet<String>,
     /// The scripted model's time to first token.
     pub ttfb: Duration,
+    /// ... and to a reply that opens with a tool call; None, `ttfb`.
+    pub call_ttfb: Option<Duration>,
     /// Its output tokens a second; None writes the reply at once.
     pub tokens_per_sec: Option<f64>,
     /// The profile those two came from, for the label.
@@ -198,6 +210,7 @@ impl Default for RunConfig {
             overrides: BTreeMap::new(),
             ablate: BTreeSet::new(),
             ttfb: Duration::ZERO,
+            call_ttfb: None,
             tokens_per_sec: None,
             profile: None,
             variant: None,
@@ -563,11 +576,21 @@ impl Bench {
                                 .collect()
                         })
                         .collect();
-                    ScriptedModel::paced(opening, p.ttfb, p.tokens_per_sec, "scripted-fast")
-                        as Arc<dyn crate::llm::ModelPort>
+                    ScriptedModel::paced_calls(
+                        opening,
+                        p.ttfb,
+                        p.call_ttfb,
+                        p.tokens_per_sec,
+                        "scripted-fast",
+                    ) as Arc<dyn crate::llm::ModelPort>
                 });
-                let model = ScriptedModel::paced(lines, cfg.ttfb, cfg.tokens_per_sec, "scripted")
-                    as Arc<dyn crate::llm::ModelPort>;
+                let model = ScriptedModel::paced_calls(
+                    lines,
+                    cfg.ttfb,
+                    cfg.call_ttfb,
+                    cfg.tokens_per_sec,
+                    "scripted",
+                ) as Arc<dyn crate::llm::ModelPort>;
                 (model, fast_model)
             }
         };

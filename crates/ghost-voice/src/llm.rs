@@ -1145,6 +1145,9 @@ pub struct ScriptedModel {
     lines: Vec<Vec<ScriptedReply>>,
     served: Arc<Mutex<Vec<usize>>>,
     ttfb: std::time::Duration,
+    /// A reply that opens with a tool call comes this long after the call began, when set
+    /// (a real model takes longer to a call than to words).
+    call_ttfb: Option<std::time::Duration>,
     /// Output tokens a second; None streams the reply at once.
     rate: Option<f64>,
     name: String,
@@ -1184,6 +1187,7 @@ impl ScriptedModel {
             lines,
             served: Arc::new(Mutex::new(vec![0; n])),
             ttfb,
+            call_ttfb: None,
             rate: None,
             name: "scripted".into(),
             calls: Mutex::new(0),
@@ -1204,6 +1208,28 @@ impl ScriptedModel {
             lines,
             served: Arc::new(Mutex::new(vec![0; n])),
             ttfb,
+            call_ttfb: None,
+            rate: tokens_per_sec.filter(|r| *r > 0.0),
+            name: name.into(),
+            calls: Mutex::new(0),
+        })
+    }
+
+    /// `paced`, with a reply that opens with a tool call coming `call_ttfb` after the call
+    /// began (its own tokens' time on top, at the rate).
+    pub fn paced_calls(
+        lines: Vec<Vec<ScriptedReply>>,
+        ttfb: std::time::Duration,
+        call_ttfb: Option<std::time::Duration>,
+        tokens_per_sec: Option<f64>,
+        name: &str,
+    ) -> Arc<Self> {
+        let n = lines.len();
+        Arc::new(Self {
+            lines,
+            served: Arc::new(Mutex::new(vec![0; n])),
+            ttfb,
+            call_ttfb,
             rate: tokens_per_sec.filter(|r| *r > 0.0),
             name: name.into(),
             calls: Mutex::new(0),
@@ -1288,7 +1314,11 @@ impl ModelPort for ScriptedModel {
                 }
             }
         };
-        let ttfb = reply.ttfb.unwrap_or(self.ttfb);
+        let opens_with_call = reply.text.trim().is_empty() && !reply.tool_calls.is_empty();
+        let ttfb = reply.ttfb.unwrap_or(match self.call_ttfb {
+            Some(t) if opens_with_call => t,
+            _ => self.ttfb,
+        });
         Box::pin(async_stream_words(
             words,
             reply.tool_calls,

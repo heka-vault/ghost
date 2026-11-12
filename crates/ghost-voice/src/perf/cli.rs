@@ -575,6 +575,7 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                     overrides: over.clone(),
                     ablate: ablate.clone(),
                     ttfb: profile.as_ref().map_or(ttfb, |p| p.ttfb),
+                    call_ttfb: profile.as_ref().and_then(|p| p.call_ttfb),
                     tokens_per_sec: profile.as_ref().map_or(rate, |p| p.tokens_per_sec),
                     profile: profile.as_ref().map(|p| p.name.clone()),
                     variant: variant.clone(),
