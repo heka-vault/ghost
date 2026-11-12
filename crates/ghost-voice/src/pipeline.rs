@@ -1069,6 +1069,10 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             Frame::user_text(first, true)
         });
     } else {
+        if settings.llm_warm && !matches!(p.greeting, Greeting::None) {
+            // The first turn is a few seconds off: its prompt is cached meanwhile.
+            opening.push(Frame::WarmCache);
+        }
         match &p.greeting {
             Greeting::Varied => {
                 let text = match &runtime {

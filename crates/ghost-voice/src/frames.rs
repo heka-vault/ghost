@@ -120,6 +120,9 @@ pub enum Frame {
     SystemPrompt(String),
     SetTools(Tools),
     RunLlm,
+    /// A session opens: write the model's prompt cache now, while the greeting plays, so
+    /// the first turn reads it (`ModelPort::warm_cache`; the main model and the fast one).
+    WarmCache,
     /// Start answering `text` at Smart Turn's verdict, before the grace confirms the turn.
     Speculate(String),
     /// The grace ended with the same words: the held answer is the answer. The words
@@ -159,6 +162,14 @@ pub enum Frame {
     HandOver {
         names: Vec<String>,
         secs: f64,
+    },
+    /// A reply began a tool call (`ghost_llm::Event::ToolStarting`): the first sign the turn
+    /// needs a tool, before the call is whole. `said` is the model's own words before it,
+    /// when they are short enough to say for it (the narration cut sets it; the fast
+    /// model's held words come in it from the model's stage). Nothing runs on it.
+    ToolStarting {
+        name: String,
+        said: Option<String>,
     },
     Metrics(Metric),
 
@@ -239,6 +250,7 @@ impl Frame {
             Frame::SystemPrompt(_) => "SystemPrompt",
             Frame::SetTools(_) => "SetTools",
             Frame::RunLlm => "RunLlm",
+            Frame::WarmCache => "WarmCache",
             Frame::Speculate(_) => "Speculate",
             Frame::SpeculationConfirmed(_) => "SpeculationConfirmed",
             Frame::SpeculationCancelled => "SpeculationCancelled",
@@ -254,6 +266,7 @@ impl Frame {
             Frame::LlmEnd => "LlmEnd",
             Frame::ReplyCut => "ReplyCut",
             Frame::HandOver { .. } => "HandOver",
+            Frame::ToolStarting { .. } => "ToolStarting",
             Frame::Metrics(_) => "Metrics",
             Frame::ThinkingStart => "ThinkingStart",
             Frame::ThinkingStop => "ThinkingStop",
