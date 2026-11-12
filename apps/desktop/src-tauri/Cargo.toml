@@ -31,6 +31,12 @@ hyperlocal = "0.9"
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 rustix = { workspace = true, features = ["process"] }
+zbus.workspace = true
+
+# The floating room's surface (ADR 0059): its window through GTK, and a few X11 reads.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+x11 = { version = "2", features = ["xlib"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -380,6 +380,7 @@ export class MockDaemon {
       this.playStory();
     }
     this.playPieces();
+    this.playFloating();
     return () => this.listeners.delete(l);
   }
   /**
@@ -499,6 +500,93 @@ export class MockDaemon {
       this.pushStatus({ phase: "thinking" });
     });
     this.later(6100, () => this.reply("It finished at 3:12 PM, and every check passed."));
+  }
+  /**
+   * `?mock=floating`: a whole spoken session as the daemon sends it, for the floating room
+   * (ADR 0059), then rest, then again. Synthetic words only.
+   */
+  private floatingPlayed = false;
+  private playFloating() {
+    if (!this.scenario.floating || this.floatingPlayed) return;
+    this.floatingPlayed = true;
+    const loop = () => {
+      let at = 0;
+      const step = (ms: number, f: () => void) => {
+        at += ms;
+        this.later(at, f);
+      };
+      step(2500, () => this.wake("ghost"));
+      step(900, () => this.act("you_started"));
+      step(2300, () => {
+        this.act("you_stopped");
+        const asked = "What needs me before the billing deploy?";
+        this.addTurn("user", asked, "voice");
+        this.heard(asked);
+        this.pushStatus({ phase: "thinking" });
+      });
+      const calls = [
+        { name: "github_issue_list", id: "f1" },
+        { name: "github_issue_read", id: "f2" },
+        { name: "github_actions_runs", id: "f3" },
+        { name: "ghost_recall", id: "f4" },
+      ];
+      step(400, () => this.act("call", calls[0]));
+      step(500, () => this.act("call", calls[2]));
+      step(600, () => this.act("result", calls[0]));
+      step(150, () => this.act("call", calls[1]));
+      step(700, () => this.act("result", calls[2]));
+      step(200, () => this.act("result", calls[1]));
+      step(100, () => this.act("call", calls[3]));
+      step(500, () => this.act("result", calls[3]));
+      step(300, () => this.reply("Two things. The billing deploy failed at its migration step, and app 151 looks like a duplicate of 148."));
+      step(8200, () => {
+        this.propose({
+          source: "github",
+          operation: "github_issue_write",
+          target: "ghost-mock/app#151",
+          summary: "Close app#151 as a duplicate of #148",
+          rationale: "Same Safari cookie bug; 148 has the fix in review.",
+        });
+        this.reply("Close app 151 as a duplicate? Say yes, or press Yes.", 3200);
+      });
+      step(8000, () => {
+        if (!this.pending) return;
+        this.act("you_started");
+      });
+      step(900, () => {
+        if (!this.pending) return;
+        this.act("you_stopped");
+        this.addTurn("user", "Yes.", "voice");
+        this.heard("Yes.");
+        this.confirm();
+      });
+      step(4200, () => {
+        const q: QuestionView = {
+          key: `question:float-${Date.now()}`, kind: "question", source: "agent:accounting", asked_by: "Accounting", asked_at: now(),
+          question: "Send the Q3 summary to Dana now, or wait for the Stripe fees line?", detail: null,
+          choices: ["Send it", "Wait"], choices_only: true, state: "open", urgency: "notify", in_run: true,
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(), answer: null, answered_at: null, answered_via: null, choice: null, change_id: null,
+        };
+        this.questions = [...this.questions, q];
+        this.emit({ type: "question", question: q });
+        this.reply("Accounting asks: send the summary now, or wait?", 3000);
+      });
+      step(8000, () => {
+        const q = this.questions.find((x) => x.key.startsWith("question:float-") && x.state === "open");
+        if (!q) return;
+        this.addTurn("user", "Wait.", "voice");
+        this.heard("Wait.");
+        const answered: QuestionView = { ...q, state: "answered", answer: "Wait", choice: "Wait", answered_at: now(), answered_via: "voice" };
+        this.questions = this.questions.map((x) => (x.key === q.key ? answered : x));
+        this.emit({ type: "question", question: answered });
+      });
+      step(800, () => {
+        this.pushStatus({ ending: true });
+        this.reply("Okay. I'll tell Accounting to wait. Talk soon.", 3200);
+      });
+      step(9000, loop);
+    };
+    loop();
   }
   private emit(e: GhostEvent) {
     for (const l of this.listeners) l(e);

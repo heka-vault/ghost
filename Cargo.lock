@@ -2622,6 +2622,7 @@ version = "2026.10.0"
 dependencies = [
  "futures-util",
  "ghost-api",
+ "gtk",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2637,6 +2638,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "x11",
+ "zbus",
 ]
 
 [[package]]

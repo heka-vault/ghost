@@ -24,6 +24,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { notListening, notListeningSub } from "../../app/listening";
 import { useListening } from "../../app/ListeningSwitch";
+import { usePosture } from "../../app/PostureContext";
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
@@ -32,7 +33,7 @@ import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
 import { useAnnounced, useHeld, useSaying, useSessionActivity, useSessionQuestions } from "./live";
-import { RoomView, Stage, stageState, useRoomView } from "./Stage";
+import { RoomView, Stage, stageState } from "./Stage";
 import { activityItems, type ExtraItem, weave, withGaps } from "./timeline";
 import { Transcript } from "./Transcript";
 import { buildHistory, buildTranscript } from "./transcript";
@@ -113,7 +114,11 @@ export default function SessionScreen(_: RouteProps) {
   const micOffText = micOff ? notListeningSub(micOff) : null;
   const listenAgain = () => void listening.set(true);
   const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
-  const { room, toggle: toggleRoom, leave: leaveRoom } = useRoomView(inSession && !onPhone);
+  // Room view is the room posture on this screen (app/posture.ts): one rule, one switch.
+  const posture = usePosture();
+  const room = posture.posture === "room" && inSession && !onPhone;
+  const toggleRoom = () => posture.hold(room ? "auto" : "room");
+  const leaveRoom = () => posture.hold("auto");
   // Room view fills the panel from its top; leaving it goes back to the end of the record.
   useEffect(() => {
     if (room) scrollPanelToTop();

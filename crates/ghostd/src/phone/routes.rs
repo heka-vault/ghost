@@ -89,7 +89,8 @@ pub trait PhoneEvents: Send + Sync {
 /// control API's WebSocket sends, less the voice level (twenty a second for the desktop's
 /// waveform; nothing on the phone draws it, and the data channel shares the call) and the
 /// session's activity (ADR 0055: the desktop's conversation screen, not the phone's) and
-/// which words of a reply are heard (`saying`, ADR 0058: the desktop's highlight). The
+/// which words of a reply are heard (`saying`, ADR 0058: the desktop's highlight), and the
+/// request to raise the desktop's window (`show_app`, ADR 0059: the desk's own). The
 /// operator's turn as it closed (`heard`) does go: the phone's captions show its words.
 /// Returns when the bus closes.
 pub async fn forward_events(
@@ -106,7 +107,16 @@ pub async fn forward_events(
                 if let Some(data) = event_of(&text)
                     && !matches!(
                         kind(&data),
-                        Some("log" | "status" | "voice" | "activity" | "saying" | "run" | "reach")
+                        Some(
+                            "log"
+                                | "status"
+                                | "voice"
+                                | "activity"
+                                | "saying"
+                                | "run"
+                                | "reach"
+                                | "show_app"
+                        )
                     )
                 {
                     backlog.push(data);
@@ -128,7 +138,9 @@ pub async fn forward_events(
                 if let Some(data) = event_of(&text)
                     && !matches!(
                         kind(&data),
-                        Some("log" | "voice" | "activity" | "saying" | "run" | "reach")
+                        Some(
+                            "log" | "voice" | "activity" | "saying" | "run" | "reach" | "show_app"
+                        )
                     )
                 {
                     sink.send_server_message(&data).await;
@@ -1393,6 +1405,9 @@ mod tests {
                 json!({"type": "saying", "saying": {"reply": 0, "from": 0, "to": 3}}).to_string(),
             )
             .unwrap();
+            // ADR 0059: raising the desktop's window is the desk's own.
+            tx.send(json!({"type": "show_app", "session_id": "s1"}).to_string())
+                .unwrap();
             tx.send(
                 json!({"type": "heard", "heard": {"text": "close it", "reopened": false}})
                     .to_string(),
