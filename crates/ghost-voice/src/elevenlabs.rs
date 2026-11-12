@@ -195,6 +195,7 @@ pub fn session_tts(
         voices,
         line,
         clause_min_words,
+        first_clause_words: s.tts_first_clause_words,
         url: DEFAULT_URL.into(),
         connect_timeout: Duration::from_secs_f64(CONNECT_TIMEOUT_SECS),
     })
@@ -312,6 +313,10 @@ pub struct ElevenLabsConfig {
     pub voices: BTreeMap<String, String>,
     pub line: Option<LineFn>,
     pub clause_min_words: Option<usize>,
+    /// A reply's first piece cut early, as Kokoro's is (`GHOST_TTS_FIRST_CLAUSE_WORDS`):
+    /// with `auto_mode` the cloud starts on each piece as it arrives, so a shorter first
+    /// piece is sooner audio here too.
+    pub first_clause_words: usize,
     pub url: String,
     pub connect_timeout: Duration,
 }
@@ -329,7 +334,17 @@ struct Shared {
     speaking: AtomicBool,
     /// The reply's token, as the model stage stamped it.
     turn: Mutex<Option<tokio_util::sync::CancellationToken>>,
+    /// The context being spoken in, for the keep-alive.
+    context: std::sync::atomic::AtomicU64,
 }
+
+/// How often a quiet socket's context is told it is still wanted (ElevenLabs'
+/// `KeepContextAlive`, an empty text), well inside the 180 s `inactivity_timeout`.
+pub const KEEP_ALIVE: Duration = Duration::from_secs(60);
+
+type Ws = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
 
 struct Socket {
     tx: mpsc::Sender<String>,
@@ -351,11 +366,17 @@ pub struct ElevenLabsTts {
     /// Kokoro, taking over on failure: set by the failover.
     fallback: Option<Arc<tokio::sync::Mutex<KokoroTts>>>,
     on_say: Option<OnSay>,
+    /// A handshake started ahead (`warm`), for this voice.
+    pending: Option<(String, JoinHandle<Result<Ws, String>>)>,
+    /// Connect only when there are words to send, as before ADR 0053 (the harness's
+    /// before-and-after).
+    cold: bool,
 }
 
 impl ElevenLabsTts {
     pub fn new(cfg: ElevenLabsConfig) -> Self {
-        let clause = cfg.clause_min_words;
+        let aggregator = ClauseAggregator::new(cfg.clause_min_words)
+            .with_first_clause(cfg.first_clause_words);
         Self {
             cfg,
             shared: Arc::new(Shared {
@@ -366,15 +387,24 @@ impl ElevenLabsTts {
                 end_owed: AtomicBool::new(false),
                 speaking: AtomicBool::new(false),
                 turn: Mutex::new(None),
+                context: std::sync::atomic::AtomicU64::new(0),
             }),
             socket: None,
-            aggregator: ClauseAggregator::new(clause),
+            aggregator,
             context_id: 0,
             turns: None,
             speed: None,
             fallback: None,
             on_say: None,
+            pending: None,
+            cold: false,
         }
+    }
+
+    /// Connect only when the first words are ready, never ahead (the measurement's before).
+    pub fn cold(mut self) -> Self {
+        self.cold = true;
+        self
     }
 
     pub fn with_turns(mut self, turns: Arc<TurnControl>) -> Self {
@@ -434,6 +464,64 @@ impl ElevenLabsTts {
             s.reader.abort();
             s.writer.abort();
         }
+        if let Some((_, h)) = self.pending.take() {
+            h.abort();
+        }
+    }
+
+    /// The socket's handshake for `voice`, on a task of its own: TLS and the websocket
+    /// upgrade, 0.1 to 0.4 s, bounded by the connect timeout. The result is the stream or
+    /// the reason, with nothing of the key in it.
+    fn connect(&self, voice: &str) -> JoinHandle<Result<Ws, String>> {
+        // `inactivity_timeout` at its documented maximum: a context left quiet for the
+        // default 20 s between turns would otherwise be closed under a session that is
+        // only listening (the keep-alive below covers longer).
+        let url = format!(
+            "{}/v1/text-to-speech/{voice}/multi-stream-input?model_id={}&output_format=pcm_{SAMPLE_RATE}&auto_mode=true&inactivity_timeout=180",
+            self.cfg.url.trim_end_matches('/'),
+            self.cfg.model
+        );
+        let key = self.cfg.api_key.clone();
+        let timeout = self.cfg.connect_timeout;
+        tokio::spawn(async move {
+            let mut request =
+                tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
+                    url.as_str(),
+                )
+                .map_err(|e| format!("bad url: {e}"))?;
+            let header = key
+                .as_str()
+                .parse()
+                .map_err(|_| "the key can't be sent as a header".to_string())?;
+            request.headers_mut().insert("xi-api-key", header);
+            match tokio::time::timeout(timeout, tokio_tungstenite::connect_async(request)).await {
+                Ok(Ok((ws, _))) => Ok(ws),
+                Ok(Err(tokio_tungstenite::tungstenite::Error::Http(r))) => {
+                    Err(format!("HTTP {}", r.status().as_u16()))
+                }
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("connect timed out".to_string()),
+            }
+        })
+    }
+
+    /// Start the handshake ahead of the first words (ADR 0053): at the session's first
+    /// frame and after an agent's voice change, so a reply never waits for it. Nothing when
+    /// a socket for the voice is up, a connect is under way, or the voice is written off.
+    fn warm(&mut self) {
+        if self.cold || self.written_off() || self.pending.is_some() {
+            return;
+        }
+        let voice = self.active_voice();
+        if self
+            .socket
+            .as_ref()
+            .is_some_and(|s| s.voice == voice && !s.reader.is_finished())
+        {
+            return;
+        }
+        let handle = self.connect(&voice);
+        self.pending = Some((voice, handle));
     }
 
     /// Connect (once per voice) and spawn the reader; false when written off.
@@ -453,58 +541,43 @@ impl ElevenLabsTts {
             s.reader.abort();
             s.writer.abort();
         }
-        let url = format!(
-            "{}/v1/text-to-speech/{voice}/multi-stream-input?model_id={}&output_format=pcm_{SAMPLE_RATE}&auto_mode=true",
-            self.cfg.url.trim_end_matches('/'),
-            self.cfg.model
-        );
-        let request =
-            match tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
-                url.as_str(),
-            ) {
-                Ok(mut r) => {
-                    match self.cfg.api_key.as_str().parse() {
-                        Ok(v) => {
-                            r.headers_mut().insert("xi-api-key", v);
-                        }
-                        Err(_) => {
-                            self.write_off("the key can't be sent as a header");
-                            return false;
-                        }
-                    }
-                    r
-                }
-                Err(e) => {
-                    self.write_off(&format!("bad url: {e}"));
-                    return false;
-                }
-            };
-        let connected = tokio::time::timeout(
-            self.cfg.connect_timeout,
-            tokio_tungstenite::connect_async(request),
-        )
-        .await;
-        let ws = match connected {
-            Ok(Ok((ws, _))) => ws,
-            Ok(Err(e)) => {
-                let reason = match &e {
-                    tokio_tungstenite::tungstenite::Error::Http(r) => {
-                        format!("HTTP {}", r.status().as_u16())
-                    }
-                    other => other.to_string(),
-                };
+        // A connect started ahead for this voice (`warm`), else one now.
+        let connecting = match self.pending.take() {
+            Some((v, handle)) if v == voice => handle,
+            Some((_, handle)) => {
+                handle.abort();
+                self.connect(&voice)
+            }
+            None => self.connect(&voice),
+        };
+        let ws = match connecting.await {
+            Ok(Ok(ws)) => ws,
+            Ok(Err(reason)) => {
                 self.write_off(&reason);
                 return false;
             }
             Err(_) => {
-                self.write_off("connect timed out");
+                self.write_off("the connect was dropped");
                 return false;
             }
         };
         let (mut sink, mut stream) = ws.split();
         let (tx, mut rx) = mpsc::channel::<String>(64);
+        let alive = self.shared.clone();
         let writer = tokio::spawn(async move {
-            while let Some(text) = rx.recv().await {
+            let mut keep = tokio::time::interval_at(tokio::time::Instant::now() + KEEP_ALIVE, KEEP_ALIVE);
+            loop {
+                let text = tokio::select! {
+                    t = rx.recv() => match t {
+                        Some(t) => t,
+                        None => break,
+                    },
+                    _ = keep.tick() => json!({
+                        "text": "",
+                        "context_id": alive.context.load(Ordering::SeqCst).to_string(),
+                    })
+                    .to_string(),
+                };
                 if sink.send(WsMessage::Text(text.into())).await.is_err() {
                     break;
                 }
@@ -626,6 +699,7 @@ impl ElevenLabsTts {
         });
         // The context's first message carries the voice settings.
         self.context_id += 1;
+        self.shared.context.store(self.context_id, Ordering::SeqCst);
         let mut init = json!({"text": " ", "context_id": self.context_id.to_string()});
         if let Some(speed) = self.speed {
             init["voice_settings"] = json!({"speed": speed});
@@ -683,6 +757,9 @@ impl Stage for ElevenLabsTts {
                 out.forward(frame, direction).await;
             }
             return;
+        }
+        if !matches!(frame, Frame::End | Frame::Cancel | Frame::VoiceChange { .. }) {
+            self.warm();
         }
         match &frame {
             Frame::LlmStart => {
@@ -745,12 +822,16 @@ impl Stage for ElevenLabsTts {
                     self.send(json!({"context_id": ctx, "close_context": true}))
                         .await;
                     self.context_id += 1;
+                    self.shared.context.store(self.context_id, Ordering::SeqCst);
                     let ctx = self.context_id.to_string();
                     self.send(json!({"text": " ", "context_id": ctx})).await;
                 }
                 self.shared.speaking.store(false, Ordering::SeqCst);
             }
             Frame::End | Frame::Cancel => {
+                if let Some((_, h)) = self.pending.take() {
+                    h.abort();
+                }
                 if let Some(s) = self.socket.take() {
                     let _ = s.tx.send(json!({"close_socket": true}).to_string()).await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -764,6 +845,9 @@ impl Stage for ElevenLabsTts {
     }
 
     async fn stopped(&mut self) {
+        if let Some((_, h)) = self.pending.take() {
+            h.abort();
+        }
         if let Some(s) = self.socket.take() {
             s.reader.abort();
             s.writer.abort();
@@ -968,6 +1052,18 @@ mod tests {
 
     impl FakeElevenLabs {
         async fn start(drop_after: Option<usize>, reject: Option<u16>) -> Self {
+            Self::start_with(drop_after, reject, Duration::ZERO, Duration::ZERO).await
+        }
+
+        /// With the service's own times: `handshake` before the upgrade is answered (TLS
+        /// and the upgrade, 0.1 to 0.4 s from this desk), `audio_after` from a text to its
+        /// first audio (Flash v2.5, about 0.25 s, ADR 0026).
+        async fn start_with(
+            drop_after: Option<usize>,
+            reject: Option<u16>,
+            handshake: Duration,
+            audio_after: Duration,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
             let paths = Arc::new(Mutex::new(Vec::new()));
@@ -995,6 +1091,7 @@ mod tests {
                             }
                             Ok(resp)
                         };
+                        tokio::time::sleep(handshake).await;
                         let Ok(ws) = tokio_tungstenite::accept_hdr_async(stream, check).await
                         else {
                             return;
@@ -1038,6 +1135,7 @@ mod tests {
                             } else {
                                 format!("{text} ")
                             };
+                            tokio::time::sleep(audio_after).await;
                             let chars: Vec<String> =
                                 spoken.chars().map(|c| c.to_string()).collect();
                             let n = chars.len();
@@ -1107,6 +1205,7 @@ mod tests {
             voices,
             line,
             clause_min_words: Some(4),
+            first_clause_words: 0,
             url: url.into(),
             connect_timeout: Duration::from_secs(3),
         })
@@ -1137,6 +1236,102 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
         drain(&mut rx).await
+    }
+
+    // --- what Ghost adds before the cloud's first audio (ADR 0053) -------------------
+
+    /// One reply as the model streams it, from the end of the operator's words: the
+    /// model's first token after `model`, then a token every 3.4 ms (Haiku 5.5's 290 a
+    /// second). The seconds from the first token to the first audio frame out of the stage.
+    type Heard = Arc<Mutex<Vec<std::time::Instant>>>;
+
+    /// The stage's output, every audio frame's arrival kept.
+    fn listening() -> (Out, Heard, JoinHandle<()>) {
+        let (out, mut rx) = Out::capture();
+        let heard: Heard = Arc::new(Mutex::new(Vec::new()));
+        let h = heard.clone();
+        let watch = tokio::spawn(async move {
+            while let Some(p) = rx.recv().await {
+                if matches!(p.frame, Frame::TtsAudio { .. }) {
+                    h.lock().unwrap().push(std::time::Instant::now());
+                }
+            }
+        });
+        (out, heard, watch)
+    }
+
+    async fn first_audio(
+        tts: &mut TtsFailover,
+        (out, heard): (&Out, &Heard),
+        reply: &str,
+        model: Duration,
+    ) -> f64 {
+        tts.process(Frame::UserStopped, Direction::Down, out).await;
+        tokio::time::sleep(model).await;
+        let began = std::time::Instant::now();
+        tts.process(Frame::LlmStart, Direction::Down, out).await;
+        for word in reply.split_inclusive(' ') {
+            tts.process(Frame::LlmText(word.into()), Direction::Down, out)
+                .await;
+            tokio::time::sleep(Duration::from_micros(3400)).await;
+        }
+        tts.process(Frame::LlmEnd, Direction::Down, out).await;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(at) = heard.lock().unwrap().iter().find(|t| **t > began) {
+                return at.duration_since(began).as_secs_f64();
+            }
+            assert!(std::time::Instant::now() < deadline, "no audio came back");
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_the_cloud_voice_waits_for_the_service_and_not_for_ghost() {
+        // A local stand-in with the service's times: 150 ms to connect, 250 ms from a
+        // text to its audio. Before: the socket opened when the first clause was ready, and
+        // the first clause was a whole clause. After: the socket opens at the turn's first
+        // frame, and the first piece is cut early as Kokoro's is.
+        let (handshake, service) = (Duration::from_millis(150), Duration::from_millis(250));
+        let reply = "I found three issues waiting and two of them need your sign-off today.";
+        let mut rows = Vec::new();
+        for (label, cold, first_words) in [("before", true, 0usize), ("after", false, 4)] {
+            let server = FakeElevenLabs::start_with(None, None, handshake, service).await;
+            let mut cfg_tts = cloud(&server.url, BTreeMap::new(), None);
+            cfg_tts.cfg.first_clause_words = first_words;
+            cfg_tts.aggregator = ClauseAggregator::new(Some(4)).with_first_clause(first_words);
+            if cold {
+                cfg_tts = cfg_tts.cold();
+            }
+            let (synth, _) = kokoro();
+            let local = KokoroTts::new(synth, TtsSettings::default(), Some(4)).unwrap();
+            let mut tts = TtsFailover::new(cfg_tts, local);
+            // The first reply of a session (a fresh socket), then one on the open socket.
+            let (out, heard, watch) = listening();
+            let model = Duration::from_millis(500);
+            let fresh = first_audio(&mut tts, (&out, &heard), reply, model).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let open = first_audio(&mut tts, (&out, &heard), reply, model).await;
+            watch.abort();
+            assert!(!tts.on_fallback(), "{label}: fell back");
+            eprintln!(
+                "{label}: first token to first audio {:.0} ms on a fresh socket, {:.0} ms on an open one \
+                 (the service's own {:.0} ms)",
+                fresh * 1000.0,
+                open * 1000.0,
+                service.as_secs_f64() * 1000.0
+            );
+            rows.push((fresh, open));
+        }
+        let ghost = |t: f64| t - service.as_secs_f64();
+        let (before, after) = (rows[0], rows[1]);
+        // Before, a fresh socket paid the handshake after the first clause was written.
+        assert!(ghost(before.0) > handshake.as_secs_f64(), "{before:?}");
+        // After, the handshake is done while the model thinks, and the first piece goes as
+        // soon as its four words are there: Ghost's share is the writing of those words
+        // (about 15 ms here) and the hops, on either socket.
+        assert!(ghost(after.0) < 0.08, "{after:?}");
+        assert!(ghost(after.1) < 0.08, "{after:?}");
     }
 
     // --- choosing the engine ---------------------------------------------------------
