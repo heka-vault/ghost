@@ -161,6 +161,10 @@ pub struct Turn {
     closed: Option<String>,
     reopened: Option<&'static str>,
     prerender: IndexMap<String, u64>,
+    /// Segments read from their first quiet frame, by what became of each, and the model's
+    /// seconds on them.
+    early_read: IndexMap<String, u64>,
+    early_read_secs: f64,
     /// Hand-overs from the fast model, and the time it took to ask (ADR 0050).
     handovers: u64,
     handover_secs: f64,
@@ -206,6 +210,8 @@ impl Turn {
             closed: None,
             reopened: None,
             prerender: IndexMap::new(),
+            early_read: IndexMap::new(),
+            early_read_secs: 0.0,
             handovers: 0,
             handover_secs: 0.0,
             early_ttfb: None,
@@ -588,6 +594,10 @@ impl LatencyObserver {
                     }
                 }
             }
+            Metric::EarlyRead { what, secs } => {
+                *turn.early_read.entry(what.to_string()).or_insert(0) += 1;
+                turn.early_read_secs += secs;
+            }
             Metric::Turn {
                 complete,
                 probability,
@@ -931,6 +941,11 @@ pub fn build_record(
             hear.insert("reopened".into(), json!(how));
         }
         rec.insert("hear".into(), Value::Object(hear));
+    }
+    if !turn.early_read.is_empty() {
+        let mut e = turn.early_read.clone();
+        let secs = round(turn.early_read_secs, 3);
+        rec.insert("early_read".into(), json!({"n": e.drain(..).collect::<IndexMap<_, _>>(), "secs": secs}));
     }
     if !turn.prerender.is_empty() {
         rec.insert("prerender".into(), json!(turn.prerender));

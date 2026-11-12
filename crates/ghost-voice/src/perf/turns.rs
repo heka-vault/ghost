@@ -105,6 +105,8 @@ async fn ends_of(
     let clock_pos = pos.clone();
     let clock = Arc::new(move || 1.0e9 + clock_pos.load(Ordering::Relaxed) as f64 / 16_000.0);
     let mut stt = ParakeetStt::new(models.stt.clone(), Some(vad), settings.vad_params(), 0.0)
+        .with_early_read(settings.stt_early_read)
+            .with_early_read_after(settings.stt_early_read_after_secs)
         .with_vad_clock(clock);
     let mut analyzer = SmartTurnAnalyzer::new(
         models.turn.clone(),

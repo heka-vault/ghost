@@ -48,6 +48,12 @@ pub struct VoiceSettings {
     pub llm_env: HashMap<String, String>,
     pub llm_thinking: String,
     pub llm_max_tokens: u32,
+    /// `GHOST_LLM_FAST_READS`: the fast model (ADR 0050) makes reads itself and answers
+    /// from their results while they are no longer than `GHOST_LLM_FAST_READ_MAX_CHARS`,
+    /// for at most `GHOST_LLM_FAST_READ_ROUNDS` rounds; off, any call hands the turn over.
+    pub llm_fast_reads: bool,
+    pub llm_fast_read_max_chars: usize,
+    pub llm_fast_read_rounds: usize,
 
     // STT
     pub stt_model: String,
@@ -59,6 +65,13 @@ pub struct VoiceSettings {
     /// (`models/parakeet-tdt-0.6b-v3/`, `scripts/models.sh parakeet`), and for int8 the
     /// Hugging Face cache.
     pub stt_dir: Option<PathBuf>,
+    /// `GHOST_STT_EARLY_READ`: a segment is read from the VAD's first quiet frame, so its
+    /// words are ready when the stop is confirmed (`on`); at the stop, as before (`off`);
+    /// or both, keeping the stop's words and counting where they differ (`verify`, for
+    /// the harness).
+    pub stt_early_read: crate::stt::EarlyReadMode,
+    /// `GHOST_STT_EARLY_READ_AFTER_SECS`: the quiet that starts the early read.
+    pub stt_early_read_after_secs: f64,
 
     // TTS
     pub tts_voice: String,
@@ -247,12 +260,27 @@ impl VoiceSettings {
             llm_env,
             llm_thinking: string("GHOST_LLM_THINKING", ghost_llm::DEFAULT_THINKING),
             llm_max_tokens: number("GHOST_LLM_MAX_TOKENS")?.map_or(LLM_MAX_TOKENS, |v| v as u32),
+            llm_fast_reads: flag("GHOST_LLM_FAST_READS", false),
+            llm_fast_read_max_chars: usize_or("GHOST_LLM_FAST_READ_MAX_CHARS", 4000)?,
+            llm_fast_read_rounds: usize_or("GHOST_LLM_FAST_READ_ROUNDS", 2)?,
             stt_model: string("GHOST_STT_MODEL", "nemo-parakeet-tdt-0.6b-v3"),
             stt_quantization: get("GHOST_STT_QUANTIZATION")
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty() && v != "none"),
             stt_threads: usize_or("GHOST_STT_THREADS", 4)?,
             stt_dir: path("GHOST_STT_DIR"),
+            stt_early_read_after_secs: f64_or("GHOST_STT_EARLY_READ_AFTER_SECS", 0.0)?,
+            stt_early_read: match text("GHOST_STT_EARLY_READ")
+                .map(|v| v.trim().to_lowercase())
+                .as_deref()
+            {
+                None => crate::stt::EarlyReadMode::Off,
+                Some("verify") => crate::stt::EarlyReadMode::Verify,
+                Some(v) => match parse_bool(v) {
+                    Some(true) => crate::stt::EarlyReadMode::On,
+                    _ => crate::stt::EarlyReadMode::Off,
+                },
+            },
             tts_voice: string("GHOST_TTS_VOICE", "af_heart"),
             tts_speed: f64_or("GHOST_TTS_SPEED", 1.0)?,
             tts_model_path: path("GHOST_TTS_MODEL_PATH"),
@@ -472,6 +500,8 @@ mod tests {
         assert_eq!(s.turn_reopen_started_secs, 0.15);
         assert!(s.prerender(), "Kokoro renders the first clause ahead");
         assert_eq!(s.tts_first_clause_words, 4);
+        assert_eq!(s.stt_early_read, crate::stt::EarlyReadMode::Off);
+        assert!(!s.llm_fast_reads);
         assert!(s.turn_speculate);
         assert!(s.turn_reread);
         assert_eq!(s.turn_stop_secs, 1.6);

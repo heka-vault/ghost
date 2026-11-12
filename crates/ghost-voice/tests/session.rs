@@ -1458,3 +1458,215 @@ async fn a_quick_models_call_waits_until_the_grace_would_have_run_out() {
     );
     finish(&w).await;
 }
+
+// --- the fast model reads for itself ------------------------------------------------------
+
+/// A connected app with one read (counted, its result `result_chars` long) and one change.
+fn app_with_a_change(reads: Arc<AtomicUsize>, result_chars: usize) -> ToolSource {
+    use ghost_core::source::Operation;
+    let mut app = counting_app(reads.clone());
+    app.read_tools[0].handler = Arc::new(move |_| {
+        let reads = reads.clone();
+        Box::pin(async move {
+            reads.fetch_add(1, Ordering::SeqCst);
+            let mut m = Map::new();
+            m.insert("issues".into(), json!("x".repeat(result_chars)));
+            Ok(m)
+        })
+    });
+    app.operations = vec![Operation {
+        tool_name: Some("github_close_issue".into()),
+        ..Operation::new(
+            "close_issue",
+            "Close an issue.",
+            Arc::new(|_| Box::pin(async { anyhow::bail!("not in this test") })),
+            Arc::new(ghost_core::fakes::FakeWriter::default()),
+        )
+    }];
+    app
+}
+
+fn fast_reads(setup: Setup, max_chars: usize) -> Setup {
+    setup
+        .set("GHOST_LLM_FAST_READS", "true")
+        .set("GHOST_LLM_FAST_READ_MAX_CHARS", &max_chars.to_string())
+}
+
+#[tokio::test]
+async fn the_fast_model_reads_and_answers_from_a_short_result_without_the_main_model() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut setup = fast_reads(
+        Setup::new(
+            &["any critical issues in quotient"],
+            vec![vec![ScriptedModel::say("The main model was asked.")]],
+        ),
+        2000,
+    );
+    setup.fast = Some(vec![vec![
+        ScriptedModel::call("", "github_search_issues", Map::new()),
+        ScriptedModel::say("One is critical: the Redis one."),
+    ]]);
+    setup.sources = vec![app_with_a_change(reads.clone(), 200)];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    assert_eq!(reads.load(Ordering::SeqCst), 1, "the fast model's read ran once");
+    assert!(w.asked.lock().unwrap().is_empty(), "the main model was asked");
+    assert_eq!(
+        said_by_ghost(&w),
+        vec!["Yeah?", "One is critical: the Redis one."]
+    );
+    assert!(rec.get("handover").is_none(), "{rec}");
+    assert!(rec["ack"].is_number(), "the lookup is acknowledged: {rec}");
+    assert_eq!(w.fast_asked.lock().unwrap().len(), 2, "the read, then the answer");
+    finish(&w).await;
+}
+
+#[tokio::test]
+async fn after_a_long_result_the_main_model_answers() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut setup = fast_reads(
+        Setup::new(
+            &["any critical issues in quotient"],
+            vec![vec![ScriptedModel::say("Of the many, two are critical.")]],
+        ),
+        2000,
+    );
+    setup.fast = Some(vec![vec![ScriptedModel::call(
+        "",
+        "github_search_issues",
+        Map::new(),
+    )]]);
+    setup.sources = vec![app_with_a_change(reads.clone(), 5000)];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    voice_records(&w, 1).await;
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    assert_eq!(w.fast_asked.lock().unwrap().len(), 1, "only the read");
+    assert_eq!(w.asked.lock().unwrap().len(), 1, "the main model answered");
+    assert_eq!(
+        said_by_ghost(&w),
+        vec!["Yeah?", "Of the many, two are critical."]
+    );
+    finish(&w).await;
+}
+
+#[tokio::test]
+async fn a_change_from_the_fast_model_still_hands_the_turn_over() {
+    // Reads are the fast model's; a change is always the main model's to make.
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut setup = fast_reads(
+        Setup::new(
+            &["close the redis one"],
+            vec![vec![
+                ScriptedModel::call("", "github_close_issue", Map::new())
+                    .after(Duration::from_millis(300)),
+                ScriptedModel::say("I couldn't close it."),
+            ]],
+        ),
+        2000,
+    );
+    setup.fast = Some(vec![vec![ScriptedModel::call(
+        "",
+        "github_close_issue",
+        Map::new(),
+    )]]);
+    setup.sources = vec![app_with_a_change(reads.clone(), 200)];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    assert_eq!(rec["handover"]["n"], json!(1), "{rec}");
+    assert_eq!(w.fast_asked.lock().unwrap().len(), 1);
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+    assert_eq!(said_by_ghost(&w), vec!["Yeah?", "I couldn't close it."]);
+    finish(&w).await;
+}
+
+#[tokio::test]
+async fn think_harder_and_a_read_after_its_rounds_hand_over_with_reads_on() {
+    // think_harder is a hand-over whatever else is on.
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut setup = fast_reads(
+        Setup::new(
+            &["how should we split the billing service"],
+            vec![vec![ScriptedModel::say("By tenant first.")]],
+        ),
+        2000,
+    )
+    .set("GHOST_LLM_FAST_READ_ROUNDS", "1");
+    setup.fast = Some(vec![vec![ScriptedModel::call(
+        "",
+        "think_harder",
+        Map::new(),
+    )]]);
+    setup.sources = vec![app_with_a_change(reads.clone(), 200)];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    assert_eq!(rec["handover"]["n"], json!(1), "{rec}");
+    assert_eq!(said_by_ghost(&w), vec!["Yeah?", "By tenant first."]);
+    finish(&w).await;
+
+    // One round of reads: a second read is the main model's to make.
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut setup = fast_reads(
+        Setup::new(
+            &["any critical issues in quotient"],
+            vec![vec![
+                ScriptedModel::call("", "github_search_issues", Map::new()),
+                ScriptedModel::say("Two are critical."),
+            ]],
+        ),
+        2000,
+    )
+    .set("GHOST_LLM_FAST_READ_ROUNDS", "1");
+    setup.fast = Some(vec![vec![
+        ScriptedModel::call("", "github_search_issues", Map::new()),
+        ScriptedModel::call("", "github_search_issues", Map::new()),
+    ]]);
+    setup.sources = vec![app_with_a_change(reads.clone(), 200)];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    assert_eq!(rec["handover"]["n"], json!(1), "{rec}");
+    assert_eq!(reads.load(Ordering::SeqCst), 2, "one read each");
+    assert_eq!(said_by_ghost(&w), vec!["Yeah?", "Two are critical."]);
+    finish(&w).await;
+}
+
+#[tokio::test]
+async fn with_reads_off_any_call_hands_over_as_before() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut setup = Setup::new(
+        &["any critical issues in quotient"],
+        vec![vec![
+            ScriptedModel::call("", "github_search_issues", Map::new())
+                .after(Duration::from_millis(300)),
+            ScriptedModel::say("Two are critical."),
+        ]],
+    );
+    setup.fast = Some(vec![vec![ScriptedModel::call(
+        "",
+        "github_search_issues",
+        Map::new(),
+    )]]);
+    setup.sources = vec![app_with_a_change(reads.clone(), 200)];
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    assert_eq!(rec["handover"]["n"], json!(1), "{rec}");
+    assert_eq!(reads.load(Ordering::SeqCst), 1, "the main model's read only");
+    finish(&w).await;
+}

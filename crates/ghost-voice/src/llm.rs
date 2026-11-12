@@ -27,6 +27,12 @@
 //! and nothing the fast model wrote is spoken or kept. The main model answers every call
 //! after the first, so what runs a tool is always the main model.
 //!
+//! With `fast_reads` set, the fast model may also look things up itself: a reply whose
+//! calls are all reads (an app's, or Ghost's own) is the fast model's to make, and the
+//! answer after their results is its too while the results are short
+//! (`FastReads::max_chars`). It hands over as before for a change, for `think_harder`, for
+//! anything after a long result, and after `FastReads::rounds` rounds of reads.
+//!
 //! The reply's first clause is handed to the voice as it is written
 //! (`crate::tts::Prerender`, ADR 0049), so it is rendered by the time the reply is released.
 
@@ -188,6 +194,19 @@ type Events = mpsc::UnboundedReceiver<Result<Held, LlmError>>;
 /// The calls the fast model started when it handed a held answer over.
 type Handed = Arc<Mutex<Option<Vec<String>>>>;
 
+/// Whether the tool the model called by this name only reads (`ToolDispatcher::is_read`).
+pub type IsRead = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// The fast model's own lookups (`LlmStage::with_fast_reads`): which calls are reads, how
+/// long the results may be for it to answer from them, and how many rounds of reads it
+/// may make before the main model takes the turn.
+#[derive(Clone)]
+pub struct FastReads {
+    pub is_read: IsRead,
+    pub max_chars: usize,
+    pub rounds: usize,
+}
+
 /// One model call for the stage: the fast model first when one is given, then the main.
 struct Call {
     main: Arc<dyn ModelPort>,
@@ -201,6 +220,8 @@ struct Call {
     /// A held answer: where it stands, and where its withdrawal is said.
     held: Option<(Arc<std::sync::atomic::AtomicU8>, Out)>,
     handed: Handed,
+    /// Which of the fast model's calls it may make itself; None, any call hands over.
+    reads: Option<IsRead>,
 }
 
 impl Call {
@@ -225,6 +246,7 @@ impl Call {
             let mut kept: Vec<Event> = Vec::new();
             let mut first: Option<f64> = None;
             let mut names: Vec<String> = Vec::new();
+            let mut calls: Vec<ToolCall> = Vec::new();
             let mut spoke = false;
             let mut failed = false;
             loop {
@@ -235,7 +257,10 @@ impl Call {
                 };
                 let Some(ev) = ev else { break };
                 match ev {
-                    Ok(Event::ToolCall(call)) => names.push(call.name),
+                    Ok(Event::ToolCall(call)) => {
+                        names.push(call.name.clone());
+                        calls.push(call);
+                    }
                     // Cut off at the cap, or redone: more than the fast model is for.
                     Ok(Event::CutOff { .. } | Event::Redo | Event::Say(_)) => {
                         failed = true;
@@ -259,6 +284,38 @@ impl Call {
                 }
             }
             drop(stream);
+            // Reads only, and the fast model may make them (`FastReads`): its reply,
+            // calls and all, is the turn's, as the main model's would be.
+            let reads_only = !failed
+                && !calls.is_empty()
+                && self.reads.as_ref().is_some_and(|is_read| {
+                    calls
+                        .iter()
+                        .all(|c| c.name != THINK_HARDER_TOOL && is_read(&c.name))
+                });
+            if reads_only {
+                if let Some(p) = pre {
+                    p.cancel(); // what was written before a call is narration
+                }
+                // A held answer keeps its reads: they are the stage's to run once the turn
+                // is confirmed, and only once its grace has run (`TurnControl::settles`),
+                // so nothing is read for a turn that had not ended, and the fast model is
+                // not asked again for the same words.
+                let _ = tx.send(Ok(Held::First {
+                    model: fast.model_name(),
+                    secs: first.unwrap_or_else(|| began.elapsed().as_secs_f64()),
+                }));
+                let text_events = kept.into_iter().filter(|e| !matches!(e, Event::Finished(_)));
+                for ev in text_events
+                    .chain(calls.into_iter().map(Event::ToolCall))
+                    .chain([Event::Finished(ghost_llm::FinishReason::ToolUse)])
+                {
+                    if tx.send(Ok(Held::Event(ev))).is_err() {
+                        return;
+                    }
+                }
+                return;
+            }
             if names.is_empty() && spoke && !failed {
                 if let Some(p) = pre {
                     p.end();
@@ -376,6 +433,12 @@ pub struct LlmStage {
     /// for these words, goes to the main model, and these are the calls it was after.
     handed_for: Option<(String, Vec<String>)>,
     last_input_tokens: u64,
+    /// The fast model's own lookups (`with_fast_reads`); None, any call hands over.
+    fast_reads: Option<FastReads>,
+    /// The results of the last reply's calls, in characters as the context holds them.
+    last_results_chars: usize,
+    /// Rounds of reads the fast model made in this turn.
+    fast_rounds: usize,
 }
 
 impl LlmStage {
@@ -405,7 +468,17 @@ impl LlmStage {
             prerender: None,
             handed_for: None,
             last_input_tokens: 0,
+            fast_reads: None,
+            last_results_chars: 0,
+            fast_rounds: 0,
         }
+    }
+
+    /// Let the fast model make reads itself and answer from short results (see the
+    /// module doc); None, any call hands the turn over (ADR 0050 as first written).
+    pub fn with_fast_reads(mut self, reads: Option<FastReads>) -> Self {
+        self.fast_reads = reads;
+        self
     }
 
     /// A fast model for a turn's first call (ADR 0050); None, the one model answers all.
@@ -449,6 +522,11 @@ impl LlmStage {
             prerender: self.prerender.clone(),
             held,
             handed,
+            reads: self
+                .fast_reads
+                .as_ref()
+                .filter(|r| self.fast_rounds < r.rounds)
+                .map(|r| r.is_read.clone()),
         }
         .start()
     }
@@ -501,6 +579,13 @@ impl LlmStage {
     /// token is taken once: a run interrupted between two calls stops, rather than going
     /// on under the next turn's token.
     async fn run(&mut self, out: &Out) {
+        self.fast_rounds = 0;
+        self.run_from(out, false).await;
+    }
+
+    /// `run`, with the fast model asked first when `fast_again` (it made the reads whose
+    /// results end the context).
+    async fn run_from(&mut self, out: &Out, mut fast_again: bool) {
         let turn = self.turns.current();
         let mut first = true;
         loop {
@@ -510,13 +595,14 @@ impl LlmStage {
             self.refresh_tools();
             let context = self.snapshot();
             // A turn's first call, the operator's words last in the context, is the fast
-            // model's; what follows a tool's result is the main model's.
+            // model's; what follows a tool's result is the main model's, unless the fast
+            // model made the reads itself and their results are short (`FastReads`).
             let said = match context.messages.last() {
                 Some(Message::User(text)) if first => Some(text.clone()),
                 _ => None,
             };
             first = false;
-            let mut fast = said.is_some();
+            let mut fast = said.is_some() || fast_again;
             if let Some((text, names)) = self.handed_for.take()
                 && said.as_deref() == Some(text.as_str())
             {
@@ -531,10 +617,28 @@ impl LlmStage {
             let Some(reply) = reply else {
                 return; // interrupted
             };
+            let by_fast = reply.by_fast;
             if !self.after_reply(reply, &turn, out).await {
                 return;
             }
+            fast_again = by_fast && self.fast_answers_after_reads();
         }
+    }
+
+    /// The fast model made the last reply's reads: whether the answer after them is its
+    /// too (the results are short), or the main model's.
+    fn fast_answers_after_reads(&mut self) -> bool {
+        let Some(r) = &self.fast_reads else {
+            return false;
+        };
+        self.fast_rounds += 1;
+        let again = self.last_results_chars <= r.max_chars;
+        info!(
+            "fast model: read {} characters of results; {} answers",
+            self.last_results_chars,
+            if again { "it" } else { "the main model" }
+        );
+        again
     }
 
     /// Stream one reply as frames, from the call's events (a held answer's are already
@@ -549,6 +653,7 @@ impl LlmStage {
         out.push(Frame::ReplyTurn(turn.clone())).await;
         let mut reply = Reply::default();
         let mut answering = self.model.model_name();
+        let fast_name = self.fast.as_ref().map(|f| f.model_name());
         loop {
             let next = tokio::select! {
                 biased;
@@ -563,6 +668,9 @@ impl LlmStage {
             let Some(ev) = next else { break };
             match ev {
                 Ok(Held::First { model, secs }) => {
+                    reply.by_fast = fast_name.as_deref() == Some(model.as_str())
+                        && self.fast.is_some()
+                        && model != self.model.model_name();
                     answering = model;
                     out.push(Frame::Metrics(Metric::Ttfb {
                         value: secs,
@@ -580,6 +688,7 @@ impl LlmStage {
                         }
                     );
                     reply.text.clear(); // nothing of the fast model's is the reply
+                    reply.by_fast = false;
                     out.push(Frame::HandOver { names, secs }).await;
                 }
                 Ok(Held::Event(Event::Text(t))) => {
@@ -708,10 +817,13 @@ impl LlmStage {
         // Stopped by a hang-up: nobody is there for an answer to the results.
         let mut run_again = !hung_up.is_cancelled();
         let mut after: Vec<Frame> = Vec::new();
+        self.last_results_chars = 0;
         for (call, result) in results {
             {
+                let value = Value::Object(result.result.clone());
+                self.last_results_chars += value.to_string().chars().count();
                 let mut ctx = self.context.lock().unwrap();
-                ctx.push_result(&call.id, &Value::Object(result.result.clone()));
+                ctx.push_result(&call.id, &value);
             }
             out.push(Frame::FunctionCallResult {
                 name: call.name.clone(),
@@ -750,6 +862,7 @@ impl LlmStage {
     async fn speculate(&mut self, text: String, out: &Out) {
         self.drop_speculation();
         self.refresh_tools();
+        self.fast_rounds = 0;
         let mut context = self.snapshot();
         context.push(self.user_turn(&text));
         let state = Arc::new(std::sync::atomic::AtomicU8::new(held::STREAMING));
@@ -873,8 +986,11 @@ impl LlmStage {
         };
         // The run loop continues on the results, when a call asks for one (not after a
         // `hang_up` or a `hold`, whose result nothing follows).
+        let by_fast = reply.by_fast;
+        self.fast_rounds = 0;
         if self.after_reply(reply, &turn, out).await {
-            self.run(out).await;
+            let again = by_fast && self.fast_answers_after_reads();
+            self.run_from(out, again).await;
         }
     }
 
@@ -963,6 +1079,8 @@ impl LlmStage {
 struct Reply {
     text: String,
     calls: Vec<ToolCall>,
+    /// The fast model wrote it (its own reads, `FastReads`), not the main one.
+    by_fast: bool,
 }
 
 #[async_trait]

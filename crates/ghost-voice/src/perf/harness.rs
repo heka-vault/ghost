@@ -550,10 +550,18 @@ impl Bench {
                 }
             }
             None => {
+                // With its own reads (`GHOST_LLM_FAST_READS`) the fast model answers what it
+                // looked up as the main model would: the whole line is its script.
+                let whole_line = settings.llm_fast_reads;
                 let fast_model = cfg.fast.as_ref().map(|p| {
                     let opening: Vec<Vec<_>> = lines
                         .iter()
-                        .map(|l| l.iter().take(1).cloned().collect())
+                        .map(|l| {
+                            l.iter()
+                                .take(if whole_line { usize::MAX } else { 1 })
+                                .cloned()
+                                .collect()
+                        })
                         .collect();
                     ScriptedModel::paced(opening, p.ttfb, p.tokens_per_sec, "scripted-fast")
                         as Arc<dyn crate::llm::ModelPort>
@@ -685,6 +693,30 @@ impl Bench {
             && let Some(problem) = check(&mock_issues(tmp.path()))
         {
             problems.push(problem);
+        }
+        // The calls with their arguments, as the agent's record has them (in this run's
+        // own store): what a line expects of them.
+        let calls: Vec<String> = env
+            .conversations
+            .turns(GHOST, 500)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.role == Role::Call)
+            .map(|t| t.text)
+            .collect();
+        for (i, line) in scenario.lines.iter().enumerate() {
+            if !line.args.is_empty()
+                && i < lines.len()
+                && !calls
+                    .iter()
+                    .any(|c| line.args.iter().all(|part| c.contains(part)))
+            {
+                let p = format!("line {}: no call with {:?}", i + 1, line.args);
+                if let Some(l) = lines.get_mut(i) {
+                    l.problems.push(p.clone());
+                }
+                problems.push(p);
+            }
         }
         if !run_task.is_finished() {
             session.end().await;

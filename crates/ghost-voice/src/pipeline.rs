@@ -773,7 +773,9 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             )
             .with_params_over_ghost(settings.vad_params_over_ghost())
             .with_closing_start_secs(settings.vad_closing_start_secs)
-            .with_speaking(speaking.clone()),
+            .with_speaking(speaking.clone())
+            .with_early_read(settings.stt_early_read)
+            .with_early_read_after(settings.stt_early_read_after_secs),
         ),
     ));
     let hold_gate = HoldGate::new(
@@ -908,6 +910,16 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 runtime.clone(),
             )
             .with_fast(p.fast_model.clone())
+            .with_fast_reads(
+                (settings.llm_fast_reads && p.fast_model.is_some()).then(|| {
+                    let d = dispatcher.clone();
+                    crate::llm::FastReads {
+                        is_read: Arc::new(move |name: &str| d.is_read(name)),
+                        max_chars: settings.llm_fast_read_max_chars,
+                        rounds: settings.llm_fast_read_rounds.max(1),
+                    }
+                }),
+            )
             .with_prerender(prerender.clone())
             .with_compaction(compaction),
         ),
