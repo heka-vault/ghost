@@ -844,7 +844,10 @@ impl Model {
         }
         let mut ctx = context.clone();
         ctx.push(Message::user(WARM_PLACEHOLDER));
-        let mut body = self.turn_body(&ctx, &self.wire_tools(tools), options);
+        // Shaped as the route's real turns are (ADR 0056), or the prefix warmed is not the
+        // one read: a setting the route refused is left out here too.
+        let caps = capabilities::learned(&self.target);
+        let mut body = self.shaped_body(&ctx, &self.wire_tools(tools), options, &caps);
         body["stream"] = json!(false);
         if let Some(last) = body["messages"]
             .as_array_mut()
