@@ -29,3 +29,13 @@ We return to ADR 0005's plan, built the way Alexa and Siri are:
 - **No interface change.** The `WakeDetector` interface stays; the phrase list and the 0.9 matcher remain the verifier's rules.
 - **Addressing Ghost by name has its own models** (every `ghost_*.onnx` beside `hey_ghost.onnx`: one model, or one per opener). It is trained on the openers "Ghost, I need you", "Ghost, let's work on", "Ghost, what is the status of" and "Ghost, what (or where) did we leave off on", and fires as the opener ends. Everything after "Ghost" is the first turn, so "Ghost, what is the status of the infra repo?" reaches the model as that whole request. Its check (`match_opening`) wants the name to open what was said, after one interjection at most ("so, Ghost"), so "the ghost story" isn't talking to Ghost. Both models share one pass of the audio features, and each has its own threshold.
 - **A changed phrase needs a new model.** A phrase added in settings is honoured by the verifier only until a model for it is trained. Until then, transcript wake stays available as a setting.
+
+## Amendment, 2026-11-12: the check of a weak hit takes Parakeet's spelling of "hey"
+
+A score under the threshold but at the checked floor (`GHOST_WAKE_CHECK_THRESHOLD`, 0.3) is a weak hit, and Parakeet must confirm it. On `ghost.mic` Parakeet writes the operator's "Hey Ghost" as "A ghost." more than anything else, which the 0.8 match refuses. So the operator had to speak up to get past the threshold.
+
+For a weak "hey ghost" hit, the check now also accepts a sentence of the reading that opens with the word "ghost", after at most one short interjection Parakeet writes for "hey" (`match_heys_spelling`). The name inside a sentence is still no match. The same rule gives back the request after "A ghost," once Ghost is woken.
+- On the operator's recorded takes it heard 16 of 21 on `ghost.mic`, against 10.
+- It added no false wake on any negative set ([2026-11-12 wake check](../benchmarks/2026-11-12-wake-check.md)).
+
+The first frame at the floor still decides, though the score may still be rising, so a near miss that climbs past the threshold is checked. Waiting for the peak heard more takes, but it let confusables wake unchecked (issue #13).
