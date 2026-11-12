@@ -13,6 +13,7 @@ path = "src/bin/ghost-api-export.rs"
 
 [dependencies]
 ghost-core.workspace = true
+ghost-llm.workspace = true
 
 anyhow.workspace = true
 thiserror.workspace = true

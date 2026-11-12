@@ -36,16 +36,14 @@ impl Refusal {
 /// typed by the daemon (W9).
 pub type PhoneConnection = Box<dyn std::any::Any + Send>;
 
-/// What a Test connection measured (`ghost_voice.llm.Probe`): request to first token and
-/// to the end, the first words, the model that answered, or why not.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Probe {
-    /// Seconds.
-    pub ttft: Option<f64>,
-    pub total: Option<f64>,
-    pub text: String,
-    pub model: String,
-    pub error: Option<String>,
+/// What the provider check found (ADR 0056): each model of the connection, and what
+/// would help when it is too slow for a good spoken reply.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelCheckRun {
+    pub at: chrono::DateTime<chrono::Utc>,
+    pub models: Vec<ghost_llm::check::ModelCheck>,
+    /// In plain words; None when the connection is quick enough.
+    pub advice: Option<String>,
 }
 
 /// The environment a model connection is resolved from, as a draft edits it.
@@ -77,9 +75,13 @@ pub trait Controller: Send + Sync {
     fn apply_settings(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String>;
     /// The model connection's keys, live (ADR 0037): the ones taken.
     fn apply_model(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String>;
-    /// Test connection (ADR 0037): one tiny request through `env`. None when the daemon
-    /// can't test one now.
-    async fn probe_model(&self, env: ModelEnv, prompt: &str, max_tokens: u32) -> Option<Probe>;
+    /// The provider check (ADR 0056) through `env`: the main model and the fast one, kept
+    /// with a time. None when the daemon can't check one now.
+    async fn check_model(&self, env: ModelEnv) -> Option<ModelCheckRun>;
+    /// The latest kept check of the saved connection.
+    fn last_model_check(&self) -> Option<ModelCheckRun> {
+        None
+    }
     /// The routes this daemon has something behind (`RouteEngine.routes`); the digest
     /// is always one.
     fn routes_available(&self) -> Vec<RouteName>;
@@ -166,7 +168,7 @@ impl Controller for Unavailable {
         Vec::new()
     }
 
-    async fn probe_model(&self, _env: ModelEnv, _prompt: &str, _max: u32) -> Option<Probe> {
+    async fn check_model(&self, _env: ModelEnv) -> Option<ModelCheckRun> {
         None
     }
 

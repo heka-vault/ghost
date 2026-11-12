@@ -64,7 +64,10 @@ export type ModelConnectionView = Schemas["ModelConnectionView"];
 export type ModelProviderView = Schemas["ModelProviderView"];
 export type ModelDraft = Schemas["ModelDraft"];
 export type ModelListView = Schemas["ModelListView"];
-export type ModelTestResult = Schemas["ModelTestResult"];
+export type ModelCheckView = Schemas["ModelCheckView"];
+export type ModelCheckModel = Schemas["ModelCheckModel"];
+export type ModelCheckVerdict = Schemas["ModelCheckVerdict"];
+export type ModelCheckLatest = Schemas["ModelCheckLatest"];
 export type ModelSignInResult = Schemas["ModelSignInResult"];
 export type DevicesView = Schemas["DevicesView"];
 export type ModelsView = Schemas["ModelsView"];
@@ -368,9 +371,15 @@ export class GhostClient {
   modelList(draft: ModelDraft = { values: {} }) {
     return unwrap(this.api.POST("/model/models", { body: draft }));
   }
-  /** One tiny request through a draft connection: time to first token, as `make perf-llm` times it. */
-  testModel(draft: ModelDraft = { values: {} }) {
-    return unwrap(this.api.POST("/model/test", { body: draft }));
+  /** The provider check (ADR 0056) through a draft connection, or the saved one: each
+   *  model's first byte and first word, and whether streaming, tool calls, the prompt cache
+   *  and the thinking setting work. Kept by the daemon. */
+  checkModel(draft: ModelDraft = { values: {} }) {
+    return unwrap(this.api.POST("/model/check", { body: draft }));
+  }
+  /** The latest kept check of the saved connection, if any. */
+  modelCheckLatest() {
+    return unwrap(this.api.GET("/model/check"));
   }
   /** Sign in to OpenRouter: open `url`; the key comes back to Ghost, never to the app. */
   modelSignIn() {

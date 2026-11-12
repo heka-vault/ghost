@@ -26,6 +26,7 @@ use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Map, Value, json};
 use tracing::warn;
 
+use crate::capabilities::{self, Capabilities};
 use crate::context::{Context, Message, ToolCall, with_system_breakpoint};
 use crate::reply::{Reply, Watch};
 use crate::sse::Sse;
@@ -183,6 +184,160 @@ pub struct Probe {
     pub error: Option<String>,
 }
 
+/// One request as the provider check sees it ([`Model::measure`]). Seconds from the call.
+#[derive(Debug, Default)]
+pub struct Measured {
+    /// The first byte of the reply's body.
+    pub first_byte: Option<f64>,
+    /// The first piece of text.
+    pub first_word: Option<f64>,
+    pub total: Option<f64>,
+    /// How many network chunks carried text: one means the reply came all at once.
+    pub text_chunks: usize,
+    pub text: String,
+    pub calls: Vec<ToolCall>,
+    pub usage: Option<Usage>,
+    pub stop_reason: Option<String>,
+    /// As the provider answered, when it says.
+    pub model: String,
+    pub error: Option<LlmError>,
+}
+
+/// `reasoning_effort`, as the route's refused thinking setting on Chat Completions.
+pub const REASONING_EFFORT: &str = "reasoning_effort";
+/// The longest a rate limit or an overloaded provider is waited for, in a turn: the
+/// operator is listening. Longer, and the turn says so instead.
+pub const MOST_WAIT: Duration = Duration::from_secs(2);
+/// The wait when the provider says none.
+const DEFAULT_WAIT: Duration = Duration::from_millis(500);
+
+/// Whether a failure is worth one more try in a turn: a rate limit, or an overloaded or
+/// briefly failing provider. A refusal of the request itself is not.
+pub fn comes_back(e: &LlmError) -> bool {
+    match e {
+        LlmError::Status { status, .. } => matches!(status, 429 | 500 | 502 | 503 | 504 | 529),
+        _ => false,
+    }
+}
+
+fn pause(asked: Option<Duration>) -> Duration {
+    asked.unwrap_or(DEFAULT_WAIT).min(MOST_WAIT)
+}
+
+/// How long a refusal asked Ghost to wait: OpenRouter's
+/// `error.metadata.retry_after_seconds` in the body, else the `Retry-After` header in
+/// seconds. Adapted from Goose's `extract_retry_after`
+/// (`crates/goose-providers/src/http_status.rs`, Apache-2.0); the HTTP-date form is not
+/// read, and a wait past [`MOST_WAIT`] is cut to it by the caller anyway.
+pub fn retry_after(headers: &HeaderMap, body: &[u8]) -> Option<Duration> {
+    let finite =
+        |s: f64| (s.is_finite() && s >= 0.0).then(|| Duration::from_secs_f64(s.min(3600.0)));
+    let from_body = serde_json::from_slice::<Value>(body).ok().and_then(|v| {
+        v["error"]["metadata"]["retry_after_seconds"]
+            .as_f64()
+            .and_then(finite)
+    });
+    from_body.or_else(|| {
+        headers
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .and_then(finite)
+    })
+}
+
+/// A field of Ghost's request the route refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Refused {
+    Thinking(String),
+    Effort,
+    CacheMarkers,
+}
+
+impl Refused {
+    fn name(&self) -> String {
+        match self {
+            Refused::Thinking(t) => format!("thinking {t}"),
+            Refused::Effort => REASONING_EFFORT.into(),
+            Refused::CacheMarkers => "the cache markers".into(),
+        }
+    }
+
+    fn apply(&self, c: &mut Capabilities) {
+        match self {
+            Refused::Thinking(t) => c.rejects_thinking = Some(t.clone()),
+            Refused::Effort => c.rejects_thinking = Some(REASONING_EFFORT.into()),
+            Refused::CacheMarkers => c.rejects_cache_markers = true,
+        }
+    }
+}
+
+/// The field an HTTP 400 is about, when it is one Ghost sent and can do without.
+fn refused_field(e: &LlmError, body: &Value) -> Option<Refused> {
+    let LlmError::Status {
+        status: 400 | 422,
+        detail,
+    } = e
+    else {
+        return None;
+    };
+    let d = detail.to_lowercase();
+    if let Some(t) = body["thinking"]["type"].as_str()
+        && (d.contains("thinking") || d.contains(t))
+    {
+        return Some(Refused::Thinking(t.to_string()));
+    }
+    if body.get(REASONING_EFFORT).is_some() && d.contains("reasoning") {
+        return Some(Refused::Effort);
+    }
+    if d.contains("cache_control") && body.to_string().contains("cache_control") {
+        return Some(Refused::CacheMarkers);
+    }
+    None
+}
+
+/// What Ghost says when a turn's model call failed, in plain words for the operator:
+/// never silence (ADR 0056). Never a key, a body or an address.
+pub fn spoken_failure(e: &LlmError) -> String {
+    match e {
+        LlmError::Unreachable { kind, .. } if *kind == "ReadTimeout" => {
+            "The model took too long to answer. Try again in a moment.".into()
+        }
+        LlmError::Unreachable { .. } => {
+            "I can't reach the model right now. Check the model connection in Settings.".into()
+        }
+        LlmError::Status { status, .. } => match status {
+            401 | 403 => "The model provider refused Ghost's key. Check the model connection in Settings.".into(),
+            402 => "The model provider says the account is out of credit.".into(),
+            404 => "The model provider doesn't offer that model. Check the model connection in Settings.".into(),
+            408 => "The model took too long to answer. Try again in a moment.".into(),
+            429 => "The model provider is limiting how fast I can ask. Try again in a moment.".into(),
+            503 | 529 => "The model provider is overloaded right now. Try again in a moment.".into(),
+            s if *s >= 500 => "The model provider had an error. Try again in a moment.".into(),
+            _ => "The model provider refused the request. The reason is in Ghost's log.".into(),
+        },
+        LlmError::Api { kind, .. } => {
+            let k = kind.to_lowercase();
+            if k.contains("overloaded") {
+                "The model provider is overloaded right now. Try again in a moment.".into()
+            } else if k.contains("rate") {
+                "The model provider is limiting how fast I can ask. Try again in a moment.".into()
+            } else {
+                "The model stopped with an error partway. Try again in a moment.".into()
+            }
+        }
+        LlmError::Stream(_) => {
+            "The model's answer broke off partway. Try again in a moment.".into()
+        }
+        LlmError::Headers(_) | LlmError::Client(_) => {
+            "Ghost can't send to the model with these settings. Check the model connection in Settings.".into()
+        }
+    }
+}
+
 type Body = Pin<Box<dyn Stream<Item = reqwest::Result<Vec<u8>>> + Send>>;
 
 /// Ghost's model, whichever protocol reaches it: a connection's target and the HTTP
@@ -330,17 +485,32 @@ impl Model {
     }
 
     fn turn_body(&self, context: &Context, tools: &[Value], options: &Options) -> Value {
+        self.shaped_body(context, tools, options, &Capabilities::default())
+    }
+
+    /// The turn's body as the route takes it (ADR 0056): a thinking setting, a
+    /// `reasoning_effort` or cache markers the route refused before are left out.
+    fn shaped_body(
+        &self,
+        context: &Context,
+        tools: &[Value],
+        options: &Options,
+        caps: &Capabilities,
+    ) -> Value {
         let t = &*self.target;
+        let markers = !caps.rejects_cache_markers;
         let mut p = Map::new();
         p.insert("model".into(), json!(t.model));
         p.insert("stream".into(), json!(true));
         match t.protocol {
             Protocol::Anthropic => {
                 p.insert("max_tokens".into(), json!(options.max_tokens));
-                if let Some(thinking) = &options.thinking {
+                if let Some(thinking) = &options.thinking
+                    && caps.takes_thinking(thinking)
+                {
                     p.insert("thinking".into(), json!({"type": thinking}));
                 }
-                let conv = context.anthropic(true, !prefill_supported(&t.model));
+                let conv = context.anthropic(markers, !prefill_supported(&t.model));
                 if !context.system.is_empty() {
                     p.insert("system".into(), conv.system);
                 }
@@ -348,7 +518,7 @@ impl Model {
                 if !tools.is_empty() {
                     p.insert("tools".into(), Value::Array(tools.to_vec()));
                 }
-                if options.cache_system {
+                if options.cache_system && markers {
                     with_system_breakpoint(&mut p);
                 }
             }
@@ -358,7 +528,11 @@ impl Model {
                 if !tools.is_empty() {
                     p.insert("tools".into(), Value::Array(tools.to_vec()));
                 }
-                p.extend(t.chat_params(options.max_tokens));
+                let mut params = t.chat_params(options.max_tokens);
+                if !caps.takes_thinking(REASONING_EFFORT) {
+                    params.remove(REASONING_EFFORT);
+                }
+                p.extend(params);
             }
         }
         Value::Object(p)
@@ -398,33 +572,171 @@ impl Model {
         message.chars().take(DETAIL_CHARS).collect()
     }
 
-    async fn send(&self, body: &Value) -> Result<reqwest::Response, LlmError> {
+    /// One request; a refusal carries how long the provider asked Ghost to wait.
+    async fn send_once(
+        &self,
+        body: &Value,
+    ) -> Result<reqwest::Response, (LlmError, Option<Duration>)> {
         let url = self.url(self.path());
+        let headers = self.headers().map_err(|e| (e, None))?;
         let resp = self
             .http
             .post(&url)
-            .headers(self.headers()?)
+            .headers(headers)
             .json(body)
             .send()
             .await
-            .map_err(|e| LlmError::Unreachable {
-                host: host(&url),
-                kind: error_kind(&e),
+            .map_err(|e| {
+                (
+                    LlmError::Unreachable {
+                        host: host(&url),
+                        kind: error_kind(&e),
+                    },
+                    None,
+                )
             })?;
         let status = resp.status();
         if !status.is_success() {
+            let headers = resp.headers().clone();
             let body = resp.bytes().await.unwrap_or_default();
-            return Err(LlmError::Status {
-                status: status.as_u16(),
-                detail: self.detail(&body),
-            });
+            let wait = retry_after(&headers, &body);
+            return Err((
+                LlmError::Status {
+                    status: status.as_u16(),
+                    detail: self.detail(&body),
+                },
+                wait,
+            ));
         }
         Ok(resp)
+    }
+
+    /// One request, with one more try after a rate limit or an overloaded provider
+    /// (ADR 0056).
+    async fn send(&self, body: &Value) -> Result<reqwest::Response, LlmError> {
+        match self.send_once(body).await {
+            Ok(r) => Ok(r),
+            Err((e, wait)) if comes_back(&e) => {
+                let wait = pause(wait);
+                warn!("model: {e}; trying once more in {:.1}s", wait.as_secs_f64());
+                tokio::time::sleep(wait).await;
+                self.send_once(body).await.map_err(|(e, _)| e)
+            }
+            Err((e, _)) => Err(e),
+        }
     }
 
     async fn open(&self, body: &Value) -> Result<Body, LlmError> {
         let resp = self.send(body).await?;
         Ok(Box::pin(resp.bytes_stream().map(|r| r.map(|b| b.to_vec()))))
+    }
+
+    /// A turn's request as the route takes it (ADR 0056): what the route refused before
+    /// is left out; a field it refuses now (HTTP 400 naming the thinking setting,
+    /// `reasoning_effort` or the cache markers) is left out and the request sent again,
+    /// once per field, and the route remembers; a rate limit or an overloaded provider is
+    /// tried once more after the wait it asked for (two seconds at most). Anything else is
+    /// the error, for the caller to say.
+    async fn open_turn(
+        &self,
+        context: &Context,
+        tools: &[Value],
+        options: &Options,
+    ) -> Result<Body, LlmError> {
+        let mut caps = capabilities::learned(&self.target);
+        let mut waited = false;
+        for _ in 0..4 {
+            let body = self.shaped_body(context, tools, options, &caps);
+            match self.send_once(&body).await {
+                Ok(resp) => {
+                    return Ok(Box::pin(resp.bytes_stream().map(|r| r.map(|b| b.to_vec()))));
+                }
+                Err((e, wait)) => {
+                    if let Some(field) = refused_field(&e, &body) {
+                        warn!(
+                            "model: {} refused {}; sending it without, from now on",
+                            self.target.model,
+                            field.name()
+                        );
+                        capabilities::learn(&self.target, |c| field.apply(c));
+                        field.apply(&mut caps);
+                        continue;
+                    }
+                    if comes_back(&e) && !waited {
+                        waited = true;
+                        let wait = pause(wait);
+                        warn!("model: {e}; trying once more in {:.1}s", wait.as_secs_f64());
+                        tokio::time::sleep(wait).await;
+                        continue;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        Err(LlmError::Stream(
+            "the provider kept refusing the request".into(),
+        ))
+    }
+
+    /// One request sent exactly as given, timed from the call: its first byte, its first
+    /// word, and what came back. No retry, no capability applied: the provider check
+    /// (`crate::check`) wants to see what the route does with each field.
+    pub async fn measure(&self, context: &Context, tools: &Tools, options: &Options) -> Measured {
+        self.measure_shaped(context, tools, options, &Capabilities::default())
+            .await
+    }
+
+    /// [`Model::measure`], with what the route refused already left out.
+    pub async fn measure_shaped(
+        &self,
+        context: &Context,
+        tools: &Tools,
+        options: &Options,
+        caps: &Capabilities,
+    ) -> Measured {
+        let body = self.shaped_body(context, &self.wire_tools(tools), options, caps);
+        let began = Instant::now();
+        let mut m = Measured::default();
+        let mut watch = Watch::new(self.target.protocol);
+        let result = async {
+            let resp = self.send_once(&body).await.map_err(|(e, _)| e)?;
+            let mut stream = resp.bytes_stream();
+            let mut sse = Sse::default();
+            let mut live = VecDeque::new();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|e| LlmError::Stream(error_kind(&e).into()))?;
+                m.first_byte.get_or_insert(began.elapsed().as_secs_f64());
+                let mut texts = 0;
+                for ev in sse.push(&chunk) {
+                    watch.note(&ev, &mut live)?;
+                    for e in live.drain(..) {
+                        if matches!(e, Event::Text(ref t) if !t.is_empty()) {
+                            texts += 1;
+                        }
+                    }
+                }
+                if texts > 0 {
+                    m.first_word.get_or_insert(began.elapsed().as_secs_f64());
+                    m.text_chunks += 1;
+                }
+            }
+            if let Some(ev) = sse.finish() {
+                watch.note(&ev, &mut live)?;
+            }
+            Ok::<(), LlmError>(())
+        }
+        .await;
+        m.total = Some(began.elapsed().as_secs_f64());
+        let reply = watch.finish();
+        m.model = reply.model.clone();
+        m.text = reply.text.trim().to_string();
+        m.calls = reply.calls;
+        m.usage = reply.usage;
+        m.stop_reason = reply.stop_reason;
+        if let Err(e) = result {
+            m.error = Some(e);
+        }
+        m
     }
 
     /// A session's turn: the reply's events, every tool call once the reply is whole, the
@@ -595,10 +907,11 @@ impl Turn {
             match self.phase {
                 Phase::Done => return None,
                 Phase::Start => {
-                    let body = self
+                    match self
                         .model
-                        .turn_body(&self.context, &self.tools, &self.options);
-                    match self.model.open(&body).await {
+                        .open_turn(&self.context, &self.tools, &self.options)
+                        .await
+                    {
                         Ok(b) => {
                             self.body = Some(b);
                             self.sse = Sse::default();

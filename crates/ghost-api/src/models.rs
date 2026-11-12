@@ -1958,27 +1958,85 @@ pub struct ModelListView {
     pub error: Option<String>,
 }
 
-/// One tiny request, timed like `make perf-llm`: request to first token.
+/// One finding of the provider check (ADR 0056).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCheckState {
+    Yes,
+    No,
+    /// The provider gave no figure to tell.
+    NotReported,
+    /// Nothing to check on this route.
+    NotApplicable,
+    /// Not tried: the model didn't answer.
+    Untested,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct ModelTestResult {
-    pub ok: bool,
+pub struct ModelCheckVerdict {
+    #[schema(inline)]
+    pub state: ModelCheckState,
+    /// In plain words.
     #[serde(default)]
-    pub ttft_ms: Option<i64>,
+    pub detail: Option<String>,
+}
+
+/// Median and worst over the timed calls, in milliseconds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckTiming {
     #[serde(default)]
-    pub total_ms: Option<i64>,
+    pub median_ms: Option<i64>,
+    #[serde(default)]
+    pub worst_ms: Option<i64>,
+}
+
+/// What the check found for one model of the connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckModel {
+    /// `main` or `fast` (ADR 0050).
+    pub role: String,
     /// What was asked for.
     pub model: String,
     /// What the provider said answered, when it says.
     #[serde(default)]
     pub answered_by: Option<String>,
-    /// The first words, shortened.
-    #[serde(default)]
-    pub reply: Option<String>,
+    pub reachable: bool,
+    /// Why it didn't answer, or what failed after it did, in plain words.
     #[serde(default)]
     pub error: Option<String>,
+    pub first_byte: ModelCheckTiming,
+    pub first_word: ModelCheckTiming,
+    /// Timed calls that answered.
+    pub samples: u32,
+    pub streaming: ModelCheckVerdict,
+    pub tools: ModelCheckVerdict,
+    pub caching: ModelCheckVerdict,
+    pub thinking: ModelCheckVerdict,
+    /// The thinking setting tried, if any.
+    #[serde(default)]
+    pub thinking_mode: Option<String>,
+}
+
+/// The provider check (ADR 0056): the connection's models with a fixed synthetic prompt,
+/// kept with a time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckView {
+    pub checked_at: DateTime<Utc>,
     /// Provider, protocol and host; never a key.
     #[serde(rename = "where")]
     pub where_: String,
+    pub models: Vec<ModelCheckModel>,
+    /// What would help when the connection is too slow for a good spoken reply; Ghost
+    /// never changes the connection itself.
+    #[serde(default)]
+    pub advice: Option<String>,
+}
+
+/// The latest kept check of the saved connection, if there is one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ModelCheckLatest {
+    #[serde(default)]
+    pub check: Option<ModelCheckView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

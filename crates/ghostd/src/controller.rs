@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 use async_trait::async_trait;
 use ghost_api::models::{OutcomeVia, SessionOrigin, TurnRole, TurnVia};
 use ghost_api::{
-    Controller, Phase, PhoneConnection, PhonePairing, PhoneView, Probe, Refusal, outcome_view,
+    Controller, Phase, PhoneConnection, PhonePairing, PhoneView, Refusal, outcome_view,
 };
 use ghost_core::conversations::GHOST;
 use ghost_core::models::Outcome;
@@ -266,13 +266,15 @@ impl Controller for Daemon {
         Daemon::apply_model(self, values)
     }
 
-    async fn probe_model(
+    async fn check_model(
         &self,
         env: ghost_api::controller::ModelEnv,
-        prompt: &str,
-        max_tokens: u32,
-    ) -> Option<Probe> {
-        Some(Daemon::probe_model(self, env, prompt, max_tokens).await)
+    ) -> Option<ghost_api::ModelCheckRun> {
+        Some(Daemon::check_model(self, env).await)
+    }
+
+    fn last_model_check(&self) -> Option<ghost_api::ModelCheckRun> {
+        Daemon::last_model_check(self)
     }
 
     fn routes_available(&self) -> Vec<RouteName> {

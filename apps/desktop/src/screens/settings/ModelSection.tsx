@@ -1,6 +1,6 @@
 /**
  * Owner: settings. The Model page (ADR 0037): which provider Ghost thinks with, picked like an
- * app, then its key, its model from the provider's own list, and Test connection. The address,
+ * app, then its key, its model from the provider's own list, and its check (ADR 0056). The address,
  * extra headers, the timeout and the Password's name are folded away under Advanced.
  *
  * The settings are part of the screen's one draft and save with its save bar through
@@ -9,7 +9,7 @@
  * this window. A setup from the older settings (GHOST_LLM_ENDPOINT) shows as the provider it
  * resolves to, and is written out as that provider on its first edit.
  */
-import type { ModelConnectionView, ModelDraft, ModelTestResult, PasswordInfo, PasswordsView, SettingsView } from "@ghost/client-ts";
+import type { ModelCheckModel, ModelCheckVerdict, ModelCheckView, ModelConnectionView, ModelDraft, PasswordInfo, PasswordsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
@@ -171,21 +171,32 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   const defaultModel = spec?.default_model ?? (protocol === "anthropic" ? "claude-sonnet-5-5" : models?.fallback ?? "");
   const listId = "set-model-list";
 
-  /* ---------------------------------------------------------- test connection */
-  const testKey = JSON.stringify([listKey, eff.GHOST_LLM_MODEL ?? "", eff.GHOST_LLM_TIMEOUT_SECS ?? ""]);
-  const [test, setTest] = useState<{ key: string; r?: ModelTestResult; error?: string } | null>(null);
+  /* ------------------------------------------------- the connection's check (ADR 0056) */
+  const testKey = JSON.stringify([listKey, eff.GHOST_LLM_MODEL ?? "", eff.GHOST_LLM_FAST_MODEL ?? "", eff.GHOST_LLM_TIMEOUT_SECS ?? ""]);
+  const [test, setTest] = useState<{ key: string; r?: ModelCheckView; error?: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [kept, setKept] = useState<ModelCheckView | null>(null);
+  useEffect(() => {
+    if (!online) return;
+    let live = true;
+    client
+      .modelCheckLatest()
+      .then((r) => live && setKept(r.check ?? null))
+      .catch(() => live && setKept(null));
+    return () => {
+      live = false;
+    };
+  }, [client, online]);
   const runTest = async () => {
     setTesting(true);
     try {
-      setTest({ key: testKey, r: await client.testModel(draftRef.current) });
+      setTest({ key: testKey, r: await client.checkModel(draftRef.current) });
     } catch (e) {
       setTest({ key: testKey, error: errorText(e) });
     } finally {
       setTesting(false);
     }
   };
-  const shownTest = test?.key === testKey ? test : null;
 
   /* ---------------------------------------------------------- OpenRouter's sign-in */
   const [signing, setSigning] = useState(false);
@@ -228,6 +239,8 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
 
   /* -------------------------------------------------------------------- render */
   const editing = CONNECTION_KEYS.some((k) => (values[k] ?? "") !== (s.values[k] ?? "")) || keyOpen;
+  // A fresh check of what is on screen, else the last kept check of the saved connection.
+  const shownTest = test?.key === testKey ? test : !editing && kept ? { key: testKey, r: kept } : null;
   const field = (k: string) => fieldId(k);
   const baseHere = provider === "cliproxy" || provider === "custom";
   const baseField = (
@@ -364,15 +377,22 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
           </Row>
           <Row className="set-model-test">
             <div className="set-model-test__main">
-              <p className="set-label">Time to first word</p>
+              <p className="set-label">How well it answers</p>
               <p className="set-help" aria-live="polite">
-                {shownTest ? <TestWords t={shownTest} /> : "Sends one short message and times the first word back, the way Ghost’s latency check does."}
+                {shownTest?.error ? (
+                  <span className="t-danger">{shownTest.error}</span>
+                ) : shownTest?.r ? (
+                  <CheckedAt r={shownTest.r} />
+                ) : (
+                  "Sends a few short, fixed messages to each model (never anything of yours) and reports how soon the first word comes back, and whether streaming, tool calls, the prompt cache and the thinking setting work."
+                )}
               </p>
             </div>
             <Button size="sm" variant="secondary" loading={testing} disabled={!online} onClick={() => void runTest()}>
-              Test connection
+              Test
             </Button>
           </Row>
+          {shownTest?.r && <CheckResult r={shownTest.r} />}
         </Card>
       </Section>
 
@@ -427,15 +447,93 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   );
 }
 
-function TestWords({ t }: { t: { r?: ModelTestResult; error?: string } }) {
-  if (t.error) return <span className="t-danger">{t.error}</span>;
-  const r = t.r!;
-  if (!r.ok || r.ttft_ms == null) return <span className="t-danger">{sentence(r.error ?? "No answer came back.")}</span>;
+function CheckedAt({ r }: { r: ModelCheckView }) {
+  const when = new Date(r.checked_at);
   return (
     <>
-      <span className="set-live">First word in {msWords(r.ttft_ms)}</span>
-      {r.total_ms != null && <>, the whole answer in {msWords(r.total_ms)}</>}. <span className="set-detail">{r.answered_by || r.model}</span>
+      Checked {when.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} through <span className="set-detail">{r.where}</span>.
     </>
+  );
+}
+
+const FINDINGS: { key: "streaming" | "tools" | "caching" | "thinking"; label: string }[] = [
+  { key: "streaming", label: "Streaming" },
+  { key: "tools", label: "Tool calls" },
+  { key: "caching", label: "Prompt cache" },
+  { key: "thinking", label: "Thinking setting" },
+];
+
+function finding(v: ModelCheckVerdict): { tone: "ok" | "warn" | undefined; word: string } {
+  switch (v.state) {
+    case "yes":
+      return { tone: "ok", word: "Works" };
+    case "no":
+      return { tone: "warn", word: "No" };
+    case "not_reported":
+      return { tone: undefined, word: "Not reported" };
+    case "not_applicable":
+      return { tone: undefined, word: "Not sent" };
+    default:
+      return { tone: undefined, word: "Not tried" };
+  }
+}
+
+function CheckModel({ m }: { m: ModelCheckModel }) {
+  const role = m.role === "fast" ? "Fast model" : "Main model";
+  if (!m.reachable) {
+    return (
+      <div className="set-model-check__model">
+        <p className="set-label">
+          {role} <span className="set-detail">{m.model}</span>
+        </p>
+        <p className="set-help t-danger">{sentence(m.error ?? "No answer came back.")}</p>
+      </div>
+    );
+  }
+  const fw = m.first_word;
+  return (
+    <div className="set-model-check__model">
+      <p className="set-label">
+        {role} <span className="set-detail">{m.answered_by || m.model}</span>
+      </p>
+      <p className="set-help">
+        {fw.median_ms != null ? (
+          <>
+            <span className="set-live">First word in {msWords(fw.median_ms)}</span>
+            {fw.worst_ms != null && <>, {msWords(fw.worst_ms)} at worst</>} over {m.samples} calls.
+          </>
+        ) : (
+          "No words came back to time."
+        )}
+      </p>
+      <ul className="set-model-check__findings">
+        {FINDINGS.map(({ key, label }) => {
+          const f = finding(m[key]);
+          return (
+            <li key={key} title={m[key].detail ?? undefined}>
+              <span>{label}</span> <Badge size="sm" tone={f.tone}>{f.word}</Badge>
+              {m[key].state === "no" && m[key].detail && <p className="set-help">{sentence(m[key].detail ?? "")}</p>}
+            </li>
+          );
+        })}
+      </ul>
+      {m.error && <p className="set-help t-danger">{sentence(m.error)}</p>}
+    </div>
+  );
+}
+
+function CheckResult({ r }: { r: ModelCheckView }) {
+  return (
+    <Row className="set-model-check">
+      {r.advice && (
+        <Notice tone="warn" title="Spoken replies will start slowly">
+          {r.advice}
+        </Notice>
+      )}
+      {r.models.map((m) => (
+        <CheckModel key={m.role} m={m} />
+      ))}
+    </Row>
   );
 }
 

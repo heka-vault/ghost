@@ -1,0 +1,84 @@
+{
+  "date": "2026-11-12",
+  "rows": [
+    {
+      "address": "ANTHROPIC_BASE_URL (on the operator's network)",
+      "check": {
+        "answered_by": "claude-sonnet-5-5",
+        "caching": {
+          "detail": "6071 tokens read from the cache",
+          "state": "yes"
+        },
+        "error": null,
+        "first_byte": {
+          "median": 0.520554487,
+          "worst": 0.586282087
+        },
+        "first_word": {
+          "median": 0.52063439,
+          "worst": 0.586354327
+        },
+        "model": "claude-sonnet-5-5",
+        "reachable": true,
+        "role": "main",
+        "samples": 5,
+        "streaming": {
+          "state": "yes"
+        },
+        "thinking": {
+          "detail": "accepts between_tools",
+          "state": "yes"
+        },
+        "thinking_mode": "between_tools",
+        "tools": {
+          "state": "yes"
+        }
+      },
+      "key_from": "ANTHROPIC_AUTH_TOKEN",
+      "provider": "proxy"
+    },
+    {
+      "address": "ANTHROPIC_BASE_URL (on the operator's network)",
+      "check": {
+        "answered_by": "claude-haiku-5-5",
+        "caching": {
+          "detail": "6071 tokens read from the cache",
+          "state": "yes"
+        },
+        "error": null,
+        "first_byte": {
+          "median": 0.478383729,
+          "worst": 0.510331323
+        },
+        "first_word": {
+          "median": 0.478444436,
+          "worst": 0.510386182
+        },
+        "model": "claude-haiku-5-5",
+        "reachable": true,
+        "role": "fast",
+        "samples": 5,
+        "streaming": {
+          "state": "yes"
+        },
+        "thinking": {
+          "detail": "refuses between_tools; Ghost sends its requests without it (HTTP 400: \"thinking.type.between_tools\" is not supported for this model.)",
+          "state": "no"
+        },
+        "thinking_mode": "between_tools",
+        "tools": {
+          "state": "yes"
+        }
+      },
+      "key_from": "ANTHROPIC_AUTH_TOKEN",
+      "provider": "proxy"
+    }
+  ],
+  "samples": 5,
+  "skipped": [
+    "anthropic: set ANTHROPIC_API_KEY to measure it",
+    "openrouter: set OPENROUTER_API_KEY to measure it",
+    "openrouter-openai: set OPENROUTER_API_KEY to measure it",
+    "openai: set OPENAI_API_KEY to measure it"
+  ]
+}

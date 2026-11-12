@@ -166,6 +166,27 @@ impl GhostClient {
             .await
     }
 
+    /// The provider check of the saved connection (ADR 0056): a few short calls per
+    /// model, so it gets three minutes.
+    pub async fn check_model(&self) -> Result<Value, ClientError> {
+        let body = serde_json::json!({"values": {}});
+        let reply = self
+            .request_with(
+                Method::POST,
+                "/model/check",
+                Some(&body),
+                Duration::from_secs(180),
+            )
+            .await?;
+        if !reply.ok() {
+            return Err(ClientError::Status {
+                status: reply.status,
+                body: reply.body.to_string(),
+            });
+        }
+        Ok(reply.body)
+    }
+
     pub async fn confirm(&self) -> Result<Value, ClientError> {
         self.expect_ok(Method::POST, "/proposals/pending/confirm", None)
             .await
