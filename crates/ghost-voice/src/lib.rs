@@ -17,6 +17,7 @@
 //! and the latency timeline keeps timings, never words.
 
 pub mod acks;
+pub mod activity;
 pub mod config;
 pub mod confirmation;
 pub mod conversation;

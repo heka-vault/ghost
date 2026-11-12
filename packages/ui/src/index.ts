@@ -16,3 +16,6 @@ export { GHOST_PATH, GHOST_PATH_SMALL, lineHue } from "./brand";
 export { createMotion, detailFor, stillPose, LOOK_AT_YOU } from "./mascot";
 export type { Attrs as MascotAttrs, Character, Ctx as MascotCtx, Detail as MascotDetail, El as MascotEl, Frame as MascotFrame, Look, Mood as MascotMood, Motion as MascotMotion, Scene as MascotScene } from "./mascot";
 export { WISP, wavePose, wispGlyph } from "./wisp";
+export { addActivity, appOf, callsOf, secondsBetween, youSpeaking } from "./activity";
+export type { Activity, ActivityKind, Call } from "./activity";
+export { CHARS_PER_VOICED_SEC, createVoicedClock, saidChars, splitSaid } from "./said";

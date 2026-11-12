@@ -45,7 +45,7 @@ export function useLines(): LineInfo[] {
     let live = true;
     client
       .conversations()
-      .then((list) => live && setLines(list.map((c) => ({ slug: c.slug, name: c.name, aliases: c.aliases, lastActive: c.last_active_at }))))
+      .then((list) => live && setLines(list.map((c) => ({ slug: c.slug, name: c.name, aliases: c.aliases, lastActive: c.last_active_at, voice: c.voice, speed: c.speed }))))
       .catch(() => {});
     return () => {
       live = false;

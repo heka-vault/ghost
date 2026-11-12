@@ -36,70 +36,250 @@
 .session-start__last-icon { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-3); transition: transform var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
 .session-start__last:hover .session-start__last-icon { color: var(--text-1); transform: translateX(var(--space-0_5)); }
 
-/* ------------------------------------------------------------------ transcript */
-/* One centered reading column, the same width as the dock under it. */
-.session-transcript {
-  display: flex; flex-direction: column; gap: var(--space-6);
-  width: 100%; max-width: var(--page-narrow); margin-inline: auto;
-  /* 48px reserved under the newest item: as much as the page will leave unscrolled, so a
-     transcript either fits fully above the dock or overflows by enough to scroll. Nothing
-     ever sits in the dock's fade. */
+/* ------------------------------------------------------------------ the record */
+/* The session as one timeline on a rail. Columns: the time (shown where time matters, any row's
+   on hover or focus), the rail with each row's mark, the words, and the row's actions. The
+   thread is wider than the dock by the gutter and shifted left by it, so the words line up with
+   the composer under them. */
+.session-record { container-type: inline-size; }
+.thread {
+  --thread-time: var(--space-16);
+  --thread-mark: var(--space-8);
+  --thread-lead: calc(var(--thread-time) + var(--thread-mark) + var(--space-3));
+  position: relative;
+  display: flex; flex-direction: column; gap: var(--space-5);
+  width: 100%; max-width: calc(var(--page-narrow) + var(--thread-lead)); margin-inline: auto;
+  translate: calc(var(--thread-lead) / -2) 0;
+  /* 48px under the newest item, as the dock's fade needs (see MIN_SCROLL_PX). */
   padding-top: var(--space-2); padding-bottom: var(--space-12);
 }
+/* The rail: one hairline through every mark. */
+.thread::before {
+  content: ""; position: absolute; top: var(--space-4); bottom: var(--space-12);
+  left: calc(var(--thread-time) + var(--space-3) + var(--thread-mark) / 2);
+  border-left: 1px solid var(--border-subtle);
+}
+.thread-row {
+  position: relative;
+  display: grid; grid-template-columns: var(--thread-time) var(--thread-mark) minmax(0, 1fr) auto;
+  column-gap: var(--space-3); align-items: start;
+}
+.thread-row__time {
+  padding-top: var(--space-1); text-align: right; white-space: nowrap;
+  font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); font-variant-numeric: tabular-nums;
+  opacity: 0; transition: opacity var(--duration-fast) var(--ease-out);
+}
+.thread-row.is-timed > .thread-row__time,
+.thread-row:hover > .thread-row__time,
+.thread-row:focus-within > .thread-row__time { opacity: 1; }
+/* Each mark sits on the rail and hides it behind itself. */
+.thread-row__mark {
+  position: relative; display: flex; justify-content: center;
+  height: var(--space-6); align-items: center;
+}
+.thread-row__mark > * { position: relative; }
+.thread-row__mark::before { content: ""; position: absolute; inset: 0 calc(50% - var(--space-3)); border-radius: var(--radius-full); background: var(--bg-canvas); }
+.thread-row__mark > svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-3); }
+.thread-row--ok > .thread-row__mark > svg { color: var(--ok); }
+.thread-row--danger > .thread-row__mark > svg { color: var(--danger); }
+.thread-row--warn > .thread-row__mark { color: var(--warn); }
+.thread-row__body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+/* Copy, and hear it again: on hover or focus only, never in the reading. */
+.thread-row__actions {
+  display: flex; gap: var(--space-0_5); opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.thread-row:hover > .thread-row__actions, .thread-row:focus-within > .thread-row__actions { opacity: 1; }
 
-/* Ghost or the line: glyph, then name and time, then its words unboxed. The glyph centers on
-   the name's line; the first paragraph sits 4px under the name, the rest 8px apart. */
-.session-speaker { display: grid; grid-template-columns: var(--space-6) minmax(0, 1fr); column-gap: var(--space-3); align-items: start; }
-.session-speaker__glyph { align-self: start; }
-.session-speaker__body { display: flex; flex-direction: column; min-width: 0; }
-.session-speaker__body > .session-msg + .session-msg { margin-top: var(--space-2); }
-.session-speaker__head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-6); font-size: var(--text-md); line-height: var(--leading-md); }
-.session-speaker__head + .session-msg { margin-top: var(--space-1); }
-.session-speaker__name { font-weight: var(--weight-semibold); color: var(--text-1); }
-.session-speaker__time { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
-.session-msg { position: relative; font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-1); white-space: pre-wrap; overflow-wrap: anywhere; }
+.thread-name { font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); color: var(--text-1); min-height: var(--space-6); display: flex; align-items: center; }
+.thread-name + .thread-ghost { margin-top: calc(var(--space-1) * -1); }
+/* Ghost's words are the brightest thing on the page; the operator's sit a step back. */
+.thread-ghost, .thread-you {
+  padding-top: var(--space-0_5);
+  font-size: var(--text-xl); line-height: var(--leading-xl);
+  white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty;
+}
+.thread-ghost { color: var(--text-1); }
+.thread-you { color: var(--text-2); }
+.thread-meta { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); }
+/* The reply being said: said words in full color, the rest a step back until reached. */
+.thread-said { color: var(--text-1); }
+.thread-unsaid { color: var(--text-3); transition: color var(--duration-base) var(--ease-out); }
+.thread-ghost.is-saying .thread-said { transition: color var(--duration-base) var(--ease-out); }
+/* Where the operator cut in: a short upright bar in the warn color, then what was never said. */
+.thread-cut {
+  display: inline-block; width: 2px; height: 1.1em; margin: 0 var(--space-1);
+  vertical-align: text-bottom; border-radius: var(--radius-full); background: var(--warn);
+}
+.thread-ghost.is-cut .thread-unsaid { color: var(--text-3); }
 
+/* The operator's mark: a ring, a mic inside for spoken, keys for typed. */
+.thread-you-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--space-6); height: var(--space-6); border-radius: var(--radius-full);
+  border: 1.5px solid var(--border-strong); color: var(--text-2);
+}
+.thread-you-mark > svg { width: var(--icon-xs); height: var(--icon-xs); }
+.thread-dot { display: inline-block; width: var(--space-1_5); height: var(--space-1_5); border-radius: var(--radius-full); background: var(--text-3); }
+.thread-ask-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--space-6); height: var(--space-6); border-radius: var(--radius-full);
+  background: var(--warn-soft); color: var(--warn); font-weight: var(--weight-semibold); font-size: var(--text-md);
+}
+.thread-row--quiet .thread-ask-mark { background: var(--bg-sunken); color: var(--text-3); }
 
-/* Thinking: the words shimmer while the model works, and the wait shows after 3 seconds. */
-.session-thinking { display: flex; align-items: baseline; gap: var(--space-2); }
-.session-thinking__text {
+/* Captions: what happened, small and quiet, on the rail like everything else. */
+.thread-caption { padding-top: var(--space-0_5); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.thread-caption--danger { color: var(--danger); }
+.thread-divider { display: flex; align-items: center; gap: var(--space-4); padding-left: var(--thread-lead); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.thread-divider::after { content: ""; flex: 1 1 0; border-top: 1px solid var(--border-subtle); }
+.thread-divider__text { flex: none; }
+/* Time passed: said in the gutter, and the rail goes dotted across it. */
+.thread-gap { position: relative; display: grid; grid-template-columns: var(--thread-time); height: var(--space-6); align-items: center; }
+.thread-gap__text { text-align: right; font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); white-space: nowrap; }
+.thread-gap::after {
+  content: ""; position: absolute; top: calc(var(--space-5) * -1); bottom: calc(var(--space-5) * -1);
+  left: calc(var(--thread-time) + var(--space-3) + var(--thread-mark) / 2 - 1px); width: 3px;
+  background: radial-gradient(circle, var(--border-strong) 1px, var(--bg-canvas) 1.5px) center / 3px 6px repeat-y;
+}
+
+/* The work between two turns: one quiet line that opens to each call. */
+.thread-work {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-2);
+  margin: 0 calc(var(--space-2) * -1); padding: var(--space-0_5) var(--space-2); border: 0; border-radius: var(--radius-sm);
+  background: transparent; font: inherit; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); cursor: pointer; text-align: left;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.thread-work:hover { background: var(--bg-hover); color: var(--text-1); }
+.thread-work__what.is-running {
   color: transparent;
-  background: linear-gradient(90deg, var(--text-3) 0%, var(--text-3) 38%, var(--text-1) 50%, var(--text-3) 62%, var(--text-3) 100%);
-  background-size: 250% 100%;
-  -webkit-background-clip: text; background-clip: text;
+  background: linear-gradient(90deg, var(--text-2) 0%, var(--text-2) 38%, var(--text-1) 50%, var(--text-2) 62%, var(--text-2) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text;
   animation: session-shimmer calc(var(--duration-slower) * 5) linear infinite;
 }
-.session-thinking__time { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.thread-work__meta { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.thread-work__chev { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-3); transition: transform var(--duration-fast) var(--ease-out); }
+.thread-work[aria-expanded="true"] .thread-work__chev { transform: rotate(90deg); }
+.thread-calls { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: var(--space-2) 0 0; list-style: none; border-top: 1px solid var(--border-subtle); }
+.thread-call { display: grid; grid-template-columns: var(--space-4) minmax(0, 1fr) auto; column-gap: var(--space-2); align-items: baseline; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.thread-call__state { display: inline-flex; align-self: center; justify-content: center; color: var(--ok); }
+.thread-call__state > svg { width: var(--icon-xs); height: var(--icon-xs); }
+.thread-call__state.is-running .thread-dot { background: var(--phase-thinking); animation: stage-pulse 1.2s var(--ease-in-out) infinite alternate; }
+.thread-call__app { color: var(--text-1); font-weight: var(--weight-medium); }
+.thread-call__id { margin-left: var(--space-2); font-size: var(--text-xs); color: var(--text-3); }
+.thread-call__time { font-size: var(--text-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.thread-call--note { display: block; padding-left: var(--space-6); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+
+/* A question an agent asked: its words are the asker's. */
+.thread-ask { font-size: var(--text-xl); line-height: var(--leading-xl); color: var(--text-1); overflow-wrap: anywhere; }
+.thread-ask__who { color: var(--text-2); }
+.thread-choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* The model is working. */
+.thread-working { display: flex; align-items: baseline; gap: var(--space-2); }
+.thread-working__text {
+  color: transparent;
+  background: linear-gradient(90deg, var(--text-3) 0%, var(--text-3) 38%, var(--text-1) 50%, var(--text-3) 62%, var(--text-3) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text;
+  animation: session-shimmer calc(var(--duration-slower) * 5) linear infinite;
+}
+.thread-working__time { font-size: var(--text-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
 @keyframes session-shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+
+/* A narrow window: no gutter, times inline on hover; the rail stays. */
+@container (max-width: 620px) {
+  .thread { --thread-time: 0px; translate: none; column-gap: 0; }
+  .thread-row { column-gap: var(--space-2); }
+  .thread-row__time { display: none; }
+  .thread-gap__text { position: absolute; left: var(--space-10); }
+  .thread-divider { padding-left: var(--space-10); }
+}
+
+/* ------------------------------------------------------------------ the stage */
+/* What is happening now, on the composer: a sign, the words, Ghost's voice across the rest. */
+.stage {
+  display: flex; align-items: center; gap: var(--space-3);
+  min-height: var(--control-lg); padding: 0 var(--space-1) 0 var(--space-4);
+}
+.stage__sign { flex: none; display: inline-flex; width: var(--space-6); justify-content: center; }
+.stage__words { flex: none; display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; margin: 0; }
+.stage__title { font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-medium); color: var(--text-1); white-space: nowrap; }
+.stage__hint { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage__wave { flex: 1 1 auto; min-width: var(--space-12); opacity: 0; transition: opacity var(--duration-slow) var(--ease-out); }
+.stage__wave > .g-wave { width: 100%; }
+.stage--speaking .stage__wave { opacity: 1; }
+.stage--speaking .stage__title { color: var(--phase-speaking); }
+.stage--you .stage__title { color: var(--phase-listening); }
+.stage--working .stage__title { color: var(--phase-thinking); }
+.stage--hold .stage__title, .stage--ending .stage__title { color: var(--text-2); }
+.stage__room { flex: none; color: var(--text-3); }
+/* Room view draws the voice wide; the strip keeps its words and the way back. */
+.stage.is-room .stage__wave { visibility: hidden; }
+@container (max-width: 560px) { .stage__hint { display: none; } }
+
+/* The operator is heard: a ring breathing slowly, the same whatever the volume. */
+.stage-breath {
+  --breath-size: 24px;
+  display: inline-block; width: var(--breath-size); height: var(--breath-size); border-radius: var(--radius-full);
+  border: 2px solid var(--phase-listening);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--phase-listening) 30%, transparent);
+  animation: stage-breathe 2.4s var(--ease-in-out) infinite alternate;
+}
+@keyframes stage-breathe {
+  from { transform: scale(0.82); box-shadow: 0 0 0 0 color-mix(in srgb, var(--phase-listening) 30%, transparent); }
+  to { transform: scale(1); box-shadow: 0 0 0 calc(var(--breath-size) / 5) color-mix(in srgb, var(--phase-listening) 0%, transparent); }
+}
+/* Ghost is working: a short arc going round. */
+.stage-orbit {
+  display: inline-block; width: var(--space-4); height: var(--space-4); border-radius: var(--radius-full);
+  border: 2px solid color-mix(in srgb, var(--phase-thinking) 25%, transparent); border-top-color: var(--phase-thinking);
+  animation: stage-spin 1.1s linear infinite;
+}
+@keyframes stage-spin { to { transform: rotate(1turn); } }
+@keyframes stage-pulse { from { opacity: 0.35; } to { opacity: 1; } }
+
+/* ------------------------------------------------------------------ room view */
+/* The same moment for someone across the room: the reply at display size, the voice wide. */
+.session-record.is-behind-room { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.room {
+  display: grid; grid-template-rows: auto 1fr auto; gap: var(--space-8);
+  width: 100%; max-width: var(--page-wide); margin-inline: auto; padding: var(--space-4) var(--space-4) var(--space-6);
+  animation: room-in var(--duration-slower) var(--ease-out);
+}
+@keyframes room-in { from { opacity: 0; } }
+.room__top { display: flex; align-items: center; gap: var(--space-3); }
+.room__name { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); color: var(--text-1); }
+.room__time { font-size: var(--text-2xl); line-height: var(--leading-2xl); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.room__leave {
+  margin-left: auto; padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: transparent; font: inherit; font-size: var(--text-md); color: var(--text-2); cursor: pointer;
+}
+.room__leave:hover { background: var(--bg-hover); color: var(--text-1); }
+.room__middle { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-6); text-align: center; min-height: 0; }
+.room__words {
+  max-width: 30ch; margin: 0;
+  font-size: clamp(var(--text-3xl), 3.4vw, var(--text-5xl)); line-height: 1.3; font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-tight); color: var(--text-1); text-wrap: pretty; overflow-wrap: anywhere;
+}
+.room__said { color: var(--text-1); }
+.room__unsaid { color: var(--text-3); }
+.room__heard { max-width: 36ch; margin: 0; font-size: var(--text-2xl); line-height: var(--leading-2xl); color: var(--text-2); }
+.room__label { margin: 0; font-size: var(--text-4xl); line-height: var(--leading-4xl); font-weight: var(--weight-medium); color: var(--text-2); }
+.room__hint { margin: 0; font-size: var(--text-2xl); line-height: var(--leading-2xl); color: var(--text-2); }
+.room--you .room__label { color: var(--phase-listening); }
+.room--working .room__label { color: var(--phase-thinking); }
+.room__bottom { display: flex; flex-direction: column; gap: var(--space-3); color: var(--phase-speaking); }
+.room__bottom > .g-wave { width: 100%; }
+.room__state { margin: 0; text-align: center; font-size: var(--text-xl); line-height: var(--leading-xl); color: var(--text-2); }
+
 @media (prefers-reduced-motion: reduce) {
-  .session-thinking__text { animation: none; background: none; color: var(--text-3); }
+  .stage-breath, .stage-orbit, .thread-call__state.is-running .thread-dot, .room { animation: none; }
+  .thread-working__text, .thread-work__what.is-running { animation: none; background: none; color: var(--text-3); }
 }
 @media (forced-colors: active) {
-  .session-thinking__text { animation: none; background: none; color: CanvasText; }
+  .thread-working__text, .thread-work__what.is-running { animation: none; background: none; color: CanvasText; }
+  .thread-cut { background: Highlight; }
 }
-
-/* The operator: soft bubbles on the right; how it was said shows only when it's the exception. */
-.session-you { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); padding-left: 20%; }
-.session-bubble {
-  max-width: 100%;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-xl);
-  /* An opaque step of the neutral ramp, one above the raised surface in both themes. */
-  background: var(--gray-4);
-  font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-1);
-  white-space: pre-wrap; overflow-wrap: anywhere;
-}
-.session-you__meta { padding-right: var(--space-2); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
-
-/* Session start, transfers, settled changes and notes: centered captions; a transfer gets hairlines either side. */
-.session-caption { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
-.session-caption::before, .session-caption::after { content: ""; flex: 1 1 0; }
-.session-caption--rule::before, .session-caption--rule::after { border-top: 1px solid var(--border-subtle); }
-.session-caption__inner { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; max-width: 80%; text-align: center; text-wrap: balance; }
-.session-caption--rule .session-caption__inner { color: var(--text-2); }
-.session-transcript > .session-caption--rule { margin-block: var(--space-2); }
-.session-caption__icon { display: inline-flex; flex: none; color: var(--text-3); }
-.session-caption__icon > svg { width: var(--icon-sm); height: var(--icon-sm); }
 
 /* ------------------------------------------------------------------ dock */
 /* The waiting change (when there is one), any error, then the composer, in the transcript's column. */
