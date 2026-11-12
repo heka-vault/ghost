@@ -393,6 +393,13 @@ impl EchoFilter {
                         .onset()
                         .is_some_and(|onset| onset.elapsed().as_secs_f64() <= WARMUP_SECS);
             }
+            // Early words are dropped wherever their transcript would be (ADR 0054).
+            Frame::EarlyTranscript(text)
+                if (self.in_warmup() && !Self::clearly_the_operator(text))
+                    || self.is_echo(text, None) =>
+            {
+                return true;
+            }
             Frame::Transcript(text) | Frame::Interim(text)
                 if self.in_warmup() && !Self::clearly_the_operator(text) =>
             {

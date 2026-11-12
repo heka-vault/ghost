@@ -352,6 +352,10 @@ struct StopInner {
     /// The segment's words reached the strategy since its verdict: a sure end is read off
     /// them, never off the words of the segment before.
     arrived: bool,
+    /// The segment's words read at its first quiet (ADR 0054), until the stop's arrive.
+    early: Option<String>,
+    /// The stop's words for this segment arrived: early words after them are moot.
+    final_seen: bool,
 }
 
 pub type TurnText = Arc<dyn Fn() -> String + Send + Sync>;
@@ -821,6 +825,7 @@ impl PatientTurnStopStrategy {
             Self::close(&inner, &sink, &probe, &turn_text).await;
         });
         self.inner.lock().unwrap().held = Some(task);
+        self.speculate_on_early().await;
     }
 
     fn number_secs(&self) -> f64 {
@@ -890,6 +895,43 @@ impl PatientTurnStopStrategy {
             // The close came meanwhile and the turn's own run is under way.
             self.probe.speculation("missed");
             self.sink.speculation_cancelled().await;
+        }
+    }
+
+    /// The segment's words read at its first quiet (ADR 0054): the answer may start on
+    /// them while the close waits, as it would on the stop's words, which still decide.
+    /// The stop's words arriving the same keep it; different, they start it again
+    /// (`words_arrived`). Nothing else is done with them.
+    pub async fn early_words(&mut self, text: String) {
+        // They come in the VAD's stop, before its `VadStopped`: speech that resumes in it
+        // stops them at the read (`ParakeetStt::speech_resumed`), a new segment clears them.
+        if !self.speculate || text.trim().is_empty() {
+            return;
+        }
+        {
+            let mut i = self.inner.lock().unwrap();
+            if i.final_seen {
+                return; // the stop's words came first: these are moot
+            }
+            i.early = Some(text.clone());
+        }
+        if self.holding() && !sounds_unfinished(&text) {
+            self.probe.speculation("early");
+            self.speculate_on(text).await;
+        }
+    }
+
+    /// The hold began after early words arrived: the answer starts on them now.
+    async fn speculate_on_early(&mut self) {
+        let early = {
+            let i = self.inner.lock().unwrap();
+            if i.final_seen { None } else { i.early.clone() }
+        };
+        if let Some(text) = early
+            && !sounds_unfinished(&text)
+        {
+            self.probe.speculation("early");
+            self.speculate_on(text).await;
         }
     }
 
@@ -966,6 +1008,11 @@ impl PatientTurnStopStrategy {
         match frame {
             Frame::VadStarted { .. } => {
                 self.speaking = true;
+                {
+                    let mut i = self.inner.lock().unwrap();
+                    i.early = None;
+                    i.final_seen = false;
+                }
                 let waiting = self.holding() || self.in_fallback();
                 self.cancel_fallback();
                 if waiting {
@@ -993,6 +1040,20 @@ impl PatientTurnStopStrategy {
             }
             Frame::Transcript(text) => {
                 *self.text.lock().unwrap() = text.clone();
+                let early = {
+                    let mut i = self.inner.lock().unwrap();
+                    i.final_seen = true;
+                    i.early.take()
+                };
+                if let Some(early) = early {
+                    // How often the early words were the stop's (ADR 0054); where they
+                    // differ, the answer started on them is started again below.
+                    self.probe.speculation(if early == *text {
+                        "early_same"
+                    } else {
+                        "early_differs"
+                    });
+                }
                 if self.holding() || self.in_fallback() {
                     let heard = self.heard();
                     self.words_arrived(heard).await;
@@ -1909,6 +1970,15 @@ impl Stage for UserAggregator {
                 }
                 return; // only the barge-in rule reads an interim
             }
+            Frame::EarlyTranscript(text) => {
+                // A turn's first segment only: a later one is read whole at its close
+                // (ADR 0044), and those words are not these.
+                let first = self.state.lock().unwrap().pieces.is_empty();
+                if self.turn_open() && first {
+                    self.stop.early_words(text.clone()).await;
+                }
+                return; // never the turn's words, never stored
+            }
             Frame::VadStarted { start_secs } => {
                 self.vad_on = true;
                 if !self.turn_open() {
@@ -2316,6 +2386,71 @@ mod tests {
             seen(&t.events),
             vec!["answer:what needs my sign off", "withdrawn", "rerun"]
         );
+    }
+
+    // --- early words (ADR 0054) -----------------------------------------------------
+
+    #[tokio::test]
+    async fn test_early_words_start_the_answer_and_the_same_stop_words_keep_it() {
+        // The early words come before the verdict: the answer starts as the hold does, and
+        // the stop's words, the same, keep it. What the turn closes on is the stop's.
+        let mut t = speculating(0.1);
+        t.s.process_frame(&vad_start()).await;
+        t.s.early_words("what needs my sign off".into()).await;
+        assert!(seen(&t.events).is_empty(), "nothing before the hold");
+        t.s.trigger_user_turn_stopped().await;
+        assert_eq!(seen(&t.events), vec!["answer:what needs my sign off"]);
+        t.hears("what needs my sign off").await;
+        sleep(0.15).await;
+        assert_eq!(
+            seen(&t.events),
+            vec!["answer:what needs my sign off", "confirmed"],
+            "started once, kept"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stop_words_that_differ_start_the_answer_again_on_themselves() {
+        let mut t = speculating(0.1);
+        t.s.process_frame(&vad_start()).await;
+        t.s.trigger_user_turn_stopped().await;
+        t.s.early_words("the latest book".into()).await; // arrives while the hold waits
+        t.hears("the latest bug").await;
+        sleep(0.15).await;
+        assert_eq!(
+            seen(&t.events),
+            vec![
+                "answer:the latest book",
+                "withdrawn",
+                "answer:the latest bug",
+                "confirmed"
+            ]
+        );
+        assert_eq!(t.s.speculation(), None);
+    }
+
+    #[tokio::test]
+    async fn test_early_words_after_the_stop_words_or_speech_again_start_nothing() {
+        let mut t = speculating(0.1);
+        t.s.process_frame(&vad_start()).await;
+        t.s.trigger_user_turn_stopped().await;
+        t.hears("close it").await;
+        t.s.early_words("close in".into()).await; // late: the stop's words are here
+        sleep(0.15).await;
+        assert_eq!(seen(&t.events), vec!["answer:close it", "confirmed"]);
+        // Speech again: early words of the half segment are moot.
+        let mut t = speculating(0.1);
+        t.s.process_frame(&vad_start()).await;
+        t.s.early_words("remind me tomorrow".into()).await;
+        t.s.process_frame(&vad_start()).await;
+        t.s.trigger_user_turn_stopped().await;
+        assert!(seen(&t.events).is_empty(), "{:?}", seen(&t.events));
+        // Words that stop mid-thought start no answer, early or not.
+        let mut t = speculating(0.1);
+        t.s.process_frame(&vad_start()).await;
+        t.s.early_words("remind me to".into()).await;
+        t.s.trigger_user_turn_stopped().await;
+        assert!(seen(&t.events).is_empty(), "{:?}", seen(&t.events));
     }
 
     #[tokio::test]

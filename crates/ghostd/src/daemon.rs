@@ -1803,8 +1803,12 @@ impl Daemon {
             }
         };
         let running = if let Some(models) = models {
-            if lock(&d.models_problem).take().is_some() {
-                d.refresh_waiting_now(); // the item resolves
+            // Loaded, perhaps with a voice that fell back (ADR 0053): that stays on the
+            // waiting list until the files are there; anything else resolves.
+            let after = models.problem.clone();
+            if *lock(&d.models_problem) != after {
+                *lock(&d.models_problem) = after;
+                d.refresh_waiting_now();
             }
             info!("models ready");
             let models = Arc::new(models);

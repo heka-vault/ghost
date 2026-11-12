@@ -155,7 +155,9 @@ pub struct Handled {
 }
 
 /// Looks at a user turn before the model does. `Some` takes it, `None` passes. Runs
-/// inside a session only; never on the passive path.
+/// inside a session only; never on the passive path. It only decides: the caller carries
+/// out what it returns, and may ask about a segment's early words without carrying out
+/// anything (ADR 0054), so `on_user_turn` must have no effect of its own.
 #[async_trait]
 pub trait TurnInterceptor: Send + Sync {
     fn name(&self) -> &str;

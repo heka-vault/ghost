@@ -90,6 +90,15 @@ Then, for the second round's changes (2026-11-12, ADR 0049 and 0050 amended):
 | D3 | With a fast model (`GHOST_LLM_FAST_MODEL=claude-haiku-5-5`, `GHOST_LLM_FAST_READS` on, its default): "What's waiting for triage?", "What's going on with app one forty two?", then "Mark app one fifty one ready for agent." | The two questions: `model` is the fast one in the record, no `handover`, an acknowledgment, then the right issues (the right repository and number). The change: `handover` 1 and `fast model: handed the turn over` in the log; the main model makes it. Fail: a wrong repository or number from the fast model; set `GHOST_LLM_FAST_READS=false` and note what it got wrong. |
 | D4 | Optional, one session with `GHOST_STT_EARLY_READ=verify` | `early read differs` lines in the debug log, one per segment the early read would have heard differently. Count them against the segments: under one in twenty, and none where it matters (a number, a name, a full stop for a comma), is the evidence for turning it `on`. |
 
+Then, for the third round (2026-11-12, ADR 0053 and 0054). D5 and D6 need Kokoro's halves:
+`scripts/models.sh kokoro-windowed` once.
+
+| | Do | Pass |
+|---|---|---|
+| D5 | `GHOST_TTS_STREAM=windowed` in settings.env, `make reload`. "Tell me a long sentence about the weather, about thirty words." Then the same with `GHOST_TTS_STREAM=whole` | Windowed, the voice starts sooner (the latency line's `tts` near 0.2 s against 0.6 s or more) and you hear no click, no gap and no change of level or timbre a few tenths of a second in, where the windows join. It is the same voice. Fail: a step in loudness, a buzz or a different timbre at the start; set it back to `whole` and note where. |
+| D6 | Windowed: "Say good morning." Then "Read me the three most recent issues." and say "stop" halfway | The short reply sounds exactly as it does whole (one window). The long one stops within a word of "stop", as it does whole. |
+| D7 | `GHOST_STT_EARLY_READ=speculate` with a fast model set; the five questions of part D | `speculation` shows `early` and `early_same` on most turns and `kept`; the answers are to what you said, word for word in the transcript, as without it. An `early_differs` is fine if the answer was to the stop's words. Fail: an answer to words you didn't say, or a turn whose transcript differs from the session without it. |
+
 ## Part E: interrupting still works
 
 | | Do | Pass |

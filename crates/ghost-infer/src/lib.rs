@@ -16,6 +16,7 @@ pub mod audio;
 pub mod clauses;
 pub mod espeak;
 pub mod kokoro;
+pub mod kokoro_windowed;
 pub mod loudness;
 pub mod mel;
 pub mod models;

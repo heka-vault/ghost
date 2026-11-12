@@ -38,13 +38,19 @@ def _json(path: str) -> dict:
 def every_copy() -> dict[str, str]:
     """What each copy says, read as its format says to."""
     out: dict[str, str] = {}
-    for p in ("tools/pyproject.toml", "tools/oracle/pyproject.toml"):
+    for p in (
+        "tools/pyproject.toml",
+        "tools/oracle/pyproject.toml",
+        "tools/voice-trial/pyproject.toml",
+    ):
         out[p] = _toml(p)["project"]["version"]
     lock = {pkg["name"]: pkg["version"] for pkg in _toml("uv.lock")["package"]}
     for name in version_script.WORKSPACE:
         out[f"uv.lock {name}"] = lock[name]
     oracle = {pkg["name"]: pkg["version"] for pkg in _toml("tools/oracle/uv.lock")["package"]}
     out["tools/oracle/uv.lock"] = oracle[version_script.ORACLE]
+    trial = {pkg["name"]: pkg["version"] for pkg in _toml("tools/voice-trial/uv.lock")["package"]}
+    out["tools/voice-trial/uv.lock"] = trial[version_script.VOICE_TRIAL]
     for p in (
         "package.json",
         "apps/desktop/package.json",

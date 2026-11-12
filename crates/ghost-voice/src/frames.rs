@@ -95,6 +95,12 @@ pub enum Frame {
     Interim(String),
     /// A final transcript of one segment: the pipeline's own evidence of what was said.
     Transcript(String),
+    /// A segment's words read at its first quiet, before the VAD's stop (ADR 0054,
+    /// `GHOST_STT_EARLY_READ=speculate`). Only the turn's speculative answer starts on
+    /// them, and only where a `Transcript` of the same words would reach the model: each
+    /// stage that drops or takes a transcript drops these. They are never the turn's words,
+    /// never stored and never evidence of anything; the stop's `Transcript` follows.
+    EarlyTranscript(String),
     /// The user's turn opened (a start strategy fired).
     UserStarted,
     /// The user's turn closed (after Smart Turn and the grace): the model is about to run.
@@ -224,6 +230,7 @@ impl Frame {
             Frame::VadStopped { .. } => "VadStopped",
             Frame::Interim(_) => "Interim",
             Frame::Transcript(_) => "Transcript",
+            Frame::EarlyTranscript(_) => "EarlyTranscript",
             Frame::UserStarted => "UserStarted",
             Frame::UserStopped => "UserStopped",
             Frame::ResetAggregation => "ResetAggregation",

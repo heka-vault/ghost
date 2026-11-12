@@ -99,6 +99,130 @@ pub fn stats(xs: &[f64]) -> Map<String, Value> {
     m
 }
 
+/// ADR 0053: Kokoro whole against Kokoro a window at a time, words to first audio, by
+/// length, with the objective checks a listener is not needed for: sample rate, clipping,
+/// DC offset, the step at each window's join against the audio's own steps, loudness
+/// against the whole render, and whether playback would ever wait for a window.
+fn tts_stream(settings: &VoiceSettings, n: usize) -> anyhow::Result<(Vec<String>, Value)> {
+    use ghost_infer::kokoro_windowed::Halves;
+    let mut lines = Vec::new();
+    let halves_paths = settings.kokoro_halves_paths();
+    if !halves_paths.exist() {
+        lines.push(format!(
+            "Kokoro windowed: the halves are not at {} (scripts/models.sh kokoro-windowed, or GHOST_TTS_STREAM_DIR)",
+            halves_paths.encoder.display()
+        ));
+        return Ok((lines, json!(null)));
+    }
+    let mut whole = ghost_infer::Kokoro::load(&settings.kokoro_paths())?;
+    let mut windowed = ghost_infer::Kokoro::load(&settings.kokoro_paths())?
+        .with_windows(Halves::load(&halves_paths)?, settings.window_plan());
+    let plan = settings.window_plan();
+    let (voice, speed) = (settings.tts_voice.as_str(), settings.tts_speed as f32);
+    lines.push(format!(
+        "Kokoro whole against a window at a time (first {} frames, context {}, x{}; voice {voice}): \
+         words -> ms to first audio p50/p95, ms to the end, audio s, windows, longest wait for a window, \
+         joins, loudness vs whole, DC, clipped samples (load {:.1})",
+        plan.first,
+        plan.context,
+        plan.grow,
+        load_average()
+    ));
+    let mut out = Map::new();
+    for (words, text) in TTS_LENGTHS {
+        let (mut w_first, mut s_first, mut s_end) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut whole_pcm, mut chunks) = (Vec::new(), Vec::new());
+        let mut arrivals = Vec::new();
+        for _ in 0..n.max(1) {
+            let t = Instant::now();
+            whole_pcm = whole.synthesize(text, voice, speed, crate::tts::LANG)?;
+            w_first.push(t.elapsed().as_secs_f64());
+            let t = Instant::now();
+            let mut got: Vec<Vec<f32>> = Vec::new();
+            let mut at = Vec::new();
+            windowed.stream_render(text, voice, speed, crate::tts::LANG, &mut |a| {
+                at.push(t.elapsed().as_secs_f64());
+                got.push(a);
+                true
+            })?;
+            s_end.push(t.elapsed().as_secs_f64());
+            s_first.push(at.first().copied().unwrap_or(0.0));
+            chunks = got;
+            arrivals = at;
+        }
+        // Playback from the first window's arrival: does any window come after the audio
+        // before it has run out?
+        let mut play_end = arrivals.first().copied().unwrap_or(0.0);
+        let mut longest_wait = 0.0f64;
+        for (c, &at) in chunks.iter().zip(&arrivals) {
+            if at > play_end {
+                longest_wait = longest_wait.max(at - play_end);
+                play_end = at;
+            }
+            play_end += c.len() as f64 / 24_000.0;
+        }
+        let joined: Vec<f32> = chunks.concat();
+        let mut steps = Vec::new();
+        let mut pos = 0usize;
+        for c in &chunks[..chunks.len().saturating_sub(1)] {
+            pos += c.len();
+            if pos > 0 && pos < joined.len() {
+                steps.push((joined[pos] - joined[pos - 1]).abs());
+            }
+        }
+        let mut diffs: Vec<f32> = joined.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+        diffs.sort_by(f32::total_cmp);
+        let p99 = diffs
+            .get((diffs.len() as f64 * 0.99) as usize)
+            .copied()
+            .unwrap_or(0.0);
+        let worst_step = steps.iter().copied().fold(0.0f32, f32::max);
+        let dc = joined.iter().map(|&x| f64::from(x)).sum::<f64>() / joined.len().max(1) as f64;
+        let clipped = joined.iter().filter(|x| x.abs() >= 0.999).count()
+            + whole_pcm.iter().filter(|x| x.abs() >= 0.999).count();
+        let lw = ghost_infer::loudness::integrated_loudness(&whole_pcm, 24_000);
+        let ls = ghost_infer::loudness::integrated_loudness(&joined, 24_000);
+        let loud = match (lw, ls) {
+            (Some(a), Some(b)) => b - a,
+            _ => f64::NAN,
+        };
+        let (wf, sf, se) = (stats(&w_first), stats(&s_first), stats(&s_end));
+        let g = |m: &Map<String, Value>, k: &str| num(&Value::Object(m.clone()), k) * 1000.0;
+        lines.push(format!(
+            "  {words:>2} words  whole {:4.0}/{:4.0} ms ({:.2} s)  windowed first {:4.0}/{:4.0} ms, end {:4.0} ms ({:.2} s, {} windows), \
+             longest wait {:3.0} ms, join step max {worst_step:.3} (p99 step {p99:.3}), loudness {loud:+.1} LU, DC {dc:+.5}, clipped {clipped}",
+            g(&wf, "p50"),
+            g(&wf, "p95"),
+            whole_pcm.len() as f64 / 24_000.0,
+            g(&sf, "p50"),
+            g(&sf, "p95"),
+            g(&se, "p50"),
+            joined.len() as f64 / 24_000.0,
+            chunks.len(),
+            longest_wait * 1000.0,
+        ));
+        out.insert(
+            words.to_string(),
+            json!({
+                "whole": wf, "windowed_first": sf, "windowed_end": se,
+                "audio_whole": whole_pcm.len() as f64 / 24_000.0,
+                "audio_windowed": joined.len() as f64 / 24_000.0,
+                "windows": chunks.len(), "longest_wait": longest_wait,
+                "join_step_max": worst_step, "p99_step": p99, "loudness_vs_whole": loud,
+                "dc": dc, "clipped": clipped, "rate": 24_000,
+            }),
+        );
+    }
+    Ok((lines, Value::Object(out)))
+}
+
+fn load_average() -> f64 {
+    std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|s| s.split_whitespace().next()?.parse().ok())
+        .unwrap_or(f64::NAN)
+}
+
 fn num(v: &Value, k: &str) -> f64 {
     v[k].as_f64().unwrap_or(0.0)
 }
@@ -325,6 +449,12 @@ pub async fn run_micro(only: &[String], n: usize, out: &Path, cache: &Path) -> a
         let summary = super::join::summarize(&rows);
         lines.push(summary.clone());
         results.insert("tts_join".into(), json!({"rows": rows, "summary": summary}));
+    }
+
+    if wants("tts-stream") {
+        let (lines_out, json_out) = tts_stream(&settings, n)?;
+        lines.extend(lines_out);
+        results.insert("tts_stream".into(), json_out);
     }
 
     if wants("turn")

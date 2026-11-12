@@ -397,6 +397,8 @@ pub struct Bench {
     pub cache: PathBuf,
     pub show_text: bool,
     pub models: Arc<Models>,
+    /// Kokoro a window at a time, when its halves are on the machine (ADR 0053).
+    pub windowed: Option<crate::tts::SharedSynth>,
     pub load_secs: f64,
     pub voice: Voice,
     pub infra_dir: PathBuf,
@@ -413,7 +415,25 @@ impl Bench {
         let base = VoiceSettings::from_env()?;
         crate::debug::enable(base.debug_audio); // the operator's own debugging session only
         let t = Instant::now();
-        let models = Arc::new(Models::load(&base)?);
+        // The operator's lines are always rendered whole: the voice under test is Ghost's,
+        // not the one that plays the operator in.
+        let mut whole = base.clone();
+        whole.tts_stream = crate::config::TtsStream::Whole;
+        let models = Arc::new(Models::load(&whole)?);
+        // Kokoro a window at a time (ADR 0053), for a run whose settings ask for it
+        // (`--variant w:tts_stream=windowed`), when its halves are on the machine.
+        let windowed = {
+            let mut w = base.clone();
+            w.tts_stream = crate::config::TtsStream::Windowed;
+            match crate::pipeline::windowed_halves(&w) {
+                (Some((halves, plan)), _) => {
+                    let k =
+                        ghost_infer::Kokoro::load(&base.kokoro_paths())?.with_windows(halves, plan);
+                    Some(Arc::new(std::sync::Mutex::new(k)) as crate::tts::SharedSynth)
+                }
+                _ => None,
+            }
+        };
         let load_secs = t.elapsed().as_secs_f64();
         let voice = Voice::new(models.tts.clone(), &cache.join("utterances"));
         Ok(Self {
@@ -421,11 +441,29 @@ impl Bench {
             cache: cache.to_path_buf(),
             show_text,
             models,
+            windowed,
             load_secs,
             voice,
             infra_dir: infra_dir.to_path_buf(),
             base,
         })
+    }
+
+    /// The models a run speaks with: the windowed Kokoro when its settings ask for it and
+    /// it is loaded, else the whole one.
+    fn models_for(&self, settings: &VoiceSettings) -> Arc<Models> {
+        match (&self.windowed, settings.tts_stream) {
+            (Some(tts), crate::config::TtsStream::Windowed) => Arc::new(Models {
+                stt: self.models.stt.clone(),
+                tts: tts.clone(),
+                turn: self.models.turn.clone(),
+                silero: self.models.silero.clone(),
+                voices: self.models.voices.clone(),
+                acks: self.models.acks.clone(),
+                problem: None,
+            }),
+            _ => self.models.clone(),
+        }
     }
 
     /// Where `ghost-mock-github` is: on the PATH, or beside this binary.
@@ -594,9 +632,10 @@ impl Bench {
                 (model, fast_model)
             }
         };
+        let models = self.models_for(&settings);
         let session = build_session(SessionParams {
             settings: Arc::new(settings),
-            models: self.models.clone(),
+            models,
             model,
             fast_model,
             sources: env.sources.clone(),

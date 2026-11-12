@@ -179,11 +179,19 @@ pub enum EarlyReadMode {
     /// the stop's, and whether the early read said the same is counted (`differs`). For
     /// the harness, which measures that the early words are the same.
     Verify,
+    /// From the first quiet frame, its words sent on at once as `Frame::EarlyTranscript`
+    /// for the turn's speculative answer only, and read again at the stop: the segment's
+    /// words are still the stop's, and an answer started on early words that differ from
+    /// them is started again (ADR 0054).
+    Speculate,
 }
 
 /// A segment's read begun at its first quiet frame.
 struct EarlyRead {
     task: JoinHandle<(Option<String>, f64)>,
+    /// `Speculate`: stops the early words going out once they are moot (speech again,
+    /// the stop's read under way).
+    moot: Option<tokio_util::sync::CancellationToken>,
 }
 
 /// What became of an early read (`Metric::EarlyRead`): `used`, `discarded` (speech came
@@ -264,7 +272,7 @@ impl ParakeetStt {
 
     /// The operator went quiet (the VAD's first quiet frame after speech): read what was
     /// said, with silence for the stop the VAD has still to wait.
-    pub(crate) fn silence_began(&mut self) {
+    pub(crate) fn silence_began(&mut self, out: &Out) {
         if self.early_read == EarlyReadMode::Off || !self.user_speaking || self.segment.is_empty() {
             return;
         }
@@ -276,13 +284,34 @@ impl ParakeetStt {
         let pad = to_come + TRAILING_SECS;
         let audio = Self::read_audio(&self.segment, pad);
         let model = self.model.clone();
-        self.early = Some(EarlyRead {
-            task: tokio::task::spawn_blocking(move || {
-                let began = Instant::now();
-                let text = recognize(&model, &audio, true);
-                (text, began.elapsed().as_secs_f64())
-            }),
+        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+        let speculate = self.early_read == EarlyReadMode::Speculate;
+        let task = tokio::task::spawn_blocking(move || {
+            let began = Instant::now();
+            let text = recognize(&model, &audio, true);
+            if speculate {
+                let _ = tx.send(text.clone());
+            }
+            (text, began.elapsed().as_secs_f64())
         });
+        let moot = speculate.then(|| {
+            // The words go on the moment they are read, ahead of the VAD's stop when the
+            // read is quicker than the quiet still to come.
+            let moot = tokio_util::sync::CancellationToken::new();
+            let (m, out) = (moot.clone(), out.clone());
+            tokio::spawn(async move {
+                let text = tokio::select! {
+                    _ = m.cancelled() => return,
+                    t = rx => t.ok().flatten().unwrap_or_default(),
+                };
+                if !text.is_empty() && !m.is_cancelled() {
+                    debug::audio(|| format!("early words: {text:?}"));
+                    out.push(Frame::EarlyTranscript(text)).await;
+                }
+            });
+            moot
+        });
+        self.early = Some(EarlyRead { task, moot });
     }
 
     /// Speech again before the stop: the early read was of half a segment.
@@ -290,6 +319,9 @@ impl ParakeetStt {
         self.quiet_secs = 0.0;
         self.early_tried = false;
         if let Some(e) = self.early.take() {
+            if let Some(m) = &e.moot {
+                m.cancel();
+            }
             // The read runs on to its end on its thread; its CPU is what this costs. The
             // stage does not wait for it: the operator is talking.
             let out = out.clone();
@@ -309,6 +341,9 @@ impl ParakeetStt {
 
     fn drop_early(&mut self) {
         if let Some(e) = self.early.take() {
+            if let Some(m) = &e.moot {
+                m.cancel();
+            }
             e.task.abort();
         }
     }
@@ -462,6 +497,12 @@ impl ParakeetStt {
             return;
         }
         let early = match early {
+            // Its words have gone on, or will not now: the stop's read starts at once
+            // (behind the early one on the model's lock), and the early read's words are
+            // counted against it by the turn (ADR 0054).
+            // The early words may still be on their way; the turn ignores any that come
+            // after the stop's.
+            Some(_) if self.early_read == EarlyReadMode::Speculate => None,
             Some(e) => {
                 let began = Instant::now();
                 let (text, secs) = e.task.await.unwrap_or((None, 0.0));
@@ -623,7 +664,7 @@ impl Stage for ParakeetStt {
                                 }
                                 self.quiet_secs += audio.seconds();
                                 if !self.early_tried && self.quiet_secs >= self.early_after_secs {
-                                    self.silence_began();
+                                    self.silence_began(out);
                                 }
                             }
                             VadState::Speaking if before == VadState::Stopping => {
@@ -1050,7 +1091,7 @@ mod tests {
         for f in speech(0.6) {
             stt.process(f, Direction::Down, &out).await;
         }
-        stt.silence_began();
+        stt.silence_began(&out);
         if resume {
             for f in quiet(0.1) {
                 stt.process(f, Direction::Down, &out).await;
@@ -1059,7 +1100,7 @@ mod tests {
             for f in speech(0.4) {
                 stt.process(f, Direction::Down, &out).await;
             }
-            stt.silence_began();
+            stt.silence_began(&out);
         }
         // The rest of the VAD's stop: 0.2 s of quiet, then the stop.
         for f in quiet(0.2) {
@@ -1071,6 +1112,44 @@ mod tests {
         let down = drain(&mut rx).await;
         let calls = calls.lock().unwrap().clone();
         (down, calls)
+    }
+
+    #[tokio::test]
+    async fn test_speculate_sends_the_early_words_on_and_the_stops_words_are_the_segments() {
+        // ADR 0054: the early read's words go on as soon as they are read; the segment's
+        // transcript is the stop's read, word for word the read `Off` makes.
+        let (off, _) = segment(EarlyReadMode::Off, false).await;
+        let (spec, calls) = segment(EarlyReadMode::Speculate, false).await;
+        let finals = |down: &[Frame]| -> Vec<String> {
+            down.iter()
+                .filter_map(|f| match f {
+                    Frame::Transcript(t) => Some(t.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(finals(&spec), finals(&off), "the stop's words, as today");
+        assert_eq!(calls.len(), 2, "the early read and the stop's");
+        let early: Vec<usize> = spec
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| matches!(f, Frame::EarlyTranscript(_)))
+            .map(|(i, _)| i)
+            .collect();
+        let last = spec
+            .iter()
+            .position(|f| matches!(f, Frame::Transcript(_)))
+            .unwrap();
+        assert_eq!(early.len(), 1, "{spec:?}");
+        assert!(early[0] < last, "the early words come before the stop's");
+        // Speech again before the stop: the half segment's early words never go on.
+        let (resumed, _) = segment(EarlyReadMode::Speculate, true).await;
+        let early: Vec<&Frame> = resumed
+            .iter()
+            .filter(|f| matches!(f, Frame::EarlyTranscript(_)))
+            .collect();
+        assert_eq!(early.len(), 1, "only the whole segment's: {resumed:?}");
+        assert!(early_reads(&resumed).contains(&EARLY_DISCARDED));
     }
 
     #[tokio::test]
@@ -1116,7 +1195,7 @@ mod tests {
         for f in speech(0.5) {
             stt.process(f, Direction::Down, &out).await;
         }
-        stt.silence_began();
+        stt.silence_began(&out);
         for f in quiet(0.2) {
             stt.process(f, Direction::Down, &out).await;
             tokio::time::sleep(Duration::from_millis(20)).await;

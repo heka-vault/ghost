@@ -37,6 +37,20 @@ struct FakeKokoro {
     secs: f64,
     render: Duration,
     spoken: Arc<Mutex<Vec<String>>>,
+    /// 0: renders a clause whole. More: in this many windows, each made in its share of
+    /// `render` and handed on as it is made (ADR 0053).
+    windows: usize,
+    rendering: Rendering,
+}
+
+/// What the windowed fake did: windows handed on, renders finished, renders stopped.
+#[derive(Clone, Default)]
+struct Rendering(Arc<Mutex<(usize, usize, usize)>>);
+
+impl Rendering {
+    fn get(&self) -> (usize, usize, usize) {
+        *self.0.lock().unwrap()
+    }
 }
 
 impl Synth for FakeKokoro {
@@ -52,6 +66,31 @@ impl Synth for FakeKokoro {
         self.spoken.lock().unwrap().push(text.to_string());
         std::thread::sleep(self.render);
         Ok(vec![20000; (24000.0 * self.secs) as usize])
+    }
+    fn render(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+        emit: &mut dyn FnMut(Vec<i16>) -> bool,
+    ) -> ghost_infer::Result<()> {
+        if self.windows == 0 {
+            let pcm = self.synthesize(text, voice, speed)?;
+            emit(pcm);
+            return Ok(());
+        }
+        self.spoken.lock().unwrap().push(text.to_string());
+        let each = (24000.0 * self.secs) as usize / self.windows;
+        for _ in 0..self.windows {
+            std::thread::sleep(self.render / self.windows as u32);
+            self.rendering.0.lock().unwrap().0 += 1;
+            if !emit(vec![20000; each]) {
+                self.rendering.0.lock().unwrap().2 += 1;
+                return Ok(());
+            }
+        }
+        self.rendering.0.lock().unwrap().1 += 1;
+        Ok(())
     }
 }
 
@@ -125,6 +164,8 @@ struct World {
     fast_asked: Arc<Mutex<Vec<Vec<String>>>>,
     offered: Arc<Mutex<Vec<Vec<String>>>>,
     fast_offered: Arc<Mutex<Vec<Vec<String>>>>,
+    /// The windowed fake's counts (ADR 0053).
+    rendering: Rendering,
 }
 
 /// What a session's world is made of. `Setup::new` is the plain one.
@@ -142,6 +183,8 @@ struct Setup {
     /// `GHOST_*` settings over the test's own.
     vars: Vec<(&'static str, String)>,
     sources: Vec<ToolSource>,
+    /// The voice renders in this many windows a clause; 0, whole.
+    windows: usize,
 }
 
 impl Setup {
@@ -156,6 +199,7 @@ impl Setup {
             sure: 0.99,
             vars: Vec::new(),
             sources: Vec::new(),
+            windows: 0,
         }
     }
 
@@ -268,6 +312,7 @@ fn world_setup(setup: Setup) -> World {
         sure,
         vars,
         sources,
+        windows,
     } = setup;
     let settings = VoiceSettings::from_vars(|name| {
         if let Some((_, v)) = vars.iter().find(|(k, _)| *k == name) {
@@ -285,10 +330,13 @@ fn world_setup(setup: Setup) -> World {
     heard.reverse();
     let stt: SharedRecognizer = Arc::new(Mutex::new(FakeParakeet(Arc::new(Mutex::new(heard)))));
     let spoken = Arc::new(Mutex::new(Vec::new()));
+    let rendering = Rendering::default();
     let tts: SharedSynth = Arc::new(Mutex::new(FakeKokoro {
         secs: clause_secs,
         render: Duration::from_millis(render_ms),
         spoken: spoken.clone(),
+        windows,
+        rendering: rendering.clone(),
     }));
     let models = Arc::new(Models {
         stt,
@@ -297,6 +345,7 @@ fn world_setup(setup: Setup) -> World {
         silero: "/nonexistent/silero.onnx".into(),
         voices: vec!["af_heart".into()],
         acks: rendered_acks(),
+        problem: None,
     });
     let gate = Arc::new(
         WriteGate::new(Arc::new(Store::in_memory().unwrap()))
@@ -367,6 +416,7 @@ fn world_setup(setup: Setup) -> World {
         fast_asked,
         offered,
         fast_offered,
+        rendering,
     }
 }
 
@@ -1692,4 +1742,106 @@ async fn with_reads_off_any_call_hands_over_as_before() {
         "the main model's read only"
     );
     finish(&w).await;
+}
+
+// --- a voice that starts as it is made (ADR 0053) -----------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_windowed_voice_plays_its_first_window_before_the_piece_is_rendered() {
+    // A 3 s clause made in six windows of 0.15 s each: the speaker has the first while the
+    // other five are still being made.
+    let w = Setup {
+        clause_secs: 3.0,
+        render_ms: 900,
+        windows: 6,
+        ..Setup::new(&["hello"], vec![])
+    }
+    .build();
+    w.session.start(true).await;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while w.ear.seconds_played() <= 0.0 {
+        assert!(Instant::now() < deadline, "the greeting never played");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let (windows, finished, _) = w.rendering.get();
+    assert_eq!(
+        finished, 0,
+        "the whole piece was rendered before any of it played"
+    );
+    assert!(
+        windows < 6,
+        "{windows} windows were made before the first sound"
+    );
+    // The rest arrives in time: the clause plays out whole, with no window lost.
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while w.ear.seconds_played() < 2.99 {
+        assert!(
+            Instant::now() < deadline,
+            "played {}",
+            w.ear.seconds_played()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(w.rendering.get().1, 1);
+    w.session.cancel().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_barge_in_stops_a_windowed_voice_within_100ms_and_stops_its_render() {
+    // As `a_barge_in_stops_playback_within_100ms`, with the reply made a window at a time:
+    // the speaker is cleared as fast, and the windows not yet made are never made.
+    let w = Setup {
+        clause_secs: 3.0,
+        render_ms: 1200,
+        windows: 6,
+        ..Setup::new(
+            &["tell me everything", "stop that now"],
+            vec![vec![ScriptedModel::say(
+                "Here is everything, in great detail, for a long while.",
+            )]],
+        )
+    }
+    .build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    say(&w, 0.3).await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while w.ear.seconds_played() < 3.5 {
+        assert!(Instant::now() < deadline, "Ghost never spoke the reply");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let at = Instant::now();
+    w.session
+        .inject(vec![Frame::VadStarted { start_secs: 0.2 }])
+        .await;
+    w.session
+        .inject(vec![Frame::Interim("stop that now".into())])
+        .await;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(c) = w.ear.cleared().into_iter().find(|c| *c > at) {
+            let took = c.duration_since(at);
+            assert!(
+                took < Duration::from_millis(100),
+                "cleared {took:?} after the barge-in"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the barge-in never cleared the speaker"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // The reply's render stops at its next window instead of making the rest.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while w.rendering.get().2 == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the render went on after the barge-in: {:?}",
+            w.rendering.get()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    w.session.cancel().await;
 }

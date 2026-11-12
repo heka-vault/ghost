@@ -2,7 +2,8 @@
 # This file is the one source of Ghost's version (`tools/version.py` writes every copy from
 # it, docs/releasing.md), the ruff settings for every Python file in the repository, and the
 # uv workspace of the tools. The oracle (`tools/oracle`, the model wrappers the Rust daemon
-# is measured against) has its own lock and is not a member.
+# is measured against) has its own lock and is not a member, nor is `tools/voice-trial`
+# (Kokoro's split for the windowed voice and its measurements, ADR 0053).
 [project]
 name = "ghost"
 version = "2026.10.0"
@@ -17,7 +18,7 @@ package = false
 
 [tool.uv.workspace]
 members = ["tools"]
-exclude = ["tools/oracle"]
+exclude = ["tools/oracle", "tools/voice-trial"]
 
 [dependency-groups]
 dev = ["pytest>=8.3", "ruff>=0.8"]
@@ -32,3 +33,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# One-off measurement scripts whose report lines are long f-strings.
+"tools/voice-trial/**" = ["E501"]

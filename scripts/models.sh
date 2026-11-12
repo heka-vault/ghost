@@ -21,6 +21,13 @@
 #   scripts/models.sh          ensure the four small files; print their folder on stdout
 #   scripts/models.sh parakeet ensure Parakeet's files; print their folder on stdout
 #                              (scripts/dev.sh and make models run both)
+#   scripts/models.sh kokoro-windowed
+#                              Kokoro's two halves for the windowed voice (ADR 0053,
+#                              GHOST_TTS_STREAM=windowed): made from Kokoro v1.0 in
+#                              ~/.cache/ghost/kokoro/ by tools/voice-trial's split_kokoro.py
+#                              (uv), each half pinned by SHA-256, into kokoro/windowed/;
+#                              print the folder on stdout. Never staged: the bundle does
+#                              not carry Kokoro either
 #   scripts/models.sh stage    the four, also copied (with the licences) under apps/desktop/
 #                              src-tauri/resources/models/ for the bundle (scripts/sidecars.sh
 #                              runs this; the folder is not committed)
@@ -80,9 +87,9 @@ usage() {
 
 mode="${1:-}"
 case "$mode" in
-  "" | stage | parakeet) ;;
+  "" | stage | parakeet | kokoro-windowed) ;;
   -h | --help | help) usage; exit 0 ;;
-  *) echo "usage: $0 [stage|parakeet|--help]" >&2; exit 2 ;;
+  *) echo "usage: $0 [stage|parakeet|kokoro-windowed|--help]" >&2; exit 2 ;;
 esac
 
 # The temp folder is inside the cache, so a finished file moves into place by one rename
@@ -117,6 +124,46 @@ place() {
   mv "$TMP/$name" "$dir/$name"
   echo "models: $dir/$name ($(du -h "$dir/$name" | cut -f1))" >&2
 }
+
+if [ "$mode" = kokoro-windowed ]; then
+  # Kokoro v1.0 (Apache-2.0, hexgrad/Kokoro-82M; the ONNX of thewh1teagle/kokoro-onnx's
+  # model-files-v1.0 release) cut in two, nothing inside either half changed but one added
+  # input. The split is deterministic (onnx 1.19.1, pinned in tools/voice-trial/uv.lock),
+  # so the halves are pinned like any download.
+  KOKORO_DIR="${GHOST_CACHE_DIR:-$HOME/.cache/ghost}/kokoro"
+  KOKORO_SHA=7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5
+  ENCODER_SHA=2f8a0b8abbaca5c66317ee5672bf3e68f2dfc7b1ade23a9500ae77407c3d6ec7
+  DECODER_SHA=88b5172fd6a0061fcb87102b553b6f2966dd9b1fa52ce45435730eceb0e66231
+  dir="$KOKORO_DIR/windowed"
+  if [ -f "$dir/kokoro-encoder.onnx" ] && [ -f "$dir/kokoro-decoder.onnx" ]; then
+    echo "$dir"
+    exit 0
+  fi
+  if ! [ -f "$KOKORO_DIR/kokoro-v1.0.onnx" ] || ! matches "$KOKORO_DIR/kokoro-v1.0.onnx" "$KOKORO_SHA"; then
+    echo "models: $KOKORO_DIR/kokoro-v1.0.onnx is missing or not Kokoro v1.0 as pinned;" >&2
+    echo "  fetch it as docs/releasing.md says under \"The speech models\"" >&2
+    exit 1
+  fi
+  echo "models: cutting Kokoro in two (tools/voice-trial, about a minute)" >&2
+  uv run --quiet --project "$ROOT/tools/voice-trial" python -I \
+    "$ROOT/tools/voice-trial/voice_trial/split_kokoro.py" \
+    "$KOKORO_DIR/kokoro-v1.0.onnx" "$TMP/windowed" --phase >&2
+  for pair in "kokoro-encoder.onnx|$ENCODER_SHA" "kokoro-decoder.onnx|$DECODER_SHA"; do
+    IFS='|' read -r name sha256 <<<"$pair"
+    if ! matches "$TMP/windowed/$name" "$sha256"; then
+      echo "models: $name does not match the pinned SHA-256" >&2
+      echo "  expected $sha256" >&2
+      echo "  got      $(sha256sum "$TMP/windowed/$name" | cut -d' ' -f1)" >&2
+      exit 1
+    fi
+  done
+  mkdir -p "$dir"
+  chmod 644 "$TMP/windowed/"*.onnx
+  mv "$TMP/windowed/kokoro-encoder.onnx" "$TMP/windowed/kokoro-decoder.onnx" "$dir/"
+  echo "models: $dir ($(du -sh "$dir" | cut -f1))" >&2
+  echo "$dir"
+  exit 0
+fi
 
 if [ "$mode" = parakeet ]; then
   dir="$CACHE/$PARAKEET_FOLDER"

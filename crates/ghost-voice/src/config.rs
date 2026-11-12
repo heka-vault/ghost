@@ -39,6 +39,19 @@ pub enum ConfigError {
     Endpoint,
     #[error("{0} is not a number")]
     Number(String),
+    #[error("GHOST_TTS_STREAM must be whole or windowed")]
+    Stream,
+}
+
+/// How Kokoro renders a piece (`GHOST_TTS_STREAM`, ADR 0053).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TtsStream {
+    /// The whole piece, then it plays.
+    #[default]
+    Whole,
+    /// The vocoder a window of frames at a time; the first window plays while the rest
+    /// renders.
+    Windowed,
 }
 
 /// The voice package's settings. Defaults are the Python's.
@@ -89,6 +102,19 @@ pub struct VoiceSettings {
     /// are pending, at a comma or before a phrase's first word, so its audio starts sooner
     /// (`ghost_infer::clauses::ClauseAggregator::with_first_clause`); 0, the usual rule.
     pub tts_first_clause_words: usize,
+    /// `GHOST_TTS_STREAM`: how Kokoro renders a piece (ADR 0053). `whole` (the default):
+    /// the whole piece, then it plays. `windowed`: the model's two halves
+    /// (`ghost_infer::kokoro_windowed`), the vocoder a window of frames at a time, so the
+    /// first audio comes after the encoder and one short window; the halves' files missing,
+    /// Kokoro renders whole and the waiting list says so.
+    pub tts_stream: TtsStream,
+    /// `GHOST_TTS_STREAM_DIR`: the two halves' folder; unset, `kokoro/windowed/` in Ghost's
+    /// cache (`scripts/models.sh kokoro-windowed`).
+    pub tts_stream_dir: Option<PathBuf>,
+    /// `GHOST_TTS_WINDOW_FRAMES` (8, 25 ms each) and `GHOST_TTS_WINDOW_CONTEXT` (16): the
+    /// first window's frames and the context decoded on each side of every window.
+    pub tts_window_frames: usize,
+    pub tts_window_context: usize,
     /// kokoro (local, the default) or elevenlabs (ADR 0026), Kokoro behind it.
     pub tts_engine: String,
     pub elevenlabs_api_key: Zeroizing<String>,
@@ -276,6 +302,7 @@ impl VoiceSettings {
             {
                 None => crate::stt::EarlyReadMode::Off,
                 Some("verify") => crate::stt::EarlyReadMode::Verify,
+                Some("speculate") => crate::stt::EarlyReadMode::Speculate,
                 Some(v) => match parse_bool(v) {
                     Some(true) => crate::stt::EarlyReadMode::On,
                     _ => crate::stt::EarlyReadMode::Off,
@@ -289,6 +316,17 @@ impl VoiceSettings {
             tts_clause_min_words: usize_or("GHOST_TTS_CLAUSE_MIN_WORDS", 4)?,
             tts_prerender: text("GHOST_TTS_PRERENDER").and_then(|v| parse_bool(&v)),
             tts_first_clause_words: usize_or("GHOST_TTS_FIRST_CLAUSE_WORDS", 4)?,
+            tts_stream: match text("GHOST_TTS_STREAM")
+                .map(|v| v.trim().to_lowercase())
+                .as_deref()
+            {
+                None | Some("") | Some("whole") | Some("off") => TtsStream::Whole,
+                Some("windowed") | Some("on") => TtsStream::Windowed,
+                Some(_) => return Err(ConfigError::Stream),
+            },
+            tts_stream_dir: path("GHOST_TTS_STREAM_DIR"),
+            tts_window_frames: usize_or("GHOST_TTS_WINDOW_FRAMES", 8)?.max(1),
+            tts_window_context: usize_or("GHOST_TTS_WINDOW_CONTEXT", 16)?,
             tts_engine,
             elevenlabs_api_key: Zeroizing::new(string("ELEVENLABS_API_KEY", "")),
             elevenlabs_voice: string("GHOST_ELEVENLABS_VOICE", ""),
@@ -421,6 +459,25 @@ impl VoiceSettings {
                 .clone()
                 .unwrap_or_else(|| dir.join("voices-v1.0.bin")),
             espeak_data: None,
+        }
+    }
+
+    /// The halves of Kokoro that render a window at a time (ADR 0053):
+    /// `GHOST_TTS_STREAM_DIR`, else `kokoro/windowed/` in Ghost's cache.
+    pub fn kokoro_halves_paths(&self) -> ghost_infer::kokoro_windowed::HalvesPaths {
+        let dir = self
+            .tts_stream_dir
+            .clone()
+            .unwrap_or_else(|| self.cache_dir.join("kokoro").join("windowed"));
+        ghost_infer::kokoro_windowed::HalvesPaths::in_dir(&dir)
+    }
+
+    /// How a piece is cut into windows when Kokoro renders a window at a time.
+    pub fn window_plan(&self) -> ghost_infer::kokoro_windowed::WindowPlan {
+        ghost_infer::kokoro_windowed::WindowPlan {
+            first: self.tts_window_frames,
+            context: self.tts_window_context,
+            ..Default::default()
         }
     }
 

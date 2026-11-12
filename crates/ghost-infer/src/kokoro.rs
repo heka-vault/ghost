@@ -21,6 +21,7 @@ use crate::{
     InferError, Result,
     clauses::ClauseAggregator,
     espeak::Espeak,
+    kokoro_windowed::{Halves, WindowPlan},
     npy, phonemize,
     session::{self, SessionConfig},
 };
@@ -65,6 +66,8 @@ pub struct Kokoro {
     voices: BTreeMap<String, Vec<f32>>,
     vocab: HashMap<char, i64>,
     espeak: &'static Espeak,
+    /// The two halves, when Ghost renders a window at a time (ADR 0053).
+    windowed: Option<(Halves, WindowPlan)>,
 }
 
 /// One rendered piece of a reply.
@@ -104,7 +107,56 @@ impl Kokoro {
             voices,
             vocab: vocab::VOCAB.iter().copied().collect(),
             espeak: Espeak::init(paths.espeak_data.as_deref())?,
+            windowed: None,
         })
+    }
+
+    /// Render a window at a time from here on (`stream_render`), with the two halves of
+    /// the same model (`kokoro_windowed`).
+    pub fn with_windows(mut self, halves: Halves, plan: WindowPlan) -> Self {
+        self.windowed = Some((halves, plan));
+        self
+    }
+
+    /// Whether this model renders a window at a time.
+    pub fn windowed(&self) -> bool {
+        self.windowed.is_some()
+    }
+
+    /// `synthesize`, its audio handed to `emit` as it is made: a window at a time when the
+    /// halves are loaded, else the whole text at once. `emit` returning false stops it.
+    pub fn stream_render(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+        lang: &str,
+        emit: &mut dyn FnMut(Vec<f32>) -> bool,
+    ) -> Result<()> {
+        if self.windowed.is_none() {
+            let audio = self.synthesize(text, voice, speed, lang)?;
+            emit(audio);
+            return Ok(());
+        }
+        if !(0.5..=2.0).contains(&speed) {
+            return Err(InferError::Model(format!(
+                "Speed should be between 0.5 and 2.0, got {speed}"
+            )));
+        }
+        for (phonemes, pause) in self.batches(text, lang)? {
+            let tokens = self.tokenize(&phonemes)?;
+            if tokens.is_empty() {
+                return Err(InferError::Model(format!(
+                    "No phonemes of {phonemes:?} are in the model vocabulary"
+                )));
+            }
+            let style = self.style(voice, tokens.len())?.to_vec();
+            let (halves, plan) = self.windowed.as_mut().expect("checked above");
+            if !halves.render(&tokens, &style, speed, pause, plan, emit)? {
+                return Ok(());
+            }
+        }
+        Ok(())
     }
 
     /// The voices in the file, sorted.
