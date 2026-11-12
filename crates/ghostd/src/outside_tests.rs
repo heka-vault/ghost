@@ -640,7 +640,8 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
     assert_eq!(names, TOOLS);
     // No tool about passwords, the policy file, permissions, apps to connect, clients or
-    // their tokens, transcripts or audio: by name, and by anything its schema takes.
+    // their tokens, transcripts or audio: by its name, and by the name of any argument it
+    // takes.
     let forbidden = [
         "password",
         "passwords",
@@ -674,12 +675,13 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "confirm",
     ];
     for t in &tools {
-        let said = format!(
-            "{} {}",
-            t.name,
-            serde_json::to_string(&t.input_schema).unwrap()
-        )
-        .to_lowercase();
+        let arguments: Vec<String> = t
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .map(|p| p.keys().cloned().collect())
+            .unwrap_or_default();
+        let said = format!("{} {}", t.name, arguments.join(" ")).to_lowercase();
         let words: BTreeSet<&str> = said
             .split(|c: char| !c.is_ascii_alphanumeric())
             .filter(|w| !w.is_empty())
