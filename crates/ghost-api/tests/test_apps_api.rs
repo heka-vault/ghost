@@ -142,6 +142,59 @@ async fn apps_list_each_tool_with_what_the_permissions_say() {
 }
 
 #[tokio::test]
+async fn an_apps_own_limits_and_pinned_tools_are_shown_and_set_in_its_entry() {
+    let mut w = World::new();
+    with_apps(&mut w);
+    let c = w.client();
+    let view = c.get("/apps/github").await;
+    assert_eq!(
+        view["limits"],
+        json!({
+            "timeout": null, "connect_timeout": null, "result_chars": null, "pinned": [],
+            "default_timeout": 300, "default_connect_timeout": 60, "default_result_chars": 24000,
+        })
+    );
+    let r = c
+        .put(
+            "/apps/github/limits",
+            json!({"timeout": 900, "connect_timeout": null, "result_chars": 40000,
+                   "pinned": ["issue_read", " issue_read ", ""]}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r["limits"]["timeout"], 900);
+    assert_eq!(r["limits"]["result_chars"], 40000);
+    assert_eq!(r["limits"]["pinned"], json!(["issue_read"]));
+    let file: Value =
+        serde_json::from_str(&std::fs::read_to_string(apps_file(&w)).unwrap()).unwrap();
+    let entry = &file["apps"]["github"];
+    assert_eq!(entry["timeout"], 900);
+    assert_eq!(entry["result_chars"], 40000);
+    assert_eq!(entry["pinned"], json!(["issue_read"]));
+    assert!(entry.get("connect_timeout").is_none(), "{entry}");
+    // Out of range: refused, and the file is unchanged.
+    let r = c
+        .put("/apps/github/limits", json!({"timeout": 0, "pinned": []}))
+        .await;
+    assert_eq!(r.status, 422, "{}", r.text);
+    let r = c
+        .put("/apps/github/limits", json!({"result_chars": 10, "pinned": []}))
+        .await;
+    assert_eq!(r.status, 422, "{}", r.text);
+    assert_eq!(
+        c.put("/apps/nope/limits", json!({"pinned": []})).await.status,
+        404
+    );
+    // Back to the defaults: the keys leave the entry.
+    let r = c.put("/apps/github/limits", json!({"pinned": []})).await;
+    assert_eq!(r.status, 200);
+    let file: Value =
+        serde_json::from_str(&std::fs::read_to_string(apps_file(&w)).unwrap()).unwrap();
+    assert!(file["apps"]["github"].get("timeout").is_none());
+    assert!(file["apps"]["github"].get("pinned").is_none());
+}
+
+#[tokio::test]
 async fn permissions_keep_the_rest_of_the_file_and_refuse_a_bad_rule() {
     let mut w = World::new();
     with_apps(&mut w);

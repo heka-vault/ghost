@@ -234,6 +234,100 @@ impl GhostServer {
     }
 }
 
+/// What the operator does to a watch an agent made, from the desktop (ADR 0052): pause it,
+/// resume it or remove it. Their own watches are theirs to edit in `watches.json`; this
+/// touches only an entry with `made_by`, and only that entry, through the same writer an
+/// agent's change goes through (the operator's other entries and their order are kept,
+/// and a file that would gain a problem is not written).
+pub fn operator_sets_agents_watch(
+    watches_path: &std::path::Path,
+    name: &str,
+    action: &str,
+) -> Result<(), String> {
+    let text = if watches_path.is_file() {
+        std::fs::read_to_string(watches_path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+    let body: Value = if text.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str(&text).map_err(|e| format!("{WATCHES_FILE} is not JSON ({e})"))?
+    };
+    let old = body
+        .get(name)
+        .cloned()
+        .ok_or_else(|| format!("there is no watch called {name}"))?;
+    if old.get("made_by").and_then(Value::as_str).is_none() {
+        return Err(format!(
+            "{name} is your own watch: change it in {WATCHES_FILE}"
+        ));
+    }
+    let entry = match action {
+        "pause" | "resume" => {
+            let Value::Object(mut entry) = old else {
+                return Err(format!("{name} is not an object"));
+            };
+            if action == "pause" {
+                entry.insert("paused".into(), json!(true));
+            } else {
+                entry.remove("paused");
+            }
+            Some(Value::Object(entry))
+        }
+        "remove" => None,
+        other => return Err(format!("pause, resume or remove, not {other}")),
+    };
+    let new_text = edit_keyed(&text, name, entry).map_err(|e| format!("{WATCHES_FILE}: {e}"))?;
+    let new_body: Value = serde_json::from_str(&new_text).map_err(|e| e.to_string())?;
+    let (_, before) = parse_watches(&body, WATCHES_FILE);
+    let (_, after) = parse_watches(&new_body, WATCHES_FILE);
+    if let Some(problem) = after.iter().find(|p| !before.contains(p)) {
+        return Err(format!("not written: {problem}"));
+    }
+    write_folder_file(watches_path, &new_text).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod operator_tests {
+    use super::*;
+
+    #[test]
+    fn the_operator_pauses_resumes_and_removes_an_agents_watch_and_not_their_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(WATCHES_FILE);
+        let decl = |made_by: Option<&str>| {
+            let mut w = json!({
+                "app": "github", "read": "list_runs", "every": 300,
+                "fields": {"id": {"at": "id", "type": "string"}},
+                "key": "{id}", "title": "run {id}"
+            });
+            if let Some(by) = made_by {
+                w["made_by"] = json!(by);
+            }
+            w
+        };
+        let text = serde_json::to_string_pretty(&json!({
+            "mine": decl(None),
+            "ledgers": decl(Some("agent:ledger")),
+        }))
+        .unwrap();
+        std::fs::write(&path, &text).unwrap();
+        let read = || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+        operator_sets_agents_watch(&path, "ledgers", "pause").unwrap();
+        assert_eq!(read()["ledgers"]["paused"], json!(true));
+        assert_eq!(read()["mine"], decl(None), "the operator's own is untouched");
+        operator_sets_agents_watch(&path, "ledgers", "resume").unwrap();
+        assert!(read()["ledgers"].get("paused").is_none());
+        let e = operator_sets_agents_watch(&path, "mine", "pause").unwrap_err();
+        assert!(e.contains("your own watch"), "{e}");
+        assert!(operator_sets_agents_watch(&path, "nope", "pause").is_err());
+        operator_sets_agents_watch(&path, "ledgers", "remove").unwrap();
+        assert!(read().get("ledgers").is_none());
+        assert!(read().get("mine").is_some());
+    }
+}
+
 #[tool_router(router = watches_router, vis = "pub(super)")]
 impl GhostServer {
     #[tool(

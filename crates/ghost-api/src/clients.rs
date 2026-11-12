@@ -128,7 +128,11 @@ async fn create_client(
 ) -> ApiResult<Json<ClientCreated>> {
     // This process is ghostd: the command the other tool runs is this binary, unless it
     // runs from an AppImage, whose mount goes away; then the tool connects by address.
-    let ghostd = stable_ghostd(|k| std::env::var(k).ok());
+    let ghostd = if deps.in_appimage {
+        None
+    } else {
+        stable_ghostd(|_| None)
+    };
     let command = body.command && ghostd.is_some();
     let note = (body.command && !command).then(|| APPIMAGE_NOTE.to_string());
     let made = clients(&deps)?

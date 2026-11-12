@@ -682,7 +682,70 @@ fn watch_info(deps: &Deps, w: &ghost_core::watches::Watch) -> WatchInfo {
         error: st.as_ref().and_then(|s| s.error.clone()),
         seen: st.as_ref().map_or(0, |s| s.seen as i64),
         open: st.as_ref().map_or(0, |s| s.open as i64),
+        made_by: w.made_by.clone(),
+        paused: w.paused,
     }
+}
+
+/// Pause, resume or remove a watch an agent made (ADR 0052): the operator's say over it.
+/// Their own watches they edit in watches.json.
+fn set_agents_watch(deps: &Deps, name: &str, action: &str) -> ApiResult<Json<WatchingView>> {
+    let Some(folder) = &deps.folder else {
+        return Err(ApiError::unavailable("watches are not available"));
+    };
+    let path = {
+        let folder = folder.lock().unwrap_or_else(|e| e.into_inner());
+        folder.path.join(ghost_core::folder::WATCHES_FILE)
+    };
+    ghost_core::ghost_app::watches::operator_sets_agents_watch(&path, name, action).map_err(
+        |e| {
+            if e.starts_with("there is no watch") {
+                ApiError::not_found(e)
+            } else {
+                ApiError::conflict(e)
+            }
+        },
+    )?;
+    Ok(watching_view(deps))
+}
+
+#[utoipa::path(post, path = "/watches/{name}/pause", operation_id = "pause_watch_watches__name__pause_post",
+    tag = "watching", summary = "Pause Watch",
+    description = "Pause a watch an agent made: it stays declared and is not polled.",
+    params(("name" = String, Path)),
+    responses((status = 200, description = "Successful Response", body = WatchingView),
+              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
+async fn pause_watch(
+    State(deps): State<SharedDeps>,
+    PathArg(name): PathArg<String>,
+) -> ApiResult<Json<WatchingView>> {
+    set_agents_watch(&deps, &name, "pause")
+}
+
+#[utoipa::path(post, path = "/watches/{name}/resume", operation_id = "resume_watch_watches__name__resume_post",
+    tag = "watching", summary = "Resume Watch",
+    description = "Resume a watch an agent made.",
+    params(("name" = String, Path)),
+    responses((status = 200, description = "Successful Response", body = WatchingView),
+              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
+async fn resume_watch(
+    State(deps): State<SharedDeps>,
+    PathArg(name): PathArg<String>,
+) -> ApiResult<Json<WatchingView>> {
+    set_agents_watch(&deps, &name, "resume")
+}
+
+#[utoipa::path(delete, path = "/watches/{name}", operation_id = "remove_watch_watches__name__delete",
+    tag = "watching", summary = "Remove Watch",
+    description = "Remove a watch an agent made from watches.json. The operator's own are edited in the file.",
+    params(("name" = String, Path)),
+    responses((status = 200, description = "Successful Response", body = WatchingView),
+              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
+async fn remove_watch(
+    State(deps): State<SharedDeps>,
+    PathArg(name): PathArg<String>,
+) -> ApiResult<Json<WatchingView>> {
+    set_agents_watch(&deps, &name, "remove")
 }
 
 /// The watches in watches.json and the webhooks in hooks.json, each with its last look
@@ -693,6 +756,11 @@ fn watch_info(deps: &Deps, w: &ghost_core::watches::Watch) -> WatchInfo {
     description = "The watches in watches.json and the webhooks in hooks.json, each with its last\nlook and its counts, re-read now; where the webhook listener is; and what is wrong\nin those files or left over in Ghost's folder (ADR 0035).",
     responses((status = 200, description = "Successful Response", body = WatchingView)))]
 async fn watching(State(deps): State<SharedDeps>) -> Json<WatchingView> {
+    watching_view(&deps)
+}
+
+fn watching_view(deps: &Deps) -> Json<WatchingView> {
+
     let Some(folder) = &deps.folder else {
         return Json(WatchingView {
             listening: deps.hooks_listening.clone(),
@@ -705,9 +773,9 @@ async fn watching(State(deps): State<SharedDeps>) -> Json<WatchingView> {
         watches: folder
             .watches
             .values()
-            .map(|w| watch_info(&deps, w))
+            .map(|w| watch_info(deps, w))
             .collect(),
-        hooks: folder.hooks.values().map(|h| hook_info(&deps, h)).collect(),
+        hooks: folder.hooks.values().map(|h| hook_info(deps, h)).collect(),
         listening: deps.hooks_listening.clone(),
         problems: folder.problems.clone(),
     })
@@ -1457,6 +1525,9 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .routes(routes!(phone_pairing))
         .routes(routes!(phone, forget_phone))
         .routes(routes!(watching))
+        .routes(routes!(pause_watch))
+        .routes(routes!(resume_watch))
+        .routes(routes!(remove_watch))
         .routes(routes!(get_rules, add_rule))
         .routes(routes!(outputs))
         .routes(routes!(skills, add_skill))

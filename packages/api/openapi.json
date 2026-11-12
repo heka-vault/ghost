@@ -142,6 +142,101 @@
         ],
         "type": "object"
       },
+      "AppLimits": {
+        "description": "An app's own limits in apps.json (ADR 0046). None is Ghost's default, given beside it.",
+        "properties": {
+          "connect_timeout": {
+            "description": "Seconds connecting may take.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "default_connect_timeout": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "default_result_chars": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "default_timeout": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pinned": {
+            "description": "Tools offered by name on every turn even past the limits on how many tools a turn\ncarries.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "result_chars": {
+            "description": "Characters of a result the model is given whole.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timeout": {
+            "description": "Seconds a call may take.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "timeout",
+          "connect_timeout",
+          "result_chars",
+          "pinned",
+          "default_timeout",
+          "default_connect_timeout",
+          "default_result_chars"
+        ],
+        "type": "object"
+      },
+      "AppLimitsUpdate": {
+        "description": "What `PUT /apps/{name}/limits` sets: all four at once; null is Ghost's default.",
+        "properties": {
+          "connect_timeout": {
+            "description": "1 to 600 seconds.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pinned": {
+            "description": "Tool names, as the app gives them (`search`, not `github_search`); 40 at the most.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "result_chars": {
+            "description": "1,000 to 100,000 characters.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timeout": {
+            "description": "1 to 3,600 seconds.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "AppView": {
         "description": "A connected app: how it is reached, whether it is up, and what it can do.",
         "properties": {
@@ -172,6 +267,10 @@
               "custom"
             ],
             "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/AppLimits",
+            "description": "Its own limits and pinned tools in apps.json (ADR 0046)."
           },
           "name": {
             "description": "Its short name: the rules' and the tools' prefix.",
@@ -218,7 +317,8 @@
           "kind",
           "state",
           "actions",
-          "settings"
+          "settings",
+          "limits"
         ],
         "type": "object"
       },
@@ -5417,6 +5517,13 @@
               "null"
             ]
           },
+          "made_by": {
+            "description": "`agent:<slug>` for a watch an agent made (ADR 0052); None for the operator's own.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -5424,6 +5531,10 @@
             "description": "Items it holds open now.",
             "format": "int64",
             "type": "integer"
+          },
+          "paused": {
+            "description": "Declared and not polled: an agent's watch paused by it or by the operator.",
+            "type": "boolean"
           },
           "read": {
             "type": "string"
@@ -5465,7 +5576,9 @@
           "response",
           "urgency",
           "seen",
-          "open"
+          "open",
+          "made_by",
+          "paused"
         ],
         "type": "object"
       },
@@ -5656,6 +5769,58 @@
           }
         },
         "summary": "Get App",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/apps/{name}/limits": {
+      "put": {
+        "description": "Set an app's own limits and pinned tools in apps.json (ADR 0046): how long a call\nand connecting may take, how much of a result the model is given whole, and the tools\noffered by name on every turn. Null is Ghost's default. The app connects again with them.",
+        "operationId": "set_app_limits_apps__name__limits_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppLimitsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set App Limits",
         "tags": [
           "apps"
         ]
@@ -9442,6 +9607,132 @@
           }
         },
         "summary": "Watching",
+        "tags": [
+          "watching"
+        ]
+      }
+    },
+    "/watches/{name}": {
+      "delete": {
+        "description": "Remove a watch an agent made from watches.json. The operator's own are edited in the file.",
+        "operationId": "remove_watch_watches__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Watch",
+        "tags": [
+          "watching"
+        ]
+      }
+    },
+    "/watches/{name}/pause": {
+      "post": {
+        "description": "Pause a watch an agent made: it stays declared and is not polled.",
+        "operationId": "pause_watch_watches__name__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Watch",
+        "tags": [
+          "watching"
+        ]
+      }
+    },
+    "/watches/{name}/resume": {
+      "post": {
+        "description": "Resume a watch an agent made.",
+        "operationId": "resume_watch_watches__name__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Watch",
         "tags": [
           "watching"
         ]
