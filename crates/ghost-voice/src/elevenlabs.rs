@@ -152,7 +152,10 @@ pub fn session_tts(
     // the cloud then says.
     let prerender = prerender.filter(|_| s.tts_engine != "elevenlabs");
     let local = match KokoroTts::new(kokoro, settings, clause_min_words) {
-        Ok(k) => k.with_turns(turns.clone()).with_prerender(prerender),
+        Ok(k) => k
+            .with_turns(turns.clone())
+            .with_prerender(prerender)
+            .with_first_clause(s.tts_first_clause_words),
         Err(e) => {
             warn!("tts: {e}; Kokoro's default voice speaks instead");
             KokoroTts::new(

@@ -887,6 +887,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             settings.clause_min_words(),
             Some(probe.clone()),
         )
+        .with_first_clause(settings.tts_first_clause_words)
     });
     if settings.tts_prerender == Some(true) && settings.tts_engine == "elevenlabs" {
         warn!(

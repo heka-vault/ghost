@@ -112,6 +112,59 @@ impl Profile {
     }
 }
 
+/// A real model in place of the scripted one (`--llm-url`): the address and model given,
+/// reached the way Ghost's default connection reaches one (`custom`, on the Anthropic
+/// protocol unless told otherwise), with no vault and no settings file. The key, when one
+/// is wanted, is read from the one environment variable named (`--llm-key-env`) and from
+/// nothing else; it is never printed.
+#[derive(Clone, PartialEq)]
+pub struct RealModel {
+    pub url: String,
+    pub model: String,
+    /// The fast model on the same address, for `fast=real` (ADR 0050).
+    pub fast_model: Option<String>,
+    pub key_env: Option<String>,
+    pub protocol: String,
+}
+
+impl std::fmt::Debug for RealModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RealModel")
+            .field("url", &self.url)
+            .field("model", &self.model)
+            .field("fast_model", &self.fast_model)
+            .field("key_env", &self.key_env)
+            .finish()
+    }
+}
+
+impl RealModel {
+    /// The connection for `model` at this address, as the default connection builds it.
+    pub fn target(&self, model: &str) -> ghost_core::connection::Target {
+        let mut env: HashMap<String, String> = [
+            ("GHOST_LLM_PROVIDER", "custom"),
+            ("GHOST_LLM_BASE_URL", self.url.as_str()),
+            ("GHOST_LLM_MODEL", model),
+            ("GHOST_LLM_PROTOCOL", self.protocol.as_str()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        if let Some(name) = &self.key_env {
+            env.insert("GHOST_LLM_PASSWORD".into(), name.clone());
+            // The one variable named, and nothing else of the environment.
+            if let Ok(v) = std::env::var(name) {
+                env.insert(name.clone(), v);
+            }
+        }
+        ghost_core::connection::ModelConnection::from_env(&env).target(&env)
+    }
+
+    pub fn client(&self, model: &str) -> anyhow::Result<Arc<dyn crate::llm::ModelPort>> {
+        Ok(ghost_llm::model::shared(&self.target(model))? as Arc<dyn crate::llm::ModelPort>)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     /// Earlier turns seeded into the ghost conversation's record.
@@ -131,6 +184,10 @@ pub struct RunConfig {
     /// A fast model in front (ADR 0050), with this profile's time: scripted from each
     /// line's first reply, so a line that opens with a tool call is handed over.
     pub fast: Option<Profile>,
+    /// A real model answers instead of the script (`--llm-url`); its time is its own.
+    pub real: Option<RealModel>,
+    /// With `real`, the real fast model is in front (`fast=real`).
+    pub fast_real: bool,
 }
 
 impl Default for RunConfig {
@@ -145,6 +202,8 @@ impl Default for RunConfig {
             profile: None,
             variant: None,
             fast: None,
+            real: None,
+            fast_real: false,
         }
     }
 }
@@ -154,7 +213,24 @@ impl RunConfig {
         if let Some(v) = &self.variant {
             // A variant's name stands for its overrides.
             let mut parts = vec![v.clone()];
-            parts.extend(self.profile.clone());
+            match &self.real {
+                Some(r) => parts.push(format!("real {}", r.model)),
+                None => parts.extend(self.profile.clone()),
+            }
+            return parts.join(" ");
+        }
+        if let Some(r) = &self.real {
+            let mut parts = vec![format!("real {}", r.model)];
+            if self.fast_real {
+                parts.push(format!(
+                    "fast={}",
+                    r.fast_model.as_deref().unwrap_or("none")
+                ));
+            }
+            if !self.jev {
+                parts.push("regex".into());
+            }
+            parts.extend(self.overrides.iter().map(|(k, v)| format!("{k}={v}")));
             return parts.join(" ");
         }
         let mut parts = vec!["scripted model".to_string(), "local".to_string()];
@@ -444,15 +520,49 @@ impl Bench {
         let lines: Vec<Vec<_>> = scenario.lines.iter().map(|l| l.replies.clone()).collect();
         // The fast model answers what the scenario's model would have opened with: plain
         // speech is its reply, a tool call is its hand-over.
-        let fast_model = cfg.fast.as_ref().map(|p| {
-            let opening: Vec<Vec<_>> = lines
-                .iter()
-                .map(|l| l.iter().take(1).cloned().collect())
-                .collect();
-            ScriptedModel::paced(opening, p.ttfb, p.tokens_per_sec, "scripted-fast")
-                as Arc<dyn crate::llm::ModelPort>
-        });
-        let model = ScriptedModel::paced(lines, cfg.ttfb, cfg.tokens_per_sec, "scripted");
+        let (model, fast_model) = match &cfg.real {
+            Some(real) => {
+                let fast = match (cfg.fast_real, &real.fast_model) {
+                    (true, Some(m)) => match real.client(m) {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            problems.push(format!("no client for the fast model: {e}"));
+                            None
+                        }
+                    },
+                    _ => None,
+                };
+                match real.client(&real.model) {
+                    Ok(m) => (m, fast),
+                    Err(e) => {
+                        return RunResult {
+                            scenario: scenario.name.into(),
+                            config: cfg.label(),
+                            run: index,
+                            lines: Vec::new(),
+                            opening: None,
+                            records: Vec::new(),
+                            problems: vec![format!("no client for the model: {e}")],
+                            wall: began.elapsed().as_secs_f64(),
+                            wake_to_voice: None,
+                        };
+                    }
+                }
+            }
+            None => {
+                let fast_model = cfg.fast.as_ref().map(|p| {
+                    let opening: Vec<Vec<_>> = lines
+                        .iter()
+                        .map(|l| l.iter().take(1).cloned().collect())
+                        .collect();
+                    ScriptedModel::paced(opening, p.ttfb, p.tokens_per_sec, "scripted-fast")
+                        as Arc<dyn crate::llm::ModelPort>
+                });
+                let model = ScriptedModel::paced(lines, cfg.ttfb, cfg.tokens_per_sec, "scripted")
+                    as Arc<dyn crate::llm::ModelPort>;
+                (model, fast_model)
+            }
+        };
         let session = build_session(SessionParams {
             settings: Arc::new(settings),
             models: self.models.clone(),

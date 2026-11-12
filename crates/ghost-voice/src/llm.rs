@@ -78,6 +78,17 @@ pub fn fast_tools(tools: &Tools) -> Tools {
     Tools::new(all)
 }
 
+/// How the fast model is asked: as the main model is, without the thinking setting.
+/// A small model answers small talk and needs none, and it may refuse the main model's:
+/// Haiku 5.5 answers `between_tools`, Ghost's default, with HTTP 400 ("not supported for
+/// this model", 2026-11-12), and every turn was handed over for it.
+pub fn fast_options(options: &Options) -> Options {
+    Options {
+        thinking: None,
+        ..options.clone()
+    }
+}
+
 pub const COMPACTION_PROMPT: &str =
     "You are condensing the older part of a spoken conversation between an \
 operator and their assistant into the assistant's memory of it.
@@ -180,8 +191,9 @@ type Handed = Arc<Mutex<Option<Vec<String>>>>;
 /// One model call for the stage: the fast model first when one is given, then the main.
 struct Call {
     main: Arc<dyn ModelPort>,
-    /// The fast model and what it is offered (`fast_tools`), for a turn's first call.
-    fast: Option<(Arc<dyn ModelPort>, Tools)>,
+    /// The fast model, what it is offered (`fast_tools`) and how it is asked
+    /// (`fast_options`), for a turn's first call.
+    fast: Option<(Arc<dyn ModelPort>, Tools, Options)>,
     context: Context,
     tools: Tools,
     options: Options,
@@ -202,14 +214,14 @@ impl Call {
     async fn drive(self, tx: mpsc::UnboundedSender<Result<Held, LlmError>>) {
         use std::sync::atomic::Ordering::SeqCst;
         let pre = self.prerender.as_ref();
-        if let Some((fast, fast_tools)) = &self.fast {
+        if let Some((fast, fast_tools, fast_options)) = &self.fast {
             // The fast model's reply is kept here until it ends: speech is passed on
             // whole, and a call means none of it is.
             let began = Instant::now();
             if let Some(p) = pre {
                 p.begin();
             }
-            let mut stream = fast.stream(self.context.clone(), fast_tools, &self.options);
+            let mut stream = fast.stream(self.context.clone(), fast_tools, fast_options);
             let mut kept: Vec<Event> = Vec::new();
             let mut first: Option<f64> = None;
             let mut names: Vec<String> = Vec::new();
@@ -421,7 +433,13 @@ impl LlmStage {
             .fast
             .as_ref()
             .filter(|_| first)
-            .map(|fast| (fast.clone(), fast_tools(&self.tools)));
+            .map(|fast| {
+                (
+                    fast.clone(),
+                    fast_tools(&self.tools),
+                    fast_options(&self.options),
+                )
+            });
         Call {
             main: self.model.clone(),
             fast,
@@ -1251,4 +1269,20 @@ fn async_stream_words(
             Some((Ok(ev), (it, taken, done)))
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fast_model_is_asked_without_the_thinking_setting() {
+        // Haiku 5.5 refuses `between_tools` with a 400, so every turn was handed over.
+        let main = Options::default();
+        assert_eq!(main.thinking.as_deref(), Some("between_tools"));
+        let fast = fast_options(&main);
+        assert_eq!(fast.thinking, None);
+        assert_eq!(fast.max_tokens, main.max_tokens);
+        assert_eq!(fast.cache_system, main.cache_system);
+    }
 }

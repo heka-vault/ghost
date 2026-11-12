@@ -569,6 +569,9 @@ struct EarState {
     cleared: Vec<Instant>,
     loud: bool,
     seconds_played: f64,
+    /// Silences inside Ghost's speech: the device ran dry for this long before the next
+    /// audio came, with the voice loud before it (under a second; longer is a new reply).
+    gaps: Vec<(Instant, Duration)>,
 }
 
 /// Accepts audio at the pace a sound card would (a 40 ms device buffer), drops it, and
@@ -594,6 +597,19 @@ impl Ear {
         self.0.lock().unwrap().seconds_played
     }
 
+    /// Each time the speaker ran dry in the middle of Ghost's voice after `t` (the next
+    /// piece was not there when the one before had played), and for how long.
+    pub fn gaps_after(&self, t: Instant) -> Vec<Duration> {
+        self.0
+            .lock()
+            .unwrap()
+            .gaps
+            .iter()
+            .filter(|(at, _)| *at > t)
+            .map(|(_, d)| *d)
+            .collect()
+    }
+
     /// When the queue was cleared (a barge-in), each time.
     pub fn cleared(&self) -> Vec<Instant> {
         self.0.lock().unwrap().cleared.clone()
@@ -611,6 +627,15 @@ impl MediaOut for ScriptedOut {
         let now = Instant::now();
         let wait = {
             let mut s = self.ear.0.lock().unwrap();
+            if let Some(until) = s.until
+                && s.loud
+                && now > until
+            {
+                let dry = now - until;
+                if dry < Duration::from_secs(1) {
+                    s.gaps.push((now, dry));
+                }
+            }
             if !pcm.is_empty() {
                 let rms = (pcm
                     .iter()

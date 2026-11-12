@@ -126,6 +126,8 @@ struct PrerenderInner {
     synth: SharedSynth,
     settings: Mutex<TtsSettings>,
     clause_min_words: Option<usize>,
+    /// The first piece cut early (`ClauseAggregator::with_first_clause`), as the stage cuts.
+    first_clause_words: usize,
     probe: Arc<dyn LatencyProbe>,
     pending: Mutex<Pending>,
 }
@@ -154,12 +156,32 @@ impl Prerender {
             synth,
             settings: Mutex::new(settings),
             clause_min_words,
+            first_clause_words: 0,
             probe: probe.unwrap_or_else(null_probe),
             pending: Mutex::new(Pending {
                 aggregator: ClauseAggregator::new(clause_min_words),
                 done: true,
                 ahead: None,
             }),
+        }))
+    }
+
+    /// Cut the reply's first piece early, as the TTS stage does
+    /// (`KokoroTts::with_first_clause`): what is rendered ahead must be what it would say.
+    pub fn with_first_clause(self, words: usize) -> Self {
+        let inner = Arc::try_unwrap(self.0).unwrap_or_else(|_| {
+            panic!("with_first_clause is for a handle no one shares yet")
+        });
+        let first_clause_words = words;
+        Self(Arc::new(PrerenderInner {
+            first_clause_words,
+            pending: Mutex::new(Pending {
+                aggregator: ClauseAggregator::new(inner.clause_min_words)
+                    .with_first_clause(first_clause_words),
+                done: true,
+                ahead: None,
+            }),
+            ..inner
         }))
     }
 
@@ -178,7 +200,8 @@ impl Prerender {
     pub fn begin(&self) {
         let mut p = self.0.pending.lock().unwrap();
         self.drop_ahead(&mut p);
-        p.aggregator = ClauseAggregator::new(self.0.clause_min_words);
+        p.aggregator = ClauseAggregator::new(self.0.clause_min_words)
+            .with_first_clause(self.0.first_clause_words);
         p.done = false;
     }
 
@@ -288,6 +311,8 @@ pub struct KokoroTts {
     synth: SharedSynth,
     settings: TtsSettings,
     clause_min_words: Option<usize>,
+    /// Each reply's first piece cut early (`ClauseAggregator::with_first_clause`); 0, no.
+    first_clause_words: usize,
     aggregator: ClauseAggregator,
     turns: Option<Arc<TurnControl>>,
     on_say: Option<OnSay>,
@@ -315,6 +340,7 @@ impl KokoroTts {
             synth,
             settings,
             clause_min_words,
+            first_clause_words: 0,
             aggregator: ClauseAggregator::new(clause_min_words),
             turns: None,
             on_say: None,
@@ -323,6 +349,18 @@ impl KokoroTts {
             speaking: false,
             first_audio: true,
         })
+    }
+
+    /// Cut each reply's first piece once `words` words are pending, at a comma or before
+    /// a phrase's first word, so its audio comes sooner; the rest renders while it plays.
+    pub fn with_first_clause(mut self, words: usize) -> Self {
+        self.first_clause_words = words;
+        self.aggregator = self.new_aggregator();
+        self
+    }
+
+    fn new_aggregator(&self) -> ClauseAggregator {
+        ClauseAggregator::new(self.clause_min_words).with_first_clause(self.first_clause_words)
     }
 
     /// The reply's first clause may have been rendered already (`Prerender`).
@@ -352,7 +390,9 @@ impl KokoroTts {
             synth: self.synth.clone(),
             settings: self.settings.clone(),
             clause_min_words,
-            aggregator: ClauseAggregator::new(clause_min_words),
+            first_clause_words: self.first_clause_words,
+            aggregator: ClauseAggregator::new(clause_min_words)
+                .with_first_clause(self.first_clause_words),
             turns: self.turns.clone(),
             on_say: self.on_say.clone(),
             prerender: None, // a handle belongs to one session's model stage
@@ -878,6 +918,40 @@ in app, and the Redis versus Postgres call for the session cache.";
         );
         assert!(!pre.holding());
         assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "used"]);
+    }
+
+    #[tokio::test]
+    async fn test_the_first_piece_cut_early_is_what_is_rendered_ahead() {
+        // The handle and the stage cut by one rule: the early first piece rendered ahead
+        // is the one the stage asks for, and it is not rendered again.
+        let synth = recording();
+        let counted = Arc::new(Counted::default());
+        let pre = Prerender::new(
+            synth.clone(),
+            TtsSettings::default(),
+            Some(4),
+            Some(counted.clone()),
+        )
+        .with_first_clause(4);
+        let mut tts = KokoroTts::new(synth.clone(), TtsSettings::default(), Some(4))
+            .unwrap()
+            .with_prerender(Some(pre.clone()))
+            .with_first_clause(4);
+        let text = "I found three issues waiting and two of them need your sign-off today.";
+        writes(&pre, text);
+        rendered(&synth, 1).await;
+        assert_eq!(said(&synth), vec!["I found three issues waiting"]);
+        assert_eq!(speaks(&mut tts, text).await, 2);
+        assert_eq!(
+            said(&synth),
+            vec![
+                "I found three issues waiting",
+                "and two of them need your sign-off today."
+            ]
+        );
+        assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "used"]);
+        // The next reply's first piece is cut early too.
+        assert_eq!(speaks(&mut tts, "Done. Three are left.").await, 2);
     }
 
     #[tokio::test]

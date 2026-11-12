@@ -5,6 +5,8 @@
 //!                   [--no-jev] [--ablate none,all,tts_clauses+speculate] [--ttfb-ms N]
 //!                   [--tokens-per-sec N] [--profile sonnet,haiku,instant]
 //!                   [--variant name:field=value+field=value]... [--out DIR] [--show-text]
+//!                   [--llm-url URL --llm-model M [--llm-fast-model M] [--llm-key-env NAME]
+//!                    [--llm-protocol anthropic|openai]]  (a real model; `fast=real`)
 //! ghost-perf micro  [--only stt,tts,jev,turn] [--n N] [--out DIR]
 //! ghost-perf llm    [--model a,b] [--endpoint current,proxy,openrouter+sysbp,<provider>]
 //!                   [--openrouter-models a,b] [--thinking between_tools] [--n N] [--out DIR]
@@ -30,7 +32,7 @@ use std::time::{Duration, Instant};
 use indexmap::IndexMap;
 use serde_json::{Value, json};
 
-use super::harness::{Bench, Profile, RunConfig, parse_ablations};
+use super::harness::{Bench, Profile, RealModel, RunConfig, parse_ablations};
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
@@ -299,8 +301,9 @@ fn overrides(args: &Args) -> Result<BTreeMap<String, String>, String> {
     Ok(out)
 }
 
-/// A named set of settings for one run: its name, the overrides, the fast model's profile.
-type Variant = (Option<String>, BTreeMap<String, String>, Option<Profile>);
+/// A named set of settings for one run: its name, the overrides, the fast model's profile,
+/// and whether the real fast model is in front (`fast=real`).
+type Variant = (Option<String>, BTreeMap<String, String>, Option<Profile>, bool);
 
 /// `--fast haiku`, or `none`.
 fn fast_profile(name: &str) -> Result<Option<Profile>, String> {
@@ -487,21 +490,59 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
         profiles.push(None);
     }
     // A fast model in front (ADR 0050), scripted from the same lines: `--fast haiku`.
-    let fast = match args.one("fast").map(|v| fast_profile(v)).transpose() {
+    let fast = match args
+        .one("fast")
+        .filter(|v| v.as_str() != "real")
+        .map(|v| fast_profile(v))
+        .transpose()
+    {
         Ok(f) => f.flatten(),
         Err(e) => {
             eprintln!("{e}");
             return 2;
         }
     };
+    // A real model instead of the script: `--llm-url http://host:8317 --llm-model m
+    // [--llm-fast-model m] [--llm-key-env NAME] [--llm-protocol anthropic|openai]`. Only the
+    // variable named is read for a key, and it is never printed.
+    let real = args.one("llm-url").map(|url| RealModel {
+        url: url.trim_end_matches('/').to_string(),
+        model: args
+            .one("llm-model")
+            .cloned()
+            .unwrap_or_else(|| ghost_core::connection::DEFAULT_CLAUDE.to_string()),
+        fast_model: args.one("llm-fast-model").cloned(),
+        key_env: args.one("llm-key-env").cloned(),
+        protocol: args
+            .one("llm-protocol")
+            .cloned()
+            .unwrap_or_else(|| "anthropic".into()),
+    });
+    if real.is_some() && args.has("profile") {
+        eprintln!("--profile is the scripted model's time; a real model (--llm-url) has its own");
+        return 2;
+    }
+    let fast_real_default = real.as_ref().is_some_and(|r| r.fast_model.is_some())
+        && args.one("fast").map(String::as_str) == Some("real");
+    let fast = if fast_real_default { None } else { fast };
     // Named sets of overrides, compared in one run: `before:turn_grace_secs=1.2+fast=haiku`.
     let mut variants: Vec<Variant> = Vec::new();
     for spec in args.flags.get("variant").cloned().unwrap_or_default() {
         let (name, sets) = spec.split_once(':').unwrap_or((spec.as_str(), ""));
         let mut over = overrides.clone();
         let mut fast = fast.clone();
+        let mut fast_real = fast_real_default;
         for kv in sets.split('+').map(str::trim).filter(|s| !s.is_empty()) {
             match kv.split_once('=') {
+                // The real fast model, given by --llm-fast-model.
+                Some(("fast", "real")) => {
+                    if real.as_ref().and_then(|r| r.fast_model.as_ref()).is_none() {
+                        eprintln!("fast=real needs --llm-url and --llm-fast-model");
+                        return 2;
+                    }
+                    fast = None;
+                    fast_real = true;
+                }
                 // The fast model is the connection's, not a voice setting.
                 Some(("fast", v)) => match fast_profile(v) {
                     Ok(p) => fast = p,
@@ -519,14 +560,14 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                 }
             }
         }
-        variants.push((Some(name.to_string()), over, fast));
+        variants.push((Some(name.to_string()), over, fast, fast_real));
     }
     if variants.is_empty() {
-        variants.push((None, overrides.clone(), fast.clone()));
+        variants.push((None, overrides.clone(), fast.clone(), fast_real_default));
     }
     let mut configs: Vec<RunConfig> = Vec::new();
     for ablate in ablations {
-        for (variant, over, fast) in &variants {
+        for (variant, over, fast, fast_real) in &variants {
             for profile in &profiles {
                 configs.push(RunConfig {
                     history,
@@ -538,6 +579,8 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                     profile: profile.as_ref().map(|p| p.name.clone()),
                     variant: variant.clone(),
                     fast: fast.clone(),
+                    real: real.clone(),
+                    fast_real: *fast_real,
                 });
             }
         }
@@ -573,7 +616,19 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
                 .unwrap_or(1)
         )),
     );
-    meta.insert("endpoints".into(), json!("the scripted model (no network)"));
+    meta.insert(
+        "endpoints".into(),
+        json!(match &real {
+            Some(r) => format!(
+                "a real model: {} at {} ({}), fast model {}",
+                r.model,
+                r.url,
+                r.protocol,
+                r.fast_model.as_deref().unwrap_or("none")
+            ),
+            None => "the scripted model (no network)".to_string(),
+        }),
+    );
     let named: Vec<String> = profiles
         .iter()
         .flatten()
@@ -597,11 +652,14 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
     }
     let described: Vec<String> = variants
         .iter()
-        .filter_map(|(name, over, fast)| {
+        .filter_map(|(name, over, fast, fast_real)| {
             name.as_ref().map(|n| {
                 let mut sets: Vec<String> = over.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 if let Some(f) = fast {
                     sets.push(format!("a fast model in front ({})", f.name));
+                }
+                if *fast_real && let Some(m) = real.as_ref().and_then(|r| r.fast_model.as_ref()) {
+                    sets.push(format!("the real fast model in front ({m})"));
                 }
                 format!(
                     "{n}: {}",

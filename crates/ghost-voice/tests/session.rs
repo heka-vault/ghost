@@ -1094,6 +1094,76 @@ async fn the_first_clause_is_rendered_while_the_turn_waits_and_plays_at_its_clos
     );
 }
 
+/// A reply whose first sentence has no comma: the usual rule renders it whole first.
+const NO_COMMA: &str = "I found three issues waiting and two of them need your sign-off today.";
+
+/// Ghost says `reply` with the first piece cut at `first_words` (0: the usual rule); what
+/// the voice rendered, how soon it was heard after the close, and the silences inside it.
+async fn speaks_with_first_clause(
+    first_words: &str,
+    render_ms: u64,
+) -> (Vec<String>, Value, Vec<Duration>) {
+    let mut setup = Setup::new(
+        &["what needs my sign off"],
+        vec![vec![ScriptedModel::say(NO_COMMA)]],
+    )
+    .set("GHOST_TTS_FIRST_CLAUSE_WORDS", first_words)
+    .set("GHOST_TTS_PRERENDER", "false"); // the render at the close is what is timed
+    setup.render_ms = render_ms;
+    setup.clause_secs = 0.3;
+    let w = setup.build();
+    w.session.start(true).await;
+    wait_for(&w.records, "opening", Duration::from_secs(5)).await;
+    let began = Instant::now();
+    say(&w, 0.3).await;
+    let rec = voice_records(&w, 1).await.remove(0);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while w.spoken.lock().unwrap().len() < 2 || w.ear.seconds_played() < 0.6 {
+        assert!(Instant::now() < deadline, "{:?}", w.spoken.lock().unwrap());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(400)).await; // the last piece plays out
+    let spoken = w.spoken.lock().unwrap().clone();
+    let gaps = w.ear.gaps_after(began);
+    finish(&w).await;
+    (spoken, rec, gaps)
+}
+
+#[tokio::test]
+async fn a_replys_first_piece_is_cut_early_and_the_rest_follows_without_a_seam() {
+    // Off, the first sentence is rendered whole before any of it plays.
+    let (spoken, before, _) = speaks_with_first_clause("0", 200).await;
+    assert_eq!(spoken, vec!["Yeah?".to_string(), NO_COMMA.to_string()]);
+    // On, it is cut before "and": the first piece plays while the rest renders, and the
+    // two meet with no silence put between them.
+    let (spoken, after, gaps) = speaks_with_first_clause("4", 200).await;
+    assert_eq!(
+        spoken,
+        vec![
+            "Yeah?",
+            "I found three issues waiting",
+            "and two of them need your sign-off today."
+        ]
+    );
+    let gap_ms: Vec<u128> = gaps.iter().map(Duration::as_millis).collect();
+    assert!(
+        gaps.iter().all(|g| *g <= Duration::from_millis(40)),
+        "silence inside the reply: {gap_ms:?} ms"
+    );
+    let _ = (before, after);
+}
+
+#[tokio::test]
+async fn a_rest_that_is_not_ready_in_time_shows_as_a_gap() {
+    // The ear catches a seam: the rest takes 0.45 s to render while the first piece plays
+    // for 0.3 s, so the speaker runs dry between them.
+    let (_, _, gaps) = speaks_with_first_clause("4", 450).await;
+    assert!(
+        gaps.iter().any(|g| *g >= Duration::from_millis(100)),
+        "no gap seen: {gaps:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_reopened_turn_drops_the_clause_rendered_for_its_first_half() {
     let mut setup = Setup::new(

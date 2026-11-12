@@ -72,6 +72,10 @@ pub struct VoiceSettings {
     /// held (ADR 0049). Unset: on for Kokoro, off for a paid voice, where a withdrawn
     /// reply would be paid characters.
     pub tts_prerender: Option<bool>,
+    /// `GHOST_TTS_FIRST_CLAUSE_WORDS`: a reply's first piece is cut once this many words
+    /// are pending, at a comma or before a phrase's first word, so its audio starts sooner
+    /// (`ghost_infer::clauses::ClauseAggregator::with_first_clause`); 0, the usual rule.
+    pub tts_first_clause_words: usize,
     /// kokoro (local, the default) or elevenlabs (ADR 0026), Kokoro behind it.
     pub tts_engine: String,
     pub elevenlabs_api_key: Zeroizing<String>,
@@ -256,6 +260,7 @@ impl VoiceSettings {
             tts_clauses: flag("GHOST_TTS_CLAUSES", true),
             tts_clause_min_words: usize_or("GHOST_TTS_CLAUSE_MIN_WORDS", 4)?,
             tts_prerender: text("GHOST_TTS_PRERENDER").and_then(|v| parse_bool(&v)),
+            tts_first_clause_words: usize_or("GHOST_TTS_FIRST_CLAUSE_WORDS", 4)?,
             tts_engine,
             elevenlabs_api_key: Zeroizing::new(string("ELEVENLABS_API_KEY", "")),
             elevenlabs_voice: string("GHOST_ELEVENLABS_VOICE", ""),
@@ -345,6 +350,14 @@ impl VoiceSettings {
 
     pub fn clause_min_words(&self) -> Option<usize> {
         self.tts_clauses.then_some(self.tts_clause_min_words)
+    }
+
+    /// How a reply is cut for the voice: clauses as `clause_min_words` says, and the
+    /// first piece early when `tts_first_clause_words` says so. The TTS stage and the
+    /// first clause rendered ahead cut by this one rule.
+    pub fn clause_aggregator(&self) -> ghost_infer::clauses::ClauseAggregator {
+        ghost_infer::clauses::ClauseAggregator::new(self.clause_min_words())
+            .with_first_clause(self.tts_first_clause_words)
     }
 
     /// A reply's first clause is rendered while the reply is held: as set, else only
@@ -458,6 +471,7 @@ mod tests {
         assert_eq!(s.turn_confident_prob, 0.9);
         assert_eq!(s.turn_reopen_started_secs, 0.15);
         assert!(s.prerender(), "Kokoro renders the first clause ahead");
+        assert_eq!(s.tts_first_clause_words, 4);
         assert!(s.turn_speculate);
         assert!(s.turn_reread);
         assert_eq!(s.turn_stop_secs, 1.6);

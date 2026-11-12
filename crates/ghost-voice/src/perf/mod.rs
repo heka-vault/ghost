@@ -14,6 +14,7 @@ pub mod audio;
 pub mod cli;
 pub mod harness;
 pub mod hear;
+pub mod join;
 pub mod llm;
 pub mod micro;
 pub mod report;
