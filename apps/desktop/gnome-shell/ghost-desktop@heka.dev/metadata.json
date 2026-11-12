@@ -1,0 +1,7 @@
+{
+  "uuid": "ghost-desktop@heka.dev",
+  "name": "Ghost's desktop helper",
+  "description": "Tells Ghost's floating room which monitor you are working on (the pointer and the focused window), whether that window is full screen, and the workspace. Positions only: never a window's title, contents or app.",
+  "shell-version": ["48", "49", "50"],
+  "url": "https://github.com/heka-vault/ghost"
+}

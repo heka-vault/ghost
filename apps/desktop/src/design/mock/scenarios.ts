@@ -60,6 +60,13 @@ export interface Scenario {
    * goodbye; `error` a turn that failed. They play out over the first few seconds after load.
    */
   story?: "thread" | "you" | "cut" | "hold" | "ending" | "error";
+  /**
+   * The floating room's sequence (ADR 0059, `floating.html?mock=floating`), over and over: at
+   * rest, the wake, the operator's turn, calls, a reply said clause by clause, a change waiting
+   * for a yes (answered by voice after 8 s unless pressed), an agent's question (answered by
+   * voice after 8 s), and the goodbye. One loop is about 50 seconds.
+   */
+  floating?: boolean;
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -83,6 +90,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "turn-error", label: "A turn failed", description: "The model failed on the last turn.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "error" },
   { name: "notlistening", label: "Not listening", description: "The microphone is closed until the operator turns it back on: no wake, typing still works.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", notListening: true },
   { name: "pieces", label: "Said in pieces", description: "A live session; one spoken sentence arrives in three pieces with pauses, then Ghost answers.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", pieces: true },
+  { name: "floating", label: "Floating room", description: "The floating room's whole sequence, over and over: the wake, your turn, calls, the reply, a yes, a question, goodbye.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floating: true },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, seven apps, one of them not connecting.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];
 

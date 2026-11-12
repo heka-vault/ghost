@@ -1,10 +1,13 @@
 //! The Rust side of the Ghost desktop app: the process that runs Ghost (ADR 0038).
 //!
 //! It supervises `ghostd` (adopting one already on the socket), bridges the window to the
-//! daemon's Unix socket, keeps a tray, starts at login, and stops everything on Quit.
+//! daemon's Unix socket, keeps a tray, starts at login, and stops everything on Quit. With
+//! `--floating` the same binary is the floating room's surface instead (ADR 0059), which the
+//! shell starts when the operator turns it on.
 
 mod autostart;
 mod bridge;
+pub mod floating;
 mod supervisor;
 mod tray;
 
@@ -76,7 +79,27 @@ fn stop_daemon(app: &tauri::AppHandle) {
     }
 }
 
+/// The app's one context (its config and the window's assets, embedded once).
+fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
+    if std::env::args().any(|a| a == floating::CHECK_ARG) {
+        #[cfg(target_os = "linux")]
+        floating::surface::check();
+        return;
+    }
+    if std::env::args().any(|a| a == floating::ARG) {
+        #[cfg(target_os = "linux")]
+        {
+            let mut ctx = context();
+            // The surface has its own window and no main one.
+            ctx.config_mut().app.windows.clear();
+            floating::surface::run(ctx);
+        }
+        return;
+    }
     let app = tauri::Builder::default()
         // First, so a second launch hands off and exits before anything else starts.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -100,10 +123,16 @@ pub fn run() {
             bridge::api_request,
             bridge::events_start,
             daemon_state,
-            daemon_start
+            daemon_start,
+            floating::floating_status,
+            floating::floating_set
         ])
         .setup(|app| {
-            tray::build(app)?;
+            let floating = floating::setup(app.handle());
+            tray::build(app, &floating.status())?;
+            if let Some(w) = app.get_webview_window("main") {
+                floating.main_active(w.is_focused().unwrap_or(false));
+            }
             if std::env::args().any(|a| a == "--hidden")
                 && let Some(w) = app.get_webview_window("main")
             {
@@ -131,13 +160,28 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window keeps the tray alive; Quit in the tray exits.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+            let host = window
+                .app_handle()
+                .try_state::<std::sync::Arc<floating::Host>>();
+            match event {
+                // Closing the window keeps the tray alive; Quit in the tray exits.
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let _ = window.hide();
+                    api.prevent_close();
+                    if let Some(h) = host {
+                        h.main_active(false);
+                    }
+                }
+                // The floating room leaves a session to the window the operator is using.
+                tauri::WindowEvent::Focused(focused) if window.label() == "main" => {
+                    if let Some(h) = host {
+                        h.main_active(*focused);
+                    }
+                }
+                _ => {}
             }
         })
-        .build(tauri::generate_context!())
+        .build(context())
         .expect("error while building Ghost");
     app.run(|app, event| match event {
         // Quit: the daemon goes down with the shell, before the process ends.

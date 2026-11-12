@@ -1,10 +1,16 @@
 /**
- * The app's two postures (docs/design-system.md, The two postures). At the desk: the briefing,
- * the rail and the page. In the room: Ghost's presence fills the window, legible from three
- * metres, with the few things that need the operator in large type and what Ghost is doing now.
+ * The app's postures (docs/design-system.md, The two postures, and The floating room). At the
+ * desk: the briefing, the rail and the page. In the room: Ghost's presence fills the window,
+ * legible from three metres, with the few things that need the operator in large type and what
+ * Ghost is doing now. Floating (ADR 0059, opt-in): the room without a window, over the desktop.
  *
- * One rule decides it, here and nowhere else, so the shell, the tray and the tests agree:
+ * One rule decides it, here and nowhere else, so the main window, the floating surface, the
+ * conversation screen's room view and the tests agree:
  *
+ *   - A live session at this desk floats, when the operator turned the floating room on and it
+ *     can show now (the platform has it, nothing is capturing the screen), unless this window
+ *     is the one the operator is using: the windowed app is the place you open on purpose.
+ *     A held room in the window still wins.
  *   - The operator's hold wins: “Room” (Ctrl+. or the rail's button) until they leave it with
  *     Escape, the button or the key again; “Desk” never goes to the room by itself.
  *   - A live session at this desk (not the phone's) goes to the room after the same quiet the
@@ -17,12 +23,12 @@
  * Plain TypeScript: the shell's hook feeds it the clock and the window's input.
  */
 
-export type Posture = "desk" | "room";
+export type Posture = "desk" | "room" | "float";
 /** The operator's override: `auto` follows the rule above. */
 export type PostureHold = "auto" | "desk" | "room";
 export type PostureReason = "held" | "session" | "away" | "desk";
 
-/** The conversation screen's room view waits this long (screens/session/Stage.tsx, useRoomView). */
+/** In a session, the room comes after this long without input (the conversation screen's room view reads the same rule). */
 export const SESSION_IDLE_MS = 20_000;
 /** Stepped away, outside a session, by default. */
 export const AWAY_DEFAULT_MIN = 3;
@@ -38,10 +44,18 @@ export interface PostureInput {
   awayAfterMs: number | null;
   /** In a session, the room after this long without input; null: never by itself. */
   sessionIdleMs?: number | null;
+  /**
+   * The floating room is on and can show now: the operator's switch, a platform that has it,
+   * and no screen capture or focused full-screen app hiding it. Absent: off.
+   */
+  floating?: boolean;
+  /** This window has the keyboard and is on screen. Absent: it is (the window's own view). */
+  windowActive?: boolean;
 }
 
 export function postureOf(i: PostureInput): { posture: Posture; reason: PostureReason } {
   if (i.hold === "room") return { posture: "room", reason: "held" };
+  if (i.deskSession && i.floating && i.windowActive === false) return { posture: "float", reason: "session" };
   if (i.hold === "desk") return { posture: "desk", reason: "desk" };
   const sessionIdle = i.sessionIdleMs === undefined ? SESSION_IDLE_MS : i.sessionIdleMs;
   if (i.deskSession && sessionIdle != null && i.idleMs >= sessionIdle) return { posture: "room", reason: "session" };
@@ -52,6 +66,7 @@ export function postureOf(i: PostureInput): { posture: Posture; reason: PostureR
 /** When the rule will next change its answer with no input, in ms from now, or null. */
 export function nextChangeIn(i: PostureInput): number | null {
   if (i.hold !== "auto") return null;
+  if (postureOf(i).posture === "float") return null;
   const sessionIdle = i.sessionIdleMs === undefined ? SESSION_IDLE_MS : i.sessionIdleMs;
   const at = i.deskSession ? sessionIdle : i.awayAfterMs;
   if (at == null) return null;

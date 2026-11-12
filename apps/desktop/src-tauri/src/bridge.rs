@@ -114,6 +114,12 @@ fn update_tray(app: &AppHandle, payload: &str) {
         Ok(v) => v,
         Err(_) => return,
     };
+    // "Ghost, open the app" (ADR 0059): the window comes to the operator's workspace.
+    if v.get("type").and_then(|t| t.as_str()) == Some("show_app") {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || crate::tray::show_window(&handle));
+        return;
+    }
     let phase = v
         .get("phase")
         .or_else(|| v.get("status").and_then(|s| s.get("phase")))
