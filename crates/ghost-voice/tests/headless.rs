@@ -19,6 +19,7 @@ use ghost_core::fakes::{FakeWriter, changeset};
 use ghost_core::gate::Request;
 use ghost_core::ghost_app::{self, GhostServer};
 use ghost_core::models::{FakeIssue, SetLabels};
+use ghost_core::questions::{QState, Questions, via};
 use ghost_core::schedules::jobs::AgentState;
 use ghost_core::schedules::{
     AgentRunner, Ended, JobEdit, Jobs, OPERATOR, RunOutcome, RunRequest, RunStatus, Scheduler,
@@ -192,6 +193,7 @@ struct World {
     waiting: Arc<WaitingList>,
     apps: Arc<Apps>,
     jobs: Arc<Jobs>,
+    questions: Arc<Questions>,
     reach: Reach,
     waits: Arc<Mutex<Vec<Duration>>>,
     _ghost: ghost_app::Attached,
@@ -258,6 +260,8 @@ async fn world(tmp: &Path) -> World {
                 })
             }),
     );
+    let questions =
+        Arc::new(Questions::new(store.clone(), waiting.clone()).with_jobs(jobs.clone()));
     let ghost = ghost_app::attach(
         &apps,
         GhostServer::new(ghost_app::Parts {
@@ -266,7 +270,8 @@ async fn world(tmp: &Path) -> World {
             apps: Arc::downgrade(&apps),
             status: Arc::new(Map::new),
         })
-        .with_schedules(jobs.clone()),
+        .with_schedules(jobs.clone())
+        .with_questions(questions.clone()),
     )
     .await
     .unwrap();
@@ -288,6 +293,7 @@ async fn world(tmp: &Path) -> World {
         waiting,
         apps,
         jobs,
+        questions,
         reach,
         waits: Arc::new(Mutex::new(Vec::new())),
         _ghost: ghost,
@@ -1176,4 +1182,170 @@ async fn an_agent_sets_up_its_own_schedule_from_a_run_or_a_session() {
     assert_eq!(audit[0].operation, "schedule_manage");
     assert_eq!(audit[0].conversation.as_deref(), Some("ledger"));
     let _ = (&w.apps, RunOutcome::ended(Ended::Done));
+}
+
+// --- asking the operator (ADR 0051) ----------------------------------------------------
+
+#[tokio::test]
+async fn a_run_that_asks_ends_and_the_answer_starts_exactly_one_follow_up_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let model = Watched::new(vec![
+        ScriptedModel::call(
+            "",
+            "ghost_ask",
+            args(
+                json!({"question": "Which account should the refund come from?",
+                        "choices": ["Business", "Personal"]}),
+            ),
+        ),
+        ScriptedModel::say("[SILENT]"),
+    ]);
+    let out = w
+        .runner(&model)
+        .run(request("ledger", "Refund the duplicate charge."))
+        .await;
+    // The run did not wait: it ended, silent, with the question on the list.
+    assert_eq!(out.ended, Ended::Done);
+    assert_eq!(out.answer, "[SILENT]");
+    assert_eq!(model.calls(), 2);
+    let open = w.questions.open(None).unwrap();
+    assert_eq!(open.len(), 1);
+    let q = &open[0];
+    assert_eq!(q.asker, "agent:ledger");
+    assert_eq!(q.who, "Ledger");
+    assert_eq!(q.asked_in.as_deref(), Some("run-r1"));
+    assert!(q.follow_up);
+    assert!(w.jobs.queued().unwrap().is_empty());
+    let item = w.waiting.items.get(&q.key).unwrap().unwrap();
+    assert!(item.needs_alerting(None));
+
+    // The operator answers on the desktop: one follow-up run, queued for Ledger.
+    let answered = w
+        .questions
+        .answer(&q.key, "business", via::DESKTOP, None)
+        .unwrap();
+    assert_eq!(answered.state, QState::Answered);
+    assert_eq!(answered.choice.as_deref(), Some("Business"));
+    assert_eq!(w.jobs.queued().unwrap().len(), 1);
+    // The same answer again starts nothing more.
+    w.questions
+        .answer(&q.key, "business", via::DESKTOP, None)
+        .unwrap();
+    assert_eq!(w.jobs.queued().unwrap().len(), 1);
+
+    // It runs as any run does, with the question and the answer as what it is asked.
+    let next = Watched::new(vec![ScriptedModel::say(
+        "Refunded from the business account.",
+    )]);
+    let scheduler = Scheduler::new(SchedulerParts {
+        jobs: w.jobs.clone(),
+        runner: Arc::new(w.runner(&next)),
+        waiting: w.waiting.clone(),
+        reader: None,
+        conversations: Some(w.convs.clone()),
+    });
+    scheduler.drain().await;
+    assert_eq!(next.calls(), 1);
+    let asked = match next.context_at(0).messages.last().unwrap() {
+        Message::User(t) => t.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        asked.contains("You asked the operator: \"Which account should the refund come from?\"")
+    );
+    assert!(asked.contains("The operator answered (desktop): \"business\""));
+    assert!(asked.contains("That is the choice \"Business\"."));
+    // Its answer is delivered as any run's is, and there was exactly one.
+    let runs = w.jobs.recent_runs(10).unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, RunStatus::Ok);
+    assert!(
+        w.waiting
+            .items
+            .open(None)
+            .unwrap()
+            .iter()
+            .any(|i| i.source == "agent:ledger"
+                && i.fields.get("detail").and_then(Value::as_str)
+                    == Some("Refunded from the business account."))
+    );
+    assert!(w.jobs.queued().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_declined_question_starts_no_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let model = Watched::new(vec![
+        ScriptedModel::call("", "ghost_ask", args(json!({"question": "Pay it now?"}))),
+        ScriptedModel::say("[SILENT]"),
+    ]);
+    w.runner(&model)
+        .run(request("ledger", "Pay the bill."))
+        .await;
+    let q = w.questions.open(None).unwrap().pop().unwrap();
+    w.questions.decline(&q.key, via::PHONE, None).unwrap();
+    assert!(w.jobs.queued().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn answer_is_refused_in_a_run_whatever_the_model_writes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let mut a = ghost_core::questions::Ask::new("agent:brand", "Brand", "Logo A or B?");
+    a.agent = Some("brand".into());
+    let q = w.questions.ask(a, None).unwrap();
+    let model = Watched::new(vec![
+        ScriptedModel::call(
+            "",
+            "ghost_answer",
+            args(json!({"key": q.key, "text": "A", "_heard": "run-r1", "_session": "s1"})),
+        ),
+        ScriptedModel::say("Done."),
+    ]);
+    w.runner(&model)
+        .run(request("ghost", "Answer what you can."))
+        .await;
+    assert!(w.questions.get(&q.key).unwrap().unwrap().is_open());
+    let result = format!("{:?}", model.context_at(1).messages);
+    assert!(result.contains("nobody is here to answer"), "{result}");
+}
+
+/// ADR 0018: what the question tools cost on every turn, in the cached prefix.
+#[tokio::test]
+async fn what_the_question_tools_add_to_every_turn() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let ghost = w.convs.get("ghost").unwrap().unwrap();
+    let tools = ToolDispatcher::new(ToolsParams {
+        sources: (w.reach)(&ghost),
+        gate: w.gate.clone(),
+        session_id: "s".into(),
+        on_hang_up: no_action(),
+        on_hold: None,
+        turns: None,
+        events: None,
+        conversations: None,
+        on_call: None,
+        last_request: None,
+        probe: None,
+    })
+    .schemas();
+    let bytes = |name: &str| {
+        serde_json::to_string(&tools.get(name).expect(name).anthropic())
+            .unwrap()
+            .len()
+    };
+    let names = [
+        "ghost_ask",
+        "ghost_answer",
+        "ghost_question",
+        "ghost_questions_list",
+        "ghost_question_cancel",
+    ];
+    let each: Vec<usize> = names.iter().map(|n| bytes(n)).collect();
+    let total: usize = each.iter().sum();
+    println!("{names:?}: {each:?} bytes; +5 tools, +{total} bytes");
+    assert!(total < 3_200, "{total}");
 }
