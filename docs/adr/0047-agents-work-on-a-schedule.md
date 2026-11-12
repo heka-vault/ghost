@@ -1,6 +1,6 @@
 # 0047: Agents work on a schedule, with nobody there
 
-- **Status:** accepted
+- **Status:** accepted (decided 2026-11-11; built on the `feat/schedules` branch: the run with nobody there, the scheduler and its table, a watch's `act`, the two tools on Ghost's own app, the control API's `/schedules` and `/runs`, and the desktop's Watching screen; a run keeps up with the apps as ADR 0046 has a session do)
 - **Date:** 2026-11-11
 - **Settles:** issue #10 (routines), and the `act` response ADR 0029 left proposed
 - **Amends:** ADR 0028 and ADR 0029 (a watch may act), ADR 0030 (a change at `ask` from a
@@ -24,7 +24,10 @@ session's own dispatcher and so the same gate. There is no audio in it, and none
 exists for audio: no narration cut, no spoken filter, no hang up, hold, transfer or
 bringing up a change. It loops until the model stops calling tools, for 30 model calls at
 the most (the last is offered no tools, so a run ends with an answer) and ten minutes at
-the most, and it can be stopped. A model that cannot be reached is tried again after 30,
+the most, and it can be stopped. The tools are asked for before every model call, as a
+session asks (ADR 0046), and a run that is stopped or out of time stops its calls to apps:
+each app is told, each call still returns, and a change still has its outcome in the
+audit. A tool that does not stop when told is left behind after five seconds. A model that cannot be reached is tried again after 30,
 60 and 120 seconds, then the run fails.
 
 **A schedule is one job**, a row in SQLite (`schedules`): a name, the agent, the
