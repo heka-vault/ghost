@@ -899,10 +899,17 @@ mod tests {
         ] {
             s.process(f, Direction::Down, &out).await;
         }
-        assert_eq!(acks_within(&mut rx, 100).await, vec!["Checking four thirteen."]);
+        assert_eq!(
+            acks_within(&mut rx, 100).await,
+            vec!["Checking four thirteen."]
+        );
         assert_eq!(*said.lock().unwrap(), vec!["Checking four thirteen."]);
         // No words: one of the fixed lines, at once.
-        let none = run(&mut s, vec![Frame::UserStopped, starting("ghost_tools_search", None)]).await;
+        let none = run(
+            &mut s,
+            vec![Frame::UserStopped, starting("ghost_tools_search", None)],
+        )
+        .await;
         assert!(READ.contains(&none[0].as_str()), "{none:?}");
     }
 

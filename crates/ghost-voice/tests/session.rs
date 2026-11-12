@@ -1903,7 +1903,10 @@ async fn a_lookup_the_fast_model_makes_itself_is_covered_by_its_own_words() {
         "{rendered:?}"
     );
     assert_eq!(said_by_ghost(&w), vec!["Yeah?", "Two are critical."]);
-    assert!(w.asked.lock().unwrap().is_empty(), "the main model was asked");
+    assert!(
+        w.asked.lock().unwrap().is_empty(),
+        "the main model was asked"
+    );
     finish(&w).await;
 }
 
@@ -1929,7 +1932,10 @@ async fn each_models_prompt_cache_is_warmed_as_the_session_opens_with_its_first_
     let fast = w.fast_warmed.lock().unwrap().clone();
     assert_eq!(main.len(), 1, "the main model, once: {main:?}");
     assert_eq!(fast.len(), 1, "the fast model, once: {fast:?}");
-    assert!(main[0].2.is_some(), "with the main model's thinking setting");
+    assert!(
+        main[0].2.is_some(),
+        "with the main model's thinking setting"
+    );
     assert_eq!(fast[0].2, None, "the fast model is asked without one");
     say(&w, 0.3).await;
     voice_records(&w, 1).await;

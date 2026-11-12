@@ -49,11 +49,11 @@ pub fn preamble(words: &str) -> Option<String> {
 pub struct NarrationCut {
     max: usize,
     held: Vec<String>,
-    calling: bool,  // this response called a tool: drop its text
-    released: bool, // this response is long: pass its text through
-    closed: bool,   // going to sleep: say nothing more
-    closing: bool,  // say nothing after the current response
-    saw_text: bool, // this response produced words
+    calling: bool,         // this response called a tool: drop its text
+    released: bool,        // this response is long: pass its text through
+    closed: bool,          // going to sleep: say nothing more
+    closing: bool,         // say nothing after the current response
+    saw_text: bool,        // this response produced words
     first_call_seen: bool, // this turn has started a call: no later words are its preamble
     /// A `hold` in a turn that cut Ghost off is declined (`tools`): its words go unsaid.
     turns: Option<std::sync::Arc<crate::turns::TurnControl>>,

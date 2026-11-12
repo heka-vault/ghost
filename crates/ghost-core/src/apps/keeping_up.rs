@@ -1410,7 +1410,12 @@ async fn a_search_keeps_only_its_best_few_and_the_rest_stay_callable() {
         .to_string();
     assert!(!shown.contains(&last));
     let tool = last.strip_prefix("shifty_").unwrap();
-    m.apps.app("shifty").unwrap().call(tool, Map::new(), true).await.unwrap();
+    m.apps
+        .app("shifty")
+        .unwrap()
+        .call(tool, Map::new(), true)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

@@ -159,9 +159,7 @@ pub fn prefix_key(model: &str, context: &Context, tools: &Tools, options: &Optio
 /// Note that the prefix was sent now; true when it had not been within `CACHE_FRESH`.
 pub fn sent_now(key: u64) -> bool {
     let mut sent = SENT.lock().unwrap_or_else(|e| e.into_inner());
-    let stale = sent
-        .get(&key)
-        .is_none_or(|at| at.elapsed() >= CACHE_FRESH);
+    let stale = sent.get(&key).is_none_or(|at| at.elapsed() >= CACHE_FRESH);
     sent.insert(key, Instant::now());
     stale
 }
@@ -1488,7 +1486,10 @@ fn async_stream_words(
     // once its arguments are written.
     events.extend(calls.into_iter().flat_map(|c| {
         [
-            (std::time::Duration::ZERO, Event::ToolStarting(c.name.clone())),
+            (
+                std::time::Duration::ZERO,
+                Event::ToolStarting(c.name.clone()),
+            ),
             (wait(call_tokens(&c)), Event::ToolCall(c)),
         ]
     }));
@@ -1559,11 +1560,21 @@ mod tests {
         assert_ne!(key, prefix_key("m2", &ctx, &tools, &Options::default()));
         assert_ne!(
             key,
-            prefix_key("m-warm-test", &ctx, &fast_tools(&tools), &Options::default())
+            prefix_key(
+                "m-warm-test",
+                &ctx,
+                &fast_tools(&tools),
+                &Options::default()
+            )
         );
         assert_ne!(
             key,
-            prefix_key("m-warm-test", &ctx, &tools, &fast_options(&Options::default()))
+            prefix_key(
+                "m-warm-test",
+                &ctx,
+                &tools,
+                &fast_options(&Options::default())
+            )
         );
     }
 

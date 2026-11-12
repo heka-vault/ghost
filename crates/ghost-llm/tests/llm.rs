@@ -585,8 +585,15 @@ async fn a_tool_call_is_announced_as_its_block_opens_with_the_words_before_it() 
         .iter()
         .position(|e| matches!(e, Event::ToolCall(_)))
         .unwrap();
-    let text_at = evs.iter().position(|e| matches!(e, Event::Text(_))).unwrap();
-    assert!(text_at < first_start && first_start < first_call, "{:?}", kinds(&evs));
+    let text_at = evs
+        .iter()
+        .position(|e| matches!(e, Event::Text(_)))
+        .unwrap();
+    assert!(
+        text_at < first_start && first_start < first_call,
+        "{:?}",
+        kinds(&evs)
+    );
     // The calls themselves are unchanged.
     assert_eq!(tool_calls(&evs).len(), 2);
 }
