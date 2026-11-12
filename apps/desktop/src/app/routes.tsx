@@ -19,6 +19,7 @@ import {
   type LucideIcon,
   MessagesSquare,
   PanelTop,
+  PlugZap,
   ScrollText,
   Settings,
   Settings2,
@@ -191,7 +192,7 @@ export const ROUTES: RouteDef[] = [
     component: lazy(() => import("../screens/hear")),
   },
   {
-    // General, Model, Passwords, Sound and Phone: one screen, so moving between them keeps
+    // General, Model, Passwords, Sound, Phone and Outside tools: one screen, so moving between them keeps
     // one draft (a typed password included) and one save bar.
     id: "settings",
     patterns: ["/settings/:page"],
@@ -301,11 +302,12 @@ export const SETTINGS_PAGES: SettingsPage[] = [
   page("permissions", "Permissions", ShieldCheck),
   page("sound", "Sound", Volume2),
   page("phone", "Phone", Smartphone),
+  page("tools", "Outside tools", PlugZap),
   page("notifications", "Notifications", BellRing),
   page("audit", "Audit log", ScrollText),
 ];
 /** The pages the settings screen itself draws; the rest are their owners' screens. */
-export const SETTINGS_SCREEN_PAGES = ["general", "model", "passwords", "sound", "phone"];
+export const SETTINGS_SCREEN_PAGES = ["general", "model", "passwords", "sound", "phone", "tools"];
 
 /** The settings page a path is on ("sound" for /settings/sound, "apps" for /settings/apps/github), or null. */
 export function settingsPageOf(path: string): SettingsPage | null {

@@ -79,6 +79,11 @@ export type PhoneDevice = Schemas["PhoneDevice"];
 export type PhonePairing = Schemas["PhonePairing"];
 /** One phone listen address and whether it is on the home network or the tunnel (ADR 0020). */
 export type PhoneAddress = Schemas["PhoneAddress"];
+/** An outside tool the operator connected to Ghost (ADR 0048). Never its token. */
+export type ClientView = Schemas["ClientView"];
+export type ClientsView = Schemas["ClientsView"];
+/** What connecting a tool answers, once: its token and what to paste into the tool. */
+export type ClientCreated = Schemas["ClientCreated"];
 export type SkillInfo = Schemas["SkillInfo"];
 export type SkillBody = Schemas["SkillBody"];
 export type SkillAdd = Schemas["SkillAdd"];
@@ -470,6 +475,21 @@ export class GhostClient {
   /** Forget the paired phone. Its signatures stop working and a running phone session ends. */
   forgetPhone() {
     return unwrap(this.api.DELETE("/phone"));
+  }
+
+  // --- outside tools (ADR 0048) ----------------------------------------------------------
+  /** The tools connected to Ghost, when each was last used, and where Ghost listens for them. */
+  clients() {
+    return unwrap(this.api.GET("/clients"));
+  }
+  /** Connect a tool. Its token and what to paste into it come back this once. `command`: for a
+   *  tool that can only start a command, which then runs `ghostd mcp serve`. */
+  connectClient(name: string, command = false) {
+    return unwrap(this.api.POST("/clients", { body: { name, command } }));
+  }
+  /** Remove a tool: its token stops working at once. */
+  removeClient(name: string) {
+    return unwrap(this.api.DELETE("/clients/{name}", { params: { path: { name } } }));
   }
 
   // --- skills (ADR 0023, ADR 0035) -----------------------------------------------------------

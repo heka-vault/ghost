@@ -1,5 +1,5 @@
 /**
- * Owner: settings. Five of the settings pages (#/settings/<page>), one screen so that moving
+ * Owner: settings. Six of the settings pages (#/settings/<page>), one screen so that moving
  * between them keeps one draft and one save bar:
  *   general    Finish setup while it is unfinished, Ghost's version and build and this
  *              window's (About.tsx), the settings file
@@ -7,6 +7,7 @@
  *   passwords  Ghost's vault (ADR 0036): every password, each saved on its own row (Passwords.tsx)
  *   sound      Ghost's voice, wake and your yes; microphone and speakers; voice models
  *   phone      the one phone Ghost pairs with
+ *   tools      the outside tools connected to Ghost (ADR 0048, OutsideTools.tsx)
  * Apps, Skills, Permissions, Notifications and the Audit log are their owners' screens; the
  * shell's settings nav (app/SettingsFrame.tsx) lists them all and marks a page here with
  * unsaved changes, a field to fix or a restart owed.
@@ -122,6 +123,7 @@ import { GhostVoice } from "./GhostVoice";
 import { MODEL_FORM_ID, ModelSection } from "./ModelSection";
 import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PasswordsSection } from "./Passwords";
+import { OutsideToolsSection } from "./OutsideTools";
 import { PhoneSection } from "./Phone";
 import { WakePhrasesField, wakeHelp } from "./WakePhrases";
 import { WavePicker } from "./WavePicker";
@@ -836,6 +838,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       "Every password Ghost holds for you, in its own vault, locked with your keyring."
     ) : page === "sound" ? (
       "What Ghost hears with, how it wakes, and how it sounds."
+    ) : page === "tools" ? (
+      "Other tools on this computer that can reach you through Ghost."
     ) : (
       <>
         Talk to Ghost from your phone, at home or away through your own tunnel, with nothing of anyone else’s in between.
@@ -1238,6 +1242,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         )}
 
         {s && page === "phone" && <PhoneSection settingsPath={s.settings_path} openOnLoad={forced === "pairing"} />}
+        {s && page === "tools" && <OutsideToolsSection />}
       </div>
     </Page>
   );

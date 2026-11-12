@@ -129,6 +129,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clients
+         * @description The tools the operator connected to Ghost, and where Ghost listens for them. Never a token.
+         */
+        get: operations["get_clients_clients_get"];
+        put?: never;
+        /**
+         * Create Client
+         * @description Connect a tool: its token and what to paste into it, returned once and never again.
+         */
+        post: operations["create_client_clients_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clients/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Client
+         * @description Take a tool away: its token stops working at once.
+         */
+        delete: operations["delete_client_clients__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations": {
         parameters: {
             query?: never;
@@ -1763,6 +1807,49 @@ export interface components {
             required: boolean;
             secret: boolean;
         };
+        ClientCreate: {
+            /**
+             * @description For a tool that can only start a command: Ghost keeps the token in a private file
+             *     and the tool runs `ghostd mcp serve`.
+             */
+            command?: boolean;
+            name: string;
+        };
+        /** @description What `POST /clients` answers, once: the token is never returned again. */
+        ClientCreated: {
+            /** @description The command that connects Claude Code. */
+            claude_code: string;
+            client: components["schemas"]["ClientView"];
+            clients: components["schemas"]["ClientsView"];
+            /** @description The config other tools read, as JSON text. */
+            config_json: string;
+            /**
+             * Format: password
+             * @description The client's token. Shown once.
+             */
+            readonly token: string;
+        };
+        ClientsView: {
+            clients: components["schemas"]["ClientView"][];
+            /** @description Where Ghost listens for them (`host:port`); empty when that is turned off. */
+            listening: string[];
+            /** @description Why Ghost is not listening though it should be, in a sentence. */
+            problem: string | null;
+        };
+        /** @description A tool the operator connected to Ghost. Never its token. */
+        ClientView: {
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description The last time it called Ghost; None when it never has.
+             */
+            last_used_at: string | null;
+            /** @description What it was connected as: lowercase letters, digits and hyphens. */
+            name: string;
+            /** @description The name as Ghost says it: "Claude Code" for `claude-code`. */
+            title: string;
+        };
         CompactionView: {
             /** Format: date-time */
             at: string;
@@ -3103,6 +3190,10 @@ export type SchemaCatalogOption = components['schemas']['CatalogOption'];
 export type SchemaCatalogPage = components['schemas']['CatalogPage'];
 export type SchemaCatalogPublisher = components['schemas']['CatalogPublisher'];
 export type SchemaCatalogSetting = components['schemas']['CatalogSetting'];
+export type SchemaClientCreate = components['schemas']['ClientCreate'];
+export type SchemaClientCreated = components['schemas']['ClientCreated'];
+export type SchemaClientsView = components['schemas']['ClientsView'];
+export type SchemaClientView = components['schemas']['ClientView'];
 export type SchemaCompactionView = components['schemas']['CompactionView'];
 export type SchemaConversationCreate = components['schemas']['ConversationCreate'];
 export type SchemaConversationDetail = components['schemas']['ConversationDetail'];
@@ -3459,6 +3550,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogEntryView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clients_clients_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientsView"];
+                };
+            };
+        };
+    };
+    create_client_clients_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_client_clients__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientsView"];
                 };
             };
             /** @description Validation Error */
