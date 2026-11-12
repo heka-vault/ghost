@@ -122,6 +122,37 @@ through the main model. With so few runs that is no proof of equal judgement; th
 is on by default only because the fast model itself is off by default, and the voice
 rubric's part D is what confirms it.
 
+## Amended 2026-11-12: something is said within the grace of a lookup, and the cache is warm
+
+Live, on the operator's setup (OpenRouter, four apps past the tool limit), four turns that
+looked something up went four to six seconds with only the thinking sound: the
+acknowledgment above fired at a hand-over or at a call to an outside app, and those turns
+went to Ghost's own tools or were the fast model's own reads, neither of which is a
+hand-over. [The benchmark](../benchmarks/perf/2026-11-12-reply-speed.md) has the evidence
+and the numbers.
+
+- **A call is acknowledged as it starts** (`ghost_llm::Event::ToolStarting`), for any tool
+  that sends the model round again, Ghost's own included, after the turn's grace has run
+  from the end of the operator's speech as before. A hand-over is still acknowledged the
+  same way, once.
+- **The fast model's words before its first call may be what is said.** "Nothing it wrote
+  is spoken" holds for its reply's text: what it writes before a turn's first call, eight
+  words or fewer and not before `think_harder`, is rendered and played as the
+  acknowledgment (not a turn, not in the transcript, not in the context when it handed
+  over). The same holds for the main model's words before its first call.
+- **Each model's prompt cache is written as a session opens** (`GHOST_LLM_WARM`), while the
+  greeting plays, unless the same prefix was sent in the last four minutes.
+- **The fast model's thinking is its own** (`GHOST_LLM_FAST_THINKING`). The amendment
+  above said it is asked "without the thinking setting"; left out, Haiku 5.5 thinks
+  adaptively. Turning it off began its calls 0.3 s sooner and made it look less far (a
+  triage question answered from Ghost's own status in 3 of 3 runs), so it is left out by
+  default and `disabled` is the operator's choice.
+
+Measured with the real models on the harness's deferred apps: a lookup's first sound
+3.4 to 3.9 s before, 2.0 to 2.7 s after; a question no app answers 3.8 s in three calls
+before, 2.4 s in one after. The floor is the grace the acknowledgment waits (1.2 s from
+the end of speech), then the model's first sign of a call.
+
 ## Considered options
 
 - **The fast model's own tool calls run.** A read is safe to run (it is called directly,
