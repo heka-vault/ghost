@@ -83,10 +83,38 @@ and the same on the rendered takes, against the committed baseline in [hear/](he
 `ARGS="--set vad_stop_secs=0.4"` tries a setting without a code change; `--set` takes
 the same `GHOST_*` names as `make perf`, `stt_dir` and `stt_quantization` included.
 
+## When the turn would have closed: `make perf-turns`
+
+The same takes answer a second question: when would Ghost have taken the turn for over?
+`make perf-turns` (`ghostd perf turns`, `crates/ghost-voice/src/perf/turns.rs`) runs each
+take through the stage as above and judges every segment's end as a session does: Smart
+Turn on the audio, the words the aggregator would hold then (the whole turn read once
+from the second segment on), and the wait the rule gives that end
+(`ghost_voice::turns::TurnTiming`, ADR 0049). A take is one turn as the operator meant
+it, so every end but its last is a pause mid-turn of known length, and a wait shorter
+than the pause is a turn closed too soon.
+
+```sh
+make perf-turns TAKES=latest                              # the recorded takes, the settings as they are
+make perf-turns TAKES=latest ARGS="--set turn_confident_prob=0.95"
+ghostd perf turns-report .scratch/perf/<run>-turns/turns.json --set turn_confident_grace_secs=0.5
+```
+
+The report (`turns.md`) sets the waits as they are beside the one grace Ghost had before:
+pauses closed early and how many of them the short grace closed, how many of those are
+still closed when Ghost's voice could start (0.8, 1.2 and 2.0 s after the VAD's stop; the
+others are reopened whole with nothing heard), and the wait at each take's real end, which
+is what a shorter grace buys. It sweeps the short grace and its probability, and lists
+every pause with Smart Turn's verdict and what the words read as. `turns.json` holds
+numbers and flags, never words. The harness's pauses include the VAD's usual 0.2 s start,
+where a live session re-arms in 0.1 s while a close waits, so the counts err toward more
+early closes.
+
 ## What it does not measure
 
-- Turn-taking: whether Smart Turn closed the turn after the first piece. Each take is one
-  turn here; [../voice-rubric.md](../voice-rubric.md) part B is the live check.
+- Turn-taking live: `make perf-turns` says when the turn would have closed, not what
+  happened next; whether the operator going on was reopened as one turn is the rule's
+  tests and [../voice-rubric.md](../voice-rubric.md) part B.
 - Ghost talking over the operator: no take plays Ghost's voice, so the echo filter, the
   warm-up guard and barge-in (#54, #58) are the rubric's.
 - The model's answer: a word wrong in a way the model still understands counts as wrong.
@@ -96,3 +124,4 @@ the same `GHOST_*` names as `make perf`, `stt_dir` and `stt_quantization` includ
 | Run | What |
 |---|---|
 | [hear/2026-11-05-kokoro.md](hear/2026-11-05-kokoro.md) | The first run, rendered takes in three voices: reading the whole turn takes the word error rate from 7.2% to 4.2% (better beyond noise) for 0.05 s more at the close's p95 |
+| [perf/2026-11-12-voice-speed.md](perf/2026-11-12-voice-speed.md) | `make perf-turns` on the recorded session of 2026-11-06: the short grace closes 3 of 39 pauses mid-turn early against 1, and a turn's real end waits 0.85 s on average against 1.37 s |

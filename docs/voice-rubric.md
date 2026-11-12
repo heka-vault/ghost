@@ -25,9 +25,11 @@ scripts/voice-rubric-check.sh LOG LAST   # another log, more turns
 ```
 
 Timings in play, from `.env.example` unless `settings.env` says otherwise: the hold after
-Smart Turn hears an end 1.2 s (`GHOST_TURN_GRACE_SECS`); the close after a finished
-sentence when Smart Turn did not hear an end 1.6 s (`GHOST_TURN_STOP_SECS`); the close
-after an unfinished one 3 s (`GHOST_TURN_UNFINISHED_SECS`).
+Smart Turn hears an end 1.2 s (`GHOST_TURN_GRACE_SECS`), or 0.35 s when it is sure (0.9 or
+more) and the words end a sentence (`GHOST_TURN_CONFIDENT_GRACE_SECS`,
+`GHOST_TURN_CONFIDENT_PROB`, ADR 0049); the close after a finished sentence when Smart
+Turn did not hear an end 1.6 s (`GHOST_TURN_STOP_SECS`); the close after an unfinished one
+3 s (`GHOST_TURN_UNFINISHED_SECS`).
 
 **Say the wake phrase, wait for Ghost's opening sound, then the line.** Running straight on
 is a separate test (G1): the first words after the wake are dropped by the echo warm-up
@@ -50,6 +52,7 @@ a second, then go on. Pause music for parts B to E; part H brings it back.
 | B2 | "Tell me a little bit more about … the weather today." | One answer. Either `Smart Turn says not done` on "about" and `went on after`, or `turn: [...] sounds unfinished, waiting`. |
 | B3 | "Can you read … issue … four one five." | One turn, one `github_*_issue_read` in the log. (The number may be misheard; that is STT, #52, not turn-taking.) |
 | B4 | A long sentence with three or four short pauses, as if explaining a problem | One turn, one reply. Every piece is listed under one `turn: answering "..." while the close waits`. |
+| B5 | "What's waiting for triage … in the app repo?" and "Remind me tomorrow morning … to review the notes.": the first half is a sentence by itself | One reply, to the whole sentence (ADR 0049). The first half may close after the short grace (`ends a sentence and Smart Turn is sure`); then `turn: reopened, nothing of the answer heard`, or, if Ghost had just begun, `turn: reopened, the answer had only begun` and Ghost stops within a word. Fail: an answer to the first half, a tool run for it, or two replies. Note how often Ghost said anything into your pause. |
 
 ## Part C: unfinished words wait, finished sentences don't
 
@@ -57,7 +60,7 @@ a second, then go on. Pause music for parts B to E; part H brings it back.
 |---|---|---|
 | C1 | "Can you" and stay quiet | Nothing for about 3 s (`turn 3.x` in the latency line), then Ghost asks. Fail: an answer after 1.6 s. |
 | C2 | "Tell me about um" and stay quiet | About 3 s, then a question back. `Smart Turn says not done` or `sounds unfinished, waiting`. |
-| C3 | "What time is it?" | `Smart Turn says done (0.9x)` followed within a few ms by `turn: answering "What time is it?" while the close waits`; a quick reply. |
+| C3 | "What time is it?" | `Smart Turn says done (0.9x)` followed within a few ms by `turn: answering "What time is it?" while the close waits`, then `ends a sentence and Smart Turn is sure (0.9x); closing after 0.3xs`; a quick reply. |
 | C4 | "All right, I'll talk to you later, Ghost." | Hangs up in about a second. The full stop gives `ends a sentence; closing 1.6s` or the quick intent fires. |
 
 A full stop is overridden when Smart Turn is confident you are not done (`ends a sentence,
@@ -70,10 +73,14 @@ Five clean one-sentence questions in a row, finished, no pauses: "What's on my c
 today?" "Read me issue four one three." "How many open issues are there?" "What did we
 change yesterday?" "Say good morning."
 
-Pass: the checker shows `speculation {"kept":1,"started":1}` on most of them, `hold` about
-1.2, and `answered during it` in the latency lines. Fail: `missed` on every turn or no
+Pass: the checker shows `speculation {"kept":1,"started":1}` on most of them, `close
+confident` with `hold` about 0.35 on most (`close grace` and 1.2 where Smart Turn was less
+sure or Parakeet wrote no stop; `close number` and 1.7 after "four one three"), and
+`answered during it` in the latency lines. Fail: `missed` on every turn or no
 `speculation` at all, which is the regression the Rust port had until PR #50. A `withdrawn`
-count is fine on turns where you paused (part B).
+count is fine on turns where you paused (part B). With a fast model set (ADR 0050), "Say
+good morning" should come from it (`model` in the record) and the lookups should show
+`handover` and an acknowledgment before the answer.
 
 ## Part E: interrupting still works
 

@@ -23,11 +23,16 @@ its `stop_secs`) to `BotStartedSpeaking`, and the parts tile that interval:
 
 | part | from -> to | what is in it |
 |---|---|---|
-| `hear` | operator silent -> turn released | VAD silence (`vad`), STT (`stt`, and `stt_model` for the model alone), interceptors and the confirmation classifier (`pre`), Smart Turn and waiting for the transcript (`turn`), Ghost's grace hold (`hold`; `speculation` counts answers started during it and how each ended: `kept`, `withdrawn`, `missed`, `tool`) |
+| `hear` | operator silent -> turn released | VAD silence (`vad`), STT (`stt`, and `stt_model` for the model alone), interceptors and the confirmation classifier (`pre`), Smart Turn and waiting for the transcript (`turn`), Ghost's grace hold (`hold`; `close` says how it was timed: `confident`, `grace`, `number`, `unfinished`, `sentence`, `incomplete`, ADR 0049; `speculation` counts answers started during it and how each ended: `kept`, `withdrawn`, `missed`, `tool`; `reopened` is `unheard` or `started` on a turn that goes on from one closed too soon) |
 | `llm` | each model call, start -> end | `ttfb`, `first_tool`, `first_text`, `dur`, tokens `in`/`out`/`cache_read`/`cache_write`, tools called |
 | `tools` | function call -> result | the part not overlapping a model call; per call the name, `op` for `change`, `status` (`ok`, `done:announce`, `done:request`, `needs_confirmation`, `error`), and `steps` (`read` = the ability's client, an external API for GitHub; `prepare`, `submit` = gate snapshot plus the write below `confirm`; `request` = ADR 0017's check that may execute) |
 | `tts` | last model call ends -> Ghost's voice | narration release (`wait`), Kokoro to first audio (`synth`), transport (`out`) |
 | `other` | the rest | frame hops: release -> model, tool result -> next model call |
+
+Beside the parts: `prerender` counts a reply's first clause `rendered` ahead of its
+release, then `used` or `dropped` (ADR 0049), and `handover` the turns a fast model handed
+to the main one, with the seconds it took to ask (ADR 0050; `model` is the model that
+answered first).
 
 Other kinds: `opening` (pipeline start, or the phone connecting, to the greeting; `build` is
 `build_session` to pipeline start), `text` (a typed turn), `system` (a model run nobody
@@ -59,13 +64,23 @@ headless:
   loud: `audible` is the operator's last frame to Ghost's voice at the speaker.
 - **Model:** scripted (`ghost_voice::llm::ScriptedModel`) with the scenario's replies, so
   every tool call reaches the real gate and the real mock app while the model's own time is
-  a setting (`--ttfb-ms`); no tokens are spent. The real model connection is measured by
-  `ghostd perf llm` (below), with Ghost's real system prompt and tool schemas.
+  a setting; no tokens are spent. `--profile sonnet,haiku,instant` gives it a real model's
+  time, one config each: `sonnet` is 1.2 s to the first token and 60 tokens a second,
+  `haiku` 0.45 s and 150, `instant` none (`--ttfb-ms` and `--tokens-per-sec` for others; a
+  word is 1.3 tokens, a tool call 12 and its arguments). Those times are assumed, from
+  2026-10-19's measurements, not measured in the run. `--fast haiku` puts a fast model in
+  front (ADR 0050), scripted from each line's first reply, so a line that opens with a tool
+  call is handed over. The real model connection is measured by `ghostd perf llm` (below),
+  with Ghost's real system prompt and tool schemas.
 - **Before and after:** `--ablate` turns the 2026-10-19 changes off one by one, so a change
   can be measured against Ghost without it in the same run: `tts_clauses` (whole sentences
   to Kokoro), `speculate` (the model waits out the turn grace, 2026-10-22); `prompt_lines`,
   `system_cache` and `shared_client` are the model connection's and change nothing with the
   scripted model, accepted for the label's sake. `all` is Ghost before them, `none` after.
+  `--variant name:field=value+field=value`, as often as wanted, runs named sets of settings
+  side by side (`fast=haiku` among them sets the fast model); the report compares them per
+  scenario and counts what each cost: answers started early and withdrawn, clauses
+  rendered ahead and dropped, turns reopened, hand-overs.
 - **Interleaved:** every config runs a scenario before any runs it again.
 - **State:** a fresh temp dir per run: its own SQLite, conversations, mock GitHub
   (`ghost-mock-github`, the app `infra/example/apps.json` names; the harness's policy asks
@@ -85,6 +100,8 @@ make perf SCENARIO=lookup,chain RUNS=5
 make perf ARGS="--set turn_grace_secs=0.4"       # any VoiceSettings field
 make perf ARGS="--ablate all,none"               # before vs after
 make perf ARGS="--ttfb-ms 800"                   # the scripted model's time to its first token
+make perf ARGS="--profile sonnet,haiku,instant"  # ... or a real model's assumed time, one config each
+make perf ARGS="--profile sonnet --variant before:turn_confident_grace_secs=1.2+tts_prerender=false --variant after: --variant fast:fast=haiku"
 make perf ARGS="--history 8"                     # seed earlier turns into the record
 make perf-micro                                  # STT by length, Kokoro first audio, Smart Turn, Jev
 make perf-llm                                    # the model connection as configured: hello TTFB, the tool call, the answer

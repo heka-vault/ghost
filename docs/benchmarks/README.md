@@ -14,13 +14,14 @@ the record of how they were measured.
 | [2026-10-22-cloud-speech.md](2026-10-22-cloud-speech.md) | A cloud voice and interim barge-in (ADR 0026) |
 | [2026-10-30-stt-review.md](2026-10-30-stt-review.md) | Where the operator's words go between the mic and Parakeet (#52) |
 | [latency-harness.md](latency-harness.md) | How the live timeline and `make perf` work |
-| [hear-harness.md](hear-harness.md), [hear/](hear/) | How well Ghost hears: `make perf-hear` over the operator's takes or Kokoro's, the pass rule for a speech-in change (#60) |
+| [hear-harness.md](hear-harness.md), [hear/](hear/) | How well Ghost hears: `make perf-hear` over the operator's takes or Kokoro's, the pass rule for a speech-in change (#60); and when it would take a turn for over, `make perf-turns` on the same takes (ADR 0049) |
 | [perf/](perf/) | Every release's `make perf` report |
+| [perf/2026-11-12-voice-speed.md](perf/2026-11-12-voice-speed.md) | A confident turn closes sooner, the first clause rendered ahead, a fast model in front (ADR 0049, ADR 0050): every scenario before and after each, under assumed model times |
 
 ## The scripts
 
-`make perf`, `make perf-micro`, `make perf-llm` and `make perf-hear` are `ghostd perf run|micro|llm|hear`, in
-the daemon (`crates/ghost-voice/src/perf/`, ADR 0039). The Python under
+`make perf`, `make perf-micro`, `make perf-llm`, `make perf-hear` and `make perf-turns` are
+`ghostd perf run|micro|llm|hear|turns`, in the daemon (`crates/ghost-voice/src/perf/`, ADR 0039). The Python under
 [scripts/](scripts/) is what the reports above were made with; each says what it needs:
 
 | Script | Runs with | What |
