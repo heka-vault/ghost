@@ -4244,6 +4244,13 @@
             },
             "type": "array"
           },
+          "recent": {
+            "description": "The latest calls in the stretch, newest first, at most `REACH_RECENT`.",
+            "items": {
+              "$ref": "#/components/schemas/ReachCall"
+            },
+            "type": "array"
+          },
           "since": {
             "format": "date-time",
             "type": "string"
@@ -4262,7 +4269,8 @@
           "total",
           "by_app",
           "by_agent",
-          "by_session"
+          "by_session",
+          "recent"
         ],
         "type": "object"
       },

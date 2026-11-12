@@ -554,7 +554,12 @@ pub struct ReachView {
     pub by_app: Vec<ReachTotalView>,
     pub by_agent: Vec<ReachTotalView>,
     pub by_session: Vec<ReachTotalView>,
+    /// The latest calls in the stretch, newest first, at most `REACH_RECENT`.
+    pub recent: Vec<ReachCall>,
 }
+
+/// How many of the latest calls `GET /reach` carries.
+pub const REACH_RECENT: usize = 24;
 
 // --- the waiting list (ADR 0029, ADR 0030) ----------------------------------------------
 
