@@ -199,7 +199,10 @@ mod tests {
             vec![Frame::BotStarted, Frame::Interruption, Frame::Interruption],
         );
         assert_eq!(*seen.lock().unwrap(), vec![Activity::Cut]);
-        feed(&obs, vec![Frame::BotStarted, Frame::BotStopped, Frame::Interruption]);
+        feed(
+            &obs,
+            vec![Frame::BotStarted, Frame::BotStopped, Frame::Interruption],
+        );
         assert_eq!(seen.lock().unwrap().len(), 1, "played out: nothing was cut");
     }
 
