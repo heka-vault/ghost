@@ -306,9 +306,20 @@ export function schedules(s: Scenario): { view: SchedulesView; runs: Record<stri
   };
   if (s.data !== "busy") return { view: { schedules: [MORNING, INBOX], time_zone: "America/Detroit", problems: [] }, runs };
   runs[RELEASE.id] = [run(RELEASE, 60 * 24 * 5, { status: "failed", error: "HTTP 529: the model is overloaded", delivery: "failure", retries: 3, model_calls: 4, tool_calls: 0 })];
+  // Busy: two agents at work right now, side by side (one on its schedule, one for a watch),
+  // and a morning of runs, so Today's timeline and the room show work in parallel.
+  runs[INBOX.id] = [run(INBOX, 2, { status: "running", started_at: ago(2), finished_at: null, model_calls: 3, tool_calls: 5 }), ...runs[INBOX.id]];
+  runs["watch-reviews"] = [
+    { ...run(INBOX, 1, { status: "running", started_at: ago(1), finished_at: null, model_calls: 1, tool_calls: 2 }), id: "act-reviews-1", schedule: null, source: "watch:reviews", agent: "legal", name: "review requests" },
+    { ...run(INBOX, 95, { answer: "Approved app#208 with a comment; it only touches docs.", delivery: "delivered", model_calls: 2, tool_calls: 3 }), id: "act-reviews-2", schedule: null, source: "watch:reviews", agent: "legal", name: "review requests" },
+    { ...run(INBOX, 190, { status: "failed", error: "GitHub answered 502 twice", delivery: "failure", model_calls: 1, tool_calls: 1 }), id: "act-reviews-3", schedule: null, source: "watch:reviews", agent: "legal", name: "review requests" },
+  ];
+  runs["run-now-infra"] = [
+    { ...run(INBOX, 140, { answer: "Both AGPL packages are build-time only; nothing ships to customers.", delivery: "delivered", model_calls: 4, tool_calls: 6 }), id: "now-infra-1", schedule: null, source: "run_now", agent: "infra", name: "license sweep" },
+  ];
   return {
     view: {
-      schedules: [MORNING, INBOX, RELEASE, REMINDER],
+      schedules: [MORNING, { ...INBOX, running: true, last_outcome: "running" }, RELEASE, REMINDER],
       time_zone: "America/Detroit",
       problems: ["The schedule weekly numbers is for analytics, which is retired; it will not run"],
     },

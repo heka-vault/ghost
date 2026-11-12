@@ -5,7 +5,9 @@
  */
 import { FlaskConical } from "lucide-react";
 
-import { Badge, Select, Tooltip } from "../ui";
+import { navigate } from "../app/router";
+import { ROUTES } from "../app/routes";
+import { Badge, IconButton, Menu, Select, Tooltip } from "../ui";
 import { useDesign } from "./context";
 
 export function MockBadge() {
@@ -49,5 +51,29 @@ export function PrototypeStrip() {
       </Badge>
       <span>{design ? "Mock data only. Not connected to Ghost." : "Connected to your Ghost. Saves here are real."}</span>
     </div>
+  );
+}
+
+/**
+ * The rail's design-mode menu (development only): which mock scenario, and the prototypes,
+ * which no longer have rows of their own. The flask is the Mock badge: it says the data is fake.
+ */
+export function DevMenu() {
+  const design = useDesign();
+  if (!design) return null;
+  const protos = ROUTES.filter((r) => r.component && r.nav?.group === "prototype");
+  return (
+    <Menu
+      align="start"
+      aria-label="Design mode"
+      trigger={<IconButton className="rail__dev" label={`Mock data: ${design.scenario.label}`} tooltipSide="right" icon={<FlaskConical />} />}
+      items={[
+        { heading: "Scenario" },
+        ...design.scenarios.map((s) => ({ label: s.name === design.scenario.name ? `${s.label} ✓` : s.label, onSelect: () => design.setScenario(s.name) })),
+        "separator" as const,
+        { heading: "Prototypes" },
+        ...protos.map((r) => ({ label: r.nav!.label, onSelect: () => navigate(r.path) })),
+      ]}
+    />
   );
 }

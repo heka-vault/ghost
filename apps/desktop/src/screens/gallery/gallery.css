@@ -77,8 +77,7 @@
 .gal-pending-compact { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .gal-pending-compact > * { width: 320px; }
 /* Status cards on the window ground, at the sidebar's width, as they sit in the shell. */
-.gal-status-cards { display: grid; grid-template-columns: repeat(auto-fill, 220px); gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-lg); background: var(--bg-app); }
-.gal-status-cards .sidebar__status { margin: 0; }
+.gal-status-cards { display: grid; grid-template-columns: repeat(auto-fill, var(--rail-width)); gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-lg); background: var(--bg-app); }
 /* The contrast self-check: real fields measured, never seen. */
 .gal-contrast-probe { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 /* The checks: one row each, the result badge on the right. */

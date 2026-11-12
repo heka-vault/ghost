@@ -124,7 +124,7 @@ export function AgentDetail({ slug }: { slug: string }) {
     // Ghost's conversation is the home screen; its other views are here.
     if (t === "transcript" && slug === "ghost") {
       writeParam("tab", null, slug);
-      navigate("/");
+      navigate("/session");
       return;
     }
     setTabState(t);
@@ -652,7 +652,7 @@ export function AgentDetail({ slug }: { slug: string }) {
     <>
       {/* While a change waits, reviewing it is the one thing to do here; the save bar's Save keeps the primary when there are edits too. */}
       {waiting && (
-        <Button variant={dirtyCount ? "secondary" : "primary"} href={hrefFor("/")}>
+        <Button variant={dirtyCount ? "secondary" : "primary"} href={hrefFor("/session")}>
           Review the change
         </Button>
       )}

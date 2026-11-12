@@ -83,7 +83,7 @@ import {
   statusTone,
   useToast,
 } from "../../ui";
-import { StatusCard } from "../../app/Sidebar";
+import { moodOf } from "../../app/Rail";
 import { DESKTOP_VERSION } from "../../app/version";
 import "./gallery.css";
 
@@ -1026,16 +1026,28 @@ function Specimens({ theme }: { theme: string }) {
             </div>
           ))}
         </Spec>
-        <Spec label="Status card: the sidebar’s one phase signal, on the window ground" column>
+        <Spec label="The rail’s presence: Ghost’s one phase signal at the desk, Wisp in the phase’s pose over a word" column>
           <div className="gal-status-cards">
-            <StatusCard phase={liveLabel("connecting", "offline").dot} title={liveLabel("connecting", "offline").title} sub="Looking for Ghost" />
-            <StatusCard phase="passive" title={liveLabel("online", "passive").title} sub="Nothing leaves this computer" />
-            <StatusCard phase="listening" title={liveLabel("online", "listening").title} sub="On the Accounting line" />
-            <StatusCard phase={liveLabel("reconnecting", "offline").dot} title={liveLabel("reconnecting", "offline").title} sub="Trying again now" />
-            <StatusCard phase="starting" title={liveLabel("online", "starting").title} sub="Loading voice models" />
-            <StatusCard phase={liveLabel("offline", "offline").dot} title={liveLabel("offline", "offline").title} sub="The Ghost service is stopped" />
+            {(
+              [
+                ["passive", "Ready", false],
+                ["listening", "Listening", false],
+                ["thinking", "Working", false],
+                ["speaking", "Speaking", false],
+                ["starting", "Starting", false],
+                ["offline", "Not running", false],
+                ["passive", "Not listening", true],
+              ] as const
+            ).map(([p, word, off]) => (
+              <span key={word} className={`rail__presence is-${p}${off ? " is-off" : ""}`}>
+                <span className="rail__wisp">
+                  <Mascot size={36} mood={moodOf(p, off)} still title="" />
+                </span>
+                <span className="rail__state">{word}</span>
+              </span>
+            ))}
           </div>
-          <p className="t-small t-3">Connecting is neutral and still. It turns to Not running only when the shell gives up (about 900ms), the same moment the Offline page appears. Every page’s <code>&lt;LiveStatus /&gt;</code> uses the same <code>liveLabel()</code>, so a page never contradicts this card.</p>
+          <p className="t-small t-3">Connecting is neutral and still. It turns to Not running only when the shell gives up (about 900ms), the same moment the Offline page appears. Every page’s <code>&lt;LiveStatus /&gt;</code> uses the same <code>liveLabel()</code>, so a page never contradicts the rail.</p>
         </Spec>
         <Spec label="Change status (statusLabel, statusTone)">
           {["pending", "claimed", "executed", "expired", "cancelled", "stale", "failed"].map((st) => (

@@ -4,6 +4,16 @@ The owner's bar: every feature at 9/10 is not enough; how Ghost is used has to b
 and find its own ways to present itself. Ghost is voice first: someone speaks to it across a
 room and glances at the screen. It is not a chat app with a microphone bolted on.
 
+**Decided, 2026-11-12: the combined direction.** The owner, in their words: “Let's go with the
+combine impl.” The briefing when the operator is at the keyboard, the room whenever a voice
+session is live or they have stepped away. What they said about taste: the room “doesn't feel and
+look like everything else, which is exactly what I don't like about the console”; “I do admit
+that I like the timeline from the briefing”; and “a lot of these systems are boring and they
+don't really feel like communicating with and wielding the power of a super computer and that's
+what I want Ghost to feel like.” The console is rejected. Built as the rail, Today with its
+timeline and the two postures (docs/design-system.md, The two postures, Today, The timeline);
+the `#/directions/...` mock pages are removed. Section 4 records what was built and what is left.
+
 This document has three parts: what was done to the conversation screen (shipped in the
 same PR), an audit of every other screen, and three directions for the rest of the app as
 clickable pages, with a recommendation and an order to build in. Nothing outside the
@@ -161,3 +171,28 @@ does.
 6. **Watching**: plain-words schedules (“Weekdays at 9”), one notice for all problems.
 7. **Apps**: logos or a lettered tile, never a blank; errors in words with the detail on open.
 8. **The phone**: Home with what needs you first, the same Decide/Answer/Know.
+
+## 4. What was built (the combined direction)
+
+- **The frame (step 1)**: the rail replaces the sidebar: Ghost's presence at the top (the way to
+  the conversation, now `#/session`), Today, Agents, Watching, Apps, then Hearing, Settings, the
+  room and the microphone. No agent list. Explanatory paragraphs: Today has none.
+- **Today (step 2)**: `#/` is the briefing. The day in one sentence with real counts, the
+  instruments (working now, tool and model calls, apps in reach, how fast replies start), and the
+  timeline as the spine: Now at its head with Decide, Answer, Know and the agents at work (live
+  clocks, Stop), then the day hour by hour, every change, run, watch finding and question, with
+  clusters, quiet gaps, filters, a day map, the keyboard throughout and 30 days back. What needs
+  you is Today now; `#/waiting` redirects.
+- **The two postures**: one rule (`postureOf`), the room over the desk after 3 minutes away or 20
+  seconds into a spoken session, held with Ctrl+.; on the conversation screen the rail steps out and
+  its own room view takes the window. Settings › General sets it.
+
+Where each old screen's functions went: the sidebar's status card is the rail's presence; its
+agent rows, New agent and Retired are on Agents; its Prototypes group and the scenario switcher
+are the rail's design menu (development only); the version line is the presence's tooltip and
+Settings › General. What needs you is Today's Now (every action kept). The session at `#/` is the
+conversation screen at `#/session`, unchanged inside.
+
+Still to build, in order: Agents as a roster with what each did last and has scheduled (step 5),
+agent detail on the conversation screen's record (step 4), Watching in plain words (step 6), Apps
+with lettered tiles (step 7), onboarding's copy to ADR 0034 (step 3), the phone (step 8).

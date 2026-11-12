@@ -28,6 +28,8 @@
   --text-4xl: 32px;  --leading-4xl: 40px;
   /* Room view only (the conversation screen read from across a room): one step past 4xl. */
   --text-5xl: 44px;  --leading-5xl: 56px;
+  /* The room only (Ghost read from three metres): its state word. Clamped by the room itself. */
+  --text-6xl: 64px;  --leading-6xl: 72px;
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -65,8 +67,9 @@
   --icon-sm: 14px;
   --icon-md: 16px;
   --icon-lg: 20px;
-  --sidebar-width: 244px;
-  --sidebar-rail-width: 56px;    /* the sidebar collapsed to icons (Ctrl+B) */
+  --sidebar-width: 244px;        /* a column the prototypes' frames (onboarding, the phone) measure from */
+  --rail-width: 76px;            /* the desk's rail: icons over labels, Ghost at the top */
+  --window-min: 560px;           /* the narrowest window the shell lays out for: beside other work */
   --settings-nav-width: 216px;   /* the settings area's own nav, inside the page panel */
   --nav-item-height: 28px;       /* sidebar rows: Linear density */
   --nav-item-height-2line: 40px; /* sidebar line rows with a status line */
@@ -77,6 +80,8 @@
   --panel-inset: var(--space-2); /* gap around the inset page panel */
   --field-control-width: 320px;  /* inline Field control column */
   --page-bar-height: 48px;       /* the compact sticky page header */
+  --timeline-gutter: 72px;       /* the timeline's time column, left of the spine */
+  --timeline-mark: 10px;         /* a moment's mark on the spine */
   --save-bar-min: 480px;         /* the SaveBar's narrowest width */
   --stop-pitch: 104px;           /* one column per autonomy level in a row of stops (policy) */
   --touch-target: 56px;          /* phone: the primary row of buttons (Confirm, Start) */
@@ -98,6 +103,7 @@
   --duration-base: 180ms;
   --duration-slow: 280ms;
   --duration-slower: 420ms;
+  --duration-posture: 560ms;     /* desk to room and back: the one long move in the app */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
@@ -205,6 +211,18 @@
   --phase-thinking: light-dark(#7c5cf0, #b69bff);
   --phase-speaking: light-dark(#0891d1, #5cc8ff);
   --phase-offline: light-dark(#dc2626, #f87171);
+
+  /* the timeline's marks: one colour per kind of moment (docs/design-system.md, The timeline).
+     Never amber: amber means only "waiting for your okay", which is Now's Decide, not a mark. */
+  --kind-change: var(--ok);
+  --kind-run: var(--phase-thinking);
+  --kind-watch: var(--info);
+  --kind-question: var(--accent-text);
+  --kind-note: var(--text-3);
+  --kind-failed: var(--danger);
+
+  /* the room: a deeper ground than the canvas, so the room never reads as one more page */
+  --room-bg: light-dark(#eeeef1, #050507);
 
   /* line (conversation) glyph hues: fg on its own soft tile is >= 4.5:1 */
   --hue-0-fg: light-dark(#3f4bc9, #9db0ff); --hue-0-bg: light-dark(rgba(76, 87, 224, 0.1), rgba(110, 130, 255, 0.16));
