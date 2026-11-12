@@ -41,10 +41,13 @@ pub enum RouteName {
     Call,
     Sms,
     Whatsapp,
+    /// A push through the operator's ntfy topic (ADR 0051): for when the phone is not on
+    /// the tunnel. It carries a count, never acknowledged by itself, so it is last.
+    Ntfy,
 }
 
 /// The routes, quietest first.
-pub const LADDER: [RouteName; 7] = [
+pub const LADDER: [RouteName; 8] = [
     RouteName::Digest,
     RouteName::Desk,
     RouteName::Desktop,
@@ -52,6 +55,7 @@ pub const LADDER: [RouteName; 7] = [
     RouteName::Call,
     RouteName::Sms,
     RouteName::Whatsapp,
+    RouteName::Ntfy,
 ];
 /// The routes that reach the operator only at the desk.
 pub const AT_DESK: [RouteName; 2] = [RouteName::Desk, RouteName::Desktop];
@@ -67,6 +71,7 @@ impl RouteName {
             RouteName::Call => "call",
             RouteName::Sms => "sms",
             RouteName::Whatsapp => "whatsapp",
+            RouteName::Ntfy => "ntfy",
         }
     }
 
@@ -118,7 +123,7 @@ impl Urgency {
         match self {
             Urgency::Digest => RouteName::Digest,
             Urgency::Notify => RouteName::Phone,
-            Urgency::Call => RouteName::Whatsapp,
+            Urgency::Call => RouteName::Ntfy,
         }
     }
 }
@@ -146,7 +151,7 @@ impl Carry {
 #[error("{0}")]
 pub struct RouteError(pub String);
 
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 12] = [
     "enabled",
     "escalate_after",
     "quiet_hours",
@@ -156,7 +161,36 @@ const KEYS: [&str; 9] = [
     "carry",
     "greeting",
     "urgency",
+    "ntfy",
+    "ntfy_token",
+    "ntfy_per_hour",
 ];
+
+/// A password's name, as `${NAME}` is written without its braces: the ntfy topic's
+/// address and its token are passwords in the vault, named here (ADR 0036, ADR 0051).
+fn password_name(
+    v: Option<&toml::Value>,
+    where_: &str,
+) -> std::result::Result<Option<String>, RouteError> {
+    static NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Z][A-Z0-9_]{0,63}$").unwrap());
+    match v {
+        None => Ok(None),
+        Some(toml::Value::String(s)) if s.is_empty() => Ok(None),
+        Some(toml::Value::String(s)) => {
+            let s = s.trim().trim_start_matches("${").trim_end_matches('}');
+            if NAME.is_match(s) {
+                Ok(Some(s.to_string()))
+            } else {
+                Err(RouteError(format!(
+                    "{where_} names a password in Ghost's vault, such as NTFY_TOPIC_URL"
+                )))
+            }
+        }
+        Some(_) => Err(RouteError(format!(
+            "{where_} names a password in Ghost's vault, such as NTFY_TOPIC_URL"
+        ))),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutePolicy {
@@ -175,6 +209,12 @@ pub struct RoutePolicy {
     pub greeting: String,
     /// A watch or hook, by name, to how loud it may get; in the file's order.
     pub urgency: Vec<(String, Urgency)>,
+    /// The password holding the ntfy topic's address (ADR 0051); None: no ntfy route.
+    pub ntfy: Option<String>,
+    /// The password holding its access token, when the topic needs one.
+    pub ntfy_token: Option<String>,
+    /// Pushes an hour, at the most.
+    pub ntfy_per_hour: i64,
 }
 
 impl Default for RoutePolicy {
@@ -189,9 +229,15 @@ impl Default for RoutePolicy {
             carry: Carry::Count,
             greeting: "Got a minute?".into(),
             urgency: Vec::new(),
+            ntfy: None,
+            ntfy_token: None,
+            ntfy_per_hour: NTFY_PER_HOUR,
         }
     }
 }
+
+/// ntfy pushes an hour unless the file says.
+pub const NTFY_PER_HOUR: i64 = 4;
 
 impl RoutePolicy {
     /// From the `[routes]` table the policy file held (`AutonomyPolicy.routes`); None is
@@ -265,6 +311,15 @@ impl RoutePolicy {
             carry: carry(raw.get("carry"), &format!("{where_}.carry"))?,
             greeting: greeting(raw.get("greeting"), &format!("{where_}.greeting"))?,
             urgency: urgency(raw.get("urgency"), &format!("{where_}.urgency"))?,
+            ntfy: password_name(raw.get("ntfy"), &format!("{where_}.ntfy"))?,
+            ntfy_token: password_name(raw.get("ntfy_token"), &format!("{where_}.ntfy_token"))?,
+            ntfy_per_hour: whole(
+                raw.get("ntfy_per_hour"),
+                NTFY_PER_HOUR,
+                1,
+                60,
+                &format!("{where_}.ntfy_per_hour"),
+            )?,
         })
     }
 
@@ -286,6 +341,15 @@ impl RoutePolicy {
         lines.push(format!("calls_per_day = {}", self.calls_per_day));
         lines.push(format!("carry = \"{}\"", self.carry.as_str()));
         lines.push(format!("greeting = {}", quote(&self.greeting)));
+        if let Some(n) = &self.ntfy {
+            lines.push(format!("ntfy = {}", quote(n)));
+        }
+        if let Some(n) = &self.ntfy_token {
+            lines.push(format!("ntfy_token = {}", quote(n)));
+        }
+        if self.ntfy_per_hour != NTFY_PER_HOUR {
+            lines.push(format!("ntfy_per_hour = {}", self.ntfy_per_hour));
+        }
         if !self.urgency.is_empty() {
             lines.push(String::new());
             lines.push("[routes.urgency]".to_string());
@@ -623,6 +687,15 @@ impl RouteEngine {
                     continue;
                 }
                 out.push(*r);
+            }
+            // ntfy (ADR 0051) carries a count, no content, and can never be acknowledged:
+            // last on the ladder of anything louder than the digest, where it is on.
+            if urgency != Urgency::Digest
+                && policy.enabled.contains(&RouteName::Ntfy)
+                && routes.contains_key(&RouteName::Ntfy)
+                && !out.contains(&RouteName::Ntfy)
+            {
+                out.push(RouteName::Ntfy);
             }
         }
         if !(self.at_desk)() {
@@ -1259,6 +1332,7 @@ mod tests {
             RouteName::Phone,
             RouteName::Call,
             RouteName::Sms,
+            RouteName::Ntfy,
         ]
         .into_iter()
         .map(|r| (r, Fake::new(r)))
@@ -1606,6 +1680,66 @@ mod tests {
         assert!(
             out.starts_with("Hi. Five things are waiting: Item 0; Item 1; Item 2, and two more")
         );
+    }
+
+    #[test]
+    fn a_question_in_the_digest_is_put_last_as_a_question() {
+        let store = Arc::new(Store::in_memory().unwrap());
+        let waiting = Arc::new(crate::waiting::WaitingList::new(Items::new(store.clone())));
+        let items = Items::new(store.clone());
+        items
+            .sync(
+                "watch:eng/ci",
+                &[ci("eng:ci:1", "CI failed on main")],
+                Some(t0()),
+            )
+            .unwrap();
+        let qs = crate::questions::Questions::new(store, waiting);
+        let mut a = crate::questions::Ask::new(
+            "agent:ledger",
+            "Ledger",
+            "Should the October invoice go out today",
+        );
+        a.choices = vec!["Yes".into(), "No".into()];
+        qs.ask(a, Some(t0())).unwrap();
+        let open = items.open(None).unwrap();
+        let out = spoken_digest(&open, DIGEST_TITLES);
+        assert_eq!(
+            out,
+            "Hi. CI failed on main. Ledger asks: Should the October invoice go out today? Yes or no?"
+        );
+        let (e, _, _) = plain();
+        let d = SpokenDigest::new(e, &open);
+        assert_eq!(d.questions().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ntfy_is_last_on_any_ladder_louder_than_the_digest() {
+        let mut enabled = FIVE.to_vec();
+        enabled.push(RouteName::Ntfy);
+        let (e, _, items) = engine(&enabled, false, |_| {});
+        let item = items.get("eng:ci:1").unwrap().unwrap();
+        let ladder = e.ladder(&item, t0());
+        assert_eq!(ladder.last(), Some(&RouteName::Ntfy));
+        assert_eq!(ladder.first(), Some(&RouteName::Phone));
+        // Off unless the operator enabled it.
+        let (e, _, items) = plain();
+        let item = items.get("eng:ci:1").unwrap().unwrap();
+        assert!(!e.ladder(&item, t0()).contains(&RouteName::Ntfy));
+    }
+
+    #[test]
+    fn the_ntfy_topic_and_token_are_password_names() {
+        let p = routes_of(
+            "[routes]\nenabled = [\"ntfy\"]\nntfy = \"NTFY_TOPIC_URL\"\nntfy_token = \"${NTFY_TOKEN}\"\n",
+        )
+        .unwrap();
+        assert_eq!(p.ntfy.as_deref(), Some("NTFY_TOPIC_URL"));
+        assert_eq!(p.ntfy_token.as_deref(), Some("NTFY_TOKEN"));
+        assert_eq!(p.ntfy_per_hour, NTFY_PER_HOUR);
+        assert!(routes_of("[routes]\nntfy = \"https://ntfy.sh/mine\"\n").is_err());
+        let again = routes_of(&p.to_toml().join("\n")).unwrap();
+        assert_eq!(again, p);
     }
 
     // --- the policy file --------------------------------------------------------------------

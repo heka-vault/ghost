@@ -3405,6 +3405,209 @@
         ],
         "type": "object"
       },
+      "QuestionAnswer": {
+        "description": "An answer from the operator: their words, or one of the choices as it is written.",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "text"
+        ],
+        "type": "object"
+      },
+      "QuestionEvent": {
+        "description": "A question was asked, answered, declined, expired or taken back (ADR 0051).",
+        "properties": {
+          "question": {
+            "$ref": "#/components/schemas/QuestionView"
+          },
+          "type": {
+            "default": "question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "type": "object"
+      },
+      "QuestionResult": {
+        "description": "What came of an answer or a decline. For a change, `outcome` is what the gate did.",
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "question": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuestionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "QuestionView": {
+        "description": "A question for the operator (ADR 0051). `question`, `detail` and `choices` are the\nasker's words (an agent, an outside tool, an app): show them as text, never as markup.\n`answer` is the operator's own words, as they gave them.",
+        "properties": {
+          "answer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "answered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "answered_via": {
+            "description": "`desktop`, `phone`, `voice`, or `ghost` for an expiry.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "asked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "asked_by": {
+            "description": "Who asked, as the operator knows them: `Ledger`, `Claude Code`, `GitHub`.",
+            "type": "string"
+          },
+          "change_id": {
+            "description": "The change's id, for a change.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "choice": {
+            "description": "The choice the answer clearly is, when it is one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "choices": {
+            "description": "Up to four; empty for a free answer.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "choices_only": {
+            "description": "Only one of the choices will do.",
+            "type": "boolean"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "key": {
+            "description": "The waiting-list key: `question:<id>`, or `change:<proposal>` for a change.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "question",
+              "change"
+            ],
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "source": {
+            "description": "`agent:<slug>`, `client:<name>`, `app:<name>`, or `gate` for a change.",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "answered",
+              "declined",
+              "expired",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "urgency": {
+            "enum": [
+              "digest",
+              "notify",
+              "call"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "asked_by",
+          "source",
+          "question",
+          "choices",
+          "choices_only",
+          "urgency",
+          "asked_at",
+          "expires_at",
+          "state"
+        ],
+        "type": "object"
+      },
+      "QuestionsView": {
+        "properties": {
+          "questions": {
+            "description": "The open ones first, oldest first; then those settled in the last day, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/QuestionView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "type": "object"
+      },
       "ReadToolInfo": {
         "properties": {
           "description": {
@@ -3433,7 +3636,8 @@
                 "phone",
                 "call",
                 "sms",
-                "whatsapp"
+                "whatsapp",
+                "ntfy"
               ],
               "type": "string"
             },
@@ -3467,7 +3671,8 @@
                 "phone",
                 "call",
                 "sms",
-                "whatsapp"
+                "whatsapp",
+                "ntfy"
               ],
               "type": "string"
             },
@@ -3480,6 +3685,20 @@
           },
           "greeting": {
             "type": "string"
+          },
+          "ntfy": {
+            "description": "The password in Ghost's vault that holds the ntfy topic's address (ADR 0051); the\naddress itself never crosses the API.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ntfy_token": {
+            "description": "The password that holds the topic's access token, when it needs one.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "quiet_hours": {
             "description": "\"22:00-07:00\"",
@@ -5068,6 +5287,17 @@
               "null"
             ]
           },
+          "question": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuestionView",
+                "description": "Set for a question (ADR 0051), and for a change waiting for a yes, shown as the\nquestion it is."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "snoozed_until": {
             "format": "date-time",
             "type": [
@@ -6368,6 +6598,7 @@
                       "log": "#/components/schemas/LogEvent",
                       "outcome": "#/components/schemas/OutcomeEvent",
                       "pending": "#/components/schemas/PendingEvent",
+                      "question": "#/components/schemas/QuestionEvent",
                       "status": "#/components/schemas/StatusEvent",
                       "turn": "#/components/schemas/TurnEvent",
                       "voice": "#/components/schemas/VoiceEvent",
@@ -6396,6 +6627,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/WaitingEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuestionEvent"
                     },
                     {
                       "$ref": "#/components/schemas/AppsEvent"
@@ -7758,6 +7992,112 @@
         "summary": "Confirm One",
         "tags": [
           "writes"
+        ]
+      }
+    },
+    "/questions": {
+      "get": {
+        "description": "The open questions for the operator, oldest first, with the changes waiting for a yes as questions; then the ones settled in the last day.",
+        "operationId": "questions_questions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Questions",
+        "tags": [
+          "waiting"
+        ]
+      }
+    },
+    "/questions/answer": {
+      "post": {
+        "description": "The operator's answer, recorded as they gave it with the route desktop. For a change waiting for a yes, Yes confirms it (classifier ui) and No cancels it.",
+        "operationId": "answer_questions_answer_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuestionAnswer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer",
+        "tags": [
+          "waiting"
+        ]
+      }
+    },
+    "/questions/decline": {
+      "post": {
+        "description": "The operator will not answer it. A change waiting for a yes is cancelled.",
+        "operationId": "decline_questions_decline_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decline",
+        "tags": [
+          "waiting"
         ]
       }
     },

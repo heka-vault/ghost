@@ -1024,6 +1024,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Questions
+         * @description The open questions for the operator, oldest first, with the changes waiting for a yes as questions; then the ones settled in the last day.
+         */
+        get: operations["questions_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer
+         * @description The operator's answer, recorded as they gave it with the route desktop. For a change waiting for a yes, Yes confirms it (classifier ui) and No cancels it.
+         */
+        post: operations["answer_questions_answer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline
+         * @description The operator will not answer it. A change waiting for a yes is cancelled.
+         */
+        post: operations["decline_questions_decline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rules": {
         parameters: {
             query?: never;
@@ -2596,6 +2656,69 @@ export interface components {
             routes?: components["schemas"]["RoutesView"] | null;
             text: string;
         };
+        /** @description An answer from the operator: their words, or one of the choices as it is written. */
+        QuestionAnswer: {
+            key: string;
+            text: string;
+        };
+        /** @description A question was asked, answered, declined, expired or taken back (ADR 0051). */
+        QuestionEvent: {
+            question: components["schemas"]["QuestionView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "question";
+        };
+        /** @description What came of an answer or a decline. For a change, `outcome` is what the gate did. */
+        QuestionResult: {
+            detail?: string | null;
+            ok: boolean;
+            outcome?: components["schemas"]["OutcomeView"] | null;
+            question?: components["schemas"]["QuestionView"] | null;
+        };
+        QuestionsView: {
+            /** @description The open ones first, oldest first; then those settled in the last day, newest first. */
+            questions: components["schemas"]["QuestionView"][];
+        };
+        /**
+         * @description A question for the operator (ADR 0051). `question`, `detail` and `choices` are the
+         *     asker's words (an agent, an outside tool, an app): show them as text, never as markup.
+         *     `answer` is the operator's own words, as they gave them.
+         */
+        QuestionView: {
+            answer?: string | null;
+            /** Format: date-time */
+            answered_at?: string | null;
+            /** @description `desktop`, `phone`, `voice`, or `ghost` for an expiry. */
+            answered_via?: string | null;
+            /** Format: date-time */
+            asked_at: string;
+            /** @description Who asked, as the operator knows them: `Ledger`, `Claude Code`, `GitHub`. */
+            asked_by: string;
+            /** @description The change's id, for a change. */
+            change_id?: string | null;
+            /** @description The choice the answer clearly is, when it is one. */
+            choice?: string | null;
+            /** @description Up to four; empty for a free answer. */
+            choices: string[];
+            /** @description Only one of the choices will do. */
+            choices_only: boolean;
+            detail?: string | null;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description The waiting-list key: `question:<id>`, or `change:<proposal>` for a change. */
+            key: string;
+            /** @enum {string} */
+            kind: "question" | "change";
+            question: string;
+            /** @description `agent:<slug>`, `client:<name>`, `app:<name>`, or `gate` for a change. */
+            source: string;
+            /** @enum {string} */
+            state: "open" | "answered" | "declined" | "expired" | "cancelled";
+            /** @enum {string} */
+            urgency: "digest" | "notify" | "call";
+        };
         ReadToolInfo: {
             description: string;
             name: string;
@@ -2606,7 +2729,7 @@ export interface components {
              * @description The routes this daemon has something behind; the others can be listed but do
              *     nothing yet.
              */
-            available: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
+            available: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp" | "ntfy")[];
             /** Format: int64 */
             batch_secs: number;
             /** Format: int64 */
@@ -2615,13 +2738,20 @@ export interface components {
             calls_per_hour: number;
             /** @enum {string} */
             carry: "count" | "title";
-            enabled: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp")[];
+            enabled: ("digest" | "desk" | "desktop" | "phone" | "call" | "sms" | "whatsapp" | "ntfy")[];
             /**
              * Format: int64
              * @description Minutes.
              */
             escalate_after: number;
             greeting: string;
+            /**
+             * @description The password in Ghost's vault that holds the ntfy topic's address (ADR 0051); the
+             *     address itself never crosses the API.
+             */
+            ntfy?: string | null;
+            /** @description The password that holds the topic's access token, when it needs one. */
+            ntfy_token?: string | null;
             /** @description "22:00-07:00" */
             quiet_hours?: string | null;
             urgency: {
@@ -3104,6 +3234,7 @@ export interface components {
             first_seen: string;
             key: string;
             link?: string | null;
+            question?: components["schemas"]["QuestionView"] | null;
             /** Format: date-time */
             snoozed_until?: string | null;
             source: string;
@@ -3269,6 +3400,11 @@ export type SchemaPhoneView = components['schemas']['PhoneView'];
 export type SchemaPolicyResult = components['schemas']['PolicyResult'];
 export type SchemaPolicyUpdate = components['schemas']['PolicyUpdate'];
 export type SchemaPolicyView = components['schemas']['PolicyView'];
+export type SchemaQuestionAnswer = components['schemas']['QuestionAnswer'];
+export type SchemaQuestionEvent = components['schemas']['QuestionEvent'];
+export type SchemaQuestionResult = components['schemas']['QuestionResult'];
+export type SchemaQuestionsView = components['schemas']['QuestionsView'];
+export type SchemaQuestionView = components['schemas']['QuestionView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
 export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
@@ -4099,7 +4235,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["HearEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["HearEvent"];
                 };
             };
         };
@@ -5290,6 +5426,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutcomeView"];
+                };
+            };
+        };
+    };
+    questions_questions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionsView"];
+                };
+            };
+        };
+    };
+    answer_questions_answer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuestionAnswer"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decline_questions_decline_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemKey"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

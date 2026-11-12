@@ -764,6 +764,10 @@ impl World {
         deps.folder = Some(self.folder.clone());
         deps.rules = Some(self.rules.clone());
         deps.outputs = Some(self.outputs.clone());
+        deps.questions = Some(Arc::new(ghost_core::questions::Questions::new(
+            self.store.clone(),
+            waiting.clone(),
+        )));
         deps.waiting = Some(waiting);
         deps.passwords = Some(self.passwords.clone().unwrap_or_else(|| self.vault.clone()));
         deps.apps = self.apps.clone();

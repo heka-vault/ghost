@@ -82,6 +82,15 @@ pub struct WaitingEvent {
     pub count: u64,
 }
 
+/// A question was asked, answered, declined, expired or taken back (ADR 0051).
+#[derive(ToSchema)]
+pub struct QuestionEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "question")]
+    pub r#type: String,
+    pub question: crate::models::QuestionView,
+}
+
 /// An app was connected, disconnected or changed state: read `GET /apps`. With
 /// `sign_in_url`, the app is waiting for the operator to sign in there; the desktop opens
 /// it in the browser.
@@ -134,6 +143,7 @@ pub struct HearEvent {
     ("log" = "#/components/schemas/LogEvent"),
     ("conversation" = "#/components/schemas/ConversationEvent"),
     ("waiting" = "#/components/schemas/WaitingEvent"),
+    ("question" = "#/components/schemas/QuestionEvent"),
     ("apps" = "#/components/schemas/AppsEvent"),
     ("voice" = "#/components/schemas/VoiceEvent"),
     ("hear" = "#/components/schemas/HearEvent"),
@@ -146,6 +156,7 @@ pub enum Event {
     Log(LogEvent),
     Conversation(ConversationEvent),
     Waiting(WaitingEvent),
+    Question(QuestionEvent),
     Apps(AppsEvent),
     Voice(VoiceEvent),
     Hear(HearEvent),
@@ -181,6 +192,7 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("LogEvent", LogEvent::schema()),
         ("ConversationEvent", ConversationEvent::schema()),
         ("WaitingEvent", WaitingEvent::schema()),
+        ("QuestionEvent", QuestionEvent::schema()),
         ("AppsEvent", AppsEvent::schema()),
         ("VoiceEvent", VoiceEvent::schema()),
         ("HearEvent", HearEvent::schema()),
