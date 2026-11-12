@@ -462,7 +462,7 @@ pub trait PhoneHost: Send + Sync {
         conversation: Option<&str>,
         item: Option<&str>,
     ) -> Result<Answer, OfferError>;
-    /// The desk's microphone off or on, from the paired phone (ADR 0055): what holds after.
+    /// The desk's microphone off or on, from the paired phone (ADR 0057): what holds after.
     async fn set_listening(
         &self,
         _listening: bool,

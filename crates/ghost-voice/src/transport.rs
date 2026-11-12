@@ -400,7 +400,7 @@ impl MediaOut for DeskOut {
 }
 
 /// Open the desk's devices for a session. `chime` plays the wake chime first and waits for
-/// it, so the greeting follows it. Without `mic` (not listening, ADR 0055) no capture
+/// it, so the greeting follows it. Without `mic` (not listening, ADR 0057) no capture
 /// stream is opened: the input is silent and only typed turns reach the session.
 pub async fn desk_media(
     settings: &AudioSettings,

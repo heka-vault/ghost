@@ -1,6 +1,6 @@
 //! The tray: Open Ghost, Wake, Stop listening, Start at login, Quit. Closing the window
 //! hides it; Quit in the tray is the one off switch (ADR 0038). Stop listening closes
-//! Ghost's microphone (ADR 0055): the item turns into Listen again, and the tray's icon
+//! Ghost's microphone (ADR 0057): the item turns into Listen again, and the tray's icon
 //! is struck through in red, as a smart speaker's mic-off light, until it is turned back on.
 
 use std::sync::Mutex;

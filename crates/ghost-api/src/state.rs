@@ -93,7 +93,7 @@ struct Fields {
     session_origin: Option<SessionOrigin>,
     /// Going to sleep; the goodbye may still be playing.
     ending: bool,
-    /// The microphone is closed (ADR 0055).
+    /// The microphone is closed (ADR 0057).
     not_listening: Option<NotListening>,
     /// Items on the waiting list still to be heard (ADR 0029).
     waiting: u64,
@@ -343,7 +343,7 @@ impl DaemonState {
         self.publish_status();
     }
 
-    /// The microphone closed or opened (ADR 0055); the apps and the phone follow the status.
+    /// The microphone closed or opened (ADR 0057); the apps and the phone follow the status.
     pub fn set_not_listening(&self, not_listening: Option<NotListening>) {
         {
             let mut f = self.lock();

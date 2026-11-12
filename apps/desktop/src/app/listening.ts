@@ -1,5 +1,5 @@
 /**
- * Not listening (ADR 0055), as the desktop says it: the words for the status card, the
+ * Not listening (ADR 0057), as the desktop says it: the words for the status card, the
  * switch and Settings, and the choices for how long. Plain functions, so the tests run
  * them without React.
  */

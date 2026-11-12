@@ -699,7 +699,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Whether Ghost is listening (ADR 0055) */
+        /** Whether Ghost is listening (ADR 0057) */
         get: operations["get_listening_listening_get"];
         /** Turn listening on or off */
         put: operations["put_listening_listening_put"];
@@ -2493,7 +2493,7 @@ export interface components {
         ItemKey: {
             key: string;
         };
-        /** @description `PUT /listening`: turn Ghost's microphone on or off (ADR 0055). */
+        /** @description `PUT /listening`: turn Ghost's microphone on or off (ADR 0057). */
         ListeningRequest: {
             /** @description `false` closes the microphone; `true` opens it again. */
             listening: boolean;
@@ -2633,7 +2633,7 @@ export interface components {
             where: string;
         };
         /**
-         * @description Ghost's microphone is closed (ADR 0055): no capture stream is open, nothing is heard,
+         * @description Ghost's microphone is closed (ADR 0057): no capture stream is open, nothing is heard,
          *     not even its name. Typed turns, the phone's own calls, schedules and watches go on.
          */
         NotListening: {

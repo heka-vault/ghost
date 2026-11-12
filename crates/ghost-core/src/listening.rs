@@ -1,4 +1,4 @@
-//! Not listening (ADR 0055): the operator's switch that closes Ghost's microphone. While it
+//! Not listening (ADR 0057): the operator's switch that closes Ghost's microphone. While it
 //! is off no capture stream is open, so nothing reaches the VAD, the wake detector or
 //! Parakeet, and nothing is transcribed. It is one state with an optional end ("for an
 //! hour"), kept in the store's settings like do-not-disturb so it holds over a restart.

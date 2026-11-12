@@ -70,7 +70,7 @@ fn main() -> anyhow::Result<()> {
         Some("wake") => client("wake", &args[1..]),
         Some("say") => client("say", &args[1..]),
         Some("sleep") => client("sleep", &args[1..]),
-        // ADR 0055: for a keyboard shortcut of the desktop's own
+        // ADR 0057: for a keyboard shortcut of the desktop's own
         Some("listening") => client("listening", &args[1..]),
         Some("restore-volumes") => restore_volumes(),
         Some("check") => {

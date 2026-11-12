@@ -196,7 +196,7 @@ impl Snooze {
     }
 }
 
-/// `POST /listening` (ADR 0055): `{listening, minutes?}`, the desk's microphone off or on.
+/// `POST /listening` (ADR 0057): `{listening, minutes?}`, the desk's microphone off or on.
 #[derive(Debug, Deserialize)]
 struct ListeningBody {
     listening: bool,
@@ -409,7 +409,7 @@ async fn end(State(l): Listener) -> Response {
     reply(StatusCode::OK, json!({ "ok": true }))
 }
 
-/// The desk's microphone, from the paired phone (ADR 0055). Setting a state, not a toggle,
+/// The desk's microphone, from the paired phone (ADR 0057). Setting a state, not a toggle,
 /// so a request sent twice does what it did once.
 async fn listening(State(l): Listener, body: Bytes) -> Response {
     let Some(req) = parse::<ListeningBody>(&body).filter(ListeningBody::check) else {
@@ -1141,7 +1141,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_phone_turns_the_desks_microphone_off_and_on() {
-        // ADR 0055: signed like everything else; a time goes with off only.
+        // ADR 0057: signed like everything else; a time goes with off only.
         let p = phone();
         let creds = pair(&p).await;
         let (r, nonce) = signed(

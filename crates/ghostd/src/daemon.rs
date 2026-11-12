@@ -180,7 +180,7 @@ pub struct DeskMediaRequest {
     pub audio: AudioSettings,
     pub thinking_sound: bool,
     pub chime: bool,
-    /// Open the microphone; `false` while not listening (ADR 0055): a typed turn's
+    /// Open the microphone; `false` while not listening (ADR 0057): a typed turn's
     /// session, its input silent and no capture stream opened.
     pub mic: bool,
 }
@@ -413,7 +413,7 @@ pub struct Daemon {
     pub(crate) origin: Mutex<Option<SessionOrigin>>,
     route_names: Mutex<Vec<RouteName>>,
     log_mirror: LogMirror,
-    /// Not listening (ADR 0055): the operator's switch for the microphone, kept in the store.
+    /// Not listening (ADR 0057): the operator's switch for the microphone, kept in the store.
     pub mic: Arc<Mic>,
 }
 
@@ -746,7 +746,7 @@ impl Daemon {
     /// Desk voice may start (ADR 0032): the desk is idle, nothing else is about to
     /// start, and dictation is off.
     pub(crate) fn can_raise(&self) -> bool {
-        !self.mic.is_off() // ADR 0055: no voice at the desk that would open the microphone
+        !self.mic.is_off() // ADR 0057: no voice at the desk that would open the microphone
             && self.state.models_ready()
             && self.waiting_flag.load(Ordering::SeqCst)
             && self.session().is_none()
@@ -1185,7 +1185,7 @@ impl Daemon {
             std::fs::create_dir_all(parent)?;
         }
         let store = Arc::new(Store::open(&cfg.db_path)?);
-        // ADR 0055: an operator who turned listening off and restarted is still not heard.
+        // ADR 0057: an operator who turned listening off and restarted is still not heard.
         match d.mic.attach(Items::new(store.clone())) {
             Ok(Listening::On) => {}
             Ok(_) => info!("listening: off, as the operator left it"),
@@ -1677,7 +1677,7 @@ impl Daemon {
             Arc::new(move |event| {
                 let mic = mic.clone();
                 Box::pin(async move {
-                    // ADR 0055: the operator's words in a session; the interceptor ends it
+                    // ADR 0057: the operator's words in a session; the interceptor ends it
                     // once its line is said, and the passive loop opens no capture after.
                     if event.kind == EventKind::StopListening {
                         match mic.off(None) {
@@ -1915,7 +1915,7 @@ impl Daemon {
             *lock(&d.start_in) = GHOST.to_string(); // a spoken wake lands in Ghost; a Call sets it
             let mut mic = d.mic.watch();
             mic.borrow_and_update();
-            // ADR 0055: with listening off no wake listener is built, so no capture is open.
+            // ADR 0057: with listening off no wake listener is built, so no capture is open.
             let (won, mut wake_task) = if let Listening::Off { until } = d.mic.now() {
                 d.waiting_flag.store(true, Ordering::SeqCst);
                 (d.wait_not_listening(until).await, None)

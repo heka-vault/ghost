@@ -789,7 +789,7 @@ async fn no_tool_changes_a_permission() {
 
 #[tokio::test]
 async fn no_tool_turns_listening_on_or_off() {
-    // ADR 0055: the microphone is the operator's switch. An agent never turns it back on,
+    // ADR 0057: the microphone is the operator's switch. An agent never turns it back on,
     // and never off either: a model told by an app's text to mute Ghost would leave the
     // operator talking to nothing. Its state is a field of `status`, a read.
     let w = world().await;

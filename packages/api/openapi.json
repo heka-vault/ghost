@@ -2410,7 +2410,7 @@
         "type": "object"
       },
       "ListeningRequest": {
-        "description": "`PUT /listening`: turn Ghost's microphone on or off (ADR 0055).",
+        "description": "`PUT /listening`: turn Ghost's microphone on or off (ADR 0057).",
         "properties": {
           "listening": {
             "description": "`false` closes the microphone; `true` opens it again.",
@@ -2835,7 +2835,7 @@
         "type": "object"
       },
       "NotListening": {
-        "description": "Ghost's microphone is closed (ADR 0055): no capture stream is open, nothing is heard,\nnot even its name. Typed turns, the phone's own calls, schedules and watches go on.",
+        "description": "Ghost's microphone is closed (ADR 0057): no capture stream is open, nothing is heard,\nnot even its name. Typed turns, the phone's own calls, schedules and watches go on.",
         "properties": {
           "until": {
             "description": "When listening comes back by itself (RFC 3339); null: when the operator turns it on.",
@@ -5124,7 +5124,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/NotListening",
-                "description": "Set while Ghost is not listening (ADR 0055): the microphone is closed. Orthogonal to\n`phase`: a typed turn or the phone's call can run meanwhile."
+                "description": "Set while Ghost is not listening (ADR 0057): the microphone is closed. Orthogonal to\n`phase`: a typed turn or the phone's call can run meanwhile."
               },
               {
                 "type": "null"
@@ -7626,7 +7626,7 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Whether Ghost is listening (ADR 0055)",
+        "summary": "Whether Ghost is listening (ADR 0057)",
         "tags": [
           "session"
         ]

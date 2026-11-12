@@ -57,7 +57,7 @@ pub enum Phase {
     /// Models loading; the socket is up so the UI can show progress.
     Starting,
     /// Not in a session: waiting for the wake phrase (idle audio stays on the machine), or,
-    /// with `Status.not_listening` set, with the microphone closed (ADR 0055).
+    /// with `Status.not_listening` set, with the microphone closed (ADR 0057).
     Passive,
     /// In a session, the operator's turn.
     Listening,
@@ -133,7 +133,7 @@ pub enum SessionOrigin {
     Phone,
 }
 
-/// Ghost's microphone is closed (ADR 0055): no capture stream is open, nothing is heard,
+/// Ghost's microphone is closed (ADR 0057): no capture stream is open, nothing is heard,
 /// not even its name. Typed turns, the phone's own calls, schedules and watches go on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct NotListening {
@@ -142,7 +142,7 @@ pub struct NotListening {
     pub until: Option<String>,
 }
 
-/// `PUT /listening`: turn Ghost's microphone on or off (ADR 0055).
+/// `PUT /listening`: turn Ghost's microphone on or off (ADR 0057).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ListeningRequest {
     /// `false` closes the microphone; `true` opens it again.
@@ -202,7 +202,7 @@ pub struct Status {
     #[serde(default)]
     #[schema(required)]
     pub waiting: u64,
-    /// Set while Ghost is not listening (ADR 0055): the microphone is closed. Orthogonal to
+    /// Set while Ghost is not listening (ADR 0057): the microphone is closed. Orthogonal to
     /// `phase`: a typed turn or the phone's call can run meanwhile.
     #[serde(default)]
     #[schema(required)]

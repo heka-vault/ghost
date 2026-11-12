@@ -429,13 +429,13 @@ fn listening_view(not_listening: Option<NotListening>) -> ListeningView {
 }
 
 #[utoipa::path(get, path = "/listening", operation_id = "get_listening_listening_get", tag = "session",
-    summary = "Whether Ghost is listening (ADR 0055)",
+    summary = "Whether Ghost is listening (ADR 0057)",
     responses((status = 200, description = "Successful Response", body = ListeningView)))]
 async fn get_listening(State(deps): State<SharedDeps>) -> Json<ListeningView> {
     Json(listening_view(deps.state.not_listening()))
 }
 
-/// Close or open Ghost's microphone (ADR 0055). Closing it ends a session at the desk;
+/// Close or open Ghost's microphone (ADR 0057). Closing it ends a session at the desk;
 /// the phone's own call goes on. The operator's control only: no tool reaches it.
 #[utoipa::path(put, path = "/listening", operation_id = "put_listening_listening_put", tag = "session",
     summary = "Turn listening on or off", request_body = ListeningRequest,

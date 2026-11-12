@@ -468,7 +468,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_listening_says_the_way_back_tells_the_daemon_and_ends_the_session() {
-        // ADR 0055: the operator's words close the microphone; no model runs on them.
+        // ADR 0057: the operator's words close the microphone; no model runs on them.
         let heard = Arc::new(Mutex::new(Vec::new()));
         let mut events = Events::default();
         events.add({

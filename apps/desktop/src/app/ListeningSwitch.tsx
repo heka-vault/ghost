@@ -1,5 +1,5 @@
 /**
- * The switch for Ghost's microphone (ADR 0055), as a call app's mute: the mic glyph while
+ * The switch for Ghost's microphone (ADR 0057), as a call app's mute: the mic glyph while
  * Ghost listens, the struck-through mic in red while it doesn't. Turning it off asks how
  * long (do-not-disturb's choices); turning it on is one click. Ctrl+Shift+M anywhere in the
  * app does either, off until turned back on.

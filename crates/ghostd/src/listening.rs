@@ -1,4 +1,4 @@
-//! Not listening, the daemon's side (ADR 0055): the passive loop with the microphone
+//! Not listening, the daemon's side (ADR 0057): the passive loop with the microphone
 //! closed, the switch from the control API, and the status that says so.
 //!
 //! While the switch is off the passive loop opens no capture: the wake listener is

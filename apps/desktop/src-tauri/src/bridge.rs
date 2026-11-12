@@ -118,7 +118,7 @@ fn update_tray(app: &AppHandle, payload: &str) {
         .get("phase")
         .or_else(|| v.get("status").and_then(|s| s.get("phase")))
         .and_then(|p| p.as_str());
-    // ADR 0055: a status says whether the microphone is open; the tray shows it.
+    // ADR 0057: a status says whether the microphone is open; the tray shows it.
     // The first message is a bare Status; later ones are `{type: "status", status}`.
     let status = v.get("status").unwrap_or(&v);
     if let Some(off) = status.get("not_listening") {

@@ -241,7 +241,7 @@ pub const GOODBYES: &[&str] = &[
     "Sounds good, talk soon!",
     "Bye for now!",
 ];
-/// The whole turn (fillers aside) asks Ghost to stop listening (ADR 0055): the microphone
+/// The whole turn (fillers aside) asks Ghost to stop listening (ADR 0057): the microphone
 /// closes and stays closed until the operator turns it on from the desktop or the phone.
 pub const STOP_LISTENING: &[&str] = &[
     "stop listening",
@@ -497,7 +497,7 @@ mod tests {
             ("close it and then hang up", false, None),
             ("label it bug, bye", false, None),
             ("don't hang up", false, None),
-            // ADR 0055: the microphone closes; the words only, never the model
+            // ADR 0057: the microphone closes; the words only, never the model
             ("Ghost, stop listening.", false, Some(Action::StopListening)),
             (
                 "okay ghost stop listening",

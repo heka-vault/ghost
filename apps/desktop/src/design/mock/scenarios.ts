@@ -43,7 +43,7 @@ export interface Scenario {
    */
   phone?: "off" | "unpaired" | "paired" | "tunnel" | "tunnel-down";
   /**
-   * Not listening (ADR 0055): the microphone is closed, until turned back on (`true`) or for
+   * Not listening (ADR 0057): the microphone is closed, until turned back on (`true`) or for
    * this many minutes from load. Any scenario can set it with ?listening=off|<minutes>.
    */
   notListening?: true | number;

@@ -57,7 +57,7 @@ pub trait Controller: Send + Sync {
     /// when unset. A retired or unknown line is refused.
     async fn wake(&self, first_utterance: Option<String>, conversation: Option<String>) -> bool;
     async fn sleep(&self) -> bool;
-    /// Close (`false`) or open Ghost's microphone (ADR 0055), for `minutes` or until turned
+    /// Close (`false`) or open Ghost's microphone (ADR 0057), for `minutes` or until turned
     /// back on. Closing ends a session at the desk. What holds after, or why it couldn't.
     async fn set_listening(
         &self,

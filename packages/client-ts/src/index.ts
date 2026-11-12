@@ -205,7 +205,7 @@ export class GhostClient {
   sleep() {
     return unwrap(this.api.POST("/sleep"));
   }
-  /** Whether Ghost's microphone is open (ADR 0055). */
+  /** Whether Ghost's microphone is open (ADR 0057). */
   listening() {
     return unwrap(this.api.GET("/listening"));
   }

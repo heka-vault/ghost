@@ -146,7 +146,7 @@ export function Sidebar() {
   // page appears. Until then it is a neutral, still "Connecting…": never a false alarm. The
   // same liveLabel() feeds <LiveStatus /> wherever it is used, so the two never disagree.
   const live = liveLabel(state, phase);
-  // ADR 0055: with the microphone closed and no session, the card says so, in red, as a
+  // ADR 0057: with the microphone closed and no session, the card says so, in red, as a
   // smart speaker's mic-off light does. A typed turn or the phone's call shows as itself.
   const off = state === "online" && phase === "passive" ? notListening(status) : null;
   const cardPhase = live.dot;

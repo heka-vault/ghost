@@ -179,7 +179,7 @@ export default function Home() {
                 {hero.body}
               </Text>
             ) : null}
-            {/* ADR 0055: the desk's mic is off. A call from here uses this phone's mic, so it still works. */}
+            {/* ADR 0057: the desk's mic is off. A call from here uses this phone's mic, so it still works. */}
             {status?.not_listening && link === "online" && !inSession ? (
               <View style={{ marginTop: space[4], alignItems: "center", gap: space[2], maxWidth: 320 }}>
                 <Text size="md" color="text2" align="center">

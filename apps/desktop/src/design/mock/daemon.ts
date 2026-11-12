@@ -1147,7 +1147,7 @@ export class MockDaemon {
     if (method === "GET" && path === "/listening") return this.listeningView();
     if (method === "PUT" && path === "/listening") return this.setListening(b);
     if (method === "POST" && path === "/wake") {
-      // ADR 0055: a voice session would open the microphone; typed words still open one.
+      // ADR 0057: a voice session would open the microphone; typed words still open one.
       if (this.status.not_listening && !(typeof b.text === "string" && b.text)) throw new HttpError(409, "Ghost isn’t listening. Turn listening on to talk to it.");
       this.wake(typeof b.conversation === "string" ? b.conversation : null);
       if (typeof b.text === "string" && b.text) this.say(b.text);

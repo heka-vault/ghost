@@ -1260,7 +1260,7 @@ const stepToFuzzy = (n: number) => Math.round((1 - n * 0.05) * 100) / 100;
  * for the level (Strict, Balanced, Forgiving), inline like every other slider on the page, and
  * the same word is what the slider announces.
  */
-/** Not listening (ADR 0055): the same switch as the sidebar's, in words. */
+/** Not listening (ADR 0057): the same switch as the sidebar's, in words. */
 function ListeningRow() {
   const { status } = useGhost();
   const off = notListening(status);

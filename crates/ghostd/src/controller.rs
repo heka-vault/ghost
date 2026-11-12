@@ -40,7 +40,7 @@ impl Controller for Daemon {
             return false;
         }
         if first_utterance.is_none() && self.mic.is_off() {
-            return false; // ADR 0055: a voice session would open the microphone
+            return false; // ADR 0057: a voice session would open the microphone
         }
         let Some(manual) = lock(&self.manual).clone() else {
             return false;

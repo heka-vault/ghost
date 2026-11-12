@@ -1,4 +1,4 @@
-# 0055: Not listening
+# 0057: Not listening
 
 - **Status:** accepted (decided 2026-11-12; built on the `feat/stop-listening` branch)
 - **Date:** 2026-11-12

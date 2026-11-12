@@ -32,7 +32,7 @@ async fn status_and_wake_sleep() {
 
 #[tokio::test]
 async fn listening_is_turned_off_and_on_and_the_status_says_so() {
-    // ADR 0055: the switch the desktop, the tray and the phone use.
+    // ADR 0057: the switch the desktop, the tray and the phone use.
     let w = World::new();
     let c = w.client();
     w.state.set_phase(Phase::Passive, None, None);

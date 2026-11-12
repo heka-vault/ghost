@@ -92,7 +92,7 @@ export interface Desk {
   acknowledge(key: string): Promise<void>;
   /** Not now: it comes back after `minutes`. */
   snooze(key: string, minutes: number): Promise<void>;
-  /** The desk's microphone on or off (ADR 0055); calls from the phone use the phone's own. */
+  /** The desk's microphone on or off (ADR 0057); calls from the phone use the phone's own. */
   setDeskListening(listening: boolean): Promise<void>;
   /** Answer a question: a choice as written, or the operator's own words. Rejects with why
    *  when the desk refuses it (already settled, an answer that doesn't fit). */

@@ -28,7 +28,7 @@ pub fn status_fields(status: &Status, provider: &str, model: &str) -> Map<String
         json!({"open": open, "origin": status.session_origin}),
     );
     out.insert("agent".into(), json!(status.conversation));
-    // ADR 0055: read only. No tool turns listening on, or off: it is the operator's switch.
+    // ADR 0057: read only. No tool turns listening on, or off: it is the operator's switch.
     out.insert(
         "listening".into(),
         json!({

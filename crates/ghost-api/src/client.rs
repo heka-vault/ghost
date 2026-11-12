@@ -146,7 +146,7 @@ impl GhostClient {
         self.expect_ok(Method::POST, "/wake", body.as_ref()).await
     }
 
-    /// Close or open Ghost's microphone (ADR 0055); `minutes` with `false` only.
+    /// Close or open Ghost's microphone (ADR 0057); `minutes` with `false` only.
     pub async fn set_listening(
         &self,
         listening: bool,
