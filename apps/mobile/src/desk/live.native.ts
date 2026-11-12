@@ -5,7 +5,9 @@
  * The desk lists every address it serves; the phone asks all of them once and keeps the
  * first in the list that answers (home before tunnel), until that one stops answering.
  * Outside a session the phone asks `/hello` every few seconds for the link and the status,
- * and `/audit` for the Activity tab. Start opens the mic and joins the pipeline over WebRTC.
+ * and `/audit` for the Activity tab. The waiting list and the questions come from the live
+ * stream (ADR 0051), which is native (`modules/ghost-call/link.ts`): it runs with the app
+ * closed, and every action on the list goes through it, signed with its `id`. Start opens the mic and joins the pipeline over WebRTC.
  * From then on the desk's own session events arrive on the data channel, as the same JSON the
  * desktop app reads. Every request is signed, and so is every reply. An answer whose signature
  * doesn't check is never applied, which is what keeps the audio between this phone and its desk.
@@ -17,12 +19,15 @@ import InCallManager from "react-native-incall-manager";
 import { mediaDevices, MediaStream, RTCPeerConnection, RTCSessionDescription } from "react-native-webrtc";
 
 import { onCallEnd, onCallTick, startCall, stopCall, updateCall } from "../../modules/ghost-call";
+import { answerRing, configureLink, linkAct, type LinkActionKind, linkAvailable, linkStateJson, onLinkState, setLinkInSession } from "../../modules/ghost-call/link";
 import { rememberAddresses } from "../phone/pairing";
-import { signRequest, verifyResponse } from "../phone/signing";
+import { b64url, signRequest, verifyResponse } from "../phone/signing";
 import type { AudioState, CallStats, Desk, DeskState, Link, Route, Via } from "./types";
+import { NO_LINK, parseLink } from "./waiting";
 
 const POLL_MS = 4000;
-const WAITING_EVERY_TICKS = 8; // ~30 s: the desk counts the phone as showing the list while it reads it
+/** Without the native connection (never on a real build) the list is read this often instead. */
+const WAITING_EVERY_TICKS = 8;
 const POLL_IN_SESSION_MS = 15000;
 const REQUEST_MS = 8000;
 const GATHER_MS = 3000;
@@ -69,6 +74,7 @@ export interface LiveDeskConfig {
   addresses: string[];
   deviceId: string;
   secret: Uint8Array;
+  workstation: string;
 }
 
 class DeskError extends Error {}
@@ -82,7 +88,7 @@ const MESSAGES: Record<string, string> = {
 };
 
 export class LiveDesk implements Desk {
-  private state: DeskState = { link: "connecting", via: null, address: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
+  private state: DeskState = { link: "connecting", via: null, address: null, lastCall: null, audio: DEFAULT_AUDIO, conversations: [], status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null, questions: [], live: NO_LINK };
   /** The address in use; null until one answers, and again once it stops answering. */
   private address: string | null = null;
   private listeners = new Set<() => void>();
@@ -109,8 +115,14 @@ export class LiveDesk implements Desk {
   private routeQuiet: ReturnType<typeof setTimeout> | null = null;
   private readonly endSub: () => void;
   private readonly tickSub: () => void;
+  private readonly linkSub: () => void;
 
   constructor(private cfg: LiveDeskConfig) {
+    // The live connection keeps the pairing for when the app is closed; it shows the list it
+    // kept at once, then what the stream says.
+    configureLink(cfg.deviceId, b64url(cfg.secret), cfg.addresses, cfg.workstation);
+    this.linkSub = onLinkState((json) => this.onLink(json));
+    this.onLink(linkStateJson());
     // End on the session notification (screen off, phone in a pocket) ends the call like the button.
     this.endSub = onCallEnd(() => void this.end().catch(() => {}));
     // The keepalive the desk expects every second. JS timers stop in the background (the
@@ -145,7 +157,15 @@ export class LiveDesk implements Desk {
     if (this.poll) clearTimeout(this.poll);
     this.endSub();
     this.tickSub();
+    this.linkSub();
     this.teardown();
+  }
+
+  private onLink(json: string | null) {
+    const snap = parseLink(json);
+    if (!snap) return;
+    const known = snap.live.heardAt !== null || snap.items.length > 0 || snap.questions.length > 0;
+    this.set({ live: snap.live, questions: snap.questions, ...(known ? { waiting: snap.items } : {}) });
   }
 
   private set(patch: Partial<DeskState>) {
@@ -239,10 +259,9 @@ export class LiveDesk implements Desk {
         void this.loadAudit(this.auditLimit).catch(() => {});
         void this.loadLines().catch(() => {});
       }
-      // The waiting list (ADR 0029): when the count moved, and now and then, so the desk
-      // knows this phone has it on screen.
+      // The waiting list comes from the live stream; only a build without it reads the list.
       this.ticksSinceWaiting += 1;
-      if (hello.status.waiting !== this.waitingSeen || this.ticksSinceWaiting >= WAITING_EVERY_TICKS) {
+      if (!linkAvailable && (hello.status.waiting !== this.waitingSeen || this.ticksSinceWaiting >= WAITING_EVERY_TICKS)) {
         this.waitingSeen = hello.status.waiting;
         void this.loadWaiting().catch(() => {});
       }
@@ -290,12 +309,47 @@ export class LiveDesk implements Desk {
   }
 
   async acknowledge(key: string) {
-    await this.request("POST", "/waiting/ack", { key });
-    await this.loadWaiting();
+    await this.act("ack", key, null, "/waiting/ack", { key });
   }
 
   async snooze(key: string, minutes: number) {
-    await this.request("POST", "/waiting/snooze", { key, minutes });
+    await this.act("snooze", key, String(minutes), "/waiting/snooze", { key, minutes });
+  }
+
+  async answer(key: string, text: string) {
+    await this.act("answer", key, text, "/questions/answer", { id: actionId(), key, text });
+  }
+
+  async decline(key: string) {
+    await this.act("decline", key, null, "/questions/decline", { id: actionId(), key });
+  }
+
+  async confirmChange(key: string, changeId: string) {
+    await this.act("confirm", key, changeId, "/changes/confirm", { id: actionId(), change: changeId });
+  }
+
+  async cancelChange(key: string, changeId: string) {
+    await this.act("cancel", key, changeId, "/changes/cancel", { id: actionId(), change: changeId });
+  }
+
+  async answerRing(ringId: string): Promise<boolean> {
+    if (linkAvailable) return answerRing(ringId);
+    const r = await this.request<{ ok: boolean }>("POST", "/ring", { ring_id: ringId, answer: "answered" });
+    return !!r.ok;
+  }
+
+  /**
+   * One action on the list, through the live connection: signed, with its `id`, sent again
+   * until the desk signs an answer. What came of it arrives on the stream. Without the
+   * connection (never on a real build) it is one signed request.
+   */
+  private async act(kind: LinkActionKind, key: string, arg: string | null, path: string, body: object) {
+    if (linkAvailable) {
+      const error = await linkAct(kind, key, arg);
+      if (error) throw new DeskError(error);
+      return;
+    }
+    await this.request("POST", path, body);
     await this.loadWaiting();
   }
 
@@ -336,7 +390,7 @@ export class LiveDesk implements Desk {
         void this.loadAudit(this.auditLimit).catch(() => {});
         return;
       case "waiting":
-        void this.loadWaiting().catch(() => {});
+        if (!linkAvailable) void this.loadWaiting().catch(() => {});
         return;
       case "conversation":
         if (this.state.status) this.set({ status: { ...this.state.status, conversation: e.active ?? null } });
@@ -360,7 +414,7 @@ export class LiveDesk implements Desk {
 
   // ------------------------------------------------------------------ the session
 
-  async start(conversation?: string) {
+  async start(conversation?: string, item?: string) {
     if (this.state.link !== "online") throw new DeskError("Your desk isn’t reachable right now.");
     if (this.state.status?.session_origin === "desk") throw new DeskError(MESSAGES.busy);
     if (this.pc) return;
@@ -427,7 +481,7 @@ export class LiveDesk implements Desk {
       const local = pc.localDescription!;
       this.set({ turns: [], outcomes: {} });
       const line = conversation && conversation !== "ghost" ? conversation : undefined;
-      const answer = await this.request<{ sdp: string; type: "answer"; pc_id: string }>("POST", "/offer", { sdp: local.sdp, type: local.type, ...(line ? { conversation: line } : {}) });
+      const answer = await this.request<{ sdp: string; type: "answer"; pc_id: string }>("POST", "/offer", { sdp: local.sdp, type: local.type, ...(line ? { conversation: line } : {}), ...(item ? { item } : {}) });
       await pc.setRemoteDescription(new RTCSessionDescription({ sdp: answer.sdp, type: answer.type }));
 
       // "video" to InCallManager means: the speaker by default, a Bluetooth or wired headset
@@ -448,6 +502,8 @@ export class LiveDesk implements Desk {
       maybeReady();
       // Hold the mic open with the screen off, and put an End action in the notification shade.
       startCall("Ghost", this.callBody());
+      // While the call is up the connection posts quietly and shows no ring.
+      setLinkInSession(true);
 
       await new Promise<void>((resolve, reject) => {
         const t = setTimeout(() => reject(new DeskError("Your desk answered but the session didn’t open. Try again.")), JOIN_MS);
@@ -562,6 +618,7 @@ export class LiveDesk implements Desk {
     this.routeSub = null;
     if (pc) {
       stopCall();
+      setLinkInSession(false);
       this.set({ audio: DEFAULT_AUDIO });
     }
     try {
@@ -603,6 +660,9 @@ export class LiveDesk implements Desk {
 }
 
 const rid = () => Math.random().toString(36).slice(2, 10);
+
+/** An action's `id` (1 to 64 characters), for the build without the native connection. */
+const actionId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
 type Hello = { workstation: string; status: Status; addresses?: string[] };
 

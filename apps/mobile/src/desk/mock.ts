@@ -4,13 +4,14 @@
  * Ghost asks before a confirm-level change, a spoken yes or no settles it, the audit log
  * fills in. The voice side has no mic yet, so the Mock panel drives it through `act`.
  */
-import type { AuditEntry, OutcomeView, PendingProposal, Status, Turn, WaitingItemView } from "@ghost/client-ts";
+import type { AuditEntry, OutcomeView, PendingProposal, QuestionView, Status, Turn, WaitingItemView } from "@ghost/client-ts";
 
 import type { ConversationView } from "@ghost/client-ts";
 
 import { MOCK_ADDRESS } from "../phone/pairing";
 import { stateOf } from "../phone/store";
 import type { Desk, DeskState, Link, Route } from "./types";
+import { type LiveLink, NO_LINK } from "./waiting";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -64,7 +65,7 @@ function seedAudit(): AuditEntry[] {
   ];
 }
 
-export type MockAct = "ask" | "yes" | "no" | "talk" | "drop" | "deskDown" | "deskUp" | "deskSession";
+export type MockAct = "ask" | "yes" | "no" | "talk" | "drop" | "deskDown" | "deskUp" | "deskSession" | "agentAsks";
 
 const MOCK_LINES: ConversationView[] = [
   { id: "a0", slug: "ghost", name: "Ghost", aliases: [], job: "", voice: "af_heart", speed: 1, own_voice: false, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", retired_at: null, active: false, is_ghost: true },
@@ -82,9 +83,11 @@ export class MockDesk implements Desk {
   private muted = false;
 
   constructor() {
-    this.state = { link: "connecting", via: "Wi-Fi", address: stateOf().pairing?.addresses[0] ?? MOCK_ADDRESS, lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, conversations: MOCK_LINES, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null };
+    const address = stateOf().pairing?.addresses[0] ?? MOCK_ADDRESS;
+    this.state = { link: "connecting", via: "Wi-Fi", address, lastCall: null, audio: { route: "speaker", available: ["speaker", "earpiece"] }, conversations: MOCK_LINES, status: null, pending: null, turns: [], audit: null, auditTotal: 0, outcomes: {}, waiting: null, questions: [], live: { ...NO_LINK, state: "connecting" } };
     const audit = seedAudit();
-    setTimeout(() => this.set({ link: "online", status: this.status({ waiting: 2 }), audit, auditTotal: audit.length, waiting: seedWaiting() }), 700);
+    const { items, questions } = seedWaiting();
+    setTimeout(() => this.set({ link: "online", status: this.status({ waiting: items.length }), audit, auditTotal: audit.length, waiting: items, questions, live: this.live({ state: "connected", address, via: "Wi-Fi" }) }), 700);
   }
 
   getState = () => this.state;
@@ -126,6 +129,10 @@ export class MockDesk implements Desk {
     this.set({ status: this.status({ phase }) });
   }
 
+  private live(patch: Partial<LiveLink>): LiveLink {
+    return { ...NO_LINK, ...this.state.live, enabled: true, heardAt: new Date().toISOString(), ...patch };
+  }
+
   private reachable() {
     if (this.state.link !== "online") throw new Error("Your desk isn’t reachable right now.");
   }
@@ -147,7 +154,7 @@ export class MockDesk implements Desk {
     return !!this.state.status?.session_id && this.state.status.session_origin !== "desk";
   }
 
-  async start(conversation?: string) {
+  async start(conversation?: string, _item?: string) {
     this.reachable();
     if (this.state.status?.session_origin === "desk") throw new Error("Ghost is busy at your desk. End that session there, then start here.");
     await sleep(500);
@@ -186,6 +193,47 @@ export class MockDesk implements Desk {
     this.set({ waiting: (this.state.waiting ?? []).map((i) => (i.key === key ? { ...i, state: "snoozed", snoozed_until: until } : i)) });
   }
 
+  /** The desk takes an answer and says so on the stream: the question settles, its item leaves the list. */
+  private settleQuestion(key: string, state: QuestionView["state"], answer: string | null) {
+    const at = new Date().toISOString();
+    this.set({
+      questions: this.state.questions.map((q) => (q.key === key ? { ...q, state, answer, choice: q.choices.find((c) => c.toLowerCase() === answer?.toLowerCase()) ?? null, answered_via: "phone", answered_at: at } : q)),
+      waiting: (this.state.waiting ?? []).filter((i) => i.key !== key),
+    });
+  }
+
+  async answer(key: string, text: string) {
+    this.reachable();
+    await sleep(250);
+    const q = this.state.questions.find((x) => x.key === key);
+    if (!q || q.state !== "open") throw new Error(`Already ${q?.state ?? "settled"}.`);
+    if (q.choices_only && !q.choices.some((c) => c.toLowerCase() === text.trim().toLowerCase())) throw new Error(`Only ${q.choices.join(" or ")}.`);
+    this.settleQuestion(key, "answered", text);
+  }
+
+  async decline(key: string) {
+    this.reachable();
+    await sleep(200);
+    this.settleQuestion(key, "declined", null);
+  }
+
+  async confirmChange(key: string, _changeId: string) {
+    this.reachable();
+    await sleep(300);
+    this.settleQuestion(key, "answered", "Yes");
+  }
+
+  async cancelChange(key: string, _changeId: string) {
+    this.reachable();
+    await sleep(200);
+    this.settleQuestion(key, "answered", "No");
+  }
+
+  async answerRing(_ringId: string) {
+    await sleep(200);
+    return this.state.link === "online";
+  }
+
   setMuted(muted: boolean) {
     this.muted = muted;
   }
@@ -196,9 +244,9 @@ export class MockDesk implements Desk {
       case "ask":
         return this.ask();
       case "yes":
-        return this.answer(true);
+        return this.sayYesOrNo(true);
       case "no":
-        return this.answer(false);
+        return this.sayYesOrNo(false);
       case "talk":
         if (!this.inSession() || this.muted) return;
         this.say("user", "What else is on my plate today?");
@@ -206,11 +254,16 @@ export class MockDesk implements Desk {
         await sleep(1400);
         return this.speak("Just the flaky runner on infra 77. Everything else is waiting on other people.");
       case "drop":
-        this.set({ link: "reconnecting" });
+        this.set({ link: "reconnecting", live: { ...this.state.live, state: "reconnecting" } });
         await sleep(6000);
-        return this.set({ link: "online" });
+        return this.set({ link: "online", live: this.live({ state: "connected" }) });
       case "deskDown":
-        return this.set({ link: "offline" });
+        return this.set({ link: "offline", live: { ...this.state.live, state: "offline" } });
+      case "agentAsks": {
+        const q = question("question:" + id().slice(0, 12), "Q3 audit", "agent:q3-audit", "Can I send the auditors the October bank statements?", ["Yes", "No", "Only the summary"], false, 0);
+        const item: WaitingItemView = { key: q.key, source: q.source, title: `Q3 audit asks: ${q.question}`, state: "new", first_seen: q.asked_at, changed_at: q.asked_at, age_secs: 0, question: q };
+        return this.set({ questions: [...this.state.questions, q], waiting: [...(this.state.waiting ?? []), item] });
+      }
       case "deskSession": {
         // Someone woke Ghost at the desk; toggles.
         if (this.state.status?.session_origin === "desk") return this.set({ status: this.status({ phase: "passive", session_id: null, session_origin: null }) });
@@ -218,9 +271,9 @@ export class MockDesk implements Desk {
         return this.set({ status: this.status({ phase: "listening", session_id: id(), session_origin: "desk" }) });
       }
       case "deskUp":
-        this.set({ link: "connecting" });
+        this.set({ link: "connecting", live: { ...this.state.live, state: "connecting" } });
         await sleep(700);
-        return this.set({ link: "online" });
+        return this.set({ link: "online", live: this.live({ state: "connected" }) });
     }
   }
 
@@ -245,7 +298,7 @@ export class MockDesk implements Desk {
   }
 
   /** The operator answers out loud; Jev classifies it in the pipeline. */
-  private async answer(yes: boolean) {
+  private async sayYesOrNo(yes: boolean) {
     const p = this.state.pending;
     if (!p || this.muted || this.state.link !== "online") return;
     const said = yes ? "Yeah, go ahead." : "No, leave it.";
@@ -301,12 +354,38 @@ export function isMock(desk: Desk): desk is MockDesk {
 
 export type { Link };
 
-/** What the mock desk's waiting list starts with (ADR 0029). */
-function seedWaiting(): WaitingItemView[] {
-  const ago = (m: number) => new Date(Date.now() - m * 60000).toISOString();
-  return [
-    { key: "ci:1", source: "watch:ci", title: "CI failed on main: test (ubuntu-latest)", state: "new", first_seen: ago(12), changed_at: ago(12), age_secs: 720, link: "https://github.com/heka-vault/ghost/actions" },
-    { key: "change:5f0c9a", source: "gate", title: "Waiting for your yes: On heka-vault/ghost#17: close the issue.", state: "delivered", first_seen: ago(40), changed_at: ago(40), age_secs: 2400, delivered_via: "digest", delivered_at: ago(30) },
-  ];
+function question(key: string, askedBy: string, source: string, text: string, choices: string[], only: boolean, minutesAgo: number, change: string | null = null): QuestionView {
+  const at = new Date(Date.now() - minutesAgo * 60000).toISOString();
+  return {
+    key,
+    kind: change ? "change" : "question",
+    asked_by: askedBy,
+    source,
+    question: text,
+    detail: null,
+    choices,
+    choices_only: only,
+    urgency: "notify",
+    asked_at: at,
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+    state: "open",
+    answer: null,
+    choice: null,
+    answered_via: null,
+    answered_at: null,
+    change_id: change,
+  };
 }
 
+/** What the mock desk's waiting list starts with (ADR 0029, ADR 0051): an item, a question, a change. */
+function seedWaiting(): { items: WaitingItemView[]; questions: QuestionView[] } {
+  const ago = (m: number) => new Date(Date.now() - m * 60000).toISOString();
+  const ask = question("question:0b00bdd56307", "Accounting", "agent:accounting", "Should the October invoice go out today?", ["Yes", "No"], false, 25);
+  const change = question("change:5f0c9a", "Ghost", "gate", "On heka-vault/ghost#17: close the issue.", ["Yes", "No"], true, 40, "5f0c9a");
+  const items: WaitingItemView[] = [
+    { key: "ci:1", source: "watch:ci", title: "CI failed on main: test (ubuntu-latest)", state: "new", first_seen: ago(12), changed_at: ago(12), age_secs: 720, link: "https://github.com/heka-vault/ghost/actions" },
+    { key: ask.key, source: ask.source, title: `Accounting asks: ${ask.question}`, state: "delivered", first_seen: ask.asked_at, changed_at: ask.asked_at, age_secs: 1500, delivered_via: "phone", delivered_at: ago(24), question: ask },
+    { key: change.key, source: "gate", title: "Waiting for your yes: On heka-vault/ghost#17: close the issue.", state: "delivered", first_seen: ago(40), changed_at: ago(40), age_secs: 2400, delivered_via: "digest", delivered_at: ago(30), question: change },
+  ];
+  return { items, questions: [ask, change] };
+}

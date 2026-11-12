@@ -71,7 +71,7 @@ importers:
         version: 6.4.4(@types/node@22.20.5)(lightningcss@1.33.0)(terser@5.51.2)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.7(@types/node@22.20.5)(lightningcss@1.33.0)(terser@5.51.2)
+        version: 3.2.7(@types/node@22.20.5)(lightningcss@1.33.0)(supports-color@10.2.2)(terser@5.51.2)
 
   apps/mobile:
     dependencies:
@@ -172,6 +172,9 @@ importers:
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.5)(lightningcss@1.33.0)(supports-color@10.2.2)(terser@5.51.2)
 
   packages/client-ts:
     dependencies:
@@ -187,7 +190,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.0.0
-        version: 3.2.7(@types/node@22.20.5)(lightningcss@1.33.0)(terser@5.51.2)
+        version: 3.2.7(@types/node@22.20.5)(lightningcss@1.33.0)(supports-color@10.2.2)(terser@5.51.2)
 
   packages/ui:
     dependencies:
@@ -7222,7 +7225,7 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vite-node@3.2.4(@types/node@22.20.5)(lightningcss@1.33.0)(terser@5.51.2):
+  vite-node@3.2.4(@types/node@22.20.5)(lightningcss@1.33.0)(supports-color@10.2.2)(terser@5.51.2):
     dependencies:
       cac: 6.7.14
       debug: 4.4.3(supports-color@10.2.2)
@@ -7257,7 +7260,7 @@ snapshots:
       lightningcss: 1.33.0
       terser: 5.51.2
 
-  vitest@3.2.7(@types/node@22.20.5)(lightningcss@1.33.0)(terser@5.51.2):
+  vitest@3.2.7(@types/node@22.20.5)(lightningcss@1.33.0)(supports-color@10.2.2)(terser@5.51.2):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.7
@@ -7280,7 +7283,7 @@ snapshots:
       tinypool: 1.1.1
       tinyrainbow: 2.0.0
       vite: 6.4.4(@types/node@22.20.5)(lightningcss@1.33.0)(terser@5.51.2)
-      vite-node: 3.2.4(@types/node@22.20.5)(lightningcss@1.33.0)(terser@5.51.2)
+      vite-node: 3.2.4(@types/node@22.20.5)(lightningcss@1.33.0)(supports-color@10.2.2)(terser@5.51.2)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.20.5

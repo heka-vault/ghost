@@ -5,6 +5,10 @@
  * is known by colour and a press, not a scroll, calls it directly (the session opens there,
  * greeting as that agent). Nothing listens here; the mic opens only after a tap.
  * Activity has the history. While Ghost is asking, the question is the hero.
+ *
+ * Under the ghost, what needs you (issue #21, ADR 0051): the waiting list and the questions,
+ * live from the stream, kept on the phone so they show at once, with a line when they may be
+ * out of date. They can be answered here, or from the notifications with the app closed.
  */
 import { errorText, lineHue, lineName, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
@@ -13,14 +17,16 @@ import { useEffect, useState } from "react";
 import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { useDesk } from "../../src/desk/context";
+import { staleLine, waitingRows } from "../../src/desk/waiting";
 import { update, usePhone } from "../../src/phone/store";
 import { opacityDisabled, radius, space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
 import { GhostGlyph } from "../../src/ui/Brand";
 import { TargetText } from "../../src/ui/entries";
-import { Cta, Divider, LinkDot, linkLabel, List, Row, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
+import { Cta, LinkDot, linkLabel, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
 import { VoicePresence } from "../../src/ui/VoicePresence";
+import { WaitingList } from "../../src/ui/waiting";
 
 /** Decided once per app launch, so turning the preference on later doesn't start a session on the spot. */
 let launchChecked = false;
@@ -28,7 +34,7 @@ let launchWantsStart = false;
 
 export default function Home() {
   const router = useRouter();
-  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy, via, conversations, waiting } = useDesk();
+  const { desk, link, status, pending, phase, online, loadingModels, inSession, deskBusy, via, conversations, waiting, questions, live } = useDesk();
   const phone = usePhone();
   const { pairing } = phone;
   const { tone, title } = linkLabel(link);
@@ -48,19 +54,9 @@ export default function Home() {
   const keyGap = space[3];
   const keySize = Math.floor((width - 2 * space[5] - 2 * keyGap) / 3);
   const workstation = pairing?.workstation ?? "your desk";
-  // The waiting list, without what is snoozed (ADR 0029).
-  const shownWaiting = (waiting ?? []).filter((i) => i.state !== "snoozed");
-  const [acting, setActing] = useState<string | null>(null);
-  const act = async (key: string, run: () => Promise<void>) => {
-    setActing(key);
-    try {
-      await run();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setActing(null);
-    }
-  };
+  // What needs you: items, questions and changes, without what is snoozed (ADR 0029, ADR 0051).
+  const rows = waitingRows(waiting ?? [], questions, live.sending, live.errors);
+  const stale = staleLine(live);
   const ready = online && !loadingModels && !deskBusy && !inSession;
 
   const start = async (conversation?: string) => {
@@ -181,46 +177,10 @@ export default function Home() {
         )}
       </View>
 
-      {/* What needs you (ADR 0029): read while the app is open; there is no push. A change
-          waiting for a yes is answered by voice, so a tap on one calls Ghost. */}
-      {shownWaiting.length > 0 && !inSession && link !== "connecting" ? (
+      {/* What needs you (ADR 0029, ADR 0051): live from the stream; answered here or from a notification. */}
+      {rows.length > 0 && !inSession && link !== "connecting" ? (
         <View style={{ paddingHorizontal: space[5], paddingBottom: space[6] }}>
-          <Text size="md" weight="semibold" color="text2" style={{ marginBottom: space[3], marginLeft: space[1] }}>
-            What needs you
-          </Text>
-          <List>
-            {shownWaiting.map((item, i) => (
-              <View key={item.key}>
-                {i > 0 && <Divider />}
-                <Row
-                  top
-                  title={<Text size="lg" numberOfLines={2}>{item.title}</Text>}
-                  support={
-                    <Text size="md" color="text3" numberOfLines={1}>
-                      {waitingSource(item)}
-                      {item.state === "acknowledged" ? " · heard" : ""}
-                    </Text>
-                  }
-                  accessibilityLabel={item.source === "gate" ? `${item.title}. Call Ghost to answer it.` : item.title}
-                  onPress={item.source === "gate" && ready ? () => void start() : undefined}
-                  trailing={
-                    item.source === "gate" ? null : (
-                      <View style={{ gap: space[2] }}>
-                        {item.state !== "acknowledged" ? (
-                          <TouchButton size="md" loading={acting === item.key} onPress={() => void act(item.key, () => desk.acknowledge(item.key))}>
-                            Got it
-                          </TouchButton>
-                        ) : null}
-                        <TouchButton size="md" variant="ghost" onPress={() => void act(item.key, () => desk.snooze(item.key, 120))}>
-                          Later
-                        </TouchButton>
-                      </View>
-                    )
-                  }
-                />
-              </View>
-            ))}
-          </List>
+          <WaitingList rows={rows} desk={desk} stale={stale} canCall={ready} onCall={() => void start()} />
         </View>
       ) : null}
 
@@ -288,13 +248,3 @@ export default function Home() {
     </Screen>
   );
 }
-
-/** Where an item came from, in plain words. */
-function waitingSource(item: { source: string; delivered_via?: string | null }): string {
-  const [kind, rest] = item.source.includes(":") ? [item.source.slice(0, item.source.indexOf(":")), item.source.slice(item.source.indexOf(":") + 1)] : [item.source, ""];
-  if (kind === "watch") return `Watch ${rest}`;
-  if (kind === "hook") return `Webhook ${rest}`;
-  if (kind === "gate") return "Waiting for your yes · tap to call Ghost";
-  return "Ghost";
-}
-
