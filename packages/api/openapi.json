@@ -18,6 +18,83 @@
         ],
         "type": "object"
       },
+      "ActivityEvent": {
+        "description": "What the live session is doing (ADR 0055): names, ids and a duration, never words.",
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/ActivityView"
+          },
+          "type": {
+            "default": "activity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity"
+        ],
+        "type": "object"
+      },
+      "ActivityView": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "A call's id: its `result` carries the same one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "What a live session did (`Event::Activity`, ADR 0055).",
+            "enum": [
+              "you_started",
+              "you_stopped",
+              "call",
+              "result",
+              "handover",
+              "cut",
+              "error"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "A call's tool, as the model calls it (`github_issue_read`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "names": {
+            "description": "A handover's calls, by name, none of them run.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secs": {
+            "description": "How long a handover took to decide, in seconds.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "The session it happened in.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "session_id",
+          "at",
+          "names"
+        ],
+        "type": "object"
+      },
       "AppAction": {
         "description": "One of an app's tools, and what Ghost's own permissions say about it.",
         "properties": {
@@ -6896,6 +6973,7 @@
                   "description": "What the event stream carries, discriminated by `type`.",
                   "discriminator": {
                     "mapping": {
+                      "activity": "#/components/schemas/ActivityEvent",
                       "apps": "#/components/schemas/AppsEvent",
                       "conversation": "#/components/schemas/ConversationEvent",
                       "hear": "#/components/schemas/HearEvent",
@@ -6940,6 +7018,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/VoiceEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActivityEvent"
                     },
                     {
                       "$ref": "#/components/schemas/HearEvent"

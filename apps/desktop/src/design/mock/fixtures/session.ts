@@ -2,7 +2,7 @@
  * Owner: session. The live session: transcript, the pending change, and how the mock
  * answers typed turns. Extend freely; keep the exported shape.
  */
-import type { PendingProposal, Turn } from "@ghost/client-ts";
+import type { ActivityView, AuditEntry, PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
 
 import { ago, type Scenario } from "../scenarios";
 
@@ -59,8 +59,14 @@ export interface SessionFixture {
   sessionId: string | null;
   turns: Turn[];
   pending: PendingProposal | null;
+  /** The session's activity so far (ADR 0055), sent to each new subscriber. */
+  activity: ActivityView[];
+  /** Questions agents asked (ADR 0051). */
+  questions: QuestionView[];
+  /** Audit rows of this session's changes that ran without asking. */
+  audit: AuditEntry[];
   /** Canned replies for typed turns: first rule whose pattern matches wins. */
-  replies: { match: RegExp; reply: string; propose?: Omit<PendingProposal, "id" | "expires_at" | "expires_in_secs"> }[];
+  replies: { match: RegExp; reply: string; calls?: string[]; propose?: Omit<PendingProposal, "id" | "expires_at" | "expires_in_secs"> }[];
   fallbackReply: string;
 }
 
@@ -95,13 +101,19 @@ export default function session(s: Scenario): SessionFixture {
       }
     : null;
 
+  const story = s.story && s.session ? STORIES[s.story](sessionId ?? "") : null;
+  if (story) turns = story.turns;
   return {
     sessionId,
     turns,
     pending,
+    activity: story?.activity ?? [],
+    questions: story?.questions ?? [],
+    audit: story?.audit ?? [],
     replies: [
       {
         match: /\bclose\b/i,
+        calls: ["github_issue_read"],
         reply: "Close that issue? Say yes, or press Confirm.",
         propose: {
           source: "github",
@@ -111,7 +123,7 @@ export default function session(s: Scenario): SessionFixture {
           rationale: "You asked to close it. Closing is set to ask first.",
         },
       },
-      { match: /waiting|sign.?off|what('| i)s (new|up)/i, reply: "Three issues need your sign-off: app 212, app 208 and infra 77. Want the oldest first?" },
+      { match: /waiting|sign.?off|what('| i)s (new|up)/i, calls: ["github_issue_list"], reply: "Three issues need your sign-off: app 212, app 208 and infra 77. Want the oldest first?" },
       { match: /label|tag/i, reply: "Done. Labeled it." },
       { match: /comment/i, reply: "Commented." },
       { match: /remember|pin/i, reply: "Pinned." },
@@ -120,3 +132,77 @@ export default function session(s: Scenario): SessionFixture {
     fallbackReply: "On it. Nothing in the app or infra repos matches that yet.",
   };
 }
+
+// ---------------------------------------------------------------- conversation-screen stories
+
+type Story = { turns: Turn[]; activity: ActivityView[]; questions: QuestionView[]; audit: AuditEntry[] };
+
+const t = (session: string, role: Turn["role"], text: string, m: number, via: Turn["via"] = "voice"): Turn => ({ role, text, at: ago(m), session_id: session, via });
+const a = (session: string, kind: ActivityView["kind"], m: number, extra: Partial<ActivityView> = {}): ActivityView => ({ kind, session_id: session, at: ago(m), names: [], ...extra });
+const call = (session: string, name: string, id: string, from: number, to: number) => [a(session, "call", from, { name, id }), a(session, "result", to, { name, id })];
+
+/** The ghost session's opening, as the other stories start from it. */
+const opening = (sid: string): Turn[] => [
+  t(sid, "assistant", "Ghost here.", 4.5),
+  t(sid, "user", "What\u2019s waiting on me in the app repo?", 4.3),
+  t(sid, "assistant", "Four issues need your sign-off in ghost-mock/app. The oldest is 151, a login loop on Safari after a password reset, opened nine days ago.", 4.1),
+];
+
+const STORIES: Record<NonNullable<Scenario["story"]>, (sid: string) => Story> = {
+  thread: (sid) => ({
+    turns: [
+      t(sid, "assistant", "Ghost here.", 14.0),
+      t(sid, "user", "What\u2019s waiting on me in the app repo?", 13.9),
+      t(sid, "assistant", "Four issues need your sign-off in ghost-mock/app. The oldest is 151, a login loop on Safari after a password reset, opened nine days ago.", 13.6),
+      t(sid, "user", "Isn\u2019t that the same as 148?", 13.0),
+      t(sid, "assistant", "It looks like it. 148 is the Safari cookie bug, and its fix is in review. 151 has the same steps and the same console error.", 12.7),
+      t(sid, "user", "Label 151 as a duplicate.", 12.2),
+      t(sid, "assistant", "Labeled 151 as a duplicate of 148.", 12.0),
+      t(sid, "user", "Ask Accounting whether the Q3 numbers are final.", 3.2, "text"),
+      t(sid, "assistant", "Accounting says they\u2019re final except the Stripe fees line, and it has a question for you.", 2.6),
+    ],
+    activity: [
+      a(sid, "you_started", 13.95),
+      a(sid, "you_stopped", 13.9),
+      ...call(sid, "github_issue_list", "c1", 13.85, 13.8),
+      ...call(sid, "github_issue_read", "c2", 13.78, 13.7),
+      a(sid, "you_started", 13.05),
+      a(sid, "you_stopped", 13.0),
+      a(sid, "handover", 12.98, { names: ["github_issue_read"], secs: 0.4 }),
+      ...call(sid, "github_issue_read", "c3", 12.95, 12.9),
+      ...call(sid, "github_issue_comments", "c4", 12.95, 12.85),
+      a(sid, "you_started", 12.25),
+      a(sid, "you_stopped", 12.2),
+      ...call(sid, "github_issue_write", "c5", 12.15, 12.1),
+      ...call(sid, "ghost_ask_agent", "c6", 3.1, 2.7),
+    ],
+    questions: [
+      {
+        key: "question:q3-send", kind: "question", source: "agent:accounting", asked_by: "agent:accounting", asked_at: ago(2.65),
+        question: "Should I send the Q3 summary to Dana now, or wait for the Stripe fees line?", detail: null,
+        choices: ["Send it now", "Wait for Stripe"], choices_only: true, state: "open", urgency: "notify", in_run: true,
+        expires_at: ago(-60 * 24), answer: null, answered_at: null, answered_via: null, choice: null, change_id: null,
+      },
+    ],
+    audit: [
+      {
+        id: "a51dup0000000000000000000000000a", session_id: sid, source: "github", operation: "issue_write", target: "ghost-mock/app#151",
+        summary: "Labeled ghost-mock/app#151 duplicate, pointing at #148", autonomy: "quiet", status: "executed", created_at: ago(12.15), conversation: "ghost",
+        events: [{ at: ago(12.15), event: "prepared" }, { at: ago(12.1), event: "finished", detail: { status: "success" } }],
+      },
+    ],
+  }),
+  you: (sid) => ({ turns: opening(sid), activity: [a(sid, "you_started", 0.02)], questions: [], audit: [] }),
+  cut: (sid) => ({ turns: opening(sid), activity: [], questions: [], audit: [] }),
+  hold: (sid) => ({ turns: opening(sid), activity: [], questions: [], audit: [] }),
+  ending: (sid) => ({ turns: [...opening(sid), t(sid, "user", "That\u2019s all, thanks.", 0.3)], activity: [], questions: [], audit: [] }),
+  error: (sid) => ({
+    turns: [...opening(sid), t(sid, "user", "Read me the newest comment on 151.", 0.4)],
+    activity: [a(sid, "you_started", 0.45), a(sid, "you_stopped", 0.4), ...call(sid, "github_issue_comments", "e1", 0.38, 0.3), a(sid, "error", 0.25)],
+    questions: [],
+    audit: [],
+  }),
+};
+
+/** What Ghost says in the `cut` story, cut off two seconds in. */
+export const LONG_REPLY = "There are three things on it. First, Dana's fix for the cookie domain is in review and waiting on one approval. Second, Priya asked whether the Safari steps also fail on iOS, and nobody has answered. Third, the console error points at the session refresh, not the login form.";

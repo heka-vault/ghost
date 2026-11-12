@@ -10,12 +10,17 @@
  */
 import type { Turn } from "@ghost/client-ts";
 
+import type { ExtraItem } from "./timeline";
+
 export interface LineInfo {
   slug: string;
   name: string;
   aliases: string[];
   /** When the agent was last used, from GET /conversations. */
   lastActive?: string | null;
+  /** The agent's voice and speed, for hearing a reply again. */
+  voice?: string;
+  speed?: number;
 }
 
 /** A switch observed on the status stream: after the turn at `afterAt` (null: before any). */
@@ -43,6 +48,13 @@ export interface Decision {
 
 export type Item =
   | { kind: "started"; key: string; at: string; dated?: boolean }
+  /** A session in the history ended: how long it ran (ADR 0014; the store keeps no end, so its last turn). */
+  | { kind: "ended"; key: string; at: string; secs: number }
+  /** Time passed with nothing said (`timeline.ts`). */
+  | { kind: "gap"; key: string; at: string; secs: number }
+  /** A scheduled run's or an asked turn's entry in the transcript (ADR 0047, ADR 0048, ADR 0052). */
+  | { kind: "run"; key: string; at: string; label: string; turns: Turn[] }
+  | ExtraItem
   | { kind: "transfer"; key: string; to: string; text: string; at: string | null }
   | { kind: "note"; key: string; text: string; at: string }
   | { kind: "decision"; key: string; decision: Decision }
@@ -136,13 +148,28 @@ export function buildTranscript(turns: Turn[], current: string, lines: LineInfo[
 export function buildHistory(turns: Turn[], lines: LineInfo[]): Item[] {
   const items: Item[] = [];
   let session: string | null = null;
+  let first: string | null = null;
+  let prev: Turn | null = null;
+  const end = () => {
+    if (prev && first) items.push({ kind: "ended", key: `h-e-${prev.session_id}-${prev.at}`, at: prev.at, secs: secondsApart(first, prev.at) });
+  };
   turns.forEach((t, i) => {
     const key = `h${i}-${t.at}`;
     if (t.session_id !== session) {
+      end();
       session = t.session_id;
+      first = t.at;
       items.push({ kind: "started", key: `${key}-s`, at: t.at, dated: true });
     }
+    prev = t;
     const last = items[items.length - 1];
+    const mark = runMark(t.text);
+    if (mark) {
+      const turn = { ...t, text: mark.rest };
+      if (last?.kind === "run" && last.label === mark.label) last.turns.push(turn);
+      else items.push({ kind: "run", key, at: t.at, label: mark.label, turns: [turn] });
+      return;
+    }
     const to = t.role === "assistant" ? transferTarget(t.text, lines) : null;
     if (to != null) items.push({ kind: "transfer", key, to, text: t.text.trim().replace(/[.!]$/, ""), at: t.at });
     else if (t.role === "system") items.push({ kind: "note", key, text: t.text, at: t.at });
@@ -155,5 +182,24 @@ export function buildHistory(turns: Turn[], lines: LineInfo[]): Item[] {
       else items.push({ kind: "you", key, typed, turns: [t] });
     }
   });
+  end();
   return items;
+}
+
+const MARK = /^\[(?:scheduled run: ([^\]]+)|asked by ([^,\]]+), (an outside tool|another agent))\]\s*/;
+
+/**
+ * A turn a run with nobody there wrote (ADR 0047: `[scheduled run: <name>]`) or one an outside
+ * tool or another agent asked for (ADR 0048, ADR 0052: `[asked by <who>, …]`): its label in
+ * plain words and the words after the mark. Null for an ordinary turn.
+ */
+export function runMark(text: string): { label: string; rest: string } | null {
+  const m = MARK.exec(text);
+  if (!m) return null;
+  const label = m[1] ? `Scheduled run · ${m[1].trim()}` : `Asked by ${m[2].trim()}`;
+  return { label, rest: text.slice(m[0].length) };
+}
+
+function secondsApart(from: string, to: string): number {
+  return Math.max(0, (new Date(to).getTime() - new Date(from).getTime()) / 1000);
 }
