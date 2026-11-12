@@ -244,6 +244,16 @@ mod tests {
             config_dir: tmp.join("config"),
             db_path: tmp.join("data/ghost.db"),
             policy_path: tmp.join("config/policy.toml"),
+            // Every path that defaults under the operator's home, in the temp folder.
+            catalog_path: tmp.join("cache/catalog.json"),
+            skills_dir: tmp.join("config/skills"),
+            home_skills_dir: tmp.join("home-skills"),
+            api_socket: Some(tmp.join("ghost.sock")),
+            settings_path: tmp.join("config/settings.env"),
+            env_path: tmp.join("config/env"),
+            vault_env_path: tmp.join("no-heka"),
+            infra_dir: tmp.join("infra"),
+            dictation_flag: tmp.join("rt/dictation"),
             ..GhostdSettings::default()
         }
     }
