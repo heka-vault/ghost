@@ -9,11 +9,11 @@
  */
 import type { QuestionView, WaitingItemView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { BellOff, Check, ExternalLink } from "lucide-react";
+import { BellOff, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { nameOf, useToday } from "../../app/today";
-import { Button, IconButton, Input, LineGlyph, Menu, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
+import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
 import { clock, needLine } from "./model";
 import { actionFailure, canSend, expiresIn, sourceLabel, untilTomorrowMorning } from "./needs";
 
@@ -39,7 +39,6 @@ function useAct(): { busy: string | null; act: Act } {
   return { busy, act };
 }
 
-const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 export function Now() {
   const today = useToday();
@@ -165,39 +164,37 @@ export function Now() {
   );
 }
 
-/** A change waiting for the operator's yes. Confirm calls the gate's confirm by id and nothing else. */
+/**
+ * A change waiting for the operator's yes: the one `PendingChange` card, as everywhere. Confirm
+ * calls the gate's confirm by id and nothing else (the click is confirmation evidence, ADR 0013).
+ */
 function Decide({ item, busy, act, online }: { item: WaitingItemView; busy: boolean; act: Act; online: boolean }) {
   const { client } = useGhost();
   const change = item.change!;
   return (
-    <article className="now-card is-decide" aria-label={`Decide: ${needLine(item)}`}>
-      <p className="now-card__over">
-        <span>Waiting for your okay · until {time(change.expires_at)}</span>
-        <span className="now-card__op t-mono">
-          {change.source}.{change.operation}
-        </span>
+    <div className="now-decide">
+      <PendingChange
+        summary={needLine(item)}
+        rationale={change.rationale}
+        operation={`${change.source}.${change.operation}`}
+        expiresAt={change.expires_at}
+        busy={busy}
+        disabled={!online}
+        onConfirm={() => void act(item.key, () => client.confirmProposal(change.id), "Done")}
+        onCancel={() => void act(item.key, () => client.cancelProposal(change.id), "Canceled; nothing changed")}
+      />
+      <p className="now-decide__meta">
+        {sourceLabel(item)} · {relativeTime(item.first_seen)}
+        {item.link && (
+          <>
+            {" · "}
+            <a href={item.link} target="_blank" rel="noreferrer">
+              Open
+            </a>
+          </>
+        )}
       </p>
-      <p className="now-card__line" data-user-content>
-        {needLine(item)}
-      </p>
-      {change.rationale && (
-        <p className="now-card__why" data-user-content>
-          {change.rationale}
-        </p>
-      )}
-      <div className="now-card__actions">
-        <Button size="sm" variant="primary" leadingIcon={<Check />} loading={busy} disabled={!online} onClick={() => void act(item.key, () => client.confirmProposal(change.id), "Done")}>
-          Confirm
-        </Button>
-        <Button size="sm" variant="ghost" loading={busy} disabled={!online} onClick={() => void act(item.key, () => client.cancelProposal(change.id), "Canceled; nothing changed")}>
-          Cancel
-        </Button>
-        {item.link && <IconButton size="sm" variant="ghost" label="Open" icon={<ExternalLink />} href={item.link} />}
-        <span className="now-card__meta">
-          {sourceLabel(item)} · {relativeTime(item.first_seen)}
-        </span>
-      </div>
-    </article>
+    </div>
   );
 }
 

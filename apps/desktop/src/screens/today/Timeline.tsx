@@ -168,6 +168,7 @@ export function Timeline({ moments, agents, isToday, head }: { moments: Moment[]
         )}
       </div>
 
+      {flat.length > 0 && (
       <nav className="tl-map" aria-label="Hours of the day">
         <p className="tl-map__title">The day</p>
         <ol role="list">
@@ -194,6 +195,7 @@ export function Timeline({ moments, agents, isToday, head }: { moments: Moment[]
             })}
         </ol>
       </nav>
+      )}
     </div>
   );
 }

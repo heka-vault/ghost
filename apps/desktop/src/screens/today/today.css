@@ -22,7 +22,7 @@
   transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast);
 }
 a.today-gauge:hover { border-color: var(--border-strong); text-decoration: none; }
-.today-gauge.is-warn .today-gauge__hint { color: var(--danger); }
+.today-gauge__trouble { color: var(--danger); }
 .today-gauge__label { display: flex; align-items: center; gap: var(--space-1_5); font-size: var(--text-sm); color: var(--text-3); }
 .today-gauge__live { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-full); background: var(--kind-run); animation: today-pulse 1.6s var(--ease-in-out) infinite; }
 .today-gauge__value { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tighter); color: var(--text-1); }
@@ -175,6 +175,8 @@ a.today-gauge:hover { border-color: var(--border-strong); text-decoration: none;
 .now-card__meta { margin: 0 0 0 auto; font-size: var(--text-sm); color: var(--text-3); }
 .now-card.is-answer .now-card__meta { margin: 0; }
 
+.now-decide { display: flex; flex-direction: column; gap: var(--space-1_5); }
+.now-decide__meta { margin: 0; padding-left: var(--space-1); font-size: var(--text-sm); color: var(--text-3); }
 .now-know { list-style: none; margin: 0; padding: 0; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--bg-surface); }
 .now-know__item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2_5) var(--space-3) var(--space-2_5) var(--space-4); }
 .now-know__item + .now-know__item { border-top: 1px solid var(--border-subtle); }

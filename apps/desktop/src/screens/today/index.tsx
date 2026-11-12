@@ -97,15 +97,16 @@ export default function TodayScreen(_: RouteProps) {
           </p>
         )}
 
-        {isToday && (
+        {/* The instruments appear once there is something true to say: a run, a change or an app. */}
+        {isToday && (working > 0 || counts.runs + counts.changes > 0 || today.reach.apps > 0) && (
           <ul className="today-gauges" role="list" aria-label="Ghost right now">
             <Gauge label="Working now" value={working ? `${working} ${working === 1 ? "agent" : "agents"}` : "Nobody"} live={working > 0} hint={working ? today.working.map((r) => nameOf(today.agents, r.agent)).join(", ") : "No run is going"} />
             <Gauge label="Today" value={`${counts.toolCalls} tool ${counts.toolCalls === 1 ? "call" : "calls"}`} hint={`${counts.modelCalls} model ${counts.modelCalls === 1 ? "call" : "calls"} in ${counts.runs} ${counts.runs === 1 ? "run" : "runs"}`} />
             <Gauge
               label="In reach"
               value={`${today.reach.apps} ${today.reach.apps === 1 ? "app" : "apps"}`}
-              hint={`${today.reach.tools} tools${today.reach.down ? ` · ${today.reach.down} not connected` : ""}`}
-              tone={today.reach.down ? "warn" : undefined}
+              hint={`${today.reach.tools} tools`}
+              trouble={today.reach.down ? `${today.reach.down} not connected` : undefined}
               href="/settings/apps"
             />
             <Gauge
@@ -144,7 +145,7 @@ export default function TodayScreen(_: RouteProps) {
 }
 
 /** One instrument: a true number about Ghost right now, linked to where it is set when it can be. */
-function Gauge({ label, value, hint, live, tone, href }: { label: string; value: string; hint: string; live?: boolean; tone?: "warn"; href?: string }) {
+function Gauge({ label, value, hint, live, trouble, href }: { label: string; value: string; hint: string; live?: boolean; trouble?: string; href?: string }) {
   const body = (
     <>
       <span className="today-gauge__label">
@@ -152,17 +153,20 @@ function Gauge({ label, value, hint, live, tone, href }: { label: string; value:
         {label}
       </span>
       <span className="today-gauge__value t-num">{value}</span>
-      <span className="today-gauge__hint">{hint}</span>
+      <span className="today-gauge__hint">
+        {hint}
+        {trouble && <span className="today-gauge__trouble"> · {trouble}</span>}
+      </span>
     </>
   );
   return (
     <li>
       {href ? (
-        <a className={cx("today-gauge", tone && `is-${tone}`, "is-link")} href={hrefFor(href)} aria-label={`${label}: ${value}, ${hint}`}>
+        <a className="today-gauge is-link" href={hrefFor(href)} aria-label={`${label}: ${value}, ${hint}${trouble ? `, ${trouble}` : ""}`}>
           {body}
         </a>
       ) : (
-        <div className={cx("today-gauge", tone && `is-${tone}`)} aria-label={`${label}: ${value}, ${hint}`} role="group">
+        <div className="today-gauge" aria-label={`${label}: ${value}, ${hint}`} role="group">
           {body}
         </div>
       )}
