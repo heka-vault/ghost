@@ -15,8 +15,7 @@ use axum::Json;
 use axum::extract::{Path as PathArg, State};
 use chrono::{DateTime, Utc};
 use ghost_core::apps::{
-    APPS_FILE, AppSpec, RESERVED_NAMES, app_name_problem, edit_apps, extract_secrets,
-    parse_apps_json, secret_name,
+    APPS_FILE, AppSpec, app_name_problem, edit_apps, extract_secrets, parse_apps_json, secret_name,
 };
 use ghost_core::catalog::{self, CatalogEntry, Found, Kind, Registry as CoreRegistry};
 use ghost_core::models::{py_repr, py_str};
@@ -280,20 +279,12 @@ fn entry_view(
 
 /// `base`, or `base-2` and on when an app has it or Ghost's own tools do.
 fn free_name(deps: &Deps, base: &str) -> String {
-    let mut taken: Vec<String> = deps
+    let taken: Vec<String> = deps
         .apps
         .as_ref()
         .map(|a| a.specs().into_iter().map(|s| s.name).collect())
         .unwrap_or_default();
-    taken.extend(RESERVED_NAMES.iter().map(|s| (*s).to_string()));
-    if !taken.iter().any(|t| t == base) {
-        return base.to_string();
-    }
-    let mut n = 2;
-    while taken.iter().any(|t| *t == format!("{base}-{n}")) {
-        n += 1;
-    }
-    format!("{base}-{n}")
+    ghost_core::apps::free_name(&taken, base)
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -492,22 +483,6 @@ fn values_of(req: &AppConnect) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-/// The host as `re.sub(r"[^a-z0-9]+", "-", host.lower())`.
-fn host_to_name(host: &str) -> String {
-    let mut out = String::new();
-    let mut dash = false;
-    for c in host.to_lowercase().chars() {
-        if c.is_ascii_lowercase() || c.is_ascii_digit() {
-            out.push(c);
-            dash = false;
-        } else if !dash {
-            out.push('-');
-            dash = true;
-        }
-    }
-    out
-}
-
 /// What a connect request asks for: the apps to connect, the secrets to keep, and what
 /// to tell the operator.
 struct Asked {
@@ -554,24 +529,13 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
         });
     }
     if let Some(url) = &req.url {
-        let parsed = url::Url::parse(url).ok();
-        let host = parsed
-            .as_ref()
-            .filter(|u| matches!(u.scheme(), "https" | "http"))
-            .and_then(|u| u.host_str().map(String::from))
-            .ok_or_else(|| ApiError::unprocessable("the address must start with https://"))?;
         if let Some(name) = &req.name {
             check_len(&["body", "name"], name, 0, 40)?;
         }
-        let name = req.name.clone().unwrap_or_else(|| host_to_name(&host));
-        let name = name.strip_prefix("mcp-").unwrap_or(&name).to_string();
-        let name = name.strip_suffix("-com").unwrap_or(&name).to_string();
-        let name: String = name.trim_matches('-').chars().take(40).collect();
-        let name = if name.is_empty() {
-            "app".to_string()
-        } else {
-            name
-        };
+        // The same naming an agent's connect uses (ADR 0052).
+        let base = ghost_core::apps::address_spec(url, req.name.as_deref())
+            .map_err(ApiError::unprocessable)?;
+        let name = base.name.clone();
         let mut headers = indexmap::IndexMap::new();
         let mut secrets = BTreeMap::new();
         let key = values.get("key").map(|k| k.trim()).unwrap_or("");
@@ -588,12 +552,10 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
             headers.insert("Authorization".to_string(), format!("${{{env}}}"));
         }
         let spec = AppSpec {
-            name,
             title: values.get("title").cloned().unwrap_or_default(),
-            url: Some(url.clone()),
             headers,
             sign_in: key.is_empty(),
-            ..AppSpec::default()
+            ..base
         };
         return Ok(Asked {
             specs: vec![spec],

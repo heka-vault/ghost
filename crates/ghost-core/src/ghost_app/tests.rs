@@ -142,12 +142,27 @@ async fn the_app_attaches_and_its_tools_are_offered_under_ghosts_name() {
             "ghost_audit_recent",
             "ghost_docs_read",
             "ghost_docs_search",
+            "ghost_recall",
             "ghost_status",
             "ghost_tools_search",
+            "ghost_transcript_read",
         ])
     );
-    // The search is there for a call but not offered: no app has tools to find (ADR 0046).
-    assert_eq!(src.deferred, vec!["ghost_tools_search"]);
+    // Past its core, Ghost's own tools are found by search (ADR 0052): there for a call,
+    // not offered by name until found or used.
+    assert_eq!(
+        src.deferred
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "ghost_apps_list",
+            "ghost_audit_recent",
+            "ghost_docs_read",
+            "ghost_transcript_read",
+            "ghost_waiting_snooze",
+        ])
+    );
     assert_eq!(
         src.operations
             .iter()
@@ -643,7 +658,7 @@ impl Wordy {
 #[tool_handler(router = self.tool_router, name = "wordy")]
 impl ServerHandler for Wordy {}
 
-async fn wordy(name: &str) -> Arc<App> {
+pub(super) async fn wordy(name: &str) -> Arc<App> {
     let (server_io, client_io) = tokio::io::duplex(1 << 16);
     let handler = Wordy {
         tool_router: Wordy::tool_router(),
@@ -717,8 +732,7 @@ async fn the_default_seeds_tool_list_is_measured() {
         }
     }
     println!("SEED tools={n} schema_bytes={bytes} prompt_bytes={prompt}");
-    // Nine of Ghost's own and five of mock GitHub's: the search tool is not among them
-    // while the apps' tools are within the limits.
-    assert_eq!(n, 14);
+    // Seven of Ghost's own (its core, ADR 0052) and five of mock GitHub's.
+    assert_eq!(n, 12);
     assert!(bytes < 8_000, "{bytes}");
 }

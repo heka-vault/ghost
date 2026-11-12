@@ -1258,6 +1258,8 @@ fn migrate(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    // ADR 0041, ADR 0052: the turns, searchable.
+    crate::recall::migrate(conn)?;
     Ok(())
 }
 

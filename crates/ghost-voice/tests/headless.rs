@@ -1349,3 +1349,41 @@ async fn what_the_question_tools_add_to_every_turn() {
     println!("{names:?}: {each:?} bytes; +5 tools, +{total} bytes");
     assert!(total < 3_200, "{total}");
 }
+
+/// ADR 0018, ADR 0052: what Ghost's own app costs on every turn of every session and run,
+/// all of its advertised tools together, in the cached prefix. Its new tools are found by
+/// search (`ghost_tools_search`), so this stays bounded however many it has.
+#[tokio::test]
+async fn what_ghosts_own_app_costs_every_turn() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let ghost = w.convs.get("ghost").unwrap().unwrap();
+    let tools = ToolDispatcher::new(ToolsParams {
+        sources: (w.reach)(&ghost),
+        gate: w.gate.clone(),
+        session_id: "s".into(),
+        on_hang_up: no_action(),
+        on_hold: None,
+        turns: None,
+        events: None,
+        conversations: None,
+        on_call: None,
+        last_request: None,
+        probe: None,
+    })
+    .schemas();
+    let own: Vec<&str> = tools
+        .names()
+        .into_iter()
+        .filter(|n| n.starts_with("ghost_"))
+        .collect();
+    let bytes: usize = own
+        .iter()
+        .map(|n| {
+            serde_json::to_string(&tools.get(n).unwrap().anthropic())
+                .unwrap()
+                .len()
+        })
+        .sum();
+    println!("OWN advertised={} bytes={bytes} names={own:?}", own.len());
+}

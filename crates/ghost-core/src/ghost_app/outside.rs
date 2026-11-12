@@ -531,8 +531,13 @@ impl GhostServer {
         let mut tool_router = self.tool_router.clone();
         tool_router.merge(Self::outside_router());
         // Finding a connected app's tool (ADR 0046) is for an agent, which can call it. An
-        // outside tool cannot, and what the search returns is the apps' own text.
-        tool_router.remove_route("tools_search");
+        // outside tool cannot, and what the search returns is the apps' own text. And what
+        // ADR 0052 keeps from outside tools: an agent's memory, the operator's settings and
+        // permissions, the apps' own text, and every change to apps, watches, quiet,
+        // outputs and skills (`more::NOT_FOR_OUTSIDE`).
+        for name in super::NOT_FOR_OUTSIDE {
+            tool_router.remove_route(name);
+        }
         // Only the operator answers a question (ADR 0051): an outside tool never can.
         tool_router.remove_route("answer");
         let server = Self {

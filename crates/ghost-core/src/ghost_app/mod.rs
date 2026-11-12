@@ -13,15 +13,26 @@
 //! same one is served to outside clients over HTTP (ADR 0048: `clients`, `outside`,
 //! `outside_tools`). Nothing here opens a listener; the daemon's does.
 
+pub mod agents;
+pub mod apps_tools;
 pub mod clients;
 pub mod docs;
+pub mod more;
+pub mod outputs_tools;
 pub mod outside;
 pub mod outside_tools;
 pub mod questions;
+pub mod recall;
 pub mod schedules;
+pub mod settings;
 #[cfg(test)]
 mod tests;
 pub mod tools_search;
+pub mod watches;
+#[cfg(test)]
+mod wide_tests;
+
+pub use more::{CORE, More, NOT_FOR_OUTSIDE, asks_by_default};
 
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -62,8 +73,10 @@ const RESTART_PAUSE: Duration = Duration::from_secs(1);
 /// prompt, in place of the one a connected app gets.
 pub const PROMPT: &str = "Ghost is an app too, and you have its tools. For a question about what Ghost is or how it \
 works (apps, permissions, agents, skills, the waiting list, routes, watches, the phone), look it \
-up with ghost_docs_search and answer from that, not from memory. A tool you don't have shows \
-this session's limits, not Ghost's: check the docs before saying Ghost can't do something. To \
+up with ghost_docs_search and answer from that, not from memory. Most of Ghost's own tools \
+(watches, apps, quiet, permissions, outputs, skills, your memory, asking another agent) are not \
+listed until you find them with ghost_tools_search; check there and the docs before saying Ghost \
+can't do something. To \
 tell the operator something later, or when they are away, use ghost_notify, and ghost_resolve \
 once the matter is done. When the operator is here, just ask them aloud; to ask something they \
 may answer later, use ghost_ask. When they answer a question Ghost put to them, record it with \
@@ -239,6 +252,10 @@ pub struct GhostServer {
     tool_router: ToolRouter<Self>,
     /// What only a server for outside clients has (ADR 0048).
     outside: Option<Arc<outside::Outside>>,
+    /// What the wider tools reach (ADR 0052), each when the daemon gives it.
+    more: Arc<More>,
+    /// How many `ask_agent` turns each session has running (ADR 0052: three at most).
+    asking: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
 }
 
 #[tool_router]
@@ -250,8 +267,10 @@ impl GhostServer {
             caller: Caller::Session,
             schedules: None,
             questions: None,
-            tool_router: Self::tool_router() + Self::tools_search_router(),
+            tool_router: Self::tool_router() + Self::tools_search_router() + Self::recall_router(),
             outside: None,
+            more: Arc::new(More::default()),
+            asking: Arc::default(),
         }
     }
 
