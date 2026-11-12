@@ -14,6 +14,11 @@ use super::tools::{ToolInfo, bound};
 use crate::models::{AppChange, AppSnapshot, AppTarget, Change, ChangeSet, Snapshot, Target};
 use crate::source::{Operation, Prepared, ReadTool, ToolSource, Writer};
 
+/// The argument that carries the calling agent's slug to Ghost's own app (ADR 0045). The
+/// session's dispatcher sets it, over anything the model wrote; `clean` drops a `_`-led
+/// argument for every other app, so no app the operator connected ever sees it.
+pub const CALLER_ARG: &str = "_agent";
+
 /// The gate's writer for an app's change: nothing to read first, then the call. What the
 /// app answered comes back as the read-back, once, for the model to say.
 pub struct AppWriter {
@@ -56,7 +61,7 @@ impl Writer for AppWriter {
         };
         let mut args = t.fields.clone();
         args.extend(c.arguments.iter().map(|(k, v)| (k.clone(), v.clone())));
-        let answer = self.app.call(&c.tool, args, true).await?;
+        let answer = self.app.call(&c.tool, args, !self.app.is_own()).await?;
         self.answers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -68,7 +73,13 @@ impl Writer for AppWriter {
 /// The model's arguments, checked against the tool's own schema and bounded, as a
 /// target, a change set and the words that ask for it.
 fn prepare(app: &App, tool: &ToolInfo, raw: &Map<String, Value>) -> Result<Prepared, AppError> {
-    let b = bound(tool, raw)?;
+    let mut b = bound(tool, raw)?;
+    if app.is_own()
+        && let Some(Value::String(agent)) = raw.get(CALLER_ARG)
+    {
+        b.rest
+            .insert(CALLER_ARG.into(), Value::String(agent.clone()));
+    }
     let rationale = match raw.get("rationale") {
         Some(Value::String(s)) => s.clone(),
         Some(v) if super::spec::truthy(v) => crate::models::py_str(v),
@@ -91,6 +102,16 @@ fn prepare(app: &App, tool: &ToolInfo, raw: &Map<String, Value>) -> Result<Prepa
 }
 
 impl App {
+    /// What the model reads about a tool: the first sentence of an app's description,
+    /// which is untrusted text; the whole of Ghost's own, which is ours (ADR 0045).
+    fn says(&self, tool: &ToolInfo) -> String {
+        if self.is_own() {
+            tool.description.clone()
+        } else {
+            tool.brief()
+        }
+    }
+
     pub fn read_tools(self: &Arc<Self>) -> Vec<ReadTool> {
         let offered = self.offered();
         let mut tools = Vec::new();
@@ -102,14 +123,15 @@ impl App {
             let tool_name = t.name.clone();
             tools.push(ReadTool {
                 name: name.clone(),
-                description: t.brief(),
+                description: self.says(&t),
                 properties: Value::Object(t.properties()),
                 required: t.required(),
                 handler: Arc::new(move |args| {
                     let app = Arc::clone(&app);
                     let tool_name = tool_name.clone();
                     Box::pin(async move {
-                        match app.call(&tool_name, super::tools::clean(&args), true).await {
+                        let trim = !app.is_own();
+                        match app.call(&tool_name, super::tools::clean(&args), trim).await {
                             Ok(out) => Ok(out),
                             Err(e) => Ok(Map::from_iter([(
                                 "error".to_string(),
@@ -137,7 +159,7 @@ impl App {
             let tool = t.clone();
             let mut op = Operation::new(
                 t.name.clone(),
-                t.brief(),
+                self.says(&t),
                 Arc::new(move |args| {
                     let app = Arc::clone(&app);
                     let tool = tool.clone();
@@ -164,7 +186,8 @@ pub fn source_of(app: &Arc<App>) -> ToolSource {
         read_tools: app.read_tools(),
         operations: app.operations(),
         title: app.spec.shown(),
-        app: true,
+        // A call to Ghost's own app never leaves the process: nothing to acknowledge.
+        app: !app.is_own(),
         ..Default::default()
     }
 }

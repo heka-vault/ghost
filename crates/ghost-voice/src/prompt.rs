@@ -54,6 +54,11 @@ pub const AGENT_IDENTITY: &str = "You are {name}, one of the operator's agents{j
 operator's voice assistant. Speak as {name}. You are not Claude Code and never say \
 you are.";
 
+/// ADR 0045: what Ghost knows about itself. It is the paragraph of Ghost's own app, so it
+/// is in the prompt exactly when the tools it names are in the session (`{skills}` above
+/// holds every source's paragraph), and absent from a session built without them.
+pub const SELF_KNOWLEDGE: &str = ghost_core::ghost_app::PROMPT;
+
 /// ADR 0035: Ghost's AGENTS.md, in every agent's prompt.
 pub const RULES_NOTE: &str = "\nThe operator's standing instructions, for every agent:\n{rules}\n";
 pub const ROSTER_NOTE: &str = "\nThe operator's other agents, for transfers:\n{roster}\n";
@@ -167,6 +172,28 @@ mod tests {
     fn test_prompt_includes_fragments_and_persona() {
         let p = build_system_prompt(&["FRAG".into()], &Persona::ghost());
         assert!(p.contains("You are Ghost") && p.contains("FRAG") && p.contains("not Claude Code"));
+    }
+
+    #[test]
+    fn test_prompt_tells_ghost_to_look_itself_up_when_it_has_the_tools() {
+        // ADR 0045: with Ghost's own app in the session, for Ghost and for an agent.
+        let agent = Persona {
+            name: "Brand",
+            is_ghost: false,
+            ..Persona::ghost()
+        };
+        for who in [Persona::ghost(), agent] {
+            let p = build_system_prompt(&[SELF_KNOWLEDGE.to_string()], &who);
+            assert!(p.contains("look it up with ghost_docs_search and answer from that"));
+            assert!(p.contains("this session's limits, not Ghost's"));
+            assert!(p.contains("use ghost_notify"));
+        }
+        // Short, as everything sent on every turn is: four sentences, no em dash.
+        assert_eq!(SELF_KNOWLEDGE.matches(". ").count() + 1, 4);
+        assert!(SELF_KNOWLEDGE.len() < 700 && !SELF_KNOWLEDGE.contains('—'));
+        // Without the app there is nothing to promise.
+        let bare = build_system_prompt(&["F".into()], &Persona::ghost());
+        assert!(!bare.contains("ghost_docs_search"));
     }
 
     #[test]

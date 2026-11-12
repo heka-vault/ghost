@@ -18,6 +18,7 @@ pub mod events;
 pub mod fakes;
 pub mod folder;
 pub mod gate;
+pub mod ghost_app;
 pub mod hooks;
 pub mod jev;
 pub mod levels;

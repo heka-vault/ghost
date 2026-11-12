@@ -22,7 +22,16 @@ pub static APP_NAME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{0,39}$").unwrap());
 /// The names of Ghost's own tool sources (`crate::source::ToolSource`): the gate, the
 /// permissions (`skills.*`) and the audit key on them, so an app may not take one.
-pub const RESERVED_NAMES: [&str; 5] = ["conversations", "outputs", "rules", "skills", "waiting"];
+pub const RESERVED_NAMES: [&str; 6] = [
+    "conversations",
+    GHOST_APP,
+    "outputs",
+    "rules",
+    "skills",
+    "waiting",
+];
+/// Ghost's own app (ADR 0045, `crate::ghost_app`): served in process, never from the file.
+pub const GHOST_APP: &str = "ghost";
 const TRANSPORTS: [&str; 5] = [
     "stdio",
     "http",

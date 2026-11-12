@@ -863,9 +863,11 @@ impl Change {
         match self {
             Change::App(c) => {
                 let what = c.tool.replace('_', " ");
+                // A `_`-led argument is Ghost's own (the calling agent, ADR 0045), not said.
                 let shown: Vec<String> = c
                     .arguments
                     .iter()
+                    .filter(|(k, _)| !k.starts_with('_'))
                     .map(|(k, v)| format!("{k} {}", short(v)))
                     .collect();
                 if shown.is_empty() {
@@ -972,7 +974,14 @@ impl Change {
 
     pub fn rule_args(&self) -> Map<String, Value> {
         match self {
-            Change::App(c) => c.arguments.clone(),
+            // Without Ghost's own `_`-led ones: a rule can't narrow a tool per agent
+            // (ADR 0035).
+            Change::App(c) => c
+                .arguments
+                .iter()
+                .filter(|(k, _)| !k.starts_with('_'))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             Change::InstallSkill(c) => {
                 Map::from_iter([("source".to_string(), Value::String(c.source.clone()))])
             }

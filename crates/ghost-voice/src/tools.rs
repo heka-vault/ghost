@@ -14,6 +14,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use ghost_core::apps::{CALLER_ARG, GHOST_APP};
 use ghost_core::conversations::{GHOST, SOURCE as CONVERSATIONS};
 use ghost_core::gate::Request;
 use ghost_core::rules::SOURCE as RULES;
@@ -344,6 +345,15 @@ impl ToolDispatcher {
         if aname == RULES {
             // a rule must be the operator's words
             args.insert("_request".into(), Value::String((self.last_request)().0));
+        }
+        if aname == GHOST_APP {
+            // Ghost's own app is told which agent is calling (ADR 0045): the session's,
+            // over anything the model wrote there.
+            let agent = self
+                .conversations
+                .as_ref()
+                .map_or_else(|| GHOST.to_string(), |c| c.active().slug);
+            args.insert(CALLER_ARG.into(), Value::String(agent));
         }
         let began = Instant::now();
         let prepared = match (op.prepare)(args.clone()).await {

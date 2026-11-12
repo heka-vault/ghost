@@ -140,7 +140,8 @@ allow = []                                     # exceptions, when mode is ask or
   the mode.
 
 Ghost's own operations take the same rules: `conversations.*` (the agents), `skills.*`,
-`rules.add` (a line appended to `AGENTS.md`) and `outputs.*` (files it makes). An older
+`rules.add` (a line appended to `AGENTS.md`), `outputs.*` (files it makes) and `ghost.*`
+(Ghost's own app, [below](#ghosts-own-app)). An older
 policy file with a table per source (`[conversations] delete = "confirm"`) still reads, as
 rules.
 
@@ -167,8 +168,8 @@ connect or disconnect; you can edit it by hand too.
 ```
 
 - **Its name** is lowercase letters, digits, dashes and underscores, never one of
-  Ghost's own (`conversations`, `skills`, `rules`, `outputs`, …), whose operations
-  it would shadow. Ghost writes `apps.json` for you only (0600), and edits only the entry it
+  Ghost's own (`ghost`, `conversations`, `skills`, `rules`, `outputs`, `waiting`), whose
+  operations it would shadow; `ghostd check` names an entry that tries. Ghost writes `apps.json` for you only (0600), and edits only the entry it
   connects or disconnects; a file that isn't JSON is never overwritten.
 - **How it is reached.** Either `url`, with `headers`, which Ghost signs in to when
   `sign_in` is true; or `command`, with `args` and `env`, for an app that runs on this
@@ -198,6 +199,28 @@ under `ghostd check` and on the Apps page. The daemon runs without it.
 A watch (ADR 0028) or a webhook's check at the source (ADR 0027) names an `app` and one
 of its read-only tools. The permissions' `block` rules apply to it as to the model's
 reads. Older declarations that say `server` still read ([folder.md](folder.md#watches)).
+
+## Ghost's own app
+
+Ghost is one of its own apps (ADR 0045). You don't connect it and it is not in
+`apps.json`: the daemon serves it to its agents in process, under the name `ghost`, and
+it is there before any session opens. Through it an agent can look up how Ghost works
+(`ghost_docs_search`, `ghost_docs_read`, from the documentation built into Ghost), say
+how Ghost is now (`ghost_status`, `ghost_apps_list`), say what was changed and when
+(`ghost_audit_recent`), and reach you when you are away: `ghost_notify` puts an item on
+your waiting list from that agent, your routes deliver it like any other, and the agent
+clears it with `ghost_resolve` when the matter is done. An agent can clear only what it
+put there. `ghost_waiting_ack` and `ghost_waiting_snooze` do what the buttons on the list
+do.
+
+The reads are reads and the rest are changes through the gate, recorded in the audit.
+Your permissions cover them as `ghost.*`. The one difference is the default: a `ghost.*`
+change that no rule names runs quietly, because the item on your list is the
+announcement. `allow = ["ghost.notify"]` has Ghost say it each time, `ask` has it ask
+first, and `block` takes the tool away.
+
+Ghost's own text is not an outside system's, so these tools' descriptions and results
+reach the model whole; every other app's are cut as described above.
 
 ## Before a token exists
 
@@ -232,6 +255,8 @@ the gate bridge `AppTarget`, `AppChange`, `AppWriter`), `ghost_core::catalog` th
 copy, `ghost_core::provenance` who publishes a catalog entry, whether it is the maker's own
 and where it runs (`KNOWN_MAKERS` and `SHARED_HOSTS` are the hand-kept lists),
 `ghost_core::signin` the OAuth client storage and loopback, and
-`ghost_core::permissions` the rules. Nothing in the daemon or the pipeline knows an app by
-name: never add a capability by editing them, and never write a bespoke client for a
-service. Connect an app.
+`ghost_core::permissions` the rules. Nothing in the daemon or the pipeline knows a
+connected app by name: never add a capability by editing them, and never write a bespoke
+client for a service. Connect an app. Ghost's own functions are the one exception, and
+they come the same way: as a tool of Ghost's own app (`ghost_core::ghost_app`, the server
+side of the same protocol, attached in process), never as a branch in the pipeline.

@@ -1232,3 +1232,251 @@ async fn a_hold_the_model_asks_for_in_a_barge_in_only_stops_ghost() {
     assert_eq!(r.result["ok"], json!(true));
     assert_eq!(held.lock().unwrap().len(), 1);
 }
+
+// --- Ghost's own app (ADR 0045) ---------------------------------------------------------
+
+mod ghosts_own_app {
+    use super::*;
+    use ghost_core::apps::Apps;
+    use ghost_core::ghost_app::{self, GhostServer, Parts, item_key};
+    use ghost_core::outputs::Outputs;
+    use ghost_core::rules::{Rules, rules_source};
+    use ghost_core::skills::Skills;
+    use ghost_core::waiting::{Items, WaitingList, waiting_source};
+
+    struct Own {
+        convs: Arc<Conversations>,
+        gate: Arc<WriteGate>,
+        rt: Arc<ConversationRuntime>,
+        tools: Arc<ToolDispatcher>,
+        waiting: Arc<WaitingList>,
+        /// What a session reached before Ghost was an app: the skills, the agents, the
+        /// rules, the outputs and the waiting list.
+        before: Vec<ToolSource>,
+        _attached: ghost_app::Attached,
+    }
+
+    /// A session as the daemon builds it, with no app the operator connected: Ghost's own
+    /// app in process, then Ghost's in-tree sources.
+    async fn own(tmp: &Path) -> Own {
+        let store = Arc::new(Store::in_memory().unwrap());
+        let cfg = layout(tmp, RULES);
+        let convs = Arc::new(
+            Conversations::new(
+                store.clone(),
+                &cfg,
+                ConversationsOptions {
+                    default_voice: "af_heart".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        );
+        let gate = Arc::new(WriteGate::new(store.clone()));
+        let apps = Arc::new(Apps::new(
+            Vec::new(),
+            Arc::new(std::collections::HashMap::<String, String>::new()),
+            None,
+        ));
+        let waiting = Arc::new(WaitingList::new(Items::new(store.clone())));
+        let attached = ghost_app::attach(
+            &apps,
+            GhostServer::new(Parts {
+                store,
+                waiting: waiting.clone(),
+                apps: Arc::downgrade(&apps),
+                status: Arc::new(Map::new),
+            }),
+        )
+        .await
+        .unwrap();
+        gate.register(ghost_app::NAME, attached.app.operations());
+        let skills = Arc::new(Skills::new(&cfg.join("skills"), None));
+        let rules = Arc::new(Rules::new(&cfg));
+        let outputs = Arc::new(Outputs::new(&cfg));
+        let before = vec![
+            skills.source(),
+            conversations_source(&convs),
+            rules_source(&rules),
+            outputs.source(),
+            waiting_source(waiting.clone()),
+        ];
+        for s in &before {
+            gate.register(&s.name, s.operations.clone());
+        }
+        let reach = {
+            let (apps, before) = (apps.clone(), before.clone());
+            Arc::new(move |_p: &Profile| {
+                let mut out = apps.sources();
+                out.extend(before.clone());
+                out
+            })
+        };
+        let rt = ConversationRuntime::new(
+            convs.clone(),
+            gate.clone(),
+            "s1",
+            Vec::new(),
+            24000,
+            20,
+            GHOST,
+            None,
+            Some(reach),
+        );
+        let tools = ToolDispatcher::new(ToolsParams {
+            sources: Vec::new(),
+            gate: gate.clone(),
+            session_id: "s1".into(),
+            on_hang_up: no_action(),
+            on_hold: Some(no_action()),
+            turns: None,
+            events: None,
+            conversations: Some(rt.clone()),
+            on_call: Some(record_call(&rt)),
+            last_request: None,
+            probe: None,
+        });
+        Own {
+            convs,
+            gate,
+            rt,
+            tools,
+            waiting,
+            before,
+            _attached: attached,
+        }
+    }
+
+    fn open(o: &Own) -> Vec<(String, String)> {
+        o.waiting
+            .items
+            .open(None)
+            .unwrap()
+            .into_iter()
+            .map(|i| (i.source, i.key))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn an_item_is_from_the_agent_the_session_is_with_whatever_the_model_says() {
+        let tmp = tempfile::tempdir().unwrap();
+        let o = own(tmp.path()).await;
+        hire(&o.gate, "Brand", json!({})).await;
+        let brand = o.convs.get("brand").unwrap().unwrap();
+        o.rt.switch(&brand, "", "").await;
+        // The model claims to be Ghost; the session is with Brand.
+        let r = o
+            .tools
+            .call(
+                "ghost_notify",
+                args(json!({"title": "The logo is ready", "_agent": "ghost"})),
+                "c1",
+            )
+            .await;
+        assert_eq!(r.status(), Some("done"), "{:?}", r.result);
+        // Quiet unless the operator's permissions say otherwise: not a sentence of its own.
+        assert_eq!(r.result["how_to_say_it"], "only if asked, or if it failed");
+        let key = item_key("brand", "The logo is ready");
+        assert_eq!(open(&o), vec![("agent:brand".to_string(), key.clone())]);
+        // Said again, it is still one item.
+        o.tools
+            .call(
+                "ghost_notify",
+                args(json!({"title": "The logo is ready"})),
+                "c2",
+            )
+            .await;
+        assert_eq!(open(&o).len(), 1);
+
+        // Back with Ghost: Brand's item is not Ghost's to clear.
+        let home = o.convs.get(GHOST).unwrap().unwrap();
+        o.rt.switch(&home, "", "").await;
+        let r = o
+            .tools
+            .call("ghost_resolve", args(json!({"key": key})), "c3")
+            .await;
+        assert!(
+            Value::Object(r.result.clone())
+                .to_string()
+                .contains("not an open item of yours"),
+            "{:?}",
+            r.result
+        );
+        assert_eq!(open(&o).len(), 1);
+        o.rt.switch(&brand, "", "").await;
+        let r = o
+            .tools
+            .call("ghost_resolve", args(json!({"key": key})), "c4")
+            .await;
+        assert_eq!(r.status(), Some("done"));
+        assert!(open(&o).is_empty());
+    }
+
+    #[tokio::test]
+    async fn ghosts_docs_reach_the_model_whole_and_without_an_acknowledgment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let o = own(tmp.path()).await;
+        let r = o
+            .tools
+            .call(
+                "ghost_docs_read",
+                args(json!({"name": "architecture", "section": "Conversation flow"})),
+                "c1",
+            )
+            .await;
+        let text = r.result["text"].as_str().unwrap();
+        assert!(text.chars().count() > 4_000 && !text.ends_with('…'));
+        // A call that stays in the process is not "On it."
+        assert!(o.tools.outside("ghost_docs_search").is_none());
+        assert!(o.tools.outside("ghost_notify").is_none());
+        // The paragraph that says to look Ghost up is in the prompt with the tools.
+        let prompt = o.rt.system_prompt(None);
+        assert!(prompt.contains(ghost_app::PROMPT));
+        // The operator's permissions take a tool away like any app's.
+        o.gate.set_autonomy(
+            AutonomyPolicy::parse("[permissions]\nblock = [\"ghost.notify\"]\n", "test").unwrap(),
+        );
+        let names: Vec<String> = o
+            .tools
+            .schemas()
+            .names()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert!(!names.contains(&"ghost_notify".to_string()));
+        assert!(names.contains(&"ghost_resolve".to_string()));
+        let r = o
+            .tools
+            .call("ghost_notify", args(json!({"title": "x"})), "c2")
+            .await;
+        assert!(r.error_text().is_some());
+        assert!(open(&o).is_empty());
+    }
+
+    /// ADR 0018: what the nine tools cost on every turn. Run with `--no-capture` to read
+    /// the numbers; the bound keeps a later tool from growing it unnoticed.
+    #[tokio::test]
+    async fn what_ghosts_own_tools_add_to_every_turn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let o = own(tmp.path()).await;
+        let size = |tools: &ghost_llm::Tools| {
+            (
+                tools.len(),
+                serde_json::to_string(&tools.anthropic()).unwrap().len(),
+            )
+        };
+        let (before_n, before_bytes) = size(&o.tools.schemas_for(&o.before));
+        let (after_n, after_bytes) = size(&o.tools.schemas());
+        let paragraph = ghost_app::PROMPT.len();
+        println!(
+            "tool list: {before_n} tools, {before_bytes} bytes of JSON before; \
+             {after_n} tools, {after_bytes} bytes after; +{} tools, +{} bytes; \
+             prompt paragraph +{paragraph} bytes",
+            after_n - before_n,
+            after_bytes - before_bytes
+        );
+        assert_eq!(after_n - before_n, 9);
+        assert!(after_bytes - before_bytes < 3_500, "{after_bytes}");
+        assert!(paragraph < 700);
+    }
+}

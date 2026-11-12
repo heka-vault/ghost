@@ -30,7 +30,7 @@ use ghost_api::models::{SessionOrigin, TurnVia};
 use ghost_api::server::default_socket_path;
 use ghost_api::{DaemonState, Deps, DevicesPort, Phase};
 use ghost_audio::AudioSettings;
-use ghost_core::apps::{APPS_FILE, Apps, Environ, load_apps};
+use ghost_core::apps::{APPS_FILE, Apps, Environ, GHOST_APP, load_apps};
 use ghost_core::catalog::Catalog;
 use ghost_core::confirmation::{ConfirmationClassifier, RegexClassifier};
 use ghost_core::conversations::{
@@ -39,6 +39,7 @@ use ghost_core::conversations::{
 };
 use ghost_core::folder::Folder;
 use ghost_core::gate::WriteGate;
+use ghost_core::ghost_app::{self, GhostServer};
 use ghost_core::hooks::{HookIntake, Secrets};
 use ghost_core::jev::{JevClassifier, JevClient, JevOptions, WatchDecider, watch_decider};
 use ghost_core::outputs::{Outputs, SOURCE as OUTPUTS};
@@ -1160,7 +1161,9 @@ impl Daemon {
                 for (name, src) in &now {
                     gate.register(name, src.operations.clone());
                 }
-                *reg = now.keys().cloned().collect();
+                // Ghost's own app (ADR 0045) is not one the operator connected: it is
+                // never in this set, so never unregistered and never listed with them.
+                *reg = now.keys().filter(|n| *n != GHOST_APP).cloned().collect();
                 if let Some(d) = weak.upgrade() {
                     d.state.set_apps(reg.iter().cloned().collect());
                     d.refresh_waiting_now();
@@ -1231,6 +1234,28 @@ impl Daemon {
                 .with_on_change(on_change.clone()),
         );
         d.late.waiting.set(waiting.clone()).ok();
+        // ADR 0045: Ghost is an app its own agents use, served in process before any
+        // session can open. It needs no vault, no network and no sign-in.
+        let ghost_app = match ghost_app::attach(
+            &apps,
+            GhostServer::new(ghost_app::Parts {
+                store: store.clone(),
+                waiting: waiting.clone(),
+                apps: Arc::downgrade(&apps),
+                status: crate::ghost_app::status_fn(d),
+            }),
+        )
+        .await
+        {
+            Ok(attached) => {
+                gate.register(GHOST_APP, attached.app.operations());
+                Some(attached)
+            }
+            Err(e) => {
+                error!("app {GHOST_APP}: not started: {}", e.reason());
+                None
+            }
+        };
         // ADR 0028: the watches, polled by the daemon; Jev and a model only where declared.
         let model_step: Arc<dyn Decider> = Arc::new(model_decider({
             let weak = Arc::downgrade(d);
@@ -1279,10 +1304,14 @@ impl Daemon {
                 .with_urgency_of({
                     let folder = folder.clone();
                     Arc::new(move |item| {
-                        declared_urgency(&lock(&folder))
-                            .get(&item.source)
-                            .and_then(|u| Urgency::parse(u))
-                            .unwrap_or(Urgency::Notify)
+                        // An agent's item says how loud it may get (ADR 0045); a watch's
+                        // or a hook's item, what its declaration says.
+                        ghost_app::urgency_of(item).unwrap_or_else(|| {
+                            declared_urgency(&lock(&folder))
+                                .get(&item.source)
+                                .and_then(|u| Urgency::parse(u))
+                                .unwrap_or(Urgency::Notify)
+                        })
                     })
                 })
                 .with_at_desk({
@@ -1541,6 +1570,9 @@ impl Daemon {
             api.stop().await;
         }
         signins.close().await;
+        if let Some(ghost_app) = &ghost_app {
+            ghost_app.stop(); // or it would be served again as the apps close
+        }
         apps.close().await;
         drop(store);
         Ok(())

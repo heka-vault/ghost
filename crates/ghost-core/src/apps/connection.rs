@@ -237,7 +237,7 @@ fn expand_args(args: &[String], environ: &dyn Environ) -> Result<Vec<String>, Ap
 }
 
 /// The transport's end, by kind only: never a URL, a header or a body.
-fn init_kind(e: &rmcp::service::ClientInitializeError) -> String {
+pub(crate) fn init_kind(e: &rmcp::service::ClientInitializeError) -> String {
     use rmcp::service::ClientInitializeError as E;
     match e {
         E::ConnectionClosed(_) => "ConnectionClosed",
@@ -262,6 +262,9 @@ pub struct App {
     taken_elsewhere: RwLock<HashSet<String>>,
     /// Tools not offered, with the name they'd have.
     withheld: RwLock<BTreeMap<String, String>>,
+    /// Ghost's own app, served in process (ADR 0045): its text is Ghost's, so its
+    /// descriptions go to the model whole and its results are not trimmed.
+    own: bool,
 }
 
 impl App {
@@ -279,7 +282,27 @@ impl App {
             failed: RwLock::new(None),
             taken_elsewhere: RwLock::new(HashSet::new()),
             withheld: RwLock::new(BTreeMap::new()),
+            own: false,
         }
+    }
+
+    /// Ghost's own app (ADR 0045): no address, no command, no passwords; its session is
+    /// attached. Only code makes one, never `apps.json`.
+    pub fn own(name: &str, title: &str) -> Self {
+        let spec = AppSpec {
+            name: name.into(),
+            title: title.into(),
+            ..AppSpec::default()
+        };
+        Self {
+            own: true,
+            ..Self::new(spec, Arc::new(HashMap::<String, String>::new()), None)
+        }
+    }
+
+    /// Whether this is Ghost's own app, not one the operator connected.
+    pub fn is_own(&self) -> bool {
+        self.own
     }
 
     pub fn name(&self) -> &str {
@@ -452,7 +475,9 @@ impl App {
     /// Use an already open session (tests, an in-process app).
     pub async fn attach(&self, session: Arc<dyn Session>) -> Result<(), AppError> {
         self.set_session(Some(session));
-        self.refresh().await
+        self.refresh().await?;
+        self.set_failed(None);
+        Ok(())
     }
 
     pub async fn refresh(&self) -> Result<(), AppError> {
@@ -613,6 +638,10 @@ impl App {
 
     /// The paragraph for the system prompt.
     pub fn prompt(&self) -> String {
+        if self.own {
+            // Ghost's own app speaks for itself, and its results are Ghost's own text.
+            return crate::ghost_app::PROMPT.to_string();
+        }
         let offered = self.offered();
         let name_of = |t: &ToolInfo| {
             offered

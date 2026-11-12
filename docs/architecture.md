@@ -50,6 +50,36 @@ the waiting list and the Apps page and is skipped. Everything an app sends is da
 model sees the first sentence of each description, results are trimmed, and nothing in
 them changes a permission. See [apps.md](apps.md).
 
+### Ghost's own app
+
+Ghost is an app too, and its own agents use it (ADR 0045). `ghost_core::ghost_app` is the
+other side of the protocol the apps speak, one handler over the daemon's shared state,
+and `ghostd` serves it to itself in process: a
+`tokio::io::duplex` pair, the server on one end and the ordinary app client on the other,
+joined to the apps as `ghost` (`App::attach`, `Apps::attach`) before any session can open.
+It needs no vault, network or sign-in, is not in `apps.json` (the name is reserved), is
+never an app that "isn't connected", and is started again if its task stops. Its tools are
+offered as `ghost_<tool>` and take the same path as any app's: a read is called directly,
+a change goes through the gate, and the operator's `ghost.*` rules apply.
+
+| Tool | Kind | |
+|---|---|---|
+| `ghost_docs_search`, `ghost_docs_read` | read | Ghost's own documentation, built into the binary (the README, the glossary, this page, `apps.md`, `skills.md`, `folder.md`, `performance.md`, `phone-protocol.md`), split by heading; no model, no network |
+| `ghost_status` | read | Version, phase, the session and its agent, the apps and their state, how much is waiting, the model connection's provider and model, Ghost's own problems; built from the control API's `Status` |
+| `ghost_audit_recent` | read | Recent changes from the audit: what, which agent, when, how it ended |
+| `ghost_apps_list` | read | The connected apps, their state, and how many reads and changes each offers |
+| `ghost_notify`, `ghost_resolve` | change | An item from the calling agent on the waiting list, under `agent:<slug>`, and its clearing; an agent clears only its own |
+| `ghost_waiting_ack`, `ghost_waiting_snooze` | change | What `POST /waiting/ack` and `/waiting/snooze` do |
+
+Three things differ from an app the operator connected. Its text is Ghost's own, so
+descriptions reach the model whole and results are not trimmed (the tools cap themselves:
+a section at 8,000 characters, said when cut). The calling agent is never an argument the
+model writes: the session's dispatcher sets `_agent` to the agent the session is with.
+And where no rule names a `ghost.*` change and the mode is `open`, it runs at `quiet`,
+since an item on the waiting list is its own announcement. Nothing listens for outside
+clients yet; the handler keeps nothing per connection, so the same one can be served
+over HTTP with a token later.
+
 ### Permissions
 
 Everything runs unless the operator says otherwise (ADR 0034). `[permissions]` in
@@ -92,7 +122,7 @@ One Cargo workspace (ADR 0039): the crates under `crates/` and the desktop app's
 | `ghost-audio` | The audio engine: PipeWire through the project's own binding (one clock domain), a realtime-safe ring between its thread and tokio, ducking, the chime and the thinking sound |
 | `ghost-rtc` | The phone's WebRTC audio behind one `Media` trait (ADR 0016, ADR 0020): str0m by default, Opus through the system libopus, the resampling either side of the codec, the RTVI subset |
 | `ghost-api` | The control API (ADR 0013): axum on a user-owned Unix socket. Status and a WebSocket of events, wake and sleep, typed turns, the pending change with Confirm and Cancel, audit, the apps (connect, disconnect, sign in) and the catalog, the permissions and the policy file, the passwords (names and metadata out, values only in, ADR 0036), the model connection (`/model`: its view, the provider's models, Test connection, OpenRouter's sign-in; ADR 0037), devices and setup. `packages/api/openapi.json` is generated from its types (`make api-schema`) and `packages/client-ts` from that. Nothing passive crosses it |
-| `ghost-core` | The write gate and what feeds it (ADR 0007, 0011, 0034, 0035): tool sources (`ghost_core::source::ToolSource`), the apps (`ghost_core::apps`), their catalog and sign-in (`ghost_core::catalog`, `ghost_core::signin`), the model connection (`ghost_core::connection`: the providers, which password holds the key, the settings from before it, ADR 0037), Ghost's folder and its rules (`ghost_core::folder`, `ghost_core::rules`), the operator's permissions (`ghost_core::permissions`, `ghost_core::policy`), proposals over typed targets and change sets, the confirmation classifier and Jev, the audit store, the vault (`ghost_core::passwords`) and redaction, the waiting list, watches, webhooks, routes, skills and outputs, and the agents (ADR 0014). Depends on no other crate of the workspace. Its two binaries, `ghost-mock-github` and `ghost-scripts`, are the two apps `infra/example/apps.json` names |
+| `ghost-core` | The write gate and what feeds it (ADR 0007, 0011, 0034, 0035): tool sources (`ghost_core::source::ToolSource`), the apps (`ghost_core::apps`), their catalog and sign-in (`ghost_core::catalog`, `ghost_core::signin`), the model connection (`ghost_core::connection`: the providers, which password holds the key, the settings from before it, ADR 0037), Ghost's folder and its rules (`ghost_core::folder`, `ghost_core::rules`), the operator's permissions (`ghost_core::permissions`, `ghost_core::policy`), proposals over typed targets and change sets, the confirmation classifier and Jev, the audit store, the vault (`ghost_core::passwords`) and redaction, the waiting list, watches, webhooks, routes, skills and outputs, the agents (ADR 0014), and Ghost's own app (`ghost_core::ghost_app`, ADR 0045). Depends on no other crate of the workspace. Its two binaries, `ghost-mock-github` and `ghost-scripts`, are the two apps `infra/example/apps.json` names |
 | `ghost-core::conversations` | The agents (ADR 0014, ADR 0035): the registry mirrored from the folders, the transcript, every compaction version, and the files per agent under `~/.config/ghost/agents/<slug>/` (`agent.json`, `persona.md`, `memory.md`, `notes.md`). Their mutations are gate operations under `[conversations]` |
 | `heka-ghost-desktop` | The shell (`apps/desktop/src-tauri`): the window, the tray, autostart, and the daemon's supervision (above); the window's bridge to the socket is typed by the same structs the daemon serializes |
 | SQLite | Proposals, operations, operation events, the conversation registry, session transcripts, compaction versions |
@@ -115,8 +145,10 @@ audit, and can be rehired.
 ### The waiting list (ADR 0029)
 
 What needs the operator is one list (`ghost_core::waiting`): items with stable keys in the
-`items` table, from watches and from Ghost itself (a change waiting for a yes, an app that
-isn't connected or wants a new sign-in, a file in Ghost's folder with a problem). A source syncs the whole set it
+`items` table, from watches, from Ghost itself (a change waiting for a yes, an app that
+isn't connected or wants a new sign-in, a file in Ghost's folder with a problem) and from
+the agents (`ghost_notify`, ADR 0045: one item at a time under `agent:<slug>`, cleared by
+that agent's `ghost_resolve`, as loud as the urgency it was given). A watch or Ghost syncs the whole set it
 sees; a new key is news, a key that is gone is resolved. An item is delivered when a route
 passed it on and acknowledged when the operator heard it; only acknowledged or snoozed stops
 the alerting, and a changed item alerts again. `GET /waiting`, `POST /waiting/ack` and
@@ -168,7 +200,7 @@ asking is the operator's call (ADR 0011, ADR 0034); by default, everything:
    ask for it read off the tool's name and short arguments.
 2. `core` checks the source's own limit, then resolves the level from the permissions for
    this source, tool and arguments: the most careful match among the operator's rules,
-   else the mode (`open` announces).
+   else the mode (`open` announces; for Ghost's own app it is quiet, ADR 0045).
 3. `core` stores an immutable proposal. For one of Ghost's own operations the writer
    snapshots the target first; an app's change is not read before or after, and the audit
    row says so.
@@ -225,7 +257,8 @@ types and checked by CI.
 
 Crate direction is strictly `ghostd -> {ghost-voice, ghost-api, ghost-rtc, ghost-audio,
 ghost-infer, ghost-llm} -> ghost-core`; `ghost-core` depends on no other crate of the
-workspace, and nothing knows an app by name: `ghostd` connects whatever `apps.json` lists.
+workspace, and nothing knows a connected app by name: `ghostd` connects whatever `apps.json`
+lists, and serves Ghost's own (`ghost`) beside them.
 See [apps.md](apps.md) to connect one.
 
 ### How the gate is wired into the pipeline
@@ -255,8 +288,9 @@ cancels. Transcripts that arrive while Ghost is still speaking are not evidence 
 operator has not heard the question yet, and the text may be Ghost's own voice. The
 verified outcome is appended to the context as a system note, so the model's next sentence
 describes what actually happened. The model's tools are every connected app's tools (reads
-called directly, changes through the gate), the agents', the skills' and the waiting list's
-read tools, `change`, `hang_up` and `hold`. There is no change that bypasses the gate.
+called directly, changes through the gate), Ghost's own app's in the same way (`ghost_*`,
+ADR 0045), the agents', the skills' and the waiting list's read tools, `change`, `hang_up`
+and `hold`. There is no change that bypasses the gate.
 
 The desk's audio is `crates/ghost-audio`: PipeWire through the project's own binding, one
 clock domain, a capture thread that never allocates. Ghost listens on `ghost.mic`, the output

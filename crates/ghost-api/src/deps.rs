@@ -74,7 +74,12 @@ impl AppsPort for Apps {
     }
 
     fn names(&self) -> Vec<String> {
-        Apps::apps(self).keys().cloned().collect()
+        // The apps the operator connected: Ghost's own (ADR 0045) is not one of them.
+        Apps::apps(self)
+            .into_iter()
+            .filter(|(_, app)| !app.is_own())
+            .map(|(name, _)| name)
+            .collect()
     }
 
     fn is_up(&self, name: &str) -> bool {
