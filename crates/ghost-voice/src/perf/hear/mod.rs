@@ -153,6 +153,11 @@ pub struct Results {
     pub takes: Vec<TakeResult>,
 }
 
+/// Segments read from their first quiet frame over the run, by what became of each, and
+/// the model's seconds on them (`stt::EarlyReadMode`).
+static EARLY: std::sync::Mutex<BTreeMap<&'static str, (usize, f64)>> =
+    std::sync::Mutex::new(BTreeMap::new());
+
 /// What the stage made of a take, and where its segments lay in the audio.
 struct StageRun {
     text: String,
@@ -175,7 +180,9 @@ async fn hear_stage(
     // Any start far from zero: the VAD resets on its first call, then every 5 s of audio.
     let clock = Arc::new(move || 1.0e9 + clock_pos.load(Ordering::Relaxed) as f64 / 16_000.0);
     let mut stt = ParakeetStt::new(models.stt.clone(), Some(vad), settings.vad_params(), 0.0)
-        .with_vad_clock(clock);
+        .with_vad_clock(clock)
+        .with_early_read(settings.stt_early_read)
+        .with_early_read_after(settings.stt_early_read_after_secs);
     let (out, mut rx) = Out::capture();
     let mut audio = pcm.to_vec();
     audio.extend(plan::room_noise(TAIL_SECS, -70.0, 99));
@@ -196,6 +203,12 @@ async fn hear_stage(
                 Frame::VadStarted { .. } => starts.push(end - chunk.len()),
                 Frame::VadStopped { .. } => stops.push(end),
                 Frame::Transcript(t) => texts.push(t),
+                Frame::Metrics(Metric::EarlyRead { what, secs }) => {
+                    let mut early = EARLY.lock().unwrap_or_else(|e| e.into_inner());
+                    let e = early.entry(what).or_default();
+                    e.0 += 1;
+                    e.1 += secs;
+                }
                 Frame::Metrics(Metric::Ttfb { value, .. }) => {
                     read_secs += value;
                     close = Some(value);
@@ -616,6 +629,17 @@ pub async fn run_hear(a: &HearArgs) -> anyhow::Result<i32> {
         &git_commit(&a.root),
         t.elapsed().as_secs_f64(),
     );
+    let mut meta = meta;
+    let early = EARLY.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if !early.is_empty() {
+        let line = early
+            .iter()
+            .map(|(k, (n, secs))| format!("{k} {n} ({secs:.1} s of model)"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("hear: segments read from their first quiet frame: {line}");
+        meta.insert("early reads".into(), json!(line));
+    }
     let results = Results { meta, takes };
     std::fs::write(
         a.out.join("results.json"),

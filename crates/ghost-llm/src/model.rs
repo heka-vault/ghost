@@ -712,7 +712,13 @@ pub fn shared(target: &Target) -> Result<Arc<Model>, LlmError> {
     let key = target.fingerprint();
     let mut clients = CLIENTS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(m) = clients.get(&key) {
-        return Ok(Arc::clone(m));
+        if m.target.model == target.model && m.target.provider == target.provider {
+            return Ok(Arc::clone(m));
+        }
+        // The same connection, another model: the fast model beside the main one (ADR
+        // 0050), or a model the operator has just chosen. The connection is shared; the
+        // model is the target's.
+        return Ok(Arc::new(Model::with_client(m.http.clone(), target.clone())));
     }
     let model = Arc::new(Model::new(target.clone())?);
     clients.insert(key, Arc::clone(&model));

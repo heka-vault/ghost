@@ -247,6 +247,23 @@ impl ToolDispatcher {
         self.schemas_for(&self.active_sources())
     }
 
+    /// Whether the tool the model called by `name` only reads: an app's read tool or one
+    /// of Ghost's own (an app that does not say a tool is read-only offers it as a
+    /// change). The session's own tools (hang up, hold, a transfer, `change`) are not.
+    pub fn is_read(&self, name: &str) -> bool {
+        if matches!(
+            name,
+            CHANGE_TOOL | SWITCH_TOOL | BRING_UP_TOOL | HANG_UP_TOOL | HOLD_TOOL
+        ) {
+            return false;
+        }
+        let sources = self.active_sources();
+        matches!(
+            self.offering.lookup(&sources, name),
+            Some(Offered::Read { .. })
+        )
+    }
+
     /// One call by the model: `name` with `args`; `call_id` labels its steps in the
     /// latency record.
     pub async fn call(&self, name: &str, args: Map<String, Value>, call_id: &str) -> CallResult {

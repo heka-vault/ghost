@@ -305,6 +305,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         settings: voice.clone(),
         models,
         model,
+        fast_model: d.fast_model(),
         sources,
         gate: gate.clone(),
         events: Some(events.clone()),

@@ -14,6 +14,12 @@
 //! Whether Ghost is speaking comes from the output stage's shared flag (`crate::speaking`)
 //! as much as from the `BotStarted` frame, which reaches this stage last of all.
 //!
+//! The segment's read starts when the operator goes quiet, not when the VAD has heard
+//! enough quiet to call the segment over (`with_early_read`): at the VAD's first quiet
+//! frame the segment so far is read, with silence where the rest of the stop would be, so
+//! the words are ready when the stop is confirmed. Speech again before the stop throws the
+//! read away (`Metric::EarlyRead`, `discarded`); the next quiet starts another.
+//!
 //! The VAD runs here (Pipecat ran it in the user aggregator and sent its frames back up):
 //! the frames it makes are the same, `VadStarted` and `VadStopped`, and every stage below
 //! sees them in order with the audio. Transcripts are logged only under
@@ -147,7 +153,43 @@ pub struct ParakeetStt {
     /// The VAD's clock (it resets Silero's state every few seconds of it): epoch seconds
     /// live, the audio's own time when a harness feeds a file faster than real time.
     vad_clock: Option<VadClock>,
+    /// Read a segment from its first quiet frame (`with_early_read`).
+    early_read: EarlyReadMode,
+    /// The read started at the first quiet frame, while the VAD waits out its stop.
+    early: Option<EarlyRead>,
+    /// The VAD's state after the frame before.
+    vad_state: VadState,
+    /// Quiet heard since the VAD began to stop, and whether this quiet's read began.
+    quiet_secs: f64,
+    early_tried: bool,
+    /// How much quiet starts the early read: the VAD dips between words for a frame or
+    /// two, and a read begun there is thrown away.
+    early_after_secs: f64,
 }
+
+/// Whether a segment is read from its first quiet frame (`ParakeetStt::with_early_read`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum EarlyReadMode {
+    /// At the VAD's stop, as before.
+    #[default]
+    Off,
+    /// From the first quiet frame; its words are the segment's.
+    On,
+    /// From the first quiet frame, and read again at the stop as before: the words are
+    /// the stop's, and whether the early read said the same is counted (`differs`). For
+    /// the harness, which measures that the early words are the same.
+    Verify,
+}
+
+/// A segment's read begun at its first quiet frame.
+struct EarlyRead {
+    task: JoinHandle<(Option<String>, f64)>,
+}
+
+/// What became of an early read (`Metric::EarlyRead`): `used`, `discarded` (speech came
+/// back first), `same` and `differs` (verified against the read at the stop).
+pub const EARLY_USED: &str = "used";
+pub const EARLY_DISCARDED: &str = "discarded";
 
 /// Seconds, for the VAD (`ParakeetStt::with_vad_clock`).
 pub type VadClock = Arc<dyn Fn() -> f64 + Send + Sync>;
@@ -187,6 +229,87 @@ impl ParakeetStt {
             mode: VadMode::Room,
             pending_mode: None,
             vad_clock: None,
+            early_read: EarlyReadMode::Off,
+            early: None,
+            vad_state: VadState::Quiet,
+            quiet_secs: 0.0,
+            early_tried: false,
+            early_after_secs: 0.0,
+        }
+    }
+
+    /// Read each segment from its first quiet frame, so its words are ready when the VAD
+    /// confirms the stop (see the module doc).
+    pub fn with_early_read(mut self, mode: EarlyReadMode) -> Self {
+        self.early_read = mode;
+        self
+    }
+
+    /// Start the early read once this much quiet was heard, not at the first quiet frame.
+    pub fn with_early_read_after(mut self, secs: f64) -> Self {
+        self.early_after_secs = secs.max(0.0);
+        self
+    }
+
+    /// The audio a segment is read on: what was heard, then silence to the length the
+    /// read at the stop has (the rest of the VAD's stop, then `TRAILING_SECS`).
+    fn read_audio(segment: &[i16], pad_secs: f64) -> Vec<f32> {
+        let mut audio = segment.to_vec();
+        audio.extend(std::iter::repeat_n(
+            0i16,
+            (pad_secs * f64::from(SAMPLE_RATE)) as usize,
+        ));
+        ghost_infer::audio::to_f32(&audio)
+    }
+
+    /// The operator went quiet (the VAD's first quiet frame after speech): read what was
+    /// said, with silence for the stop the VAD has still to wait.
+    pub(crate) fn silence_began(&mut self) {
+        if self.early_read == EarlyReadMode::Off || !self.user_speaking || self.segment.is_empty() {
+            return;
+        }
+        self.drop_early();
+        self.early_tried = true;
+        // The read at the stop has the whole stop's quiet; what is still to come of it is
+        // silence here.
+        let to_come = (f64::from(self.active_params().stop_secs) - self.quiet_secs).max(0.0);
+        let pad = to_come + TRAILING_SECS;
+        let audio = Self::read_audio(&self.segment, pad);
+        let model = self.model.clone();
+        self.early = Some(EarlyRead {
+            task: tokio::task::spawn_blocking(move || {
+                let began = Instant::now();
+                let text = recognize(&model, &audio, true);
+                (text, began.elapsed().as_secs_f64())
+            }),
+        });
+    }
+
+    /// Speech again before the stop: the early read was of half a segment.
+    pub(crate) async fn speech_resumed(&mut self, out: &Out) {
+        self.quiet_secs = 0.0;
+        self.early_tried = false;
+        if let Some(e) = self.early.take() {
+            // The read runs on to its end on its thread; its CPU is what this costs. The
+            // stage does not wait for it: the operator is talking.
+            let out = out.clone();
+            tokio::spawn(async move {
+                let secs = e.task.await.map(|(_, s)| s).unwrap_or_default();
+                debug::audio(|| {
+                    format!("early read discarded: speech again ({secs:.2}s of model)")
+                });
+                out.push(Frame::Metrics(Metric::EarlyRead {
+                    what: EARLY_DISCARDED,
+                    secs,
+                }))
+                .await;
+            });
+        }
+    }
+
+    fn drop_early(&mut self) {
+        if let Some(e) = self.early.take() {
+            e.task.abort();
         }
     }
 
@@ -318,6 +441,8 @@ impl ParakeetStt {
     }
 
     async fn vad_stopped(&mut self, out: &Out) {
+        self.quiet_secs = 0.0;
+        self.early_tried = false;
         self.schedule.lock().unwrap().vad_stopped();
         let stop_secs = self.active_params().stop_secs;
         self.segment_ended();
@@ -326,9 +451,51 @@ impl ParakeetStt {
     }
 
     /// The segment's transcript: waits for an interim in flight, then takes the model.
+    /// With an early read under way, its words, waited for.
     async fn final_(&mut self, out: &Out) {
         let mut segment = std::mem::take(&mut self.segment);
+        let early = self.early.take();
         if segment.is_empty() {
+            if let Some(e) = early {
+                e.task.abort();
+            }
+            return;
+        }
+        let early = match early {
+            Some(e) => {
+                let began = Instant::now();
+                let (text, secs) = e.task.await.unwrap_or((None, 0.0));
+                Some((
+                    text.unwrap_or_default(),
+                    began.elapsed().as_secs_f64(),
+                    secs,
+                ))
+            }
+            None => None,
+        };
+        if let Some((text, waited, secs)) = &early
+            && self.early_read == EarlyReadMode::On
+        {
+            out.push(Frame::Metrics(Metric::EarlyRead {
+                what: EARLY_USED,
+                secs: *secs,
+            }))
+            .await;
+            // What the read at the stop would have cost the turn: only the wait for it.
+            out.push(Frame::Metrics(Metric::Ttfb {
+                value: *waited,
+                model: None,
+            }))
+            .await;
+            let secs_audio = segment.len() as f64 / f64::from(SAMPLE_RATE);
+            if text.is_empty() {
+                debug::audio(|| {
+                    format!("heard nothing in a {secs_audio:.1}s segment (read early)")
+                });
+            } else {
+                debug::audio(|| format!("heard: {text:?} (read early)"));
+                out.push(Frame::Transcript(text.clone())).await;
+            }
             return;
         }
         let secs = segment.len() as f64 / f64::from(SAMPLE_RATE);
@@ -357,6 +524,21 @@ impl ParakeetStt {
             model: None,
         }))
         .await;
+        if let Some((early_text, _, secs)) = early {
+            // Verifying: the stop's words are the segment's; the early read's are counted.
+            if early_text != text {
+                debug::audio(|| format!("early read differs: {early_text:?} at the stop {text:?}"));
+            }
+            out.push(Frame::Metrics(Metric::EarlyRead {
+                what: if early_text == text {
+                    "same"
+                } else {
+                    "differs"
+                },
+                secs,
+            }))
+            .await;
+        }
         if text.is_empty() {
             // 2026-10-30 19:28: a 2 s segment Smart Turn judged done (0.98) left no
             // line at all, and the turn closed on the words before it.
@@ -409,6 +591,7 @@ impl ParakeetStt {
 impl Drop for ParakeetStt {
     fn drop(&mut self) {
         self.cancel_interim();
+        self.drop_early();
     }
 }
 
@@ -426,11 +609,28 @@ impl Stage for ParakeetStt {
                     // a dip through Stopping and back is the same segment.
                     let now = self.vad_clock.as_ref().map_or_else(epoch, |c| c());
                     let after = vad.analyze(&audio.samples, now).unwrap_or(vad.state());
+                    let before = std::mem::replace(&mut self.vad_state, after);
                     if !self.user_speaking && after == VadState::Speaking {
                         self.vad_started(out).await;
                     }
                     if self.user_speaking {
                         self.segment.extend_from_slice(&audio.samples);
+                        match after {
+                            VadState::Stopping => {
+                                if before != VadState::Stopping {
+                                    self.quiet_secs = 0.0;
+                                    self.early_tried = false;
+                                }
+                                self.quiet_secs += audio.seconds();
+                                if !self.early_tried && self.quiet_secs >= self.early_after_secs {
+                                    self.silence_began();
+                                }
+                            }
+                            VadState::Speaking if before == VadState::Stopping => {
+                                self.speech_resumed(out).await;
+                            }
+                            _ => {}
+                        }
                     } else {
                         self.pre_roll.extend(audio.samples.iter().copied());
                         let keep = (PRE_ROLL_SECS * f64::from(SAMPLE_RATE)) as usize;
@@ -479,7 +679,10 @@ impl Stage for ParakeetStt {
                 self.bot_speaking = false;
                 self.sync_speaking();
             }
-            Frame::End | Frame::Cancel => self.cancel_interim(),
+            Frame::End | Frame::Cancel => {
+                self.cancel_interim();
+                self.drop_early();
+            }
             _ => {}
         }
         out.forward(frame, direction).await;
@@ -487,6 +690,7 @@ impl Stage for ParakeetStt {
 
     async fn stopped(&mut self) {
         self.cancel_interim();
+        self.drop_early();
     }
 }
 
@@ -782,6 +986,154 @@ mod tests {
             assert!(interims(&down).is_empty());
             assert_eq!(m.calls(), 0);
         }
+    }
+
+    // --- the read from the first quiet frame -------------------------------------------
+
+    /// Reads what it is given: the words are the loud samples' count and the audio's
+    /// length, so two reads say the same only of the same audio as Parakeet hears it.
+    struct Counting {
+        calls: Arc<Mutex<Vec<usize>>>,
+        delay: Duration,
+    }
+
+    impl Recognizer for Counting {
+        fn transcribe(&mut self, audio: &[f32]) -> ghost_infer::Result<String> {
+            self.calls.lock().unwrap().push(audio.len());
+            std::thread::sleep(self.delay);
+            let loud = audio.iter().filter(|x| x.abs() > 0.01).count();
+            Ok(format!("{loud} loud of {}", audio.len()))
+        }
+    }
+
+    fn counting(delay_ms: u64) -> (SharedRecognizer, Arc<Mutex<Vec<usize>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        (
+            Arc::new(Mutex::new(Counting {
+                calls: calls.clone(),
+                delay: Duration::from_millis(delay_ms),
+            })),
+            calls,
+        )
+    }
+
+    fn speech(secs: f64) -> Vec<Frame> {
+        (0..((secs / 0.02).round() as usize))
+            .map(|_| Frame::AudioIn(Audio::new(vec![3000; 320], RATE)))
+            .collect()
+    }
+
+    fn quiet(secs: f64) -> Vec<Frame> {
+        (0..((secs / 0.02).round() as usize))
+            .map(|_| Frame::AudioIn(Audio::new(vec![0; 320], RATE)))
+            .collect()
+    }
+
+    fn early_reads(down: &[Frame]) -> Vec<&'static str> {
+        down.iter()
+            .filter_map(|f| match f {
+                Frame::Metrics(Metric::EarlyRead { what, .. }) => Some(*what),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// One segment as the VAD would mark it: speech, the first quiet frame (where the
+    /// early read starts), then the stop's quiet; `resume` puts speech back in between.
+    async fn segment(mode: EarlyReadMode, resume: bool) -> (Vec<Frame>, Vec<usize>) {
+        let (model, calls) = counting(30);
+        let mut stt =
+            ParakeetStt::new(model, None, VadParams::default(), 0.0).with_early_read(mode);
+        let (out, mut rx) = Out::capture();
+        stt.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        for f in speech(0.6) {
+            stt.process(f, Direction::Down, &out).await;
+        }
+        stt.silence_began();
+        if resume {
+            for f in quiet(0.1) {
+                stt.process(f, Direction::Down, &out).await;
+            }
+            stt.speech_resumed(&out).await;
+            for f in speech(0.4) {
+                stt.process(f, Direction::Down, &out).await;
+            }
+            stt.silence_began();
+        }
+        // The rest of the VAD's stop: 0.2 s of quiet, then the stop.
+        for f in quiet(0.2) {
+            stt.process(f, Direction::Down, &out).await;
+        }
+        stt.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let down = drain(&mut rx).await;
+        let calls = calls.lock().unwrap().clone();
+        (down, calls)
+    }
+
+    #[tokio::test]
+    async fn test_a_segment_read_from_its_first_quiet_frame_says_what_the_stop_would() {
+        let (off, off_calls) = segment(EarlyReadMode::Off, false).await;
+        let (on, on_calls) = segment(EarlyReadMode::On, false).await;
+        // One read each, of audio of the same length, and the same words.
+        assert_eq!(off_calls.len(), 1);
+        assert_eq!(on_calls, off_calls, "the same length of audio");
+        assert_eq!(finals(&on), finals(&off));
+        assert_eq!(finals(&on).len(), 1);
+        assert_eq!(early_reads(&on), vec![EARLY_USED]);
+        assert!(early_reads(&off).is_empty());
+        // Verifying reads twice, keeps the stop's words, and says they were the same.
+        let (verify, calls) = segment(EarlyReadMode::Verify, false).await;
+        assert_eq!(calls.len(), 2);
+        assert_eq!(finals(&verify), finals(&off));
+        assert_eq!(early_reads(&verify), vec!["same"]);
+    }
+
+    #[tokio::test]
+    async fn test_speech_again_before_the_stop_discards_the_early_read() {
+        let (off, _) = segment(EarlyReadMode::Off, true).await;
+        let (on, calls) = segment(EarlyReadMode::On, true).await;
+        // The first quiet's read was of half the segment and is thrown away; the second
+        // quiet's read is the whole segment's, and says what the stop's read says.
+        assert_eq!(early_reads(&on), vec![EARLY_DISCARDED, EARLY_USED]);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(finals(&on), finals(&off));
+        assert_eq!(finals(&on).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_the_early_read_is_not_waited_for_twice_at_the_stop() {
+        // With the read 0.15 s long and started 0.2 s before the stop, the words come at
+        // the stop: the stage reports the time it waited, not the read's.
+        let (model, _) = counting(150);
+        let mut stt = ParakeetStt::new(model, None, VadParams::default(), 0.0)
+            .with_early_read(EarlyReadMode::On);
+        let (out, mut rx) = Out::capture();
+        stt.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        for f in speech(0.5) {
+            stt.process(f, Direction::Down, &out).await;
+        }
+        stt.silence_began();
+        for f in quiet(0.2) {
+            stt.process(f, Direction::Down, &out).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        stt.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        let down = drain(&mut rx).await;
+        let waited: Vec<f64> = down
+            .iter()
+            .filter_map(|f| match f {
+                Frame::Metrics(Metric::Ttfb { value, .. }) => Some(*value),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(waited.len(), 1);
+        assert!(waited[0] < 0.05, "waited {}s at the stop", waited[0]);
+        assert_eq!(finals(&down).len(), 1);
     }
 
     // --- one recognition at a time ---------------------------------------------------

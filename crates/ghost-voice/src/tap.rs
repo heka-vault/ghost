@@ -5,6 +5,11 @@
 //! ones an interceptor later takes). `AssistantTap` sits right before TTS and collects the
 //! model's text per response, plus anything spoken directly (`Speak`). Nothing here touches
 //! passive audio: both only exist inside a session.
+//!
+//! A reply is recorded once Ghost's voice has started on it, not when the model finished
+//! writing it: a reply the operator went on over before any of it was heard (the turn is
+//! reopened, `turns::TurnControl`) was never said, and with a short grace (ADR 0049) that
+//! happens often enough that the record would fill with answers nobody heard.
 
 use std::sync::Arc;
 
@@ -105,6 +110,10 @@ pub struct AssistantTap {
     on_turn: OnTurn,
     on_marker: Option<OnMarker>,
     buf: Vec<String>,
+    /// A reply the model finished that has not reached the speaker yet.
+    unheard: Option<String>,
+    /// Ghost's voice is at the speaker.
+    speaking: bool,
 }
 
 impl AssistantTap {
@@ -113,13 +122,32 @@ impl AssistantTap {
             on_turn,
             on_marker,
             buf: Vec::new(),
+            unheard: None,
+            speaking: false,
         }
     }
 
+    /// The reply the model finished is the record's.
     async fn flush(&mut self) {
+        self.finish();
+        self.heard().await;
+    }
+
+    /// The model finished a reply: it waits for Ghost's voice.
+    fn finish(&mut self) {
         let text = std::mem::take(&mut self.buf).concat();
         let text = text.trim().to_string();
         if !text.is_empty() {
+            self.unheard = Some(match self.unheard.take() {
+                Some(before) => format!("{before} {text}"),
+                None => text,
+            });
+        }
+    }
+
+    /// Ghost's voice is on the reply (or nothing will ever say otherwise): record it.
+    async fn heard(&mut self) {
+        if let Some(text) = self.unheard.take() {
             (self.on_turn)("assistant", text).await;
         }
     }
@@ -135,19 +163,39 @@ impl Stage for AssistantTap {
         match &frame {
             Frame::Marker(slug) => {
                 // Text generated so far was the old agent's; flush it before moving on.
+                // A transfer is announced aloud, so what was written is recorded now.
                 self.flush().await;
                 if let Some(on_marker) = &self.on_marker {
                     on_marker(slug);
                 }
             }
             Frame::LlmText(text) => self.buf.push(text.clone()),
-            Frame::LlmEnd => self.flush().await,
+            Frame::LlmEnd => {
+                self.finish();
+                if self.speaking {
+                    self.heard().await; // a long reply, already being spoken
+                }
+            }
+            // The next reply, or the session's end: a reply that made no sound (nothing in
+            // it to say aloud) was still the reply.
+            Frame::LlmStart | Frame::End => self.heard().await,
+            Frame::BotStarted => {
+                self.speaking = true;
+                self.heard().await;
+            }
+            Frame::BotStopped => self.speaking = false,
+            // The operator spoke before any of it was heard: it was never said.
+            Frame::Interruption => self.unheard = None,
             Frame::Speak(text) if !text.trim().is_empty() => {
                 (self.on_turn)("assistant", text.clone()).await;
             }
             _ => {}
         }
         out.forward(frame, direction).await;
+    }
+
+    async fn stopped(&mut self) {
+        self.heard().await;
     }
 }
 
@@ -156,6 +204,76 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+
+    fn recorder() -> (OnTurn, Arc<Mutex<Vec<String>>>) {
+        let turns = Arc::new(Mutex::new(Vec::new()));
+        let t = turns.clone();
+        let on_turn: OnTurn = Arc::new(move |role, text| {
+            let t = t.clone();
+            Box::pin(async move {
+                t.lock().unwrap().push(format!("{role}:{text}"));
+            })
+        });
+        (on_turn, turns)
+    }
+
+    async fn feed(tap: &mut AssistantTap, frames: Vec<(Frame, Direction)>) {
+        let (out, _rx) = Out::capture();
+        for (frame, direction) in frames {
+            tap.process(frame, direction, &out).await;
+        }
+    }
+
+    fn reply(text: &str) -> Vec<(Frame, Direction)> {
+        vec![
+            (Frame::LlmStart, Direction::Down),
+            (Frame::LlmText(text.into()), Direction::Down),
+            (Frame::LlmEnd, Direction::Down),
+        ]
+    }
+
+    #[tokio::test]
+    async fn test_a_reply_is_recorded_when_ghosts_voice_starts_on_it() {
+        let (on_turn, turns) = recorder();
+        let mut tap = AssistantTap::new(on_turn, None);
+        feed(&mut tap, reply("Three are waiting.")).await;
+        assert!(turns.lock().unwrap().is_empty(), "written, not yet said");
+        feed(&mut tap, vec![(Frame::BotStarted, Direction::Up)]).await;
+        assert_eq!(*turns.lock().unwrap(), vec!["assistant:Three are waiting."]);
+        // A long reply still being written while it is spoken is recorded at its end.
+        feed(&mut tap, reply("And the oldest is from Monday.")).await;
+        assert_eq!(turns.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_a_reply_the_operator_went_on_over_before_it_was_heard_is_not_recorded() {
+        // The turn is reopened (`turns::TurnControl`): the half turn's answer was never
+        // said, and the whole turn's answer is the one the record keeps.
+        let (on_turn, turns) = recorder();
+        let mut tap = AssistantTap::new(on_turn, None);
+        feed(&mut tap, reply("Three are waiting.")).await;
+        feed(&mut tap, vec![(Frame::Interruption, Direction::Down)]).await;
+        feed(&mut tap, reply("Three are waiting in the app repo.")).await;
+        feed(&mut tap, vec![(Frame::BotStarted, Direction::Up)]).await;
+        assert_eq!(
+            *turns.lock().unwrap(),
+            vec!["assistant:Three are waiting in the app repo."]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a_reply_that_made_no_sound_is_recorded_by_the_next_one_or_the_end() {
+        let (on_turn, turns) = recorder();
+        let mut tap = AssistantTap::new(on_turn, None);
+        feed(&mut tap, reply("**")).await; // nothing in it to say aloud
+        feed(&mut tap, reply("Done.")).await;
+        assert_eq!(*turns.lock().unwrap(), vec!["assistant:**"]);
+        tap.stopped().await;
+        assert_eq!(
+            *turns.lock().unwrap(),
+            vec!["assistant:**", "assistant:Done."]
+        );
+    }
 
     #[tokio::test]
     async fn test_fragments_record_turns_but_thinking_waits_for_the_turn_end() {

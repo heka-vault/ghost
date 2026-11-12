@@ -28,7 +28,7 @@ use crate::config::VoiceSettings;
 use crate::confirmation::{ConfirmationProcessor, last_assistant_text};
 use crate::conversation::{ConversationRuntime, OnSwitch, Reach};
 use crate::echo::EchoFilter;
-use crate::elevenlabs::session_tts;
+use crate::elevenlabs::{VoiceHooks, session_tts};
 use crate::frames::{Clock, Direction, Frame, INBOX, Observer, Out, Pushed, Stage, assemble};
 use crate::hold::{HoldGate, HoldState, OnResume};
 use crate::intents::{QuickIntents, pick};
@@ -385,6 +385,8 @@ pub struct SessionParams {
     pub settings: Arc<VoiceSettings>,
     pub models: Arc<Models>,
     pub model: Arc<dyn ModelPort>,
+    /// The model a turn's first call goes to, when the connection names one (ADR 0050).
+    pub fast_model: Option<Arc<dyn ModelPort>>,
     pub sources: Vec<ToolSource>,
     pub gate: Arc<WriteGate>,
     pub events: Option<Arc<Events>>,
@@ -771,7 +773,9 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             )
             .with_params_over_ghost(settings.vad_params_over_ghost())
             .with_closing_start_secs(settings.vad_closing_start_secs)
-            .with_speaking(speaking.clone()),
+            .with_speaking(speaking.clone())
+            .with_early_read(settings.stt_early_read)
+            .with_early_read_after(settings.stt_early_read_after_secs),
         ),
     ));
     let hold_gate = HoldGate::new(
@@ -847,6 +851,11 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 settings.turn_speculate,
                 turns.clone(),
             )
+            .with_confident_close(
+                settings.turn_confident_grace_secs,
+                settings.turn_confident_prob,
+            )
+            .with_reopen_started(settings.turn_reopen_started_secs)
             .with_probe(probe.clone())
             .with_idle(settings.idle_timeout_secs, on_idle, held.clone())
             .with_reader(settings.turn_reread.then(|| p.models.stt.clone()))
@@ -858,22 +867,6 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         keep_messages: settings.compact_keep_messages,
         summary_tokens: settings.compact_summary_tokens,
     });
-    stages.push((
-        Some(Slot::AfterLlm),
-        Box::new(
-            LlmStage::new(
-                p.model.clone(),
-                context.clone(),
-                tools,
-                options,
-                dispatcher.clone(),
-                turns.clone(),
-                inject,
-                runtime.clone(),
-            )
-            .with_compaction(compaction),
-        ),
-    ));
     let tts_settings = match &runtime {
         Some(rt) => match rt.conversations().voice_for(&rt.active()) {
             Ok((voice, speed)) => TtsSettings { voice, speed },
@@ -887,6 +880,50 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             speed: settings.tts_speed,
         },
     };
+    // The reply's first clause is rendered while the reply is held (ADR 0049): with the
+    // local voice unless set otherwise, never behind a paid one.
+    let prerender = (settings.prerender() && settings.tts_engine != "elevenlabs").then(|| {
+        crate::tts::Prerender::new(
+            p.models.tts.clone(),
+            tts_settings.clone(),
+            settings.clause_min_words(),
+            Some(probe.clone()),
+        )
+        .with_first_clause(settings.tts_first_clause_words)
+    });
+    if settings.tts_prerender == Some(true) && settings.tts_engine == "elevenlabs" {
+        warn!(
+            "tts: GHOST_TTS_PRERENDER is on, but rendering ahead is Kokoro's only; the cloud voice renders as it speaks"
+        );
+    }
+    stages.push((
+        Some(Slot::AfterLlm),
+        Box::new(
+            LlmStage::new(
+                p.model.clone(),
+                context.clone(),
+                tools,
+                options,
+                dispatcher.clone(),
+                turns.clone(),
+                inject,
+                runtime.clone(),
+            )
+            .with_fast(p.fast_model.clone())
+            .with_fast_reads(
+                (settings.llm_fast_reads && p.fast_model.is_some()).then(|| {
+                    let d = dispatcher.clone();
+                    crate::llm::FastReads {
+                        is_read: Arc::new(move |name: &str| d.is_read(name)),
+                        max_chars: settings.llm_fast_read_max_chars,
+                        rounds: settings.llm_fast_read_rounds.max(1),
+                    }
+                }),
+            )
+            .with_prerender(prerender.clone())
+            .with_compaction(compaction),
+        ),
+    ));
     stages.push((
         None,
         Box::new(NarrationCut::default().with_turns(turns.clone())),
@@ -913,6 +950,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                     tts_settings.speed,
                     turns.clone(),
                 )
+                .with_settle(settings.turn_grace_secs)
                 .with_on_ack(on_ack),
             ),
         ));
@@ -940,8 +978,11 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         tts_settings,
         settings.clause_min_words(),
         line,
-        turns.clone(),
-        Some(on_say),
+        VoiceHooks {
+            turns: turns.clone(),
+            on_say: Some(on_say),
+            prerender,
+        },
     );
     stages.push((Some(Slot::AudioOut), tts));
     stages.push((None, Box::new(ThinkingSoundCut)));

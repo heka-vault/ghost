@@ -17,10 +17,11 @@ pub const TTS_ENGINES: [&str; 2] = ["kokoro", "elevenlabs"];
 pub const LLM_MAX_TOKENS: u32 = ghost_llm::LLM_MAX_TOKENS;
 /// The VoiceSettings fields that make up the model connection, and the variables they
 /// mirror (ghost_core.connection). ghostd refreshes them when the desktop saves.
-pub const LLM_FIELDS: [(&str, &str); 10] = [
+pub const LLM_FIELDS: [(&str, &str); 11] = [
     ("llm_provider", "GHOST_LLM_PROVIDER"),
     ("llm_endpoint", "GHOST_LLM_ENDPOINT"),
     ("llm_model", "GHOST_LLM_MODEL"),
+    ("llm_fast_model", "GHOST_LLM_FAST_MODEL"),
     ("llm_protocol", "GHOST_LLM_PROTOCOL"),
     ("llm_base_url", "GHOST_LLM_BASE_URL"),
     ("llm_password", "GHOST_LLM_PASSWORD"),
@@ -47,6 +48,12 @@ pub struct VoiceSettings {
     pub llm_env: HashMap<String, String>,
     pub llm_thinking: String,
     pub llm_max_tokens: u32,
+    /// `GHOST_LLM_FAST_READS`: the fast model (ADR 0050) makes reads itself and answers
+    /// from their results while they are no longer than `GHOST_LLM_FAST_READ_MAX_CHARS`,
+    /// for at most `GHOST_LLM_FAST_READ_ROUNDS` rounds; off, any call hands the turn over.
+    pub llm_fast_reads: bool,
+    pub llm_fast_read_max_chars: usize,
+    pub llm_fast_read_rounds: usize,
 
     // STT
     pub stt_model: String,
@@ -58,6 +65,13 @@ pub struct VoiceSettings {
     /// (`models/parakeet-tdt-0.6b-v3/`, `scripts/models.sh parakeet`), and for int8 the
     /// Hugging Face cache.
     pub stt_dir: Option<PathBuf>,
+    /// `GHOST_STT_EARLY_READ`: a segment is read from the VAD's first quiet frame, so its
+    /// words are ready when the stop is confirmed (`on`); at the stop, as before (`off`);
+    /// or both, keeping the stop's words and counting where they differ (`verify`, for
+    /// the harness).
+    pub stt_early_read: crate::stt::EarlyReadMode,
+    /// `GHOST_STT_EARLY_READ_AFTER_SECS`: the quiet that starts the early read.
+    pub stt_early_read_after_secs: f64,
 
     // TTS
     pub tts_voice: String,
@@ -67,6 +81,14 @@ pub struct VoiceSettings {
     /// Speak from the first clause instead of the whole sentence (`ghost_infer::clauses`).
     pub tts_clauses: bool,
     pub tts_clause_min_words: usize,
+    /// `GHOST_TTS_PRERENDER`: render a reply's first clause while the reply is still
+    /// held (ADR 0049). Unset: on for Kokoro, off for a paid voice, where a withdrawn
+    /// reply would be paid characters.
+    pub tts_prerender: Option<bool>,
+    /// `GHOST_TTS_FIRST_CLAUSE_WORDS`: a reply's first piece is cut once this many words
+    /// are pending, at a comma or before a phrase's first word, so its audio starts sooner
+    /// (`ghost_infer::clauses::ClauseAggregator::with_first_clause`); 0, the usual rule.
+    pub tts_first_clause_words: usize,
     /// kokoro (local, the default) or elevenlabs (ADR 0026), Kokoro behind it.
     pub tts_engine: String,
     pub elevenlabs_api_key: Zeroizing<String>,
@@ -91,6 +113,15 @@ pub struct VoiceSettings {
     pub barge_in_interim_secs: f64,
     pub echo_window_secs: f64,
     pub turn_grace_secs: f64,
+    /// `GHOST_TURN_CONFIDENT_GRACE_SECS`, `GHOST_TURN_CONFIDENT_PROB` (ADR 0049): the grace
+    /// when Smart Turn is at least this sure and the words end a sentence. A grace at or
+    /// over `turn_grace_secs`, or a probability over 1, is the one grace for every turn.
+    pub turn_confident_grace_secs: f64,
+    pub turn_confident_prob: f32,
+    /// `GHOST_TURN_REOPEN_STARTED_SECS`: words from the operator whose speech began
+    /// within this long of Ghost's first sample reopen the turn; 0 keeps a turn whose
+    /// answer began, and the words are a barge-in.
+    pub turn_reopen_started_secs: f64,
     pub turn_speculate: bool,
     /// `GHOST_TURN_REREAD`: a second and later segment replaces the turn's pieces with the
     /// whole turn read once (ADR 0044); off, the pieces as they came.
@@ -229,18 +260,35 @@ impl VoiceSettings {
             llm_env,
             llm_thinking: string("GHOST_LLM_THINKING", ghost_llm::DEFAULT_THINKING),
             llm_max_tokens: number("GHOST_LLM_MAX_TOKENS")?.map_or(LLM_MAX_TOKENS, |v| v as u32),
+            llm_fast_reads: flag("GHOST_LLM_FAST_READS", true),
+            llm_fast_read_max_chars: usize_or("GHOST_LLM_FAST_READ_MAX_CHARS", 4000)?,
+            llm_fast_read_rounds: usize_or("GHOST_LLM_FAST_READ_ROUNDS", 2)?,
             stt_model: string("GHOST_STT_MODEL", "nemo-parakeet-tdt-0.6b-v3"),
             stt_quantization: get("GHOST_STT_QUANTIZATION")
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty() && v != "none"),
             stt_threads: usize_or("GHOST_STT_THREADS", 4)?,
             stt_dir: path("GHOST_STT_DIR"),
+            stt_early_read_after_secs: f64_or("GHOST_STT_EARLY_READ_AFTER_SECS", 0.0)?,
+            stt_early_read: match text("GHOST_STT_EARLY_READ")
+                .map(|v| v.trim().to_lowercase())
+                .as_deref()
+            {
+                None => crate::stt::EarlyReadMode::Off,
+                Some("verify") => crate::stt::EarlyReadMode::Verify,
+                Some(v) => match parse_bool(v) {
+                    Some(true) => crate::stt::EarlyReadMode::On,
+                    _ => crate::stt::EarlyReadMode::Off,
+                },
+            },
             tts_voice: string("GHOST_TTS_VOICE", "af_heart"),
             tts_speed: f64_or("GHOST_TTS_SPEED", 1.0)?,
             tts_model_path: path("GHOST_TTS_MODEL_PATH"),
             tts_voices_path: path("GHOST_TTS_VOICES_PATH"),
             tts_clauses: flag("GHOST_TTS_CLAUSES", true),
             tts_clause_min_words: usize_or("GHOST_TTS_CLAUSE_MIN_WORDS", 4)?,
+            tts_prerender: text("GHOST_TTS_PRERENDER").and_then(|v| parse_bool(&v)),
+            tts_first_clause_words: usize_or("GHOST_TTS_FIRST_CLAUSE_WORDS", 4)?,
             tts_engine,
             elevenlabs_api_key: Zeroizing::new(string("ELEVENLABS_API_KEY", "")),
             elevenlabs_voice: string("GHOST_ELEVENLABS_VOICE", ""),
@@ -262,6 +310,9 @@ impl VoiceSettings {
             barge_in_interim_secs: f64_or("GHOST_BARGE_IN_INTERIM_SECS", 0.3)?,
             echo_window_secs: f64_or("GHOST_ECHO_WINDOW_SECS", 3.0)?,
             turn_grace_secs: f64_or("GHOST_TURN_GRACE_SECS", 1.2)?,
+            turn_confident_grace_secs: f64_or("GHOST_TURN_CONFIDENT_GRACE_SECS", 0.35)?,
+            turn_confident_prob: f64_or("GHOST_TURN_CONFIDENT_PROB", 0.9)? as f32,
+            turn_reopen_started_secs: f64_or("GHOST_TURN_REOPEN_STARTED_SECS", 0.15)?,
             turn_speculate: flag("GHOST_TURN_SPECULATE", true),
             turn_reread: flag("GHOST_TURN_REREAD", true),
             turn_stop_secs: f64_or("GHOST_TURN_STOP_SECS", 1.6)?,
@@ -308,6 +359,15 @@ impl VoiceSettings {
         }
     }
 
+    /// Where a spoken turn's first call goes when the connection names a fast model
+    /// (ADR 0050); None, and the one model answers everything.
+    pub fn llm_fast_target(&self, env: Option<&HashMap<String, String>>) -> Option<Target> {
+        match env {
+            Some(env) => self.llm_connection().fast_target(env),
+            None => self.llm_connection().fast_target(&process_env()),
+        }
+    }
+
     /// What stops the model from being reachable, without naming any value.
     pub fn llm_problems(&self, env: Option<&HashMap<String, String>>) -> Vec<String> {
         match env {
@@ -318,6 +378,34 @@ impl VoiceSettings {
 
     pub fn clause_min_words(&self) -> Option<usize> {
         self.tts_clauses.then_some(self.tts_clause_min_words)
+    }
+
+    /// How a reply is cut for the voice: clauses as `clause_min_words` says, and the
+    /// first piece early when `tts_first_clause_words` says so. The TTS stage and the
+    /// first clause rendered ahead cut by this one rule.
+    pub fn clause_aggregator(&self) -> ghost_infer::clauses::ClauseAggregator {
+        ghost_infer::clauses::ClauseAggregator::new(self.clause_min_words())
+            .with_first_clause(self.tts_first_clause_words)
+    }
+
+    /// A reply's first clause is rendered while the reply is held: as set, else only
+    /// with the local voice, where what is thrown away costs nothing but a moment of CPU.
+    pub fn prerender(&self) -> bool {
+        self.tts_prerender
+            .unwrap_or(self.tts_engine != "elevenlabs")
+    }
+
+    /// The waits a turn's close runs by (`turns::TurnTiming`).
+    pub fn turn_timing(&self) -> crate::turns::TurnTiming {
+        crate::turns::TurnTiming {
+            grace_secs: self.turn_grace_secs,
+            confident_grace_secs: self.turn_confident_grace_secs,
+            confident_prob: self.turn_confident_prob,
+            stop_secs: self.turn_stop_secs,
+            unfinished_secs: self.turn_unfinished_secs,
+            sentence_min_prob: self.turn_sentence_min_prob,
+            number_secs: self.turn_number_secs,
+        }
     }
 
     /// The Kokoro files: the configured paths, else Ghost's cache.
@@ -407,6 +495,16 @@ mod tests {
         assert_eq!(s.tts_engine, "kokoro");
         assert_eq!(s.tts_voice, "af_heart");
         assert_eq!(s.turn_grace_secs, 1.2);
+        assert_eq!(s.turn_confident_grace_secs, 0.35);
+        assert_eq!(s.turn_confident_prob, 0.9);
+        assert_eq!(s.turn_reopen_started_secs, 0.15);
+        assert!(s.prerender(), "Kokoro renders the first clause ahead");
+        assert_eq!(s.tts_first_clause_words, 4);
+        assert_eq!(s.stt_early_read, crate::stt::EarlyReadMode::Off);
+        assert!(
+            s.llm_fast_reads,
+            "with a fast model set, it makes reads itself"
+        );
         assert!(s.turn_speculate);
         assert!(s.turn_reread);
         assert_eq!(s.turn_stop_secs, 1.6);
@@ -428,6 +526,41 @@ mod tests {
         assert!(!s.debug_audio);
         assert_eq!(s.llm_thinking, "between_tools");
         assert_eq!(s.llm_max_tokens, 2000);
+    }
+
+    #[test]
+    fn rendering_ahead_is_kokoros_by_default_and_never_a_paid_voices_unless_set() {
+        // ADR 0049: a reply that is withdrawn has rendered a clause for nothing; with a
+        // paid voice that would be paid characters.
+        assert!(VoiceSettings::default().prerender());
+        let cloud = VoiceSettings::from_vars(vars(&[("GHOST_TTS_ENGINE", "elevenlabs")])).unwrap();
+        assert!(!cloud.prerender());
+        let forced = VoiceSettings::from_vars(vars(&[
+            ("GHOST_TTS_ENGINE", "elevenlabs"),
+            ("GHOST_TTS_PRERENDER", "true"),
+        ]))
+        .unwrap();
+        assert!(forced.prerender());
+        let off = VoiceSettings::from_vars(vars(&[("GHOST_TTS_PRERENDER", "false")])).unwrap();
+        assert!(!off.prerender());
+    }
+
+    #[test]
+    fn the_turns_waits_are_settings_and_the_one_grace_is_reachable() {
+        let s = VoiceSettings::from_vars(vars(&[
+            ("GHOST_TURN_CONFIDENT_GRACE_SECS", "0.5"),
+            ("GHOST_TURN_CONFIDENT_PROB", "0.95"),
+            ("GHOST_TURN_REOPEN_STARTED_SECS", "0"),
+        ]))
+        .unwrap();
+        let t = s.turn_timing();
+        assert_eq!((t.confident_grace_secs, t.confident_prob), (0.5, 0.95));
+        assert!(t.confident(0.96) && !t.confident(0.9));
+        assert_eq!(s.turn_reopen_started_secs, 0.0);
+        // The grace as it was for every turn: the short one set to it.
+        let old =
+            VoiceSettings::from_vars(vars(&[("GHOST_TURN_CONFIDENT_GRACE_SECS", "1.2")])).unwrap();
+        assert!(!old.turn_timing().confident(1.0));
     }
 
     #[test]

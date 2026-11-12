@@ -123,6 +123,15 @@ pub fn describe_tts(s: &VoiceSettings) -> String {
     )
 }
 
+/// What a session gives its voice besides the voice's own settings.
+pub struct VoiceHooks {
+    pub turns: Arc<TurnControl>,
+    /// Told each clause as it goes to the voice (the echo filter's feed).
+    pub on_say: Option<OnSay>,
+    /// The reply's first clause, rendered ahead (ADR 0049); Kokoro's only.
+    pub prerender: Option<crate::tts::Prerender>,
+}
+
 /// The session's TTS stage: a fresh Kokoro stage, or ElevenLabs with that stage as its
 /// fallback. `line` names the active agent, for its ElevenLabs voice. What is missing is
 /// logged once per process, not once per session.
@@ -132,11 +141,21 @@ pub fn session_tts(
     settings: TtsSettings,
     clause_min_words: Option<usize>,
     line: Option<LineFn>,
-    turns: Arc<TurnControl>,
-    on_say: Option<OnSay>,
+    hooks: VoiceHooks,
 ) -> Box<dyn Stage> {
+    let VoiceHooks {
+        turns,
+        on_say,
+        prerender,
+    } = hooks;
+    // Rendering ahead is Kokoro's (ADR 0049): behind the cloud voice it would render what
+    // the cloud then says.
+    let prerender = prerender.filter(|_| s.tts_engine != "elevenlabs");
     let local = match KokoroTts::new(kokoro, settings, clause_min_words) {
-        Ok(k) => k.with_turns(turns.clone()),
+        Ok(k) => k
+            .with_turns(turns.clone())
+            .with_prerender(prerender)
+            .with_first_clause(s.tts_first_clause_words),
         Err(e) => {
             warn!("tts: {e}; Kokoro's default voice speaks instead");
             KokoroTts::new(
@@ -1129,8 +1148,11 @@ mod tests {
             TtsSettings::default(),
             Some(4),
             None,
-            TurnControl::new(tokio_util::sync::CancellationToken::new()),
-            None,
+            VoiceHooks {
+                turns: TurnControl::new(tokio_util::sync::CancellationToken::new()),
+                on_say: None,
+                prerender: None,
+            },
         )
     }
 

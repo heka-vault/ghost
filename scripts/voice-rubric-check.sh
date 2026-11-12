@@ -60,7 +60,9 @@ count "Smart Turn says done" 'Smart Turn says done'
 count "Smart Turn says not done" 'Smart Turn says not done'
 count "answering while the close waits (the head start)" 'while the close waits'
 count "went on after a pause (B)" 'turn: went on after'
-count "reopened, nothing of the answer heard (B)" 'turn: reopened'
+count "reopened, nothing of the answer heard (B)" 'turn: reopened, nothing'
+count "reopened, the answer had only begun (B5)" 'turn: reopened, the answer had only begun'
+count "closed after the short grace (C3, D)" 'and Smart Turn is sure'
 count "sounds unfinished, waiting (B2, C2)" 'sounds unfinished'
 count "ends a sentence; closing (C4)" 'ends a sentence; closing'
 count "full stop overridden by Smart Turn (C)" "but Smart Turn is sure"
@@ -79,7 +81,9 @@ if [[ -r "$LATENCY" ]]; then
     select(.kind == "voice" and .ts > $since and .hear != null)
     | [ .ts[11:19], .origin,
         ("hold " + ((.hear.hold // 0) | tostring)),
+        ("close " + (.hear.close // "-")),
         ("segments " + ((.hear.segments // 0) | tostring)),
+        ("reopened " + (.hear.reopened // "-")),
         ("speculation " + ((.hear.speculation // "none") | tostring)),
         ("reply " + ((.reply // 0) | tostring)) ]
     | join("  ")' "$LATENCY" | tail -n "$LAST"

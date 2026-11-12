@@ -79,6 +79,102 @@ pub const HISTORY: [(&str, &str); 8] = [
 /// scenarios that measure the yes (ADR 0017) have one to measure.
 pub const PERF_POLICY: &str = "[permissions]\nask = [\"github.issue_write(state=closed)\"]\n";
 
+/// How long the scripted model takes: a real model's first token and its rate, assumed.
+/// The harness spends no tokens, so these stand in for the connection; `ghostd perf llm`
+/// measures the real one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Profile {
+    pub name: String,
+    pub ttfb: Duration,
+    /// A reply that opens with a tool call, from the call's start; None, `ttfb`.
+    pub call_ttfb: Option<Duration>,
+    /// Output tokens a second; None writes the reply at once.
+    pub tokens_per_sec: Option<f64>,
+}
+
+impl Profile {
+    pub const NAMES: [&'static str; 5] = ["sonnet", "haiku", "instant", "sonnet55", "haiku55"];
+
+    /// `sonnet`: 1.2 s to the first token, 60 tokens a second (the main model as measured
+    /// 2026-10-19 to 2026-10-29: first token 1.1 to 1.5 s). `haiku`: 0.45 s and 150 (a
+    /// small model through the same connection: 0.6 s to "hello" on 2026-10-19).
+    /// `instant`: no model time, the stages alone.
+    ///
+    /// `sonnet55` and `haiku55` are the models as measured through the default
+    /// connection on 2026-11-12 (`perf llm`, Ghost's prompt and tools): Sonnet 5.5 1.73 s
+    /// to its first words, 3.12 s to a tool call, its text arriving all at once; Haiku 5.5
+    /// 0.52 s to words, 1.11 s to a call, about 290 tokens a second.
+    pub fn named(name: &str) -> Option<Self> {
+        let (ttfb_ms, call_ms, rate) = match name {
+            "sonnet" => (1200, None, Some(60.0)),
+            "haiku" => (450, None, Some(150.0)),
+            "instant" => (0, None, None),
+            "sonnet55" => (1730, Some(3120), None),
+            "haiku55" => (520, Some(1110), Some(290.0)),
+            _ => return None,
+        };
+        Some(Self {
+            name: name.into(),
+            ttfb: Duration::from_millis(ttfb_ms),
+            call_ttfb: call_ms.map(Duration::from_millis),
+            tokens_per_sec: rate,
+        })
+    }
+}
+
+/// A real model in place of the scripted one (`--llm-url`): the address and model given,
+/// reached the way Ghost's default connection reaches one (`custom`, on the Anthropic
+/// protocol unless told otherwise), with no vault and no settings file. The key, when one
+/// is wanted, is read from the one environment variable named (`--llm-key-env`) and from
+/// nothing else; it is never printed.
+#[derive(Clone, PartialEq)]
+pub struct RealModel {
+    pub url: String,
+    pub model: String,
+    /// The fast model on the same address, for `fast=real` (ADR 0050).
+    pub fast_model: Option<String>,
+    pub key_env: Option<String>,
+    pub protocol: String,
+}
+
+impl std::fmt::Debug for RealModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RealModel")
+            .field("url", &self.url)
+            .field("model", &self.model)
+            .field("fast_model", &self.fast_model)
+            .field("key_env", &self.key_env)
+            .finish()
+    }
+}
+
+impl RealModel {
+    /// The connection for `model` at this address, as the default connection builds it.
+    pub fn target(&self, model: &str) -> ghost_core::connection::Target {
+        let mut env: HashMap<String, String> = [
+            ("GHOST_LLM_PROVIDER", "custom"),
+            ("GHOST_LLM_BASE_URL", self.url.as_str()),
+            ("GHOST_LLM_MODEL", model),
+            ("GHOST_LLM_PROTOCOL", self.protocol.as_str()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        if let Some(name) = &self.key_env {
+            env.insert("GHOST_LLM_PASSWORD".into(), name.clone());
+            // The one variable named, and nothing else of the environment.
+            if let Ok(v) = std::env::var(name) {
+                env.insert(name.clone(), v);
+            }
+        }
+        ghost_core::connection::ModelConnection::from_env(&env).target(&env)
+    }
+
+    pub fn client(&self, model: &str) -> anyhow::Result<Arc<dyn crate::llm::ModelPort>> {
+        Ok(ghost_llm::model::shared(&self.target(model))? as Arc<dyn crate::llm::ModelPort>)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     /// Earlier turns seeded into the ghost conversation's record.
@@ -89,6 +185,21 @@ pub struct RunConfig {
     pub ablate: BTreeSet<String>,
     /// The scripted model's time to first token.
     pub ttfb: Duration,
+    /// ... and to a reply that opens with a tool call; None, `ttfb`.
+    pub call_ttfb: Option<Duration>,
+    /// Its output tokens a second; None writes the reply at once.
+    pub tokens_per_sec: Option<f64>,
+    /// The profile those two came from, for the label.
+    pub profile: Option<String>,
+    /// A named set of overrides compared with the others in one run (`--variant`).
+    pub variant: Option<String>,
+    /// A fast model in front (ADR 0050), with this profile's time: scripted from each
+    /// line's first reply, so a line that opens with a tool call is handed over.
+    pub fast: Option<Profile>,
+    /// A real model answers instead of the script (`--llm-url`); its time is its own.
+    pub real: Option<RealModel>,
+    /// With `real`, the real fast model is in front (`fast=real`).
+    pub fast_real: bool,
 }
 
 impl Default for RunConfig {
@@ -99,12 +210,42 @@ impl Default for RunConfig {
             overrides: BTreeMap::new(),
             ablate: BTreeSet::new(),
             ttfb: Duration::ZERO,
+            call_ttfb: None,
+            tokens_per_sec: None,
+            profile: None,
+            variant: None,
+            fast: None,
+            real: None,
+            fast_real: false,
         }
     }
 }
 
 impl RunConfig {
     pub fn label(&self) -> String {
+        if let Some(v) = &self.variant {
+            // A variant's name stands for its overrides.
+            let mut parts = vec![v.clone()];
+            match &self.real {
+                Some(r) => parts.push(format!("real {}", r.model)),
+                None => parts.extend(self.profile.clone()),
+            }
+            return parts.join(" ");
+        }
+        if let Some(r) = &self.real {
+            let mut parts = vec![format!("real {}", r.model)];
+            if self.fast_real {
+                parts.push(format!(
+                    "fast={}",
+                    r.fast_model.as_deref().unwrap_or("none")
+                ));
+            }
+            if !self.jev {
+                parts.push("regex".into());
+            }
+            parts.extend(self.overrides.iter().map(|(k, v)| format!("{k}={v}")));
+            return parts.join(" ");
+        }
         let mut parts = vec!["scripted model".to_string(), "local".to_string()];
         if !self.ablate.is_empty() {
             if ABLATIONS.iter().all(|a| self.ablate.contains(*a)) {
@@ -116,8 +257,18 @@ impl RunConfig {
                 ));
             }
         }
-        if self.ttfb > Duration::ZERO {
-            parts.push(format!("ttfb={}ms", self.ttfb.as_millis()));
+        if let Some(p) = &self.profile {
+            parts.push(p.clone());
+        } else {
+            if self.ttfb > Duration::ZERO {
+                parts.push(format!("ttfb={}ms", self.ttfb.as_millis()));
+            }
+            if let Some(r) = self.tokens_per_sec {
+                parts.push(format!("{r:.0}tok/s"));
+            }
+        }
+        if let Some(f) = &self.fast {
+            parts.push(format!("fast={}", f.name));
         }
         if self.history > 0 {
             parts.push(format!("history={}", self.history));
@@ -380,11 +531,74 @@ impl Bench {
         };
         let (media, mouth, ear) = scripted_media();
         let lines: Vec<Vec<_>> = scenario.lines.iter().map(|l| l.replies.clone()).collect();
-        let model = ScriptedModel::new(lines, cfg.ttfb);
+        // The fast model answers what the scenario's model would have opened with: plain
+        // speech is its reply, a tool call is its hand-over.
+        let (model, fast_model) = match &cfg.real {
+            Some(real) => {
+                let fast = match (cfg.fast_real, &real.fast_model) {
+                    (true, Some(m)) => match real.client(m) {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            problems.push(format!("no client for the fast model: {e}"));
+                            None
+                        }
+                    },
+                    _ => None,
+                };
+                match real.client(&real.model) {
+                    Ok(m) => (m, fast),
+                    Err(e) => {
+                        return RunResult {
+                            scenario: scenario.name.into(),
+                            config: cfg.label(),
+                            run: index,
+                            lines: Vec::new(),
+                            opening: None,
+                            records: Vec::new(),
+                            problems: vec![format!("no client for the model: {e}")],
+                            wall: began.elapsed().as_secs_f64(),
+                            wake_to_voice: None,
+                        };
+                    }
+                }
+            }
+            None => {
+                // With its own reads (`GHOST_LLM_FAST_READS`) the fast model answers what it
+                // looked up as the main model would: the whole line is its script.
+                let whole_line = settings.llm_fast_reads;
+                let fast_model = cfg.fast.as_ref().map(|p| {
+                    let opening: Vec<Vec<_>> = lines
+                        .iter()
+                        .map(|l| {
+                            l.iter()
+                                .take(if whole_line { usize::MAX } else { 1 })
+                                .cloned()
+                                .collect()
+                        })
+                        .collect();
+                    ScriptedModel::paced_calls(
+                        opening,
+                        p.ttfb,
+                        p.call_ttfb,
+                        p.tokens_per_sec,
+                        "scripted-fast",
+                    ) as Arc<dyn crate::llm::ModelPort>
+                });
+                let model = ScriptedModel::paced_calls(
+                    lines,
+                    cfg.ttfb,
+                    cfg.call_ttfb,
+                    cfg.tokens_per_sec,
+                    "scripted",
+                ) as Arc<dyn crate::llm::ModelPort>;
+                (model, fast_model)
+            }
+        };
         let session = build_session(SessionParams {
             settings: Arc::new(settings),
             models: self.models.clone(),
             model,
+            fast_model,
             sources: env.sources.clone(),
             gate: env.gate.clone(),
             events: Some(Arc::new(Events::default())),
@@ -502,6 +716,41 @@ impl Bench {
             && let Some(problem) = check(&mock_issues(tmp.path()))
         {
             problems.push(problem);
+        }
+        // The calls with their arguments, as the agent's record has them (in this run's
+        // own store): what a line expects of them.
+        let calls: Vec<String> = env
+            .conversations
+            .turns(GHOST, 500)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.role == Role::Call)
+            .map(|t| t.text)
+            .collect();
+        for (i, line) in scenario.lines.iter().enumerate() {
+            if !line.args.is_empty()
+                && i < lines.len()
+                && !calls
+                    .iter()
+                    .any(|c| line.args.iter().all(|part| c.contains(part)))
+            {
+                // The mock app's calls (the scenario's own data, no one's text) are named,
+                // so a wrong argument can be told from a different way to ask.
+                let p = format!(
+                    "line {}: no call with {:?} (calls: {})",
+                    i + 1,
+                    line.args,
+                    if calls.is_empty() {
+                        "none".to_string()
+                    } else {
+                        calls.join("; ")
+                    }
+                );
+                if let Some(l) = lines.get_mut(i) {
+                    l.problems.push(p.clone());
+                }
+                problems.push(p);
+            }
         }
         if !run_task.is_finished() {
             session.end().await;

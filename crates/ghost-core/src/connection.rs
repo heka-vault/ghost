@@ -60,9 +60,10 @@ pub const LIST_TIMEOUT_SECS: f64 = 8.0;
 const EXCHANGE_TIMEOUT_SECS: f64 = 15.0;
 
 /// The environment keys this module reads (besides the Password it names).
-pub const ENV_KEYS: [&str; 7] = [
+pub const ENV_KEYS: [&str; 8] = [
     "GHOST_LLM_PROVIDER",
     "GHOST_LLM_MODEL",
+    "GHOST_LLM_FAST_MODEL",
     "GHOST_LLM_PROTOCOL",
     "GHOST_LLM_BASE_URL",
     "GHOST_LLM_PASSWORD",
@@ -623,6 +624,9 @@ pub struct ModelConnection {
     pub base_url: String,
     /// As the operator wrote it ("" means the provider's default).
     pub model: String,
+    /// A second model on the same connection for a spoken turn's first call (ADR 0050),
+    /// as the operator wrote it; "" is none, and the one model answers everything.
+    pub fast_model: String,
     /// A name.
     pub password: String,
     /// Sent as written.
@@ -654,6 +658,26 @@ impl ModelConnection {
         model
     }
 
+    /// The fast model as the provider names it; None when none is set, or when it is the
+    /// main model under another spelling.
+    pub fn fast_wire_model(&self) -> Option<String> {
+        if self.fast_model.is_empty() {
+            return None;
+        }
+        let model = if self.provider == "openrouter" {
+            openrouter_model(&self.fast_model)
+        } else {
+            self.fast_model.clone()
+        };
+        (model != self.wire_model()).then_some(model)
+    }
+
+    /// Where a spoken turn's first call goes when a fast model is set: the same provider,
+    /// address, key and headers, the other model (ADR 0050).
+    pub fn fast_target(&self, env: &impl Env) -> Option<Target> {
+        Some(self.target_for(self.fast_wire_model()?, env))
+    }
+
     pub fn key(&self, env: &impl Env) -> Zeroizing<String> {
         if self.password.is_empty() {
             return Zeroizing::new(String::new());
@@ -662,7 +686,10 @@ impl ModelConnection {
     }
 
     pub fn target(&self, env: &impl Env) -> Target {
-        let model = self.wire_model();
+        self.target_for(self.wire_model(), env)
+    }
+
+    fn target_for(&self, model: String, env: &impl Env) -> Target {
         let (mut cap_param, mut thinks) = ("max_tokens", Reasoning::default());
         if self.protocol == Protocol::Openai {
             // A reasoning model is one wherever it is served, and OpenAI's take only
@@ -848,6 +875,7 @@ impl ModelConnection {
             protocol: resolved_protocol,
             base_url: base,
             model: get("GHOST_LLM_MODEL"),
+            fast_model: get("GHOST_LLM_FAST_MODEL"),
             password: if password.is_empty() {
                 spec.password.to_string()
             } else {
@@ -1244,6 +1272,35 @@ mod tests {
         // A legacy token with no address is Anthropic itself, as the SDK default was.
         let env = env(&[("ANTHROPIC_AUTH_TOKEN", TOKEN)]);
         assert_eq!(*ModelConnection::from_env(&env).target(&env).api_key, TOKEN);
+    }
+
+    #[test]
+    fn a_fast_model_is_the_same_connection_with_another_model() {
+        // ADR 0050: off unless one is named; the key, the address and the headers are the
+        // connection's, and only the model differs.
+        let mut env = env(&[
+            ("GHOST_LLM_PROVIDER", "openrouter"),
+            ("OPENROUTER_API_KEY", OR_KEY),
+            ("GHOST_LLM_MODEL", "claude-sonnet-5-5"),
+        ]);
+        let c = ModelConnection::from_env(&env);
+        assert_eq!(c.fast_wire_model(), None);
+        assert!(c.fast_target(&env).is_none());
+        env.insert("GHOST_LLM_FAST_MODEL".into(), "claude-haiku-5-5".into());
+        let c = ModelConnection::from_env(&env);
+        let (main, fast) = (c.target(&env), c.fast_target(&env).expect("a fast model"));
+        assert_eq!(main.model, "anthropic/claude-sonnet-5.5");
+        assert_eq!(fast.model, "anthropic/claude-haiku-5.5");
+        assert_eq!(
+            (&fast.base_url, &fast.provider, fast.protocol),
+            (&main.base_url, &main.provider, main.protocol)
+        );
+        assert_eq!(*fast.api_key, OR_KEY);
+        assert_eq!(fast.fingerprint(), main.fingerprint(), "one connection");
+        assert!(c.problems(&env, false).is_empty());
+        // The main model named again is no fast model at all.
+        env.insert("GHOST_LLM_FAST_MODEL".into(), "claude-sonnet-5-5".into());
+        assert!(ModelConnection::from_env(&env).fast_target(&env).is_none());
     }
 
     #[test]

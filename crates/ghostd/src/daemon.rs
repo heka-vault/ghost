@@ -187,6 +187,10 @@ pub type ModelFactory = Arc<
         + Send
         + Sync,
 >;
+/// The fast model's client when the connection names one (ADR 0050).
+pub type FastModelFactory = Arc<
+    dyn Fn(&VoiceSettings, &HashMap<String, String>) -> Option<Arc<dyn ModelPort>> + Send + Sync,
+>;
 pub type DeskMedia =
     Arc<dyn Fn(DeskMediaRequest) -> BoxFuture<'static, Result<Media, String>> + Send + Sync>;
 /// Play `samples` at `rate` on the device (the chime, a voice sample) and wait for them.
@@ -201,6 +205,7 @@ pub struct Ports {
     pub keyring: Arc<dyn Keyring>,
     pub load_models: LoadModels,
     pub model: ModelFactory,
+    pub fast_model: FastModelFactory,
     pub desk_media: DeskMedia,
     /// The passive pipeline's capture; None: `ghost.mic` through `ghost_audio`.
     pub passive_media: Option<MediaFactory>,
@@ -222,6 +227,16 @@ impl Ports {
             model: Arc::new(|voice, env| {
                 let target = voice.llm_target(Some(env));
                 Ok(ghost_llm::model::shared(&target)? as Arc<dyn ModelPort>)
+            }),
+            fast_model: Arc::new(|voice, env| {
+                let target = voice.llm_fast_target(Some(env))?;
+                match ghost_llm::model::shared(&target) {
+                    Ok(m) => Some(m as Arc<dyn ModelPort>),
+                    Err(e) => {
+                        warn!("llm: no client for the fast model ({e}); the main model answers");
+                        None
+                    }
+                }
             }),
             desk_media: Arc::new(|req: DeskMediaRequest| {
                 Box::pin(async move {
@@ -254,6 +269,7 @@ impl Ports {
             keyring: Arc::new(ghost_core::MemoryKeyring::new()),
             load_models: Arc::new(|_| anyhow::bail!("no models in this test")),
             model: Arc::new(|_, _| anyhow::bail!("no model in this test")),
+            fast_model: Arc::new(|_, _| None),
             desk_media: Arc::new(|_| {
                 Box::pin(async { Ok(ghost_voice::transport::silent_media()) })
             }),
@@ -890,6 +906,9 @@ impl Daemon {
                     "llm: {} from the next session",
                     fresh.llm_target(Some(&env)).describe()
                 );
+                if let Some(fast) = fresh.llm_fast_target(Some(&env)) {
+                    info!("llm: {} answers a spoken turn first", fast.model);
+                }
                 for problem in fresh.llm_problems(Some(&env)) {
                     warn!("llm: {problem}");
                 }
@@ -1733,6 +1752,9 @@ impl Daemon {
             voice.llm_target(Some(&env)).describe(),
             voice.llm_thinking
         );
+        if let Some(fast) = voice.llm_fast_target(Some(&env)) {
+            info!("llm: {} answers a spoken turn first", fast.model);
+        }
         for problem in voice.llm_problems(Some(&env)) {
             error!("llm: {problem}");
         }
@@ -2144,6 +2166,11 @@ impl Daemon {
     /// The model this session runs on.
     pub(crate) fn model(&self) -> anyhow::Result<Arc<dyn ModelPort>> {
         (self.ports.model)(&self.voice(), &self.env())
+    }
+
+    /// The model a turn's first call goes to, when the connection names one (ADR 0050).
+    pub(crate) fn fast_model(&self) -> Option<Arc<dyn ModelPort>> {
+        (self.ports.fast_model)(&self.voice(), &self.env())
     }
 
     /// "Last used" on the Passwords page (ADR 0036): the model connection's key and the

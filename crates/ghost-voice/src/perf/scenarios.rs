@@ -20,6 +20,10 @@ pub struct Line {
     pub tools: Vec<&'static str>,
     /// A change's expected status, e.g. "done:announce".
     pub status: Option<&'static str>,
+    /// Some call made for this line reads, in the agent's record, with every one of these
+    /// (`github_issue_read(... issue_number=142 ...)`): the right tool with the right
+    /// arguments, which is what a real model can get wrong.
+    pub args: Vec<&'static str>,
     /// The session should end after this line.
     pub ends: bool,
     pub intercepted: bool,
@@ -33,6 +37,7 @@ impl Line {
             text: text.into(),
             tools: Vec::new(),
             status: None,
+            args: Vec::new(),
             ends: false,
             intercepted: false,
             replies,
@@ -41,6 +46,11 @@ impl Line {
 
     fn tools(mut self, tools: &[&'static str]) -> Self {
         self.tools = tools.to_vec();
+        self
+    }
+
+    fn args(mut self, parts: &[&'static str]) -> Self {
+        self.args = parts.to_vec();
         self
     }
 
@@ -180,7 +190,8 @@ pub fn scenarios() -> Vec<Scenario> {
                         ScriptedModel::say("Three are waiting: the session cache choice, dark mode, and the webhook rotation."),
                     ],
                 )
-                .tools(&["github_list_issues"]),
+                .tools(&["github_list_issues"])
+                .args(&["github_list_issues(", "needs-triage"]),
             ],
             check: None,
             tags: vec![],
@@ -196,7 +207,8 @@ pub fn scenarios() -> Vec<Scenario> {
                         ScriptedModel::say("Three are waiting: the session cache choice, dark mode, and the webhook rotation."),
                     ],
                 )
-                .tools(&["github_list_issues"]),
+                .tools(&["github_list_issues"])
+                .args(&["github_list_issues(", "repo=app", "needs-triage"]),
             ],
             check: None,
             tags: vec!["pause"],
@@ -219,7 +231,8 @@ pub fn scenarios() -> Vec<Scenario> {
                         ScriptedModel::say("Issue one forty two is Redis versus Postgres for the session cache; two people lean toward Postgres."),
                     ],
                 )
-                .tools(&["github_issue_read"]),
+                .tools(&["github_issue_read"])
+                .args(&["github_issue_read(", "repo=app", "issue_number=142"]),
             ],
             check: None,
             tags: vec![],
@@ -307,7 +320,8 @@ pub fn scenarios() -> Vec<Scenario> {
                         ScriptedModel::say("Dark mode is a toggle in settings; three comments, nobody assigned yet."),
                     ],
                 )
-                .tools(&["github_issue_read"]),
+                .tools(&["github_issue_read"])
+                .args(&["github_issue_read(", "issue_number=151"]),
                 Line::new(
                     "Mark it ready for agent.",
                     vec![label_151(), ScriptedModel::say("Done.")],

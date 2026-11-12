@@ -2492,6 +2492,13 @@ export interface components {
             base_url: string;
             /** @description Set when it isn't the provider's own. */
             base_url_override?: string | null;
+            /**
+             * @description A second model for a spoken turn's first call (ADR 0050), as saved; none, and the
+             *     one model answers everything.
+             */
+            fast_model?: string | null;
+            /** @description What is sent for it. */
+            fast_wire_model?: string | null;
             headers: {
                 [key: string]: string;
             };

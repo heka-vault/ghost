@@ -123,6 +123,9 @@ pub fn explicit_values(conn: &ModelConnection) -> BTreeMap<String, String> {
     if !conn.model.is_empty() {
         out.insert("GHOST_LLM_MODEL".into(), conn.model.clone());
     }
+    if !conn.fast_model.is_empty() {
+        out.insert("GHOST_LLM_FAST_MODEL".into(), conn.fast_model.clone());
+    }
     if conn.provider == "custom" {
         out.insert("GHOST_LLM_PROTOCOL".into(), conn.protocol.to_string());
     }
@@ -190,6 +193,8 @@ fn view(deps: &Deps, env: &HashMap<String, String>) -> ModelConnectionView {
             .then(|| conn.base_url_override.clone()),
         model: conn.model.clone(),
         wire_model: conn.wire_model(),
+        fast_model: (!conn.fast_model.is_empty()).then(|| conn.fast_model.clone()),
+        fast_wire_model: conn.fast_wire_model(),
         password: (!conn.password.is_empty()).then(|| conn.password.clone()),
         password_set: conn.password_set(env),
         headers: conn.headers.iter().cloned().collect(),

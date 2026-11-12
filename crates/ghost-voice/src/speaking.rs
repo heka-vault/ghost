@@ -60,6 +60,15 @@ impl Speaking {
         *last = Some(now);
     }
 
+    /// How long Ghost has been quiet at the speaker; None while it speaks, or before it
+    /// ever has.
+    pub fn silent_for(&self) -> Option<Duration> {
+        if self.is_on() {
+            return None;
+        }
+        self.0.last_audio.lock().unwrap().map(|t| t.elapsed())
+    }
+
     /// When Ghost's voice last (re)started after a gap, if ever.
     pub fn onset(&self) -> Option<Instant> {
         *self.0.onset.lock().unwrap()

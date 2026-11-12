@@ -12,6 +12,13 @@
 //! (`ghost_infer::clauses`). What reaches the model is speech, not Markdown (`spoken`).
 //! Every audio frame carries the turn's token: cancelled by a barge-in, it never reaches
 //! the speaker.
+//!
+//! A reply's first clause is rendered ahead ([`Prerender`], ADR 0049): the model's stage
+//! hands it over the moment the model has written it, while the reply is still held (the
+//! turn's grace, the narration cut), and the stage here plays that audio instead of
+//! rendering the clause when the reply is released. Rendering is not speaking: nothing of
+//! it reaches the speaker or the echo filter until the reply is the answer, and a reply
+//! that is withdrawn, or that calls a tool instead, drops it.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -22,6 +29,7 @@ use ghost_infer::clauses::ClauseAggregator;
 use tracing::warn;
 
 use crate::frames::{Audio, Direction, Frame, Metric, Out, Stage};
+use crate::latency::{LatencyProbe, null_probe};
 use crate::spoken::spoken;
 use crate::turns::TurnControl;
 
@@ -96,14 +104,219 @@ pub enum TtsError {
 /// between are busy with.
 pub type OnSay = Arc<dyn Fn(&str) + Send + Sync>;
 
+// --- the first clause, ahead of its turn ------------------------------------------------
+
+/// A clause being rendered, or rendered: what it says, in which voice, and its audio
+/// when the model is done with it.
+struct Ahead {
+    text: String,
+    voice: String,
+    speed: f64,
+    audio: tokio::sync::oneshot::Receiver<Option<Vec<i16>>>,
+}
+
+struct Pending {
+    aggregator: ClauseAggregator,
+    /// The reply's first clause was taken, or the reply is not to be rendered ahead.
+    done: bool,
+    ahead: Option<Ahead>,
+}
+
+struct PrerenderInner {
+    synth: SharedSynth,
+    settings: Mutex<TtsSettings>,
+    clause_min_words: Option<usize>,
+    /// The first piece cut early (`ClauseAggregator::with_first_clause`), as the stage cuts.
+    first_clause_words: usize,
+    probe: Arc<dyn LatencyProbe>,
+    pending: Mutex<Pending>,
+}
+
+/// The first clause of the reply the model is writing, rendered before the reply is
+/// released (ADR 0049). One handle shared by the model's stage, which feeds it the reply's
+/// text as it streams, and the TTS stage, which takes the audio when that clause is the
+/// first thing it is asked to say. The clause is cut by the same rule the stage cuts by
+/// (`ghost_infer::clauses`), so what was rendered is what would have been.
+///
+/// What it costs: a reply that is withdrawn (the operator went on) or that turns out to
+/// be narration before a tool call has rendered a clause for nothing, about a third of a
+/// second of Kokoro on a blocking thread. With a paid voice that would be paid characters,
+/// so a session whose voice is the cloud's has no handle (`GHOST_TTS_PRERENDER`).
+#[derive(Clone)]
+pub struct Prerender(Arc<PrerenderInner>);
+
+impl Prerender {
+    pub fn new(
+        synth: SharedSynth,
+        settings: TtsSettings,
+        clause_min_words: Option<usize>,
+        probe: Option<Arc<dyn LatencyProbe>>,
+    ) -> Self {
+        Self(Arc::new(PrerenderInner {
+            synth,
+            settings: Mutex::new(settings),
+            clause_min_words,
+            first_clause_words: 0,
+            probe: probe.unwrap_or_else(null_probe),
+            pending: Mutex::new(Pending {
+                aggregator: ClauseAggregator::new(clause_min_words),
+                done: true,
+                ahead: None,
+            }),
+        }))
+    }
+
+    /// Cut the reply's first piece early, as the TTS stage does
+    /// (`KokoroTts::with_first_clause`): what is rendered ahead must be what it would say.
+    pub fn with_first_clause(self, words: usize) -> Self {
+        let inner = Arc::try_unwrap(self.0)
+            .unwrap_or_else(|_| panic!("with_first_clause is for a handle no one shares yet"));
+        let first_clause_words = words;
+        Self(Arc::new(PrerenderInner {
+            first_clause_words,
+            pending: Mutex::new(Pending {
+                aggregator: ClauseAggregator::new(inner.clause_min_words)
+                    .with_first_clause(first_clause_words),
+                done: true,
+                ahead: None,
+            }),
+            ..inner
+        }))
+    }
+
+    /// The session's voice changed (a transfer): what is rendered from here is in it.
+    pub fn set_voice(&self, settings: TtsSettings) {
+        *self.0.settings.lock().unwrap() = settings;
+    }
+
+    fn drop_ahead(&self, p: &mut Pending) {
+        if p.ahead.take().is_some() {
+            self.0.probe.prerender("dropped");
+        }
+    }
+
+    /// A reply begins: whatever was rendered for the one before is dropped.
+    pub fn begin(&self) {
+        let mut p = self.0.pending.lock().unwrap();
+        self.drop_ahead(&mut p);
+        p.aggregator = ClauseAggregator::new(self.0.clause_min_words)
+            .with_first_clause(self.0.first_clause_words);
+        p.done = false;
+    }
+
+    /// The reply's text as the model writes it. Its first whole clause starts rendering.
+    pub fn text(&self, text: &str) {
+        let clause = {
+            let mut p = self.0.pending.lock().unwrap();
+            if p.done {
+                return;
+            }
+            let Some(clause) = p.aggregator.push(text).into_iter().next() else {
+                return;
+            };
+            p.done = true;
+            clause
+        };
+        self.render(&clause);
+    }
+
+    /// The reply ended with no call: what is left of a reply shorter than one clause.
+    pub fn end(&self) {
+        let rest = {
+            let mut p = self.0.pending.lock().unwrap();
+            if p.done {
+                return;
+            }
+            p.done = true;
+            p.aggregator.flush()
+        };
+        if let Some(rest) = rest {
+            self.render(&rest);
+        }
+    }
+
+    /// The reply is not the answer (withdrawn, cut off by the operator, or a tool call's
+    /// narration): what was rendered for it is dropped.
+    pub fn cancel(&self) {
+        let mut p = self.0.pending.lock().unwrap();
+        self.drop_ahead(&mut p);
+        p.done = true;
+    }
+
+    fn render(&self, clause: &str) {
+        let text = spoken(clause);
+        if text.trim().is_empty() {
+            return;
+        }
+        let (voice, speed) = {
+            let s = self.0.settings.lock().unwrap();
+            (s.voice.clone(), s.speed)
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let synth = self.0.synth.clone();
+        let (say, in_voice) = (text.clone(), voice.clone());
+        // Off the runtime, behind the model's own lock: a clause the stage is rendering
+        // for the reply before goes first.
+        tokio::task::spawn_blocking(move || {
+            let pcm = {
+                let mut s = synth.lock().unwrap_or_else(|e| e.into_inner());
+                s.synthesize(&say, &in_voice, speed as f32)
+            };
+            let _ = tx.send(pcm.ok());
+        });
+        self.0.probe.prerender("rendered");
+        let mut p = self.0.pending.lock().unwrap();
+        self.drop_ahead(&mut p);
+        p.ahead = Some(Ahead {
+            text,
+            voice,
+            speed,
+            audio: rx,
+        });
+    }
+
+    /// The audio for `text` in this voice, when it is what was rendered ahead: ready, or
+    /// on its way (the caller waits for the one render rather than starting another).
+    /// Anything else rendered ahead was for other words, and is dropped.
+    pub fn take(
+        &self,
+        text: &str,
+        voice: &str,
+        speed: f64,
+    ) -> Option<tokio::sync::oneshot::Receiver<Option<Vec<i16>>>> {
+        let mut p = self.0.pending.lock().unwrap();
+        let ahead = p.ahead.take()?;
+        if ahead.text == text && ahead.voice == voice && (ahead.speed - speed).abs() < 1e-9 {
+            Some(ahead.audio) // the caller says whether it was played (`count`)
+        } else {
+            self.0.probe.prerender("dropped");
+            None
+        }
+    }
+
+    /// What became of audio that was taken: `used` or `dropped`.
+    pub fn count(&self, what: &str) {
+        self.0.probe.prerender(what);
+    }
+
+    /// A clause is rendered ahead, or on its way.
+    pub fn holding(&self) -> bool {
+        self.0.pending.lock().unwrap().ahead.is_some()
+    }
+}
+
 /// Kokoro as one session's TTS stage.
 pub struct KokoroTts {
     synth: SharedSynth,
     settings: TtsSettings,
     clause_min_words: Option<usize>,
+    /// Each reply's first piece cut early (`ClauseAggregator::with_first_clause`); 0, no.
+    first_clause_words: usize,
     aggregator: ClauseAggregator,
     turns: Option<Arc<TurnControl>>,
     on_say: Option<OnSay>,
+    /// The reply's first clause, rendered ahead of its release.
+    prerender: Option<Prerender>,
     /// The token of the reply being spoken, as the model stage stamped it.
     reply_turn: Option<tokio_util::sync::CancellationToken>,
     speaking: bool,
@@ -126,13 +339,33 @@ impl KokoroTts {
             synth,
             settings,
             clause_min_words,
+            first_clause_words: 0,
             aggregator: ClauseAggregator::new(clause_min_words),
             turns: None,
             on_say: None,
+            prerender: None,
             reply_turn: None,
             speaking: false,
             first_audio: true,
         })
+    }
+
+    /// Cut each reply's first piece once `words` words are pending, at a comma or before
+    /// a phrase's first word, so its audio comes sooner; the rest renders while it plays.
+    pub fn with_first_clause(mut self, words: usize) -> Self {
+        self.first_clause_words = words;
+        self.aggregator = self.new_aggregator();
+        self
+    }
+
+    fn new_aggregator(&self) -> ClauseAggregator {
+        ClauseAggregator::new(self.clause_min_words).with_first_clause(self.first_clause_words)
+    }
+
+    /// The reply's first clause may have been rendered already (`Prerender`).
+    pub fn with_prerender(mut self, prerender: Option<Prerender>) -> Self {
+        self.prerender = prerender;
+        self
     }
 
     pub fn with_turns(mut self, turns: Arc<TurnControl>) -> Self {
@@ -156,9 +389,12 @@ impl KokoroTts {
             synth: self.synth.clone(),
             settings: self.settings.clone(),
             clause_min_words,
-            aggregator: ClauseAggregator::new(clause_min_words),
+            first_clause_words: self.first_clause_words,
+            aggregator: ClauseAggregator::new(clause_min_words)
+                .with_first_clause(self.first_clause_words),
             turns: self.turns.clone(),
             on_say: self.on_say.clone(),
+            prerender: None, // a handle belongs to one session's model stage
             reply_turn: None,
             speaking: false,
             first_audio: true,
@@ -215,19 +451,47 @@ impl KokoroTts {
         let synth = self.synth.clone();
         let (voice, speed) = (self.settings.voice.clone(), self.settings.speed as f32);
         let began = Instant::now();
-        let text_for_model = text.clone();
-        let rendered = tokio::task::spawn_blocking(move || {
-            let mut s = synth.lock().unwrap_or_else(|e| e.into_inner());
-            s.synthesize(&text_for_model, &voice, speed)
-        })
-        .await;
-        let pcm = match rendered {
-            Ok(Ok(pcm)) => pcm,
-            Ok(Err(e)) => {
-                warn!("tts: Kokoro failed: {e}");
-                return;
+        // Rendered ahead while the reply was held: that audio, without rendering it again.
+        let ahead = match &self.prerender {
+            Some(p) if reply => p.take(&text, &self.settings.voice, self.settings.speed),
+            _ => None,
+        };
+        let ahead = match ahead {
+            Some(audio) => {
+                let pcm = audio.await.ok().flatten();
+                if let Some(p) = &self.prerender {
+                    // Played, or made for a turn the operator has since taken back.
+                    p.count(if pcm.is_some() && !turn.is_cancelled() {
+                        "used"
+                    } else {
+                        "dropped"
+                    });
+                }
+                pcm
             }
-            Err(_) => return,
+            None => None,
+        };
+        if turn.is_cancelled() {
+            return;
+        }
+        let pcm = match ahead {
+            Some(pcm) => pcm,
+            None => {
+                let text_for_model = text.clone();
+                let rendered = tokio::task::spawn_blocking(move || {
+                    let mut s = synth.lock().unwrap_or_else(|e| e.into_inner());
+                    s.synthesize(&text_for_model, &voice, speed)
+                })
+                .await;
+                match rendered {
+                    Ok(Ok(pcm)) => pcm,
+                    Ok(Err(e)) => {
+                        warn!("tts: Kokoro failed: {e}");
+                        return;
+                    }
+                    Err(_) => return,
+                }
+            }
         };
         if turn.is_cancelled() {
             return;
@@ -299,6 +563,9 @@ impl Stage for KokoroTts {
                         voice: voice.clone(),
                         speed: *speed,
                     };
+                    if let Some(p) = &self.prerender {
+                        p.set_voice(self.settings.clone());
+                    }
                 } else {
                     warn!(
                         "tts: voice {voice} not found in available voices; keeping {}",
@@ -569,6 +836,178 @@ in app, and the Redis versus Postgres call for the session cache.";
             KokoroTts::new(FakeKokoro::shared(), TtsSettings::default(), Some(4)).unwrap();
         assert_eq!(template.fork().clause_min_words(), Some(4));
         assert_eq!(template.fork_with(None).clause_min_words(), None);
+    }
+
+    // --- the first clause, rendered ahead (ADR 0049) -------------------------------
+
+    /// Keeps what the handle counted.
+    #[derive(Default)]
+    struct Counted(Mutex<Vec<String>>);
+
+    impl LatencyProbe for Counted {
+        fn prerender(&self, what: &str) {
+            self.0.lock().unwrap().push(what.to_string());
+        }
+    }
+
+    fn ahead(synth: &SharedSynth) -> (Prerender, Arc<Counted>, KokoroTts) {
+        let counted = Arc::new(Counted::default());
+        let pre = Prerender::new(
+            synth.clone(),
+            TtsSettings::default(),
+            Some(4),
+            Some(counted.clone()),
+        );
+        let tts = KokoroTts::new(synth.clone(), TtsSettings::default(), Some(4))
+            .unwrap()
+            .with_prerender(Some(pre.clone()));
+        (pre, counted, tts)
+    }
+
+    /// The model writes `text`, as the model's stage hears it.
+    fn writes(pre: &Prerender, text: &str) {
+        pre.begin();
+        for t in tokens(text) {
+            pre.text(&t);
+        }
+    }
+
+    async fn rendered(synth: &SharedSynth, n: usize) {
+        for _ in 0..200 {
+            if said(synth).len() >= n {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("{n} clause(s) never rendered: {:?}", said(synth));
+    }
+
+    async fn speaks(tts: &mut KokoroTts, text: &str) -> usize {
+        let (out, mut rx) = Out::capture();
+        for t in tokens(text) {
+            tts.process(Frame::LlmText(t), Direction::Down, &out).await;
+        }
+        tts.process(Frame::LlmEnd, Direction::Down, &out).await;
+        drain(&mut rx)
+            .await
+            .iter()
+            .filter(|f| matches!(f, Frame::TtsAudio { .. }))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn test_a_clause_rendered_ahead_plays_when_the_reply_is_released() {
+        let synth = recording();
+        let (pre, counted, mut tts) = ahead(&synth);
+        writes(&pre, LIST);
+        rendered(&synth, 1).await;
+        // Rendered while the reply is held: the first clause, and only it.
+        assert_eq!(said(&synth), vec!["Three need your sign-off:"]);
+        assert!(pre.holding());
+        // Released: every clause plays, and the first is not rendered a second time.
+        assert_eq!(speaks(&mut tts, LIST).await, 4);
+        assert_eq!(
+            said(&synth),
+            vec![
+                "Three need your sign-off:",
+                "rotating the Discord webhook in infra,",
+                "the dark mode toggle in app,",
+                "and the Redis versus Postgres call for the session cache.",
+            ]
+        );
+        assert!(!pre.holding());
+        assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "used"]);
+    }
+
+    #[tokio::test]
+    async fn test_the_first_piece_cut_early_is_what_is_rendered_ahead() {
+        // The handle and the stage cut by one rule: the early first piece rendered ahead
+        // is the one the stage asks for, and it is not rendered again.
+        let synth = recording();
+        let counted = Arc::new(Counted::default());
+        let pre = Prerender::new(
+            synth.clone(),
+            TtsSettings::default(),
+            Some(4),
+            Some(counted.clone()),
+        )
+        .with_first_clause(4);
+        let mut tts = KokoroTts::new(synth.clone(), TtsSettings::default(), Some(4))
+            .unwrap()
+            .with_prerender(Some(pre.clone()))
+            .with_first_clause(4);
+        let text = "I found three issues waiting and two of them need your sign-off today.";
+        writes(&pre, text);
+        rendered(&synth, 1).await;
+        assert_eq!(said(&synth), vec!["I found three issues waiting"]);
+        assert_eq!(speaks(&mut tts, text).await, 2);
+        assert_eq!(
+            said(&synth),
+            vec![
+                "I found three issues waiting",
+                "and two of them need your sign-off today."
+            ]
+        );
+        assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "used"]);
+        // The next reply's first piece is cut early too.
+        assert_eq!(speaks(&mut tts, "Done. Three are left.").await, 2);
+    }
+
+    #[tokio::test]
+    async fn test_a_withdrawn_reply_drops_what_was_rendered_for_it() {
+        let synth = recording();
+        let (pre, counted, mut tts) = ahead(&synth);
+        writes(&pre, "What's waiting, you ask: three issues.");
+        rendered(&synth, 1).await;
+        pre.cancel(); // the operator went on: the reply is not the answer
+        assert!(!pre.holding());
+        pre.text("more of the same reply, which nobody will hear,");
+        assert_eq!(said(&synth).len(), 1, "nothing more is rendered for it");
+        // The answer to the whole turn is rendered as usual, clause by clause.
+        assert_eq!(
+            speaks(&mut tts, "Two of them are open, and one is closed.").await,
+            2
+        );
+        assert_eq!(said(&synth).len(), 3);
+        assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "dropped"]);
+    }
+
+    #[tokio::test]
+    async fn test_a_reply_shorter_than_a_clause_is_rendered_at_its_end() {
+        let synth = recording();
+        let (pre, counted, mut tts) = ahead(&synth);
+        writes(&pre, "Done");
+        assert!(!pre.holding(), "no clause yet");
+        pre.end();
+        rendered(&synth, 1).await;
+        assert_eq!(speaks(&mut tts, "Done").await, 1);
+        assert_eq!(said(&synth), vec!["Done"]);
+        assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "used"]);
+    }
+
+    #[tokio::test]
+    async fn test_other_words_than_were_rendered_are_rendered_themselves() {
+        // What the stage is asked to say first is not what was rendered ahead (a line of
+        // Ghost's own, another reply): the audio is for other words, and is dropped.
+        let synth = recording();
+        let (pre, counted, mut tts) = ahead(&synth);
+        writes(&pre, "Three need your sign-off: and so on.");
+        rendered(&synth, 1).await;
+        assert_eq!(speaks(&mut tts, "Closed it.").await, 1);
+        assert_eq!(
+            said(&synth),
+            vec!["Three need your sign-off:", "Closed it."]
+        );
+        assert_eq!(*counted.0.lock().unwrap(), vec!["rendered", "dropped"]);
+        // A line spoken directly never takes a reply's audio.
+        writes(&pre, "Hello there.");
+        pre.end();
+        rendered(&synth, 3).await;
+        let (out, _rx) = Out::capture();
+        tts.process(Frame::Speak("Hello there.".into()), Direction::Down, &out)
+            .await;
+        assert_eq!(said(&synth).len(), 4);
+        assert!(pre.holding());
     }
 
     // --- each session's TTS over the one loaded model ------------------------------

@@ -62,6 +62,15 @@ pub trait LatencyProbe: Send + Sync {
     /// answer), `withdrawn` (the operator went on), `missed` (the words changed) or
     /// `tool` (it reached a tool call and the confirmed turn ran again).
     fn speculation(&self, _outcome: &str) {}
+    /// How the turn's close was timed (`turns::Close`): `confident`, `grace`, `number`,
+    /// `unfinished`, `sentence` or `incomplete`.
+    fn closed(&self, _band: &str) {}
+    /// The operator went on and the turn before was reopened: before any of its answer
+    /// was heard, or (`started`) just as Ghost's voice began.
+    fn reopened(&self, _started: bool) {}
+    /// A reply's first clause rendered ahead of its turn (`tts::Prerender`): `rendered`,
+    /// then `used` (it was what Ghost said) or `dropped`.
+    fn prerender(&self, _what: &str) {}
     /// An interceptor (`name` is its code name) handled the turn in `secs`.
     fn intercepted(&self, _name: &str, _secs: f64) {}
     /// The interceptors looked at a transcript and let it through, taking `secs`.
@@ -148,6 +157,17 @@ pub struct Turn {
     /// Each pause at a segment's end: its seconds and whether the operator went on.
     pauses: Vec<Value>,
     speculation: IndexMap<String, u64>,
+    /// How the close was timed, and how this turn came back from one closed too soon.
+    closed: Option<String>,
+    reopened: Option<&'static str>,
+    prerender: IndexMap<String, u64>,
+    /// Segments read from their first quiet frame, by what became of each, and the model's
+    /// seconds on them.
+    early_read: IndexMap<String, u64>,
+    early_read_secs: f64,
+    /// Hand-overs from the fast model, and the time it took to ask (ADR 0050).
+    handovers: u64,
+    handover_secs: f64,
     early_ttfb: Option<f64>,
     pre: f64,
     intercepted: Option<String>,
@@ -187,6 +207,13 @@ impl Turn {
             kept_open: 0,
             pauses: Vec::new(),
             speculation: IndexMap::new(),
+            closed: None,
+            reopened: None,
+            prerender: IndexMap::new(),
+            early_read: IndexMap::new(),
+            early_read_secs: 0.0,
+            handovers: 0,
+            handover_secs: 0.0,
             early_ttfb: None,
             pre: 0.0,
             intercepted: None,
@@ -381,6 +408,12 @@ impl LatencyObserver {
                     turn.flags.insert("cut_off".into());
                 }
             }
+            Frame::HandOver { secs, .. } => {
+                if let Some(turn) = &mut s.turn {
+                    turn.handovers += 1;
+                    turn.handover_secs += secs;
+                }
+            }
             Frame::LlmStart if src == LLM => {
                 let needs_new = match &s.turn {
                     None => true,
@@ -561,6 +594,10 @@ impl LatencyObserver {
                     }
                 }
             }
+            Metric::EarlyRead { what, secs } => {
+                *turn.early_read.entry(what.to_string()).or_insert(0) += 1;
+                turn.early_read_secs += secs;
+            }
             Metric::Turn {
                 complete,
                 probability,
@@ -698,6 +735,24 @@ impl LatencyProbe for LatencyObserver {
     fn speculation(&self, outcome: &str) {
         if let Some(turn) = &mut self.lock().turn {
             *turn.speculation.entry(outcome.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    fn closed(&self, band: &str) {
+        if let Some(turn) = &mut self.lock().turn {
+            turn.closed = Some(band.to_string());
+        }
+    }
+
+    fn reopened(&self, started: bool) {
+        if let Some(turn) = &mut self.lock().turn {
+            turn.reopened = Some(if started { "started" } else { "unheard" });
+        }
+    }
+
+    fn prerender(&self, what: &str) {
+        if let Some(turn) = &mut self.lock().turn {
+            *turn.prerender.entry(what.to_string()).or_insert(0) += 1;
         }
     }
 
@@ -879,7 +934,28 @@ pub fn build_record(
         if !turn.smart_turn.is_empty() {
             hear.insert("smart_turn".into(), json!(turn.smart_turn));
         }
+        if let Some(band) = &turn.closed {
+            hear.insert("close".into(), json!(band));
+        }
+        if let Some(how) = turn.reopened {
+            hear.insert("reopened".into(), json!(how));
+        }
         rec.insert("hear".into(), Value::Object(hear));
+    }
+    if !turn.early_read.is_empty() {
+        rec.insert(
+            "early_read".into(),
+            json!({"n": turn.early_read, "secs": round(turn.early_read_secs, 3)}),
+        );
+    }
+    if !turn.prerender.is_empty() {
+        rec.insert("prerender".into(), json!(turn.prerender));
+    }
+    if turn.handovers > 0 {
+        rec.insert(
+            "handover".into(),
+            json!({"n": turn.handovers, "secs": round(turn.handover_secs, 3)}),
+        );
     }
     if let Some(c) = &turn.confirm {
         rec.insert("confirm".into(), c.clone());
