@@ -334,24 +334,37 @@ pub struct FirstSound {
 }
 
 impl FirstSound {
-    /// Never sooner than this after the reply begins: a model that answers in under a
-    /// second on a good connection is not talked over.
+    /// Never sooner than this after the reply begins.
     pub const FLOOR_SECS: f64 = 0.7;
     /// Never later: past this the silence is long whatever the connection.
     pub const CAP_SECS: f64 = 1.4;
-    /// Over the connection's usual first word: a turn is slow for it only past this.
+    /// A connection whose first word usually comes within this is quick: the word waits
+    /// until it is late for it, and is said only on a turn slower than usual.
+    pub const QUICK_SECS: f64 = 0.75;
+    /// On a quick connection, past its usual first word by this.
     pub const MARGIN_SECS: f64 = 0.25;
+    /// On a slow one, this far ahead of its usual first word: said well before the answer,
+    /// never a moment before it (measured 2026-11-12: at 0.8 s after the reply began the
+    /// word came about 0.9 s before a plain answer; at the slow connection's own first
+    /// word it would have come 0.35 s before it, "One sec. Doing well.").
+    pub const AHEAD_SECS: f64 = 0.8;
     /// With no measure of the connection.
     pub const UNKNOWN_SECS: f64 = 1.0;
 
     /// The wait for a connection whose first word usually comes `first_word` seconds
     /// after the call (the median of its last spoken turns, or of its latest check).
+    ///
+    /// The word must not land just before an answer. On a quick connection that means
+    /// late: after its usual first word, so it is said only when this turn is slow. On a
+    /// slow one (OpenRouter's Haiku 5.5, 1.5 to 1.9 s; a real-size prompt through the
+    /// proxy, 1.5 s) it means early: most turns are long enough to need it, and said
+    /// `AHEAD_SECS` before the usual answer it is a word and a pause, then the answer.
     pub fn for_connection(first_word: Option<f64>) -> Self {
-        let secs = first_word
-            .filter(|s| s.is_finite() && *s > 0.0)
-            .map_or(Self::UNKNOWN_SECS, |s| {
-                (s + Self::MARGIN_SECS).clamp(Self::FLOOR_SECS, Self::CAP_SECS)
-            });
+        let secs = match first_word.filter(|s| s.is_finite() && *s > 0.0) {
+            None => Self::UNKNOWN_SECS,
+            Some(s) if s <= Self::QUICK_SECS => (s + Self::MARGIN_SECS).max(Self::FLOOR_SECS),
+            Some(s) => (s - Self::AHEAD_SECS).clamp(Self::FLOOR_SECS, Self::CAP_SECS),
+        };
         Self {
             after: std::time::Duration::from_secs_f64(secs),
         }
@@ -1300,20 +1313,28 @@ mod tests {
     #[test]
     fn the_first_sound_follows_the_connections_first_word() {
         let secs = |w: Option<f64>| FirstSound::for_connection(w).after.as_secs_f64();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        // Quick: past its usual first word, so only a slow turn hears it.
+        assert!(near(secs(Some(0.3)), FirstSound::FLOOR_SECS));
+        assert!(near(secs(Some(0.6)), 0.85));
+        // Slow: well ahead of its usual first word, never just before the answer.
         assert!(
-            (secs(Some(0.3)) - FirstSound::FLOOR_SECS).abs() < 1e-9,
-            "a quick one"
+            near(secs(Some(1.47)), FirstSound::FLOOR_SECS),
+            "{}",
+            secs(Some(1.47))
         );
-        assert!(
-            (secs(Some(0.8)) - 1.05).abs() < 1e-9,
-            "its first word and the margin"
-        );
-        assert!(
-            (secs(Some(1.9)) - FirstSound::CAP_SECS).abs() < 1e-9,
-            "a slow one"
-        );
-        assert!((secs(None) - FirstSound::UNKNOWN_SECS).abs() < 1e-9);
-        assert!((secs(Some(f64::NAN)) - FirstSound::UNKNOWN_SECS).abs() < 1e-9);
+        assert!(near(secs(Some(1.9)), 1.1), "{}", secs(Some(1.9)));
+        assert!(near(secs(Some(3.0)), FirstSound::CAP_SECS));
+        assert!(near(secs(None), FirstSound::UNKNOWN_SECS));
+        assert!(near(secs(Some(f64::NAN)), FirstSound::UNKNOWN_SECS));
+        // Never later than the cap, never sooner than the floor.
+        for w in [0.1, 0.5, 0.75, 0.76, 1.0, 1.5, 2.0, 2.5, 5.0] {
+            let s = secs(Some(w));
+            assert!(
+                (FirstSound::FLOOR_SECS..=FirstSound::CAP_SECS).contains(&s),
+                "{w}: {s}"
+            );
+        }
     }
 
     #[test]
