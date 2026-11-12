@@ -93,7 +93,14 @@ fn ghosts_own_names_are_not_app_names() {
     // operator's `skills.*` rules would apply to it.
     assert_eq!(
         RESERVED_NAMES.iter().copied().collect::<BTreeSet<_>>(),
-        BTreeSet::from(["conversations", "outputs", "rules", "skills", "waiting"])
+        BTreeSet::from([
+            "conversations",
+            "ghost",
+            "outputs",
+            "rules",
+            "skills",
+            "waiting"
+        ])
     );
     let f = parse_apps_json(
         r#"{"apps": {"skills": {"command": "x"}, "conversations": {"url": "https://x"},

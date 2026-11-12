@@ -247,6 +247,9 @@ impl Apps {
         let mut extra: Vec<&String> = apps.keys().filter(|n| !order.contains(n)).collect();
         extra.sort();
         order.extend(extra.into_iter().cloned());
+        // Ghost's own app first (ADR 0045): an app called `ghost_docs` can't take
+        // `ghost_docs_search` from it.
+        order.sort_by_key(|n| !apps.get(n).is_some_and(|a| a.is_own())); // stable
         order
             .iter()
             .filter_map(|n| apps.get(n).cloned())

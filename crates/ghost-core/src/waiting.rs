@@ -561,6 +561,26 @@ impl WaitingList {
         Ok(ok)
     }
 
+    /// One item from `source`, seen now (what an agent tells the operator, ADR 0045); the others of that
+    /// source stay. True when it is new or changed.
+    pub fn observe(&self, source: &str, draft: &ItemDraft) -> Result<bool> {
+        let changed = self.items.observe(source, draft, None)?;
+        if changed {
+            (self.on_change)();
+        }
+        Ok(changed)
+    }
+
+    /// `source` says `key` is over. False when the item is not open, or is another
+    /// source's.
+    pub fn resolve(&self, source: &str, key: &str) -> Result<bool> {
+        let ok = self.items.resolve(source, key, None)?;
+        if ok {
+            (self.on_change)();
+        }
+        Ok(ok)
+    }
+
     /// How many still need alerting, for `Status`.
     pub fn count(&self, now: Option<DateTime<Utc>>) -> Result<usize> {
         let now = now.unwrap_or_else(utcnow);

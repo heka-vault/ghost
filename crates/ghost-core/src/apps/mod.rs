@@ -38,17 +38,18 @@ mod tools;
 
 use std::collections::{BTreeMap, HashMap};
 
-pub use bridge::{AppWriter, source_of};
+pub use bridge::{AppWriter, CALLER_ARG, source_of};
 pub use collection::Apps;
 pub use connection::{
     App, AuthFor, CALL_TIMEOUT, CONNECT_TIMEOUT, SIGN_IN_TIMEOUT, Session, SessionError,
     StderrRelay,
 };
+pub(crate) use connection::{RmcpSession, init_kind};
 pub(crate) use spec::truthy as spec_truthy;
 pub use spec::{
-    APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, RESERVED_NAMES, app_name_problem, edit_apps,
-    extract_secrets, fill_secrets, load_apps, looks_like_secret, parse_app, parse_apps_json,
-    render_app, render_apps_json, secret_name, secret_names, write_apps,
+    APP_NAME_RE, APPS_FILE, AppSpec, AppsFile, GHOST_APP, RESERVED_NAMES, app_name_problem,
+    edit_apps, extract_secrets, fill_secrets, load_apps, looks_like_secret, parse_app,
+    parse_apps_json, render_app, render_apps_json, secret_name, secret_names, write_apps,
 };
 pub use tools::{
     BRIEF_MAX, MAX_FIELD_CHARS, MAX_LIST_ITEMS, MAX_RESULT_ITEMS, MAX_RESULT_TEXT, MAX_TEXT_CHARS,

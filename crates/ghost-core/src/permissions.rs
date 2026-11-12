@@ -431,7 +431,13 @@ impl Permissions {
         args: Option<&Map<String, Value>>,
     ) -> Autonomy {
         self.matched(source, operation, args)
-            .unwrap_or_else(|| self.mode.level())
+            .unwrap_or_else(|| match self.mode.level() {
+                // Ghost's own app (ADR 0045): an item on the waiting list is its own
+                // announcement, so what no rule names runs without a sentence about it.
+                // `allow = ["ghost.notify"]` says it aloud; `ask` and `block` hold as ever.
+                Autonomy::Announce if source == crate::apps::GHOST_APP => Autonomy::Quiet,
+                level => level,
+            })
     }
 
     fn matched(

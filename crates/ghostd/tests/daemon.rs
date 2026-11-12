@@ -205,6 +205,40 @@ async fn a_file_wake_and_a_typed_turn(wake_mode: &str) {
     assert_eq!(st["session_id"], Value::Null);
     assert!(!run.is_finished());
 
+    // ADR 0045: Ghost's own app is served before any session opens, with no vault, no
+    // network and no apps.json. It is in the gate and in an agent's reach, and it is not
+    // one of the operator's connected apps, nor ever an app that "isn't connected".
+    let apps = w.daemon.apps().unwrap();
+    assert!(apps.is_up("ghost"));
+    assert!(
+        w.daemon
+            .gate()
+            .unwrap()
+            .operation("ghost", "notify")
+            .is_ok()
+    );
+    assert_eq!(st["apps"], serde_json::json!([]));
+    assert_eq!(st["waiting"], 0);
+    let ghost = w.daemon.conversations().unwrap().get("ghost").unwrap();
+    let reach = w.daemon.reach().unwrap()(&ghost.unwrap());
+    assert_eq!(reach[0].name, "ghost");
+    assert!(
+        reach[0]
+            .read_tools
+            .iter()
+            .any(|t| t.name == "ghost_docs_search")
+    );
+    let status = reach[0]
+        .read_tools
+        .iter()
+        .find(|t| t.name == "ghost_status")
+        .unwrap();
+    let said = (status.handler)(serde_json::Map::new()).await.unwrap();
+    assert_eq!(said["phase"], "passive");
+    assert_eq!(said["session"]["open"], false);
+    assert_eq!(said["problems"], serde_json::json!([]));
+    assert!(said["model"]["provider"].is_string());
+
     // the file wake: a session opens in Ghost and greets
     std::fs::write(tmp.path().join("rt/wake"), "").unwrap();
     let st = until(client, "a session", |v| v["phase"] != "passive").await;
