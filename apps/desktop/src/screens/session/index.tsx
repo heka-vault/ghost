@@ -17,17 +17,21 @@
  * summary. A typed turn goes through the same pipeline, tools and gate as speech. “Ghost
  * isn’t running” is the shell's (src/app/Offline.tsx).
  */
-import { useGhost } from "@ghost/ui";
+import { callsOf, useGhost, youSpeaking } from "@ghost/ui";
+import type { QuestionView } from "@ghost/client-ts";
 import { ArrowDown, ArrowRight, AudioLines, Brain, Clock, Mic, MoreHorizontal, PhoneOff, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, scrollPanelToTop, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
+import { useAnnounced, useHeld, useSaying, useSessionQuestions } from "./live";
+import { RoomView, Stage, stageState, useRoomView } from "./Stage";
+import { activityItems, type ExtraItem, weave, withGaps } from "./timeline";
 import { Transcript } from "./Transcript";
 import { buildHistory, buildTranscript } from "./transcript";
 import "./session.css";
@@ -52,7 +56,7 @@ const FAILED: Record<Action, string> = {
 };
 
 export default function SessionScreen(_: RouteProps) {
-  const { client, status, turns, pending } = useGhost();
+  const { client, status, turns, heldTurns, pending, activity } = useGhost();
   // The shell's state: the same words as the sidebar card, and `online` gates every write.
   const { phase, online, loadingModels: loading, setupNeeded, setupLocked = false, setupHref } = useLive();
   const design = useDesign();
@@ -78,10 +82,37 @@ export default function SessionScreen(_: RouteProps) {
   // Home is Ghost's page (conversation zero, where every wake lands): Ghost's earlier sessions,
   // then the live one. #/agents/ghost comes here; Ghost's persona and memory are its ⋯ menu.
   const history = useGhostHistory(sessionId);
-  const items = useMemo(
-    () => [...buildHistory(history.turns, lines), ...buildTranscript(turns, line, lines, switches, decisions)],
-    [history.turns, turns, line, lines, switches, decisions],
-  );
+  const announced = useAnnounced(sessionId);
+  const held = useHeld(sessionId, phase);
+  const questions = useSessionQuestions(inSession ? (turns[0]?.at ?? null) : null);
+  const apps = status?.apps ?? [];
+  const items = useMemo(() => {
+    const extras: ExtraItem[] = [
+      ...activityItems(activity, turns, apps),
+      ...announced.map((a): ExtraItem => ({ kind: "change", key: `ch-${a.id}`, at: a.at, summary: a.summary, ok: a.ok })),
+      ...held.map((h): ExtraItem => ({ kind: "hold", key: `hold-${h.at}`, at: h.at, back: h.back })),
+      ...questions.map((q): ExtraItem => ({ kind: "question", key: `q-${q.key}`, at: q.asked_at, question: q })),
+    ];
+    return withGaps([...buildHistory(history.turns, lines), ...weave(buildTranscript(turns, line, lines, switches, decisions), extras)]);
+    // apps is a fresh array per status; its contents are what matter.
+  }, [history.turns, turns, line, lines, switches, decisions, activity, announced, held, questions, apps.join(",")]);
+  const speed = lines.find((l) => l.slug === line)?.speed ?? 1;
+  const saying = useSaying(turns, phase === "speaking", activity, speed);
+  // The operator is mid-turn: the turn opened (ADR 0055), or pieces of it are held until it closes (#73).
+  const youTalking = inSession && (youSpeaking(activity) || heldTurns > 0);
+  const calls = useMemo(() => callsOf(activity, apps), [activity, apps.join(",")]);
+  const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
+  const { room, toggle: toggleRoom, leave: leaveRoom } = useRoomView(inSession && !onPhone);
+  // Room view fills the panel from its top; leaving it goes back to the end of the record.
+  useEffect(() => {
+    if (room) scrollPanelToTop();
+    else if (pinned.current) scrollIntoPanel(end.current, { block: "panel-end" });
+  }, [room]);
+  const lastReply = [...turns].reverse().find((t) => t.role === "assistant") ?? null;
+  const lastHeard = [...turns].reverse().find((t) => t.role === "user") ?? null;
+  const answer = async (q: QuestionView, choice: string) => {
+    await client.answerQuestion(q.key, choice);
+  };
   const seenLast = useLastSession(sessionId, inSession ? line : null, turns.length ? turns[turns.length - 1].at : null);
   // What this window saw end, or else the line used most recently (survives a reload).
   const lastSession = useMemo(() => {
@@ -104,7 +135,8 @@ export default function SessionScreen(_: RouteProps) {
   const pinned = useRef(true);
   const follow = useRef(false);
   const [unseen, setUnseen] = useState(false);
-  const shownTurns = turns.length + history.turns.length;
+  // Rows, not only turns: a call, a question or a change arriving is something new to see.
+  const shownTurns = items.length;
   const seen = useRef({ turns: shownTurns, pending: pending?.id ?? null });
 
   useEffect(() => {
@@ -259,7 +291,7 @@ export default function SessionScreen(_: RouteProps) {
       disabled={!canType}
       sending={busy === "send"}
       placeholder={placeholder}
-      presence={hasTranscript ? presencePhase : undefined}
+      presence={hasTranscript && !inSession ? presencePhase : undefined}
       label={inSession ? `Message ${lineLabel}` : "Message Ghost"}
       voice={voice}
     />
@@ -339,6 +371,7 @@ export default function SessionScreen(_: RouteProps) {
               />
             )}
             {!pending && errorEl}
+            {inSession && <Stage state={state} slug={line} name={lineLabel} calls={calls} room={room} onRoom={toggleRoom} />}
             {composerEl}
             {pending && errorEl}
           </div>
@@ -347,8 +380,23 @@ export default function SessionScreen(_: RouteProps) {
     >
       {hasTranscript ? (
         <>
-          <Transcript items={items} nameOf={nameOf} thinkingAs={thinking ? line : null} />
+          <div className={cx("session-record", room && "is-behind-room")}>
+            <Transcript items={items} nameOf={nameOf} thinkingAs={thinking ? line : null} saying={saying} lines={lines} canReplay={!inSession && online} onAnswer={answer} />
+          </div>
           <div ref={end} />
+          {room && inSession && (
+            <RoomView
+              state={state}
+              slug={line}
+              name={lineLabel}
+              reply={lastReply ? { text: lastReply.text, saying: saying[lastReply.at] } : null}
+              heard={lastHeard?.text ?? null}
+              calls={calls}
+              pending={pending}
+              startedAt={turns[0]?.at ?? null}
+              onLeave={leaveRoom}
+            />
+          )}
         </>
       ) : (
         <div className={cx("session-start page-fill", !startOnly && "session-start--live")}>

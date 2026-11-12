@@ -29,7 +29,8 @@ describe("home is Ghost's page", () => {
       ],
       lines,
     );
-    expect(items.map((i) => i.kind)).toEqual(["started", "you", "ghost", "transfer", "ghost", "started", "you"]);
+    // Each stored session closes with how long it ran.
+    expect(items.map((i) => i.kind)).toEqual(["started", "you", "ghost", "transfer", "ghost", "ended", "started", "you", "ended"]);
     expect(items[0]).toMatchObject({ kind: "started", dated: true });
     // After a transfer sentence the stored replies are still Ghost's: the agent's live in its own transcript.
     expect(items[4]).toMatchObject({ kind: "ghost", slug: "ghost" });

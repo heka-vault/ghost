@@ -396,6 +396,7 @@ fn world_setup(setup: Setup) -> World {
             on_conversation: None,
             on_latency: Some(Arc::new(move |rec| r.lock().unwrap().push(rec.clone()))),
             on_level: None,
+            on_activity: None,
         },
         wake_phrases: None,
         wake_fuzzy: 0.0,
