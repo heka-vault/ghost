@@ -28,13 +28,16 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
+use ghost_core::conversations::models::Profile;
 use ghost_core::ghost_app::GhostServer;
-use ghost_core::ghost_app::clients::{AuthError, ClientId, Clients};
-use ghost_core::ghost_app::outside::{DeskVoice, Feed, Outside, Said};
+use ghost_core::ghost_app::clients::{AuthError, CLIENT_SOURCE, ClientId, Clients, shown};
+use ghost_core::ghost_app::outside::{AgentRunner, DeskVoice, Feed, Outside, Said};
 use ghost_core::routes::{Delivery, RouteName, RoutePolicy};
+use ghost_core::schedules::{DEFAULT_MAX_RUNTIME_SECS, DEFAULT_MAX_TURNS, Ended};
 use ghost_core::store::Item;
 use ghost_core::time::utcnow;
 use ghost_core::waiting::WaitingList;
+use ghost_voice::headless::{Asked, HeadlessRunner};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use serde_json::{Value, json};
@@ -263,6 +266,90 @@ impl OutsideListener {
             if tokio::time::timeout(STOP_WAIT, server.task).await.is_err() {
                 abort.abort(); // a client still waiting on events_wait
             }
+        }
+    }
+}
+
+// --- a written turn with an agent ---------------------------------------------------------------
+
+/// `agent_ask`, through the run with nobody there (ADR 0047): the agent's own prompt,
+/// memory and tools, the same gate, no audio. A change that would ask is set aside on the
+/// waiting list, since nothing an outside tool writes is the operator's yes. The turn is
+/// kept in the agent's transcript as asked by that tool, bounded as a scheduled run is
+/// (30 model calls, ten minutes), and stopped when the request it was made for is
+/// cancelled or dropped, or when Ghost stops.
+pub struct AskRunner {
+    runner: Arc<HeadlessRunner>,
+    /// Cancelled when the daemon stops.
+    stop: CancellationToken,
+    max_turns: u32,
+    max_runtime: Duration,
+}
+
+impl AskRunner {
+    pub fn new(runner: Arc<HeadlessRunner>, stop: CancellationToken) -> Self {
+        Self {
+            runner,
+            stop,
+            max_turns: DEFAULT_MAX_TURNS,
+            max_runtime: Duration::from_secs(DEFAULT_MAX_RUNTIME_SECS),
+        }
+    }
+
+    pub fn with_limits(mut self, max_turns: u32, max_runtime: Duration) -> Self {
+        self.max_turns = max_turns;
+        self.max_runtime = max_runtime;
+        self
+    }
+}
+
+#[async_trait]
+impl AgentRunner for AskRunner {
+    async fn ask(&self, agent: &Profile, text: &str, from: &str) -> Result<String, String> {
+        let who = shown(from.strip_prefix(CLIENT_SOURCE).unwrap_or(from));
+        let cancel = self.stop.child_token();
+        // The request this turn is for (`ghost_app::outside` runs a change under it).
+        let request = ghost_core::apps::current_cancel();
+        let asked = Asked {
+            id: format!("ask-{}", uuid::Uuid::new_v4().simple()),
+            agent: agent.slug.clone(),
+            from: who,
+            text: text.to_string(),
+            max_turns: self.max_turns,
+            max_runtime: self.max_runtime,
+            cancel: cancel.clone(),
+        };
+        // Its own task, stopped through its token and never dropped where it stands: a
+        // change the agent has in the gate still gets its outcome.
+        let runner = self.runner.clone();
+        let run = tokio::spawn(async move { runner.ask(asked).await });
+        tokio::pin!(run);
+        let _gone = cancel.clone().drop_guard();
+        let out = match request {
+            Some(request) => tokio::select! {
+                out = &mut run => out,
+                () = request.cancelled() => {
+                    cancel.cancel();
+                    run.await
+                }
+            },
+            None => run.await,
+        }
+        .map_err(|e| format!("the turn did not finish: {e}"))?;
+        match out.ended {
+            Ended::Done if out.answer.is_empty() => {
+                Ok(format!("{} had nothing to say to that.", agent.name))
+            }
+            Ended::Done => Ok(out.answer),
+            Ended::TimedOut => Err(format!(
+                "{} did not finish within {} minutes; what it changed before that is in the \
+                 audit",
+                agent.name,
+                self.max_runtime.as_secs().div_ceil(60)
+            )),
+            Ended::Cancelled => Err(format!("stopped before {} answered", agent.name)),
+            Ended::Transient(e) => Err(format!("the model could not be reached: {e}")),
+            Ended::Failed(e) => Err(e),
         }
     }
 }

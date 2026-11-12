@@ -1138,3 +1138,433 @@ fn the_command_line_adds_lists_and_removes_and_shows_a_token_once() {
     let kept = store.get_client("claude-code").unwrap().unwrap();
     assert!(!kept.token_hash.contains(&token));
 }
+
+// --- agent_ask over the run with nobody there, and the schedules (ADR 0047) ------------------
+
+mod asking {
+    use std::time::Duration;
+
+    use ghost_core::conversations::models::Role;
+    use ghost_core::conversations::{
+        Conversations, ConversationsOptions, SOURCE as CONVERSATIONS, conversations_source,
+    };
+    use ghost_core::gate::Request;
+    use ghost_core::schedules::jobs::AgentState;
+    use ghost_core::schedules::{Jobs, is_run_session};
+    use ghost_llm::Options;
+    use ghost_voice::conversation::Reach;
+    use ghost_voice::headless::{HeadlessParts, HeadlessRunner, asked_mark};
+    use ghost_voice::llm::{ModelPort, ScriptedModel, ScriptedReply};
+
+    use super::*;
+
+    /// The listener over the real pieces: the agents, the gate, Ghost's own app with the
+    /// schedules, and `agent_ask` over the headless run with a scripted model.
+    struct Asking {
+        _tmp: tempfile::TempDir,
+        store: Arc<Store>,
+        convs: Arc<Conversations>,
+        waiting: Arc<WaitingList>,
+        clients: Arc<Clients>,
+        jobs: Arc<Jobs>,
+        runner: Arc<AskRunner>,
+        host: OutsideHost,
+        url: String,
+        _attached: Attached,
+        _apps: Arc<Apps>,
+    }
+
+    async fn asking(policy: &str, replies: Vec<ScriptedReply>, ttfb: Duration) -> Asking {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("ghost");
+        std::fs::create_dir_all(&cfg).unwrap();
+        let store = Arc::new(Store::in_memory().unwrap());
+        let convs = Arc::new(
+            Conversations::new(store.clone(), &cfg, ConversationsOptions::default()).unwrap(),
+        );
+        convs.ensure_ghost().unwrap();
+        let gate = Arc::new(
+            WriteGate::new(store.clone())
+                .with_autonomy(AutonomyPolicy::parse(policy, "<test>").unwrap()),
+        );
+        gate.register(CONVERSATIONS, conversations_source(&convs).operations);
+        let hire = gate.operation(CONVERSATIONS, "create").unwrap();
+        let prepared = (hire.prepare)(
+            json!({"name": "Ledger", "job": "the books"})
+                .as_object()
+                .cloned()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        gate.submit(Request::new(
+            "setup",
+            CONVERSATIONS,
+            "create",
+            prepared.target,
+            prepared.changes,
+            "",
+        ))
+        .await
+        .unwrap();
+        let (_bus, events) = broadcast::channel::<String>(64);
+        let waiting =
+            Arc::new(WaitingList::new(Items::new(store.clone())).with_changes(gate.clone()));
+        let apps = Arc::new(Apps::new(
+            Vec::new(),
+            Arc::new(HashMap::<String, String>::new()),
+            None,
+        ));
+        let jobs = Arc::new(
+            Jobs::new(store.clone())
+                .with_default_tz("UTC")
+                .with_agents({
+                    let convs = convs.clone();
+                    Arc::new(move |slug: &str| match convs.get(slug) {
+                        Ok(Some(p)) if p.retired() => AgentState::Retired,
+                        Ok(Some(_)) => AgentState::Known,
+                        _ => AgentState::Unknown,
+                    })
+                }),
+        );
+        let server = GhostServer::new(Parts {
+            store: store.clone(),
+            waiting: waiting.clone(),
+            apps: Arc::downgrade(&apps),
+            status: Arc::new(status),
+        })
+        .with_schedules(jobs.clone());
+        let attached = ghost_app::attach(&apps, server.clone()).await.unwrap();
+        gate.register(NAME, attached.app.operations());
+        // What an agent reaches in a run: here, Ghost's own app.
+        let reach: Reach = {
+            let apps = apps.clone();
+            Arc::new(move |_p| apps.sources())
+        };
+        let model = ScriptedModel::new(vec![replies], ttfb);
+        let runner = Arc::new(AskRunner::new(
+            Arc::new(HeadlessRunner::new(HeadlessParts {
+                conversations: convs.clone(),
+                gate: gate.clone(),
+                reach,
+                model: Arc::new(move || Ok(model.clone() as Arc<dyn ModelPort>)),
+                options: Options::default(),
+                skills: None,
+            })),
+            CancellationToken::new(),
+        ));
+        let clients = Arc::new(Clients::new(store.clone(), tmp.path().join("clients")));
+        let host = OutsideHost::new(
+            "127.0.0.1:0",
+            clients.clone(),
+            Some(&server),
+            Outside::new(gate.clone()).with_runner(runner.clone()),
+        );
+        host.start(&waiting, events).await;
+        let url = format!("http://127.0.0.1:{}{PATH}", host.port());
+        Asking {
+            _tmp: tmp,
+            store,
+            convs,
+            waiting,
+            clients,
+            jobs,
+            runner,
+            host,
+            url,
+            _attached: attached,
+            _apps: apps,
+        }
+    }
+
+    impl Asking {
+        async fn client(&self, name: &str) -> Client {
+            let token = self.clients.create(name, false).unwrap().token.to_string();
+            connect(&self.url, &token, ClientLifecycleMode::Initialize)
+                .await
+                .unwrap()
+        }
+
+        fn transcript(&self, slug: &str) -> Vec<(Role, String, String)> {
+            self.convs
+                .turns(slug, 100)
+                .unwrap()
+                .into_iter()
+                .map(|t| (t.role, t.session_id, t.text))
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_client_asks_an_agent_and_gets_its_written_answer() {
+        let w = asking(
+            "",
+            vec![ScriptedModel::say("October came to 4,210.")],
+            Duration::ZERO,
+        )
+        .await;
+        let c = w.client("claude-code").await;
+        let out = call(
+            &c,
+            "agent_ask",
+            json!({"agent": "Ledger", "text": "the October total?"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            out,
+            json!({"agent": "ledger", "answer": "October came to 4,210."})
+        );
+
+        // The turn is in that agent's transcript, marked as from that tool, under a run's
+        // session id; nothing of it is in Ghost's.
+        let mark = asked_mark("Claude Code");
+        let turns = w.transcript("ledger");
+        assert_eq!(turns.len(), 2, "{turns:?}");
+        assert_eq!(turns[0].0, Role::System);
+        assert_eq!(turns[0].2, format!("{mark} the October total?"));
+        assert_eq!(turns[1].0, Role::Assistant);
+        assert_eq!(turns[1].2, format!("{mark} October came to 4,210."));
+        assert!(
+            turns
+                .iter()
+                .all(|t| is_run_session(&t.1) && t.1 == turns[0].1)
+        );
+        assert!(w.transcript("ghost").is_empty());
+
+        // The audit has the ask as the client's change.
+        let (rows, _) = w.store.list_proposals(&ProposalQuery::page(10, 0)).unwrap();
+        let ask = rows.iter().find(|p| p.operation == "agent_ask").unwrap();
+        assert_eq!(ask.status, ProposalStatus::Executed);
+        assert_eq!(ask.session_id, "client:claude-code");
+        let _ = c.cancel().await;
+        w.host.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_change_that_would_ask_inside_the_turn_is_set_aside_on_the_waiting_list() {
+        // The operator's permissions ask before an agent tells them something. The client
+        // wrote the question, and nothing a client writes is the operator's yes: the
+        // change the agent makes for it waits, and the turn carries on and says so.
+        let w = asking(
+            "[permissions]\nask = [\"ghost.notify\"]\n",
+            vec![
+                ScriptedModel::call(
+                    "",
+                    "ghost_notify",
+                    json!({"title": "The October total is ready"})
+                        .as_object()
+                        .cloned()
+                        .unwrap(),
+                ),
+                ScriptedModel::say("I have asked the operator before telling them."),
+            ],
+            Duration::ZERO,
+        )
+        .await;
+        let c = w.client("claude-code").await;
+        let out = call(
+            &c,
+            "agent_ask",
+            json!({"agent": "ledger", "text": "tell the operator the October total is ready"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            out["answer"],
+            "I have asked the operator before telling them."
+        );
+
+        let (rows, _) = w.store.list_proposals(&ProposalQuery::page(10, 0)).unwrap();
+        let notify = rows.iter().find(|p| p.operation == "notify").unwrap();
+        assert_eq!(notify.status, ProposalStatus::Pending, "it has not run");
+        assert!(is_run_session(&notify.session_id), "{}", notify.session_id);
+        w.waiting.refresh(None).unwrap();
+        let items = w.waiting.items.open(Some(Tell::Tell)).unwrap();
+        assert!(
+            items
+                .iter()
+                .any(|i| i.source == "gate" && i.key == format!("change:{}", notify.id)),
+            "{items:?}"
+        );
+        // Nothing was told: the agent's item is not there.
+        assert!(!items.iter().any(|i| i.source == "agent:ledger"));
+        let _ = c.cancel().await;
+        w.host.stop().await;
+    }
+
+    #[tokio::test]
+    async fn an_agent_ghost_does_not_have_is_a_clear_error_and_nothing_runs() {
+        let w = asking("", vec![ScriptedModel::say("Never said.")], Duration::ZERO).await;
+        let c = w.client("claude-code").await;
+        let e = call(&c, "agent_ask", json!({"agent": "nobody", "text": "hi"}))
+            .await
+            .unwrap_err();
+        assert!(
+            e.contains("no agent called nobody") && e.contains("ledger") && e.contains("ghost"),
+            "{e}"
+        );
+        assert!(w.transcript("ledger").is_empty() && w.transcript("ghost").is_empty());
+        let _ = c.cancel().await;
+        w.host.stop().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_turn_stops_when_the_request_it_was_made_for_does_and_is_bounded() {
+        // The model takes a quarter of an hour. The request is cancelled: the turn stops,
+        // and what was asked is still in the transcript, as not answered.
+        let slow = Duration::from_secs(900);
+        let w = asking("", vec![ScriptedModel::say("Too late.")], slow).await;
+        let ledger = w.convs.get("ledger").unwrap().unwrap();
+        let request = CancellationToken::new();
+        let turn = {
+            let (runner, ledger, request) = (w.runner.clone(), ledger.clone(), request.clone());
+            tokio::spawn(ghost_core::apps::with_cancel(request, async move {
+                runner.ask(&ledger, "the total?", "client:cursor").await
+            }))
+        };
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        request.cancel();
+        let e = turn.await.unwrap().unwrap_err();
+        assert!(e.contains("stopped before Ledger answered"), "{e}");
+        let turns = w.transcript("ledger");
+        assert_eq!(turns.len(), 1, "{turns:?}");
+        assert_eq!(
+            turns[0].2,
+            format!("{} the total? (not answered)", asked_mark("Cursor"))
+        );
+
+        // Left alone, it is bounded by the run's own clock: ten minutes.
+        let e = w
+            .runner
+            .ask(&ledger, "the total?", "client:cursor")
+            .await
+            .unwrap_err();
+        assert!(e.contains("did not finish within 10 minutes"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_client_sets_up_a_schedule_as_its_own_and_manages_only_its_own() {
+        let w = asking("", Vec::new(), Duration::ZERO).await;
+        let claude = w.client("claude-code").await;
+        let cursor = w.client("cursor").await;
+        let names: Vec<String> = claude
+            .list_all_tools()
+            .await
+            .unwrap()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        assert!(names.iter().any(|n| n == "schedules_list"));
+        assert!(names.iter().any(|n| n == "schedule_manage"));
+        // Finding an app's tool is for an agent, which can call it.
+        assert!(!names.iter().any(|n| n == "tools_search"), "{names:?}");
+
+        // Through the gate, attributed to the client, run as the agent it names (Ghost
+        // when it names none).
+        let made = call(
+            &claude,
+            "schedule_manage",
+            json!({"action": "create", "name": "build watch", "every": "30m",
+                   "instruction": "Check the build and say if it is red."}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made["status"], "created");
+        assert_eq!(made["agent"], "ghost");
+        assert_eq!(made["made_by"], "client:claude-code");
+        let job = w.jobs.find("build watch").unwrap().unwrap();
+        assert_eq!(job.created_by, "client:claude-code");
+        let books = call(
+            &claude,
+            "schedule_manage",
+            json!({"action": "create", "name": "books", "every": "1d", "agent": "ledger",
+                   "instruction": "Close the day."}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(books["agent"], "ledger");
+        let (rows, _) = w.store.list_proposals(&ProposalQuery::page(10, 0)).unwrap();
+        assert!(
+            rows.iter()
+                .filter(|p| p.operation == "schedule_manage")
+                .all(|p| p.session_id == "client:claude-code"
+                    && p.status == ProposalStatus::Executed)
+        );
+
+        // Another client cannot pause it, read it, or see what it says.
+        let e = call(
+            &cursor,
+            "schedule_manage",
+            json!({"action": "pause", "id": "build watch"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(e.contains("an outside tool manages only its own"), "{e}");
+        assert!(w.jobs.find("build watch").unwrap().unwrap().enabled);
+        let e = call(&cursor, "schedules_list", json!({"id": "build watch"}))
+            .await
+            .unwrap_err();
+        assert!(e.contains("that you set up"), "{e}");
+        let seen = call(&cursor, "schedules_list", json!({})).await.unwrap();
+        let rows = seen["schedules"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter().all(|r| r["yours"] == false
+                && r.get("name").is_none()
+                && r.get("made_by").is_none())
+        );
+        // A schedule an agent or the operator made is not a client's to manage either.
+        let theirs = w
+            .jobs
+            .create(
+                &ghost_core::schedules::JobEdit {
+                    name: Some("morning".into()),
+                    agent: Some("ledger".into()),
+                    instruction: Some("Look.".into()),
+                    when: Some(ghost_core::schedules::Written {
+                        every: Some("1h".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                ghost_core::schedules::OPERATOR,
+                ghost_core::time::utcnow(),
+            )
+            .unwrap();
+        let e = call(
+            &claude,
+            "schedule_manage",
+            json!({"action": "remove", "id": theirs.id}),
+        )
+        .await
+        .unwrap_err();
+        assert!(e.contains("manages only its own"), "{e}");
+
+        // Its own it reads whole, pauses and removes.
+        let mine = call(&claude, "schedules_list", json!({"id": "build watch"}))
+            .await
+            .unwrap();
+        assert_eq!(mine["instruction"], "Check the build and say if it is red.");
+        let paused = call(
+            &claude,
+            "schedule_manage",
+            json!({"action": "pause", "id": "build watch"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(paused["status"], "paused");
+        let gone = call(
+            &claude,
+            "schedule_manage",
+            json!({"action": "remove", "id": "build watch"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(gone["status"], "removed");
+        assert!(w.jobs.find("build watch").unwrap().is_none());
+        let _ = claude.cancel().await;
+        let _ = cursor.cancel().await;
+        w.host.stop().await;
+    }
+}

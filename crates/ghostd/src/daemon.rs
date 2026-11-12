@@ -1435,7 +1435,13 @@ impl Daemon {
             &cfg.mcp_listen,
             Arc::new(Clients::new(store.clone(), cfg.clients_dir())),
             ghost_app.as_ref().map(|_| &ghost_server),
-            Outside::new(gate.clone()).with_desk(Arc::new(crate::outside::Desk(Arc::downgrade(d)))),
+            Outside::new(gate.clone())
+                .with_desk(Arc::new(crate::outside::Desk(Arc::downgrade(d))))
+                // ADR 0047's run with nobody there is what `agent_ask` runs.
+                .with_runner(Arc::new(crate::outside::AskRunner::new(
+                    Arc::new(crate::schedules::runner(d, &gate, &conversations, &skills)),
+                    d.stop.child_token(),
+                ))),
         ));
         d.late.outside.set(outside.clone()).ok();
         // The hooks listener is made now (its addresses are in the API's status) and
