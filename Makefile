@@ -52,7 +52,7 @@ define ghostd
 cargo build -q -p ghostd || exit 1; $(load_env) $(GHOSTD)
 endef
 
-.PHONY: help prereqs setup sync env passwords passwords-import echo-cancel echo-cancel-off \
+.PHONY: help prereqs setup sync env passwords passwords-import echo-cancel echo-cancel-off demo-audio \
         dev daemon desktop desktop-web reload start stop restart \
         wake say status check latency restore-volumes \
         lint fmt test deny typecheck contract web ci api-schema version release screenshots \
@@ -121,6 +121,9 @@ echo-cancel: ## optional: the echo-cancelled mic "ghost.mic" (a user service), s
 
 echo-cancel-off: ## stop and remove the echo-cancel service
 	infra/pipewire/install.sh --uninstall
+
+demo-audio: ## for a demo on a call: a mic "Ghost and your microphone" with Ghost's voice mixed in; Ctrl+C removes it
+	@scripts/demo-audio.sh
 
 ##@ Develop: Ghost from this checkout
 
