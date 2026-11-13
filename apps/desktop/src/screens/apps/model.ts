@@ -47,14 +47,14 @@ export const safeIcon = (url: string | null | undefined): string | null => (url 
 
 /** An app's state in words, and the tone of its badge. */
 export function stateWords(a: AppView): { label: string; tone: Tone } {
-  if (a.sign_in_url) return { label: "Waiting for you to sign in", tone: "warn" };
+  if (a.sign_in_url) return { label: "Waiting for you to sign in", tone: "info" };
   switch (a.state) {
     case "connected":
       return { label: "Connected", tone: "ok" };
     case "connecting":
       return { label: "Connecting…", tone: "info" };
     case "needs_sign_in":
-      return { label: "Needs you to sign in again", tone: "warn" };
+      return { label: "Needs you to sign in again", tone: "danger" };
     default:
       return { label: "Not connected", tone: "danger" };
   }

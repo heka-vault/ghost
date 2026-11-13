@@ -4,14 +4,14 @@
  * app's config, whose passwords Ghost moves into its vault (ADR 0036). Behind a quiet link, with
  * one line of caution: Ghost uses every tool an app offers.
  */
-import { ApiError } from "@ghost/client-ts";
+import { ApiError, type AppView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { ExternalLink } from "lucide-react";
 import { type FormEvent, useEffect, useId, useState } from "react";
 
 import { useDesign } from "../../design/context";
 import { Button, Dialog, Disclosure, Field, Input, Notice, SegmentedControl, Textarea, errorText, useLive, useToast } from "../../ui";
-import { connectOutcome, failedText } from "./ConnectDialog";
+import { Connected, connectOutcome, failedText } from "./ConnectDialog";
 import { sentence } from "./model";
 import { expectSignIn, openSignIn } from "./signin";
 
@@ -42,6 +42,7 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
   const [error, setError] = useState<{ title: string; text: string; taken: boolean; failed?: boolean } | null>(null);
   /** Saved by an earlier try that then didn't connect: the next try replaces it. */
   const [saved, setSaved] = useState(false);
+  const [done, setDone] = useState<AppView | null>(null);
   const [blank, setBlank] = useState(false);
   const [signIn, setSignIn] = useState<{ url: string; opened: boolean } | null>(null);
 
@@ -92,6 +93,9 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
       } else if (connecting) {
         toast({ title: names.length === 1 ? `Connecting to ${names[0]}…` : `Connecting to ${names.length} apps…`, description: `Ghost is still reaching it. It shows as connected under Apps once it answers.${notes}` });
         onClose();
+      } else if (r.apps.length === 1 && !notes) {
+        // One app, connected: end on what it lets Ghost do.
+        setDone(r.apps[0]);
       } else {
         toast({ title: names.length === 1 ? `Connected ${names[0]}` : `Connected ${names.length} apps`, description: `Ghost can use it from its next turn. Its tools are on its page under Apps.${notes}` });
         onClose();
@@ -109,6 +113,7 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
     void connect();
   };
 
+  if (open && done) return <Connected app={done} onClose={() => (setDone(null), onClose())} />;
   if (open && signIn) {
     return (
       <Dialog

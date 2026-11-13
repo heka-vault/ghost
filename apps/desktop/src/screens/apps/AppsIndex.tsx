@@ -6,7 +6,7 @@
 import type { AppView, CatalogEntryView, CatalogPage } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { BadgeCheck, Blocks, ChevronDown, CloudOff, ExternalLink, MoreHorizontal, Plus, RotateCw, Search, SearchX, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { hrefFor } from "../../app/router";
 import { useDesign } from "../../design/context";
@@ -17,6 +17,7 @@ import { AddOwnDialog } from "./AddOwnDialog";
 import { AppIcon } from "./AppIcon";
 import { ConnectDialog } from "./ConnectDialog";
 import { problemWords, sentence, summaryWords, usedWords } from "./model";
+import { twinsOf } from "./plain";
 
 /** After a middle dot, lowercase, except a name (“Ghost can’t reach it”). */
 const afterDot = (t: string) => (t.startsWith("Ghost") ? t : t.charAt(0).toLowerCase() + t.slice(1));
@@ -35,6 +36,7 @@ export function AppsIndex() {
   const { client, appsVersion } = useGhost();
   const fail = useFail();
   const [apps, setApps] = useState<AppView[] | null>(null);
+  const twins = useMemo(() => twinsOf(apps ?? []), [apps]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<CatalogEntryView | null>(null);
   const [addingOwn, setAddingOwn] = useState(false);
@@ -116,7 +118,7 @@ export function AppsIndex() {
         ) : apps ? (
           <Card list>
             {apps.map((a) => (
-              <AppRow key={a.name} app={a} actions={actions} />
+              <AppRow key={a.name} app={a} actions={actions} twins={twins.get(a.name) ?? []} />
             ))}
           </Card>
         ) : null}
@@ -133,7 +135,7 @@ export function AppsIndex() {
 
 /* ------------------------------------------------------------------ connected */
 
-function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof useAppActions> }) {
+function AppRow({ app: a, actions, twins }: { app: AppView; actions: ReturnType<typeof useAppActions>; twins: AppView[] }) {
   const today = useToday();
   // What Ghost used it for today (ADR 0060): counts and sizes only.
   const used = usedWords(today.reachDay?.by_app.find((x) => x.key === a.name) ?? null, today.calls.filter((c) => c.app === a.name));
@@ -148,6 +150,7 @@ function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof 
       </span>
     ) : a.state === "connected" ? (
       <span className="apps-row__state">
+        {twins.length > 0 && <span className="apps-row__twin">{twins.length === 1 ? "1 of 2 connections" : `1 of ${twins.length + 1} connections`} · </span>}
         {summaryWords(a)}
         {used && <span className="apps-row__used"> · {used}</span>}
       </span>
