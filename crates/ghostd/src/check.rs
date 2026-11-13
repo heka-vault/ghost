@@ -241,6 +241,22 @@ pub fn check_models(
         }
     }
 
+    // ADR 0064: a retrained detector is loaded only when it matches its card and wakes no
+    // more often than the shipped one on any set the card measured.
+    if let Some(name) = cfg.retrained_detector() {
+        match crate::wake_detectors::load(&cfg.data_dir, name) {
+            Ok(i) => {
+                let _ = writeln!(
+                    out,
+                    "wake detector: {name} (threshold {:.2}, floor {:.2})",
+                    i.card.threshold, i.card.floor
+                );
+            }
+            Err(e) => problems.push(format!(
+                "{e}; Ghost hears with the shipped detector until it is fixed                  (`ghostd detector use shipped` clears GHOST_WAKE_DETECTOR)"
+            )),
+        }
+    }
     if cfg.wake_mode == "onnx" {
         let (hey, address) = wake_model_paths(cfg, voice);
         if hey.is_file() {

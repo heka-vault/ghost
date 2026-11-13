@@ -57,6 +57,7 @@ endef
         lint fmt test deny typecheck ci api-schema version release \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
         perf perf-micro perf-llm perf-providers perf-hear perf-turns record wake-eval record-takes wake-takes-eval wake-check-replay \
+        wake-train wake-detectors wake-use wake-rollback \
         android android-apk android-install mobile-web \
         bundle sidecars onnxruntime models
 
@@ -280,6 +281,19 @@ record-takes: ## guided recording of the wake test set (docs/wake-recording.md):
 
 wake-takes-eval: ## score the wake takes, transcript wake against the trained detector (the oracle): make wake-takes-eval [TAKES=dir]
 	@$(ORACLE) python -I docs/benchmarks/scripts/wake_takes_eval.py $(if $(TAKES),--takes $(TAKES)) $(ARGS)
+
+wake-train: ## retrain the "hey ghost" detector on your labelled wake takes, on this computer (ADR 0064, docs/wake-takes.md): make wake-train [ARGS="--unlabelled-accepted-are-me"]
+	@$(UV) sync -q --project tools/wake-train
+	@$(UV) run -q --project tools/wake-train python -I -m wake_train $(ARGS)
+
+wake-detectors: ## the retrained detectors beside the shipped one, with their numbers; * marks the one in use
+	@cargo run -q -p ghostd -- detector list
+
+wake-use: ## hear with a retrained detector: make wake-use NAME=operator-20261113-0900 (restart Ghost after)
+	@cargo run -q -p ghostd -- detector use $(NAME)
+
+wake-rollback: ## back to the shipped detector (restart Ghost after)
+	@cargo run -q -p ghostd -- detector use shipped
 
 wake-check-replay: ## the detector and its check of a weak hit over labelled streams, before and after (the oracle): make wake-check-replay ARGS="--stream f.wav:pos@12.3 --stream g.wav:neg"
 	@$(ORACLE) python -I docs/benchmarks/scripts/wake_check_replay.py $(ARGS)

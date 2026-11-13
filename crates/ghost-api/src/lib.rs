@@ -31,6 +31,7 @@ pub mod schedules;
 pub mod server;
 pub mod skill_catalog;
 pub mod state;
+pub mod wake_takes;
 
 pub use app::{
     audit_page, create_app, outcome_view, pending_view, permissions_view, status_snapshot,
@@ -48,6 +49,7 @@ pub use models::{
 };
 pub use server::{bind, default_socket_path, serve};
 pub use state::{DaemonState, EventBus};
+pub use wake_takes::{WakeTakesPort, WakeTakesView};
 
 /// The routes over `deps`, as `axum::serve` takes them.
 pub fn router(deps: SharedDeps) -> axum::Router {

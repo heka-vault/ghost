@@ -5,6 +5,7 @@
  *   #/hear/sessions     the sessions recorded, their takes, play, continue, delete
  *   #/hear/runs[/:id]   score a session; the runs, and a run's report against a baseline
  *   #/hear/plan         the take list, editable
+ *   #/hear/wake         wake takes Ghost kept (ADR 0064): play, label, delete
  *
  * The recorder holds the mic while it is open, so Ghost isn't listening for its name then.
  * It is open while Record is the tab (and while a run it started is scoring), and closes when
@@ -24,11 +25,12 @@ import { RecordTab } from "./Record";
 import { cancelClose, closeSoon, serial } from "./recorder";
 import { RunsTab } from "./Runs";
 import { SessionsTab } from "./Sessions";
+import { WakeTakesTab } from "./WakeTakes";
 import "./hear.css";
 
-export type HearTab = "record" | "sessions" | "runs" | "plan";
-export const HEAR_TABS: HearTab[] = ["record", "sessions", "runs", "plan"];
-const LABELS: Record<HearTab, string> = { record: "Record", sessions: "Sessions", runs: "Runs", plan: "Take list" };
+export type HearTab = "record" | "sessions" | "runs" | "plan" | "wake";
+export const HEAR_TABS: HearTab[] = ["record", "sessions", "runs", "plan", "wake"];
+const LABELS: Record<HearTab, string> = { record: "Record", sessions: "Sessions", runs: "Runs", plan: "Take list", wake: "Wake takes" };
 
 /** The open recorder's lease, for the tabs: what it is doing and how to change it. */
 export interface Lease {
@@ -222,6 +224,7 @@ export default function HearScreen({ params }: RouteProps) {
         {tab === "record" && <RecordTab view={view} plan={plan?.plan ?? null} planError={planError} onRetryPlan={() => setPlanAttempt((n) => n + 1)} lease={lease} onScore={toRuns} />}
         {tab === "sessions" && <SessionsTab view={view} onContinue={continueSession} onScore={toRuns} />}
         {tab === "runs" && <RunsTab view={view} runId={runId} session={runSession} onScore={score} />}
+        {tab === "wake" && <WakeTakesTab />}
         {tab === "plan" && <PlanTab editor={editor} error={planError} onRetry={() => setPlanAttempt((n) => n + 1)} />}
       </Tabs>
     </Page>

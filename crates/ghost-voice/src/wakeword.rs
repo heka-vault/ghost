@@ -67,6 +67,15 @@ pub type Recognize = Arc<dyn Fn(Vec<f32>) -> String + Send + Sync>;
 pub type OnMatch = Arc<dyn Fn(WakeMatch) -> BoxFuture<'static, ()> + Send + Sync>;
 pub type OnHeard = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
+/// Where a decided hit's audio goes when the operator keeps wake takes (ADR 0064,
+/// `ghost_core::wake_takes`). The processor asks `wants` before it copies any audio, so
+/// with keeping off nothing is copied, let alone written.
+pub trait TakeKeeper: Send + Sync {
+    fn wants(&self) -> bool;
+    /// `tail_secs`: how long before the newest sample heard the take's last sample is.
+    fn keep(&self, take: ghost_core::wake_takes::NewTake, tail_secs: f64);
+}
+
 /// What the passive listener needs to wake on the trained models.
 pub struct Detector {
     pub scorer: Box<dyn Scorer>,
@@ -74,6 +83,8 @@ pub struct Detector {
     pub models: Vec<WakeModel>,
     pub verify: bool,
     pub cooldown_secs: f64,
+    /// Keeps each decided hit's audio, when the operator keeps wake takes.
+    pub keeper: Option<Arc<dyn TakeKeeper>>,
 }
 
 /// Last stage of the passive pipeline in detector mode, after the VAD.
@@ -113,7 +124,15 @@ pub struct DetectorWakeProcessor {
     last_best_log: usize,
     woken: bool,
     done: bool,
+    /// The hit model's score at each 80 ms step: (where its window ended, the score), the
+    /// last `SCORES_KEPT`; only while a keeper wants takes.
+    scores: std::collections::VecDeque<(usize, f32)>,
+    /// What Parakeet last read for the hit.
+    reading: Option<String>,
 }
+
+/// About 14 s of scores: a kept take's whole window.
+const SCORES_KEPT: usize = 180;
 
 impl DetectorWakeProcessor {
     pub fn new(
@@ -146,7 +165,67 @@ impl DetectorWakeProcessor {
             last_best_log: 0,
             woken: false,
             done: false,
+            scores: std::collections::VecDeque::new(),
+            reading: None,
         }
+    }
+
+    /// Hand the hit's audio to the keeper: from `PRE_*_SECS` before the frame that scored
+    /// to `POST_SECS` after it (or as far as has been heard), with the scores over it and
+    /// what Parakeet read.
+    fn keep_take(&mut self, accepted: bool) {
+        let Some(keeper) = self.d.keeper.clone() else {
+            return;
+        };
+        let Some(hit) = self.hit else { return };
+        if !keeper.wants() {
+            return;
+        }
+        use ghost_core::wake_takes::{NewTake, POST_SECS, PRE_ACCEPTED_SECS, PRE_REFUSED_SECS};
+        let rate = SAMPLE_RATE as f64;
+        let pre = if accepted {
+            PRE_ACCEPTED_SECS
+        } else {
+            PRE_REFUSED_SECS
+        };
+        let from = hit.saturating_sub((pre * rate) as usize).max(self.base);
+        let to = (hit + (POST_SECS * rate) as usize).min(self.base + self.buf.len());
+        if to <= from {
+            return;
+        }
+        let audio = self.buf[from - self.base..to - self.base].to_vec();
+        let m = &self.d.models[self.model];
+        let model = m.name.clone();
+        let threshold = m.threshold;
+        let (mut scores, mut scores_end) = (Vec::new(), 0);
+        for (end, score) in &self.scores {
+            if *end > from && *end <= to {
+                scores.push(*score);
+                scores_end = end - from;
+            }
+        }
+        let score = self
+            .scores
+            .iter()
+            .find(|(end, _)| *end == hit)
+            .map_or(0.0, |(_, s)| *s);
+        let tail_secs = (self.n - to) as f64 / rate;
+        keeper.keep(
+            NewTake {
+                audio,
+                hit: hit - from,
+                accepted,
+                model,
+                score,
+                threshold,
+                input: String::new(),
+                reading: self.reading.clone(),
+                scores,
+                scores_end,
+                array: None,
+            },
+            tail_secs,
+        );
     }
 
     pub fn done(&self) -> bool {
@@ -242,6 +321,17 @@ impl DetectorWakeProcessor {
             return;
         };
         let hit = pick_hit(&scores, &self.d.models);
+        if self.d.keeper.as_ref().is_some_and(|k| k.wants()) {
+            // the "hey ghost" model's score (the first), or the hit's
+            let s = hit
+                .map(|(s, _)| s)
+                .or_else(|| scores.first().map(|(_, s)| *s))
+                .unwrap_or(0.0);
+            self.scores.push_back((end, s));
+            while self.scores.len() > SCORES_KEPT {
+                self.scores.pop_front();
+            }
+        }
         // The first score at a model's floor decides, though it may still be rising: one
         // that enters the checked band first is a weak hit, read by Parakeet. Waiting a few
         // frames for the peak heard one more of the operator's takes in 21 but let the
@@ -292,6 +382,7 @@ impl DetectorWakeProcessor {
         let text = tokio::task::spawn_blocking(move || recognize(audio))
             .await
             .unwrap_or_default();
+        self.reading = Some(text.clone());
         debug::audio(|| {
             format!(
                 "passive: check{} read {described}",
@@ -327,6 +418,8 @@ impl DetectorWakeProcessor {
             return;
         }
         info!("wake: not confirmed");
+        self.keep_take(false);
+        self.reading = None;
         self.hit = None;
         self.checked = false;
     }
@@ -363,6 +456,9 @@ impl DetectorWakeProcessor {
             .or_else(|| match_opening(&text, ADDRESS_PHRASE, fuzzy, OPENERS));
         let name = model.name.clone();
         debug::audio(|| format!("passive: woken by {name}, heard {text:?}"));
+        if self.reading.is_none() {
+            self.reading = Some(text.clone());
+        }
         let remainder = match m {
             Some(m) => m.remainder,
             // The model heard "Ghost, <opener>" but the transcript lost the name ("Coast,
@@ -370,7 +466,9 @@ impl DetectorWakeProcessor {
             None if model.opening => text.trim().to_string(),
             None => String::new(),
         };
-        (self.on_match)(WakeMatch::new(&model.phrase, &remainder)).await;
+        let phrase = model.phrase.clone();
+        self.keep_take(true);
+        (self.on_match)(WakeMatch::new(&phrase, &remainder)).await;
     }
 }
 
@@ -538,6 +636,7 @@ mod tests {
             models: vec![hey(), address()],
             verify,
             cooldown_secs: 2.0,
+            keeper: None,
         }
     }
 
@@ -583,6 +682,113 @@ mod tests {
 
     fn frames(parts: Vec<Vec<Frame>>) -> Vec<Frame> {
         parts.into_iter().flatten().collect()
+    }
+
+    /// A keeper that records what it is handed (ADR 0064).
+    struct FakeKeeper {
+        on: bool,
+        asked: Mutex<usize>,
+        kept: Mutex<Vec<ghost_core::wake_takes::NewTake>>,
+    }
+
+    impl FakeKeeper {
+        fn new(on: bool) -> Arc<Self> {
+            Arc::new(Self {
+                on,
+                asked: Mutex::new(0),
+                kept: Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    impl TakeKeeper for FakeKeeper {
+        fn wants(&self) -> bool {
+            *self.asked.lock().unwrap() += 1;
+            self.on
+        }
+        fn keep(&self, take: ghost_core::wake_takes::NewTake, _tail_secs: f64) {
+            self.kept.lock().unwrap().push(take);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_an_accepted_wake_is_handed_to_the_keeper_with_its_score_and_reading() {
+        let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
+        let keeper = FakeKeeper::new(true);
+        let mut d = detector(FakeScorer::with(&[3], 0.8, "hey_ghost"), &recognize, true);
+        d.keeper = Some(keeper.clone());
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        assert_eq!(events.len(), 2);
+        let kept = keeper.kept.lock().unwrap();
+        assert_eq!(kept.len(), 1);
+        let t = &kept[0];
+        assert!(t.accepted);
+        assert_eq!(t.score, 0.8);
+        assert_eq!(t.model, "hey_ghost");
+        assert_eq!(
+            t.reading.as_deref(),
+            Some("Hey Ghost, what needs my sign-off?")
+        );
+        // the hit is the third score, its window ending 2.24 s in; everything heard before
+        // it is kept (less than the 12 s of an accepted take), and up to 1.5 s after
+        assert_eq!(t.hit, 3 * STEP + WINDOW - STEP);
+        assert!(t.audio.len() > t.hit);
+        assert!(t.scores.contains(&0.8));
+    }
+
+    #[tokio::test]
+    async fn test_a_refused_hit_is_kept_as_refused() {
+        let recognize = Recognizer::new(&["There you go."]);
+        let keeper = FakeKeeper::new(true);
+        let mut d = detector(FakeScorer::with(&[3], 0.4, "hey_ghost"), &recognize, false);
+        d.models[0].checked_from = Some(0.3);
+        d.keeper = Some(keeper.clone());
+        let events = run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(1.0),
+            ]),
+        )
+        .await;
+        assert!(events.is_empty());
+        let kept = keeper.kept.lock().unwrap();
+        assert_eq!(kept.len(), 1);
+        assert!(!kept[0].accepted);
+        assert_eq!(kept[0].score, 0.4);
+        assert_eq!(kept[0].reading.as_deref(), Some("There you go."));
+    }
+
+    #[tokio::test]
+    async fn test_with_keeping_off_nothing_is_handed_over() {
+        let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
+        let keeper = FakeKeeper::new(false);
+        let mut d = detector(FakeScorer::with(&[3], 0.8, "hey_ghost"), &recognize, true);
+        d.keeper = Some(keeper.clone());
+        let mut p = DetectorWakeProcessor::new(d, Arc::new(|_| Box::pin(async {})), None, 0.9, 0.3);
+        let (out, _rx) = Out::capture();
+        for f in frames(vec![
+            vec![started()],
+            audio(2.6),
+            vec![stopped()],
+            audio(0.4),
+        ]) {
+            p.process(f, Direction::Down, &out).await;
+        }
+        assert!(keeper.kept.lock().unwrap().is_empty());
+        assert!(*keeper.asked.lock().unwrap() > 0);
+        assert!(p.scores.is_empty(), "no scores are kept either");
     }
 
     #[tokio::test]
@@ -994,6 +1200,7 @@ mod tests {
                 models: vec![hey()],
                 verify: true,
                 cooldown_secs: 2.0,
+                keeper: None,
             },
             frames(vec![
                 vec![started()],
@@ -1136,6 +1343,7 @@ mod tests {
                 ],
                 verify: true,
                 cooldown_secs: 2.0,
+                keeper: None,
             },
             frames(vec![
                 vec![started()],
@@ -1166,6 +1374,7 @@ mod tests {
                 ],
                 verify: false,
                 cooldown_secs: 2.0,
+                keeper: None,
             },
             frames(vec![
                 vec![started()],

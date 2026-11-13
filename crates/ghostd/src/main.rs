@@ -74,6 +74,18 @@ fn main() -> anyhow::Result<()> {
         // ADR 0057: for a keyboard shortcut of the desktop's own
         Some("listening") => client("listening", &args[1..]),
         Some("restore-volumes") => restore_volumes(),
+        // ADR 0064: the retrained wake detectors, and the one-command way back
+        Some("detector") => {
+            let cfg = GhostdSettings::load()?;
+            std::process::exit(ghostd::wake_detectors::cli(
+                &args[1..],
+                &cfg.data_dir,
+                &cfg.settings_path,
+                cfg.retrained_detector(),
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            ))
+        }
         Some("check") => {
             let cfg = GhostdSettings::load()?;
             std::process::exit(check(&cfg))

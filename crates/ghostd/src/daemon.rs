@@ -355,6 +355,8 @@ pub struct Late {
     pub schedules: OnceLock<Arc<ghost_core::schedules::Scheduler>>,
     /// The Hearing test's recorder (ADR 0042).
     pub hear: OnceLock<Arc<crate::hear::HearDesk>>,
+    /// Kept wake takes (ADR 0064).
+    pub wake_takes: OnceLock<Arc<ghost_core::wake_takes::Takes>>,
     /// The outside tools and their listener (ADR 0048).
     pub outside: OnceLock<Arc<crate::outside::OutsideHost>>,
 }
@@ -548,6 +550,14 @@ impl Daemon {
 
     pub fn models(&self) -> Option<Arc<Models>> {
         self.late.models.get().cloned()
+    }
+
+    /// Kept wake takes (ADR 0064): made once, under the data folder.
+    pub fn wake_takes(&self) -> Arc<ghost_core::wake_takes::Takes> {
+        self.late
+            .wake_takes
+            .get_or_init(|| Arc::new(ghost_core::wake_takes::Takes::new(&self.cfg().data_dir)))
+            .clone()
     }
 
     /// The Hearing test's recorder (ADR 0042).
@@ -1095,7 +1105,22 @@ impl Daemon {
     ) -> Arc<dyn WakeDetector> {
         let cfg = self.cfg();
         let voice = self.voice();
-        let (path, address) = wake_model_paths(&cfg, &voice);
+        let (mut path, address) = wake_model_paths(&cfg, &voice);
+        // ADR 0064: a retrained detector, with the threshold and floor from its own curve.
+        let mut retrained: Option<(f64, f64)> = None;
+        if let Some(name) = cfg.retrained_detector() {
+            match crate::wake_detectors::load(&cfg.data_dir, name) {
+                Ok(i) => {
+                    info!(
+                        "wake: retrained detector {name}, threshold {:.2}, floor {:.2}",
+                        i.card.threshold, i.card.floor
+                    );
+                    path = i.path;
+                    retrained = Some((i.card.threshold, i.card.floor));
+                }
+                Err(e) => error!("wake: {e}; hearing with the shipped detector"),
+            }
+        }
         let fall_back = |why: String| {
             error!("wake: {why}; listening by transcript instead");
             lock(&self.cfg).wake_mode = "transcript".into();
@@ -1117,9 +1142,12 @@ impl Daemon {
             Ok(s) => s,
             Err(e) => return fall_back(format!("the wake models did not load: {e}")),
         };
+        let (threshold, floor) = match retrained {
+            Some((t, f)) => (t, Some(f)),
+            None => (cfg.detector_threshold(), cfg.wake_check_threshold),
+        };
         let mut wake_models = vec![
-            WakeModel::known(&path, cfg.detector_threshold() as f32, None)
-                .checked_from(cfg.wake_check_threshold.map(|t| t as f32)),
+            WakeModel::known(&path, threshold as f32, None).checked_from(floor.map(|t| t as f32)),
         ];
         wake_models.extend(address.iter().map(|p| {
             WakeModel::known(
@@ -1147,12 +1175,27 @@ impl Daemon {
             );
         }
         info!("wake: those phrases only");
+        // ADR 0064: the array's own stream beside the one the detector hears, for the kept
+        // takes, when there is one and the detector is not already hearing it.
+        let tape = std::fs::read_to_string(cfg.config_dir.join("echo-cancel.conf"))
+            .ok()
+            .and_then(|c| crate::hear::capture_target(&c))
+            .filter(|node| voice.input_device.as_deref() != Some(node.as_str()))
+            .map(crate::wake_takes::ArrayTape::new);
         let spec = DetectorSpec {
             scorer: Arc::new(Mutex::new(scorer)),
             recognize: ghost_voice::stt::recognize_fn(&models.stt),
             models: wake_models,
             verify: cfg.wake_verify,
             cooldown_secs: cfg.wake_cooldown_secs,
+            keeper: Some(Arc::new(crate::wake_takes::Keeper::new(
+                self.wake_takes(),
+                voice
+                    .input_device
+                    .clone()
+                    .unwrap_or_else(|| "default".into()),
+                tape.clone(),
+            ))),
         };
         let listener = Arc::new(WakeListener::new(
             voice,
@@ -1170,7 +1213,12 @@ impl Daemon {
                 Box::pin(async move { d.heard_early().await })
             })
         };
-        Arc::new(SpokenWakeDetector::new(listener, manual, Some(on_heard)))
+        let spoken: Arc<dyn WakeDetector> =
+            Arc::new(SpokenWakeDetector::new(listener, manual, Some(on_heard)));
+        match tape {
+            Some(tape) => Arc::new(crate::wake_takes::TapedWake::new(spoken, tape)),
+            None => spoken,
+        }
     }
 
     /// The detector decided while the operator may still be talking ("hey ghost, what
@@ -1231,6 +1279,12 @@ impl Daemon {
             Err(e) => warn!("listening: the switch could not be read ({e}); listening"),
         }
         d.follow_mic();
+        // ADR 0064: kept wake takes, on unless the operator turned them off.
+        match d.wake_takes().attach(Items::new(store.clone())) {
+            Ok(c) if c.keep => info!("wake takes: kept on this computer (Settings › Sound)"),
+            Ok(_) => info!("wake takes: not kept, as the operator chose"),
+            Err(e) => warn!("wake takes: the choice could not be read ({e})"),
+        }
         let autonomy = AutonomyPolicy::load(&cfg.policy_path)?;
         // ADR 0035: one folder, Ghost's. ADR 0034: the apps are Ghost's, connected now, and
         // every agent reaches them.
@@ -2267,6 +2321,10 @@ impl Daemon {
             model_net: Arc::new(LiveModelNet),
             model_sign_in: ghost_api::deps::ModelSignIn::default(),
             hear: Some(self.hear_desk()),
+            wake_takes: Some(crate::wake_takes::WakeTakesDesk::new(
+                self.wake_takes(),
+                Arc::downgrade(self),
+            )),
             schedules: Some(p.schedules),
             clients: Some(p.clients),
             clients_listening: p.clients_listening,

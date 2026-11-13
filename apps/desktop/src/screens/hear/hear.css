@@ -216,3 +216,20 @@
   .hear-record { grid-template-columns: minmax(0, 1fr) 240px; gap: var(--space-6); }
   .hear-plan__block-fields { grid-template-columns: 100px 180px minmax(0, 1fr); }
 }
+
+/* ------------------------------------------------------------ wake takes (ADR 0064) */
+.wt { display: flex; flex-direction: column; gap: var(--space-4); }
+.wt-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-4); padding: var(--space-4); }
+.wt-keep { display: flex; flex-direction: column; gap: var(--space-2); max-width: 60ch; }
+.wt-notice, .wt-keys { color: var(--text-muted); font-size: var(--text-sm); margin: 0; }
+.wt-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-3); }
+.wt-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-md); max-height: 60vh; overflow-y: auto; outline: none; }
+.wt-list:focus-visible { box-shadow: var(--focus-ring); }
+.wt-row { display: grid; grid-template-columns: auto 7rem 6.5rem 3rem 160px minmax(0, 1fr) 9rem 9rem auto; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); cursor: default; }
+.wt-row:last-child { border-bottom: none; }
+.wt-row.is-selected { background: var(--surface-selected, var(--surface-2)); }
+.wt-when, .wt-input, .wt-unlabelled { color: var(--text-muted); font-size: var(--text-sm); }
+.wt-score { font-family: var(--font-mono); font-size: var(--text-sm); }
+.wt-reading { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.wt-curve-line { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.wt-curve-threshold { stroke: var(--border-strong, var(--border)); stroke-dasharray: 3 3; }
