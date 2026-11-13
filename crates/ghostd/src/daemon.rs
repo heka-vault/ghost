@@ -1135,11 +1135,13 @@ impl Daemon {
             .is_none_or(|(_, p)| p.session != plan.session || p.wake != plan.wake);
         if changed {
             info!(
-                "microphone: {} ({}); a session hears {}, the wake hears {}",
+                "microphone: {} ({}); a session hears {}, the wake hears {}; the echo \
+                 filter's warm-up after Ghost's onset is {}",
                 plan.summary,
                 plan.case.as_str(),
                 plan.session,
-                plan.wake
+                plan.wake,
+                if plan.echo_warmup() { "on" } else { "off" }
             );
             if let Some(f) = &plan.fell_back {
                 warn!("microphone: {f}");

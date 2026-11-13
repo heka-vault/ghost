@@ -109,7 +109,7 @@ The likely mechanism, not proven:
 Under `flock /tmp/ghost-rubric/mic.lock`, the operator's `make dev` Ghost stopped, output at 100% (as found, left there).
 - **`ghostd check`** on this machine names the case (on-chip), what each input hears and the suggested settings.
 - **This branch's daemon**, run with every Ghost path in a temp folder, opened the wake's stream as `<array> @ 16000, channel 0 of 2 alone`. `pw-top` showed `ghost-wake-capture` at 16 kHz, 2 channels, 0 xruns, and `ghost.mic` suspended (not opened).
-- **Ghost's voice through the room could not be measured.** A full-scale 1 kHz tone through the array's output didn't reach the uncleaned channel at all, five times between 00:00 and 01:22: the sound bar on the array's jack was off. The recordings made then (Ghost's voice from the Kokoro corpus, 8.5 min including 80 clips of Ghost itself saying "hey ghost", and synthetic music, on the canceller as it was after 8 days and fresh) hold the room's floor only. They are not used.
+- **Ghost's voice through the room** was not heard that night: the sound bar on the array's jack was off, and the recordings made then hold the room's floor only and are not used. It was measured later in the day with the sound bar on (§7).
 
 **Left on the machine** (the way back is in each line):
 - `~/.config/ghost/settings.env`: `GHOST_INPUT_DEVICE=ghost.mic` is commented out. Unset, this branch hears the array's channel 0 for the wake and sessions; main's code before this branch falls back to the default source instead of failing. Backup: `settings.env.before-microphone-path-2026-11-13`.
@@ -118,3 +118,27 @@ Under `flock /tmp/ghost-rubric/mic.lock`, the operator's `make dev` Ghost stoppe
 - The operator's `make dev` Ghost was stopped at 00:00 and is left stopped.
 
 With this branch's daemon on those settings (paths in a temp folder), a file wake closed the wake's capture and opened the session's on the array's channel 0 (`ghost-capture`, 2 channels at 16 kHz, 0 xruns); after the session the wake's capture opened again.
+
+## 7. 2026-11-13, with the sound bar on
+
+Main at `41da58ee`, the same desk: the array is the microphone and, through its jack and the sound bar, the only speaker. The case is on-chip, the host canceller off, the wake and sessions on the array's channel 0. Ghost's voice was played through the default sink at −19 dBFS. The recordings made for this were deleted; only these numbers are kept.
+
+| | what played | result |
+|---|---|---|
+| idle, quiet room | 90 s of Ghost's sentences (Kokoro voices), then 80 clips of Ghost itself saying the wake phrases ("hey ghost", "ghost, there" and the rest) | 0 passive VAD segments, 0 detector hits at any score, 0 wakes |
+| idle, earlier the same hour | 5 min of Ghost's sentences | 0 VAD segments; two weak detector hits (0.35, 0.41), both turned down by Parakeet's check with an empty read |
+| typed sessions, the wake listener beside them | eleven spoken replies | no detector hit |
+| a desk session, microphone open | three long replies (a 45 s story, a count to twenty, a waiting-list read) | none cut off; one `VAD while Ghost speaks, waiting for words`, which heard nothing in a 1.7 s segment at −45 dBFS |
+
+**The onset**, which the echo filter's warm-up rule (`WARMUP_SECS`, 0.8 s) exists for. Over 122 clip onsets:
+
+| | first 0.5 s of a clip, mean (p95, max) | after it, mean (p95) | room floor |
+|---|---|---|---|
+| channel 0 (the beam, what Ghost hears) | −54 dBFS (−51, −38) | −52 dBFS (−50) | −55 dBFS |
+| channel 1 (not cleaned by the chip) | −56 dBFS | −56 dBFS | −56 dBFS |
+
+Played at −19 dBFS, so the chip takes 35 dB or more off Ghost's voice, and the first half second as well as the rest. On this path there is no onset leak: the warm-up rule saved nothing here and cost the operator's short words right as Ghost starts (a one-word barge-in, the words after the wake in #54).
+
+**What changed:** the warm-up rule is now a property of the microphone's path (`ghostd::microphone::Plan::echo_warmup`). It is off when the session hears an on-chip device directly, or a headset, and kept for the host canceller (also over an on-chip device), an unprotected microphone, a path Ghost could not read, and the phone. The test by words (`is_echo`) runs on every path. `GHOST_ECHO_WARMUP` overrides it for debugging.
+
+**Not measured:** a person speaking at Ghost's onset under the new rule, and barge-in over Ghost's voice by a real voice; both need a live run with the operator.

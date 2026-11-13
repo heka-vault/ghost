@@ -223,6 +223,9 @@ pub struct EchoFilter {
     vad_began_over_ghost: bool,
     /// ... and inside the canceller's warm-up after its voice (re)started.
     vad_in_warmup: bool,
+    /// Whether the microphone's path leaks Ghost's onset, so the warm-up rule applies
+    /// (`with_warmup`). On unless the path says otherwise.
+    warmup: bool,
 }
 
 /// How long after Ghost's voice (re)starts the canceller is taken to be leaking: a
@@ -230,6 +233,12 @@ pub struct EchoFilter {
 /// voice, whatever the words. LiveKit ignores interruptions for 3 s after its agent
 /// starts speaking; Ghost's canceller leaks about half a second, and the VAD's start lags
 /// the leak by 0.2 s.
+///
+/// Only where the path leaks (ADR 0064): the host canceller (`ghost.mic`), an unprotected
+/// microphone, the phone. A chip that cancels against what it plays leaves nothing at the
+/// onset (2026-11-13: 122 onsets of Ghost's voice, the array's channel 0 at -54 dBFS in
+/// the first half second against a -55 dBFS room), and there the rule cost the operator's
+/// one-word barge-in and the words after the wake (#54); see `with_warmup`.
 pub const WARMUP_SECS: f64 = 0.8;
 
 /// Inside the warm-up a transcript this long, or one with a word that stops Ghost, is the
@@ -262,7 +271,16 @@ impl EchoFilter {
             vad_started_at: f64::NEG_INFINITY,
             vad_began_over_ghost: false,
             vad_in_warmup: false,
+            warmup: true,
         }
+    }
+
+    /// Whether the warm-up rule applies (`WARMUP_SECS`): false where the microphone's path
+    /// leaks nothing at Ghost's onset (`ghostd::microphone::Plan::echo_warmup`). The test
+    /// by words (`is_echo`) applies on every path.
+    pub fn with_warmup(mut self, on: bool) -> Self {
+        self.warmup = on;
+        self
     }
 
     fn clearly_the_operator(text: &str) -> bool {
@@ -387,7 +405,8 @@ impl EchoFilter {
             Frame::VadStarted { .. } => {
                 self.vad_started_at = (self.clock)();
                 self.vad_began_over_ghost = self.speaking();
-                self.vad_in_warmup = self.vad_began_over_ghost
+                self.vad_in_warmup = self.warmup
+                    && self.vad_began_over_ghost
                     && self
                         .speaking_now
                         .onset()
@@ -650,6 +669,61 @@ mod tests {
             passed.iter().any(|p| matches!(p, Frame::Transcript(_))),
             "{passed:?}"
         );
+    }
+
+    /// The operator's one word 0.3 s after Ghost's voice starts, and a leak of Ghost's own
+    /// words at the same moment, with the warm-up guard on (the host canceller's path) or
+    /// off (a chip that cancels on its own, ADR 0064). What reached the next stage.
+    async fn at_the_onset(warmup: bool, heard: &str) -> Vec<String> {
+        use crate::frames::drain;
+        let speaking = Speaking::new();
+        let (f, clock) = filter(3.0);
+        let mut f = f.with_speaking(speaking.clone()).with_warmup(warmup);
+        let (out, mut rx) = Out::capture();
+        f.saying("Here is everything on the list today.");
+        speaking.set(true);
+        speaking.mark_onset_at(Instant::now() - std::time::Duration::from_millis(300));
+        *clock.lock().unwrap() = 100.3;
+        f.process(Frame::VadStarted { start_secs: 0.1 }, Direction::Down, &out)
+            .await;
+        *clock.lock().unwrap() = 100.6;
+        f.process(Frame::Interim(heard.into()), Direction::Down, &out)
+            .await;
+        f.process(Frame::Transcript(heard.into()), Direction::Down, &out)
+            .await;
+        drain(&mut rx)
+            .await
+            .into_iter()
+            .filter_map(|p| match p {
+                Frame::Transcript(t) | Frame::Interim(t) => Some(t),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_a_one_word_turn_at_ghosts_onset_is_kept_where_the_chip_cancels() {
+        // 2026-11-13, the array cancelling on chip: over 122 onsets of Ghost's voice its
+        // channel 0 held -54 dBFS in the first half second against a -55 dBFS room. Nothing
+        // leaks there, so the operator's "okay" right as Ghost starts is the operator.
+        assert_eq!(at_the_onset(false, "Okay.").await, ["Okay.", "Okay."]);
+        assert_eq!(at_the_onset(false, "yes").await, ["yes", "yes"]);
+        // the host canceller leaks its first half second (#42): the guard stays there
+        assert!(at_the_onset(true, "Okay.").await.is_empty());
+        assert!(at_the_onset(true, "yes").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_an_echo_by_words_is_dropped_on_every_path() {
+        for warmup in [true, false] {
+            assert!(
+                at_the_onset(warmup, "here is everything").await.is_empty(),
+                "warm-up {warmup}"
+            );
+        }
+        // the guard is on unless the path says otherwise
+        let (f, _clock) = filter(3.0);
+        assert!(f.warmup);
     }
 
     #[test]

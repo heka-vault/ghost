@@ -158,6 +158,12 @@ pub struct VoiceSettings {
     pub barge_in_min_words: usize,
     pub barge_in_interim_secs: f64,
     pub echo_window_secs: f64,
+    /// Whether the echo filter's warm-up rule applies (`echo::WARMUP_SECS`): a short
+    /// segment begun right as Ghost's voice starts is taken for its leak. A property of
+    /// the microphone's path (ADR 0064), which the daemon fills for a desk session
+    /// (`ghostd::microphone::Plan::echo_warmup`); `GHOST_ECHO_WARMUP` overrides it for
+    /// debugging. Unset and unfilled (the phone, a test): on.
+    pub echo_warmup: Option<bool>,
     pub turn_grace_secs: f64,
     /// `GHOST_TURN_CONFIDENT_GRACE_SECS`, `GHOST_TURN_CONFIDENT_PROB` (ADR 0049): the grace
     /// when Smart Turn is at least this sure and the words end a sentence. A grace at or
@@ -418,6 +424,7 @@ impl VoiceSettings {
             barge_in_min_words: usize_or("GHOST_BARGE_IN_MIN_WORDS", 2)?,
             barge_in_interim_secs: f64_or("GHOST_BARGE_IN_INTERIM_SECS", 0.3)?,
             echo_window_secs: f64_or("GHOST_ECHO_WINDOW_SECS", 3.0)?,
+            echo_warmup: text("GHOST_ECHO_WARMUP").and_then(|v| parse_bool(&v)),
             turn_grace_secs: f64_or("GHOST_TURN_GRACE_SECS", 1.2)?,
             turn_confident_grace_secs: f64_or("GHOST_TURN_CONFIDENT_GRACE_SECS", 0.35)?,
             turn_confident_prob: f64_or("GHOST_TURN_CONFIDENT_PROB", 0.9)? as f32,
@@ -681,6 +688,19 @@ mod tests {
         assert!(forced.prerender());
         let off = VoiceSettings::from_vars(vars(&[("GHOST_TTS_PRERENDER", "false")])).unwrap();
         assert!(!off.prerender());
+    }
+
+    #[test]
+    fn the_echo_warm_up_is_the_paths_unless_overridden_for_debugging() {
+        // Unset: the daemon fills it from the microphone's path (ADR 0064).
+        assert_eq!(
+            VoiceSettings::from_vars(vars(&[])).unwrap().echo_warmup,
+            None
+        );
+        let off = VoiceSettings::from_vars(vars(&[("GHOST_ECHO_WARMUP", "0")])).unwrap();
+        assert_eq!(off.echo_warmup, Some(false));
+        let on = VoiceSettings::from_vars(vars(&[("GHOST_ECHO_WARMUP", "true")])).unwrap();
+        assert_eq!(on.echo_warmup, Some(true));
     }
 
     #[test]

@@ -691,7 +691,9 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     // BotStarted frame has made its way up behind a TTS stage still rendering the reply.
     let speaking = Speaking::new();
     let echo = Arc::new(Mutex::new(
-        EchoFilter::new(settings.echo_window_secs).with_speaking(speaking.clone()),
+        EchoFilter::new(settings.echo_window_secs)
+            .with_speaking(speaking.clone())
+            .with_warmup(settings.echo_warmup.unwrap_or(true)),
     ));
     // Each clause as it is rendered, a clause ahead of the speaker: what a leak of
     // Ghost's own voice would read as.

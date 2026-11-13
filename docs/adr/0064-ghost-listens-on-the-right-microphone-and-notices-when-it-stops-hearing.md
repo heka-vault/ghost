@@ -49,6 +49,8 @@ A problem is a note of Ghost's own on the waiting list (`input:degraded`), shown
 - **The operator's desk** listens to the array directly for the wake and for sessions, with the host canceller off. The measurements are in the [2026-11-13 microphone path note](../benchmarks/2026-11-13-microphone-path.md):
   - **Sessions** read the same on both inputs: 4.6% word error on the array's channel 0 against 4.2% on `ghost.mic` for the turn the model gets, and better under music (4.2% against 8.3%).
   - **The 15.4% of 2026-11-06** was the int8 model's.
+  - **Ghost's own voice** through the sound bar (later on 2026-11-13, §7 of the note): 0 passive VAD segments and 0 wakes from 90 s of Ghost's sentences and 80 clips of Ghost saying the wake phrases; no long reply in a desk session cut off. At Ghost's onset the array's channel 0 held −54 dBFS in the first half second against a −55 dBFS room (122 onsets, played at −19 dBFS): nothing leaks there.
+- **The echo filter's warm-up rule follows the path** (`Plan::echo_warmup`, `EchoFilter::with_warmup`). A short segment begun within 0.8 s of Ghost's voice (re)starting is taken for its leak only where a canceller leaks at the onset: Ghost's own canceller (also over an on-chip device), an unprotected microphone, a path Ghost could not read, and the phone. It is off where a session hears an on-chip device directly, and for a headset, since nothing of Ghost's plays into the room there. Off, the operator's "okay" or "yes" right as Ghost starts, and the words after the wake (#54), are kept. The test by words runs on every path. `GHOST_ECHO_WARMUP` overrides it for debugging only.
 - **Idle audio still stays on the machine.** The meter counts numbers on the passive path and keeps none of the audio. The check's report is a level and a word count, never words. No amendment of the rule was needed; the passive audio's numbers were already local.
 - **Cost (ADR 0018):**
   - The meter is one compare and one multiply per sample, and a sort of at most a few thousand run lengths every 3 s.
@@ -58,4 +60,4 @@ A problem is a note of Ghost's own on the waiting list (`input:degraded`), shown
   - Their cases are tested on fixtures shaped like their PipeWire nodes. When a detection is wrong it fails toward working: no canceller assumed, the default microphone, the sentence that Ghost may hear itself.
   - A device that cancels on chip but isn't on the list reads as unprotected until it is added.
 - **Still open:**
-  - The echo filter's warm-up guard after Ghost's voice (#42, #54) exists for the host canceller's onset leak. On the on-chip path it may cost more than it saves, to be measured once Ghost's voice can be played in the room again.
+  - The warm-up rule off on the on-chip path is measured on Ghost's voice alone. A person speaking at Ghost's onset, and barge-in over Ghost's voice by a real voice, are still to be run live (#54). The host canceller's onset leak (#42) is unchanged where it is used.
