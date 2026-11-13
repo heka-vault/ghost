@@ -97,10 +97,145 @@ While the floating room is on, the shell asks mutter every two seconds whether a
 or remote-desktop session exists (D-Bus introspection of `/org/gnome/Mutter/ScreenCast/Session`
 and `/org/gnome/Mutter/RemoteDesktop/Session`: a child node is a session). Every capture on
 GNOME goes through one: a browser's meeting through the portal, OBS, GNOME's own recorder,
-remote desktop. While one exists the surface draws nothing at all and a spoken session shows
-in the window. Not seen: a program that grabs XWayland's pixels itself (`ffmpeg -f x11grab`)
+remote desktop. Not seen: a program that grabs XWayland's pixels itself (`ffmpeg -f x11grab`)
 and any desktop other than GNOME; Settings says so when it can't tell, and the tray switch
 turns the floating room off at once.
+
+What it does then is the operator's choice, Settings › General › The room › **While my screen
+is shared** (`floating.json`'s `while_shared`, `src-tauri/src/floating/share.rs`):
+
+- **Hide Ghost** (the default, and what it always did): the surface draws nothing at all, not
+  even the line, and a spoken session shows in the window. Nothing changes for anyone who
+  doesn't choose otherwise.
+- **Show Ghost**: Ghost floats in the share as anywhere else, wearing a **Screen shared** mark
+  (a red recording dot on a dark pill, above the label under Wisp, and above the line at rest)
+  so the operator always knows the audience sees it.
+- **Ask each time**: when a share starts, a small card low on the surface's monitor asks “Your
+  screen is being shared. Show Ghost in it?” with **Show** and **Hide**, and nothing else of
+  Ghost is drawn. The card is itself in the share, so it says nothing more and leaves after
+  20 s, taking the share as Hide.
+
+Whatever the choice, the tray's **Show Ghost in this share** (usable only during a share) puts
+Ghost in or takes it out for that share only; the card's answer is the same. Both are forgotten
+when the share ends, and the next share starts from the setting again.
+
+**Sharing one window never includes the floating room**: a window share is that window's own
+picture, and the surface is another window. To show Ghost with a window share, share the
+stage (below).
+
+### What a capture sees (measured 2026-11-13)
+
+On the workstation (GNOME Shell 50.1 on Wayland, two 1920×1080 monitors, the surface through
+XWayland, the mock session playing), with captures started without a click: GNOME's own
+recorder through its D-Bus interface (`org.gnome.Shell.Screencast.Screencast`, which records
+as long as the caller's bus connection stays open) and mutter's screen-cast API directly
+(`org.gnome.Mutter.ScreenCast`: `RecordMonitor` is what the portal gives a browser's "entire
+screen" and OBS; `RecordWindow` what it gives "a window"), frames read from the PipeWire
+stream with `pipewiresrc`.
+
+1. **A whole monitor**: the floating surface is in every frame, on either monitor, in GNOME's
+   recorder and in mutter's monitor stream alike, with its transparency (the desktop shows
+   through) and the oval dim intact. A browser meeting's and OBS's "entire screen" take the
+   same stream through the portal, so they see the same; what each meeting then does to the
+   picture (scaling, compression) is its own. Each capture showed as a mutter session node the
+   moment it started, so the detection above sees all of them.
+2. **One window**: an ordinary window recorded alone while Ghost floated over it on the same
+   monitor carried only that window; the monitor stream taken at the same time showed Ghost
+   over it.
+3. **The surface as a window of its own**: the portal's window list is gnome-shell's
+   `Introspect.GetWindows`, which keeps every window of type normal that isn't
+   override-redirect, so the floating surface ("Ghost", normal, skip-taskbar) is offered. A
+   transparent, undecorated XWayland window recorded alone arrives as RGBA: its transparent
+   pixels are (0, 0, 0, 0) and the translucent ones premultiplied, so a meeting (which drops
+   the alpha) shows it on **black**, darker where it was see-through: no garbage, but no
+   backdrop either, and at rest a black frame with a thin line. That is why there is a stage.
+   The real surface can't be given the focus (it refuses it), and mutter's window ids are
+   closed to ordinary clients, so it was measured with a test window of the same kind; the
+   owner's check below has the two-minute look at the real one.
+
+## Ghost on stage
+
+The tray's **Ghost on stage**, or Settings › The room › **Open the stage**: the floating
+room drawn in an ordinary window titled **Ghost · Stage** (`stage.html`,
+`src-tauri/src/floating/stage.rs`), on an opaque designed backdrop, driven by the same live
+events as the floating room. In a meeting, share that window; or record it. It shows what the
+floating room shows (Wisp, the state, where Ghost is looking, a yes or a question) in the
+middle of a dark stage; at rest Ghost waits there with “Say “Ghost”” rather than as a line; a
+session comes forward whichever window has the keyboard; Ghost's own words are captioned for
+people who may not hear it (never the operator's); and it has no Open in Ghost or Done. It
+never hides from a share: it was opened to be seen. It is a window of the main process,
+native wherever the main window is, and works where the floating room can't (it needs no X11).
+Close it like any window. `stage.html?mock=floating` on the dev server plays the mock session
+on it.
+
+Measured as above: the stage page in a WebKitGTK window recorded alone with `RecordWindow`
+is the stage and its title bar, opaque, nothing behind it.
+
+## What the people on the call hear
+
+Seeing Ghost is half of it. Ghost's voice plays on the speakers (or headphones), and a meeting
+sends only the microphone it was given. The honest options on Linux with PipeWire:
+
+1. **The microphone hears the speakers.** Works only with open speakers and a microphone that
+   doesn't cancel them, and then the meeting's own echo cancelling and noise suppression decide
+   what survives: they cancel what the meeting itself plays (the other people), not Ghost, so
+   Ghost usually gets through, quieter and roomier than your voice. **On this desk it doesn't
+   work**: the reSpeaker's chip cancels everything played through its own output, Ghost
+   included. Measured 2026-11-13 with a speech-like test signal through the speakers: the
+   webcam's microphone heard its harmonics 23.7 dB above the room, the reSpeaker's processed
+   output 5.4 dB. A meeting using the reSpeaker as its microphone carries Ghost at a whisper.
+2. **Share the system's sound with the screen.** On Linux, Chrome shares a tab's sound but not
+   the system's with an entire screen or a window (that is Windows and ChromeOS only, see
+   above), and Firefox shares none; the Zoom and Teams Linux clients have a "share sound"
+   option of their own whose behaviour depends on their build (not checked). Not something to
+   count on.
+3. **A microphone with Ghost mixed in** (recommended): **`make demo-audio`**
+   (`scripts/demo-audio.sh`). For the length of the demo it makes a source **Ghost and your
+   microphone**: your microphone (`ghost.mic` when the echo canceller made it, else the
+   default, or `GHOST_DEMO_MIC`) and Ghost's voice (the `ghost-playback` stream, linked in each
+   time a session opens it) mixed into a sink nobody hears. Choose it as the meeting's
+   microphone; Ghost's voice still plays where it always does. Ctrl+C removes everything it
+   made. Measured: the test voice played as `ghost-playback` came through the new source
+   28 dB above the room. Ghost's own audio input is not touched.
+
+**What Ghost hears of the call.** The other people's voices come out of the speakers. Ghost
+listens for its name in whatever reaches its microphone: someone on the call saying “Ghost”
+can wake it, and once a session is open their words can be taken as yours. On this desk the
+reSpeaker cancels what the speakers play, which helps but isn't a guarantee. For a demo:
+
+- **Wear headphones** and run `make demo-audio`: the call can't reach Ghost's microphone, and
+  the audience hears Ghost through the mixed microphone. This is the setup to use.
+- On open speakers, tell the room you are about to call Ghost, keep sessions short (“Ghost,
+  that's all” when done), and use the tray's Stop listening while others talk at length.
+- A yes to a change is still yours only: the gate waits for your words in your own session
+  (ADR 0017), but a voice from the call that sounds like a yes is heard as one. Don't demo a
+  change that matters on open speakers.
+
+### On other desktops (from their documentation, not measured)
+
+- **KDE Plasma (Wayland)**: KWin keeps an XWayland window above and honours its input shape,
+  so the surface itself should work as here, and KWin has layer-shell for a native one later.
+  But there is no mutter to ask, so a share reads as unknown: Settings says so and the tray
+  switch is the answer. A portable way to see a share would be to watch PipeWire for the
+  compositor's screen-cast video nodes, as Waybar's privacy module does; not built.
+- **Hyprland**: its event socket reports `screencast` when a client's screen-copy state
+  changes ([wiki](https://wiki.hypr.land/IPC/)), which could feed the same choice. Not built.
+  **Sway**: no such event; the PipeWire watch above would be the way.
+- **Windows**: a window can leave itself out of every capture
+  (`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, Windows 10 2004 and later,
+  [docs](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity)),
+  so Hide would need no detection at all: Ghost would stay on the operator's screen and be
+  absent from the share. Show is simply not setting it.
+- **macOS**: `NSWindow.sharingType = .none` used to do the same, but since macOS 15
+  ScreenCaptureKit, which meetings now use, is reported to ignore it
+  ([tauri#14200](https://github.com/tauri-apps/tauri/issues/14200),
+  [electron#48258](https://github.com/electron/electron/issues/48258)); detection would be
+  needed there too.
+- **System sound in a browser meeting**: Chrome shares tab audio on every desktop, and the
+  whole system's sound with an entire screen only on Windows and ChromeOS
+  ([addpipe](https://addpipe.com/getdisplaymedia-demo/),
+  [mdn/content#25307](https://github.com/mdn/content/issues/25307)): on Linux and macOS the
+  mixed microphone below is the way.
 
 ## A full-screen app
 
@@ -124,6 +259,17 @@ the focused window's monitor, else the pointer's. Measured on GNOME Shell 50.1 u
   while native Wayland windows had the focus. Only a focused X client counts.
 - `_NET_CURRENT_DESKTOP` follows the workspace.
 - `org.gnome.Shell.Introspect` and `Eval` are closed to ordinary clients.
+
+**Moving between monitors** (2026-11-13): the surface used to be sized to the whole monitor.
+A window that size doesn't fit a monitor with GNOME's top bar, so mutter kept it on, or sent it
+back to, the monitor where it fits: a summon to the primary monitor (a named one, "where I am")
+left the surface where it was (measured: the choice was HDMI-1, the window stayed at +1920).
+And an undecorated window that asks to cover a whole monitor is made a legacy full-screen one
+(`_NET_WM_STATE_FULLSCREEN`): it then ignores sizes, moves only as a whole monitor, and on the
+primary monitor GNOME Shell hides its top bar under it (seen in a recording). Now the surface
+leaves full screen and takes the monitor's work area (`_NET_WORKAREA`: on the primary, under
+the top bar and above the dock), in one request; measured moving HDMI-3 → HDMI-1 → HDMI-3 →
+HDMI-1, each at once, the top bar kept.
 
 So on GNOME Wayland the pointer and the focused window come from **Ghost's desktop helper**,
 an optional GNOME Shell extension in `apps/desktop/gnome-shell/ghost-desktop@heka.dev`. It
@@ -198,7 +344,10 @@ from the frame loop.
 
 - `http://localhost:1420/floating.html?mock=floating` plays the whole sequence over and over
   in a browser (`&main=active`, `&capture=yes`, `&covered=1`, `&side=left`, `&still=1`,
-  `&listening=off`). The main window's mock takes `&floating=on|off|refused`.
+  `&listening=off`; with `&capture=yes`, `&sharing=hidden|shown|asking` is the operator's
+  choice for the share). `stage.html?mock=floating` plays it on the stage. The main window's
+  mock takes `&floating=on|off|refused`, `&capture=yes`, `&sharing=…` and
+  `&while_shared=hide|show|ask`.
 - The real surface on this desktop, with the mock page (debug builds only):
   `GDK_BACKEND=x11 GHOST_FLOATING_URL='http://localhost:1420/floating.html?mock=floating' target/debug/heka-ghost-desktop --floating`
   (the page must come from the app's dev address, 1420; close it with Ctrl+C or by closing
@@ -225,8 +374,20 @@ Things this session could not do without your hand. With the dev page served
    it takes the click. Type in a text field: the letters go there. The Yes and No buttons take
    a click (the mock answers).
 5. **Screen sharing.** Start a share (a browser meeting's "present", or Ctrl+Alt+Shift+R), run
-   the check: `"capture": "yes"`. With the floating room on in the real app, Ghost disappears
-   within two seconds and comes back when the share ends.
+   the check: `"capture": "yes"`. With the floating room on in the real app and While my
+   screen is shared at Hide Ghost, Ghost disappears within two seconds and comes back when the
+   share ends. At Ask each time, the card appears instead; Show puts Ghost in with the Screen
+   shared mark; the tray's Show Ghost in this share flips it; a new share asks again. At Show
+   Ghost, the mark is there from the start.
+8. **The surface in a window picker.** In a browser meeting (meet.jit.si needs no account),
+   Share screen › Window: the list has "Ghost" (the floating surface) and "Ghost · Stage" when
+   the stage is open. Pick the floating one: expected Ghost on black. Pick the stage: the
+   stage as you see it.
+9. **The stage.** Tray › Ghost on stage, call Ghost: it comes forward on the stage, captioned,
+   while the floating room does what it does.
+10. **Audio.** With headphones, `make demo-audio`, a meeting with "Ghost and your microphone"
+    as its microphone and a second device in the call: call Ghost; the second device hears you
+    and Ghost. Ctrl+C the helper and switch the microphone back.
 6. **Bringing the app.** With the real app on (the tray's Float over the desktop), put the main
    window on workspace 1, go to workspace 2, use the tray's Open Ghost: the window appears on
    workspace 2, focused. Say "Ghost, open the app" in a session: the same.
