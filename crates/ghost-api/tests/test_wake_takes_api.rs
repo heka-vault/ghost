@@ -43,6 +43,7 @@ fn view(m: ghost_core::wake_takes::TakeMeta) -> WakeTakeView {
             Label::Not => WakeTakeLabel::Not,
             Label::MeMissedBefore => WakeTakeLabel::MeMissedBefore,
         }),
+        cut_at_start: m.cut_at_start,
         bytes: m.bytes,
     }
 }
@@ -116,6 +117,7 @@ fn take(accepted: bool) -> NewTake {
         scores: vec![0.1, 0.42],
         scores_end: 8_000,
         array: None,
+        cut_at_start: false,
     }
 }
 

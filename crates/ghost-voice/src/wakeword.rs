@@ -161,7 +161,10 @@ impl DetectorWakeProcessor {
             on_heard,
             fuzzy,
             end: (end_secs * SAMPLE_RATE as f64) as usize,
-            keep: ((OPENING_PRE_SECS + MAX_LISTEN_SECS + 1.0) * SAMPLE_RATE as f64) as usize,
+            keep: ((OPENING_PRE_SECS.max(ghost_core::wake_takes::PRE_ACCEPTED_SECS)
+                + MAX_LISTEN_SECS
+                + 1.0)
+                * SAMPLE_RATE as f64) as usize,
             buf: Vec::new(),
             base: 0,
             n: 0,
@@ -208,7 +211,13 @@ impl DetectorWakeProcessor {
         } else {
             PRE_REFUSED_SECS
         };
-        let from = hit.saturating_sub((pre * rate) as usize).max(self.base);
+        let pre = (pre * rate) as usize;
+        let from = hit.saturating_sub(pre).max(self.base);
+        // The buffer holds an accepted take's 12 s and the longest request after it, so
+        // a take is short only where this listener began: after a session, a restart or
+        // listening turned on. What came before was not passive (a session's own audio is
+        // not a wake attempt), so it is not here to keep; the take says it was cut there.
+        let cut_at_start = hit - from < pre && self.base == 0;
         let to = (hit + (POST_SECS * rate) as usize).min(self.base + self.buf.len());
         if to <= from {
             return;
@@ -243,6 +252,7 @@ impl DetectorWakeProcessor {
                 scores,
                 scores_end,
                 array: None,
+                cut_at_start,
             },
             tail_secs,
         );
@@ -767,6 +777,57 @@ mod tests {
         assert_eq!(t.hit, 3 * STEP + WINDOW - STEP);
         assert!(t.audio.len() > t.hit);
         assert!(t.scores.contains(&0.8));
+    }
+
+    #[tokio::test]
+    async fn test_a_take_right_after_the_listener_starts_is_marked_cut() {
+        // After a session the passive listener starts afresh: what came before it was the
+        // session, not a wake attempt, so the take begins at the listener's start and says so.
+        let recognize = Recognizer::new(&["Hey Ghost, what needs my sign-off?"]);
+        let keeper = FakeKeeper::new(true);
+        let mut d = detector(FakeScorer::with(&[3], 0.8, "hey_ghost"), &recognize, true);
+        d.keeper = Some(keeper.clone());
+        run(
+            d,
+            frames(vec![
+                vec![started()],
+                audio(2.6),
+                vec![stopped()],
+                audio(0.4),
+            ]),
+        )
+        .await;
+        let kept = keeper.kept.lock().unwrap();
+        assert!(kept[0].cut_at_start);
+    }
+
+    #[tokio::test]
+    async fn test_a_long_request_keeps_the_whole_twelve_seconds_before_the_hit() {
+        // Found live: the passive buffer held 17.5 s, so 8 s of request after the name
+        // pushed most of the 12 s before it out, and the take came back short.
+        let recognize = Recognizer::new(&["Hey Ghost, a long request that goes on."]);
+        let keeper = FakeKeeper::new(true);
+        // the hit's window ends 20.0 s in
+        let call = 1 + (20 * RATE - WINDOW) / STEP;
+        let mut d = detector(FakeScorer::with(&[call], 0.8, "hey_ghost"), &recognize, true);
+        d.keeper = Some(keeper.clone());
+        let events = run(
+            d,
+            frames(vec![
+                audio(19.0),
+                vec![started()],
+                audio(9.0),
+                vec![stopped()],
+                audio(0.5),
+            ]),
+        )
+        .await;
+        assert_eq!(events.len(), 2, "{events:?}");
+        let kept = keeper.kept.lock().unwrap();
+        let t = &kept[0];
+        let pre = (ghost_core::wake_takes::PRE_ACCEPTED_SECS * RATE as f64) as usize;
+        assert_eq!(t.hit, pre);
+        assert!(!t.cut_at_start);
     }
 
     #[tokio::test]

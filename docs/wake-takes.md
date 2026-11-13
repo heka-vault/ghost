@@ -19,6 +19,11 @@ decision is made:
 
 The 12 s before a wake holds an attempt Ghost missed, when you had to say it again.
 
+A take is shorter only when the listener had just started: right after a conversation ends,
+Ghost restarts, or listening is turned back on. What came before was the conversation (or
+nothing), not a wake attempt, so it is not kept; the take is marked `cut_at_start` and the
+Hearing test says it begins where Ghost started listening.
+
 Files are in `~/.local/share/ghost/wake/takes/` (0600, the folder 0700): about 1.3 MB for a
 wake with the array beside it, 0.5 MB for a refused hit. At most 2,000 takes or 1 GB; the
 oldest go first. Nothing between hits is kept, and nothing is sent anywhere. The phone, the

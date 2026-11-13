@@ -76,6 +76,9 @@ pub struct WakeTakeView {
     pub reading: Option<String>,
     #[schema(required)]
     pub label: Option<WakeTakeLabel>,
+    /// The take begins where the passive listener started (after a session): shorter than
+    /// asked, since what came before was not passive audio.
+    pub cut_at_start: bool,
     pub bytes: u64,
 }
 
