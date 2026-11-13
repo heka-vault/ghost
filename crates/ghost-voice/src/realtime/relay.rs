@@ -86,7 +86,7 @@ fn fold(run: &[String]) -> String {
     while i < run.len() {
         let v = small_number(&run[i]).unwrap_or(0);
         if v >= 20
-            && v % 10 == 0
+            && v.is_multiple_of(10)
             && let Some(next) = run.get(i + 1).and_then(|n| small_number(n))
             && (1..10).contains(&next)
         {

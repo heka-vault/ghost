@@ -286,6 +286,7 @@ async fn speak(
     }
 }
 
+#[allow(clippy::result_large_err)] // tungstenite's handshake callback returns its own response
 async fn serve(stream: tokio::net::TcpStream, state: Arc<Mutex<State>>, key: String) {
     let st = state.clone();
     let check = move |req: &Request, resp: Response| {
@@ -358,8 +359,10 @@ async fn serve(stream: tokio::net::TcpStream, state: Arc<Mutex<State>>, key: Str
                     .decode(v["audio"].as_str().unwrap_or(""))
                     .unwrap_or_default();
                 let sound = bytes
-                    .chunks_exact(2)
-                    .any(|c| i16::from_le_bytes([c[0], c[1]]).abs() > 300);
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .any(|c| i16::from_le_bytes(*c).abs() > 300);
                 let ended = {
                     let mut s = state.lock().unwrap();
                     s.audio_bytes += bytes.len();
