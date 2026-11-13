@@ -21,6 +21,7 @@ pub mod capture;
 pub mod config;
 pub mod duck;
 pub mod frame;
+pub mod input;
 pub mod mixer;
 pub mod playback;
 pub mod pw;
@@ -28,12 +29,13 @@ pub mod ring;
 pub mod sounds;
 pub mod wake;
 
-pub use capture::{Capture, CaptureConfig, CaptureCounters, ECHO_CANCELLED_SOURCE};
+pub use capture::{Capture, CaptureConfig, CaptureCounters, ECHO_CANCELLED_SOURCE, take_channel};
 pub use config::AudioSettings;
 pub use duck::{
     DUCK_STATE, DuckError, DuckedStream, Ducker, default_state_file, restore_from_state,
 };
 pub use frame::{CAPTURE_RATE, FRAME_MS, Frame, PLAYBACK_RATE, frame_samples};
+pub use input::{CANCELLER_SOURCE, InputSpec, cancels_on_chip};
 pub use mixer::{Mixer, mix_sample};
 pub use playback::{MixerHandle, Playback, PlaybackConfig, PlaybackCounters};
 pub use pw::{BoundNode, GlobalNode, NodeFacts, NodeFormat, NodeState, PwError, Session};
