@@ -42,6 +42,7 @@ def every_copy() -> dict[str, str]:
         "tools/pyproject.toml",
         "tools/oracle/pyproject.toml",
         "tools/voice-trial/pyproject.toml",
+        "tools/wake-train/pyproject.toml",
     ):
         out[p] = _toml(p)["project"]["version"]
     lock = {pkg["name"]: pkg["version"] for pkg in _toml("uv.lock")["package"]}
@@ -51,6 +52,8 @@ def every_copy() -> dict[str, str]:
     out["tools/oracle/uv.lock"] = oracle[version_script.ORACLE]
     trial = {pkg["name"]: pkg["version"] for pkg in _toml("tools/voice-trial/uv.lock")["package"]}
     out["tools/voice-trial/uv.lock"] = trial[version_script.VOICE_TRIAL]
+    wake = {pkg["name"]: pkg["version"] for pkg in _toml("tools/wake-train/uv.lock")["package"]}
+    out["tools/wake-train/uv.lock"] = wake[version_script.WAKE_TRAIN]
     for p in (
         "package.json",
         "apps/desktop/package.json",

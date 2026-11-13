@@ -1807,6 +1807,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wake/takes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Kept wake takes */
+        get: operations["wake_takes_view_wake_takes_get"];
+        put?: never;
+        post?: never;
+        /** Delete every take */
+        delete: operations["wake_takes_delete_all_wake_takes_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wake/takes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a take */
+        delete: operations["wake_take_delete_wake_takes__id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wake/takes/{id}/label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Label a take */
+        put: operations["wake_take_label_wake_takes__id__label_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wake/takes/{id}/play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Play a take */
+        post: operations["wake_take_play_wake_takes__id__play_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wake/takes/choice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Keep wake takes */
+        put: operations["wake_takes_choice_wake_takes_choice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wake/takes/play/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop playing */
+        post: operations["wake_takes_stop_wake_takes_play_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/watches": {
         parameters: {
             query?: never;
@@ -3960,6 +4063,76 @@ export interface components {
             /** @description Words to treat as the first turn. */
             text?: string | null;
         };
+        /** @enum {string} */
+        WakeTakeLabel: "me" | "not" | "me_missed_before";
+        WakeTakeLabelRequest: {
+            label?: components["schemas"]["WakeTakeLabel"] | null;
+        };
+        /** @enum {string} */
+        WakeTakeOutcome: "accepted" | "refused";
+        WakeTakePlayRequest: {
+            /** @description Play the array's own stream instead of the one the detector heard. */
+            array?: boolean;
+        };
+        /** @description The operator's choice: one switch, on unless they turned it off. */
+        WakeTakesChoice: {
+            /**
+             * @description Keep the sound of each wake attempt (both streams), its score curve and what
+             *     Parakeet read.
+             */
+            keep: boolean;
+            /** @description The retraining counts an accepted wake with no label as the operator calling Ghost. */
+            unlabelled_accepted_are_me?: boolean;
+        };
+        WakeTakesDeleted: {
+            deleted: number;
+        };
+        /** @description Everything kept, and the choice. */
+        WakeTakesView: {
+            /** Format: int64 */
+            bytes: number;
+            choice: components["schemas"]["WakeTakesChoice"];
+            count: number;
+            /** Format: int64 */
+            max_bytes: number;
+            max_count: number;
+            /** @description The take playing, if any. */
+            playing: string | null;
+            /** @description Newest first. */
+            takes: components["schemas"]["WakeTakeView"][];
+        };
+        /** @description One kept take, without its audio. */
+        WakeTakeView: {
+            /** @description The array's own stream kept beside it, by node name. */
+            array: string | null;
+            /** @description RFC 3339. */
+            at: string;
+            /** Format: int64 */
+            bytes: number;
+            /**
+             * Format: double
+             * @description Where in the take the frame that scored ended, in seconds.
+             */
+            hit_at: number;
+            id: string;
+            /** @description The input the detector heard. */
+            input: string;
+            label: components["schemas"]["WakeTakeLabel"] | null;
+            model: string;
+            outcome: components["schemas"]["WakeTakeOutcome"];
+            /** @description What Parakeet read for it. */
+            reading: string | null;
+            /** Format: float */
+            score: number;
+            /** @description The detector's score every 80 ms; the last one's window ended at `scores_end`. */
+            scores: number[];
+            /** Format: double */
+            scores_end: number;
+            /** Format: double */
+            secs: number;
+            /** Format: float */
+            threshold: number;
+        };
         /** @description A watch in watches.json (ADR 0028, ADR 0035) and how its last look went. */
         WatchInfo: {
             /** @description The agent a run starts for on each new item, when the watch acts (ADR 0047). */
@@ -4189,6 +4362,14 @@ export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
 export type SchemaWaitingPlace = components['schemas']['WaitingPlace'];
 export type SchemaWaitingView = components['schemas']['WaitingView'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
+export type SchemaWakeTakeLabel = components['schemas']['WakeTakeLabel'];
+export type SchemaWakeTakeLabelRequest = components['schemas']['WakeTakeLabelRequest'];
+export type SchemaWakeTakeOutcome = components['schemas']['WakeTakeOutcome'];
+export type SchemaWakeTakePlayRequest = components['schemas']['WakeTakePlayRequest'];
+export type SchemaWakeTakesChoice = components['schemas']['WakeTakesChoice'];
+export type SchemaWakeTakesDeleted = components['schemas']['WakeTakesDeleted'];
+export type SchemaWakeTakesView = components['schemas']['WakeTakesView'];
+export type SchemaWakeTakeView = components['schemas']['WakeTakeView'];
 export type SchemaWatchInfo = components['schemas']['WatchInfo'];
 export type SchemaWatchingView = components['schemas']['WatchingView'];
 export type $defs = Record<string, never>;
@@ -7627,6 +7808,212 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    wake_takes_view_wake_takes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeTakesView"];
+                };
+            };
+        };
+    };
+    wake_takes_delete_all_wake_takes_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeTakesDeleted"];
+                };
+            };
+        };
+    };
+    wake_take_delete_wake_takes__id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such take */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    wake_take_label_wake_takes__id__label_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WakeTakeLabelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeTakeView"];
+                };
+            };
+            /** @description No such take */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    wake_take_play_wake_takes__id__play_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WakeTakePlayRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such take */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    wake_takes_choice_wake_takes_choice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WakeTakesChoice"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeTakesView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    wake_takes_stop_wake_takes_play_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
                 };
             };
         };

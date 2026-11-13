@@ -66,7 +66,13 @@ export default defineConfig({
     target: "es2022",
     outDir: "dist",
     sourcemap: false,
-    // Two pages: the app's window, and the floating room's surface (ADR 0059).
-    rollupOptions: { input: { main: fileURLToPath(new URL("index.html", import.meta.url)), floating: fileURLToPath(new URL("floating.html", import.meta.url)) } },
+    // Three pages: the app's window, the floating room's surface, and the stage (ADR 0059).
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("index.html", import.meta.url)),
+        floating: fileURLToPath(new URL("floating.html", import.meta.url)),
+        stage: fileURLToPath(new URL("stage.html", import.meta.url)),
+      },
+    },
   },
 });

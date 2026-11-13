@@ -133,6 +133,7 @@ import { PasswordsSection } from "./Passwords";
 import { OutsideToolsSection } from "./OutsideTools";
 import { PhoneSection } from "./Phone";
 import { WakePhrasesField, wakeHelp } from "./WakePhrases";
+import { WakeTakesRow } from "./WakeTakesRow";
 import { WavePicker } from "./WavePicker";
 import "./settings.css";
 
@@ -1123,6 +1124,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         }
                       />
                     )}
+                    <WakeTakesRow />
                     <Row>
                       <Field
                         layout="inline"

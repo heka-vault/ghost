@@ -114,6 +114,45 @@ Ghost is looking for things". So:
 The look, the states and the motion are the same: this takes text down, it doesn't change
 the character.
 
+## Amended 2026-11-13: while the screen is shared, and the stage
+
+The owner: "What are our options for making Ghost be able to float in when we are doing screen
+sharing? I wanted to share my screen because I actually wanted to show off Ghost." Hiding from
+every capture was right as a default and wrong as the only answer. Measured on the workstation
+(`docs/floating-room.md`, What a capture sees): a whole-monitor capture (GNOME's recorder,
+mutter's monitor stream, which the portal gives a browser and OBS) carries the surface with its
+transparency and dim on either monitor; a single-window share never does; and the surface shared
+alone as a window arrives on black, since a meeting drops the alpha. So:
+
+- **A choice, Hide by default.** "While my screen is shared": Hide Ghost (default, as before),
+  Show Ghost, Ask each time (`floating.json`'s `while_shared`). The shell keeps one share's
+  memory (`floating::share`, a pure state machine fed the capture and the clock) and sends the
+  surface one word with the capture: `none`, `hidden`, `shown` or `asking`. Ask shows a small
+  card on the surface's monitor with Show and Hide and nothing else of Ghost; unanswered for
+  20 s it is taken as Hide, since the card is itself in the share. The tray's "Show Ghost in
+  this share" flips what is in effect, for that share only. Shown, Ghost wears a "Screen shared"
+  mark it cannot be without. The posture rule's `floating` input is "on, up, and not kept out
+  of a share". A capture line from an older shell still means hidden.
+- **The stage.** A window of the main process, "Ghost · Stage" (`stage.html`), drawing the same
+  page on an opaque designed backdrop from the same events, opened from the tray or Settings: the
+  thing to share as a window or record. It never hides (it was opened to be seen), captions
+  Ghost's own words for people who may not hear it, has no Open in Ghost or Done, and needs no
+  X11. It reads what the main window reads and changes nothing the main window cannot.
+- **The audience's ears.** Not the daemon's business: a meeting sends a microphone, and on this
+  desk the reSpeaker cancels Ghost's voice out of its own (measured: 5.4 dB above the room
+  against 23.7 dB at the webcam's). `make demo-audio` makes, for the length of a demo, a source
+  "Ghost and your microphone" that mixes the operator's microphone and Ghost's `ghost-playback`
+  stream; Ghost's own input is untouched. Headphones are the advice, so the call can't wake
+  Ghost or speak for the operator.
+- **Moving between monitors.** Found while measuring: the surface, sized to the whole monitor,
+  didn't fit the primary monitor's work area and mutter kept it where it was, and a window asking
+  to cover a monitor became a legacy full-screen one that hid GNOME's top bar on the primary.
+  It now leaves full screen and takes the monitor's work area.
+
+Cost: nothing at rest or forward changes; the share's word rides on the existing two-second
+poll and one line on the surface's stdin when it changes. The stage is a second webview while it
+is open, costing what the floating room costs forward (not measured on its own); closed, nothing.
+
 ## What it costs (ADR 0018)
 
 Measured on the workstation (Intel UHD 750, GNOME Shell 50.1, XWayland, two 1920×1080
@@ -132,6 +171,6 @@ event is one more broadcast per "open the app", and the quick intent is a phrase
   three processes in a debug build serving the dev page (shared libraries counted in each);
   a release build was not measured.
 - The ADR 0057 rule holds for it: nothing it does opens or closes the microphone.
-- A screen share on a desktop that isn't GNOME is not seen; the tray switch is the answer.
+- A screen share on a desktop that isn't GNOME is not seen; the tray switch is the answer. Showing Ghost in a share is the operator's choice, never a default, and it is marked on the surface.
 - Native Wayland support needs layer-shell (KDE, wlroots) or a GNOME Shell extension that
   stacks the window, both later.

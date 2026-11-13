@@ -6525,6 +6525,223 @@
         },
         "type": "object"
       },
+      "WakeTakeLabel": {
+        "enum": [
+          "me",
+          "not",
+          "me_missed_before"
+        ],
+        "type": "string"
+      },
+      "WakeTakeLabelRequest": {
+        "properties": {
+          "label": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WakeTakeLabel",
+                "description": "None clears the label."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "WakeTakeOutcome": {
+        "enum": [
+          "accepted",
+          "refused"
+        ],
+        "type": "string"
+      },
+      "WakeTakePlayRequest": {
+        "properties": {
+          "array": {
+            "description": "Play the array's own stream instead of the one the detector heard.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "WakeTakeView": {
+        "description": "One kept take, without its audio.",
+        "properties": {
+          "array": {
+            "description": "The array's own stream kept beside it, by node name.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at": {
+            "description": "RFC 3339.",
+            "type": "string"
+          },
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "hit_at": {
+            "description": "Where in the take the frame that scored ended, in seconds.",
+            "format": "double",
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "description": "The input the detector heard.",
+            "type": "string"
+          },
+          "label": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WakeTakeLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/WakeTakeOutcome"
+          },
+          "reading": {
+            "description": "What Parakeet read for it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "score": {
+            "format": "float",
+            "type": "number"
+          },
+          "scores": {
+            "description": "The detector's score every 80 ms; the last one's window ended at `scores_end`.",
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "scores_end": {
+            "format": "double",
+            "type": "number"
+          },
+          "secs": {
+            "format": "double",
+            "type": "number"
+          },
+          "threshold": {
+            "format": "float",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "outcome",
+          "model",
+          "score",
+          "threshold",
+          "input",
+          "array",
+          "secs",
+          "hit_at",
+          "scores",
+          "scores_end",
+          "reading",
+          "label",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "WakeTakesChoice": {
+        "description": "The operator's choice: one switch, on unless they turned it off.",
+        "properties": {
+          "keep": {
+            "description": "Keep the sound of each wake attempt (both streams), its score curve and what\nParakeet read.",
+            "type": "boolean"
+          },
+          "unlabelled_accepted_are_me": {
+            "description": "The retraining counts an accepted wake with no label as the operator calling Ghost.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "keep"
+        ],
+        "type": "object"
+      },
+      "WakeTakesDeleted": {
+        "properties": {
+          "deleted": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "type": "object"
+      },
+      "WakeTakesView": {
+        "description": "Everything kept, and the choice.",
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "choice": {
+            "$ref": "#/components/schemas/WakeTakesChoice"
+          },
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "playing": {
+            "description": "The take playing, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "takes": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/WakeTakeView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "choice",
+          "count",
+          "bytes",
+          "max_count",
+          "max_bytes",
+          "playing",
+          "takes"
+        ],
+        "type": "object"
+      },
       "WatchInfo": {
         "description": "A watch in watches.json (ADR 0028, ADR 0035) and how its last look went.",
         "properties": {
@@ -11018,6 +11235,256 @@
         "summary": "Wake",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/wake/takes": {
+      "delete": {
+        "operationId": "wake_takes_delete_all_wake_takes_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WakeTakesDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delete every take",
+        "tags": [
+          "wake"
+        ]
+      },
+      "get": {
+        "operationId": "wake_takes_view_wake_takes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WakeTakesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Kept wake takes",
+        "tags": [
+          "wake"
+        ]
+      }
+    },
+    "/wake/takes/choice": {
+      "put": {
+        "operationId": "wake_takes_choice_wake_takes_choice_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WakeTakesChoice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WakeTakesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Keep wake takes",
+        "tags": [
+          "wake"
+        ]
+      }
+    },
+    "/wake/takes/play/stop": {
+      "post": {
+        "operationId": "wake_takes_stop_wake_takes_play_stop_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Stop playing",
+        "tags": [
+          "wake"
+        ]
+      }
+    },
+    "/wake/takes/{id}": {
+      "delete": {
+        "operationId": "wake_take_delete_wake_takes__id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such take"
+          }
+        },
+        "summary": "Delete a take",
+        "tags": [
+          "wake"
+        ]
+      }
+    },
+    "/wake/takes/{id}/label": {
+      "put": {
+        "operationId": "wake_take_label_wake_takes__id__label_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WakeTakeLabelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WakeTakeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such take"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Label a take",
+        "tags": [
+          "wake"
+        ]
+      }
+    },
+    "/wake/takes/{id}/play": {
+      "post": {
+        "operationId": "wake_take_play_wake_takes__id__play_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/WakeTakePlayRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such take"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Play a take",
+        "tags": [
+          "wake"
         ]
       }
     },

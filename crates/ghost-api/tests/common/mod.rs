@@ -634,6 +634,7 @@ pub struct World {
     pub devices: Option<Arc<dyn DevicesPort>>,
     pub model_net: Option<Arc<dyn ModelNet>>,
     pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,
+    pub wake_takes: Option<Arc<dyn ghost_api::WakeTakesPort>>,
     /// Where Ghost listens for outside tools (ADR 0048); the clients are always there.
     pub clients_listening: Vec<String>,
     /// The daemon runs from an AppImage.
@@ -734,6 +735,7 @@ impl World {
             devices: None,
             model_net: None,
             schedules: None,
+            wake_takes: None,
             clients_listening: Vec::new(),
             in_appimage: false,
             tmp,
@@ -793,6 +795,7 @@ impl World {
         deps.skill_catalog = self.skill_catalog.clone();
         deps.hooks_listening = self.hooks_listening.clone();
         deps.schedules = self.schedules.clone();
+        deps.wake_takes = self.wake_takes.clone();
         deps.clients = Some(Arc::new(ghost_core::ghost_app::clients::Clients::new(
             self.store.clone(),
             self.tmp.path().join("clients"),

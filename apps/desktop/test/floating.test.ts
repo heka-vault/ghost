@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { canFloat, prefOf, prefValue, type FloatingStatus } from "../src/app/floating";
 import { postureOf } from "../src/app/posture";
-import { captionsShown, captionText, fpsOf, goneAfterGoodbye, GOODBYE_MS, isForward, labelOf, sceneOf, type SceneInput } from "../src/floating/scene";
+import { captionsShown, captionText, fpsOf, goneAfterGoodbye, GOODBYE_MS, isForward, labelOf, sceneOf, sharingOf, type SceneInput } from "../src/floating/scene";
 
 const base: SceneInput = { posture: "float", capture: "no", phase: "listening", ending: false, youTalking: false, pending: false, question: false };
 
@@ -18,6 +18,19 @@ describe("sceneOf", () => {
     expect(sceneOf({ ...base, capture: "yes", posture: "desk" })).toBe("hidden");
     // A desktop that can't tell is not a capture.
     expect(sceneOf({ ...base, capture: "unknown" })).toBe("listening");
+  });
+
+  it("follows the operator's choice while the screen is shared (hide by default)", () => {
+    // The shell's word wins; without one a capture hides, as before there was a choice.
+    expect(sharingOf("yes", undefined)).toBe("hidden");
+    expect(sharingOf("no", undefined)).toBe("none");
+    expect(sharingOf("yes", "shown")).toBe("shown");
+    expect(sceneOf({ ...base, capture: "yes", sharing: "hidden" })).toBe("hidden");
+    // Asking: only the card is drawn, Ghost stays out until the answer.
+    expect(sceneOf({ ...base, capture: "yes", sharing: "asking" })).toBe("hidden");
+    // Shown: Ghost comes forward in the share as anywhere else, and rests at the line.
+    expect(sceneOf({ ...base, capture: "yes", sharing: "shown" })).toBe("listening");
+    expect(sceneOf({ ...base, capture: "yes", sharing: "shown", posture: "desk" })).toBe("line");
   });
 
   it("puts what needs the operator first: a yes, then a question, then their turn", () => {
@@ -131,10 +144,15 @@ describe("the floating room's switch in the main window", () => {
     helper: false,
     ...over,
   });
-  it("floats only when on, up and not captured", () => {
+  it("floats only when on, up and not kept out of a share", () => {
     expect(canFloat(status())).toBe(true);
     expect(canFloat(status({ capture: "unknown" }))).toBe(true);
+    // An older shell: a capture keeps it out.
     expect(canFloat(status({ capture: "yes" }))).toBe(false);
+    expect(canFloat(status({ capture: "yes", sharing: "hidden" }))).toBe(false);
+    expect(canFloat(status({ capture: "yes", sharing: "asking" }))).toBe(false);
+    // The operator chose to show Ghost in this share.
+    expect(canFloat(status({ capture: "yes", sharing: "shown" }))).toBe(true);
     expect(canFloat(status({ running: false }))).toBe(false);
     expect(canFloat(status({ settings: { on: false, monitor: "other" } }))).toBe(false);
     expect(canFloat(null)).toBe(false);

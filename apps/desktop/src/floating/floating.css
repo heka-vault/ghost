@@ -296,16 +296,166 @@ body {
   overflow: hidden;
 }
 
+/* ---------------------------------------------------------------- while the screen is shared (2026-11-13) */
+/* The mark Ghost wears when the operator chose to show it in a share: the recording dot everyone
+   knows, on its own dark pill so it reads over any desktop. Beside the line at rest, above the
+   label when Ghost is forward. */
+.flt-shared {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 700 12px/1 var(--flt-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--flt-ink);
+  background: rgb(3 5 9 / 0.86);
+  border: 1px solid rgb(255 77 94 / 0.7);
+  border-radius: 999px;
+  padding: 6px 12px 6px 10px;
+  white-space: nowrap;
+  box-shadow: 0 0 16px rgb(255 77 94 / 0.35);
+}
+.flt-under .flt-shared { margin-bottom: 4px; }
+.flt-line .flt-shared { margin-bottom: 10px; }
+.flt-shared__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--flt-red);
+  box-shadow: 0 0 10px var(--flt-red);
+  animation: flt-rec 1.6s ease-in-out infinite;
+  flex: none;
+}
+@keyframes flt-rec { 50% { opacity: 0.35; } }
+
+/* "Show Ghost in it?" when a share starts and the operator chose to be asked: small, low and
+   central, over the line's place; it is itself in the share, so it says nothing but that. */
+.flt-sharecard {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  /* `translate`, not `transform`: the arrival's keyframes own the transform. */
+  translate: -50% 0;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgb(3 5 9 / 0.9);
+  border: 1px solid rgb(234 252 255 / 0.18);
+  border-radius: 16px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.6);
+  animation: flt-arrive 400ms cubic-bezier(.16,.84,.24,1) both;
+}
+.flt-sharecard__q {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 15px/1.3 var(--flt-display);
+  color: var(--flt-ink);
+  white-space: nowrap;
+}
+.flt-sharecard .flt-word { font-size: 17px; padding: 6px 18px 8px; }
+.flt-sharecard .flt-word--yes {
+  color: #001318;
+  background: var(--flt-cyan);
+  border-color: var(--flt-cyan);
+  box-shadow: 0 0 22px rgb(95 227 255 / 0.45);
+}
+
+/* ---------------------------------------------------------------- on stage (2026-11-13) */
+/* The same room in an ordinary window, for showing Ghost to people: an opaque backdrop so a
+   shared window or a recording of it alone looks finished. Deep black with the scene's light
+   rising from the middle, a floor of faint lines running to the horizon, and the corners
+   falling away. Nothing on it is sized from what is said. */
+.flt-root[data-stage="1"] {
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 46%, color-mix(in srgb, var(--flt-tint) 13%, transparent), transparent 70%),
+    radial-gradient(ellipse 120% 90% at 50% 50%, #0a0e18 0%, #05060a 62%, #020203 100%);
+  transition: background 600ms;
+}
+.flt-root[data-stage="1"]::before {
+  content: "";
+  position: absolute;
+  left: -50%;
+  right: -50%;
+  bottom: 0;
+  height: 42%;
+  background:
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--flt-tint) 22%, transparent) 0 1px, transparent 1px 64px),
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--flt-tint) 16%, transparent) 0 1px, transparent 1px 48px);
+  transform: perspective(420px) rotateX(62deg);
+  transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, rgb(0 0 0 / 0.55), transparent 85%);
+  mask-image: linear-gradient(to top, rgb(0 0 0 / 0.55), transparent 85%);
+  pointer-events: none;
+}
+.flt-root[data-stage="1"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 85% 80% at 50% 50%, transparent 55%, rgb(0 0 0 / 0.65) 100%);
+  pointer-events: none;
+}
+.flt-root[data-stage="1"] .flt-field,
+.flt-root[data-stage="1"] .flt-stage,
+.flt-root[data-stage="1"] .flt-node,
+.flt-root[data-stage="1"] .flt-more,
+.flt-root[data-stage="1"] .flt-card,
+.flt-root[data-stage="1"] .flt-captions,
+.flt-root[data-stage="1"] .flt-line,
+.flt-root[data-stage="1"] .flt-rest,
+.flt-root[data-stage="1"] .flt-brand { z-index: 1; }
+.flt-root[data-stage="1"] .flt-line { opacity: 0; }
+.flt-rest {
+  position: absolute;
+  /* Where Ghost comes forward (left and top set from the layout's core), so it doesn't jump. */
+  translate: -50% calc(var(--flt-wisp) * -0.4);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  animation: flt-arrive 700ms cubic-bezier(.16,.84,.24,1) both;
+}
+.flt-rest__wisp { opacity: 0.9; filter: drop-shadow(0 0 28px rgb(95 227 255 / 0.35)); }
+.flt-rest__say {
+  margin: 0;
+  font: 600 13px/1 var(--flt-mono);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--flt-dim-text);
+}
+.flt-brand {
+  position: absolute;
+  left: 28px;
+  top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 800 18px/1 var(--flt-display);
+  letter-spacing: -0.02em;
+  color: var(--flt-ink);
+  opacity: 0.85;
+}
+.flt-brand__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--flt-tint);
+  box-shadow: 0 0 12px var(--flt-tint);
+}
+.flt-brand__dot[data-live="0"] { background: rgb(234 252 255 / 0.3); box-shadow: none; }
+
 @keyframes flt-arrive {
   from { opacity: 0; transform: translateY(18px) scale(0.98); filter: blur(6px); }
   to { opacity: 1; transform: none; filter: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .flt-ask, .flt-acts, .flt-node { animation: none; }
+  .flt-ask, .flt-acts, .flt-node, .flt-sharecard, .flt-rest, .flt-shared__dot { animation: none; }
   .flt-line { transition: none; }
 }
 @media (forced-colors: active) {
   .flt-ask__q, .flt-node__name, .flt-node__word, .flt-label { text-shadow: none; }
-  .flt-card::before, .flt-captions, .flt-pill { background: Canvas; }
+  .flt-card::before, .flt-captions, .flt-pill, .flt-shared, .flt-sharecard { background: Canvas; }
+  .flt-shared__dot { background: Mark; box-shadow: none; }
 }

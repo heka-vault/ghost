@@ -29,10 +29,25 @@ export type Scene =
 
 export type Capture = "yes" | "no" | "unknown";
 
+/**
+ * What the floating room does about a screen share now, as the shell decides it
+ * (`src-tauri/src/floating/share.rs`, the operator's "While my screen is shared"): no share,
+ * kept out of it (the default), shown in it with the shared mark, or asking with a small card.
+ */
+export type Sharing = "none" | "hidden" | "shown" | "asking";
+
+/** The shell's word, or what a capture meant before there was a choice: hidden. */
+export function sharingOf(capture: Capture | null, sharing: Sharing | null | undefined): Sharing {
+  if (sharing) return sharing;
+  return capture === "yes" ? "hidden" : "none";
+}
+
 export interface SceneInput {
   /** `postureOf()` with this surface's inputs: `float` is a session that comes forward here. */
   posture: Posture;
   capture: Capture | null;
+  /** The shell's word for a share (absent: a capture hides, as it always did). */
+  sharing?: Sharing | null;
   phase: string | null;
   ending: boolean;
   youTalking: boolean;
@@ -55,7 +70,9 @@ export interface SceneInput {
  * turn open is Ghost still at the speaker, and the label must say so.
  */
 export function sceneOf(i: SceneInput): Scene {
-  if (i.capture === "yes") return "hidden";
+  // Kept out of a share, or asking about one: nothing of Ghost, not even the line.
+  const shared = sharingOf(i.capture, i.sharing);
+  if (shared === "hidden" || shared === "asking") return "hidden";
   if (i.posture !== "float") return "line";
   if (i.gone) return "line";
   if (i.ending) return "ending";

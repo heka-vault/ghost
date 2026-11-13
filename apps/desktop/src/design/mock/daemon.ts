@@ -56,6 +56,7 @@ import { pairLink } from "@ghost/client-ts";
 import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
+import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockSchedules } from "./schedules";
 import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
@@ -243,6 +244,7 @@ export class MockDaemon {
   private storyPlayed = false;
   /** The Hearing test (ADR 0042): the recorder, its takes, sessions and runs. */
   private hear: MockHear;
+  private wakeTakes = new MockWakeTakes();
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;
   /** Each call an agent made, as counts and sizes (ADR 0060). */
@@ -1468,6 +1470,10 @@ export class MockDaemon {
     if (method === "GET" && path === "/status") return this.snapshot();
     if (path.startsWith("/hear")) {
       const answer = await this.hear.handle(method, path, query, b);
+      if (answer !== undefined) return answer;
+    }
+    if (path.startsWith("/wake/takes")) {
+      const answer = this.wakeTakes.handle(method, path, b);
       if (answer !== undefined) return answer;
     }
     if (method === "GET" && path === "/listening") return this.listeningView();

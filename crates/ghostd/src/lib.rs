@@ -31,5 +31,7 @@ pub mod routes;
 pub mod schedules;
 pub mod session;
 pub mod wake;
+pub mod wake_detectors;
+pub mod wake_takes;
 
 pub use config::GhostdSettings;
