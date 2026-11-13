@@ -44,3 +44,20 @@ export function listeningSentence(off: NotListening | null, now: Date = new Date
 export function switchLabel(off: NotListening | null): string {
   return off ? "Listen again" : "Stop listening";
 }
+
+type SessionStatus = Pick<Status, "session_id" | "session_typed" | "session_origin">;
+
+/**
+ * A typed session is open (2026-11-13): started by typing with no session open, it opened no
+ * microphone, and Ghost still listens for its name beside it.
+ */
+export function typedSession(status: Partial<SessionStatus> | null | undefined): boolean {
+  return !!status?.session_id && !!status.session_typed && status.session_origin !== "phone";
+}
+
+/** Which session it is, in the screen's words: typing with, or talking with, the agent. */
+export function sessionWords(status: Partial<SessionStatus> | null | undefined, agent: string): string | null {
+  if (!status?.session_id) return null;
+  if (status.session_origin === "phone") return "On your phone";
+  return typedSession(status) ? `Typing with ${agent}` : `Talking with ${agent}`;
+}

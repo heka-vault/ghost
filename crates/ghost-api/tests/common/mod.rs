@@ -58,6 +58,10 @@ pub struct FakeControl {
     pub phone_address: Mutex<Option<String>>,
     pub phone_device: Mutex<Option<PhoneDevice>>,
     pub check: Mutex<Option<CheckFn>>,
+    /// The daemon's own environment and the one it was started in: a saved model setting
+    /// goes live there, as `Daemon::apply_model` does (ADR 0037).
+    pub environ: SharedEnviron,
+    pub started_env: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl FakeControl {
@@ -197,17 +201,27 @@ impl Controller for FakeControl {
     }
 
     fn apply_settings(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
-        let applied: Vec<String> = values
+        let mut applied: Vec<String> = values
             .keys()
             .filter(|k| k.starts_with("GHOST_WAKE_"))
             .cloned()
             .collect();
+        applied.extend(self.apply_model(values)); // as the daemon's controller does
         *self.applied.lock().unwrap() = applied.clone();
         applied
     }
 
-    fn apply_model(&self, _values: &BTreeMap<String, Option<String>>) -> Vec<String> {
-        Vec::new()
+    fn apply_model(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
+        let started = self.started_env.lock().unwrap().clone();
+        let mut live = self.environ.lock().unwrap();
+        let mut applied = Vec::new();
+        for (k, v) in values {
+            if ghost_api::model::connection_keys().contains(&k.as_str()) {
+                ghost_core::environment::apply(&started, &mut live, k, v.as_deref());
+                applied.push(k.clone());
+            }
+        }
+        applied
     }
 
     async fn check_model(&self, env: ModelEnv) -> Option<ModelCheckRun> {
@@ -617,6 +631,8 @@ pub struct World {
     pub keyring: Arc<MemoryKeyring>,
     pub vault: Arc<Passwords>,
     pub environ: SharedEnviron,
+    /// The environment the daemon was started in (ADR 0037): empty unless a test sets it.
+    pub started_env: Arc<Mutex<HashMap<String, String>>>,
     pub source: ToolSource,
     pub settings_path: PathBuf,
     pub env_path: PathBuf,
@@ -678,6 +694,9 @@ impl World {
         let outputs = Arc::new(Outputs::new(&config));
         gate.register("outputs", outputs.operations());
         let state = Arc::new(DaemonState::new("test", "file"));
+        // An environment of its own, never the operator's (ADR 0036), and an empty start.
+        let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
+        let started_env: Arc<Mutex<HashMap<String, String>>> = Arc::default();
         let control = Arc::new(FakeControl {
             state: state.clone(),
             gate: gate.clone(),
@@ -687,6 +706,8 @@ impl World {
             phone_address: Mutex::new(None),
             phone_device: Mutex::new(None),
             check: Mutex::new(None),
+            environ: environ.clone(),
+            started_env: started_env.clone(),
         });
         let infra = root.join("infra").join("pipewire");
         std::fs::create_dir_all(&infra).unwrap();
@@ -696,8 +717,7 @@ impl World {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        // A fake keyring, and an environment of its own: never the operator's (ADR 0036).
-        let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
+        // A fake keyring: never the operator's (ADR 0036).
         let keyring = Arc::new(MemoryKeyring::new());
         let vault = Arc::new(
             Passwords::new(root.join("data").join("passwords.vault"), keyring.clone())
@@ -719,6 +739,7 @@ impl World {
             keyring,
             vault,
             environ,
+            started_env,
             source,
             settings_path: root.join("settings.env"),
             env_path: root.join("env"),
@@ -757,6 +778,15 @@ impl World {
         self.environ.lock().unwrap().clone()
     }
 
+    /// A value in the environment Ghost was started in (a shell's export, or settings.env
+    /// loaded by the launcher).
+    pub fn set_started(&self, key: &str, value: &str) {
+        self.started_env
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), value.to_string());
+    }
+
     pub fn deps(&self) -> Arc<Deps> {
         let changes: Arc<dyn Changes> = self.gate.clone();
         let waiting =
@@ -778,6 +808,7 @@ impl World {
         deps.output_device = None;
         deps.stt_model = "parakeet".into();
         deps.environ = self.environ.clone();
+        deps.started_env = Arc::new(self.started_env.lock().unwrap().clone());
         deps.conversations = Some(self.conversations.clone());
         deps.folder = Some(self.folder.clone());
         deps.rules = Some(self.rules.clone());

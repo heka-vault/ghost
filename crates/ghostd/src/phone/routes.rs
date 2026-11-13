@@ -702,6 +702,7 @@ mod tests {
                 pending: None,
                 conversation: None,
                 session_origin: None,
+                session_typed: false,
                 ending: false,
                 waiting: 0,
                 not_listening: None,

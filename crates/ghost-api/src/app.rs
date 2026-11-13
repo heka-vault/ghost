@@ -196,6 +196,7 @@ pub fn status_snapshot(deps: &Deps) -> Status {
         pending,
         conversation: st.conversation(),
         session_origin: st.session_origin(),
+        session_typed: st.session_typed(),
         ending: st.ending(),
         waiting: st.waiting(),
         not_listening: st.not_listening(),

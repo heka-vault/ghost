@@ -313,6 +313,7 @@ export class MockDaemon {
       pending: this.pending,
       conversation: scenario.session,
       session_origin: scenario.session ? (scenario.origin ?? "desk") : null,
+      session_typed: !!scenario.session && !!scenario.typed,
       ending: false,
       waiting: this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length,
       not_listening: scenario.notListening === undefined ? null : { until: scenario.notListening === true ? null : new Date(Date.now() + scenario.notListening * 60_000).toISOString() },
@@ -718,14 +719,18 @@ export class MockDaemon {
     this.turns = [];
     this.replyNo = -1;
     this.setActive(slug);
-    this.pushStatus({ session_id: newId(), phase: "listening", conversation: slug, session_origin: "desk" });
+    this.pushStatus({ session_id: newId(), phase: "listening", conversation: slug, session_origin: "desk", session_typed: false });
     this.addTurn("assistant", target.is_ghost ? "Ghost here." : `${target.name} here.`, "system");
   }
   private setActive(slug: string | null) {
     for (const l of this.agents.values()) l.detail.active = l.detail.slug === slug;
   }
   private say(text: string, conversation?: string | null) {
-    if (!this.status.session_id) this.wake(conversation);
+    // Typed with no session open: a typed session, the mic closed (the daemon, 2026-11-13).
+    if (!this.status.session_id) {
+      this.wake(conversation);
+      this.pushStatus({ session_typed: true });
+    }
     this.addTurn("user", text, "text");
     this.pushStatus({ phase: "thinking" });
     // A reply that reads an app first: the calls go out, come back, then Ghost answers.
@@ -839,7 +844,7 @@ export class MockDaemon {
     if (this.pending) this.settlePending("cancelled", { reason: "session ended" });
     this.setActive(null);
     this.activity = [];
-    this.pushStatus({ session_id: null, phase: "passive", conversation: null, session_origin: null, ending: false });
+    this.pushStatus({ session_id: null, phase: "passive", conversation: null, session_origin: null, session_typed: false, ending: false });
     this.conversationEvent(null);
   }
   private settlePending(status: "executed" | "cancelled", detail?: Record<string, unknown>): AuditEntry | null {

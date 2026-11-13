@@ -41,7 +41,7 @@ import { ModelSection } from "../settings/ModelSection";
 import { HeroPresence, StepFrame } from "./frame";
 import type { Wizard } from "./index";
 import { firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
-import { KEEP_NOTICE } from "../hear/wakeTakes";
+import { keeping } from "../hear/wakeTakes";
 import { exchangeOf, isAwake, useWakeWatch } from "./watch";
 
 /* ------------------------------------------------------------------------------ shared */
@@ -439,6 +439,8 @@ export function WakeStep({ w }: { w: Wizard }) {
   const ready = live.online && !live.loadingModels && w.models?.ready !== false;
   const fuzzy = Number(w.settings?.values.GHOST_WAKE_FUZZY || 0.9);
   const off = useMicOff();
+  // ADR 0065: takes are kept only under the trained detector; transcript wake keeps none.
+  const kept = keeping(useGhost().status?.wake_mode, 0);
 
   const { alreadyAwake, markClick } = useWakeWatch(awake, (how, at) => {
     if (w.saved.heard !== "voice") w.setSaved({ heard: how, heardAt: at.toISOString() });
@@ -537,10 +539,15 @@ export function WakeStep({ w }: { w: Wizard }) {
       <div className="onb-try">
         {line && <p className="onb-try__line">{line}</p>}
         <p className="onb-try__meta">
-          {KEEP_NOTICE}{" "}
-          <a href="#/settings/sound" onClick={(e) => (e.preventDefault(), navigate("/settings/sound"))}>
-            Turn off or delete
-          </a>
+          {kept.notice}
+          {kept.controls && (
+            <>
+              {" "}
+              <a href="#/settings/sound" onClick={(e) => (e.preventDefault(), navigate("/settings/sound"))}>
+                Turn off or delete
+              </a>
+            </>
+          )}
         </p>
         {list.length > 1 && !success && !quiet && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
         {(quiet || off) && !success && (

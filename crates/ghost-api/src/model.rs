@@ -38,7 +38,7 @@ pub const SIGN_IN_SECS: u64 = 600;
 pub const HELD: &str = "(in the vault)";
 
 /// What a connection is read from: its own settings, and the older ones it falls back on.
-fn connection_keys() -> Vec<&'static str> {
+pub fn connection_keys() -> Vec<&'static str> {
     let mut keys: Vec<&'static str> = ENV_KEYS.to_vec();
     keys.extend([
         "GHOST_LLM_ENDPOINT",
@@ -55,24 +55,19 @@ fn protocol_of(p: CoreProtocol) -> Protocol {
     }
 }
 
-/// What a connection is resolved from: the daemon's environment (where Ghost's own
-/// passwords are, ADR 0036), the saved settings over it, then the draft. Its Password
-/// comes from the vault by name: its value only when `use_key` (a list or a test, noted
-/// as a use for "last used"); otherwise only whether it is there. A key typed into a
-/// draft is used for that one request and never kept.
+/// What a connection is resolved from: what the daemon's sessions read (ADR 0037: the
+/// environment Ghost was started in, its own over it, where the vault's values and the
+/// settings saved since are; `Deps::ghost_env`), then the draft. Its Password comes from the
+/// vault by name: its value only when `use_key` (a list or a test, noted as a use for "last
+/// used"); otherwise only whether it is there. A key typed into a draft is used for that one
+/// request and never kept.
 pub fn model_env(
     deps: &Deps,
     draft: Option<&ModelDraft>,
     use_key: bool,
 ) -> ApiResult<HashMap<String, String>> {
-    let mut env = deps.environ();
-    let saved = deps.settings();
+    let mut env = deps.ghost_env();
     let keys = connection_keys();
-    for k in &keys {
-        if let Some(v) = saved.get(*k) {
-            env.insert((*k).to_string(), v.clone());
-        }
-    }
     if let Some(draft) = draft {
         for (k, v) in &draft.values {
             if !keys.contains(&k.as_str()) {
@@ -181,6 +176,40 @@ fn locked(deps: &Deps) -> bool {
     deps.passwords.as_ref().is_some_and(|v| !v.is_open())
 }
 
+/// The names the connection reads now whose value comes only from the environment Ghost was
+/// started in: not settings.env, not the vault, not a setting saved since. Names only.
+pub fn from_environment(
+    deps: &Deps,
+    env: &HashMap<String, String>,
+    conn: &ModelConnection,
+) -> Vec<String> {
+    let mut read: Vec<&str> = ENV_KEYS.to_vec();
+    let named = env
+        .get("GHOST_LLM_PROVIDER")
+        .is_some_and(|p| provider(&p.trim().to_lowercase()).is_some());
+    if !named {
+        // The older settings count only when no provider is named.
+        read.extend([
+            "GHOST_LLM_ENDPOINT",
+            "ANTHROPIC_BASE_URL",
+            "CLIPROXY_BASE_URL",
+        ]);
+    }
+    if !conn.password.is_empty() {
+        read.push(conn.password.as_str());
+    }
+    let live = deps.environ();
+    let file = deps.settings();
+    let mut names: Vec<String> = read
+        .into_iter()
+        .filter(|k| ghost_core::environment::from_start(k, &deps.started_env, &live, &file))
+        .map(String::from)
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 fn view(deps: &Deps, env: &HashMap<String, String>) -> ModelConnectionView {
     let conn = ModelConnection::from_env(env);
     let problems = conn.problems(env, locked(deps));
@@ -205,6 +234,7 @@ fn view(deps: &Deps, env: &HashMap<String, String>) -> ModelConnectionView {
         providers: providers_view(),
         sign_in_pending: deps.model_sign_in.pending(),
         sign_in_error: deps.model_sign_in.error(),
+        from_environment: from_environment(deps, env, &conn),
     }
 }
 

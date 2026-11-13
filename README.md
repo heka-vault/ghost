@@ -30,8 +30,8 @@ see [What's rough](#whats-rough). Linux only today.
   OpenRouter, OpenAI, …), unless you choose a local model. Your voice itself leaves the
   machine only if you turn on the optional realtime voice.
 - **It keeps things on your machine:** conversation transcripts, an audit log of every change,
-  and possibly recordings around the wake word to learn your voice (see Privacy for what your
-  build keeps and how to delete it).
+  and, with the trained wake detector only, recordings around the wake word to learn your voice
+  (see Privacy for what is kept and how to delete it).
 - **It acts.** Connected apps are used for real: by default Ghost makes the changes you ask for
   and tells you; set what it must ask about first in Settings › Permissions.
 - **It is early software**, built on one desk. Linux only. See [What's rough](#whats-rough).
@@ -211,12 +211,15 @@ is not logged, stored or shown. With listening off, the microphone isn't opened 
 - the transcript of each conversation after the wake word, and what agents did on their own
   (`~/.local/share/ghost/ghost.db`), and the audit log of changes;
 - recordings you make on purpose in the Hearing test (`~/.local/share/ghost/hear/`);
-- **wake takes**: Ghost keeps the sound of each time it thinks it heard its name, on this
+- **wake takes**, only when the trained wake detector is in use (`GHOST_WAKE_MODE=onnx`; a
+  fresh install wakes by reading the transcript and keeps none: Ghost keeps nothing it hears
+  before its name): Ghost keeps the sound of each time it thinks it heard its name, on this
   computer, to learn your voice: a few seconds around each wake and each near miss its check
   turned down, what Parakeet read and how sure the detector was
-  (`~/.local/share/ghost/wake/takes/`, at most 1 GB, the oldest go first). On by default; turn
-  it off or delete it all in Settings › Sound, label takes in the Hearing test and retrain the
-  detector on your own voice with `make wake-train` ([docs/wake-takes.md](docs/wake-takes.md));
+  (`~/.local/share/ghost/wake/takes/`, at most 1 GB, the oldest go first). On by default with
+  the detector; turn it off or delete it all in Settings › Sound, label takes in the Hearing
+  test and retrain the detector on your own voice with `make wake-train`
+  ([docs/wake-takes.md](docs/wake-takes.md));
   deleting `~/.local/share/ghost/` (with Ghost stopped) removes everything Ghost has kept;
 - `GHOST_DEBUG_AUDIO=1`, off by default and set only by you, prints what Ghost heard (idle
   included) to your terminal, not to a file.

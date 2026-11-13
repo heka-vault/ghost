@@ -1,7 +1,9 @@
 /**
- * Settings › Sound: kept wake takes (ADR 0065). On unless the operator turns it off, so it
- * is said here in one plain line, with the switch, what is kept, Delete, and where to label
- * them (Hearing test › Wake takes).
+ * Settings › Sound: kept wake takes (ADR 0065). Only the trained detector keeps them, on
+ * unless the operator turns it off, so under it this says so in one plain line, with the
+ * switch, what is kept, Delete, and where to label them (Hearing test › Wake takes). Under
+ * transcript wake nothing is kept and the row is not there, unless takes from an earlier
+ * detector are left to delete.
  */
 import type { WakeTakesView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
@@ -9,10 +11,10 @@ import { useEffect, useState } from "react";
 
 import { navigate } from "../../app/router";
 import { Button, ListRow, Switch, errorText, useConfirm, useToast } from "../../ui";
-import { KEEP_NOTICE, bytesText } from "../hear/wakeTakes";
+import { bytesText, keeping } from "../hear/wakeTakes";
 
 export function WakeTakesRow() {
-  const { client } = useGhost();
+  const { client, status } = useGhost();
   const toast = useToast();
   const { confirm, dialog } = useConfirm();
   const [view, setView] = useState<WakeTakesView | null>(null);
@@ -29,7 +31,8 @@ export function WakeTakesRow() {
     };
   }, [client]);
 
-  if (failed) return null;
+  const said = keeping(status?.wake_mode, view?.count ?? 0);
+  if (failed || !said.row) return null;
   const keep = view?.choice.keep ?? true;
   const kept = view ? ` ${view.count} kept, ${bytesText(view.bytes)}.` : "";
 
@@ -65,11 +68,16 @@ export function WakeTakesRow() {
         title="Wake takes"
         description={
           <>
-            {KEEP_NOTICE}
-            {kept} Nothing is sent anywhere.{" "}
-            <a href="#/hear/wake" onClick={(e) => (e.preventDefault(), navigate("/hear/wake"))}>
-              Label them
-            </a>
+            {said.notice}
+            {kept} Nothing is sent anywhere.
+            {said.controls && (
+              <>
+                {" "}
+                <a href="#/hear/wake" onClick={(e) => (e.preventDefault(), navigate("/hear/wake"))}>
+                  Label them
+                </a>
+              </>
+            )}
           </>
         }
         meta={
@@ -77,7 +85,7 @@ export function WakeTakesRow() {
             <Button size="sm" variant="danger-ghost" onClick={() => void removeAll()} disabled={!view?.count}>
               Delete all
             </Button>
-            <Switch checked={keep} onChange={(on) => void toggle(on)} aria-label="Keep wake takes" />
+            {said.controls && <Switch checked={keep} onChange={(on) => void toggle(on)} aria-label="Keep wake takes" />}
           </span>
         }
       />

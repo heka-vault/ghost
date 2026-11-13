@@ -14,6 +14,38 @@ import type { WakeTakeLabel, WakeTakeView } from "@ghost/client-ts";
 export const KEEP_NOTICE =
   "Ghost keeps the sound of each time it thinks it heard its name, on this computer, to learn your voice.";
 
+/** Said instead under transcript wake, which keeps nothing it hears before its name. */
+export const NOTHING_KEPT = "Ghost keeps nothing it hears before its name.";
+
+/** The wake that keeps takes: the trained detector (`GHOST_WAKE_MODE=onnx`). */
+export const DETECTOR_WAKE = "onnx";
+
+export interface Keeping {
+  /** The line to say: the keeping notice under the detector, else the honest one. */
+  notice: string;
+  /** The switch and the labelling: only while takes are being kept. */
+  controls: boolean;
+  /** Settings › Sound shows a Wake takes row: under the detector, or takes left from it. */
+  row: boolean;
+}
+
+/**
+ * What to say about wake takes for the wake Ghost is using (`Status.wake_mode`). Takes are
+ * kept only under the trained detector; transcript wake keeps none, so it says nothing
+ * about takes, except that ones kept earlier are still there to delete.
+ */
+export function keeping(wakeMode: string | null | undefined, count: number): Keeping {
+  if (wakeMode === DETECTOR_WAKE) return { notice: KEEP_NOTICE, controls: true, row: true };
+  if (count > 0) {
+    return {
+      notice: `${NOTHING_KEPT} These were kept while the trained detector was the wake; delete them when you like.`,
+      controls: false,
+      row: true,
+    };
+  }
+  return { notice: NOTHING_KEPT, controls: false, row: false };
+}
+
 export type TakeAction =
   | { kind: "label"; label: WakeTakeLabel | null }
   | { kind: "play"; array: boolean }

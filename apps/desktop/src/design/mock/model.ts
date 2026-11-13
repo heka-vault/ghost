@@ -110,6 +110,7 @@ export class MockModel {
       providers: MODEL_PROVIDERS,
       sign_in_pending: this.signIn.pending,
       sign_in_error: this.signIn.error,
+      from_environment: [],
     };
   }
 

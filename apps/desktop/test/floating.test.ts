@@ -107,6 +107,14 @@ describe("cost and words", () => {
     expect(labelOf("listening", { ...o, micOff: true })).toBe("Mic off · type in Ghost");
     expect(labelOf("line", o)).toBe("");
   });
+
+  it("a typed session says typing, not listening (2026-11-13)", () => {
+    const o = { agent: "Ghost", using: null, asker: null, micOff: false, typed: true };
+    expect(labelOf("listening", o)).toBe("Typing with Ghost");
+    expect(labelOf("listening", { ...o, agent: "Ledger" })).toBe("Typing with Ledger");
+    expect(labelOf("thinking", o)).toBe("Thinking");
+    expect(labelOf("listening", { ...o, typed: false })).toBe("Listening");
+  });
 });
 
 describe("captions", () => {

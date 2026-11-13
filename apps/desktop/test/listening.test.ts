@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { OFF_FOR, listeningSentence, notListening, notListeningSub, switchLabel, untilText } from "../src/app/listening";
+import { OFF_FOR, listeningSentence, notListening, notListeningSub, sessionWords, switchLabel, typedSession, untilText } from "../src/app/listening";
+import { moodOf } from "../src/app/mood";
 import { MockDaemon } from "../src/design/mock/daemon";
 import { composeFixtures } from "../src/design/mock/fixtures";
 import { scenarioByName } from "../src/design/mock/scenarios";
@@ -49,5 +50,32 @@ describe("the mock daemon's switch", () => {
     const off = (await d.handle("PUT", "/listening", new URLSearchParams(), { listening: false, minutes: 30 })) as { listening: boolean; until: string };
     expect(off.listening).toBe(false);
     expect(Date.parse(off.until)).toBeGreaterThan(Date.now() + 29 * 60_000);
+  });
+});
+
+describe("a typed session or a spoken one, in words (2026-11-13)", () => {
+  const typed = { session_id: "s1", session_typed: true, session_origin: "desk" as const };
+  const spoken = { session_id: "s1", session_typed: false, session_origin: "desk" as const };
+
+  it("is typed only while a typed session is open", () => {
+    expect(typedSession(typed)).toBe(true);
+    expect(typedSession(spoken)).toBe(false);
+    expect(typedSession({ ...typed, session_id: null })).toBe(false);
+    expect(typedSession(null)).toBe(false);
+  });
+
+  it("says typing with, or talking with, the agent", () => {
+    expect(sessionWords(typed, "Ghost")).toBe("Typing with Ghost");
+    expect(sessionWords(spoken, "Ledger")).toBe("Talking with Ledger");
+    expect(sessionWords({ ...spoken, session_origin: "phone" as const }, "Ghost")).toBe("On your phone");
+    expect(sessionWords({ ...typed, session_id: null }, "Ghost")).toBeNull();
+  });
+
+  it("Wisp waits for its name in a typed session rather than listening to the room", () => {
+    expect(moodOf("listening", false, true)).toBe("passive");
+    expect(moodOf("listening", false, false)).toBe("listening");
+    expect(moodOf("speaking", false, true)).toBe("speaking");
+    expect(moodOf("thinking", false, true)).toBe("thinking");
+    expect(moodOf("listening", true, true)).toBe("hold");
   });
 });

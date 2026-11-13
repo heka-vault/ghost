@@ -25,6 +25,7 @@ import {
   sectionDomId,
   type Values,
 } from "./model";
+import { environmentNote } from "./environment";
 import { Row } from "./parts";
 import { PasswordRow, passwordTitle } from "./Passwords";
 
@@ -238,6 +239,11 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
     }
   };
 
+  /* ---------------------------- what comes from the environment Ghost was started in */
+  const fromEnv = conn ? environmentNote(conn) : null;
+  // The page's draft becomes the settings Ghost is using, for the save bar to keep them.
+  const keepFromEnv = () => setValues(Object.fromEntries(CONNECTION_KEYS.map((k) => [k, conn?.values[k] ?? ""])));
+
   /* -------------------------------------------------------------------- render */
   const editing = CONNECTION_KEYS.some((k) => (values[k] ?? "") !== (s.values[k] ?? "")) || keyOpen;
   // A fresh check of what is on screen, else the last kept check of the saved connection.
@@ -281,6 +287,20 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         {conn && !conn.ready && !editing && (
           <Notice tone="info" title="Ghost can’t reach a model yet">
             {sentence(conn.problems[0] ?? "")}
+          </Notice>
+        )}
+        {fromEnv && !editing && (
+          <Notice tone="info" title={fromEnv.title}>
+            <p>{fromEnv.text}</p>
+            {fromEnv.keepSettings && (
+              <p>
+                {fromEnv.keepSettings}{" "}
+                <Button size="sm" variant="secondary" disabled={!online} onClick={keepFromEnv}>
+                  Keep these settings
+                </Button>
+              </p>
+            )}
+            {fromEnv.keepPassword && <p>{fromEnv.keepPassword}</p>}
           </Notice>
         )}
         <Card list>

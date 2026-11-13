@@ -181,6 +181,9 @@ pub struct VoiceSettings {
     /// Audio before the speech that Smart Turn also hears.
     pub turn_pre_speech_secs: f64,
     pub idle_timeout_secs: f64,
+    /// A typed session's idle (2026-11-13): it ends this long after its reply unless the
+    /// operator types again; it opened no microphone, so nothing else keeps it going.
+    pub typed_idle_secs: f64,
     pub hold_timeout_secs: f64,
     pub smart_turn_threads: usize,
     /// `GHOST_SILERO_MODEL`, `GHOST_SMART_TURN_MODEL`: the ONNX files; unset, where
@@ -427,6 +430,7 @@ impl VoiceSettings {
             turn_number_secs: f64_or("GHOST_TURN_NUMBER_SECS", 0.5)?,
             turn_pre_speech_secs: f64_or("GHOST_TURN_PRE_SPEECH_SECS", 1.0)?,
             idle_timeout_secs: f64_or("GHOST_IDLE_TIMEOUT_SECS", 45.0)?,
+            typed_idle_secs: f64_or("GHOST_TYPED_IDLE_SECS", 20.0)?,
             hold_timeout_secs: f64_or("GHOST_HOLD_TIMEOUT_SECS", 1800.0)?,
             smart_turn_threads: usize_or("GHOST_SMART_TURN_THREADS", 2)?,
             silero_model,

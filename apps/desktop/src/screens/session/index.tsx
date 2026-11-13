@@ -22,7 +22,7 @@ import type { QuestionView } from "@ghost/client-ts";
 import { ArrowDown, ArrowRight, AudioLines, Brain, Clock, Mic, MicOff, MoreHorizontal, PhoneOff, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
-import { notListening, notListeningSub } from "../../app/listening";
+import { notListening, notListeningSub, typedSession } from "../../app/listening";
 import { useListening } from "../../app/ListeningSwitch";
 import { usePosture } from "../../app/PostureContext";
 import { Link, navigate } from "../../app/router";
@@ -113,6 +113,7 @@ export default function SessionScreen(_: RouteProps) {
   const listening = useListening();
   const micOff = notListening(status);
   const micOffText = micOff ? notListeningSub(micOff) : null;
+  const typed = typedSession(status);
   const listenAgain = () => void listening.set(true);
   const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
   // Room view is the room posture on this screen (app/posture.ts): one rule, one switch.
@@ -373,7 +374,7 @@ export default function SessionScreen(_: RouteProps) {
       </Notice>
     ));
 
-  const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone, recording, micOff: micOffText });
+  const start = startCopy({ online, loading, needsSetup, locked: setupLocked, inSession, onPhone, recording, micOff: micOffText, typed });
   // The way back to the last agent used; Ghost's own sessions are this page.
   const showLast = startOnly && online && !loading && !needsSetup && lastSession && lastSession.slug !== "ghost";
   const newest = turns[turns.length - 1] ?? history.turns[history.turns.length - 1];
@@ -438,6 +439,7 @@ export default function SessionScreen(_: RouteProps) {
                 room={room}
                 onRoom={toggleRoom}
                 micOff={micOff && !onPhone ? { text: micOffText ?? "Mic off", onListen: listenAgain, busy: listening.busy } : null}
+                typed={typed}
               />
             )}
             {/* Out of a session with the mic closed (ADR 0057): the strip says so, with the way back. */}
@@ -458,6 +460,7 @@ export default function SessionScreen(_: RouteProps) {
           <div ref={end} />
           {room && inSession && (
             <RoomView
+              typed={typed}
               state={state}
               slug={line}
               name={lineLabel}
@@ -527,7 +530,7 @@ export default function SessionScreen(_: RouteProps) {
 }
 
 /** The start state before the first turn: one presence, one line, one hint. Never promises what can’t happen yet. */
-export function startCopy({ online, loading, needsSetup, locked, inSession, onPhone, recording, micOff }: { online: boolean; loading: boolean; needsSetup: boolean; locked: boolean; inSession: boolean; onPhone: boolean; recording: boolean; micOff?: string | null }): { title: string; text?: string } {
+export function startCopy({ online, loading, needsSetup, locked, inSession, onPhone, recording, micOff, typed }: { online: boolean; loading: boolean; needsSetup: boolean; locked: boolean; inSession: boolean; onPhone: boolean; recording: boolean; micOff?: string | null; typed?: boolean }): { title: string; text?: string } {
   if (!online) return { title: "Reconnecting", text: "This picks up again as soon as Ghost is back." };
   // The shell's banner and the status card already say the models are loading; this says
   // the next thing instead of repeating it.
@@ -539,6 +542,8 @@ export function startCopy({ online, loading, needsSetup, locked, inSession, onPh
   // The header already says “Listening”; this says what to do with it.
   if (onPhone) return { title: "On your phone", text: "Ghost hears you through your phone. You can end the session here." };
   if (inSession && micOff) return { title: "Your mic is off", text: "Type below. Ghost can’t hear you until you turn listening on." };
+  // A typed session (2026-11-13): the mic stays closed, and Ghost still hears its name.
+  if (inSession && typed) return { title: "Typing with Ghost", text: `Your mic stays closed. Say ${quoted("Hey Ghost")} to talk instead.` };
   if (inSession) return { title: "Go ahead", text: "Ask what’s waiting on you." };
   if (micOff) return { title: "Ghost isn’t listening", text: `${micOff}. Type below, or turn listening on to talk.` };
   // The Hearing test holds the mic (ADR 0042); closing it gives the mic back.

@@ -84,7 +84,7 @@ import {
   statusTone,
   useToast,
 } from "../../ui";
-import { moodOf } from "../../app/Rail";
+import { moodOf } from "../../app/mood";
 import { DESKTOP_VERSION } from "../../app/version";
 import "./gallery.css";
 

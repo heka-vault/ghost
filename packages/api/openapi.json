@@ -2946,6 +2946,13 @@
               "null"
             ]
           },
+          "from_environment": {
+            "description": "The settings and the Password this connection reads now whose value comes only from\nthe environment Ghost was started in (a shell's export), not settings.env or the\nvault: names, never a value. They last until Ghost is started another way.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "headers": {
             "additionalProperties": {
               "type": "string"
@@ -3046,7 +3053,8 @@
           "ready",
           "values",
           "providers",
-          "sign_in_pending"
+          "sign_in_pending",
+          "from_environment"
         ],
         "type": "object"
       },
@@ -6098,6 +6106,10 @@
               }
             ]
           },
+          "session_typed": {
+            "description": "The session is a typed one (2026-11-13): started by typing with no session open, it\nopens no microphone, and Ghost still listens for its name beside it. False for a\nsession Ghost hears.",
+            "type": "boolean"
+          },
           "uptime_secs": {
             "format": "double",
             "type": "number"
@@ -6126,6 +6138,7 @@
           "api_version",
           "wake_mode",
           "apps",
+          "session_typed",
           "ending",
           "waiting",
           "not_listening"

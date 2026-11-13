@@ -374,6 +374,74 @@ async fn a_typed_line_without_a_session_wakes_with_those_words_and_a_call_names_
         .unwrap();
 }
 
+/// 2026-11-13: typing to Ghost with no session open started a full desk session with the
+/// microphone live, and the room's music was taken for turns and answered. A typed turn is a
+/// typed session: no capture is opened for it, the passive listener runs beside it (so "hey
+/// Ghost" still works), the status says so, and it ends on its own after the reply.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_typed_turn_opens_no_microphone_and_ends_on_its_own() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mics: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
+    let passive_opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let w = world_from(
+        tmp.path(),
+        "transcript",
+        |v| v.typed_idle_secs = 1.0,
+        |ports| {
+            let inner = ports.desk_media.clone();
+            let mics = mics.clone();
+            ports.desk_media = Arc::new(move |req| {
+                mics.lock().unwrap().push(req.mic);
+                inner(req)
+            });
+            let opens = passive_opens.clone();
+            ports.passive_media = Some(Arc::new(move || {
+                opens.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Box::new(Silent) as Box<dyn MediaIn>)
+            }));
+        },
+    );
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    until(client, "passive with the models ready", |v| {
+        v["phase"] == "passive" && v["models_ready"] == true
+    })
+    .await;
+    let opened_before = passive_opens.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(client.say("what's on my list").await.unwrap()["ok"], true);
+    let st = until(client, "a typed session", |v| v["session_id"].is_string()).await;
+    assert_eq!(st["session_typed"], true, "{st}");
+    assert_eq!(st["session_origin"], "desk");
+    // The session's own input was silent: no capture stream for it.
+    assert_eq!(*mics.lock().unwrap(), vec![false]);
+    // The passive listener is opened again while the typed session is still on, so "hey
+    // Ghost" works beside it.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while passive_opens.load(std::sync::atomic::Ordering::SeqCst) <= opened_before {
+        assert!(
+            Instant::now() < deadline,
+            "no wake listener beside the typed session"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        client.status().await.unwrap()["session_id"].is_string(),
+        "still in the typed session"
+    );
+    // The reply, then the session ends by itself a short while after it.
+    until(client, "passive again", |v| v["phase"] == "passive").await;
+    assert_eq!(client.status().await.unwrap()["session_typed"], false);
+    w.daemon.stop.cancel();
+    tokio::time::timeout(Duration::from_secs(15), run)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 /// A load that fails as on a machine without the model files: the first `fails` tries.
 fn flaky_models(ports: &mut Ports, fails: usize) -> Arc<std::sync::atomic::AtomicUsize> {
     let tries = Arc::new(std::sync::atomic::AtomicUsize::new(0));

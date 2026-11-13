@@ -1,7 +1,7 @@
 import type { WakeTakeView } from "@ghost/client-ts";
 import { describe, expect, it } from "vitest";
 
-import { afterDelete, bytesText, curvePath, keyAction, move, nextAfterLabel, tally } from "../src/screens/hear/wakeTakes";
+import { KEEP_NOTICE, NOTHING_KEPT, afterDelete, bytesText, curvePath, keeping, keyAction, move, nextAfterLabel, tally } from "../src/screens/hear/wakeTakes";
 
 function take(id: string, extra: Partial<WakeTakeView> = {}): WakeTakeView {
   return {
@@ -96,5 +96,33 @@ describe("the numbers shown", () => {
   it("draws the score curve 0 at the bottom", () => {
     expect(curvePath([0, 1], 10, 10)).toBe("M0.0 10.0 L10.0 0.0");
     expect(curvePath([0.5], 10, 10)).toBe("");
+  });
+});
+
+describe("where keeping wake takes is said (ADR 0065)", () => {
+  it("is said, with its switch, only while the trained detector is the wake", () => {
+    const k = keeping("onnx", 0);
+    expect(k.notice).toBe(KEEP_NOTICE);
+    expect(k.controls).toBe(true);
+  });
+
+  it("transcript wake keeps none: one honest line, no switch, nothing about takes", () => {
+    const k = keeping("transcript", 0);
+    expect(k.notice).toBe(NOTHING_KEPT);
+    expect(k.notice).not.toMatch(/take/i);
+    expect(k.controls).toBe(false);
+    expect(k.row).toBe(false);
+  });
+
+  it("takes kept under the detector before stay deletable, said as from before", () => {
+    const k = keeping("transcript", 3);
+    expect(k.row).toBe(true);
+    expect(k.controls).toBe(false);
+    expect(k.notice).toMatch(/while the trained detector was the wake/);
+  });
+
+  it("an unknown or missing mode is not taken for the detector", () => {
+    expect(keeping(undefined, 0).controls).toBe(false);
+    expect(keeping("file", 0).notice).toBe(NOTHING_KEPT);
   });
 });

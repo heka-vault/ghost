@@ -114,6 +114,7 @@ export class MockDesk implements Desk {
       phase: "passive",
       session_id: null,
       session_origin: null,
+      session_typed: false,
       ending: false,
       waiting: 0,
       not_listening: null,

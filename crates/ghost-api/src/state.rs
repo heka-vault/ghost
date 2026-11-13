@@ -93,6 +93,7 @@ struct Fields {
     conversation: Option<String>,
     /// "desk" | "phone" while a session runs.
     session_origin: Option<SessionOrigin>,
+    session_typed: bool,
     /// Going to sleep; the goodbye may still be playing.
     ending: bool,
     /// The microphone is closed (ADR 0057).
@@ -146,6 +147,7 @@ impl DaemonState {
                 pending: None,
                 conversation: None,
                 session_origin: None,
+                session_typed: false,
                 ending: false,
                 not_listening: None,
                 waiting: 0,
@@ -180,6 +182,13 @@ impl DaemonState {
         self.lock().wake_mode.clone()
     }
 
+    /// The wake Ghost listens with now: `onnx` falls back to `transcript` when the trained
+    /// detector cannot load.
+    pub fn set_wake_mode(&self, mode: &str) {
+        self.lock().wake_mode = mode.to_string();
+        self.publish_status();
+    }
+
     pub fn phase(&self) -> Phase {
         self.lock().phase
     }
@@ -206,6 +215,22 @@ impl DaemonState {
 
     pub fn session_origin(&self) -> Option<SessionOrigin> {
         self.lock().session_origin
+    }
+
+    pub fn session_typed(&self) -> bool {
+        self.lock().session_typed
+    }
+
+    /// The session about to start (or the one ending) is typed: no microphone.
+    pub fn set_session_typed(&self, typed: bool) {
+        {
+            let mut f = self.lock();
+            if f.session_typed == typed {
+                return;
+            }
+            f.session_typed = typed;
+        }
+        self.publish_status();
     }
 
     pub fn ending(&self) -> bool {
@@ -241,6 +266,7 @@ impl DaemonState {
             if matches!(phase, Phase::Passive | Phase::Starting) {
                 f.session_id = None;
                 f.session_origin = None;
+                f.session_typed = false;
                 f.ending = false;
                 f.pending = None;
                 f.conversation = None;
@@ -520,6 +546,7 @@ impl DaemonState {
             pending: f.pending.clone(),
             conversation: f.conversation.clone(),
             session_origin: f.session_origin,
+            session_typed: f.session_typed,
             ending: f.ending,
             waiting: f.waiting,
             not_listening: f.not_listening.clone(),

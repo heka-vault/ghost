@@ -53,11 +53,12 @@ export interface MicOff {
   busy?: boolean;
 }
 
-function words(state: StageState, name: string, calls: Call[], micOff?: MicOff | null): { title: string; hint?: string } {
+/** The strip's words. `typed`: a typed session (2026-11-13), which opened no microphone. */
+export function stageWords(state: StageState, name: string, calls: Call[], micOff?: MicOff | null, typed = false): { title: string; hint?: string } {
   const running = [...new Set(calls.filter((c) => !c.endedAt).map((c) => appTitle(c.app ?? "an app")))];
   switch (state) {
     case "speaking":
-      return { title: `${name} is speaking`, hint: "Talk over it to cut in" };
+      return { title: `${name} is speaking`, hint: typed ? "Type to go on" : "Talk over it to cut in" };
     case "you":
       return { title: "Listening to you", hint: "Ghost answers when you finish" };
     case "working":
@@ -73,6 +74,8 @@ function words(state: StageState, name: string, calls: Call[], micOff?: MicOff |
     default:
       // A typed turn's session while the mic is closed: Ghost hears nothing, so it can't say “go ahead”.
       if (micOff) return { title: micOff.text, hint: "Type below. Ghost can’t hear you." };
+      // Typed with no session open: the mic stays closed; Ghost hears only its name.
+      if (typed) return { title: `Typing with ${name}`, hint: "Your mic stays closed. Type below, or say “Hey Ghost” to talk." };
       return { title: "Listening", hint: "Go ahead, or type below" };
   }
 }
@@ -81,8 +84,8 @@ function words(state: StageState, name: string, calls: Call[], micOff?: MicOff |
 const OPEN: StageState[] = ["speaking", "you"];
 
 /** The strip on the composer. */
-export function Stage({ state, slug, name, calls, room, onRoom, micOff }: { state: StageState; slug: string; name: string; calls: Call[]; room: boolean; onRoom?: () => void; micOff?: MicOff | null }) {
-  const w = words(state, name, calls, micOff);
+export function Stage({ state, slug, name, calls, room, onRoom, micOff, typed = false }: { state: StageState; slug: string; name: string; calls: Call[]; room: boolean; onRoom?: () => void; micOff?: MicOff | null; typed?: boolean }) {
+  const w = stageWords(state, name, calls, micOff, typed);
   const open = OPEN.includes(state);
   const off = state === "listening" && !!micOff;
   return (
@@ -134,10 +137,12 @@ export interface RoomViewProps {
   pending: PendingProposal | null;
   startedAt: string | null;
   onLeave: () => void;
+  /** A typed session (2026-11-13): it says typing, not listening. */
+  typed?: boolean;
 }
 
-export function RoomView({ state, slug, name, reply, heard, calls, pending, startedAt, onLeave }: RoomViewProps) {
-  const w = words(state, name, calls);
+export function RoomView({ state, slug, name, reply, heard, calls, pending, startedAt, onLeave, typed = false }: RoomViewProps) {
+  const w = stageWords(state, name, calls, null, typed);
   const elapsed = useElapsed(startedAt);
   const leave = useRef<HTMLButtonElement>(null);
   useEffect(() => {
