@@ -186,6 +186,15 @@ turn but an issue asked for by number came at 1.30 to 1.33 s, against 2.4 to 3.1
 before small talk in most padded runs, 0.75 s or more ahead of the answer, and not when the model
 was quick. Whether that sounds better than silence is the voice rubric's part D.
 
+## Amended 2026-11-12: the main model is asked beside the fast one
+
+[ADR 0060](0060-the-main-model-is-asked-beside-the-fast-one.md): every call the fast model
+takes also goes to the main model (`GHOST_LLM_RACE`, on), whose reply waits and is the
+turn's when the fast model hands over, and is ended unread otherwise. "A turn that needs a
+tool pays for the fast model's call before the main model starts" no longer holds: a change
+through the real models went from 9.26 to 7.20 s at the p50. The fast model's thinking stays
+left out by default, measured again ([the benchmark](../benchmarks/perf/2026-11-12-reply-time.md)).
+
 ## Considered options
 
 - **The fast model's own tool calls run.** A read is safe to run (it is called directly,
