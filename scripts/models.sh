@@ -21,6 +21,9 @@
 #   scripts/models.sh          ensure the four small files; print their folder on stdout
 #   scripts/models.sh parakeet ensure Parakeet's files; print their folder on stdout
 #                              (scripts/dev.sh and make models run both)
+#   scripts/models.sh kokoro   ensure Kokoro v1.0's two files (Ghost's voice, 340 MB, Apache-2.0;
+#                              thewh1teagle/kokoro-onnx's model-files-v1.0 release) in
+#                              ~/.cache/ghost/kokoro/; print their folder on stdout (make models)
 #   scripts/models.sh kokoro-windowed
 #                              Kokoro's two halves for the windowed voice (ADR 0053,
 #                              GHOST_TTS_STREAM=windowed): made from Kokoro v1.0 in
@@ -38,7 +41,8 @@
 # LICENSE.openwakeword, parakeet-tdt-0.6b-v3/}. Nothing is fetched for a file that is there.
 # A file that does not match its pin is refused, both hashes printed, and nothing of it is
 # kept. `GHOST_MODELS_DIR` and `GHOST_STT_DIR` still win at run time (crates/ghost-infer).
-# Kokoro and the operator's trained wake classifiers are not here (docs/releasing.md).
+# The operator's trained wake classifiers are not here (docs/releasing.md); without them the
+# wake word is read from Parakeet's transcript (GHOST_WAKE_MODE=transcript, the default).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -67,6 +71,15 @@ FILES=(
   "LICENSE.openwakeword|https://raw.githubusercontent.com/dscripka/openWakeWord/$OPENWAKEWORD_TAG/LICENSE|c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4|11357|644"
 )
 
+# Kokoro v1.0, the voice (ADR 0004): the model-files-v1.0 release of thewh1teagle/kokoro-onnx,
+# the ONNX of hexgrad/Kokoro-82M (Apache-2.0). The model's pin is the one the windowed halves
+# are cut from (below).
+KOKORO_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
+KOKORO_FILES=(
+  "kokoro-v1.0.onnx|$KOKORO_URL/kokoro-v1.0.onnx|7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5|325532387|644"
+  "voices-v1.0.bin|$KOKORO_URL/voices-v1.0.bin|bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d|28214398|644"
+)
+
 # Parakeet: the revision is the snapshot onnx-asr 0.12 fetched for the oracle on 2026-10-30,
 # the pins the hashes of its files. The encoder's weights are the one large file.
 PARAKEET_REV=8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce
@@ -87,9 +100,9 @@ usage() {
 
 mode="${1:-}"
 case "$mode" in
-  "" | stage | parakeet | kokoro-windowed) ;;
+  "" | stage | parakeet | kokoro | kokoro-windowed) ;;
   -h | --help | help) usage; exit 0 ;;
-  *) echo "usage: $0 [stage|parakeet|kokoro-windowed|--help]" >&2; exit 2 ;;
+  *) echo "usage: $0 [stage|parakeet|kokoro|kokoro-windowed|--help]" >&2; exit 2 ;;
 esac
 
 # The temp folder is inside the cache, so a finished file moves into place by one rename
@@ -141,7 +154,7 @@ if [ "$mode" = kokoro-windowed ]; then
   fi
   if ! [ -f "$KOKORO_DIR/kokoro-v1.0.onnx" ] || ! matches "$KOKORO_DIR/kokoro-v1.0.onnx" "$KOKORO_SHA"; then
     echo "models: $KOKORO_DIR/kokoro-v1.0.onnx is missing or not Kokoro v1.0 as pinned;" >&2
-    echo "  fetch it as docs/releasing.md says under \"The speech models\"" >&2
+    echo "  scripts/models.sh kokoro fetches it" >&2
     exit 1
   fi
   echo "models: cutting Kokoro in two (tools/voice-trial, about a minute)" >&2
@@ -161,6 +174,18 @@ if [ "$mode" = kokoro-windowed ]; then
   chmod 644 "$TMP/windowed/"*.onnx
   mv "$TMP/windowed/kokoro-encoder.onnx" "$TMP/windowed/kokoro-decoder.onnx" "$dir/"
   echo "models: $dir ($(du -sh "$dir" | cut -f1))" >&2
+  echo "$dir"
+  exit 0
+fi
+
+if [ "$mode" = kokoro ]; then
+  dir="${GHOST_CACHE_DIR:-$HOME/.cache/ghost}/kokoro"
+  for entry in "${KOKORO_FILES[@]}"; do
+    IFS='|' read -r name url sha256 size perm <<<"$entry"
+    if [ ! -f "$dir/$name" ]; then
+      place "$name" "$url" "$sha256" "$size" "$perm" "$dir"
+    fi
+  done
   echo "$dir"
   exit 0
 fi

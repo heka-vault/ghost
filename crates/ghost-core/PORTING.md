@@ -60,8 +60,7 @@ Any Python you add (a fixture recorder, an automated far end under `scripts/`) i
 Work in your own worktree on a branch from `rust-daemon`:
 
 ```bash
-git -C /home/detroitpro/projects/active/ghost worktree add \
-  /home/detroitpro/projects/active/ghost-w2-<module> -b w2/<module> rust-daemon
+git worktree add ../ghost-w2-<module> -b w2/<module> rust-daemon
 ```
 
 Commit on that branch with a conventional message (`feat(core): port <module>`) ending in

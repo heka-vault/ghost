@@ -388,11 +388,11 @@ function question(key: string, askedBy: string, source: string, text: string, ch
 function seedWaiting(): { items: WaitingItemView[]; questions: QuestionView[] } {
   const ago = (m: number) => new Date(Date.now() - m * 60000).toISOString();
   const ask = question("question:0b00bdd56307", "Accounting", "agent:accounting", "Should the October invoice go out today?", ["Yes", "No"], false, 25);
-  const change = question("change:5f0c9a", "Ghost", "gate", "On heka-vault/ghost#17: close the issue.", ["Yes", "No"], true, 40, "5f0c9a");
+  const change = question("change:5f0c9a", "Ghost", "gate", "On ghost-mock/app#17: close the issue.", ["Yes", "No"], true, 40, "5f0c9a");
   const items: WaitingItemView[] = [
-    { key: "ci:1", source: "watch:ci", title: "CI failed on main: test (ubuntu-latest)", state: "new", first_seen: ago(12), changed_at: ago(12), age_secs: 720, link: "https://github.com/heka-vault/ghost/actions" },
+    { key: "ci:1", source: "watch:ci", title: "CI failed on main: test (ubuntu-latest)", state: "new", first_seen: ago(12), changed_at: ago(12), age_secs: 720, link: "https://github.com/ghost-mock/app/actions" },
     { key: ask.key, source: ask.source, title: `Accounting asks: ${ask.question}`, state: "delivered", first_seen: ask.asked_at, changed_at: ask.asked_at, age_secs: 1500, delivered_via: "phone", delivered_at: ago(24), question: ask },
-    { key: change.key, source: "gate", title: "Waiting for your yes: On heka-vault/ghost#17: close the issue.", state: "delivered", first_seen: ago(40), changed_at: ago(40), age_secs: 2400, delivered_via: "digest", delivered_at: ago(30), question: change },
+    { key: change.key, source: "gate", title: "Waiting for your yes: On ghost-mock/app#17: close the issue.", state: "delivered", first_seen: ago(40), changed_at: ago(40), age_secs: 2400, delivered_via: "digest", delivered_at: ago(30), question: change },
   ];
   return { items, questions: [ask, change] };
 }

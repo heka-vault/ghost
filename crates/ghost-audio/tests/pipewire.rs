@@ -152,7 +152,7 @@ fn a_missing_capture_node_is_named_and_the_fallback_is_explicit() {
     .expect("no such node");
     assert_eq!(
         err.to_string(),
-        "audio in: no PipeWire node named \"ghost.no-such-node\" (is ghost-echo-cancel running?)"
+        "audio in: no PipeWire node named \"ghost.no-such-node\" (GHOST_INPUT_DEVICE names it; `pactl list short sources` lists the ones there are)"
     );
     let capture = Capture::open(CaptureConfig {
         node: Some("ghost.no-such-node".into()),
