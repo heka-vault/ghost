@@ -494,9 +494,11 @@ ADR 0045), the agents', the skills' and the waiting list's read tools, `change`,
 and `hold`. There is no change that bypasses the gate.
 
 The desk's audio is `crates/ghost-audio`: PipeWire through the project's own binding, one
-clock domain, a capture thread that never allocates. Ghost listens on `ghost.mic`, the output
-of PipeWire's WebRTC echo canceller running as its own user service
-([infra/pipewire](../infra/pipewire/README.md)). The module takes the speaker sink as its
+clock domain, a capture thread that never allocates. Ghost listens on `GHOST_INPUT_DEVICE` when
+it is set; unset, on `ghost.mic` when it exists, else the default source (`CaptureConfig::for_input`),
+so a machine without the canceller still hears. `ghost.mic` is the output of PipeWire's WebRTC
+echo canceller running as its own user service ([infra/pipewire](../infra/pipewire/README.md),
+`make echo-cancel`, optional). The module takes the speaker sink as its
 reference, so what Kokoro plays is subtracted from what the microphone hears before VAD or
 STT see it. Device names are rendered into the user's config at install time and never
 committed.

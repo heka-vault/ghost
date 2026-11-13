@@ -746,14 +746,13 @@ impl MediaIn for CaptureIn {
     }
 }
 
-/// `ghost.mic` (or `GHOST_INPUT_DEVICE`) through `ghost_audio`, opened per pipeline.
+/// `GHOST_INPUT_DEVICE`, else `ghost.mic` when there, else the default source, through
+/// `ghost_audio`, opened per pipeline.
 pub fn desk_capture(input_device: Option<String>) -> MediaFactory {
     Arc::new(move || {
-        let capture = ghost_audio::Capture::open(ghost_audio::CaptureConfig {
-            node: input_device.clone().or_else(|| Some("ghost.mic".into())),
-            ..ghost_audio::CaptureConfig::default()
-        })
-        .map_err(|e| e.to_string())?;
+        let capture =
+            ghost_audio::Capture::open(ghost_audio::CaptureConfig::for_input(input_device.clone()))
+                .map_err(|e| e.to_string())?;
         Ok(Box::new(CaptureIn(capture)) as Box<dyn MediaIn>)
     })
 }

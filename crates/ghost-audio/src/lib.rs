@@ -28,7 +28,7 @@ pub mod ring;
 pub mod sounds;
 pub mod wake;
 
-pub use capture::{Capture, CaptureConfig, CaptureCounters};
+pub use capture::{Capture, CaptureConfig, CaptureCounters, ECHO_CANCELLED_SOURCE};
 pub use config::AudioSettings;
 pub use duck::{
     DUCK_STATE, DuckError, DuckedStream, Ducker, default_state_file, restore_from_state,
@@ -47,7 +47,9 @@ pub enum AudioError {
     PipeWire(#[from] PwError),
     /// The configured capture node is not there (`ghost-echo-cancel` not running, or the
     /// name in `GHOST_INPUT_DEVICE` is wrong).
-    #[error("audio in: no PipeWire node named {name:?} (is ghost-echo-cancel running?)")]
+    #[error(
+        "audio in: no PipeWire node named {name:?} (GHOST_INPUT_DEVICE names it; `pactl list short sources` lists the ones there are)"
+    )]
     NoSuchSource { name: String },
     /// The configured sink is not there.
     #[error("audio out: no PipeWire sink named {name:?}")]

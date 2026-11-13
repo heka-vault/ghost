@@ -46,10 +46,35 @@ pub struct CaptureConfig {
     pub description: String,
 }
 
+/// The echo canceller's output (`infra/pipewire`), used when no device is named and it is
+/// there.
+pub const ECHO_CANCELLED_SOURCE: &str = "ghost.mic";
+
+impl CaptureConfig {
+    /// The capture for `GHOST_INPUT_DEVICE`. Named, that node and no other (missing is an
+    /// error). Unset, `ghost.mic` when the echo canceller made one, else the default
+    /// source: Ghost starts on any machine, and on open speakers without the canceller it
+    /// may hear itself (README.md, "Sound").
+    pub fn for_input(input_device: Option<String>) -> Self {
+        match input_device {
+            Some(name) => Self {
+                node: Some(name),
+                fallback_to_default: false,
+                ..Self::default()
+            },
+            None => Self {
+                node: Some(ECHO_CANCELLED_SOURCE.into()),
+                fallback_to_default: true,
+                ..Self::default()
+            },
+        }
+    }
+}
+
 impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
-            node: Some("ghost.mic".into()),
+            node: Some(ECHO_CANCELLED_SOURCE.into()),
             fallback_to_default: false,
             rate: CAPTURE_RATE,
             channels: 1,
@@ -166,8 +191,8 @@ fn run(
         Some(name) => match session.find_node(name) {
             Ok(Some(node)) => (Some(node.serial_or_id().to_string()), name.clone()),
             Ok(None) if config.fallback_to_default => {
-                warn!(
-                    "audio in: no PipeWire node named {name:?} (is ghost-echo-cancel running?); \
+                info!(
+                    "audio in: no PipeWire node named {name:?} (no echo canceller set up); \
                      capturing from the default source"
                 );
                 (None, "default source".to_string())
@@ -393,5 +418,31 @@ impl Drop for Capture {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A machine without Ghost's echo canceller still hears: with no
+    /// `GHOST_INPUT_DEVICE`, `ghost.mic` is used when it is there and the default
+    /// source otherwise, so a laptop's microphone or a headset works out of the box.
+    #[test]
+    fn no_device_named_prefers_ghost_mic_then_the_default_source() {
+        let c = CaptureConfig::for_input(None);
+        assert_eq!(c.node.as_deref(), Some(ECHO_CANCELLED_SOURCE));
+        assert!(c.fallback_to_default);
+    }
+
+    /// A device the operator named is that device and no other: a missing one is an
+    /// error that names it, never a silent switch to another microphone.
+    #[test]
+    fn a_named_device_does_not_fall_back() {
+        let c = CaptureConfig::for_input(Some("alsa_input.usb-headset".into()));
+        assert_eq!(c.node.as_deref(), Some("alsa_input.usb-headset"));
+        assert!(!c.fallback_to_default);
+        let c = CaptureConfig::for_input(Some("ghost.mic".into()));
+        assert!(!c.fallback_to_default);
     }
 }

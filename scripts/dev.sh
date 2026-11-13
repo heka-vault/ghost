@@ -71,13 +71,15 @@ start_desktop() {
 # and the model files (scripts/onnxruntime.sh and scripts/models.sh, each once; Parakeet's
 # 2.5 GB the first time).
 build_daemon() {
-  cargo build -q -p ghostd || { say "cargo build -p ghostd failed"; return 1; }
+  # ghost-core's two apps live beside the daemon: the pretend GitHub and the skill scripts.
+  cargo build -q -p ghostd -p ghost-core --bins || { say "cargo build -p ghostd failed"; return 1; }
   if [[ -x scripts/onnxruntime.sh ]]; then
     scripts/onnxruntime.sh >/dev/null || { say "scripts/onnxruntime.sh failed"; return 1; }
   fi
   if [[ -x scripts/models.sh ]]; then
     scripts/models.sh >/dev/null || { say "scripts/models.sh failed"; return 1; }
     scripts/models.sh parakeet >/dev/null || { say "scripts/models.sh parakeet failed"; return 1; }
+    scripts/models.sh kokoro >/dev/null || { say "scripts/models.sh kokoro failed"; return 1; }
   fi
 }
 

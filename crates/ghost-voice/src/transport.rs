@@ -356,7 +356,8 @@ impl Stage for AudioOutput {
 
 // --- the desk -------------------------------------------------------------------------
 
-/// The workstation's sound devices: `ghost.mic` in, the default sink out, the thinking
+/// The workstation's sound devices: `GHOST_INPUT_DEVICE`, else `ghost.mic` when the echo
+/// canceller made one, else the default source in; the default sink out, the thinking
 /// sound on the playback's mixer, the chime on open, music ducked for the session.
 pub struct DeskIn {
     capture: Capture,
@@ -419,13 +420,7 @@ pub async fn desk_media(
     mic: bool,
 ) -> Result<Media, ghost_audio::AudioError> {
     let input: Box<dyn MediaIn> = if mic {
-        let capture = Capture::open(CaptureConfig {
-            node: settings
-                .input_device
-                .clone()
-                .or_else(|| Some("ghost.mic".into())),
-            ..CaptureConfig::default()
-        })?;
+        let capture = Capture::open(CaptureConfig::for_input(settings.input_device.clone()))?;
         Box::new(DeskIn { capture })
     } else {
         Box::new(Silent)

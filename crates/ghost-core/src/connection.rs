@@ -1212,8 +1212,8 @@ mod tests {
         let env = env(&[
             ("GHOST_LLM_ENDPOINT", "openrouter"),
             ("OPENROUTER_API_KEY", OR_KEY),
-            ("ANTHROPIC_BASE_URL", "http://192.168.4.67:8317"),
-            ("CLIPROXY_BASE_URL", "http://192.168.4.67:8317"),
+            ("ANTHROPIC_BASE_URL", "http://192.168.1.5:8317"),
+            ("CLIPROXY_BASE_URL", "http://192.168.1.5:8317"),
         ]);
         let c = ModelConnection::from_env(&env);
         let t = c.target(&env);

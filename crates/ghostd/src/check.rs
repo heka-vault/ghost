@@ -216,8 +216,8 @@ pub fn check_models(
         let _ = writeln!(out, "kokoro: {}", dir.display());
     } else {
         problems.push(format!(
-            "Kokoro's files are not there ({}, {}); fetch them as docs/releasing.md says \
-             under \"The speech models\", or set GHOST_TTS_MODEL_PATH and GHOST_TTS_VOICES_PATH",
+            "Kokoro's files are not there ({}, {}); make models fetches them \
+             (scripts/models.sh kokoro), or set GHOST_TTS_MODEL_PATH and GHOST_TTS_VOICES_PATH",
             kokoro.model.display(),
             kokoro.voices.display()
         ));
@@ -806,7 +806,7 @@ mod tests {
         );
         assert!(
             problems[2].starts_with("Kokoro's files are not there")
-                && problems[2].contains("docs/releasing.md"),
+                && problems[2].contains("scripts/models.sh kokoro"),
             "{}",
             problems[2]
         );

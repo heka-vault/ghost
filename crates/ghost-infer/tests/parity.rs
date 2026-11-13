@@ -6,7 +6,7 @@
 //! RMS. Each prints the matches out of the total and p50/p95 times on this CPU.
 //!
 //! The tests are ignored unless the fixture folder exists (`GHOST_FIXTURES`, or
-//! `~/projects/active/ghost/.scratch/spike-fixtures`), so CI without fixtures stays green:
+//! this checkout's `.scratch/spike-fixtures`), so CI without fixtures stays green:
 //!
 //! ```text
 //! cargo nextest run -p ghost-infer --release --run-ignored all --no-capture
@@ -56,7 +56,9 @@ use ghost_infer::{
 };
 use serde::Deserialize;
 
-const FIXTURES_DEFAULT: &str = "/home/detroitpro/projects/active/ghost/.scratch/spike-fixtures";
+/// This checkout's `.scratch/spike-fixtures` (`scripts/fixtures/record.py` writes it there).
+const FIXTURES_DEFAULT: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../.scratch/spike-fixtures");
 
 fn fixtures() -> Option<PathBuf> {
     let dir = std::env::var_os("GHOST_FIXTURES")
