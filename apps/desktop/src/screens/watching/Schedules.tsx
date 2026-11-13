@@ -9,6 +9,9 @@
  */
 import type { AppView, ConversationView, ScheduleInfo, ScheduleRequest, ScheduleRunInfo, SchedulesView, SkillInfo } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
+import { RunCard, useAppTitles, useRunReach } from "./Runs";
+import { WhenPicker } from "./WhenPicker";
+import { PLAIN_DEFAULT, type Plain, plainOf, requestOf } from "./when";
 import { CalendarClock, History, MoreHorizontal, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -23,6 +26,7 @@ import {
   Field,
   IconButton,
   Input,
+  LineGlyph,
   ListRow,
   Menu,
   Notice,
@@ -45,7 +49,15 @@ import { DELIVERY, KINDS, OUTCOME, type ScheduleKind, URGENCY, count, madeBy, ru
 /** How often the list is read again while the screen is open: next and last runs move. */
 const REFRESH_MS = 15_000;
 
-export function Schedules({ onProblems }: { onProblems?: (problems: string[]) => void } = {}) {
+export interface SchedulesProps {
+  onProblems?: (problems: string[]) => void;
+  /** Show only this agent's schedules (the page's agent filter), and add new ones for it. */
+  agent?: string | null;
+  /** Every schedule as read, for the page's agent filter. */
+  onSchedules?: (s: ScheduleInfo[]) => void;
+}
+
+export function Schedules({ onProblems, agent: only = null, onSchedules }: SchedulesProps = {}) {
   const { client, waitingVersion } = useGhost();
   const { online } = useLive();
   const toast = useToast();
@@ -69,7 +81,7 @@ export function Schedules({ onProblems }: { onProblems?: (problems: string[]) =>
     let on = true;
     client
       .schedules()
-      .then((v) => on && (setView(v), setLoadError(null), onProblems?.(v.problems)))
+      .then((v) => on && (setView(v), setLoadError(null), onProblems?.(v.problems), onSchedules?.(v.schedules)))
       .catch((e) => on && setLoadError(errorText(e)));
     return () => {
       on = false;
@@ -173,12 +185,12 @@ export function Schedules({ onProblems }: { onProblems?: (problems: string[]) =>
             </div>
           ))}
         </Card>
-      ) : view.schedules.length === 0 ? (
+      ) : view.schedules.length === 0 || (only && !view.schedules.some((s) => s.agent === only)) ? (
         <Card>
           <EmptyState
             size="compact"
             icon={<CalendarClock />}
-            title="Nothing is scheduled"
+            title={only ? `${nameOf(only)} has nothing scheduled` : "Nothing is scheduled"}
             description={<>Add one here, or tell an agent: “check the build every morning at nine and tell me if it’s red.” It sets the schedule up itself, and it shows here.</>}
             actions={
               <Button leadingIcon={<Plus />} onClick={() => setAdding(true)} disabled={!online}>
@@ -189,7 +201,7 @@ export function Schedules({ onProblems }: { onProblems?: (problems: string[]) =>
         </Card>
       ) : (
         <Card list>
-          {view.schedules.map((s) => (
+          {view.schedules.filter((s) => !only || s.agent === only).map((s) => (
             <ScheduleRow
               key={s.id}
               s={s}
@@ -215,6 +227,7 @@ export function Schedules({ onProblems }: { onProblems?: (problems: string[]) =>
           setEditing(null);
         }}
         agents={agents}
+        defaultAgent={only}
         zone={view?.time_zone ?? ""}
         editing={editing}
         onSaved={(s) => {
@@ -270,11 +283,7 @@ function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onS
   return (
     <ListRow
       align="start"
-      leading={
-        <span className="wat-icon">
-          <CalendarClock aria-hidden />
-        </span>
-      }
+      leading={<LineGlyph slug={s.agent} name={agent} size="lg" />}
       title={
         <span className="wat-title">
           <span data-user-content>{s.name}</span>
@@ -341,6 +350,8 @@ interface DialogProps {
   agents: ConversationView[];
   /** The zone a time is read in. */
   zone: string;
+  /** Who does a new one, when the page is showing one agent. */
+  defaultAgent?: string | null;
   /** The schedule being changed; none to add one. */
   editing?: ScheduleInfo | null;
   onSaved: (s: ScheduleInfo) => void;
@@ -353,8 +364,8 @@ interface Draft {
   instruction: string;
   name: string;
   agent: string;
-  kind: ScheduleKind;
-  when: string;
+  /** When it runs, as the plain choice (or the cron form) that says it. */
+  plain: Plain;
   start: string;
   end: string;
   urgency: Urgency;
@@ -382,13 +393,12 @@ function whenOf(s: ScheduleInfo): string {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
-function draftOf(s: ScheduleInfo | null | undefined): Draft {
+function draftOf(s: ScheduleInfo | null | undefined, agent?: string | null): Draft {
   return {
     instruction: s?.instruction ?? "",
     name: s?.name ?? "",
-    agent: s?.agent ?? "ghost",
-    kind: s?.kind ?? "every",
-    when: s ? whenOf(s) : "",
+    agent: s?.agent ?? agent ?? "ghost",
+    plain: s ? plainOf(s.kind, whenOf(s)) : PLAIN_DEFAULT,
     start: s?.active_hours?.start ?? "",
     end: s?.active_hours?.end ?? "",
     urgency: s?.urgency ?? "notify",
@@ -402,10 +412,10 @@ function draftOf(s: ScheduleInfo | null | undefined): Draft {
 
 const HOUR = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-function ScheduleDialog({ open, onClose, agents, zone, editing, onSaved }: DialogProps) {
+function ScheduleDialog({ open, onClose, agents, defaultAgent, zone, editing, onSaved }: DialogProps) {
   const { client } = useGhost();
   const { online } = useLive();
-  const [d, setD] = useState<Draft>(() => draftOf(editing));
+  const [d, setD] = useState<Draft>(() => draftOf(editing, defaultAgent));
   const [apps, setApps] = useState<AppView[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [busy, setBusy] = useState(false);
@@ -415,7 +425,7 @@ function ScheduleDialog({ open, onClose, agents, zone, editing, onSaved }: Dialo
 
   useEffect(() => {
     if (!open) return;
-    setD(draftOf(editing));
+    setD(draftOf(editing, defaultAgent));
     setError(null);
     let on = true;
     // What a check may read: a connected app's read-only tools. And the skills to start with.
@@ -433,7 +443,7 @@ function ScheduleDialog({ open, onClose, agents, zone, editing, onSaved }: Dialo
       on = false;
       cancelAnimationFrame(id);
     };
-  }, [open, editing, client]);
+  }, [open, editing, client, defaultAgent]);
 
   const hoursProblem = (d.start || d.end) && !(HOUR.test(d.start) && HOUR.test(d.end)) ? "Both as 24-hour times, like 08:00 and 18:00, or both empty for any hour." : null;
   let argsProblem: string | null = null;
@@ -448,7 +458,9 @@ function ScheduleDialog({ open, onClose, agents, zone, editing, onSaved }: Dialo
     }
   }
   const checkProblem = d.checkApp && !d.checkRead ? "Pick which of its reads to look at." : null;
-  const ready = d.instruction.trim() !== "" && d.when.trim() !== "" && !hoursProblem && !argsProblem && !checkProblem;
+  const when = requestOf(d.plain);
+  const whenProblem = "problem" in when ? when.problem : null;
+  const ready = d.instruction.trim() !== "" && !whenProblem && !hoursProblem && !argsProblem && !checkProblem;
 
   const body = (): ScheduleRequest => {
     const was = editing ? draftOf(editing) : null;
@@ -460,7 +472,8 @@ function ScheduleDialog({ open, onClose, agents, zone, editing, onSaved }: Dialo
       skills: d.skills,
     };
     // A time is sent when it is new or changed: a one-off's time already past is not resent.
-    if (!was || was.kind !== d.kind || was.when.trim() !== d.when.trim()) req[d.kind] = d.when.trim();
+    const wasWhen = editing ? { kind: editing.kind, when: whenOf(editing).trim() } : null;
+    if (!("problem" in when) && (!wasWhen || wasWhen.kind !== when.kind || wasWhen.when !== when.when)) req[when.kind] = when.when;
     if (d.zone.trim() && (!was || was.zone !== d.zone.trim())) req.time_zone = d.zone.trim();
     if (d.start && d.end) req.active_hours = { start: d.start, end: d.end };
     else if (was && was.start) req.clear_active_hours = true;
@@ -525,20 +538,7 @@ function ScheduleDialog({ open, onClose, agents, zone, editing, onSaved }: Dialo
         <Field label="Who does it">
           <Select value={d.agent} onChange={(e) => set("agent", e.target.value)} options={options} />
         </Field>
-        <Field label="When" error={error} help={`${KINDS[d.kind].help}${zone ? ` Times are in ${d.zone.trim() || zone}.` : ""}`}>
-          <div className="wat-when">
-            <SegmentedControl
-              aria-label="How often"
-              value={d.kind}
-              onChange={(k) => {
-                setD((x) => ({ ...x, kind: k, when: editing && editing.kind === k ? whenOf(editing) : "" }));
-                setError(null);
-              }}
-              options={(Object.keys(KINDS) as ScheduleKind[]).map((k) => ({ value: k, label: KINDS[k].label }))}
-            />
-            <Input mono value={d.when} placeholder={KINDS[d.kind].placeholder} aria-label={KINDS[d.kind].label} onChange={(e) => set("when", e.target.value)} />
-          </div>
-        </Field>
+        <WhenPicker value={d.plain} onChange={(p) => (set("plain", p), setError(null))} problem={error} zone={d.zone.trim() || zone} />
         <Field label="Name" optional help="A few words to call it by. Left empty, it is the start of what to do.">
           <Input value={d.name} maxLength={80} placeholder="morning build check" onChange={(e) => set("name", e.target.value)} />
         </Field>
@@ -605,6 +605,8 @@ function RunsDialog({ schedule, onClose }: { schedule: ScheduleInfo | null; onCl
   const [runs, setRuns] = useState<ScheduleRunInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const id = schedule?.id ?? null;
+  const reach = useRunReach(runs);
+  const appTitle = useAppTitles();
 
   useEffect(() => {
     if (!id) return;
@@ -626,7 +628,7 @@ function RunsDialog({ schedule, onClose }: { schedule: ScheduleInfo | null; onCl
       onClose={onClose}
       size="md"
       title={schedule ? `What ${schedule.name} said` : "What it said"}
-      description="Its last runs, newest first."
+      description="Its last runs, newest first: how each ended, how long it took, what it reached and what it said."
       footer={
         <Button variant="secondary" onClick={onClose}>
           Close
@@ -645,34 +647,11 @@ function RunsDialog({ schedule, onClose }: { schedule: ScheduleInfo | null; onCl
       ) : runs.length === 0 ? (
         <EmptyState size="compact" icon={<History />} title="It hasn’t run yet" description="Its runs show here once it has, with what each one answered." />
       ) : (
-        <ul className="wat-runs">
-          {runs.map((r) => {
-            const quiet = r.delivery === "silent" || r.delivery === "empty";
-            return (
-              <li key={r.id} className="wat-run">
-                <span className="wat-run__head">
-                  <Badge tone={OUTCOME[r.status].tone} dot size="sm">
-                    {OUTCOME[r.status].label}
-                  </Badge>
-                  <span className="t-small t-3">
-                    {relativeTime(r.finished_at ?? r.scheduled_for)}
-                    {r.delivery && DELIVERY[r.delivery] ? ` · ${DELIVERY[r.delivery].toLowerCase()}` : ""}
-                    {r.status === "ok" ? ` · ${count(r.tool_calls, "tool call")}` : ""}
-                  </span>
-                </span>
-                {r.error ? (
-                  <span className="wat-error" data-user-content>
-                    {r.error}
-                  </span>
-                ) : r.answer && !quiet ? (
-                  <span className="wat-run__answer" data-user-content>
-                    {r.answer}
-                  </span>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+        <div className="wat-runs">
+          {runs.map((r, i) => (
+            <RunCard key={r.id} r={r} reach={reach.get(r.id)} appTitle={appTitle} open={i === 0} hideName />
+          ))}
+        </div>
       )}
     </Dialog>
   );

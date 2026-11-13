@@ -1,37 +1,32 @@
-/** Owner: onboarding. The wizard's frame: the step rail, a step's header and footer, the level meter, the hero presence. */
+/** Owner: onboarding. The first run's frame: the step rail, a step's header and footer, the hero presence. */
 import { ArrowLeft, Check, Minus } from "lucide-react";
 import { createContext, type FormEvent, type KeyboardEvent, type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { Badge, Button, cx, type GhostPhase, Skeleton, VoicePresence } from "../../ui";
-import { STEPS, type StepId, stepIndex } from "./state";
+import { Button, cx, type GhostPhase, Skeleton, VoicePresence } from "../../ui";
+import { type Progress, type StepDef, STEPS, type StepId, stepIndex, TASKS } from "./state";
 
 /* -------------------------------------------------------------------------------- rail */
 
 export interface RailProps {
   current: StepId;
-  done: Record<StepId, boolean>;
-  /** Steps whose state can't be read (Ghost isn't answering): plain numbers, and no count. */
-  unknown: StepId[];
-  /** The first GET /settings hasn't answered: no count yet, a placeholder instead. */
+  progress: Progress;
+  /** The first answer from Ghost hasn't come: no count yet, a placeholder instead. */
   checking: boolean;
-  skipped: StepId[];
-  /** Small live note under a step's label (“38%” while the models download). */
-  notes: Partial<Record<StepId, string>>;
   onGo: (id: StepId) => void;
 }
 
+const NETWORK_NOTE: Record<StepDef["network"], string | null> = { none: null, maybe: null, needs: "Needs the internet" };
+
 /**
  * Every step, in order, each one a button: setup resumes anywhere and nothing is locked.
- * One Tab stop (the current step); arrows, Home and End move between steps, so the form
- * is never eight presses away.
+ * One Tab stop (the current step); arrows, Home and End move between steps.
  */
-export function Rail({ current, done, unknown, checking, skipped, notes, onGo }: RailProps) {
-  const tasks = STEPS.filter((s) => s.task);
-  const count = tasks.filter((s) => done[s.id]).length;
+export function Rail({ current, progress, checking, onGo }: RailProps) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const [focusAt, setFocusAt] = useState(stepIndex(current));
   useEffect(() => setFocusAt(stepIndex(current)), [current]);
+  const unknown = TASKS.some((t) => progress.state[t.id] === "unknown");
 
   const move = (e: KeyboardEvent<HTMLOListElement>) => {
     const n = STEPS.length;
@@ -56,19 +51,21 @@ export function Rail({ current, done, unknown, checking, skipped, notes, onGo }:
           <Skeleton width={56} height={12} className="onb-rail__count-skel" />
         ) : (
           <p className="t-small t-2 t-num">
-            {unknown.length ? "Start Ghost to check these" : count === tasks.length ? "All done" : `${count} of ${tasks.length} done`}
+            {progress.done === progress.total ? "All done" : `${progress.done} of ${progress.total} done`}
+            {unknown && " · start Ghost to check the rest"}
           </p>
         )}
+        <div className="onb-rail__bar" aria-hidden>
+          <span style={{ transform: `scaleX(${progress.done / progress.total})` }} />
+        </div>
       </div>
       <ol className="onb-rail__list" onKeyDown={move}>
         {STEPS.map((s, i) => {
           const isCurrent = s.id === current;
-          const isUnknown = unknown.includes(s.id);
-          // Only the six counted tasks earn a check; Welcome and Done stay numbered, so the
-          // checks on the rail always agree with “N of 6 done”.
-          const isDone = !isUnknown && s.task && done[s.id];
-          const isSkipped = !isDone && !isUnknown && skipped.includes(s.id);
-          const note = notes[s.id] ?? (isSkipped ? "Skipped" : null);
+          const st = progress.state[s.id];
+          const isDone = s.task && st === "done";
+          const isSkipped = s.task && st === "skipped";
+          const note = isSkipped ? "Skipped" : !isDone ? NETWORK_NOTE[s.network] : null;
           return (
             <li key={s.id} className={cx("onb-rail__item", isDone && "is-done", isCurrent && "is-current")}>
               <button
@@ -87,9 +84,9 @@ export function Rail({ current, done, unknown, checking, skipped, notes, onGo }:
                 </span>
                 <span className="onb-rail__text">
                   <span className="onb-rail__label">{s.label}</span>
-                  {note && <span className="onb-rail__note t-num">{note}</span>}
+                  {note && <span className="onb-rail__note">{note}</span>}
                 </span>
-                <span className="sr-only">{isDone ? ", done" : isSkipped ? ", skipped" : isUnknown ? ", can’t check yet" : ""}</span>
+                <span className="sr-only">{isDone ? ", done" : isSkipped ? ", skipped" : st === "unknown" ? ", can’t check yet" : ""}</span>
               </button>
             </li>
           );
@@ -130,6 +127,8 @@ export interface StepFrameProps {
   centered?: boolean;
   /** Focus the title when the step opens (not on first load). */
   autoFocus: boolean;
+  /** A div, not a form: for a step that holds forms of its own (a password row), since forms can't nest. Enter then belongs to them. */
+  plain?: boolean;
   className?: string;
 }
 
@@ -139,7 +138,7 @@ export interface StepFrameProps {
  */
 const DOCK_ALLOWANCE = 112;
 
-export function StepFrame({ id, title, description, lead, children, notices, primary, secondary, onBack, onSkip, skipLabel = "Skip for now", footNote, centered, autoFocus, className }: StepFrameProps) {
+export function StepFrame({ id, title, description, lead, children, notices, primary, secondary, onBack, onSkip, skipLabel = "Skip for now", footNote, centered, autoFocus, plain, className }: StepFrameProps) {
   const heading = useRef<HTMLHeadingElement>(null);
   const form = useRef<HTMLFormElement>(null);
   const foot = useRef<HTMLDivElement>(null);
@@ -181,6 +180,7 @@ export function StepFrame({ id, title, description, lead, children, notices, pri
   }, [dockHost, id]);
   const dock = overflows ? dockHost : null;
 
+  const Root = (plain ? "div" : "form") as "form";
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!primary || primary.loading || primary.disabled) return;
@@ -205,7 +205,15 @@ export function StepFrame({ id, title, description, lead, children, notices, pri
           )}
           {secondary}
           {primary && (
-            <Button type="submit" form={formId} variant="primary" loading={primary.loading} disabled={primary.disabled} leadingIcon={primary.icon}>
+            <Button
+              type={plain ? "button" : "submit"}
+              form={plain ? undefined : formId}
+              onClick={plain ? () => void primary.onClick() : undefined}
+              variant="primary"
+              loading={primary.loading}
+              disabled={primary.disabled}
+              leadingIcon={primary.icon}
+            >
               {primary.label}
             </Button>
           )}
@@ -217,7 +225,7 @@ export function StepFrame({ id, title, description, lead, children, notices, pri
 
   return (
     <>
-      <form id={formId} ref={form} className={cx("onb-step", centered && "onb-step--centered", className)} onSubmit={submit} autoComplete="off" noValidate aria-labelledby={`onb-title-${id}`}>
+      <Root id={formId} ref={form} className={cx("onb-step", centered && "onb-step--centered", className)} onSubmit={plain ? undefined : submit} autoComplete={plain ? undefined : "off"} noValidate={plain ? undefined : true} aria-labelledby={`onb-title-${id}`} role={plain ? "group" : undefined}>
         <header className="onb-step__head">
           {lead && <div className="onb-step__lead">{lead}</div>}
           <h2 id={`onb-title-${id}`} ref={heading} tabIndex={-1} className={cx("onb-step__title", centered ? "t-display" : "t-title-lg")}>
@@ -228,7 +236,7 @@ export function StepFrame({ id, title, description, lead, children, notices, pri
         {children && <div className="onb-step__body">{children}</div>}
         {notices && <div className="onb-step__notices">{notices}</div>}
         {!dock && footer}
-      </form>
+      </Root>
       {dock &&
         createPortal(
           <div className="onb onb--dock">
@@ -243,31 +251,9 @@ export function StepFrame({ id, title, description, lead, children, notices, pri
 
 /* ------------------------------------------------------------------------- small parts */
 
-/** Marks a control that has no API behind it yet: it only exists while the mock is on. */
-export function PrototypeTag() {
-  return (
-    <Badge size="sm" variant="outline">
-      Prototype
-    </Badge>
-  );
-}
-
 /** A padded row inside a Card list, for rows that aren't a ListRow (a field, a meter). */
 export function Row({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cx("onb-row", className)}>{children}</div>;
-}
-
-/**
- * The live input level: one slim track whose fill follows the level, in the listening color,
- * because it means exactly that: Ghost is hearing this microphone right now.
- */
-export function LevelMeter({ level, label }: { level: number; label: string }) {
-  const v = Math.max(0, Math.min(1, level));
-  return (
-    <div className="onb-meter" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v * 100)}>
-      <span className="onb-meter__fill" style={{ transform: `scaleX(${v})` }} />
-    </div>
-  );
 }
 
 /**

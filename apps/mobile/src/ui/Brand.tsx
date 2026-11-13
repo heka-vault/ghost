@@ -4,9 +4,10 @@
  * it is Wisp saying hello (grinning, mid-wave); below that, where the arms are not drawn, the
  * plain body. Every line gets the ghost in its own colour: the colour is the identity.
  */
-import { lineHue, wavePose } from "@ghost/ui";
+import { lineHue, lookOf, SHAPES, wavePose } from "@ghost/ui";
 import { useMemo } from "react";
 import { View } from "react-native";
+import Svg, { Ellipse, Path } from "react-native-svg";
 
 import { useColors } from "../theme";
 import { Mascot } from "./Mascot";
@@ -52,6 +53,29 @@ export function LineGlyph({ slug, size = "md" }: { slug: string; name?: string; 
   return (
     <View accessible={false} style={{ width: GLYPH[size], height: GLYPH[size], alignItems: "center", justifyContent: "center" }}>
       <GhostGlyph size={GLYPH[size]} color={c.hue[lineHue(slug)].fg} />
+    </View>
+  );
+}
+
+/**
+ * An agent's mark as the desktop draws it (ADR 0061): its shape from the shared family
+ * (`@ghost/ui` agentShapes) in its colour, Wisp's two eyes cut in the ground's colour. Ghost,
+ * and an agent with no look, is Wisp in its colour, saying hello as before.
+ */
+export function AgentMark({ slug, look, size = 40 }: { slug: string; look?: string | null; size?: number }) {
+  const c = useColors();
+  const l = lookOf(slug, look);
+  const fg = c.hue[l.hue].fg;
+  if (l.shape === "wisp") return <GhostGlyph size={size} color={fg} />;
+  const d = SHAPES[l.shape];
+  return (
+    <View accessible={false} style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <Svg width={size} height={size} viewBox="0 0 24 24">
+        <Path d={d.body} fill={fg} />
+        {d.eyes.map(([x, y, rx, ry], i) => (
+          <Ellipse key={i} cx={x} cy={y} rx={rx} ry={ry} fill={c.bgCanvas} />
+        ))}
+      </Svg>
     </View>
   );
 }

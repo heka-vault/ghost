@@ -3871,6 +3871,7 @@ export interface components {
             first_seen: string;
             key: string;
             link?: string | null;
+            place?: components["schemas"]["WaitingPlace"] | null;
             question?: components["schemas"]["QuestionView"] | null;
             /** Format: date-time */
             snoozed_until?: string | null;
@@ -3879,6 +3880,12 @@ export interface components {
             state: "new" | "delivered" | "acknowledged" | "snoozed";
             title: string;
         };
+        /**
+         * @description A place in the desktop app a waiting item can lead to. Closed: the app maps each to a
+         *     route of its own, and nothing an app or a model sends can name another.
+         * @enum {string}
+         */
+        WaitingPlace: "model" | "sound" | "passwords" | "outside-tools" | "apps" | "watching";
         WaitingView: {
             /**
              * Format: int64
@@ -4116,6 +4123,7 @@ export type SchemaVoiceEvent = components['schemas']['VoiceEvent'];
 export type SchemaVoiceInfo = components['schemas']['VoiceInfo'];
 export type SchemaWaitingEvent = components['schemas']['WaitingEvent'];
 export type SchemaWaitingItemView = components['schemas']['WaitingItemView'];
+export type SchemaWaitingPlace = components['schemas']['WaitingPlace'];
 export type SchemaWaitingView = components['schemas']['WaitingView'];
 export type SchemaWakeRequest = components['schemas']['WakeRequest'];
 export type SchemaWatchInfo = components['schemas']['WatchInfo'];

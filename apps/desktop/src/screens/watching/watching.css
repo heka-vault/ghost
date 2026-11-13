@@ -51,3 +51,45 @@
 .wat-run__head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .wat-run__answer { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-1); }
 .wat-hold { display: inline-flex; gap: var(--space-3); visibility: hidden; }
+
+/* Whose: one chip per agent that owns something here, its mark beside its name. Choosing one
+   narrows schedules, watches and runs to it, and a new schedule is its. */
+.wat-owners { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-8); }
+.wat-owner {
+  display: inline-flex; align-items: center; gap: var(--space-1_5); height: var(--control-sm); padding: 0 var(--space-3) 0 var(--space-1_5);
+  border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--bg-surface); color: var(--text-2);
+  font: inherit; font-size: var(--text-md); cursor: pointer; transition: background-color var(--duration-fast) var(--ease-out);
+}
+.wat-owner:first-child { padding-left: var(--space-3); }
+.wat-owner:hover { background: var(--bg-hover); color: var(--text-1); }
+.wat-owner.is-on { border-color: var(--accent-border); background: var(--accent-soft); color: var(--text-1); }
+
+/* When, without cron: the choice, then only the control it needs, read back under it. */
+.wat-when { flex-direction: column; align-items: stretch; gap: var(--space-3); }
+.wat-when__line:empty { display: none; }
+.wat-when__part { display: flex; align-items: center; gap: var(--space-2); color: var(--text-2); font-size: var(--text-md); }
+.wat-when__time { max-width: calc(var(--field-control-width) / 2); }
+.wat-when__n { max-width: var(--space-20); }
+.wat-when__switch { align-self: flex-start; margin-left: calc(var(--space-2_5) * -1); }
+.wat-when__readback strong { color: var(--text-1); font-weight: var(--weight-medium); }
+.wat-days { display: flex; flex-wrap: wrap; gap: var(--space-1_5); }
+.wat-day {
+  min-width: var(--control-md); height: var(--control-md); padding: 0 var(--space-2); border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong); background: var(--bg-canvas); color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer;
+}
+.wat-day.is-on { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+
+/* A run, read as what it did. */
+.wat-runcard { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-4); min-width: 0; }
+.wat-runs .wat-runcard { padding: var(--space-3) 0; }
+.wat-runs .wat-runcard + .wat-runcard { border-top: 1px solid var(--border-subtle); }
+.wat-runcard__head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.wat-runcard__title { color: var(--text-1); font-weight: var(--weight-medium); }
+.wat-runcard__agent { color: var(--text-1); font-weight: var(--weight-semibold); }
+.wat-runcard__meta, .wat-runcard__delivery { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+.wat-runcard__reach { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
+.wat-runcard__said { margin-top: var(--space-1); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-1); font-size: var(--text-lg); line-height: var(--leading-lg); }
+.wat-runcard__said.is-error { color: var(--danger); font-size: var(--text-md); }
+.wat-runcard__said.is-clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.wat-runcard__more { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.wat-runcard__more .is-up { transform: rotate(180deg); }

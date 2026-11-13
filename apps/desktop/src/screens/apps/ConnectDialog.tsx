@@ -6,14 +6,16 @@
  */
 import { ApiError, type AppView, type CatalogEntryView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { ExternalLink } from "lucide-react";
-import { type FormEvent, useId, useState } from "react";
+import { Check, ExternalLink } from "lucide-react";
+import { type FormEvent, useEffect, useId, useState } from "react";
 
+import { navigate } from "../../app/router";
 import { useDesign } from "../../design/context";
-import { Button, Dialog, Disclosure, Field, Input, Notice, RadioGroup, Select, errorText, useLive, useToast } from "../../ui";
+import { Button, Dialog, Disclosure, Field, Input, Notice, RadioGroup, Select, Spinner, errorText, useLive, useToast } from "../../ui";
 import { AboutApp } from "./AboutApp";
 import { AppIcon } from "./AppIcon";
-import { optionHelp, sentence } from "./model";
+import { count, optionHelp, sentence } from "./model";
+import { abilityOf } from "./plain";
 import { expectSignIn, openSignIn } from "./signin";
 
 /**
@@ -45,6 +47,8 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
   /** Saved by an earlier try that then didn't connect: the next try replaces it. */
   const [saved, setSaved] = useState(false);
   const [missing, setMissing] = useState<Set<string>>(new Set());
+  /** Connected, or waiting for it to be: the last pane of the flow. */
+  const [done, setDone] = useState<{ name: string; app: AppView | null } | null>(null);
   /** After a connect that signs in: the page Ghost opened, and whether it could open it. */
   const [signIn, setSignIn] = useState<{ url: string; opened: boolean; name: string } | null>(null);
 
@@ -76,12 +80,12 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
       } else if (r.sign_in_url) {
         const opened = await openSignIn(r.sign_in_url, { again: true, mock });
         setSignIn({ url: r.sign_in_url, opened, name: r.apps[0]?.title ?? e.title });
+        setDone({ name: appName, app: null });
       } else if (connecting) {
-        toast({ title: `Connecting to ${e.title}…`, description: "Ghost is still reaching it. It shows as connected under Apps once it answers." });
-        onClose();
+        // Still reaching it: the dialog waits with it and shows the tools once it answers.
+        setDone({ name: appName, app: null });
       } else {
-        toast({ title: `Connected ${e.title}`, description: "Ghost can use it from its next turn. Its tools are on its page under Apps." });
-        onClose();
+        setDone({ name: appName, app: r.apps.find((a) => a.name === appName) ?? r.apps[0] ?? null });
       }
     } catch (err) {
       const taken = err instanceof ApiError && err.status === 409;
@@ -96,6 +100,44 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
     void connect();
   };
 
+  // Waiting on a sign-in or a first answer: look again until the app is connected, then show what it can do.
+  useEffect(() => {
+    if (!done || done.app?.state === "connected") return;
+    let on = true;
+    const t = window.setInterval(() => {
+      client
+        .app(done.name)
+        .then((a) => {
+          if (!on) return;
+          if (a.state === "connected") {
+            setDone({ name: done.name, app: a });
+            setSignIn(null);
+            onConnected();
+          } else if (a.state === "failed") {
+            setDone(null);
+            setSignIn(null);
+            setSaved(true);
+            setError({ title: `Ghost couldn’t connect to ${e.title}`, text: failedText(a), taken: false, failed: true });
+          }
+        })
+        .catch(() => {});
+    }, 1500);
+    return () => {
+      on = false;
+      window.clearInterval(t);
+    };
+  }, [client, done, e.title, onConnected]);
+
+  if (done?.app?.state === "connected") return <Connected app={done.app} onClose={onClose} onOpen={onOpen} />;
+  if (done && !signIn) {
+    return (
+      <Dialog open onClose={onClose} size="md" title={`Connecting to ${e.title}…`} description="Ghost is reaching it. Its tools show here once it answers; you can close this and it carries on." footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
+        <div className="apps-wait" aria-busy="true">
+          <Spinner size={16} label="" /> <span className="t-2">Waiting for {e.title} to answer…</span>
+        </div>
+      </Dialog>
+    );
+  }
   if (signIn) {
     return (
       <Dialog
@@ -116,6 +158,9 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
         }
       >
         <p className="apps-signin-url t-mono t-small t-3">{new URL(signIn.url).host}</p>
+        <p className="apps-wait" aria-live="polite">
+          <Spinner size={14} label="" /> <span className="t-2">Waiting for you to sign in. This moves on by itself.</span>
+        </p>
       </Dialog>
     );
   }
@@ -232,6 +277,39 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
         {/* Enter in a field submits; the visible Connect button sits in the dialog's footer. */}
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
+    </Dialog>
+  );
+}
+
+/** The flow's last pane: connected, and what it lets Ghost do, in plain words. */
+export function Connected({ app: a, onClose, onOpen }: { app: AppView; onClose: () => void; onOpen?: (name: string) => void }) {
+  const ab = abilityOf(a.actions);
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      size="md"
+      title={`${a.title} is connected`}
+      description="Every agent can use it from its next turn, under your permissions."
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => (onOpen ? onOpen(a.name) : navigate(`/apps/${a.name}`))}>
+            Its permissions and limits
+          </Button>
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
+    >
+      <div className="apps-can apps-can--dialog">
+        <p className="apps-can__lead">
+          <Check size={16} aria-hidden className="t-ok" /> Ghost can look up {count(ab.reads.length, "thing")} and change {count(ab.changes.length, "thing")} in {a.title}.
+        </p>
+        {ab.readLine && <p className="apps-can__line">{ab.readLine}</p>}
+        {ab.changeLine && <p className="apps-can__line">{ab.changeLine}</p>}
+        <p className="apps-can__line apps-can__rules">{ab.changes.length ? "Each change runs and Ghost tells you, unless your permissions say to ask first or block it." : "It only looks things up; nothing it does changes anything."}</p>
+      </div>
     </Dialog>
   );
 }

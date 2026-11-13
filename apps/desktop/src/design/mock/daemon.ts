@@ -295,7 +295,7 @@ export class MockDaemon {
     if (options.vault === "locked") {
       const at = new Date().toISOString();
       this.waitingItems = [
-        { key: "passwords:locked", source: "ghost", title: "Unlock your keyring so Ghost can read its passwords", state: "new", first_seen: at, changed_at: at, age_secs: 0 },
+        { key: "passwords:locked", source: "ghost", title: "Unlock your keyring so Ghost can read its passwords", state: "new", first_seen: at, changed_at: at, age_secs: 0, place: "passwords" },
         ...this.waitingItems,
       ];
     }

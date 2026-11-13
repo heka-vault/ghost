@@ -607,6 +607,48 @@ pub struct WaitingItemView {
     /// question it is.
     #[serde(default)]
     pub question: Option<QuestionView>,
+    /// Where in the app the operator deals with it: one of a closed set, given only to
+    /// Ghost's own notes (source `ghost`) from their key, never from an item's words or an
+    /// app's text. None for everything else.
+    #[serde(default)]
+    pub place: Option<WaitingPlace>,
+}
+
+/// A place in the desktop app a waiting item can lead to. Closed: the app maps each to a
+/// route of its own, and nothing an app or a model sends can name another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum WaitingPlace {
+    /// Settings › Model: the connection and its check (ADR 0056).
+    Model,
+    /// Settings › Sound: the voice mode and the voice models (ADR 0063).
+    Sound,
+    /// Settings › Passwords: the vault (ADR 0036).
+    Passwords,
+    /// Settings › Outside tools: the listener for them (ADR 0048).
+    OutsideTools,
+    /// Apps: an app that isn't connected or needs a sign-in (ADR 0034).
+    Apps,
+    /// Watching: the schedules, watches and Ghost's folder (ADR 0035, ADR 0047).
+    Watching,
+}
+
+/// Where Ghost's own note leads, from its key. Only source `ghost`: an item from a watch, a
+/// webhook, an agent, an app or an outside tool never gets a place, whatever its key says.
+pub fn waiting_place(source: &str, key: &str) -> Option<WaitingPlace> {
+    if source != "ghost" {
+        return None;
+    }
+    let head = key.split(':').next().unwrap_or("");
+    Some(match (head, key) {
+        (_, "model:slow") => WaitingPlace::Model,
+        (_, "voice:realtime") | (_, "models:missing") => WaitingPlace::Sound,
+        (_, "ghost:outside-listener") => WaitingPlace::OutsideTools,
+        ("passwords", _) => WaitingPlace::Passwords,
+        ("app", _) => WaitingPlace::Apps,
+        ("folder", _) | ("watch", _) | ("schedule", _) | ("schedules", _) => WaitingPlace::Watching,
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -2240,6 +2282,62 @@ pub struct ModelSignInResult {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_ghosts_own_notes_lead_somewhere_and_only_to_a_closed_set() {
+        assert_eq!(
+            waiting_place("ghost", "model:slow"),
+            Some(WaitingPlace::Model)
+        );
+        assert_eq!(
+            waiting_place("ghost", "voice:realtime"),
+            Some(WaitingPlace::Sound)
+        );
+        assert_eq!(
+            waiting_place("ghost", "models:missing"),
+            Some(WaitingPlace::Sound)
+        );
+        assert_eq!(
+            waiting_place("ghost", "ghost:outside-listener"),
+            Some(WaitingPlace::OutsideTools)
+        );
+        assert_eq!(
+            waiting_place("ghost", "passwords:locked"),
+            Some(WaitingPlace::Passwords)
+        );
+        assert_eq!(
+            waiting_place("ghost", "app:github"),
+            Some(WaitingPlace::Apps)
+        );
+        assert_eq!(
+            waiting_place("ghost", "schedule:abc:agent"),
+            Some(WaitingPlace::Watching)
+        );
+        assert_eq!(
+            waiting_place("ghost", "watch:ci:act"),
+            Some(WaitingPlace::Watching)
+        );
+        assert_eq!(
+            waiting_place("ghost", "folder"),
+            Some(WaitingPlace::Watching)
+        );
+        assert_eq!(waiting_place("ghost", "something:else"), None);
+        // A watch, an agent, an app or an outside tool never gets a place, even with Ghost's keys.
+        for source in [
+            "watch:ci",
+            "agent:ledger",
+            "client:cursor",
+            "gate",
+            "hook:jobs",
+        ] {
+            assert_eq!(waiting_place(source, "model:slow"), None, "{source}");
+            assert_eq!(waiting_place(source, "app:github"), None, "{source}");
+        }
+        assert_eq!(
+            serde_json::to_value(WaitingPlace::OutsideTools).unwrap(),
+            json!("outside-tools")
+        );
+    }
 
     #[test]
     fn events_are_discriminated_by_type() {

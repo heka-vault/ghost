@@ -98,10 +98,12 @@ export default function Activity() {
 
 function ActivityRow({ e, open, onToggle }: { e: AuditEntry; open: boolean; onToggle: () => void }) {
   const c = useColors();
+  const { conversations } = useDesk();
+  const look = conversations.find((x) => x.slug === entryLine(e))?.look ?? null;
   const how = decidedBy(e);
   return (
     <View>
-      <Row top leading={<LineMark slug={entryLine(e)} />} expanded={open} onPress={onToggle} title={<EntryTitle e={e} lines={open ? undefined : 2} />} support={<EntrySupport e={e} />} />
+      <Row top leading={<LineMark slug={entryLine(e)} look={look} />} expanded={open} onPress={onToggle} title={<EntryTitle e={e} lines={open ? undefined : 2} />} support={<EntrySupport e={e} />} />
       {open && (
         <View style={{ paddingHorizontal: space[4], paddingBottom: space[4], gap: space[2], borderTopWidth: 1, borderTopColor: c.borderSubtle, paddingTop: space[3] }}>
           <Detail term="Status" value={statusLabel(e.status)} />

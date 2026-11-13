@@ -110,6 +110,17 @@ export default function waiting(s: Scenario): WaitingItemView[] {
       first_seen: ago(3),
       changed_at: ago(3),
       age_secs: 180,
+      place: "apps",
+    });
+    items.push({
+      key: "model:slow",
+      source: "ghost",
+      title: "Replies are starting slowly: the first word takes 2.4 s. A fast model in front would help. Test it in Settings › Model.",
+      state: "new",
+      first_seen: ago(12),
+      changed_at: ago(12),
+      age_secs: 720,
+      place: "model",
     });
   }
   return items;

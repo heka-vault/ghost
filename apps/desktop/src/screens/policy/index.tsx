@@ -14,10 +14,11 @@
  */
 import { ApiError, type AppView, type PermissionsView, type PolicyView, type SourceInfo } from "@ghost/client-ts";
 import { permissionLabel, permissionOf, useGhost } from "@ghost/ui";
-import { Code, Hand, Megaphone, ShieldOff, SlidersHorizontal, X } from "lucide-react";
+import { Code, Hand, Megaphone, ShieldOff, SlidersHorizontal, VolumeX, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
+import { parseArgs, triedWords, tryCall } from "./tryRule";
 import { Link } from "../../app/router";
 import { useDesign } from "../../design/context";
 import {
@@ -335,6 +336,10 @@ export default function PermissionsScreen(_: RouteProps) {
         />
       </Section>
 
+      <Section id="perm-try" title="Try it" description="Pick a tool and, if you like, what it’s called with: see what Ghost would do and which rule decides.">
+        <TryIt perms={perms} apps={apps ?? []} words={(r) => ruleWords(r, titleOf)} />
+      </Section>
+
       <Section id="perm-add" title="Add a rule" description="A rule names an app, a tool, or a tool with what it’s called with. The most careful rule that matches wins: block, then ask first, then quiet, then allow.">
         <AddRule disabled={!online} busy={!!setting && setting.startsWith("add:")} existing={(r) => listOf(r)} onAdd={(rule, list, onError) => change(`add:${rule}`, { set: { rule, level: list } }, { what: `${rule}: ${permissionLabel(list).toLowerCase()}.`, undo: { set: { rule, level: listOf(rule) } }, onError })} />
       </Section>
@@ -357,11 +362,11 @@ export default function PermissionsScreen(_: RouteProps) {
               perms[l.list].map((rule) => (
                 <div key={rule} className="policy-rule">
                   <div className="policy-rule__text">
-                    <span className="policy-rule__code">{rule}</span>
                     <span className="policy-rule__words">
                       {ruleWords(rule, titleOf)}
                       {waiting(rule) && <span className="t-3"> · no app called {ruleApp(rule)} is connected yet</span>}
                     </span>
+                    <span className="policy-rule__code">{rule}</span>
                   </div>
                   <IconButton size="sm" icon={<X />} label={`Remove ${rule}`} loading={setting === rule} disabled={!online || (!!setting && setting !== rule)} onClick={() => removeRule(rule)} />
                 </div>
@@ -455,6 +460,31 @@ const EXAMPLES: { rule: string; says: string }[] = [
   { rule: "github.issue_write(state=closed)", says: "one kind of call" },
   { rule: "github.*(repo!=site)", says: "everything outside one repository" },
 ];
+
+function TryIt({ perms, apps, words }: { perms: PermissionsView; apps: AppView[]; words: (rule: string) => string }) {
+  const usable = apps.filter((a) => a.actions.length > 0);
+  const [app, setApp] = useState("");
+  const [tool, setTool] = useState("");
+  const [args, setArgs] = useState("");
+  const a = usable.find((x) => x.name === app) ?? usable[0];
+  const t = a?.actions.find((x) => x.name === tool) ?? a?.actions[0];
+  if (!a || !t) return <p className="policy-empty">Connect an app to try its tools here.</p>;
+  const tried = tryCall(perms, a.name, t.name, t.reads, parseArgs(args));
+  const Icon = tried.level === "block" ? ShieldOff : tried.level === "ask" ? Hand : tried.level === "quiet" ? VolumeX : Megaphone;
+  return (
+    <Card padding="md" className="policy-try">
+      <div className="policy-try__pick">
+        <Select aria-label="App" value={a.name} onChange={(e) => (setApp(e.target.value), setTool(""))} options={usable.map((x) => ({ value: x.name, label: x.title }))} />
+        <Select aria-label="Tool" value={t.name} onChange={(e) => setTool(e.target.value)} options={a.actions.map((x) => ({ value: x.name, label: `${x.name}${x.reads ? " (read)" : ""}` }))} />
+        <Input mono aria-label="Called with" value={args} placeholder="state=closed" onChange={(e) => setArgs(e.target.value)} />
+      </div>
+      <p className={`policy-try__answer is-${tried.level}`} aria-live="polite">
+        <Icon size={16} aria-hidden /> {triedWords(tried, words, t.reads)}
+      </p>
+      {tried.beaten.length > 0 && <p className="policy-try__more">Also names it: {tried.beaten.map((b) => `“${words(b.rule)}” (${permissionLabel(b.list).toLowerCase()})`).join(", ")}. The most careful wins.</p>}
+    </Card>
+  );
+}
 
 function AddRule({ disabled, busy, existing, onAdd }: { disabled: boolean; busy: boolean; existing: (rule: string) => Level | null; onAdd: (rule: string, list: Level, onError: (message: string) => void) => Promise<boolean> }) {
   const [rule, setRule] = useState("");

@@ -251,6 +251,7 @@ pub fn waiting_view(deps: &Deps) -> ApiResult<WaitingView> {
             acknowledged_at: i.acknowledged_at,
             snoozed_until: i.snoozed_until,
             change: change.map(|c| pending_view(c, Some(at))),
+            place: crate::models::waiting_place(&i.source, &i.key),
             question: match change {
                 Some(c) => Some(crate::questions::question_view(
                     &ghost_core::questions::change_question(c),

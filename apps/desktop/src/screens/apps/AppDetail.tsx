@@ -7,17 +7,19 @@
  * rule that still decides the tool is named under it. Under the tools, its own limits in
  * apps.json (`AppLimits.tsx`, ADR 0046), committed with the page's save bar.
  */
-import type { AppAction, AppView, PermissionsView } from "@ghost/client-ts";
+import type { AppAction, AppView, PermissionsView, ReachView } from "@ghost/client-ts";
 import { permissionLabel, useGhost } from "@ghost/ui";
 import { ChevronLeft, ExternalLink, Megaphone, MoreHorizontal, RotateCw, SearchX, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
-import { Badge, Button, Card, EmptyState, Field, IconButton, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, errorText, quoted, useLive, useToast } from "../../ui";
+import { Badge, Button, Card, EmptyState, Field, IconButton, LineGlyph, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, agentName, errorText, quoted, relativeTime, useLive, useToast } from "../../ui";
+import { formatBytes } from "../watching/model";
 import { useAppActions } from "./actions";
 import { useAppLimits } from "./AppLimits";
+import { abilityOf, callsOf, latelyWords, limitsWords, twinsOf } from "./plain";
 import { AppIcon } from "./AppIcon";
-import { type Level, appConditionalRules, choose, conditionalRules, coversWholeApp, decidingRule, kindWords, listOf, listVerb, sentence, stateWords, toolLabel } from "./model";
+import { type Level, count, appConditionalRules, choose, conditionalRules, coversWholeApp, decidingRule, kindWords, listOf, listVerb, sentence, stateWords, toolLabel } from "./model";
 
 const MODE_WORDS: Record<PermissionsView["mode"], string> = { open: "Open", ask: "Ask before changes", "read-only": "Read only" };
 
@@ -103,6 +105,9 @@ export function AppDetail({ name }: { name: string }) {
   const wholeBlocked = !!perms?.block.includes(name);
   const appConds = perms ? appConditionalRules(perms, name) : [];
   const busy = actions.busy === name;
+  const ability = abilityOf(app?.actions ?? []);
+  const twins = useTwins(name);
+  const { lately, calls } = useLately(name);
 
   return (
     <Page
@@ -139,7 +144,7 @@ export function AppDetail({ name }: { name: string }) {
               </Button>
             ) : app.state === "needs_sign_in" ? (
               <Button variant="primary" loading={busy} disabled={!online} onClick={() => void actions.signIn(app)}>
-                Sign in
+                Sign in again
               </Button>
             ) : app.state === "failed" || app.state === "stopped" ? (
               <Button variant="primary" leadingIcon={<RotateCw />} loading={busy} disabled={!online} onClick={() => void actions.signIn(app)}>
@@ -179,6 +184,28 @@ export function AppDetail({ name }: { name: string }) {
       ) : (
         <>
           <StateNotice app={app} onReopen={() => void actions.reopen(app)} />
+          {twins.length > 0 && (
+            <Notice tone="info" title={`One of ${twins.length + 1} ${app.title.replace(/\s*\(.*\)$/, "")} connections`} className="apps-notice">
+              The others: {twins.map((t, i) => (
+                <span key={t.name}>
+                  {i > 0 && ", "}
+                  <Link to={`/apps/${t.name}`}>{t.title}</Link>
+                </span>
+              ))}
+              . Ghost names each to its model as a connection of its own, and when one can’t find something it looks in the other. {app.title} doesn’t say which account each is signed in to; the name you gave it is how Ghost tells them apart.
+            </Notice>
+          )}
+          {app.state === "connected" && (
+            <section className="apps-can" aria-label={`What Ghost can do with ${title}`}>
+              <p className="apps-can__lead">
+                {ability.reads.length + ability.changes.length === 0 ? `${title} offers no tools yet.` : `Ghost can ${ability.reads.length ? `look up ${count(ability.reads.length, "thing")}` : ""}${ability.reads.length && ability.changes.length ? " and " : ""}${ability.changes.length ? `change ${count(ability.changes.length, "thing")}` : ""} in ${title}.`}
+              </p>
+              {ability.readLine && <p className="apps-can__line">{ability.readLine}</p>}
+              {ability.changeLine && <p className="apps-can__line">{ability.changeLine}</p>}
+              {ability.ruleLine && <p className="apps-can__line apps-can__rules">{ability.ruleLine}</p>}
+              <p className="apps-can__line apps-can__limits">{limitsWords(app.limits)}</p>
+            </section>
+          )}
 
           {perms.mode !== "open" && (
             <Notice tone="info" title={`Permissions are set to ${MODE_WORDS[perms.mode].toLowerCase()}`} className="apps-notice" action={<Button size="sm" variant="ghost" href={hrefFor("/settings/permissions")}>Permissions</Button>}>
@@ -258,6 +285,27 @@ export function AppDetail({ name }: { name: string }) {
             )}
           </Section>
 
+          <Section id="apps-lately" title="Lately" description={lately ?? `Ghost hasn’t used ${title} this week.`}>
+            {calls.length > 0 && (
+              <Card list>
+                {calls.map((c, i) => (
+                  <div key={`${c.at}-${i}`} className="apps-call">
+                    <span className="apps-call__when t-num">{relativeTime(c.at)}</span>
+                    <LineGlyph slug={c.agent} name={agentName(c.agent)} size="sm" />
+                    <span className="apps-call__what">
+                      <span className="apps-call__agent">{agentName(c.agent)}</span> {c.read ? "looked up" : "changed"} {toolLabel(c.tool).toLowerCase()}
+                    </span>
+                    <span className="apps-call__meta t-num">
+                      {c.items != null ? `${count(c.items, "item")} · ` : ""}
+                      {formatBytes(c.bytes)} · {c.ms < 1000 ? `${c.ms} ms` : `${(c.ms / 1000).toFixed(1)} s`}
+                      {!c.ok && <span className="t-danger"> · failed</span>}
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            )}
+          </Section>
+
           {limits.section}
 
           <p className="apps-foot t-small t-3">
@@ -277,18 +325,19 @@ export function AppDetail({ name }: { name: string }) {
   );
 }
 
-/** What's in the way: a sign-in waiting in the browser, one to do again, or why it isn't connected. */
+/** What's in the way: a sign-in waiting in the browser, one to do again, or why it isn't connected. Never amber: amber is a waiting okay. */
 function StateNotice({ app: a, onReopen }: { app: AppView; onReopen: () => void }) {
   if (a.sign_in_url)
     return (
-      <Notice tone="warn" title="Finish signing in in your browser" className="apps-notice" action={<Button size="sm" variant="secondary" leadingIcon={<ExternalLink />} onClick={onReopen}>Open it again</Button>}>
+      <Notice tone="info" title="Finish signing in in your browser" className="apps-notice" action={<Button size="sm" variant="secondary" leadingIcon={<ExternalLink />} onClick={onReopen}>Open it again</Button>}>
         {a.title} connects once you’ve signed in there.
       </Notice>
     );
   if (a.state === "needs_sign_in")
     return (
-      <Notice tone="warn" title={`${a.title} needs you to sign in again`} className="apps-notice">
-        <span data-user-content>{a.problem ? sentence(a.problem) : ""}</span> Until then Ghost can’t use it.
+      <Notice tone="danger" title={`${a.title} needs you to sign in again`} className="apps-notice">
+        <span data-user-content>{a.problem ? `${sentence(a.problem)} ` : ""}</span>
+        Until you do, Ghost can’t use it and says so if asked. Signing in again keeps its tools, your permissions and its limits as they are.
       </Notice>
     );
   if (a.state === "failed" || a.state === "stopped")
@@ -414,3 +463,37 @@ function DetailSkeleton() {
   );
 }
 
+
+/** The other connections to the same service, re-read with the app list. */
+function useTwins(name: string): AppView[] {
+  const { client, appsVersion } = useGhost();
+  const [twins, setTwins] = useState<AppView[]>([]);
+  useEffect(() => {
+    client
+      .apps()
+      .then((a) => setTwins(twinsOf(a).get(name) ?? []))
+      .catch(() => setTwins([]));
+  }, [client, name, appsVersion]);
+  return twins;
+}
+
+const WEEK_MS = 7 * 24 * 3600_000;
+
+/** What Ghost used this app for in the last seven days (ADR 0060): counts and the latest calls, never contents. */
+function useLately(name: string): { lately: string | null; calls: ReachView["recent"] } {
+  const { client } = useGhost();
+  const [view, setView] = useState<ReachView | null>(null);
+  useEffect(() => {
+    let on = true;
+    client
+      .reach(new Date(Date.now() - WEEK_MS))
+      .then((v) => on && setView(v))
+      .catch(() => on && setView(null));
+    return () => {
+      on = false;
+    };
+  }, [client, name]);
+  const calls = view ? callsOf(view.recent, name) : [];
+  const agents = [...new Set(calls.map((c) => agentName(c.agent)))];
+  return { lately: latelyWords(view?.by_app.find((r) => r.key === name), agents, formatBytes), calls };
+}

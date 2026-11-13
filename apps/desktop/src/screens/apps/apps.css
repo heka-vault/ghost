@@ -178,3 +178,24 @@
 .apps-pinned__key { margin-left: var(--space-2); font-weight: 400; }
 .apps-pinned__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-2) var(--space-4); margin-top: var(--space-2); }
 .apps-limit { padding: var(--space-3) var(--space-4); }
+
+/* What Ghost can do with an app, in plain words, over its tool lists. */
+.apps-can { display: flex; flex-direction: column; gap: var(--space-1_5); margin-bottom: var(--space-8); max-width: 64ch; }
+.apps-can--dialog { margin-bottom: 0; }
+.apps-can p { margin: 0; }
+.apps-can__lead { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: var(--weight-medium); color: var(--text-1); }
+.apps-can__line { font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-2); }
+.apps-can__rules, .apps-can__limits { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-3); }
+.apps-wait { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0 0; }
+.apps-row__twin { color: var(--text-2); }
+
+/* Lately: one line per call, the time in a fixed column so the agents line up. */
+.apps-call { display: grid; grid-template-columns: var(--space-20) auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-2_5) var(--space-4); font-size: var(--text-md); line-height: var(--leading-md); }
+.apps-call__when, .apps-call__meta { color: var(--text-3); font-size: var(--text-sm); white-space: nowrap; }
+.apps-call__what { min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apps-call__agent { color: var(--text-1); font-weight: var(--weight-medium); }
+@media (max-width: 720px) {
+  .apps-call { grid-template-columns: auto minmax(0, 1fr); }
+  .apps-call__when { display: none; }
+  .apps-call__meta { grid-column: 2; }
+}

@@ -12,6 +12,8 @@ import { useGhost } from "@ghost/ui";
 import { BellOff, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { placeOf } from "../../app/places";
+import { hrefFor } from "../../app/router";
 import { nameOf, useToday } from "../../app/today";
 import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
 import { clock, needLine } from "./model";
@@ -105,6 +107,11 @@ export function Now() {
                   </p>
                 </div>
                 <span className="now-know__actions">
+                  {placeOf(i) && (
+                    <Button size="sm" variant="secondary" href={hrefFor(placeOf(i)!.path)}>
+                      {placeOf(i)!.label}
+                    </Button>
+                  )}
                   {i.link && <IconButton size="sm" variant="ghost" label="Open" icon={<ExternalLink />} href={i.link} />}
                   <Menu
                     align="end"

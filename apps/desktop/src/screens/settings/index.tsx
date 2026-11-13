@@ -49,7 +49,7 @@ import {
   useState,
 } from "react";
 
-import { navigate } from "../../app/router";
+import { hrefFor, navigate } from "../../app/router";
 import { ListeningButton } from "../../app/ListeningSwitch";
 import { RoomSettings } from "../../app/RoomSettings";
 import { listeningSentence, notListening } from "../../app/listening";
@@ -896,6 +896,15 @@ export default function SettingsScreen({ params: route }: RouteProps) {
               <VersionNotice status={status} />
               <Card list>
                 <VersionRows status={status} />
+                <ListRow
+                  title="Set up Ghost"
+                  description="The first run again: the model, the microphone, its name, its voice, an app, an agent and a first question. It keeps what’s done."
+                  trailing={
+                    <Button size="sm" variant="secondary" href={hrefFor("/welcome")}>
+                      Open setup
+                    </Button>
+                  }
+                />
                 <ListRow
                   title="Settings file"
                   description="Where these pages save. Passwords are in Ghost’s vault, never in this file."

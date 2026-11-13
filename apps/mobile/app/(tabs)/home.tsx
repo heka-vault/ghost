@@ -10,7 +10,7 @@
  * live from the stream, kept on the phone so they show at once, with a line when they may be
  * out of date. They can be answered here, or from the notifications with the app closed.
  */
-import { errorText, lineHue, lineName, splitSummary } from "@ghost/ui";
+import { errorText, lineName, lookOf, splitSummary } from "@ghost/ui";
 import { useRouter } from "expo-router";
 import { AudioLines, Mic } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -21,7 +21,7 @@ import { staleLine, waitingRows } from "../../src/desk/waiting";
 import { update, usePhone } from "../../src/phone/store";
 import { opacityDisabled, radius, space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
-import { GhostGlyph } from "../../src/ui/Brand";
+import { AgentMark, GhostGlyph } from "../../src/ui/Brand";
 import { TargetText } from "../../src/ui/entries";
 import { Cta, LinkDot, linkLabel, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
@@ -214,7 +214,7 @@ export default function Home() {
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: keyGap, opacity: ready ? 1 : opacityDisabled }}>
             {keys.map((c) => {
-              const hue = colors.hue[lineHue(c.slug)];
+              const hue = colors.hue[lookOf(c.slug, c.look).hue];
               const name = lineName(c.slug, c.name);
               return (
                 <Pressable
@@ -239,7 +239,7 @@ export default function Home() {
                     transform: [{ scale: pressed ? 0.97 : 1 }],
                   })}
                 >
-                  <GhostGlyph size={Math.round(keySize * 0.4)} color={hue.fg} />
+                  <AgentMark slug={c.slug} look={c.look} size={Math.round(keySize * 0.4)} />
                   <Text size="md" weight="semibold" align="center" numberOfLines={2} style={{ color: colors.text1 }}>
                     {name}
                   </Text>

@@ -356,3 +356,31 @@ mod tests {
         assert_eq!(live_first_token(&records), Some((1.6, 5)));
     }
 }
+
+#[cfg(test)]
+mod place_tests {
+    use ghost_api::models::{WaitingPlace, waiting_place};
+    use ghost_core::waiting::GHOST;
+
+    /// Each note Ghost posts about itself leads to where it is dealt with: the slow
+    /// connection's note says “Test it in Settings › Model”, so it leads there.
+    #[test]
+    fn ghosts_own_notes_lead_to_their_settings() {
+        assert_eq!(
+            waiting_place(GHOST, super::SLOW_NOTE_KEY),
+            Some(WaitingPlace::Model)
+        );
+        assert_eq!(
+            waiting_place(GHOST, crate::daemon::REALTIME_NOTE_KEY),
+            Some(WaitingPlace::Sound)
+        );
+        assert_eq!(
+            waiting_place(GHOST, crate::daemon::MODELS_PROBLEM_KEY),
+            Some(WaitingPlace::Sound)
+        );
+        assert_eq!(
+            waiting_place(GHOST, crate::outside::PROBLEM_KEY),
+            Some(WaitingPlace::OutsideTools)
+        );
+    }
+}

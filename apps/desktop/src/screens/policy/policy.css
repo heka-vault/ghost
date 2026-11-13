@@ -21,8 +21,8 @@
 /* ----------------------------------------------------------------------- rules */
 .policy-rule { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-2_5) var(--space-3) var(--space-2_5) var(--space-4); min-width: 0; }
 .policy-rule__text { display: flex; flex-direction: column; gap: var(--space-0_5); min-width: 0; }
-.policy-rule__code { font-variant-ligatures: none; font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-md); color: var(--text-1); overflow-wrap: anywhere; }
-.policy-rule__words { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.policy-rule__code { font-variant-ligatures: none; font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-3); overflow-wrap: anywhere; }
+.policy-rule__words { font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); overflow-wrap: anywhere; }
 .policy-empty { margin: 0; padding: var(--space-3) var(--space-4); font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-3); }
 
 /* ------------------------------------------------------- Ghost's own operations */
@@ -82,3 +82,16 @@
 
 /* The load error's file path: identifier, on its own line under the sentence. */
 .policy-load__path { display: block; margin-top: var(--space-1); color: var(--text-2); font-size: var(--text-xs); line-height: var(--leading-xs); }
+
+/* Try it: the call on one line, the answer under it in the level's own color. Amber is only the
+   waiting okay itself, so Ask first is the accent here. */
+.policy-try { display: flex; flex-direction: column; gap: var(--space-3); }
+.policy-try__pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-2); }
+.policy-try__answer { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-1); }
+.policy-try__answer svg { flex: none; margin-top: var(--space-0_5); }
+.policy-try__answer.is-block svg { color: var(--danger); }
+.policy-try__answer.is-ask svg { color: var(--accent-text); }
+.policy-try__answer.is-quiet svg { color: var(--text-3); }
+.policy-try__answer.is-allow svg { color: var(--ok); }
+.policy-try__more { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
+@media (max-width: 720px) { .policy-try__pick { grid-template-columns: minmax(0, 1fr); } }
