@@ -5,7 +5,7 @@
 # `uv run --project tools/voice-trial python -I <script>`.
 [project]
 name = "ghost-voice-trial"
-version = "2026.10.0"
+version = "2026.11.0"
 description = "Kokoro split for windowed decoding, and the measurements behind it"
 requires-python = ">=3.12,<3.13"
 license = "MIT"

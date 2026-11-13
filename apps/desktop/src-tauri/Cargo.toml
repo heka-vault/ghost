@@ -1,6 +1,6 @@
 [package]
 name = "heka-ghost-desktop"
-version = "2026.10.0"
+version = "2026.11.0"
 description = "Ghost desktop: the window, the tray, and the daemon it runs (ADR 0038)"
 authors = ["Eric Polerecky"]
 license = "MIT"
