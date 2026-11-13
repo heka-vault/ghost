@@ -70,6 +70,50 @@ shell raises the window by unmapping and mapping it again, which puts it on the 
 workspace and in front on GNOME, where a plain raise would switch workspace or only flash
 "Ghost is ready". The tray's Open Ghost and the surface's button do the same.
 
+## Amended 2026-11-12, evening: a voice, not captions
+
+The owner used it live the same day: "good, not 9/10 good". The reply covered the work in 80 px
+type and ran off the bottom of the screen, under a label that said "Listening to you". Their
+words: "I don't really think I need to read what I just said, and if I can hear Ghost I don't
+need to read what they said either", and of the working state, "I like the idea of seeing where
+Ghost is looking for things". So:
+
+- **No transcript.** The floating room shows neither the operator's words nor Ghost's reply.
+  It shows the state (Wisp, the light and its colour, a few words under Wisp), where Ghost is
+  looking, and only what sound can't carry: a change waiting for a yes and an agent's question,
+  in a fixed card. Captions are a setting (off, when the sound is off, always; off by default),
+  Ghost's own words, two lines. "When the sound is off" reads the default output's volume and
+  mute with `wpctl` once per reply, read only; nothing changes the sound.
+- **Where Ghost is looking is the working state.** Every app and agent the turn reaches for
+  is a named place with a beam (`src/floating/reach.ts`): lit while its call runs and 750 ms at
+  least, the answer coming back as light in proportion to what it brought, then a quiet trace
+  for the rest of the turn. Ghost's own lookups are places (Memory, Docs, Agents). Names are
+  the app's and at most two words from the tool's own name, never an identifier or a sentence.
+  The size of what came back is the length of `GET /calls/{id}`'s preview (ADR 0058), fetched
+  once per finished call of the turn by the surface on this desk; its text is never shown. This
+  widens ADR 0058's "fetched when the operator opens the call" to this one reader, for a number.
+  The corner list of calls is gone: the beams carry the same truth.
+- **The calls make the working state, not the phase.** The daemon's phase follows the audio, so
+  while Ghost says "One sec." over its calls the phase is `speaking`, then `listening`; the
+  beams, drawn in `thinking` only, never showed in real use. Calls in flight now make the scene
+  `thinking` whatever the phase, Ghost's voice wins over a turn the VAD opened (the daemon
+  interrupts Ghost when the operator's turn really starts), and the goodbye leaves once its
+  voice has been quiet 0.7 s, and after 4 s at the most.
+- **A layout rule.** Everything forward is inside the monitor's safe area and within a share
+  of it (36% beside the work, 16% in the corner, 45% in the centre), scaled by the shorter side;
+  nothing is sized from what is said (`src/floating/layout.ts`, tested on five monitor shapes).
+  The dim is an oval around Ghost, not the whole desktop. **Placements**: beside the work
+  (default; the owner, seeing it on the other monitor: "I liked Ghost showing up without taking
+  the full screen"), in the corner, in the centre (`floating.json`'s `placement`). The
+  full-screen dim is gone; the centre is the largest it gets.
+- **Cost** (measured again, `docs/floating-room.md`): at rest 0.1% of a core; forward 12.6% to
+  14.6% beside the work and in the corner, 16.5% in the centre, against about 13% before.
+- **Sending it away**: "Ghost, that's all", **Done** under Wisp, or a desktop shortcut to
+  `ghostd sleep`. Each ends the session (`POST /sleep`, as the window's own button).
+
+The look, the states and the motion are the same: this takes text down, it doesn't change
+the character.
+
 ## What it costs (ADR 0018)
 
 Measured on the workstation (Intel UHD 750, GNOME Shell 50.1, XWayland, two 1920×1080

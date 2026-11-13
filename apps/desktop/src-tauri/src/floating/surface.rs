@@ -185,6 +185,23 @@ fn floating_shell(state: tauri::State<'_, State>) -> ShellState {
     state.shell.lock().unwrap().clone()
 }
 
+/// The default output's volume and mute, for the captions' "when muted" choice: one
+/// `wpctl get-volume` (PipeWire), read only, at most a second; null when it can't be read.
+#[tauri::command]
+async fn floating_sound() -> Option<super::Sound> {
+    let run = tokio::process::Command::new("wpctl")
+        .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let out = tokio::time::timeout(std::time::Duration::from_secs(1), run)
+        .await
+        .ok()?
+        .ok()?;
+    super::parse_wpctl(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// A line for the journal (the page's frame timings and decisions).
 #[tauri::command]
 fn floating_log(line: String) {
@@ -321,7 +338,8 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             floating_summon,
             floating_open_app,
             floating_shell,
-            floating_log
+            floating_log,
+            floating_sound
         ])
         .setup(|app| {
             // The window's own capability: the daemon bridge, its events and the commands

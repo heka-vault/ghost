@@ -1510,6 +1510,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_item_shown_and_not_told_reaches_no_route_and_no_digest() {
+        let (e, routes, items) = at_desk();
+        items
+            .sync(
+                crate::waiting::GHOST,
+                &[ItemDraft::new("model:slow", "Replies are starting slowly")
+                    .response(Response::Show)],
+                Some(t0()),
+            )
+            .unwrap();
+        for m in (0..120).step_by(15) {
+            e.tick(mins(m)).await.unwrap();
+        }
+        for r in routes.values() {
+            assert!(
+                r.got().iter().flatten().all(|k| k != "model:slow"),
+                "{:?} was handed the note",
+                r.name()
+            );
+        }
+        assert!(!digest_keys(&e).contains(&"model:slow".to_string()));
+    }
+
+    #[tokio::test]
     async fn a_route_that_fails_is_skipped_not_fatal() {
         let (e, routes, items) = plain();
         routes[&RouteName::Phone]

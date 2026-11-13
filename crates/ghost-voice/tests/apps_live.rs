@@ -201,6 +201,7 @@ fn rig(script: Vec<Vec<ScriptedReply>>) -> Rig {
             max_tokens: 400,
             thinking: None,
             cache_system: true,
+            effort: None,
         },
         dispatcher,
         turns.clone(),

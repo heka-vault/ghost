@@ -753,7 +753,10 @@ fn watch_info(deps: &Deps, w: &ghost_core::watches::Watch) -> WatchInfo {
         steps,
         response: match w.response.response() {
             ghost_core::waiting::Response::Tell => WatchResponse::Tell,
-            ghost_core::waiting::Response::Record => WatchResponse::Record,
+            // A watch declares `tell` or `record`; `show` is Ghost's own notes only.
+            ghost_core::waiting::Response::Record | ghost_core::waiting::Response::Show => {
+                WatchResponse::Record
+            }
         },
         acts_through: w.act.as_ref().map(|a| a.agent.clone()),
         urgency: urgency_of(&w.urgency),

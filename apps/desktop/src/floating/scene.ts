@@ -6,8 +6,6 @@
  * Nothing here reads the microphone: the operator's turn is a sign from the session's activity
  * (`you_started`), never a level and never words while they speak (#73, ADR 0055).
  */
-import { appOf, type Activity } from "@ghost/ui";
-
 import type { Posture } from "../app/posture";
 
 export type Scene =
@@ -40,19 +38,53 @@ export interface SceneInput {
   youTalking: boolean;
   pending: boolean;
   question: boolean;
+  /** Calls of this turn still running. The phase follows the audio, not the work (below). */
+  openCalls?: number;
+  /** The goodbye has had its time (`goneAfterGoodbye`): the session is over for this surface. */
+  gone?: boolean;
 }
 
+/**
+ * The phase is the daemon's word for the audio (`ghost_voice::tap`): `speaking` from Ghost's
+ * first sound, `listening` again when it stops. So while Ghost says "One sec." over its calls
+ * the phase is `speaking`, and after it, `listening` with the calls still running: the work
+ * has to come from the calls themselves, or the reach never shows (2026-11-12, live).
+ *
+ * Ghost's own voice wins over a turn the VAD opened: the daemon interrupts Ghost when the
+ * operator's turn really starts (`turns.rs`, `turn_started`), so a `speaking` phase with a
+ * turn open is Ghost still at the speaker, and the label must say so.
+ */
 export function sceneOf(i: SceneInput): Scene {
   if (i.capture === "yes") return "hidden";
   if (i.posture !== "float") return "line";
+  if (i.gone) return "line";
   if (i.ending) return "ending";
   if (i.phase === "hold") return "hold";
   if (i.pending) return "okay";
   if (i.question) return "question";
-  if (i.youTalking) return "you";
-  if (i.phase === "thinking") return "thinking";
   if (i.phase === "speaking") return "speaking";
+  if (i.youTalking) return "you";
+  if ((i.openCalls ?? 0) > 0) return "thinking";
+  if (i.phase === "thinking") return "thinking";
   return "listening";
+}
+
+/** Seconds with nothing out and no reply before the label names the model as the wait. */
+export const SLOW_MODEL_SECS = 4;
+
+/** The goodbye's longest stay: past it the surface leaves even if the voice still says something. */
+export const GOODBYE_MS = 4_000;
+/** Quiet this long after the goodbye's voice has stopped, and the surface leaves. */
+export const GOODBYE_QUIET_MS = 700;
+
+/**
+ * The session is ending and the surface should go back to the line now: the goodbye's voice
+ * has been quiet a moment, or it has had its time. It must not linger (owner, 2026-11-12).
+ */
+export function goneAfterGoodbye(o: { endingFor: number | null; quietFor: number; heard: boolean }): boolean {
+  if (o.endingFor == null) return false;
+  if (o.endingFor >= GOODBYE_MS) return true;
+  return o.heard && o.quietFor >= GOODBYE_QUIET_MS;
 }
 
 /** Scenes where Ghost has come forward over the desktop (the frame loop runs, Wisp is drawn). */
@@ -70,15 +102,21 @@ export function fpsOf(s: Scene, arriving: boolean): number {
   return arriving ? 60 : 30;
 }
 
-/** The scene's word, in the label over the type. */
-export function labelOf(s: Scene, o: { agent: string; using: string | null; asker: string | null; micOff: boolean }): string {
+/** The scene's word, in the label under Wisp. A few words: the beams say where. */
+export function labelOf(
+  s: Scene,
+  o: { agent: string; using: string | null; asker: string | null; micOff: boolean; modelSecs?: number | null },
+): string {
   switch (s) {
     case "you":
       return "Listening to you";
     case "listening":
       return o.micOff ? "Mic off · type in Ghost" : "Listening";
     case "thinking":
-      return o.using ? `Using ${o.using}` : "Working";
+      if (o.using) return `Looking in ${o.using}`;
+      // Nothing out, no reply yet: the model is the wait, and says how long (a slow provider).
+      if (o.modelSecs != null && o.modelSecs >= SLOW_MODEL_SECS) return `Waiting on the model · ${Math.floor(o.modelSecs)} s`;
+      return "Thinking";
     case "speaking":
       return o.agent;
     case "okay":
@@ -94,74 +132,27 @@ export function labelOf(s: Scene, o: { agent: string; using: string | null; aske
   }
 }
 
-/** One line of the telemetry margin: a call of this session, true to the daemon's activity. */
-export interface CallRow {
-  id: string;
-  /** Clock time it started, HH:MM:SS. */
-  at: string;
-  /** `github.issue_read`, or the tool's name when no connected app matches. */
-  name: string;
-  app: string | null;
-  /** How long it took, or null while it runs. */
-  ms: number | null;
+/**
+ * Captions (Settings › Captions): Ghost's own words while it speaks, never the operator's. Off
+ * by default: Ghost is a voice. "When the sound is off" is the default output muted or under
+ * 8% (`wpctl`); an output that can't be read is not taken as off.
+ */
+export function captionsShown(mode: "off" | "muted" | "always", scene: Scene, sound: { volume: number; muted: boolean } | null): boolean {
+  if (scene !== "speaking" && scene !== "ending") return false;
+  if (mode === "always") return true;
+  if (mode === "muted") return !!sound && (sound.muted || sound.volume < 0.08);
+  return false;
 }
 
-export interface Telemetry {
-  rows: CallRow[];
-  calls: number;
-  open: number;
-  /** Apps reached this session, in the order first used. */
-  apps: string[];
-  handovers: number;
-  cuts: number;
-}
-
-const two = (n: number) => String(n).padStart(2, "0");
-const clock = (iso: string) => {
-  const d = new Date(iso);
-  return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
-};
-
-/** The session's work from its activity: the last `keep` calls, newest last, and the counts. */
-export function telemetryOf(list: readonly Activity[], apps: readonly string[], keep = 8): Telemetry {
-  const rows: CallRow[] = [];
-  const byId = new Map<string, CallRow & { started: number }>();
-  const reached: string[] = [];
-  let handovers = 0;
-  let cuts = 0;
-  for (const a of list) {
-    if (a.kind === "call" && a.id && a.name) {
-      const app = appOf(a.name, apps);
-      const row = { id: a.id, at: clock(a.at), name: app ? `${app}.${a.name.slice(app.length + 1)}` : a.name, app, ms: null, started: new Date(a.at).getTime() };
-      byId.set(a.id, row);
-      rows.push(row);
-      if (app && !reached.includes(app)) reached.push(app);
-    } else if (a.kind === "result" && a.id) {
-      const r = byId.get(a.id);
-      if (r && r.ms == null) r.ms = Math.max(0, new Date(a.at).getTime() - r.started);
-    } else if (a.kind === "handover") handovers++;
-    else if (a.kind === "cut") cuts++;
-  }
-  const clean = rows.map(({ id, at, name, app, ms }) => ({ id, at, name, app, ms }));
-  return { rows: clean.slice(-keep), calls: rows.length, open: rows.filter((r) => r.ms == null).length, apps: reached, handovers, cuts };
-}
-
-/** `412 ms`, `1.4 s`, `12 s`: a call's time in the margin. */
-export function msText(ms: number | null): string {
-  if (ms == null) return "…";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)} s`;
-  return `${Math.round(ms / 1000)} s`;
-}
-
-/** `0:42`, `12:05`: how long the session has run. */
-export function elapsedText(fromIso: string | null, now: number): string | null {
-  if (!fromIso) return null;
-  const s = Math.max(0, Math.floor((now - new Date(fromIso).getTime()) / 1000));
-  return `${Math.floor(s / 60)}:${two(s % 60)}`;
-}
-
-/** Where Ghost's stage sits across the monitor, from the shell's choice (`place.rs`, `Side`). */
-export function stageX(side: "centre" | "left" | "right" | null | undefined): number {
-  return side === "left" ? 0.3 : side === "right" ? 0.7 : 0.5;
+/**
+ * What the two caption lines hold: the reply up to the end of what is being said, its last
+ * `max` characters cut at a word, so the newest words are always the ones on screen.
+ */
+export function captionText(text: string, upto: number | null, max = 120): string {
+  const end = upto == null ? text.length : Math.min(text.length, Math.max(0, upto));
+  const said = text.slice(0, end).trim();
+  if (said.length <= max) return said;
+  const tail = said.slice(said.length - max);
+  const space = tail.indexOf(" ");
+  return `…${space >= 0 ? tail.slice(space + 1) : tail}`;
 }

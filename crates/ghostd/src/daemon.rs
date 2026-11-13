@@ -376,7 +376,7 @@ pub struct Daemon {
     /// The last model load's failure while it is tried again; on the waiting list meanwhile.
     models_problem: Mutex<Option<String>>,
     /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
-    pub(crate) model_slow: Mutex<Option<String>>,
+    pub(crate) model_slow: Mutex<Option<ghost_llm::check::Slow>>,
     models_retry: std::time::Duration,
     pub late: Late,
     /// The agents, with the voices once Kokoro is loaded.
@@ -1370,14 +1370,23 @@ impl Daemon {
                             if let Some(problem) = lock(&d.models_problem).clone() {
                                 out.push((MODELS_PROBLEM_KEY.to_string(), problem));
                             }
-                            if let Some(slow) = d.slow_problem() {
-                                out.push((crate::model_check::SLOW_PROBLEM_KEY.to_string(), slow));
-                            }
                             if let Some(problem) = d.late.outside.get().and_then(|o| o.problem()) {
                                 out.push((crate::outside::PROBLEM_KEY.to_string(), problem));
                             }
                         }
                         out
+                    }
+                }))
+                // ADR 0056: Ghost's note about its own speed is for the screen; no route
+                // and no wake says it.
+                .with_notes(Arc::new({
+                    let weak = Arc::downgrade(d);
+                    move || {
+                        weak.upgrade()
+                            .and_then(|d| d.slow_note())
+                            .map(|slow| (crate::model_check::SLOW_NOTE_KEY.to_string(), slow))
+                            .into_iter()
+                            .collect()
                     }
                 }))
                 .with_on_change(on_change.clone()),
