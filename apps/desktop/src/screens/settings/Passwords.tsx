@@ -16,6 +16,7 @@ import { KeyRound, MoreHorizontal, Plus, ShieldCheck, Trash2 } from "lucide-reac
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, IconButton, Input, Menu, Notice, Skeleton, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
+import { passwordFromEnvironment } from "./environment";
 import { SECRET_INFO, isAppSecret, secretLabel, tildePath } from "./model";
 import { secretActionId } from "./parts";
 
@@ -42,6 +43,8 @@ const TITLES: Record<string, string> = {
 /** "The model connection · last used 3 min ago": what uses it, then when. */
 function usedWords(p: PasswordInfo): string {
   const by = p.ghost ? p.used_by.join("; ") : p.used_by.length ? `Used by ${p.used_by.join(", ")}` : "Nothing names it yet";
+  const env = passwordFromEnvironment(p);
+  if (env) return `${by} · ${env.text}`;
   if (!p.set) return by;
   return `${by} · ${p.last_used ? `last used ${relativeTime(p.last_used)}` : "not used yet"}`;
 }
@@ -282,6 +285,7 @@ export function PasswordRow({
   const info = SECRET_INFO[p.name];
   // Required and missing is the one that asks for attention: the model's, before setup is done.
   const variant = p.set === false && p.ghost && !info?.optional ? "secondary" : "ghost";
+  const env = passwordFromEnvironment(p);
 
   const close = () => {
     setValue("");
@@ -328,6 +332,10 @@ export function PasswordRow({
           ) : p.set ? (
             <Badge tone="ok" size="sm" dot>
               Set
+            </Badge>
+          ) : env ? (
+            <Badge tone="info" size="sm">
+              {env.badge}
             </Badge>
           ) : (
             <Badge size="sm">Not set</Badge>

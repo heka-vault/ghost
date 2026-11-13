@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { environmentNote } from "../src/screens/settings/environment";
+import { environmentNote, passwordFromEnvironment } from "../src/screens/settings/environment";
 
 describe("a connection from the environment Ghost was started in (ADR 0037)", () => {
   it("says nothing when every setting is Ghost's own", () => {
@@ -29,5 +29,24 @@ describe("a connection from the environment Ghost was started in (ADR 0037)", ()
     const n = environmentNote({ from_environment: ["GHOST_LLM_PROVIDER"], password: "OPENAI_API_KEY" })!;
     expect(n.password).toBeNull();
     expect(n.keepPassword).toBeNull();
+  });
+});
+
+describe("Settings › Passwords: a password from the environment Ghost was started in", () => {
+  it("names where it comes from and how to keep it, instead of Not set", () => {
+    const n = passwordFromEnvironment({ name: "ANTHROPIC_AUTH_TOKEN", set: false, from_environment: true })!;
+    expect(n.badge).toBe("From the environment");
+    expect(n.text).toContain("from the environment Ghost was started in");
+    expect(n.text).toContain("Add it to keep it");
+    expect(n.text).not.toContain("sk-");
+  });
+
+  it("says nothing for a password in the vault or one that isn't anywhere", () => {
+    expect(passwordFromEnvironment({ name: "HF_TOKEN", set: true, from_environment: false })).toBeNull();
+    expect(passwordFromEnvironment({ name: "HF_TOKEN", set: false, from_environment: false })).toBeNull();
+  });
+
+  it("an older daemon that doesn't say is Not set, as before", () => {
+    expect(passwordFromEnvironment({ name: "HF_TOKEN", set: false })).toBeNull();
   });
 });

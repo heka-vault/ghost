@@ -97,6 +97,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         set: false,
         ghost: true,
         used_by: ["The model connection"],
+        from_environment: false,
         added: null,
         updated: null,
         last_used: null,

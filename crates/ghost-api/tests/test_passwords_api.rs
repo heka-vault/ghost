@@ -370,3 +370,37 @@ async fn no_validation_error_echoes_what_was_sent() {
             .collect()
     );
 }
+
+// --- a password from the environment Ghost was started in (ADR 0037's amendment) ---------
+
+const SHELL_TOKEN: &str = "sk-shell-0123456789abcdef";
+
+#[tokio::test]
+async fn a_password_from_the_environment_ghost_was_started_in_is_named_so() {
+    // Started from a shell that exports the key: Ghost uses it, so the page must not say
+    // only "not set". The name, never the value.
+    let w = World::new();
+    w.set_started("ANTHROPIC_AUTH_TOKEN", SHELL_TOKEN);
+    let c = w.client();
+    let v = c.get("/passwords").await;
+    let row = rows(&v.json)["ANTHROPIC_AUTH_TOKEN"];
+    assert_eq!(row["set"], false, "not in the vault");
+    assert_eq!(row["from_environment"], true, "{}", v.text);
+    assert!(!v.text.contains(SHELL_TOKEN));
+    assert_eq!(
+        rows(&v.json)["ELEVENLABS_API_KEY"]["from_environment"],
+        false
+    );
+
+    // Put in the vault, the vault's value is the one Ghost uses.
+    let r = c
+        .put(
+            "/passwords/ANTHROPIC_AUTH_TOKEN",
+            json!({"value": "sk-vault-0123456789"}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let row = rows(&r["passwords"])["ANTHROPIC_AUTH_TOKEN"];
+    assert_eq!(row["set"], true);
+    assert_eq!(row["from_environment"], false);
+}

@@ -1373,7 +1373,7 @@ export class MockDaemon {
       const at = new Date().toISOString();
       const row = this.passwords.passwords.find((x) => x.name === name);
       if (row) Object.assign(row, { set: true, updated: at, used_by: row.used_by.length ? row.used_by : [usedBy] });
-      else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [usedBy], added: at, updated: at, last_used: null });
+      else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [usedBy], added: at, updated: at, last_used: null, from_environment: false });
       if (!this.settings.secrets.some((x) => x.name === name)) this.settings.secrets.push({ name, set: true });
     }
     this.syncSecrets();
@@ -1385,8 +1385,8 @@ export class MockDaemon {
     this.requireVault();
     const at = new Date().toISOString();
     const row = this.passwords.passwords.find((x) => x.name === name);
-    if (row) Object.assign(row, { set: true, updated: at, added: row.added ?? at });
-    else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [], added: at, updated: at, last_used: null });
+    if (row) Object.assign(row, { set: true, updated: at, added: row.added ?? at, from_environment: false });
+    else this.passwords.passwords.push({ name, set: true, ghost: false, used_by: [], added: at, updated: at, last_used: null, from_environment: false });
     this.syncSecrets();
     // The model connection reads its own by name at each session (ADR 0037): no restart.
     return { passwords: this.passwordsView(), restart_required: !!row?.ghost && !isModelOnly(name) };

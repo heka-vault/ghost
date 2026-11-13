@@ -3451,6 +3451,10 @@
               "null"
             ]
           },
+          "from_environment": {
+            "description": "Not in the vault, and Ghost is using the value of the environment it was started in\n(a shell's export): it lasts until Ghost is started another way, and adding it to the\nvault keeps it (ADR 0037's amendment). The name only; never a value.",
+            "type": "boolean"
+          },
           "ghost": {
             "description": "One Ghost itself reads; a new value applies at its next start.",
             "type": "boolean"
@@ -3493,7 +3497,8 @@
           "name",
           "set",
           "used_by",
-          "ghost"
+          "ghost",
+          "from_environment"
         ],
         "type": "object"
       },

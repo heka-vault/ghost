@@ -249,11 +249,19 @@ pub fn passwords_view(deps: &Deps) -> ApiResult<PasswordsView> {
         rest.remove(*n);
     }
     names.extend(rest);
+    let live = deps.environ();
     let rows = names
         .into_iter()
         .map(|name| {
             let m = meta.get(&name);
             PasswordInfo {
+                from_environment: m.is_none()
+                    && ghost_core::environment::from_start(
+                        &name,
+                        &deps.started_env,
+                        &live,
+                        &settings,
+                    ),
                 set: if is_open { Some(m.is_some()) } else { None }, // unknown while it's closed
                 used_by: uses.get(&name).cloned().unwrap_or_default(),
                 ghost: ghost_use(&name).is_some() && name != "GITHUB_TOKEN",
