@@ -226,7 +226,7 @@ general line is gone. It costs about 70 tokens in that paragraph when there is s
 from the cache. Measured: 0 of 21 by-number reads through the second connection, against 1 of 12
 before ([the benchmark](../benchmarks/perf/2026-11-12-first-sound.md)).
 
-*Amended the same evening (ADR 0061):* the two may be accounts that see different things. Live,
+*Amended the same evening (ADR 0062):* the two may be accounts that see different things. Live,
 an issue only the second account could see was read through the first, answered 404, and Ghost
 said it could not find it. A read whose error says the thing was not found is now read through
 the twin by the dispatcher, in the same call and under the operator's block rules

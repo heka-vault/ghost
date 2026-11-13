@@ -188,7 +188,7 @@ was quick. Whether that sounds better than silence is the voice rubric's part D.
 
 ## Amended 2026-11-12: the main model is asked beside the fast one
 
-[ADR 0061](0061-the-main-model-is-asked-beside-the-fast-one.md): every call the fast model
+[ADR 0062](0062-the-main-model-is-asked-beside-the-fast-one.md): every call the fast model
 takes also goes to the main model (`GHOST_LLM_RACE`, on), whose reply waits and is the
 turn's when the fast model hands over, and is ended unread otherwise. "A turn that needs a
 tool pays for the fast model's call before the main model starts" no longer holds: a change

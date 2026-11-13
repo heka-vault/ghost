@@ -91,7 +91,7 @@ The effort is sent as `output_config.effort` and a route that refuses it learns 
 
 ## What was changed
 
-- **The main model is asked beside the fast one** (`GHOST_LLM_RACE`, on, ADR 0061). Every call
+- **The main model is asked beside the fast one** (`GHOST_LLM_RACE`, on, ADR 0062). Every call
   the fast model takes also goes to the main model with the same context; if the fast model hands
   over, the main model's reply is already on its way, and if not, its request is ended unread.
   The gate still sees only the main model's call, made once. Measured in one run, four each
