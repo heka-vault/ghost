@@ -95,4 +95,6 @@ says it to agents.
   reply (`GHOST_TYPED_IDLE_SECS`) unless the operator types again. While listening is on, the
   passive listener runs beside it, so the name still wakes Ghost and opens a voice session in
   the same conversation; while it is off, nothing is opened. `Status.session_typed` says
-  which it is, and the desktop says "Typing with Ghost" rather than "Listening".
+  which it is, and the desktop says "Typing with Ghost" rather than "Listening". Its music
+  is ducked only while a spoken reply plays, and comes back once the reply has finished,
+  not 20 s later (`ghostd::reply_duck`); a voice session still holds it start to end.

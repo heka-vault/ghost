@@ -31,7 +31,7 @@ The phone app (`apps/mobile`, Expo, Android) is a second transport into the same
 
 ### The app and the daemon
 
-`tauri build` produces one .deb and one AppImage carrying the desktop app (`apps/desktop`, Tauri 2 and React) and `ghostd`, with `ghost-mock-github`, `ghost-scripts` and the ONNX Runtime the models were measured on beside it. The shell (`apps/desktop/src-tauri`) supervises the daemon: at launch it adopts one already answering on the control socket (`make dev`'s, or one started by hand), else runs `ghostd restore-volumes`, spawns `ghostd run` in its own process group with `settings.env`, pipes its output through `systemd-cat -t ghostd` so `journalctl --user -t ghostd` keeps working, and restarts it with backoff when it exits. Quit sends TERM to the group, waits up to 20 s, then KILL, then `restore-volumes`; the daemon also exits on its own when its parent is gone. The same binary runs under the user unit by itself; nothing in it knows which way it was started beyond `GHOST_LAUNCHER`, which only changes what the desktop says about restarting ([releasing.md](releasing.md)).
+`tauri build` produces one .deb and one AppImage carrying the desktop app (`apps/desktop`, Tauri 2 and React) and `ghostd`, with `ghost-mock-github`, `ghost-scripts` and the ONNX Runtime the models were measured on beside it. The shell (`apps/desktop/src-tauri`) supervises the daemon: at launch it adopts one already answering on the control socket (`make dev`'s, or one started by hand), else runs `ghostd restore-volumes`, spawns `ghostd run` in its own process group with `settings.env` (and `GHOST_SETTINGS_LOADED=1`, so the daemon does not read it again; started by hand, every `ghostd` command reads it itself, under what the shell exported: `ghost_core::environment::settings_file_under`), pipes its output through `systemd-cat -t ghostd` so `journalctl --user -t ghostd` keeps working, and restarts it with backoff when it exits. Quit sends TERM to the group, waits up to 20 s, then KILL, then `restore-volumes`; the daemon also exits on its own when its parent is gone. The same binary runs under the user unit by itself; nothing in it knows which way it was started beyond `GHOST_LAUNCHER`, which only changes what the desktop says about restarting ([releasing.md](releasing.md)).
 
 ### Apps
 
@@ -247,7 +247,10 @@ One Cargo workspace (ADR 0039): the crates under `crates/` and the desktop app's
    session open, it starts a *typed session* (2026-11-13; `Daemon::typed_session`,
    `Status.session_typed`): its input is silent and no capture stream is opened for it, no
    chime plays, the reply is shown and said, and it ends `GHOST_TYPED_IDLE_SECS` (20 s) after
-   the reply unless the operator types again. The passive listener runs beside it, so the
+   the reply unless the operator types again. Music is ducked (and players paused) only while
+   a reply plays: taken as the session opens and when a further reply starts, given back 1.5 s
+   after Ghost stops speaking with no call to a tool out (`ghostd::reply_duck`), not held
+   through the 20 s wait. The passive listener runs beside it, so the
    name ends it and opens a voice session in the conversation it is in; a wake while Ghost
    speaks its typed reply, or within 1.5 s after, is taken for its own voice. Typing during a
    voice session is a turn of that session, as before.

@@ -79,7 +79,8 @@ values and keeps them from child processes, and the waiting list asks for the im
 
 **No plaintext secret files.** The service, the deploy drop-in, `make dev`, `make daemon`
 and the make targets load `settings.env`, which holds only non-secret settings, and the
-daemon opens the vault itself. `ghost-render-env.sh` is gone.
+daemon opens the vault itself. (2026-11-13: a `ghostd` started by hand reads `settings.env`
+itself and leaves a password's name in it out; ADR 0037's second amendment.) `ghost-render-env.sh` is gone.
 
 ## Consequences
 

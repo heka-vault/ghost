@@ -7,7 +7,8 @@
 - **Builds on:** ADR 0036 (the connection's key is a password in Ghost's vault)
 - **Amended by:** ADR 0056 (Test connection is the provider check, kept per route; a field
   a route refuses is left out of its requests; a failed turn is said); 2026-11-13 below (what
-  the desktop is told is the connection Ghost uses)
+  the desktop is told is the connection Ghost uses; Passwords says it, and `ghostd` reads
+  `settings.env` itself)
 
 Ghost reached its model through whatever `ANTHROPIC_BASE_URL` pointed at, or OpenRouter's
 Anthropic API with `GHOST_LLM_ENDPOINT=openrouter`. Only Anthropic's protocol was spoken, the
@@ -104,3 +105,25 @@ started in (not `settings.env`, not the vault): names, never a value. Settings â
 ("From the environment Ghost was started in") with the way to keep them: save the page for the
 settings, add the password to the vault. Nothing is written to an env file by Ghost itself, and
 a value still never comes out (ADR 0036).
+
+## Amendment, 2026-11-13 (later): the same on Passwords, and `ghostd` reads `settings.env`
+
+**Settings â€º Passwords says it too.** `PasswordInfo.from_environment` is true for a name
+that is not in the vault and whose value Ghost is using from the environment it was started
+in (the same `from_start` test as `/model`). The row says "From the environment" in place of
+"Not set", with "until Ghost is started another way. Add it to keep it."; `ghostd passwords
+list` prints the same with `ghostd passwords set NAME`. Names only, never a value.
+
+**Every `ghostd` command loads `settings.env` itself**, first, before any thread
+(`ghostd::config::load_settings_file`, over `ghost_core::environment::settings_file_under`).
+A plain `ghostd run` from a shell read only what the shell exported, while the launchers and
+`ghostd mcp` read the file. The precedence: a setting in the file applies unless the process
+environment holds the name, and then the process environment's value wins, an empty one
+included. The file is what the operator saved in Ghost; a variable present at the start was
+put there for that start (a shell's export, a unit's `Environment=`), the one way to override
+a saved setting without editing it, and it is exactly what `from_environment` reports. A
+password's name in the file is left out with a log line (ADR 0036). A launcher that loads the
+file itself (`make` and `make dev`, the user unit and the deploy drop-in, the desktop app)
+sets `GHOST_SETTINGS_LOADED=1` and the daemon reads nothing more, so the file is read once
+and each launcher's own rule stands (the file over the login session's exports, a `./.env` in
+its place for the make targets).

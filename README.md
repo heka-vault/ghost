@@ -93,7 +93,8 @@ without echo and never shown again:
 target/debug/ghostd passwords set ANTHROPIC_API_KEY
 ```
 
-Then, with Ghost running (`make dev`, or `make start` for the daemon alone), check it:
+Then, with Ghost running (`make dev`, `make start` for the daemon alone, or
+`target/debug/ghostd run` by hand), check it:
 
 ```bash
 target/debug/ghostd llm test
@@ -103,6 +104,12 @@ It sends a fixed synthetic prompt and reports how soon the first word comes back
 streaming, tool calls and the prompt cache work. Under about a second to the first word feels
 like a conversation; past 1.5 s Ghost puts a note on its list saying what would help. A change
 to `settings.env` applies from the next session (`make reload` restarts the daemon).
+
+Every `ghostd` command reads `settings.env` itself, so `ghostd run`, `check`, `llm test`,
+`passwords` and `listening` behave the same by hand as from `make` or the service. A variable
+exported in the shell you start it from wins over the file for that start (an empty one too),
+and **Settings › Model** and **Settings › Passwords** say which ones come "from the environment
+Ghost was started in"; a password is never read from the file.
 
 **What it costs.** A spoken turn sends about 7,000 tokens of prompt and tools, almost all of it
 read from the prompt cache, and gets a sentence or two back. On Claude Sonnet 5.5 that is a
