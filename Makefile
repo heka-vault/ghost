@@ -57,7 +57,7 @@ endef
         wake say status check latency restore-volumes \
         lint fmt test deny typecheck contract web ci api-schema version release screenshots \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
-        perf perf-micro perf-llm perf-providers perf-hear perf-turns record wake-eval record-takes wake-takes-eval wake-check-replay \
+        perf perf-micro perf-llm perf-providers perf-hear perf-turns record wake-eval record-takes wake-takes-eval wake-check-replay wake-dynamics \
         wake-train wake-detectors wake-use wake-rollback \
         android android-apk android-install mobile-web \
         bundle sidecars onnxruntime models
@@ -313,6 +313,9 @@ wake-rollback: ## back to the shipped detector (restart Ghost after)
 
 wake-check-replay: ## the detector and its check of a weak hit over labelled streams, before and after (the oracle): make wake-check-replay ARGS="--stream f.wav:pos@12.3 --stream g.wav:neg"
 	@$(ORACLE) python -I docs/benchmarks/scripts/wake_check_replay.py $(ARGS)
+
+wake-dynamics: ## compression, normalisation, AGC and filters before the wake detector and its check, over the labelled streams (the oracle): make wake-dynamics ARGS="--only base,c4-fast"
+	@$(ORACLE) python -I docs/benchmarks/scripts/wake_dynamics.py $(ARGS)
 
 ##@ Phone app (apps/mobile: Expo, installed over adb; no EAS, no Play Store)
 
