@@ -25,8 +25,8 @@ exception and nothing here reads it.
 | `pw` | The PipeWire plumbing: a `Session` (main loop, core, round trips), the registry's nodes, `Props` and `Format` pods. |
 | `config` | `AudioSettings::from_env()`: the `GHOST_*` names the Python daemon read. |
 
-Settings, with the Python defaults: `GHOST_INPUT_DEVICE` (`ghost.mic`; a `node.name`, not a
-PortAudio index), `GHOST_OUTPUT_DEVICE` (unset: the default sink), `GHOST_DUCK_APPS`
+Settings, with the Python defaults: `GHOST_INPUT_DEVICE` (a `node.name`, not a PortAudio index;
+unset, `ghost.mic` when the echo canceller made it, else the default source: `CaptureConfig::for_input`), `GHOST_OUTPUT_DEVICE` (unset: the default sink), `GHOST_DUCK_APPS`
 (`["spotify"]`), `GHOST_DUCK_LEVEL` (0.25), `GHOST_CHIME` (true), `GHOST_THINKING_SOUND`
 (true), `GHOST_THINKING_VOLUME` (0.12), `GHOST_THINKING_DELAY_SECS` (0.5), `GHOST_CACHE_DIR`.
 

@@ -1,6 +1,8 @@
 # PipeWire echo cancellation
 
-Ghost listens on `ghost.mic`, a source produced by PipeWire's WebRTC echo
+Optional (`make echo-cancel`). With no `GHOST_INPUT_DEVICE` set, Ghost listens on
+`ghost.mic` when it exists and on the default microphone otherwise; with headphones it
+isn't needed. `ghost.mic` is a source produced by PipeWire's WebRTC echo
 canceller. It subtracts what the speakers are playing from what the microphone
 hears, so neither Ghost's own voice nor music comes back as the operator's turn
 or as a wake word. This is the primary defence against self-interruption; the
