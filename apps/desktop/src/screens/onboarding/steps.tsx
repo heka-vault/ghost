@@ -150,7 +150,7 @@ export function WelcomeStep({ w }: { w: Wizard }) {
         ))}
       </ul>
       {speech.view && speech.view.missing.length > 0 && (
-        <p className="onb-promise__body">
+        <p className="onb-promise__body" style={{ marginTop: "var(--space-5)" }}>
           {speech.view.fetch.state === "fetching" ? "Ghost’s ears and voice are downloading; setup carries on meanwhile." : `Get started also downloads Ghost’s ears and voice, ${(speech.view.missing_bytes / 1e9).toFixed(1)} GB, while you set up the rest.`}
         </p>
       )}

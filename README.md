@@ -54,10 +54,15 @@ On Ubuntu 24.04 or 26.04 (x86-64), from the [latest release](https://github.com/
 and run it. It needs FUSE 2 (`libfuse2t64` on Ubuntu 24.04); without it, run it with
 `--appimage-extract-and-run`.
 
-**No microphone?** Ghost still works typed: the first run's microphone and wake steps can be
-skipped, and typing to Ghost needs no microphone (it answers out loud on your speakers and
-on screen). Turn listening off (the switch by the brand, or Settings › Sound) to keep it
-from looking for one.
+**No microphone?** Ghost still works typed: skip the first run's microphone and wake steps
+and type to it (the box at the bottom of Today, or the last step). It still downloads its ears
+and voice, and it needs a working sound output, since it answers out loud as well as on
+screen. Turn listening off (the switch by the brand, or Settings › Sound) to keep it from
+looking for a microphone.
+
+**Speakers, not headphones?** The release does not carry the echo canceller yet (its "Set it
+up" button needs the installer from a checkout, `infra/pipewire/install.sh`); until it does,
+headphones or a microphone that cancels echo itself keep Ghost from hearing its own voice.
 
 **Updates.** Ghost checks for a new release when it starts and once a day, and says
 "Update available" on the rail; Settings › General shows what's new and has **Update and

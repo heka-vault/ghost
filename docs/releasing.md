@@ -78,8 +78,12 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
 publishing: the bundle, the signatures, the install test and `latest.json` (its URLs name the
 release the version would get) are kept as the run's artifact for 14 days
 (`gh run download <run id>`). Run it before the first tag of a month, or after changing the
-bundle. It took about 30 minutes on 2026-11-13, most of it the release build with a cold
-cache.
+bundle. On 2026-11-13 it took 25 minutes with a cold cache (22 of them the signed bundle
+build) and 18 with a warm one.
+
+The release is built on GitHub's Ubuntu 24.04 runner on purpose: a bundle links the glibc of
+the machine that built it, so one built on 26.04 (glibc 2.43) refuses to start on 24.04
+(`GLIBC_2.43 not found`). A `make bundle` on a 26.04 workstation is for that workstation.
 
 If the month turns between the merge and the tag, `make release` refuses: the merged
 `2026.10.x` is no longer this month's. Bump again with `make version V=next` in a PR.
