@@ -212,9 +212,21 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     let mic = phone.is_none() && opens_mic(typed, d.mic.is_off());
     let ducker = lock(&d.ducker).clone();
     let already_chimed = d.chimed.swap(false, Ordering::SeqCst);
+    // A typed session lowers the music only while its reply plays (`reply_duck`); a voice
+    // session holds it from start to end.
+    let reply_duck = (typed && phone.is_none()).then(|| {
+        crate::reply_duck::ReplyDuck::new(
+            ducker.clone(),
+            d.ports.players.clone(),
+            cfg.pause_players,
+        )
+    });
+    let ducker = if reply_duck.is_some() { None } else { ducker };
     let (media, phone) = match phone {
         None => {
-            if !already_chimed && let Some(du) = &ducker {
+            if let Some(rd) = &reply_duck {
+                rd.take().await; // the reply is coming
+            } else if !already_chimed && let Some(du) = &ducker {
                 du.duck();
                 if cfg.pause_players {
                     d.ports.players.pause_playing().await;
@@ -235,6 +247,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
                     error!("session: the desk's devices did not open: {e}");
                     if let Some(du) = &ducker {
                         du.restore();
+                    }
+                    if let Some(rd) = &reply_duck {
+                        rd.release().await;
                     }
                     d.ports.players.resume().await;
                     return;
@@ -336,9 +351,14 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     };
     let on_phase: OnPhase = {
         let d = Arc::downgrade(d);
+        let reply_duck = reply_duck.clone();
         Arc::new(move |phase| {
             let d = d.clone();
+            let reply_duck = reply_duck.clone();
             Box::pin(async move {
+                if let Some(rd) = &reply_duck {
+                    rd.on_phase(phase).await;
+                }
                 if let Some(d) = d.upgrade() {
                     if phase != SessionPhase::Speaking && d.state.phase() == Phase::Speaking {
                         *lock(&d.spoke_at) = Some(Instant::now()); // Daemon::own_voice_now
@@ -364,7 +384,11 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     // What the session is doing, by name, never in words (ADR 0055): the desktop's screen.
     let on_activity: ghost_voice::activity::OnActivity = {
         let d = Arc::downgrade(d);
+        let reply_duck = reply_duck.clone();
         Arc::new(move |a| {
+            if let Some(rd) = &reply_duck {
+                rd.on_activity(&a);
+            }
             if let Some(d) = d.upgrade() {
                 let view = activity_view(a);
                 // Kept beside the transcript, so a reload and history show the calls, a
@@ -466,6 +490,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             if let Some(du) = &ducker {
                 du.restore();
             }
+            if let Some(rd) = &reply_duck {
+                rd.release().await;
+            }
             d.ports.players.resume().await;
             if let Some(p) = phone {
                 p.media.close().await;
@@ -477,6 +504,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         error!("session: the daemon is not running");
         if let Some(du) = &ducker {
             du.restore();
+        }
+        if let Some(rd) = &reply_duck {
+            rd.release().await;
         }
         d.ports.players.resume().await;
         if let Some(p) = phone {
@@ -676,6 +706,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     }
     if let Some(du) = &ducker {
         du.restore();
+    }
+    if let Some(rd) = &reply_duck {
+        rd.release().await;
     }
     d.ports.players.resume().await;
     // A change the session was still waiting on stays on the waiting list (ADR 0030).

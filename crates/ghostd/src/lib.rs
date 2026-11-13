@@ -27,6 +27,7 @@ pub mod phone_host;
 /// Pausing the players for a session (MPRIS).
 pub mod players;
 pub mod push;
+pub mod reply_duck;
 pub mod routes;
 pub mod schedules;
 pub mod session;
