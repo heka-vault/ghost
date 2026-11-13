@@ -14,6 +14,8 @@ export interface ScheduleHooks {
   /** A run's answer, for the waiting list. */
   deliver(agent: string, key: string, title: string): void;
   later(fn: () => void, ms: number): void;
+  /** A run started or ended (ADR 0060): the daemon's `run` event. */
+  ran?(run: ScheduleRunInfo, phase: "started" | "ended"): void;
 }
 
 const DURATION = /^(\d+)\s*(m|min|h|d|w)?$/i;
@@ -40,6 +42,24 @@ export class MockSchedules {
   ) {
     this.view = structuredClone(f.view);
     this.runs = structuredClone(f.runs);
+  }
+
+  /** Every run, newest first. */
+  allRuns(): ScheduleRunInfo[] {
+    return Object.values(this.runs)
+      .flat()
+      .sort((a, b) => b.scheduled_for.localeCompare(a.scheduled_for));
+  }
+
+  private setRun(runId: string, patch: Partial<ScheduleRunInfo>): ScheduleRunInfo | null {
+    let hit: ScheduleRunInfo | null = null;
+    for (const [k, list] of Object.entries(this.runs))
+      this.runs[k] = list.map((x) => {
+        if (x.id !== runId) return x;
+        hit = { ...x, ...patch };
+        return hit;
+      });
+    return hit;
   }
 
   private find(scheduleId: string): ScheduleInfo {
@@ -158,14 +178,19 @@ export class MockSchedules {
     this.runs[s.id] = [r, ...(this.runs[s.id] ?? [])];
     this.put({ ...s, running: true });
     this.hooks.later(() => {
+      const started = this.setRun(r.id, { status: "running", started_at: now() });
+      if (started && started.status === "running") this.hooks.ran?.(structuredClone(started), "started");
+    }, 300);
+    this.hooks.later(() => {
+      const going = this.allRuns().find((x) => x.id === r.id);
+      if (!going || going.status !== "running") return;
       const answer = "Nothing unusual: everything this looks at is as it was this morning.";
-      this.runs[s.id] = (this.runs[s.id] ?? []).map((x) =>
-        x.id === r.id ? { ...x, status: "ok", started_at: r.scheduled_for, finished_at: now(), answer, delivery: "delivered", model_calls: 2, tool_calls: 1 } : x,
-      );
+      const ended = this.setRun(r.id, { status: "ok", finished_at: now(), answer, delivery: "delivered", model_calls: 2, tool_calls: 3 });
+      if (ended) this.hooks.ran?.(structuredClone(ended), "ended");
       const current = this.view.schedules.find((x) => x.id === s.id);
       if (current) this.put({ ...current, running: false, last_run: now(), last_outcome: "ok", last_error: null });
       this.hooks.deliver(s.agent, `agent:${s.agent}:schedule:${s.id}`, `${s.name}: ${answer}`);
-    }, 2500);
+    }, 4500);
     return structuredClone(r);
   }
 
@@ -199,11 +224,21 @@ export class MockSchedules {
       return { runs: structuredClone((this.runs[s.id] ?? []).slice(0, limit)) };
     }
     if (method === "GET" && path === "/runs") {
-      const all = Object.values(this.runs).flat().sort((a, b2) => b2.scheduled_for.localeCompare(a.scheduled_for));
+      // Since and until narrow them by when they were due (ADR 0060).
+      const since = query.get("since"), until = query.get("until");
+      const all = this.allRuns().filter((x) => (!since || x.scheduled_for >= since) && (!until || x.scheduled_for < until));
       return { runs: structuredClone(all.slice(0, Number(query.get("limit") ?? 20))) };
     }
     if (method === "POST" && (r = /^\/runs\/([^/]+)\/cancel$/.exec(path))) {
-      throw new HttpError(404, `there is no run ${r[1]} waiting or going`);
+      const going = this.allRuns().find((x) => x.id === r![1] && (x.status === "running" || x.status === "queued"));
+      if (!going) throw new HttpError(404, `there is no run ${r[1]} waiting or going`);
+      const ended = this.setRun(going.id, { status: "cancelled", finished_at: now(), delivery: "none" });
+      if (going.schedule) {
+        const sched = this.view.schedules.find((x) => x.id === going.schedule);
+        if (sched) this.put({ ...sched, running: false, last_outcome: "cancelled" });
+      }
+      if (ended && going.status === "running") this.hooks.ran?.(structuredClone(ended), "ended");
+      return { ok: true, detail: null };
     }
     return undefined;
   }

@@ -12,3 +12,12 @@ describe("problemWords", () => {
     expect(problemWords(null)).toBe("Not connected");
   });
 });
+
+describe("what Ghost used an app for today", () => {
+  it("counts the day's calls and the ones since, with what was read", async () => {
+    const { usedWords } = await import("../src/screens/apps/model");
+    expect(usedWords(null, [])).toBeNull();
+    expect(usedWords({ calls: 40, changes: 1, bytes: 1_100_000 }, [{ read: true, bytes: 100_000 }, { read: false, bytes: 0 }])).toBe("used 42 times today, 2 changes, 1.2 MB read");
+    expect(usedWords(null, [{ read: true, bytes: 820 }])).toBe("used once today, 820 B read");
+  });
+});

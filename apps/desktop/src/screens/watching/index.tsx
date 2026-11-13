@@ -36,6 +36,7 @@ export default function WatchingScreen(_: RouteProps) {
   const toast = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [view, setView] = useState<WatchingView | null>(null);
+  const [scheduleProblems, setScheduleProblems] = useState<string[]>([]);
   /** The agent's watch a write is going for, and what refused the last one. */
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -105,7 +106,27 @@ export default function WatchingScreen(_: RouteProps) {
         )
       }
     >
-      <Schedules />
+      {/* Everything that can't run, in one place, before anything else: schedules that won't
+          run and the parts of Ghost's folder that are broken. Danger, never amber (amber means
+          only “waiting for your okay”). */}
+      {(scheduleProblems.length > 0 || (view?.problems.length ?? 0) > 0) && (
+        <Notice tone="danger" title={`${count(scheduleProblems.length + (view?.problems.length ?? 0), "thing")} can’t run`} className="wat-notice wat-problems-notice">
+          <p className="wat-notice__lead">Ghost goes on without them. Fix each and it picks the change up.</p>
+          <ul className="wat-problems">
+            {scheduleProblems.map((p) => (
+              <li key={p} className="t-small" data-user-content>
+                {p}
+              </li>
+            ))}
+            {(view?.problems ?? []).map((p) => (
+              <li key={p} className="t-mono t-small" data-user-content>
+                {p}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+      <Schedules onProblems={setScheduleProblems} />
       <div className="wat-rest">
       {loadError && view != null && (
         <Notice tone="danger" title="Couldn’t refresh what Ghost watches" onDismiss={() => setLoadError(null)} className="wat-notice">
@@ -142,19 +163,6 @@ export default function WatchingScreen(_: RouteProps) {
         </div>
       ) : (
         <>
-          {view.problems.length > 0 && (
-            <Notice tone="warn" title={`${count(view.problems.length, "problem")} in Ghost’s folder`} className="wat-notice">
-              <p className="wat-notice__lead">Ghost runs without the part that is broken. Fix the file and it picks the change up.</p>
-              <ul className="wat-problems">
-                {view.problems.map((p) => (
-                  <li key={p} className="t-mono t-small" data-user-content>
-                    {p}
-                  </li>
-                ))}
-              </ul>
-            </Notice>
-          )}
-
           {empty ? (
             <Card>
               <EmptyState

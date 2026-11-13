@@ -447,6 +447,9 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   );
 }
 
+/** Past this a spoken reply's first word is late enough to be felt (`ghost_llm::check::SLOW_FIRST_WORD_SECS`, ADR 0056). */
+const SLOW_FIRST_WORD_MS = 1500;
+
 function CheckedAt({ r }: { r: ModelCheckView }) {
   const when = new Date(r.checked_at);
   return (
@@ -499,8 +502,9 @@ function CheckModel({ m }: { m: ModelCheckModel }) {
       <p className="set-help">
         {fw.median_ms != null ? (
           <>
-            <span className="set-live">First word in {msWords(fw.median_ms)}</span>
+            <span className={fw.median_ms > SLOW_FIRST_WORD_MS ? "set-slow" : "set-live"}>First word in {msWords(fw.median_ms)}</span>
             {fw.worst_ms != null && <>, {msWords(fw.worst_ms)} at worst</>} over {m.samples} calls.
+            {fw.median_ms > SLOW_FIRST_WORD_MS ? " Too slow for a good spoken reply: past 1.5 s the pause before Ghost speaks is felt." : " Quick enough for a spoken reply."}
           </>
         ) : (
           "No words came back to time."
@@ -526,7 +530,7 @@ function CheckResult({ r }: { r: ModelCheckView }) {
   return (
     <Row className="set-model-check">
       {r.advice && (
-        <Notice tone="warn" title="Spoken replies will start slowly">
+        <Notice tone="danger" title="Too slow for a good spoken reply">
           {r.advice}
         </Notice>
       )}

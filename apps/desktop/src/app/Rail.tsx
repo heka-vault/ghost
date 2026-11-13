@@ -109,7 +109,6 @@ export function Rail() {
           aria-label={`Conversation. Ghost: ${state}${sub ? `, ${sub}` : ""}${working > 1 ? `. ${working} at work` : ""}`}
           onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)}
           onPointerLeave={() => setHover(false)}
-          style={{ viewTransitionName: "ghost-presence" } as React.CSSProperties}
         >
           <span className="rail__wisp">
             <Mascot size={36} mood={moodOf(phase, !!off)} hovered={hover} title="" />

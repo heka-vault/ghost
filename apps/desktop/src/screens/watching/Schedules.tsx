@@ -40,12 +40,12 @@ import {
   useToast,
 } from "../../ui";
 import { toolTitle } from "../settings/tools";
-import { DELIVERY, KINDS, OUTCOME, type ScheduleKind, URGENCY, count, madeBy, untilWords, whenWords } from "./model";
+import { DELIVERY, KINDS, OUTCOME, type ScheduleKind, URGENCY, count, madeBy, runErrorWords, untilWords, whenWords } from "./model";
 
 /** How often the list is read again while the screen is open: next and last runs move. */
 const REFRESH_MS = 15_000;
 
-export function Schedules() {
+export function Schedules({ onProblems }: { onProblems?: (problems: string[]) => void } = {}) {
   const { client, waitingVersion } = useGhost();
   const { online } = useLive();
   const toast = useToast();
@@ -69,7 +69,7 @@ export function Schedules() {
     let on = true;
     client
       .schedules()
-      .then((v) => on && (setView(v), setLoadError(null)))
+      .then((v) => on && (setView(v), setLoadError(null), onProblems?.(v.problems)))
       .catch((e) => on && setLoadError(errorText(e)));
     return () => {
       on = false;
@@ -155,17 +155,6 @@ export function Schedules() {
       {failed && (
         <Notice tone="danger" title="That didn’t happen" onDismiss={() => setFailed(null)} className="wat-notice">
           {failed}
-        </Notice>
-      )}
-      {view != null && view.problems.length > 0 && (
-        <Notice tone="warn" title={`${count(view.problems.length, "schedule")} can’t run`} className="wat-notice">
-          <ul className="wat-problems">
-            {view.problems.map((p) => (
-              <li key={p} className="t-small" data-user-content>
-                {p}
-              </li>
-            ))}
-          </ul>
         </Notice>
       )}
       {view == null && loadError ? (
@@ -314,8 +303,8 @@ function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onS
             {by.you ? "" : ` · set up by ${"tool" in by ? toolTitle(by.tool) : maker(by.slug)}`}
           </span>
           {s.last_error && last && last.tone !== "ok" && (
-            <span className="wat-error" data-user-content>
-              {s.last_error}
+            <span className="wat-error" title={s.last_error}>
+              Last run didn’t finish: {runErrorWords(s.last_error)}.
             </span>
           )}
         </span>
