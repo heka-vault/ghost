@@ -75,6 +75,18 @@ pub struct VoiceSettings {
     /// `none` leaves the field out (Haiku 5.5 then thinks adaptively), `disabled` is
     /// sooner and looks less far (`crate::llm::fast_options`).
     pub llm_fast_thinking: Option<String>,
+    /// `GHOST_LLM_FAST_ANSWER_THINKING`: the fast model's thinking setting on the call
+    /// that answers from its own reads; `same` is `GHOST_LLM_FAST_THINKING`'s, `none`
+    /// leaves the field out (`crate::llm::FastAsk`).
+    pub llm_fast_answer_thinking: Option<Option<String>>,
+    /// `GHOST_LLM_FAST_EFFORT`: `output_config.effort` on the fast model's calls; unset or
+    /// `none` leaves the model's own.
+    pub llm_fast_effort: Option<String>,
+    /// `GHOST_LLM_RACE`: with a fast model, ask the main model beside it on every call
+    /// the fast model takes, so a hand-over finds the main model's reply on its way
+    /// (`crate::llm::LlmStage::with_race`). Costs a main-model request per fast call,
+    /// mostly read from the cache and ended before it writes. On by default.
+    pub llm_race: bool,
 
     // STT
     pub stt_model: String,
@@ -237,6 +249,15 @@ impl Default for VoiceSettings {
 impl VoiceSettings {
     /// When the first sound is said (`acks::FirstSound`): as set, never at 0, or chosen
     /// for the connection's own first word when unset.
+    /// How the fast model is asked, per call.
+    pub fn fast_ask(&self) -> crate::llm::FastAsk {
+        crate::llm::FastAsk {
+            thinking: self.llm_fast_thinking.clone(),
+            answer_thinking: self.llm_fast_answer_thinking.clone(),
+            effort: self.llm_fast_effort.clone(),
+        }
+    }
+
     pub fn first_sound(&self) -> Option<crate::acks::FirstSound> {
         match self.first_sound_secs {
             Some(s) if s <= 0.0 || !s.is_finite() => None,
@@ -319,6 +340,16 @@ impl VoiceSettings {
             llm_fast_read_max_chars: usize_or("GHOST_LLM_FAST_READ_MAX_CHARS", 4000)?,
             llm_fast_read_rounds: usize_or("GHOST_LLM_FAST_READ_ROUNDS", 2)?,
             llm_warm: flag("GHOST_LLM_WARM", true),
+            llm_race: flag("GHOST_LLM_RACE", true),
+            llm_fast_answer_thinking: match string("GHOST_LLM_FAST_ANSWER_THINKING", "same")
+                .as_str()
+            {
+                "same" | "" => None,
+                "none" => Some(None),
+                t => Some(Some(t.to_string())),
+            },
+            llm_fast_effort: Some(string("GHOST_LLM_FAST_EFFORT", "none"))
+                .filter(|t| !t.is_empty() && t != "none"),
             llm_fast_thinking: Some(string("GHOST_LLM_FAST_THINKING", "none"))
                 .filter(|t| !t.is_empty() && t != "none"),
             stt_model: string("GHOST_STT_MODEL", "nemo-parakeet-tdt-0.6b-v3"),
@@ -597,6 +628,7 @@ mod tests {
             "with a fast model set, it makes reads itself"
         );
         assert!(s.llm_warm, "the prompt cache is warmed as a session opens");
+        assert!(s.llm_race, "the main model is asked beside the fast one");
         assert_eq!(
             s.llm_fast_thinking, None,
             "the fast model thinks as it chooses"

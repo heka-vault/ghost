@@ -93,10 +93,38 @@ pub fn fast_tools(tools: &Tools) -> Tools {
 /// far: asked what was waiting for triage it read Ghost's own status and answered in 3 of
 /// 3 runs, where with its thinking it went on to the issues in 3 of 3 (2026-11-12, the
 /// harness's deferred apps). Right later beats wrong sooner, so it is left out.
-pub fn fast_options(options: &Options, thinking: Option<&str>) -> Options {
+pub fn fast_options(options: &Options, ask: &FastAsk, after_reads: bool) -> Options {
+    let thinking = match (&ask.answer_thinking, after_reads) {
+        (Some(answer), true) => answer.clone(),
+        _ => ask.thinking.clone(),
+    };
     Options {
-        thinking: thinking.map(str::to_string),
+        thinking,
+        effort: ask.effort.clone(),
         ..options.clone()
+    }
+}
+
+/// How the fast model is asked, per call (`GHOST_LLM_FAST_THINKING`,
+/// `GHOST_LLM_FAST_ANSWER_THINKING`, `GHOST_LLM_FAST_EFFORT`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FastAsk {
+    /// The thinking setting of a turn's first call; None leaves the field out.
+    pub thinking: Option<String>,
+    /// The thinking setting of a call after the fast model's own reads, which answers
+    /// from their results; None is the first call's, `Some(None)` leaves the field out.
+    pub answer_thinking: Option<Option<String>>,
+    /// `output_config.effort` on every fast call; None leaves the model's own.
+    pub effort: Option<String>,
+}
+
+impl FastAsk {
+    /// Only the first call's thinking set, as `GHOST_LLM_FAST_THINKING` alone sets it.
+    pub fn thinking(thinking: Option<&str>) -> Self {
+        Self {
+            thinking: thinking.map(str::to_string),
+            ..Self::default()
+        }
     }
 }
 
@@ -152,16 +180,19 @@ pub const CACHE_FRESH: std::time::Duration = std::time::Duration::from_secs(240)
 static SENT: std::sync::LazyLock<Mutex<std::collections::HashMap<u64, Instant>>> =
     std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
-/// What the cached part of a request is keyed by: the model, the tools, the system prompt
-/// (whose cache marker ends that part) and the thinking setting, which is rendered into
-/// the prompt.
+/// What the cached part of a request is keyed by: the model, the tools, the system prompt,
+/// the messages (the history a session opens with, which the warm-up writes after the
+/// system prompt's marker) and the thinking setting and effort, which are rendered into the
+/// prompt.
 pub fn prefix_key(model: &str, context: &Context, tools: &Tools, options: &Options) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     model.hash(&mut h);
     context.system.hash(&mut h);
+    format!("{:?}", context.messages).hash(&mut h);
     format!("{tools:?}").hash(&mut h);
     options.thinking.hash(&mut h);
+    options.effort.hash(&mut h);
     h.finish()
 }
 
@@ -295,6 +326,9 @@ struct Call {
     handed: Handed,
     /// Which of the fast model's calls it may make itself; None, any call hands over.
     reads: Option<IsRead>,
+    /// Ask the main model beside the fast one (`LlmStage::with_race`): its reply waits
+    /// here and is the turn's if the fast model hands over, and is dropped if not.
+    race: bool,
 }
 
 impl Call {
@@ -308,6 +342,10 @@ impl Call {
     async fn drive(self, tx: mpsc::UnboundedSender<Result<Held, LlmError>>) {
         use std::sync::atomic::Ordering::SeqCst;
         let pre = self.prerender.as_ref();
+        // The main model asked beside the fast one: its events wait in a channel, and its
+        // request ends when this call does unless the fast model hands over to it.
+        let mut raced = (self.race && self.fast.is_some())
+            .then(|| Raced::start(&self.main, &self.context, &self.tools, &self.options));
         if let Some((fast, fast_tools, fast_options)) = &self.fast {
             // The fast model's reply is kept here until it ends: speech is passed on
             // whole, and a call means none of it is.
@@ -433,11 +471,16 @@ impl Call {
                 return;
             }
         }
-        let began = Instant::now();
         if let Some(p) = pre {
             p.begin();
         }
-        let mut stream = self.main.stream(self.context, &self.tools, &self.options);
+        let (began, mut stream) = match raced.take() {
+            Some(r) => (r.began, r.events()),
+            None => (
+                Instant::now(),
+                self.main.stream(self.context, &self.tools, &self.options),
+            ),
+        };
         let mut first = true;
         let mut called = false;
         let mut writing = false;
@@ -515,6 +558,56 @@ impl Call {
     }
 }
 
+/// The main model's request made beside the fast model's (`Call::race`). Nothing reads it
+/// until the fast model hands over; dropped, its task and the request end.
+struct Raced {
+    began: Instant,
+    rx: mpsc::UnboundedReceiver<Result<Event, LlmError>>,
+    task: AbortOnDrop,
+}
+
+impl Raced {
+    fn start(
+        main: &Arc<dyn ModelPort>,
+        context: &Context,
+        tools: &Tools,
+        options: &Options,
+    ) -> Self {
+        let began = Instant::now();
+        let mut stream = main.stream(context.clone(), tools, options);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(async move {
+            while let Some(ev) = stream.next().await {
+                if tx.send(ev).is_err() {
+                    return;
+                }
+            }
+        });
+        Self {
+            began,
+            rx,
+            task: AbortOnDrop(task),
+        }
+    }
+
+    /// What the main model sent and goes on sending, as a stream; the request ends when
+    /// the stream is dropped.
+    fn events(self) -> BoxStream<'static, Result<Event, LlmError>> {
+        Box::pin(futures::stream::unfold(
+            (self.rx, self.task),
+            |(mut rx, guard)| async move { rx.recv().await.map(|ev| (ev, (rx, guard))) },
+        ))
+    }
+}
+
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 struct Speculation {
     text: String,
     events: Events,
@@ -550,8 +643,10 @@ pub struct LlmStage {
     last_results_chars: usize,
     /// Rounds of reads the fast model made in this turn.
     fast_rounds: usize,
-    /// The fast model's thinking setting (`with_fast_thinking`).
-    fast_thinking: Option<String>,
+    /// How the fast model is asked (`with_fast_ask`).
+    fast_ask: FastAsk,
+    /// Ask the main model beside the fast one (`with_race`).
+    race: bool,
 }
 
 impl LlmStage {
@@ -584,13 +679,29 @@ impl LlmStage {
             fast_reads: None,
             last_results_chars: 0,
             fast_rounds: 0,
-            fast_thinking: None,
+            fast_ask: FastAsk::default(),
+            race: false,
         }
+    }
+
+    /// Ask the main model beside the fast one on every call the fast model takes
+    /// (`GHOST_LLM_RACE`): when the fast model hands over, the main model's reply is
+    /// already on its way instead of starting then. Its request is ended unread when the
+    /// fast model answers or reads for itself.
+    pub fn with_race(mut self, race: bool) -> Self {
+        self.race = race;
+        self
     }
 
     /// The fast model's thinking setting; None leaves the field out of its requests.
     pub fn with_fast_thinking(mut self, thinking: Option<String>) -> Self {
-        self.fast_thinking = thinking;
+        self.fast_ask.thinking = thinking;
+        self
+    }
+
+    /// How the fast model is asked, per call (`FastAsk`).
+    pub fn with_fast_ask(mut self, ask: FastAsk) -> Self {
+        self.fast_ask = ask;
         self
     }
 
@@ -622,13 +733,16 @@ impl LlmStage {
         held: Option<(Arc<std::sync::atomic::AtomicU8>, Out)>,
         handed: Handed,
     ) -> (Events, JoinHandle<()>) {
+        // After the fast model's own reads the context ends with their results.
+        let after_reads = matches!(context.messages.last(), Some(Message::Tool { .. }));
         let fast = self.fast.as_ref().filter(|_| first).map(|fast| {
             (
                 fast.clone(),
                 fast_tools(&self.tools),
-                fast_options(&self.options, self.fast_thinking.as_deref()),
+                fast_options(&self.options, &self.fast_ask, after_reads),
             )
         });
+        let race = self.race && fast.is_some();
         Call {
             main: self.model.clone(),
             fast,
@@ -643,6 +757,7 @@ impl LlmStage {
                 .as_ref()
                 .filter(|r| self.fast_rounds < r.rounds)
                 .map(|r| r.is_read.clone()),
+            race,
         }
         .start()
     }
@@ -658,7 +773,7 @@ impl LlmStage {
             jobs.push((
                 fast.clone(),
                 fast_tools(&self.tools),
-                fast_options(&self.options, self.fast_thinking.as_deref()),
+                fast_options(&self.options, &self.fast_ask, false),
             ));
         }
         for (model, tools, options) in jobs {
@@ -1613,13 +1728,34 @@ mod tests {
                 &Options::default()
             )
         );
+        // The history it carries (live, 2026-11-12 23:07 to 23:11: every session's first
+        // call wrote about 3,000 tokens, the turns carried over from the session before,
+        // because a warm-up of the same system prompt and tools within four minutes was
+        // skipped, though the history after them had grown).
+        let mut later = ctx.clone();
+        later.push(Message::user("What's waiting?"));
+        later.push(Message::assistant("Two issues."));
+        assert_ne!(
+            key,
+            prefix_key("m-warm-test", &later, &tools, &Options::default())
+        );
+        assert!(sent_now(prefix_key(
+            "m-warm-test",
+            &later,
+            &tools,
+            &Options::default()
+        )));
         assert_ne!(
             key,
             prefix_key(
                 "m-warm-test",
                 &ctx,
                 &tools,
-                &fast_options(&Options::default(), Some(FAST_THINKING_OFF))
+                &fast_options(
+                    &Options::default(),
+                    &FastAsk::thinking(Some(FAST_THINKING_OFF)),
+                    false
+                )
             )
         );
     }
@@ -1629,12 +1765,40 @@ mod tests {
         // Haiku 5.5 refuses `between_tools` with a 400, so every turn was handed over.
         let main = Options::default();
         assert_eq!(main.thinking.as_deref(), Some("between_tools"));
-        let fast = fast_options(&main, Some(FAST_THINKING_OFF));
+        let fast = fast_options(&main, &FastAsk::thinking(Some(FAST_THINKING_OFF)), false);
         assert_eq!(fast.thinking.as_deref(), Some("disabled"));
         // The default leaves the field out: Haiku 5.5 then thinks as it chooses.
-        assert_eq!(fast_options(&main, None).thinking, None);
+        assert_eq!(
+            fast_options(&main, &FastAsk::default(), false).thinking,
+            None
+        );
         assert_eq!(fast.max_tokens, main.max_tokens);
         assert_eq!(fast.cache_system, main.cache_system);
+        assert_eq!(fast.effort, None);
+    }
+
+    #[test]
+    fn the_fast_models_answer_after_its_reads_may_be_asked_otherwise() {
+        // 2026-11-12: Haiku 5.5 thought 36 to 280 tokens (0.2 to 1.1 s) before answering
+        // from a read's result it had only to say. The answer after its own reads has its
+        // own thinking setting; the first call, which decides what to do, keeps its own.
+        let main = Options::default();
+        let ask = FastAsk {
+            thinking: None,
+            answer_thinking: Some(Some(FAST_THINKING_OFF.into())),
+            effort: Some("low".into()),
+        };
+        let first = fast_options(&main, &ask, false);
+        assert_eq!(first.thinking, None);
+        assert_eq!(first.effort.as_deref(), Some("low"));
+        let answer = fast_options(&main, &ask, true);
+        assert_eq!(answer.thinking.as_deref(), Some(FAST_THINKING_OFF));
+        // Unset, the answer is asked as the first call is.
+        let same = FastAsk::thinking(Some("adaptive"));
+        assert_eq!(
+            fast_options(&main, &same, true).thinking.as_deref(),
+            Some("adaptive")
+        );
     }
 
     async fn held_of(call: Call) -> Vec<String> {
@@ -1666,7 +1830,75 @@ mod tests {
             held: None,
             handed: Handed::default(),
             reads: None,
+            race: false,
         }
+    }
+
+    /// The time from the call to the main model's first word, and every word that came.
+    async fn main_words(call: Call) -> (Duration, Vec<String>) {
+        let began = tokio::time::Instant::now();
+        let (mut rx, _task) = call.start();
+        let mut first = None;
+        let mut words = Vec::new();
+        while let Some(ev) = rx.recv().await {
+            if let Ok(Held::Event(Event::Text(t))) = ev {
+                first.get_or_insert_with(|| began.elapsed());
+                words.push(t.trim().to_string());
+            }
+        }
+        (first.unwrap_or_default(), words)
+    }
+
+    fn hands_over(ttfb: Duration) -> Arc<ScriptedModel> {
+        let change = ScriptedModel::call("", "github_issue_write", serde_json::Map::new());
+        ScriptedModel::new(vec![vec![change]], ttfb)
+    }
+
+    fn says(text: &str, ttfb: Duration) -> Arc<ScriptedModel> {
+        let reply = ScriptedReply {
+            text: text.into(),
+            ..Default::default()
+        };
+        ScriptedModel::new(vec![vec![reply]], ttfb)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_main_model_is_asked_beside_the_fast_one_so_a_hand_over_waits_for_neither() {
+        // 2026-11-12, the real models through the proxy: Haiku 5.5 took 1.3 to 1.9 s to
+        // ask for a change it could not make, then Sonnet 5.5 began from nothing (1.4 to
+        // 2.1 s to its first token): a change paid both, one after the other.
+        let fast = hands_over(Duration::from_millis(900));
+        let main = says("Closed it.", Duration::from_millis(1500));
+        let mut call = call_with(Some(fast.clone()), main.clone());
+        call.race = true;
+        let (took, words) = main_words(call).await;
+        assert_eq!(words, ["Closed", "it."]);
+        assert!(
+            took < Duration::from_millis(1600),
+            "the main model's word came {took:?} after the call, not after both"
+        );
+        // Without the race, the main model starts once the fast one has handed over.
+        let fast = hands_over(Duration::from_millis(900));
+        let main = says("Closed it.", Duration::from_millis(1500));
+        let (took, _) = main_words(call_with(Some(fast), main)).await;
+        assert!(took >= Duration::from_millis(2400), "{took:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_race_the_fast_model_answers_is_dropped_unheard() {
+        // The fast model's plain answer is the reply: nothing of the main model's, asked
+        // beside it, reaches the turn, and its request is ended, not read to the end.
+        let fast = says("Doing well.", Duration::from_millis(500));
+        let main = says("Main words.", Duration::from_millis(200));
+        let mut call = call_with(Some(fast), main.clone());
+        call.race = true;
+        let (_, words) = main_words(call).await;
+        assert_eq!(words, ["Doing", "well."]);
+        assert_eq!(
+            *main.calls.lock().unwrap(),
+            1,
+            "asked once, beside the fast model"
+        );
     }
 
     #[tokio::test]

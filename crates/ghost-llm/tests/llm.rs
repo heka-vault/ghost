@@ -200,6 +200,7 @@ fn test_the_system_prompt_carries_a_cache_marker() {
 fn test_without_the_marker_the_system_prompt_is_a_string() {
     let options = Options {
         cache_system: false,
+        effort: None,
         ..Options::default()
     };
     let params = model(anthropic_target("http://localhost:1")).body(&context(), &tools(), &options);
@@ -617,6 +618,7 @@ async fn the_cache_is_warmed_with_the_turns_own_prefix_and_no_output() {
     let opts = Options {
         thinking: Some("between_tools".into()),
         cache_system: true,
+        effort: None,
         ..Options::default()
     };
     let usage = m.warm(&context(), &tools(), &opts).await.unwrap();

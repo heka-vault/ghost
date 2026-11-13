@@ -188,6 +188,7 @@ impl ModelCheck {
             caches: self.caching.yes(),
             tools: self.tools.yes(),
             streams: self.streaming.yes(),
+            rejects_effort: false,
         }
     }
 
@@ -251,6 +252,7 @@ fn options(max_tokens: u32, thinking: Option<String>, cache_system: bool) -> Opt
         max_tokens,
         thinking,
         cache_system,
+        effort: None,
     }
 }
 
