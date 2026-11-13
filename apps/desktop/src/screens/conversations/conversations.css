@@ -303,3 +303,4 @@
 .conv-look-field__label { margin: 0; font-size: var(--text-md); font-weight: var(--weight-medium); color: var(--text-1); }
 .conv-look-field__help { margin: 0; font-size: var(--text-sm); color: var(--text-3); }
 @media (max-width: 560px) { .conv-look { flex-direction: column; } }
+.conv-record__note { margin: 0 0 var(--space-4); }

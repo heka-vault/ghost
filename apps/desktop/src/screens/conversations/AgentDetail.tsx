@@ -55,7 +55,7 @@ import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
 import { Composer } from "../session/Composer";
 import { rehireAgent, retireAgent, retiredAt } from "./threads";
-import { Transcript } from "./Transcript";
+import { AgentRecord } from "./AgentRecord";
 // The composer's styles live with the session screen, which may not have been opened yet.
 import "../session/session.css";
 import { claimParams, clearParams, designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
@@ -1021,7 +1021,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
               />
             )}
             <h2 className="conv-section-title">The conversation</h2>
-          <Transcript turns={live ? withoutHeld(turns, heldTurns) : turns} lineName={name} limit={TURN_LIMIT} total={detail.turn_count} openAtTop={!isGhost} />
+          <AgentRecord turns={live ? withoutHeld(turns, heldTurns) : turns} slug={slug} name={name} limit={TURN_LIMIT} total={detail.turn_count} />
           </>
         ) : (
           <History

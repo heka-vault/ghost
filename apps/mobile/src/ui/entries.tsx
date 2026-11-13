@@ -4,11 +4,11 @@
  * glance at the colour says which conversation did it.
  */
 import type { AuditEntry } from "@ghost/client-ts";
-import { didNotHappen, lineHue, lineName, relativeTime, splitSummary, statusLabel, statusTone } from "@ghost/ui";
+import { didNotHappen, lineName, relativeTime, splitSummary, statusLabel, statusTone } from "@ghost/ui";
 import { View } from "react-native";
 
 import { space, useColors } from "../theme";
-import { GhostGlyph } from "./Brand";
+import { AgentMark } from "./Brand";
 import { Badge, Row } from "./parts";
 import { Text } from "./Text";
 
@@ -17,10 +17,9 @@ export function entryLine(e: AuditEntry): string {
   return e.conversation ?? "ghost";
 }
 
-/** The ghost in the line's colour, leading a row. */
-export function LineMark({ slug, size = 40 }: { slug: string; size?: number }) {
-  const c = useColors();
-  return <GhostGlyph size={size} color={c.hue[lineHue(slug)].fg} />;
+/** The agent's own mark (its shape and colour, ADR 0061), leading a row. */
+export function LineMark({ slug, size = 40, look }: { slug: string; size?: number; look?: string | null }) {
+  return <AgentMark slug={slug} look={look} size={size} />;
 }
 
 /** The target as a row shows it: an issue ref in mono, a line's name in regular text. */
