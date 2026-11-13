@@ -33,6 +33,14 @@ pub fn api_refusal(r: phone::Refusal) -> Refusal {
 
 #[async_trait]
 impl Controller for Daemon {
+    async fn microphone(&self) -> Option<ghost_api::models::MicrophoneView> {
+        Some(self.mic_view())
+    }
+
+    async fn repair_microphone(&self) -> Result<String, String> {
+        self.repair_mic().await
+    }
+
     /// `conversation`: the line the session opens in (the desktop's Call button); Ghost
     /// when unset. A retired or unknown line is refused.
     async fn wake(&self, first_utterance: Option<String>, conversation: Option<String>) -> bool {

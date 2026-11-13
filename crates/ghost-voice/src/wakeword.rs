@@ -66,6 +66,9 @@ impl Scorer for WakeScorer {
 pub type Recognize = Arc<dyn Fn(Vec<f32>) -> String + Send + Sync>;
 pub type OnMatch = Arc<dyn Fn(WakeMatch) -> BoxFuture<'static, ()> + Send + Sync>;
 pub type OnHeard = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
+/// A check of a hit, as numbers (ADR 0064): the reading's level in dBFS, how many words
+/// Parakeet read, and whether it was the final read. Never the words.
+pub type OnCheck = Arc<dyn Fn(f32, usize, bool) + Send + Sync>;
 
 /// What the passive listener needs to wake on the trained models.
 pub struct Detector {
@@ -87,6 +90,15 @@ pub struct Detector {
 /// goes" (2026-10-30 19:56: 0.45 read back as "Hey guys." and was turned down; the 0.9
 /// match that keeps room talk out of transcript wake takes neither).
 pub const WEAK_FUZZY: f64 = 0.8;
+
+/// The RMS level of float audio in dBFS.
+fn level_of(audio: &[f32]) -> f32 {
+    if audio.is_empty() {
+        return -180.0;
+    }
+    let rms = (audio.iter().map(|x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
+    20.0 * rms.max(1e-9).log10()
+}
 
 pub struct DetectorWakeProcessor {
     d: Detector,
@@ -113,6 +125,7 @@ pub struct DetectorWakeProcessor {
     last_best_log: usize,
     woken: bool,
     done: bool,
+    on_check: Option<OnCheck>,
 }
 
 impl DetectorWakeProcessor {
@@ -146,7 +159,14 @@ impl DetectorWakeProcessor {
             last_best_log: 0,
             woken: false,
             done: false,
+            on_check: None,
         }
+    }
+
+    /// Report each check's numbers (the daemon's microphone health, ADR 0064).
+    pub fn with_on_check(mut self, on_check: Option<OnCheck>) -> Self {
+        self.on_check = on_check;
+        self
     }
 
     pub fn done(&self) -> bool {
@@ -288,10 +308,14 @@ impl DetectorWakeProcessor {
     async fn check(&mut self, final_: bool) {
         let audio = self.heard();
         let described = self.describe(&audio);
+        let level = level_of(&audio);
         let recognize = self.d.recognize.clone();
         let text = tokio::task::spawn_blocking(move || recognize(audio))
             .await
             .unwrap_or_default();
+        if let Some(on_check) = &self.on_check {
+            on_check(level, text.split_whitespace().count(), final_);
+        }
         debug::audio(|| {
             format!(
                 "passive: check{} read {described}",
@@ -619,6 +643,45 @@ mod tests {
         .await;
         assert!(events.is_empty());
         assert_eq!(recognize.calls(), 2); // at the pause, then the whole utterance once it ended
+    }
+
+    #[tokio::test]
+    async fn each_check_reports_its_level_and_word_count_never_its_words() {
+        // ADR 0064: the daemon's microphone health counts loud reads of nothing.
+        let recognize = Recognizer::new(&["", ""]);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let on_check: OnCheck = {
+            let seen = seen.clone();
+            Arc::new(move |level, words, final_| seen.lock().unwrap().push((level, words, final_)))
+        };
+        let on_match: OnMatch = Arc::new(|_| Box::pin(async {}));
+        let mut p = DetectorWakeProcessor::new(
+            detector(FakeScorer::new(&[3]), &recognize, true),
+            on_match,
+            None,
+            0.9,
+            0.3,
+        )
+        .with_on_check(Some(on_check));
+        let (out, _rx) = Out::capture();
+        for f in frames(vec![
+            vec![started()],
+            audio(2.6),
+            vec![stopped()],
+            audio(1.0),
+        ]) {
+            p.process(f, Direction::Down, &out).await;
+        }
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert!(
+            !seen[0].2 && seen[1].2,
+            "the first read, then the final one"
+        );
+        assert!(
+            seen.iter()
+                .all(|(level, words, _)| *words == 0 && *level < -100.0)
+        );
     }
 
     #[tokio::test]

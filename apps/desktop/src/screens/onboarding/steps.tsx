@@ -279,8 +279,13 @@ export function HearStep({ w }: { w: Wizard }) {
   const [installing, setInstalling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const value = device ?? (saved || (d?.echo_cancel_source_present ? "ghost.mic" : ""));
-  const echo = !!d?.echo_cancel_active;
+  // ADR 0064: with the daemon's reading of the machine, unset lets Ghost choose by its case
+  // (an array that cancels on chip heard directly, a headset as it is, ghost.mic where the
+  // canceller runs); without it, ghost.mic when it is there, as before.
+  const mp = d?.microphone ?? null;
+  const value = device ?? (saved || (mp ? "" : d?.echo_cancel_source_present ? "ghost.mic" : ""));
+  const noCancellerNeeded = mp?.case === "on-chip" || mp?.case === "headset";
+  const echo = !!d?.echo_cancel_active || noCancellerNeeded;
   const speech = w.models?.ready ?? null;
   const off = useMicOff();
 
@@ -290,6 +295,8 @@ export function HearStep({ w }: { w: Wizard }) {
     try {
       const r = await w.client.setupEchoCancel(false);
       if (!r.ok) setError(r.detail ?? "The installer stopped without saying why. Run ghostd setup echo-cancel in a terminal to see it.");
+      // A device that cancels echo itself: the installer says so and installs nothing.
+      else if (/no host echo canceller is needed/.test(r.detail ?? "")) setError(null);
       await w.reload();
     } catch (e) {
       setError(errorText(e));
@@ -311,7 +318,7 @@ export function HearStep({ w }: { w: Wizard }) {
     }
   };
 
-  const micLabel = value || "System default";
+  const micLabel = value || (mp ? `Ghost’s choice: ${mp.session_input}` : "System default");
   return (
     <StepFrame
       id="hear"
@@ -335,7 +342,7 @@ export function HearStep({ w }: { w: Wizard }) {
       <VoicePath
         stops={[
           { icon: off ? <MicOff /> : <Mic />, label: off ? "Not listening" : "Your microphone", detail: off ? "Turned off" : micLabel, ok: d ? !off : null },
-          { icon: <AudioLines />, label: "Its own voice taken out", detail: echo ? "ghost.mic" : "Not set up", ok: d ? echo : null },
+          { icon: <AudioLines />, label: "Its own voice taken out", detail: noCancellerNeeded ? (mp?.case === "headset" ? "A headset" : "By the microphone itself") : d?.echo_cancel_active ? "ghost.mic" : "Not set up", ok: d ? echo : null },
           { icon: <Ear />, label: "Listens for its name", detail: speech ? "On this computer" : "Models not here yet", ok: speech },
           { icon: <Cpu />, label: "Your model", detail: "Only after its name", ok: w.progress.state.model === "done" ? true : w.progress.state.model === "unknown" ? null : false },
         ]}
@@ -360,11 +367,33 @@ export function HearStep({ w }: { w: Wizard }) {
               }
             />
           )}
+          {mp && (
+            <ListRow
+              title="How Ghost hears you"
+              description={
+                <>
+                  {mp.summary}
+                  {mp.advice ? ` ${mp.advice}` : ""}
+                  {mp.fell_back ? ` ${mp.fell_back}` : ""}
+                </>
+              }
+            />
+          )}
           <ListRow
             title="Take Ghost’s voice out of the microphone"
-            description={echo ? "Running: PipeWire removes what Ghost says from what it hears." : "One click: adds ghost.mic, so Ghost doesn’t hear itself."}
+            description={
+              noCancellerNeeded
+                ? "Not needed here: Ghost’s voice doesn’t come back through this microphone."
+                : echo
+                  ? "Running: PipeWire removes what Ghost says from what it hears."
+                  : "One click: adds ghost.mic, so Ghost doesn’t hear itself. Headphones help too."
+            }
             trailing={
-              echo ? (
+              noCancellerNeeded ? (
+                <Badge tone="ok" dot>
+                  Not needed
+                </Badge>
+              ) : echo ? (
                 <Badge tone="ok" dot>
                   Running
                 </Badge>

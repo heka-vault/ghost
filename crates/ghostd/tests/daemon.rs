@@ -111,7 +111,18 @@ fn world(tmp: &std::path::Path, wake_mode: &str) -> World {
 
 /// The same, with the ports changed before the daemon is built.
 fn world_with(tmp: &std::path::Path, wake_mode: &str, tweak: impl FnOnce(&mut Ports)) -> World {
-    let (cfg, voice) = settings(tmp, wake_mode);
+    world_from(tmp, wake_mode, |_| {}, tweak)
+}
+
+/// The same, with the voice settings changed too.
+fn world_from(
+    tmp: &std::path::Path,
+    wake_mode: &str,
+    voice_tweak: impl FnOnce(&mut VoiceSettings),
+    tweak: impl FnOnce(&mut Ports),
+) -> World {
+    let (cfg, mut voice) = settings(tmp, wake_mode);
+    voice_tweak(&mut voice);
     std::fs::create_dir_all(tmp.join("rt")).unwrap();
     let spoken: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let ear: Arc<Mutex<Option<Ear>>> = Arc::new(Mutex::new(None));
@@ -688,4 +699,195 @@ async fn a_connected_tool_uses_the_running_ghost_and_is_refused_once_removed() {
         .expect("the daemon stops")
         .unwrap()
         .unwrap();
+}
+
+// --- the microphone path (ADR 0064) ----------------------------------------------------------
+
+const ARRAY: &str = "alsa_input.usb-Example_XVF3800_Array-00.iec958-stereo";
+
+/// The owner's kind of desk: an array that cancels on chip is mic and speakers, with the
+/// host canceller over it.
+fn array_facts() -> ghostd::microphone::SoundFacts {
+    use ghostd::microphone::{Node, SoundFacts};
+    let node =
+        |name: &str, class: &str, device: Option<&str>, channels: u16, extra: &[(&str, &str)]| {
+            let mut props: std::collections::BTreeMap<String, String> = extra
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            props.insert("node.name".into(), name.into());
+            if let Some(d) = device {
+                props.insert("device.id".into(), d.into());
+            }
+            Node {
+                name: name.into(),
+                class: class.into(),
+                description: String::new(),
+                channels,
+                props,
+                running: false,
+            }
+        };
+    let out = "alsa_output.usb-Example_XVF3800_Array-00.analog-stereo";
+    SoundFacts {
+        nodes: vec![
+            node(ARRAY, "Audio/Source", Some("66"), 2, &[]),
+            node(out, "Audio/Sink", Some("66"), 2, &[]),
+            node("ghost.mic", "Audio/Source", None, 1, &[]),
+            node(
+                "ghost.mic.capture",
+                "Stream/Input/Audio",
+                None,
+                1,
+                &[("node.target", ARRAY)],
+            ),
+        ],
+        default_source: Some(ARRAY.into()),
+        default_sink: Some(out.into()),
+    }
+}
+
+/// A passive input that says nothing and logs when it is closed.
+struct LoggedIn(Arc<Mutex<Vec<String>>>);
+
+#[async_trait::async_trait]
+impl MediaIn for LoggedIn {
+    async fn next_frame(&mut self) -> Option<ghost_voice::frames::Audio> {
+        std::future::pending().await
+    }
+}
+
+impl Drop for LoggedIn {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().push("wake closed".into());
+    }
+}
+
+async fn until_log(log: &Arc<Mutex<Vec<String>>>, what: &str) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !log.lock().unwrap().last().is_some_and(|l| l == what) {
+        assert!(
+            Instant::now() < deadline,
+            "never: {what}; log {:?}",
+            log.lock().unwrap()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_wake_and_the_session_open_their_own_inputs_one_at_a_time_and_not_listening_opens_neither()
+ {
+    let tmp = tempfile::tempdir().unwrap();
+    let log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let wake_input = format!("{ARRAY}#0");
+    let w = world_from(
+        tmp.path(),
+        "transcript",
+        |v| {
+            v.input_device = Some("ghost.mic".into());
+            v.wake_input_device = Some(wake_input.clone());
+        },
+        |p| {
+            p.sound_facts = Arc::new(|| Some(array_facts()));
+            p.passive_media = Some({
+                let log = log.clone();
+                Arc::new(move || {
+                    log.lock().unwrap().push("wake open".into());
+                    Ok(Box::new(LoggedIn(log.clone())) as Box<dyn MediaIn>)
+                })
+            });
+            p.desk_media = {
+                let log = log.clone();
+                Arc::new(move |req| {
+                    log.lock().unwrap().push(format!(
+                        "session open {} mic={}",
+                        req.audio.input_device.clone().unwrap_or_default(),
+                        req.mic
+                    ));
+                    Box::pin(async move { Ok(scripted_media().0) })
+                })
+            };
+        },
+    );
+    // The plan: the wake on the array's processed channel, sessions on ghost.mic as set.
+    let plan = w.daemon.mic_plan();
+    assert_eq!(plan.wake.to_string(), wake_input);
+    assert!(plan.session.is_canceller());
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    until(client, "passive", |v| {
+        v["phase"] == "passive" && v["models_ready"] == true
+    })
+    .await;
+    until_log(&log, "wake open").await;
+
+    // A wake: the passive input is closed before the session's opens.
+    client.wake(None).await.unwrap();
+    until_log(&log, "session open ghost.mic mic=true").await;
+    {
+        let l = log.lock().unwrap().clone();
+        let n = l.len();
+        assert_eq!(
+            &l[n - 3..n - 1],
+            &["wake open".to_string(), "wake closed".to_string()],
+            "{l:?}"
+        );
+    }
+    until(client, "the session", |v| {
+        v["phase"] != "passive" && v["session_id"] != Value::Null
+    })
+    .await;
+    // The greeting may still be playing; sleep until it takes.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while client.status().await.unwrap()["phase"] != "passive" {
+        let _ = client.sleep().await;
+        assert!(Instant::now() < deadline, "the session never ended");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    until_log(&log, "wake open").await;
+
+    // Not listening (ADR 0057): the wake's input closes and nothing opens either input;
+    // a typed turn's session has no microphone.
+    client.set_listening(false, None).await.unwrap();
+    until_log(&log, "wake closed").await;
+    client.say("hello").await.unwrap();
+    until_log(&log, "session open ghost.mic mic=false").await;
+    assert!(
+        !log.lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(2)
+            .any(|l| l == "wake open"),
+        "{:?}",
+        log.lock().unwrap()
+    );
+    w.daemon.stop.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(10), run).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_setting_for_a_microphone_that_is_gone_falls_back_to_one_that_is_there() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world_from(
+        tmp.path(),
+        "file",
+        |v| v.input_device = Some("alsa_input.unplugged".into()),
+        |p| p.sound_facts = Arc::new(|| Some(array_facts())),
+    );
+    let plan = w.daemon.mic_plan();
+    // Gone: the machine's own choice, the array's processed channel, not silence.
+    assert_eq!(plan.session.to_string(), format!("{ARRAY}#0"));
+    assert!(
+        plan.fell_back
+            .as_deref()
+            .unwrap()
+            .contains("alsa_input.unplugged")
+    );
+    let session = w.daemon.audio_settings(false).input_device.unwrap();
+    assert_eq!(session, format!("{ARRAY}#0"));
 }

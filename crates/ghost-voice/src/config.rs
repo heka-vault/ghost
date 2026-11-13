@@ -209,7 +209,12 @@ pub struct VoiceSettings {
     pub thinking_volume: f64,
     pub thinking_delay_secs: f64,
 
+    /// `GHOST_INPUT_DEVICE`: what a session hears, `node` or `node#N` (one channel taken
+    /// alone, `ghost_audio::InputSpec`); unset, the default source.
     pub input_device: Option<String>,
+    /// `GHOST_WAKE_INPUT_DEVICE` (ADR 0064): what the wake detector and Parakeet's check of
+    /// a weak hit hear while passive, in the same form; unset, the session's input.
+    pub wake_input_device: Option<String>,
     pub output_device: Option<String>,
     pub cache_dir: PathBuf,
 
@@ -440,6 +445,7 @@ impl VoiceSettings {
             thinking_volume: f64_or("GHOST_THINKING_VOLUME", 0.12)?,
             thinking_delay_secs: f64_or("GHOST_THINKING_DELAY_SECS", 0.5)?,
             input_device: text("GHOST_INPUT_DEVICE"),
+            wake_input_device: text("GHOST_WAKE_INPUT_DEVICE"),
             output_device: text("GHOST_OUTPUT_DEVICE"),
             cache_dir,
             latency: flag("GHOST_LATENCY", true),

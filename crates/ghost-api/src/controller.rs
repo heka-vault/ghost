@@ -125,6 +125,15 @@ pub trait Controller: Send + Sync {
     fn outside_problem(&self) -> Option<String> {
         None
     }
+    /// What Ghost listens on, the machine's case, and the input's health (ADR 0064).
+    async fn microphone(&self) -> Option<crate::models::MicrophoneView> {
+        None
+    }
+    /// The operator pressed Repair (ADR 0064): restart the echo canceller if it is in use
+    /// and reopen the passive microphone. What was done, or why not.
+    async fn repair_microphone(&self) -> Result<String, String> {
+        Err("the daemon is not running".into())
+    }
 }
 
 /// A controller with nothing behind it: every call is refused, nothing is pending.

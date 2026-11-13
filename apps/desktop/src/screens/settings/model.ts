@@ -64,6 +64,8 @@ export const VALUE_KEYS = [
   "GHOST_LLM_HEADERS",
   "GHOST_LLM_TIMEOUT_SECS",
   "GHOST_INPUT_DEVICE",
+  "GHOST_WAKE_INPUT_DEVICE",
+  "GHOST_INPUT_REPAIR",
   "GHOST_WAKE_PHRASES",
   "GHOST_WAKE_FUZZY",
   "GHOST_JEV",
@@ -93,6 +95,8 @@ export const KEY_LABEL: Record<string, string> = {
   OPENAI_API_KEY: "OpenAI password",
   LLM_API_KEY: "Password for your own address",
   GHOST_INPUT_DEVICE: "Microphone",
+  GHOST_WAKE_INPUT_DEVICE: "Wake microphone",
+  GHOST_INPUT_REPAIR: "When the microphone stops hearing well",
   GHOST_WAKE_PHRASES: "Wake phrases",
   GHOST_WAKE_FUZZY: "Wake sensitivity",
   GHOST_JEV: "How Ghost hears your yes",
@@ -109,6 +113,8 @@ export const KEY_LABEL: Record<string, string> = {
 export const KEY_SECTION: Record<string, SectionId> = {
   ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, "model" as SectionId])),
   GHOST_INPUT_DEVICE: "audio",
+  GHOST_WAKE_INPUT_DEVICE: "audio",
+  GHOST_INPUT_REPAIR: "audio",
   GHOST_WAKE_PHRASES: "voice",
   GHOST_WAKE_FUZZY: "voice",
   GHOST_JEV: "voice",
@@ -315,6 +321,38 @@ export function micOptions(d: DevicesView | null, current: string): { value: str
   if (current && !opts.some((o) => o.value === current)) opts.push({ value: current, label: `${current} · not found` });
   return opts;
 }
+
+/**
+ * What the wake detector can listen on (ADR 0064): the session's microphone by default, any
+ * input, and each device with several channels as its first channel alone (`name#0`): an
+ * array that cancels echo on its own chip puts its processed beam there.
+ */
+export function wakeMicOptions(d: DevicesView | null, current: string): { value: string; label: string }[] {
+  const opts: { value: string; label: string }[] = [{ value: "", label: "Same as the microphone" }];
+  if (d?.echo_cancel_source_present) opts.push({ value: "ghost.mic", label: "ghost.mic · cancels Ghost’s own voice" });
+  for (const dev of d?.devices ?? []) {
+    if (dev.max_input_channels <= 0 || dev.name === "ghost.mic" || dev.name === "default") continue;
+    if (dev.max_input_channels > 1) opts.push({ value: `${dev.name}#0`, label: `${dev.name} · first channel alone` });
+    opts.push({ value: dev.name, label: dev.name });
+  }
+  for (const sug of d?.microphone?.suggest ?? []) {
+    if (sug.key === "GHOST_WAKE_INPUT_DEVICE" && !opts.some((o) => o.value === sug.value)) opts.splice(1, 0, { value: sug.value, label: `${sug.value} · suggested` });
+  }
+  if (current && !opts.some((o) => o.value === current)) opts.push({ value: current, label: `${current} · not found` });
+  return opts;
+}
+
+/** The machine's microphone case (ADR 0064), as a badge's words. */
+export const MIC_CASE_LABEL: Record<string, string> = {
+  "on-chip": "Cancels on its own chip",
+  headset: "Headset",
+  "host-canceller": "Ghost’s echo canceller",
+  unprotected: "Nothing cancels Ghost’s voice",
+  unknown: "Not read",
+};
+
+/** The installer's answer for a device that cancels echo itself (infra/pipewire/install.sh). */
+export const installerNotNeeded = (detail: string | null | undefined) => /no host echo canceller is needed/.test(detail ?? "");
 
 /** The microphone Ghost is listening on now, in words. The daemon reports null for the system default. */
 export const micInUse = (d: DevicesView | null) => (d?.input_device ? String(d.input_device) : "System default");

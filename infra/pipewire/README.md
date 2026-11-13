@@ -30,6 +30,32 @@ changing microphone or speakers.
 Requires `libspa-aec-webrtc` (package `pipewire-audio` or `libspa-0.2-modules`
 depending on the distribution).
 
+## When not to install it (ADR 0064)
+
+The host canceller is for a microphone that can hear the speakers and does nothing
+about it: a laptop's microphone beside its speakers, a webcam's microphone with desk
+speakers. It is not for:
+
+- **A device that cancels echo on its own chip, with Ghost playing through it**: a mic
+  array like the reSpeaker XVF3800, a conference puck, a speakerphone. The chip cancels
+  against exactly what it plays, before its beamformer and gain; the host canceller then
+  runs on a signal that is already clean, adds two streams that each run up xruns
+  against a 10 ms block the graph's power-of-two quantum never matches, and drifts over
+  hours until it chops the operator's words (issues #42, #58). Ghost listens to the
+  device directly and takes its processed channel alone (`<node>#0`): mixed down to
+  mono, an array's raw microphone beside the beam would bring the echo back.
+- **A headset**: Ghost's voice is in the operator's ears, not the room.
+
+`install.sh` recognises the first case (the microphone and the speakers on one device
+whose name is a known on-chip canceller) and installs nothing unless `--force` is given.
+`ghostd check` and Settings › Sound say which case the machine is in and what Ghost
+listens on; Ghost chooses by itself when `GHOST_INPUT_DEVICE` is unset.
+
+If the canceller is in use and goes deaf over the day, Ghost notices (loud stretches read
+as no words, again and again) and puts a note on the waiting list with **Repair**, which
+restarts this unit with the graph's rate held so the restart cannot move the graph to
+48 kHz under the devices and silence the output (issue #58).
+
 ## One rate
 
 PipeWire runs its graph at one sample rate, 48 kHz unless told otherwise, and puts a

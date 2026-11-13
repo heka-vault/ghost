@@ -267,6 +267,21 @@ impl HearDesk {
             .and_then(|c| capture_target(&c))
     }
 
+    /// A session's input, its channel taken alone when it names one.
+    async fn open_input(spec: ghost_audio::InputSpec) -> Result<Capture, String> {
+        tokio::task::spawn_blocking(move || {
+            Capture::open(CaptureConfig {
+                ring_seconds: 2.0,
+                name: "ghost-hear".into(),
+                description: "Ghost (Hearing test)".into(),
+                ..CaptureConfig::for_spec(&spec)
+            })
+            .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
     async fn open_capture(node: String, channels: u16) -> Result<Capture, String> {
         tokio::task::spawn_blocking(move || {
             Capture::open(CaptureConfig {
@@ -1168,11 +1183,10 @@ impl HearDesk {
             .ok_or_else(|| HearError::Unavailable("the models are not loaded".into()))?;
         let settings = d.voice();
         let vad = Vad::load(&models.silero, settings.vad_params()).map_err(failed)?;
-        let node = settings
-            .input_device
-            .clone()
-            .unwrap_or_else(|| "ghost.mic".to_string());
-        let aec = Self::open_capture(node.clone(), 1)
+        // What a session hears (ADR 0064): `ghost.mic`, or a device's channel taken alone.
+        let spec = d.mic_plan().session;
+        let node = spec.to_string();
+        let aec = Self::open_input(spec)
             .await
             .map_err(|e| HearError::Unavailable(format!("{node} could not be opened: {e}")))?;
         let raw_node = self.raw_node();

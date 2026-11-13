@@ -32,7 +32,13 @@
 # playback for a moment (README.md, "Two clocks"). A re-run keeps the rule and
 # re-renders it for the current sink; --uninstall removes it.
 #
-# Usage: install.sh [--uninstall | --dry-run] [--sink-drives]
+# A microphone that cancels echo on its own chip against what it plays (a mic array like
+# the reSpeaker XVF3800, a conference puck or speakerphone), with Ghost playing through
+# that same device, needs no host canceller (ADR 0064): Ghost listens to it directly and
+# picks its processed channel itself. The installer says so and installs nothing unless
+# --force is given.
+#
+# Usage: install.sh [--uninstall | --dry-run] [--sink-drives] [--force]
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -47,14 +53,19 @@ LEGACY="$HOME/.config/pipewire/pipewire.conf.d/90-ghost-echo-cancel.conf"
 DRIVER_CONF="$HOME/.config/wireplumber/wireplumber.conf.d/51-ghost-sink-driver.conf"
 RATES_CONF="$HOME/.config/pipewire/pipewire.conf.d/50-ghost-allowed-rates.conf"
 
-MODE="" SINK_DRIVES=false
+MODE="" SINK_DRIVES=false FORCE=false
 for arg in "$@"; do
   case "$arg" in
     --uninstall | --dry-run) MODE="$arg" ;;
     --sink-drives) SINK_DRIVES=true ;;
-    *) echo "usage: install.sh [--uninstall | --dry-run] [--sink-drives]" >&2; exit 2 ;;
+    --force) FORCE=true ;;
+    *) echo "usage: install.sh [--uninstall | --dry-run] [--sink-drives] [--force]" >&2; exit 2 ;;
   esac
 done
+
+# Devices known to cancel echo on chip, by a word of their names (ghost_audio::input).
+ON_CHIP='xvf3800|xvf3000|respeaker|speakerphone|jabra_speak|powerconf'
+cancels_on_chip() { echo "$1" | tr 'A-Z -' 'a-z__' | grep -qE "$ON_CHIP"; }
 
 have_node() { { pactl list short sources; pactl list short sinks; } | awk '{print $2}' | grep -qx "$1"; }
 
@@ -158,6 +169,17 @@ RENDERED=$(sed -e "s|@MIC@|$MIC|g" -e "s|@SINK@|$SINK|g" -e "s|@CHANNEL@|$CHANNE
 
 TWO_CLOCKS=false
 [[ "$(device_of "$MIC")" != "$(device_of "$SINK")" ]] && TWO_CLOCKS=true
+
+if ! $TWO_CLOCKS && cancels_on_chip "$MIC" && ! $FORCE; then
+  echo "$MIC cancels echo on its own chip, and Ghost plays through it ($SINK):"
+  echo "no host echo canceller is needed (ADR 0064). Ghost listens to it directly;"
+  echo "leave GHOST_INPUT_DEVICE unset, or set it to $MIC#0 (its processed channel)."
+  if systemctl --user is-enabled "$UNIT" >/dev/null 2>&1; then
+    echo "The canceller is installed: \`$0 --uninstall\` removes it."
+  fi
+  echo "To install the canceller anyway: $0 --force"
+  exit 0
+fi
 
 # The rule is opt-in; once in place a re-run keeps it, following the current sink.
 DRIVER_RULE=""

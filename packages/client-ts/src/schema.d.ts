@@ -750,6 +750,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/microphone/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Repair the microphone */
+        post: operations["repair_microphone_microphone_repair_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model": {
         parameters: {
             query?: never;
@@ -2347,6 +2364,7 @@ export interface components {
             echo_cancel_active: boolean;
             echo_cancel_source_present: boolean;
             input_device: string | null;
+            microphone?: components["schemas"]["MicrophoneView"] | null;
             output_device: string | null;
         };
         HearBlock: {
@@ -2717,6 +2735,43 @@ export interface components {
              * @enum {string}
              */
             type: "log";
+        };
+        /** @description What Repair did. */
+        MicrophoneRepairView: {
+            message: string;
+        };
+        /**
+         * @description The microphone path (ADR 0064): which case the machine is in, what Ghost did about it,
+         *     and whether the input is still hearing.
+         */
+        MicrophoneView: {
+            /** @description A better choice than the settings make, if there is one. */
+            advice: string | null;
+            /** @description Repair can be pressed now (no session is open). */
+            can_repair: boolean;
+            /**
+             * @description `on-chip` (the device cancels echo itself and Ghost plays through it), `headset`,
+             *     `host-canceller` (ghost.mic), `unprotected` (nothing cancels Ghost's voice), or
+             *     `unknown` (the sound devices couldn't be read).
+             */
+            case: string;
+            /** @description A setting named a device that is not there, and Ghost listens elsewhere. */
+            fell_back: string | null;
+            /** @description What is wrong with the input now, in the words of the note on the waiting list. */
+            problem: string | null;
+            /**
+             * @description `ask` (a note with Repair) or `auto` (repaired when no session is open), from
+             *     `GHOST_INPUT_REPAIR`.
+             */
+            repair: string;
+            /** @description What a session hears (`node`, `node#N` for one channel alone, or `default source`). */
+            session_input: string;
+            /** @description The settings to save for that advice. */
+            suggest: components["schemas"]["SettingSuggestion"][];
+            /** @description The case and what Ghost did about it, in a sentence or two. */
+            summary: string;
+            /** @description What the wake detector hears. */
+            wake_input: string;
         };
         /** @description The latest kept check of the saved connection, if there is one. */
         ModelCheckLatest: {
@@ -3579,6 +3634,11 @@ export interface components {
             restart_required: boolean;
             settings: components["schemas"]["SettingsView"];
         };
+        /** @description A setting Ghost suggests for a better microphone path: the key and the value to save. */
+        SettingSuggestion: {
+            key: string;
+            value: string;
+        };
         /**
          * @description `values`: a None value deletes the key. `secrets`: write-only, into the vault (ADR
          *     0036); None deletes.
@@ -4028,6 +4088,8 @@ export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaListeningRequest = components['schemas']['ListeningRequest'];
 export type SchemaListeningView = components['schemas']['ListeningView'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
+export type SchemaMicrophoneRepairView = components['schemas']['MicrophoneRepairView'];
+export type SchemaMicrophoneView = components['schemas']['MicrophoneView'];
 export type SchemaModelCheckLatest = components['schemas']['ModelCheckLatest'];
 export type SchemaModelCheckModel = components['schemas']['ModelCheckModel'];
 export type SchemaModelCheckTiming = components['schemas']['ModelCheckTiming'];
@@ -4095,6 +4157,7 @@ export type SchemaScheduleRunsView = components['schemas']['ScheduleRunsView'];
 export type SchemaSchedulesView = components['schemas']['SchedulesView'];
 export type SchemaSecretState = components['schemas']['SecretState'];
 export type SchemaSettingsResult = components['schemas']['SettingsResult'];
+export type SchemaSettingSuggestion = components['schemas']['SettingSuggestion'];
 export type SchemaSettingsUpdate = components['schemas']['SettingsUpdate'];
 export type SchemaSettingsView = components['schemas']['SettingsView'];
 export type SchemaShowAppEvent = components['schemas']['ShowAppEvent'];
@@ -5719,6 +5782,33 @@ export interface operations {
                 };
             };
             /** @description Ghost could not keep the switch */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    repair_microphone_microphone_repair_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MicrophoneRepairView"];
+                };
+            };
+            /** @description Ghost could not repair it now */
             503: {
                 headers: {
                     [name: string]: unknown;

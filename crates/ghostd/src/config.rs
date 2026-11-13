@@ -170,6 +170,10 @@ pub struct GhostdSettings {
     /// suppresses the operator against music it is cancelling.
     pub pause_players: bool,
     pub chime: bool,
+    /// `GHOST_INPUT_REPAIR=auto` (ADR 0064): a microphone gone deaf is repaired by itself
+    /// while no session is open, at most once an hour; `ask` (the default) leaves a note
+    /// with Repair.
+    pub input_repair_auto: bool,
 
     /// Coexist with nerd-dictation (F9): its toggle script writes this file while active.
     pub dictation_flag: PathBuf,
@@ -218,6 +222,7 @@ impl Default for GhostdSettings {
             duck_apps: vec!["spotify".into()],
             duck_level: 0.25,
             pause_players: true,
+            input_repair_auto: false,
             chime: true,
             dictation_flag: runtime.join("dictation-audio-duck.state"),
         }
@@ -409,6 +414,9 @@ impl GhostdSettings {
         env.float("GHOST_DUCK_LEVEL", &mut s.duck_level)?;
         env.bool("GHOST_PAUSE_PLAYERS", &mut s.pause_players)?;
         env.bool("GHOST_CHIME", &mut s.chime)?;
+        let mut repair = String::new();
+        env.string("GHOST_INPUT_REPAIR", &mut repair);
+        s.input_repair_auto = repair.trim().eq_ignore_ascii_case("auto");
         env.path("GHOST_DICTATION_FLAG", &mut s.dictation_flag);
         Ok(s)
     }

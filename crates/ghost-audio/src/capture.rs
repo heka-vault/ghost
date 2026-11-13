@@ -38,6 +38,10 @@ pub struct CaptureConfig {
     /// Channels to capture: 1 (the default), or the node's own for a recording of every
     /// channel (the Hearing test's raw array, ADR 0042). Frames are interleaved.
     pub channels: u16,
+    /// Take this one channel of the node alone (ADR 0064): every channel is captured and
+    /// the others are dropped here, so nothing is mixed in (an array's raw microphone
+    /// beside its processed beam). Frames are mono; `channels` is ignored.
+    pub take_channel: Option<u16>,
     /// How much audio the ring holds before the oldest is dropped.
     pub ring_seconds: f32,
     /// The stream's `node.name`.
@@ -55,6 +59,21 @@ impl CaptureConfig {
     /// error). Unset, `ghost.mic` when the echo canceller made one, else the default
     /// source: Ghost starts on any machine, and on open speakers without the canceller it
     /// may hear itself (README.md, "Sound").
+    /// The capture for a resolved input (ADR 0064): its node and the channel taken alone.
+    /// Nothing named (the sound devices could not be read): `for_input(None)`'s rule.
+    pub fn for_spec(spec: &crate::InputSpec) -> Self {
+        let mut c = match &spec.node {
+            Some(n) => Self::for_input(Some(n.clone())),
+            None if spec.channel.is_some() => Self {
+                node: None,
+                ..Self::default()
+            },
+            None => Self::for_input(None),
+        };
+        c.take_channel = spec.channel;
+        c
+    }
+
     pub fn for_input(input_device: Option<String>) -> Self {
         match input_device {
             Some(name) => Self {
@@ -78,6 +97,7 @@ impl Default for CaptureConfig {
             fallback_to_default: false,
             rate: CAPTURE_RATE,
             channels: 1,
+            take_channel: None,
             ring_seconds: 1.0,
             name: "ghost-capture".into(),
             description: "Ghost (listening)".into(),
@@ -177,7 +197,7 @@ fn run(
     config: CaptureConfig,
     producer: Producer<i16>,
     shared: Arc<Shared>,
-    ready: mpsc::Sender<Result<String, AudioError>>,
+    ready: mpsc::Sender<Result<(String, u16), AudioError>>,
     quit: pipewire::channel::Receiver<()>,
 ) {
     let session = match Session::connect("ghost") {
@@ -187,9 +207,16 @@ fn run(
             return;
         }
     };
+    let mut node_channels = None;
     let (target, source) = match &config.node {
         Some(name) => match session.find_node(name) {
-            Ok(Some(node)) => (Some(node.serial_or_id().to_string()), name.clone()),
+            Ok(Some(node)) => {
+                node_channels = node
+                    .props
+                    .get("audio.channels")
+                    .and_then(|c| c.trim().parse::<u16>().ok());
+                (Some(node.serial_or_id().to_string()), name.clone())
+            }
             Ok(None) if config.fallback_to_default => {
                 info!(
                     "audio in: no PipeWire node named {name:?} (no echo canceller set up); \
@@ -207,6 +234,11 @@ fn run(
             }
         },
         None => (None, "default source".to_string()),
+    };
+    // One channel alone: capture all of them (at least up to it), never a mixdown.
+    let channels = match config.take_channel {
+        Some(c) => node_channels.unwrap_or(2).max(c + 1).min(MAX_CHANNELS),
+        None => config.channels.max(1),
     };
     let latency = format!("{}/{}", frame_samples(config.rate), config.rate);
     let rate = format!("1/{}", config.rate);
@@ -253,7 +285,7 @@ fn run(
             return;
         }
     };
-    let format = s16_format_pod(config.rate, config.channels);
+    let format = s16_format_pod(config.rate, channels);
     let mut params = [Pod::from_bytes(&format).expect("a format pod")];
     if let Err(e) = stream.connect(
         Direction::Input,
@@ -269,11 +301,17 @@ fn run(
         let mainloop = mainloop.clone();
         move |()| mainloop.quit()
     });
-    info!(
-        "audio in: {source} @ {}, {} channel(s) (20 ms frames)",
-        config.rate, config.channels
-    );
-    let _ = ready.send(Ok(source));
+    match config.take_channel {
+        Some(c) => info!(
+            "audio in: {source} @ {}, channel {c} of {channels} alone (20 ms frames)",
+            config.rate
+        ),
+        None => info!(
+            "audio in: {source} @ {}, {channels} channel(s) (20 ms frames)",
+            config.rate
+        ),
+    }
+    let _ = ready.send(Ok((source, channels)));
     mainloop.run();
     let _ = stream.disconnect();
     drop(listener);
@@ -290,21 +328,38 @@ pub struct Capture {
     frame: usize,
     rate: u32,
     channels: u16,
+    /// The channel kept when one is taken alone.
+    take: Option<u16>,
     source: String,
+}
+
+/// The most channels a capture opens to take one of them alone.
+pub const MAX_CHANNELS: u16 = 16;
+
+/// Channel `take` of interleaved `samples` with `channels` channels.
+pub fn take_channel(samples: &[i16], channels: u16, take: u16) -> Vec<i16> {
+    let n = usize::from(channels.max(1));
+    let t = usize::from(take).min(n - 1);
+    samples.iter().skip(t).step_by(n).copied().collect()
 }
 
 impl Capture {
     /// Open the stream; returns once it is connected, or with the error that stopped it.
     pub fn open(config: CaptureConfig) -> Result<Capture, AudioError> {
-        let channels = config.channels.max(1);
+        let take = config.take_channel;
+        // With one channel taken alone the node's count is learnt once connected; the ring
+        // holds the most there can be.
+        let ring_channels = match take {
+            Some(_) => MAX_CHANNELS,
+            None => config.channels.max(1),
+        };
         let (producer, consumer) =
-            ring::ring(config.rate * u32::from(channels), config.ring_seconds);
+            ring::ring(config.rate * u32::from(ring_channels), config.ring_seconds);
         let (wake, waiter) =
             Wake::pair().map_err(|e| AudioError::Stream(format!("cannot make an eventfd: {e}")))?;
         let shared = Arc::new(Shared::new(wake));
         let (ready_tx, ready_rx) = mpsc::channel();
         let (quit_tx, quit_rx) = pipewire::channel::channel();
-        let frame = frame_samples(config.rate) * usize::from(channels);
         let rate = config.rate;
         let thread = std::thread::Builder::new()
             .name("ghost-capture".into())
@@ -314,15 +369,16 @@ impl Capture {
             })
             .map_err(|e| AudioError::Stream(format!("cannot start the capture thread: {e}")))?;
         match ready_rx.recv() {
-            Ok(Ok(source)) => Ok(Capture {
+            Ok(Ok((source, channels))) => Ok(Capture {
                 shared,
                 consumer,
                 waiter,
                 quit: quit_tx,
                 thread: Some(thread),
-                frame,
+                frame: frame_samples(rate) * usize::from(channels),
                 rate,
                 channels,
+                take,
                 source,
             }),
             Ok(Err(e)) => {
@@ -345,13 +401,18 @@ impl Capture {
         self.rate
     }
 
-    /// Samples per frame, every channel's (320 at 16 kHz mono).
+    /// Samples per frame as captured, every channel's (320 at 16 kHz mono).
     pub fn frame_samples(&self) -> usize {
         self.frame
     }
 
+    /// The channels of each frame `next_frame` returns: 1 when one is taken alone.
     pub fn channels(&self) -> u16 {
-        self.channels
+        if self.take.is_some() {
+            1
+        } else {
+            self.channels
+        }
     }
 
     pub fn counters(&self) -> CaptureCounters {
@@ -382,6 +443,10 @@ impl Capture {
     pub async fn next_frame(&mut self) -> Option<Frame> {
         loop {
             if let Some(samples) = ring::pop_frame(&mut self.consumer, self.frame) {
+                let samples = match self.take {
+                    Some(t) => take_channel(&samples, self.channels, t),
+                    None => samples,
+                };
                 let at =
                     self.shared.epoch + Duration::from_nanos(self.shared.last_ns.load(Relaxed));
                 return Some(Frame {
@@ -444,5 +509,30 @@ mod tests {
         assert!(!c.fallback_to_default);
         let c = CaptureConfig::for_input(Some("ghost.mic".into()));
         assert!(!c.fallback_to_default);
+    }
+
+    /// ADR 0064: an input with a channel names that device and channel; with nothing
+    /// named, `for_input`'s rule.
+    #[test]
+    fn an_input_spec_names_its_device_and_channel() {
+        let c = CaptureConfig::for_spec(&crate::InputSpec::parse(Some("alsa_input.array#0")));
+        assert_eq!(c.node.as_deref(), Some("alsa_input.array"));
+        assert_eq!(c.take_channel, Some(0));
+        assert!(!c.fallback_to_default);
+        let c = CaptureConfig::for_spec(&crate::InputSpec::default());
+        assert_eq!(c.node.as_deref(), Some(ECHO_CANCELLED_SOURCE));
+        assert!(c.fallback_to_default);
+        assert_eq!(c.take_channel, None);
+    }
+
+    #[test]
+    fn one_channel_is_taken_alone_never_mixed() {
+        // An array's two channels: its processed beam (1s) and its raw microphone (9s).
+        let interleaved: Vec<i16> = (0..6).flat_map(|_| [1i16, 9]).collect();
+        assert_eq!(take_channel(&interleaved, 2, 0), vec![1; 6]);
+        assert_eq!(take_channel(&interleaved, 2, 1), vec![9; 6]);
+        // Past the last channel: the last one, never a panic.
+        assert_eq!(take_channel(&interleaved, 2, 5), vec![9; 6]);
+        assert_eq!(take_channel(&[3, 4, 5], 1, 0), vec![3, 4, 5]);
     }
 }

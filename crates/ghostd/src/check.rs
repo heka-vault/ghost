@@ -443,13 +443,24 @@ pub async fn check_command(
     // Parakeet, Kokoro and the trained wake classifiers where they stay. A missing one
     // names the script or the step that gets it there (docs/releasing.md), never a panic.
     match VoiceSettings::from_vars(|name| env.get(name).cloned()) {
-        Ok(voice) => problems.extend(check_models(
-            &cfg,
-            &voice,
-            &env,
-            &ghost_infer::models::resolve_for_process,
-            out,
-        )),
+        Ok(voice) => {
+            problems.extend(check_models(
+                &cfg,
+                &voice,
+                &env,
+                &ghost_infer::models::resolve_for_process,
+                out,
+            ));
+            // ADR 0064: the machine's case and what Ghost listens on. Said, never a
+            // problem: a machine without sound devices still passes (`make deploy`).
+            for line in crate::microphone::check_lines(
+                voice.input_device.as_deref(),
+                voice.wake_input_device.as_deref(),
+                voice.output_device.as_deref(),
+            ) {
+                let _ = writeln!(out, "{line}");
+            }
+        }
         Err(e) => problems.push(format!("voice settings: {e}")),
     }
 
