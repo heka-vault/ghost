@@ -33,6 +33,15 @@ export const TASKS = STEPS.filter((s) => s.task);
 export const stepLabel = (id: StepId) => STEPS.find((s) => s.id === id)?.label ?? id;
 export const isStep = (v: string | null | undefined): v is StepId => !!v && STEPS.some((s) => s.id === v);
 export const stepIndex = (id: StepId) => STEPS.findIndex((s) => s.id === id);
+/**
+ * A task's number on the rail, 1 to 7, the same 7 the count says; null for the welcome and
+ * done pages, which are not tasks and carry no number (2026-11-13: "0 of 7 done" sat above
+ * nine numbered circles).
+ */
+export const taskNumber = (id: StepId): number | null => {
+  const at = TASKS.findIndex((t) => t.id === id);
+  return at < 0 ? null : at + 1;
+};
 
 /* --------------------------------------------------------------------------- what is done */
 

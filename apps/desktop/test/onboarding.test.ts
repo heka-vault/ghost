@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY, type Facts, firstSentence, parseSaved, progressOf, wakeHelp } from "../src/screens/onboarding/state";
+import { EMPTY, type Facts, firstSentence, parseSaved, progressOf, STEPS, taskNumber, TASKS, wakeHelp } from "../src/screens/onboarding/state";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
 
 const known: Facts = { modelReady: false, modelChecked: null, speechReady: true, echo: false, apps: 0, agents: 0, voiceSet: false };
 
 describe("the first run's progress", () => {
+  it("numbers the tasks the count counts, and not the welcome and done pages", () => {
+    const numbers = STEPS.map((s) => taskNumber(s.id)).filter((n) => n !== null);
+    expect(numbers).toEqual(TASKS.map((_, i) => i + 1));
+    expect(Math.max(...numbers)).toBe(progressOf(known, EMPTY).total);
+    expect(taskNumber("welcome")).toBeNull();
+    expect(taskNumber("done")).toBeNull();
+  });
+
   it("counts only what Ghost reports as done", () => {
     const p = progressOf(known, EMPTY);
     expect(p.done).toBe(0);
