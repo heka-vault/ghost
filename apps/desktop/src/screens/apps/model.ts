@@ -6,6 +6,7 @@
 import type { AppAction, AppView, PermissionLevel, PermissionsView } from "@ghost/client-ts";
 
 import type { Tone } from "../../ui";
+import { bytes } from "../today/telemetry";
 
 export type Level = NonNullable<PermissionLevel>;
 
@@ -204,4 +205,17 @@ export function problemWords(problem: string | null | undefined): string {
   if (/refused|can.t reach|connecterror|unreachable|dns|resolve/.test(p)) return "Ghost can’t reach it";
   if (/exited|crash|killed|signal/.test(p)) return "It stopped when Ghost started it";
   return "It couldn’t start";
+}
+
+/**
+ * What Ghost used an app for today (ADR 0060), from the day's totals and the calls since:
+ * “used 42 times today, 1.2 MB”, or null when it wasn't used.
+ */
+export function usedWords(row: { calls: number; changes: number; bytes: number } | null, live: readonly { read: boolean; bytes: number }[]): string | null {
+  const calls = (row?.calls ?? 0) + live.length;
+  if (!calls) return null;
+  const changes = (row?.changes ?? 0) + live.filter((c) => !c.read).length;
+  const size = bytes((row?.bytes ?? 0) + live.reduce((n, c) => n + c.bytes, 0));
+  const times = calls === 1 ? "once" : calls === 2 ? "twice" : `${calls.toLocaleString("en-US")} times`;
+  return `used ${times} today${changes ? `, ${changes} ${changes === 1 ? "change" : "changes"}` : ""}, ${size} read`;
 }

@@ -28,7 +28,8 @@
 /* ------------------------------------------------------------------ connected */
 .apps-row__title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .apps-row__state { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.apps-row__state.is-warn { color: var(--warn); }
+/* Amber means only “waiting for your okay”: an app that needs the operator is danger, one mid-sign-in the accent. */
+.apps-row__state.is-pending { color: var(--accent-text); }
 .apps-row__state.is-danger { color: var(--danger); }
 .apps-row__actions { display: inline-flex; align-items: center; gap: var(--space-2); }
 .apps-skel-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); }

@@ -14,7 +14,8 @@
 /* The second and third lines: what it reads and how it decides, then what it does. */
 .wat-desc { display: flex; flex-direction: column; gap: var(--space-0_5); overflow-wrap: anywhere; }
 .wat-desc .t-mono { font-variant-ligatures: none; }
-.wat-error { color: var(--danger); font-family: var(--font-mono); font-size: var(--text-sm); }
+.wat-error { color: var(--danger); font-size: var(--text-sm); }
+.wat-problems-notice { margin-bottom: var(--space-8); }
 .wat-off { color: var(--text-2); }
 
 /* Counts and the last look, right-aligned on the card's content edge. */
