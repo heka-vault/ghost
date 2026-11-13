@@ -6584,6 +6584,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "cut_at_start": {
+            "description": "The take begins where the passive listener started (after a session): shorter than\nasked, since what came before was not passive audio.",
+            "type": "boolean"
+          },
           "hit_at": {
             "description": "Where in the take the frame that scored ended, in seconds.",
             "format": "double",
@@ -6659,6 +6663,7 @@
           "scores_end",
           "reading",
           "label",
+          "cut_at_start",
           "bytes"
         ],
         "type": "object"

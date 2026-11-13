@@ -14,10 +14,11 @@ function curve(peak: number, at: number, n = 170): number[] {
   });
 }
 
-function take(i: number, minutesAgo: number, outcome: "accepted" | "refused", score: number, reading: string, label: WakeTakeLabel | null): WakeTakeView {
+function take(i: number, minutesAgo: number, outcome: "accepted" | "refused", score: number, reading: string, label: WakeTakeLabel | null, cut = 0): WakeTakeView {
   const accepted = outcome === "accepted";
-  const secs = accepted ? 13.5 : 5.5;
-  const hit = accepted ? 12 : 4;
+  // `cut`: seconds the listener had run before the hit, after a conversation (shorter than asked)
+  const hit = cut || (accepted ? 12 : 4);
+  const secs = hit + 1.5;
   return {
     id: `20261113T0${9 + Math.floor(i / 6)}${String(10 + i).padStart(2, "0")}00000-${outcome}`,
     at: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
@@ -33,6 +34,7 @@ function take(i: number, minutesAgo: number, outcome: "accepted" | "refused", sc
     scores_end: hit,
     reading,
     label,
+    cut_at_start: cut > 0,
     bytes: accepted ? 1_310_000 : 530_000,
   };
 }
@@ -42,7 +44,7 @@ export class MockWakeTakes {
   private unlabelled = false;
   private takes: WakeTakeView[] = [
     take(0, 4, "refused", 0.41, "A ghost.", null),
-    take(1, 5, "accepted", 0.82, "Hey Ghost, what needs me?", null),
+    take(1, 5, "accepted", 0.82, "Hey Ghost, what needs me?", null, 2.3),
     take(2, 31, "refused", 0.36, "There it goes.", null),
     take(3, 58, "accepted", 0.64, "A ghost, are you there?", "me"),
     take(4, 95, "refused", 0.33, "He goes to the gym.", "not"),

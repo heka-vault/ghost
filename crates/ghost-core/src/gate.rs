@@ -267,7 +267,7 @@ impl WriteGate {
     /// Swap the operator's policy live (the file was edited through the UI).
     pub fn set_autonomy(&self, policy: AutonomyPolicy) {
         (self.log)(&format!(
-            "gate: autonomy policy reloaded from {}",
+            "gate: permissions reloaded from {}",
             policy.source
         ));
         *self.autonomy.write().unwrap_or_else(|e| e.into_inner()) = policy;

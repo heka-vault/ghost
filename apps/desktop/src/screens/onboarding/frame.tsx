@@ -1,10 +1,10 @@
 /** Owner: onboarding. The first run's frame: the step rail, a step's header and footer, the hero presence. */
-import { ArrowLeft, Check, Minus } from "lucide-react";
+import { ArrowLeft, Check, Flag, Hand, Minus } from "lucide-react";
 import { createContext, type FormEvent, type KeyboardEvent, type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button, cx, type GhostPhase, Skeleton, VoicePresence } from "../../ui";
-import { type Progress, type StepDef, STEPS, type StepId, stepIndex, TASKS } from "./state";
+import { type Progress, type StepDef, STEPS, type StepId, stepIndex, taskNumber, TASKS } from "./state";
 
 /* -------------------------------------------------------------------------------- rail */
 
@@ -51,7 +51,7 @@ export function Rail({ current, progress, checking, onGo }: RailProps) {
           <Skeleton width={56} height={12} className="onb-rail__count-skel" />
         ) : (
           <p className="t-small t-2 t-num">
-            {progress.done === progress.total ? "All done" : `${progress.done} of ${progress.total} done`}
+            {progress.done === progress.total ? "All done" : `${progress.done} of ${progress.total} tasks done`}
             {unknown && " · start Ghost to check the rest"}
           </p>
         )}
@@ -79,8 +79,18 @@ export function Rail({ current, progress, checking, onGo }: RailProps) {
                 onClick={() => onGo(s.id)}
                 onFocus={() => setFocusAt(i)}
               >
-                <span className={cx("onb-mark", isDone && "is-done", isCurrent && "is-current", isSkipped && "is-skipped")} aria-hidden>
-                  {isDone ? <Check size={12} strokeWidth={2.5} /> : isSkipped ? <Minus size={12} strokeWidth={2.5} /> : <span className="t-num">{i + 1}</span>}
+                <span className={cx("onb-mark", !s.task && "is-page", isDone && "is-done", isCurrent && "is-current", isSkipped && "is-skipped")} aria-hidden>
+                  {isDone ? (
+                    <Check size={12} strokeWidth={2.5} />
+                  ) : isSkipped ? (
+                    <Minus size={12} strokeWidth={2.5} />
+                  ) : s.id === "welcome" ? (
+                    <Hand size={12} strokeWidth={2} />
+                  ) : s.id === "done" ? (
+                    <Flag size={12} strokeWidth={2} />
+                  ) : (
+                    <span className="t-num">{taskNumber(s.id)}</span>
+                  )}
                 </span>
                 <span className="onb-rail__text">
                   <span className="onb-rail__label">{s.label}</span>

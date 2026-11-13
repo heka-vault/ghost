@@ -389,6 +389,15 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             Box::pin(async {})
         })
     };
+    // Each read of the desk's microphone, as numbers (ADR 0064): a loud segment read as
+    // nothing in a session is the symptom the passive check watches for. The phone's
+    // audio is the phone's, not this microphone's.
+    let on_read: Option<ghost_voice::stt::OnRead> = (origin == SessionOrigin::Desk).then(|| {
+        let health = d.mic_health.clone();
+        Arc::new(move |dbfs: f64, words: usize| {
+            lock(&health).check(dbfs as f32, words, true, std::time::Instant::now());
+        }) as ghost_voice::stt::OnRead
+    });
     // Which words of the reply are heard now (ADR 0058), in step with the voice level.
     let on_said: ghost_voice::level::OnSaid = {
         let d = Arc::downgrade(d);
@@ -485,6 +494,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             on_heard: Some(on_heard),
             on_said: Some(on_said),
             on_result: Some(on_result),
+            on_read,
         },
         wake_phrases: Some(parse_phrases(Some(&cfg.wake_phrases))),
         wake_fuzzy: cfg.wake_fuzzy,

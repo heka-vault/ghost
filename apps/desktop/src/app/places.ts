@@ -16,8 +16,27 @@ export const PLACES: Record<Place, { path: string; label: string }> = {
   watching: { path: "/watching", label: "Open Watching" },
 };
 
+/**
+ * Ghost's own notes, by their key (Ghost's, never an app's text), to the section of the place
+ * that fixes them: the microphone's note to Microphone and speakers, not the top of Sound.
+ */
+const SECTIONS: Record<string, string> = {
+  "input:degraded": "/settings/sound/audio",
+  "models:missing": "/settings/sound/models",
+  "voice:realtime": "/settings/sound/voice-mode",
+};
+
+/** An app's own note (`app:<name>`): its page, where Sign in again is. */
+const APP_KEY = /^app:([A-Za-z0-9_-]{1,64})$/;
+
 /** The route and words for an item's place, or null. */
-export function placeOf(item: Pick<WaitingItemView, "place">): { path: string; label: string } | null {
+export function placeOf(item: Pick<WaitingItemView, "place"> & { key?: string }): { path: string; label: string } | null {
   const p = item.place;
-  return p && Object.prototype.hasOwnProperty.call(PLACES, p) ? PLACES[p as Place] : null;
+  if (!p || !Object.prototype.hasOwnProperty.call(PLACES, p)) return null;
+  const base = PLACES[p as Place];
+  const key = item.key ?? "";
+  const app = p === "apps" ? APP_KEY.exec(key) : null;
+  if (app) return { path: `/apps/${encodeURIComponent(app[1])}`, label: "Open the app" };
+  const section = SECTIONS[key];
+  return section && section.startsWith(base.path) ? { path: section, label: base.label } : base;
 }

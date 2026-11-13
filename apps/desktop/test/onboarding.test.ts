@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY, type Facts, firstSentence, parseSaved, progressOf, wakeHelp } from "../src/screens/onboarding/state";
+import { EMPTY, type Facts, firstSentence, parseSaved, inputName, progressOf, STEPS, taskNumber, TASKS, wakeHelp } from "../src/screens/onboarding/state";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
 
 const known: Facts = { modelReady: false, modelChecked: null, speechReady: true, echo: false, apps: 0, agents: 0, voiceSet: false };
 
 describe("the first run's progress", () => {
+  it("numbers the tasks the count counts, and not the welcome and done pages", () => {
+    const numbers = STEPS.map((s) => taskNumber(s.id)).filter((n) => n !== null);
+    expect(numbers).toEqual(TASKS.map((_, i) => i + 1));
+    expect(Math.max(...numbers)).toBe(progressOf(known, EMPTY).total);
+    expect(taskNumber("welcome")).toBeNull();
+    expect(taskNumber("done")).toBeNull();
+  });
+
   it("counts only what Ghost reports as done", () => {
     const p = progressOf(known, EMPTY);
     expect(p.done).toBe(0);
@@ -99,5 +107,14 @@ describe("a catalog entry's description", () => {
   it("keeps the maker's first sentence", () => {
     expect(firstSentence("Read and write issues on GitHub. Also pull requests.")).toBe("Read and write issues on GitHub.");
     expect(firstSentence("x".repeat(200)).endsWith("…")).toBe(true);
+  });
+});
+
+describe("an input's name", () => {
+  it("reads a PipeWire node as the device", () => {
+    expect(inputName("alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_114993701262400500-00.iec958-stereo#0")).toBe("Seeed Studio reSpeaker XVF3800 4-Mic Array, channel 1");
+    expect(inputName("alsa_input.usb-Shure_MV7+-00.analog-stereo")).toBe("Shure MV7+");
+    expect(inputName("ghost.mic")).toBe("ghost.mic");
+    expect(inputName("default source")).toBe("default source");
   });
 });

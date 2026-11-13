@@ -33,6 +33,15 @@ export const TASKS = STEPS.filter((s) => s.task);
 export const stepLabel = (id: StepId) => STEPS.find((s) => s.id === id)?.label ?? id;
 export const isStep = (v: string | null | undefined): v is StepId => !!v && STEPS.some((s) => s.id === v);
 export const stepIndex = (id: StepId) => STEPS.findIndex((s) => s.id === id);
+/**
+ * A task's number on the rail, 1 to 7, the same 7 the count says; null for the welcome and
+ * done pages, which are not tasks and carry no number (2026-11-13: "0 of 7 done" sat above
+ * nine numbered circles).
+ */
+export const taskNumber = (id: StepId): number | null => {
+  const at = TASKS.findIndex((t) => t.id === id);
+  return at < 0 ? null : at + 1;
+};
 
 /* --------------------------------------------------------------------------- what is done */
 
@@ -218,4 +227,19 @@ export function firstSentence(t: string): string {
   const s = t.trim();
   const m = s.match(/^.{20,160}?[.!?](\s|$)/);
   return (m ? m[0] : s.length > 160 ? `${s.slice(0, 157)}…` : s).trim();
+}
+
+/**
+ * A PipeWire input's node as a person reads it: `alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_1149…-00.iec958-stereo#0`
+ * is "Seeed Studio reSpeaker XVF3800 4-Mic Array, channel 1" (2026-11-13: the raw node ran six
+ * lines on the hear step). `ghost.mic` and anything not shaped like an ALSA node stay as they are.
+ */
+export function inputName(node: string): string {
+  const m = /^alsa_input\.(.+?)(?:#(\d+))?$/.exec(node.trim());
+  if (!m) return node;
+  let name = m[1].replace(/^(usb|pci|platform)-/, "");
+  name = name.split(".")[0]; // the profile: iec958-stereo, analog-stereo
+  name = name.replace(/_[0-9A-Fa-f]{8,}(-\d+)?$/, "").replace(/-\d+$/, ""); // the serial
+  name = name.replace(/_/g, " ").trim() || node;
+  return m[2] !== undefined ? `${name}, channel ${Number(m[2]) + 1}` : name;
 }

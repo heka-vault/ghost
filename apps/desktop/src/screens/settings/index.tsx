@@ -430,7 +430,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   // two seconds pass. The watch survives re-runs of the effect (StrictMode, a reload) until
   // one of those ends it. An old link to the Apps or Skills section lands on that page.
   // `?settings=pairing` opens on Phone. Each happens once: the query stays, the operator moves on.
-  const target = params.get("section");
+  // ?section=voice, or /settings/sound/audio (a waiting note's place)
+  const target = params.get("section") ?? route.section ?? null;
   const sentOnce = useRef(false);
   useEffect(() => {
     if (sentOnce.current) return;
@@ -1029,6 +1030,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         <JevControl value={jev} onChange={(val) => setValue("GHOST_JEV", val === "auto" && !s.values.GHOST_JEV ? "" : val)} />
                       </Field>
                     </Row>
+                    <WakeTakesRow />
                   </Card>
                   <p className="set-promise-line">
                     <ShieldCheck size={14} aria-hidden />
@@ -1114,7 +1116,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                             {micPath.advice ? ` ${micPath.advice}` : ""}
                           </>
                         }
-                        meta={<Badge size="sm" tone={micPath.case === "unprotected" ? "warn" : micPath.case === "unknown" ? undefined : "ok"}>{MIC_CASE_LABEL[micPath.case] ?? micPath.case}</Badge>}
+                        meta={<Badge size="sm" dot tone={micPath.case === "unprotected" ? "warn" : micPath.case === "unknown" ? undefined : "ok"}>{MIC_CASE_LABEL[micPath.case] ?? micPath.case}</Badge>}
                         trailing={
                           suggested.length ? (
                             <Button size="sm" variant="secondary" onClick={() => setValues(Object.fromEntries(suggested.map((x) => [x.key, x.value])))}>
@@ -1124,7 +1126,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         }
                       />
                     )}
-                    <WakeTakesRow />
                     <Row>
                       <Field
                         layout="inline"
@@ -1176,7 +1177,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                       <Field
                         layout="inline"
                         id={fieldId("GHOST_INPUT_REPAIR")}
-                        label="When the microphone stops hearing well"
+                        label="If it stops hearing well"
                         detail="GHOST_INPUT_REPAIR"
                         help="Ghost notices when loud speech keeps reading as nothing. It can leave a note with Repair, or repair it by itself while no session is open (at most once an hour)."
                       >

@@ -431,6 +431,9 @@ pub struct SessionHooks {
     pub on_said: Option<crate::level::OnSaid>,
     /// Each call and what it returned (`crate::tools::OnResult`, ADR 0058).
     pub on_result: Option<crate::tools::OnResult>,
+    /// Each segment's read as numbers, level and word count (`crate::stt::OnRead`): the
+    /// microphone's health (ADR 0064). Never the words or the audio.
+    pub on_read: Option<crate::stt::OnRead>,
 }
 
 /// How a session opens.
@@ -656,6 +659,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     let on_level = p.hooks.on_level;
     let on_said = p.hooks.on_said;
     let on_result = p.hooks.on_result;
+    let on_read = p.hooks.on_read;
 
     let runtime = p.conversations.map(|convs| {
         sources.push(ghost_core::conversations::conversations_source(&convs));
@@ -924,7 +928,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             .with_closing_start_secs(settings.vad_closing_start_secs)
             .with_speaking(speaking.clone())
             .with_early_read(settings.stt_early_read)
-            .with_early_read_after(settings.stt_early_read_after_secs),
+            .with_early_read_after(settings.stt_early_read_after_secs)
+            .with_on_read(on_read),
         ),
     ));
     let hold_gate = HoldGate::new(

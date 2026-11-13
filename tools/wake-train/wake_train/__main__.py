@@ -246,7 +246,8 @@ def main(argv: list[str] | None = None) -> int:
     log(
         f"streams: {len(all_streams)} in {len(sets)} sets ({len(missing)} missing); kept takes: "
         f"{len(kept)}, {sum(1 for _, lab in kept_used if lab == 'pos')} me, "
-        f"{sum(1 for _, lab in kept_used if lab == 'neg')} not a wake, the rest unused"
+        f"{sum(1 for _, lab in kept_used if lab == 'neg')} not a wake, the rest unused; "
+        f"{sum(1 for t, _ in kept_used if t.cut_at_start)} used begin where the listener started"
     )
     for m in missing:
         log(f"  missing, skipped: {m}")

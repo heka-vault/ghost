@@ -629,6 +629,34 @@ fn through_daemon(
     0
 }
 
+/// What uses each password, read from Ghost's folder while Ghost isn't running: Ghost's own
+/// uses, each app in `apps.json` that names it (`${NAME}` in its address, headers, `env` or
+/// arguments) and each webhook in `hooks.json`, as the daemon's list says them
+/// (`ghost_api::passwords::used_by`). Before this, a token only an app named read as
+/// "nothing names it" whenever Ghost was stopped (2026-11-13).
+fn used_by_files(config_dir: &Path) -> BTreeMap<String, Vec<String>> {
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, what) in GHOST_USES {
+        if name != "GITHUB_TOKEN" {
+            out.entry(name.to_string())
+                .or_default()
+                .push(what.to_string());
+        }
+    }
+    for spec in load_apps(&config_dir.join(APPS_FILE)).apps {
+        for name in spec.secrets() {
+            out.entry(name).or_default().push(spec.shown());
+        }
+    }
+    let folder = GhostFolder::<Declared>::new(config_dir);
+    for hook in folder.hooks.values() {
+        out.entry(hook.secret_name())
+            .or_default()
+            .push(format!("Webhook {}", hook.name));
+    }
+    out
+}
+
 /// Ghost isn't running: the vault file itself. The daemon reads it at its next start.
 fn direct(
     cfg: &GhostdSettings,
@@ -649,15 +677,12 @@ fn direct(
         return i32::from(!opened);
     }
     if cmd == "list" {
+        let uses = used_by_files(&cfg.config_dir);
         let rows: Vec<Value> = vault
             .info()
             .iter()
             .map(|m| {
-                let used_by: Vec<&str> = GHOST_USES
-                    .iter()
-                    .filter(|(n, _)| *n == m.name)
-                    .map(|(_, u)| *u)
-                    .collect();
+                let used_by = uses.get(&m.name).cloned().unwrap_or_default();
                 json!({
                     "name": m.name,
                     "set": true,
@@ -986,6 +1011,27 @@ mod tests {
         );
         assert!(text.contains("no such key [password: ANTHROPIC_AUTH_TOKEN]")); // the cause too
         assert!(text.contains("ValueError: nothing secret here"));
+    }
+
+    #[test]
+    fn a_token_an_app_names_is_used_by_that_app_while_ghost_is_stopped() {
+        // `ghostd passwords list` with Ghost stopped said "nothing names it" for the tokens
+        // two connected GitHub apps pass in their `env`.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(APPS_FILE),
+            r#"{"mcpServers": {
+                "github_work": {"command": "github-mcp", "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${WORK_TOKEN}"}},
+                "docs": {"url": "https://example.test/mcp", "headers": {"Authorization": "Bearer ${DOCS_KEY}"}}
+            }}"#,
+        )
+        .unwrap();
+        let uses = used_by_files(tmp.path());
+        assert_eq!(uses["WORK_TOKEN"].len(), 1, "{uses:?}");
+        assert_eq!(uses["DOCS_KEY"].len(), 1, "{uses:?}");
+        assert!(!uses["WORK_TOKEN"][0].is_empty());
+        // and Ghost's own still are
+        assert!(uses.contains_key("HF_TOKEN"));
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //!   the same moment from it, and writes the take off the async runtime.
 //! - [`ArrayTape`] is that second stream: the raw array under `ghost.mic` (the capture
 //!   target of `echo-cancel.conf`, as the Hearing test finds it), kept in memory for the
-//!   last 20 s and only while the passive listener runs ([`TapedWake`]). It is never
+//!   last 30 s and only while the passive listener runs ([`TapedWake`]). It is never
 //!   opened while listening is off (ADR 0057): the passive loop does not wait then.
 //! - [`WakeTakesDesk`] serves the control API's routes: the list, the choice, labels,
 //!   deleting, and playing a take through Ghost's own speaker.
@@ -31,8 +31,10 @@ use tracing::{info, warn};
 use crate::daemon::{Daemon, lock};
 use crate::wake::WakeDetector;
 
-/// How much of the array's stream is kept in memory: more than any take.
-pub const TAPE_SECS: f64 = 20.0;
+/// How much of the array's stream is kept in memory: more than any take and the longest
+/// request after its hit (an accepted take is written when the operator finishes, up to
+/// `MAX_LISTEN_SECS` after it), so the array's copy is as long as the detector's.
+pub const TAPE_SECS: f64 = 30.0;
 const RAW_CHANNELS: u16 = 2;
 
 // --- the array's stream beside the detector's ----------------------------------------------
@@ -41,6 +43,17 @@ struct Ring {
     buf: VecDeque<i16>,
     channels: u16,
     newest: Option<Instant>,
+}
+
+impl Ring {
+    /// Add the newest samples, keeping the last `TAPE_SECS`.
+    fn add(&mut self, samples: &[i16], at: Instant) {
+        let keep = (TAPE_SECS * f64::from(RATE)) as usize * usize::from(self.channels);
+        self.buf.extend(samples.iter().copied());
+        let over = self.buf.len().saturating_sub(keep);
+        self.buf.drain(..over);
+        self.newest = Some(at);
+    }
 }
 
 pub struct ArrayTape {
@@ -94,13 +107,8 @@ impl ArrayTape {
                 }
                 Err(_) => return,
             };
-            let keep = (TAPE_SECS * f64::from(RATE)) as usize * usize::from(RAW_CHANNELS);
             while let Some(frame) = cap.next_frame().await {
-                let mut r = lock(&ring);
-                r.buf.extend(frame.samples.iter().copied());
-                let over = r.buf.len().saturating_sub(keep);
-                r.buf.drain(..over);
-                r.newest = Some(Instant::now());
+                lock(&ring).add(&frame.samples, Instant::now());
             }
         }));
     }
@@ -117,9 +125,7 @@ impl ArrayTape {
 
     /// `push` for tests: as the capture loop does.
     pub fn push(&self, samples: &[i16], at: Instant) {
-        let mut r = lock(&self.ring);
-        r.buf.extend(samples.iter().copied());
-        r.newest = Some(at);
+        lock(&self.ring).add(samples, at);
     }
 
     /// `secs` of the array's stream ending `ago` seconds before now, interleaved: as much
@@ -272,6 +278,7 @@ pub fn take_view(m: TakeMeta) -> WakeTakeView {
         scores_end: m.scores_end,
         reading: m.reading,
         label: m.label.map(label_view),
+        cut_at_start: m.cut_at_start,
         bytes: m.bytes,
     }
 }
@@ -442,6 +449,19 @@ mod tests {
         settle().await;
         settle().await;
         assert!(!tmp.path().join(ghost_core::wake_takes::FOLDER).exists());
+    }
+
+    #[test]
+    fn the_tape_holds_a_whole_accepted_take_written_after_a_long_request() {
+        // 12 s before the hit and 1.5 s after, written when the operator finishes up to
+        // 12 s after the hit: the array's copy is as long as the detector's.
+        let tape = ArrayTape::new("n".into());
+        tape.push(
+            &vec![3i16; 40 * 16_000 * 2],
+            Instant::now() + Duration::from_secs(5),
+        );
+        let (_, pcm) = tape.slice(13.5, 10.5).unwrap();
+        assert_eq!(pcm.len(), (13.5 * 16_000.0) as usize * 2);
     }
 
     #[test]

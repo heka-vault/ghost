@@ -168,6 +168,8 @@ class KeptTake:
     at: str
     hit_at: float = TAKE_PRE_SECS  # seconds into the take where the scored frame ended
     array: Path | None = None  # the array's own stream, when kept
+    # begins where the passive listener started (after a session): shorter than asked
+    cut_at_start: bool = False
 
     @property
     def group(self) -> str:
@@ -199,6 +201,7 @@ def read_kept(folder: Path) -> list[KeptTake]:
                     array=meta.with_suffix("").with_suffix(".array.wav")
                     if meta.with_suffix("").with_suffix(".array.wav").is_file()
                     else None,
+                    cut_at_start=bool(m.get("cut_at_start", False)),
                 )
             )
         except (ValueError, KeyError, TypeError):

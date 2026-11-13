@@ -482,7 +482,7 @@ pub async fn check_command(
 
     let autonomy = match AutonomyPolicy::load(&cfg.policy_path) {
         Ok(p) => {
-            let _ = writeln!(out, "autonomy policy: {}", p.source);
+            let _ = writeln!(out, "permissions: {}", p.source);
             p
         }
         Err(e) => {

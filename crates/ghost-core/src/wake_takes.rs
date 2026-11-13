@@ -125,6 +125,12 @@ pub struct TakeMeta {
     pub reading: Option<String>,
     #[serde(default)]
     pub label: Option<Label>,
+    /// The take begins where the passive listener started (after a session, a restart, or
+    /// listening turned on), so it holds less than `PRE_*_SECS` before the hit: what came
+    /// before was not passive audio and is not kept. The retraining looks for no missed
+    /// attempt before such a take's start.
+    #[serde(default)]
+    pub cut_at_start: bool,
     /// Bytes on disk, every file of the take.
     #[serde(default)]
     pub bytes: u64,
@@ -147,6 +153,8 @@ pub struct NewTake {
     pub scores_end: usize,
     /// The array's stream over the same moment, interleaved, with its channel count.
     pub array: Option<(String, u16, Vec<i16>)>,
+    /// The take begins where the passive listener started, short of `PRE_*_SECS`.
+    pub cut_at_start: bool,
 }
 
 /// How much is kept.
@@ -276,6 +284,7 @@ impl Takes {
             scores_end: t.scores_end as f64 / rate,
             reading,
             label: None,
+            cut_at_start: t.cut_at_start,
             bytes,
         };
         let body = serde_json::to_vec_pretty(&meta).map_err(io::Error::other)?;
@@ -504,6 +513,7 @@ mod tests {
             scores: vec![0.1, 0.3, 0.45],
             scores_end: n.saturating_sub(24_000),
             array: None,
+            cut_at_start: false,
         }
     }
 
@@ -616,6 +626,23 @@ mod tests {
         assert!(t.delete(&m.id).unwrap());
         assert!(files(&tmp.path().join(FOLDER)).is_empty());
         assert!(t.label("../../etc/passwd", None).is_err());
+    }
+
+    #[test]
+    fn a_take_cut_at_the_listeners_start_says_so() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = Takes::new(tmp.path());
+        let whole = t.keep(take(true, 3.0)).unwrap().unwrap();
+        assert!(!whole.cut_at_start);
+        let mut nt = take(true, 3.0);
+        nt.cut_at_start = true;
+        let cut = t.keep(nt).unwrap().unwrap();
+        assert!(t.get(&cut.id).unwrap().cut_at_start);
+        // a take written before the field reads as whole
+        let mut v: serde_json::Value =
+            serde_json::from_slice(&fs::read(t.path(&whole.id, "json").unwrap()).unwrap()).unwrap();
+        v.as_object_mut().unwrap().remove("cut_at_start");
+        assert!(!serde_json::from_value::<TakeMeta>(v).unwrap().cut_at_start);
     }
 
     #[test]
