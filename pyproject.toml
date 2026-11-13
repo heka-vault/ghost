@@ -18,7 +18,7 @@ package = false
 
 [tool.uv.workspace]
 members = ["tools"]
-exclude = ["tools/oracle", "tools/voice-trial"]
+exclude = ["tools/oracle", "tools/voice-trial", "tools/wake-train"]
 
 [dependency-groups]
 dev = ["pytest>=8.3", "ruff>=0.8"]

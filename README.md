@@ -211,10 +211,13 @@ is not logged, stored or shown. With listening off, the microphone isn't opened 
 - the transcript of each conversation after the wake word, and what agents did on their own
   (`~/.local/share/ghost/ghost.db`), and the audit log of changes;
 - recordings you make on purpose in the Hearing test (`~/.local/share/ghost/hear/`);
-- recordings used to learn your voice: newer builds keep, by default and only on this machine,
-  the sound of each time Ghost thinks it heard its name and of the near misses. Where your build
-  does this, Settings and the docs say where they are and how to turn it off; deleting
-  `~/.local/share/ghost/` (with Ghost stopped) removes everything Ghost has kept, these included;
+- **wake takes**: Ghost keeps the sound of each time it thinks it heard its name, on this
+  computer, to learn your voice: a few seconds around each wake and each near miss its check
+  turned down, what Parakeet read and how sure the detector was
+  (`~/.local/share/ghost/wake/takes/`, at most 1 GB, the oldest go first). On by default; turn
+  it off or delete it all in Settings › Sound, label takes in the Hearing test and retrain the
+  detector on your own voice with `make wake-train` ([docs/wake-takes.md](docs/wake-takes.md));
+  deleting `~/.local/share/ghost/` (with Ghost stopped) removes everything Ghost has kept;
 - `GHOST_DEBUG_AUDIO=1`, off by default and set only by you, prints what Ghost heard (idle
   included) to your terminal, not to a file.
 

@@ -39,6 +39,8 @@ WORKSPACE = ("ghost", "ghost-tools")
 ORACLE = "ghost-oracle"
 # Kokoro's split and the third round's measurements (ADR 0053), its own lock too.
 VOICE_TRIAL = "ghost-voice-trial"
+# Retraining the wake detector on the operator's takes (ADR 0064), its own lock too.
+WAKE_TRAIN = "ghost-wake-train"
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,8 @@ COPIES: tuple[Copy, ...] = (
     _lock("tools/oracle/uv.lock", ORACLE),
     _project_toml("tools/voice-trial/pyproject.toml"),
     _lock("tools/voice-trial/uv.lock", VOICE_TRIAL),
+    _project_toml("tools/wake-train/pyproject.toml"),
+    _lock("tools/wake-train/uv.lock", WAKE_TRAIN),
     _top_json("package.json"),
     _top_json("apps/desktop/package.json"),
     _top_json("apps/mobile/package.json"),
