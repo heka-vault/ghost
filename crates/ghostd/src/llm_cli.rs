@@ -78,7 +78,7 @@ pub fn report(check: &Value) -> Vec<String> {
     out
 }
 
-/// The realtime voice's check (ADR 0062), as lines for a terminal.
+/// The realtime voice's check (ADR 0063), as lines for a terminal.
 pub fn realtime_report(check: &Value) -> Vec<String> {
     let mut out = vec![format!(
         "Realtime voice: {} {}",
@@ -114,7 +114,7 @@ pub fn realtime_report(check: &Value) -> Vec<String> {
 
 /// `ghostd llm …`. 0 when the check ran and every model answered, 1 when one didn't,
 /// 2 for a usage error or no daemon. With `--realtime`, or when the realtime voice is
-/// chosen, its connection is checked too (ADR 0062).
+/// chosen, its connection is checked too (ADR 0063).
 pub async fn llm_cli(
     args: &[String],
     client: &ghost_api::client::GhostClient,

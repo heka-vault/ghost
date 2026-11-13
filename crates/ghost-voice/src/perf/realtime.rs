@@ -1,5 +1,5 @@
 //! `ghost-perf realtime` (`make perf-turns REALTIME_KEY_ENV=VAR`): the realtime voice
-//! against a real provider (ADR 0062), with spoken lines rendered by Kokoro and streamed at
+//! against a real provider (ADR 0063), with spoken lines rendered by Kokoro and streamed at
 //! the pace of speech, as the microphone would.
 //!
 //! For each line it measures the first sound (the end of the line's speech to the

@@ -375,7 +375,7 @@ pub struct Daemon {
     followed_vault: AtomicBool,
     /// The last model load's failure while it is tried again; on the waiting list meanwhile.
     models_problem: Mutex<Option<String>>,
-    /// Why the realtime voice was not used or stopped, for the waiting list (ADR 0062).
+    /// Why the realtime voice was not used or stopped, for the waiting list (ADR 0063).
     pub(crate) realtime_note: Mutex<Option<String>>,
     pub(crate) realtime_check: Mutex<Option<ghost_api::realtime::RealtimeCheckView>>,
     /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
@@ -886,7 +886,7 @@ impl Daemon {
 
     /// The model connection's keys, live: the environment the next session reads, and
     /// the voice settings' copy of them. A turn in flight keeps the model it started on.
-    /// The realtime voice's settings, live from the next session (ADR 0062). Not one of
+    /// The realtime voice's settings, live from the next session (ADR 0063). Not one of
     /// them is a password; a value that does not read is refused and the old kept.
     pub(crate) fn apply_realtime(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
         let keys: Vec<String> = values

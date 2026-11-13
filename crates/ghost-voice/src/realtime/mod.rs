@@ -1,4 +1,4 @@
-//! The realtime voice (ADR 0062): an optional speech-to-speech model in front of Ghost's
+//! The realtime voice (ADR 0063): an optional speech-to-speech model in front of Ghost's
 //! agent, off by default and chosen by the operator only.
 //!
 //! The local pipeline stays the default and is untouched when the mode is off: nothing in
@@ -63,7 +63,7 @@ pub const OUT_RATE: u32 = 24_000;
 /// The microphone's rate inside a session; a provider converts from it.
 pub const IN_RATE: u32 = 16_000;
 
-/// The one sentence said in the local voice when the realtime voice goes (ADR 0062).
+/// The one sentence said in the local voice when the realtime voice goes (ADR 0063).
 pub const FALLBACK_SENTENCE: &str =
     "I lost the realtime voice, so I'm answering on this machine for now.";
 /// Said in the local voice when the day's cap is reached mid-session.

@@ -1,5 +1,5 @@
 //! The faithful relay: what the realtime voice says of the agent's answer is checked word
-//! by word against the answer as it is said (ADR 0062).
+//! by word against the answer as it is said (ADR 0063).
 //!
 //! The provider transcribes its own speech as it makes it ([`super::Event::Said`]). Both
 //! texts are reduced to the same plain words (lower case, no punctuation, digits as words),

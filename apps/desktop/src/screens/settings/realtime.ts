@@ -1,5 +1,5 @@
 /**
- * Owner: settings. The voice mode (ADR 0062) in words and settings: what a choice saves,
+ * Owner: settings. The voice mode (ADR 0063) in words and settings: what a choice saves,
  * what the spend and the check say. Pure; no React.
  */
 import type { RealtimeCheckView, RealtimeSpendView, RealtimeView } from "@ghost/client-ts";

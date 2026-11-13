@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+
+import { REALTIME_PROVIDERS } from "../src/design/mock/realtime";
 
 import { MockDaemon } from "../src/design/mock/daemon";
 import { composeFixtures } from "../src/design/mock/fixtures";
@@ -8,7 +11,7 @@ import type { RealtimeCheckView, RealtimeView } from "@ghost/client-ts";
 
 const q = new URLSearchParams();
 
-describe("the voice mode (ADR 0062)", () => {
+describe("the voice mode (ADR 0063)", () => {
   it("is this machine's voice unless the operator chose realtime, and only turning it on asks", () => {
     expect(modeValues("local")).toEqual({ GHOST_VOICE_MODE: null });
     expect(modeValues("realtime")).toEqual({ GHOST_VOICE_MODE: "realtime" });
@@ -26,6 +29,11 @@ describe("the voice mode (ADR 0062)", () => {
     expect(checkTone(ok)).toBe("ok");
     expect(checkTone({ ...ok, tools: false })).toBe("warn");
     expect(checkLine({ ...ok, reachable: false, error: "refused: HTTP 401" })).toBe("Didn’t connect: refused: HTTP 401.");
+  });
+
+  it("shows the same disclosure as the operator's page (and the daemon, which a Rust test holds to it)", () => {
+    const page = readFileSync(new URL("../../../docs/realtime-voice.md", import.meta.url), "utf8").replace(/\s+/g, " ").replaceAll("’", "'");
+    for (const line of REALTIME_PROVIDERS[0].disclosure) expect(page).toContain(line.replaceAll("’", "'"));
   });
 
   it("reads a cap in dollars, empty as none", () => {

@@ -232,6 +232,6 @@
 /* While Ghost speaks: each design's live preview at the top of its card. */
 .set-wave__preview { display: flex; align-items: center; justify-content: center; height: 56px; margin-block: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--bg-sunken); }
 
-/* The realtime voice's disclosure (ADR 0062): what changes, one plain line each. */
+/* The realtime voice's disclosure (ADR 0063): what changes, one plain line each. */
 .set-disclosure { display: grid; gap: var(--space-2); color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); }
 .set-disclosure__line { display: block; padding-left: var(--space-3); border-left: 2px solid var(--border); }

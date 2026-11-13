@@ -10566,7 +10566,7 @@
     },
     "/voice/realtime": {
       "get": {
-        "description": "The realtime voice (ADR 0062): the mode (local by default), the provider, model,\nvoice and password's name, whether the vault holds it, the daily cap, what turning it on\nchanges in plain words, today's spend estimate and the latest check. Saved through\nPUT /settings; the key through the passwords.",
+        "description": "The realtime voice (ADR 0063): the mode (local by default), the provider, model,\nvoice and password's name, whether the vault holds it, the daily cap, what turning it on\nchanges in plain words, today's spend estimate and the latest check. Saved through\nPUT /settings; the key through the passwords.",
         "operationId": "realtime_voice_get",
         "responses": {
           "200": {
@@ -10588,7 +10588,7 @@
     },
     "/voice/realtime/check": {
       "post": {
-        "description": "Check the realtime connection with the saved settings (ADR 0062): whether it\nanswers, the time to its first audio for a fixed line, and whether a fixed request is\nhanded to Ghost's agent. Nothing of the operator's is sent; the key is read from the\nvault by the daemon and never shown. Costs a fraction of a cent.",
+        "description": "Check the realtime connection with the saved settings (ADR 0063): whether it\nanswers, the time to its first audio for a fixed line, and whether a fixed request is\nhanded to Ghost's agent. Nothing of the operator's is sent; the key is read from the\nvault by the daemon and never shown. Costs a fraction of a cent.",
         "operationId": "realtime_voice_check_post",
         "responses": {
           "200": {

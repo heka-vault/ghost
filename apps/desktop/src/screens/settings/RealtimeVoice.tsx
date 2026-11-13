@@ -1,5 +1,5 @@
 /**
- * Owner: settings. The voice mode on Sound (ADR 0062): the voice on this machine, the default,
+ * Owner: settings. The voice mode on Sound (ADR 0063): the voice on this machine, the default,
  * or a realtime voice in front of Ghost's agent. Turning realtime on shows what changes and
  * asks first; going back never asks. The provider's settings, the Test and the day's spend
  * appear once it is chosen. Each change saves at once, like the waveform above: it is live

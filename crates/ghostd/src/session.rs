@@ -84,7 +84,7 @@ impl Answer {
     }
 }
 
-/// The realtime voice for this session, when the operator chose it (ADR 0062): the desk's
+/// The realtime voice for this session, when the operator chose it (ADR 0063): the desk's
 /// session with its microphone open only (the phone's call and a typed turn while not
 /// listening keep the voice on this machine), under the day's cap, with its password in
 /// the vault. Anything missing is a note on the waiting list and a local session; Ghost

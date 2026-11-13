@@ -1,4 +1,4 @@
-//! The realtime connection's check (ADR 0062, beside ADR 0056's provider check): reachable,
+//! The realtime connection's check (ADR 0063, beside ADR 0056's provider check): reachable,
 //! the time from asking for a line to its first audio, and whether a written request is
 //! handed to the agent through `consult`. A fixed line and a fixed request, a few cents of
 //! a cent; nothing the operator said, and no audio of theirs.

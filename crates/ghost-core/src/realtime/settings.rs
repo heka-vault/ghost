@@ -12,7 +12,7 @@
 //! ```
 //!
 //! Only the operator sets these (`PUT /settings`): no tool, app, model or run has a route
-//! to them, and Ghost never changes the mode itself (ADR 0062).
+//! to them, and Ghost never changes the mode itself (ADR 0063).
 
 use zeroize::Zeroizing;
 
@@ -99,7 +99,7 @@ pub const OPENAI: ProviderSpec = ProviderSpec {
 pub const PROVIDERS: [ProviderSpec; 1] = [OPENAI];
 
 /// What changes when the operator turns the realtime voice on, said plainly before it is
-/// on (ADR 0062). The desktop shows these lines as written; docs/realtime-voice.md says the
+/// on (ADR 0063). The desktop shows these lines as written; docs/realtime-voice.md says the
 /// same.
 pub fn disclosure(spec: &ProviderSpec) -> Vec<String> {
     vec![
@@ -270,6 +270,19 @@ mod tests {
         RealtimeSettings::from_vars(move |k| {
             pairs.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
         })
+    }
+
+    #[test]
+    fn what_turning_it_on_changes_is_said_as_the_operators_page_says_it() {
+        let page = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/realtime-voice.md"),
+        )
+        .unwrap();
+        let page = page.split_whitespace().collect::<Vec<_>>().join(" ");
+        for line in disclosure(&OPENAI) {
+            let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(page.contains(&line), "docs/realtime-voice.md lacks: {line}");
+        }
     }
 
     #[test]

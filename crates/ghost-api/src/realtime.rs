@@ -1,4 +1,4 @@
-//! The realtime voice's routes (ADR 0062): what is chosen, what turning it on changes, the
+//! The realtime voice's routes (ADR 0063): what is chosen, what turning it on changes, the
 //! day's spend, and the connection's check.
 //!
 //! The mode and its settings are saved like any setting, through `PUT /settings` (the
@@ -160,7 +160,7 @@ pub fn realtime_view(deps: &Deps) -> RealtimeView {
 /// The realtime voice: whether it is chosen, what turning it on changes, today's spend.
 #[utoipa::path(get, path = "/voice/realtime", operation_id = "realtime_voice_get", tag = "voice",
     summary = "Realtime Voice",
-    description = "The realtime voice (ADR 0062): the mode (local by default), the provider, model,\nvoice and password's name, whether the vault holds it, the daily cap, what turning it on\nchanges in plain words, today's spend estimate and the latest check. Saved through\nPUT /settings; the key through the passwords.",
+    description = "The realtime voice (ADR 0063): the mode (local by default), the provider, model,\nvoice and password's name, whether the vault holds it, the daily cap, what turning it on\nchanges in plain words, today's spend estimate and the latest check. Saved through\nPUT /settings; the key through the passwords.",
     responses((status = 200, description = "Successful Response", body = RealtimeView)))]
 async fn get_realtime(State(deps): State<SharedDeps>) -> Json<RealtimeView> {
     Json(realtime_view(&deps))
@@ -169,7 +169,7 @@ async fn get_realtime(State(deps): State<SharedDeps>) -> Json<RealtimeView> {
 /// Check the realtime connection with the saved settings.
 #[utoipa::path(post, path = "/voice/realtime/check", operation_id = "realtime_voice_check_post", tag = "voice",
     summary = "Realtime Voice Check",
-    description = "Check the realtime connection with the saved settings (ADR 0062): whether it\nanswers, the time to its first audio for a fixed line, and whether a fixed request is\nhanded to Ghost's agent. Nothing of the operator's is sent; the key is read from the\nvault by the daemon and never shown. Costs a fraction of a cent.",
+    description = "Check the realtime connection with the saved settings (ADR 0063): whether it\nanswers, the time to its first audio for a fixed line, and whether a fixed request is\nhanded to Ghost's agent. Nothing of the operator's is sent; the key is read from the\nvault by the daemon and never shown. Costs a fraction of a cent.",
     responses((status = 200, description = "Successful Response", body = RealtimeCheckView),
               (status = 503, description = "Ghost can't check the realtime voice now")))]
 async fn check_realtime(State(deps): State<SharedDeps>) -> ApiResult<Json<RealtimeCheckView>> {

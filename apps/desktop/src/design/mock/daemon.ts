@@ -210,7 +210,7 @@ export class MockDaemon {
     (name) => this.keepPasswords([name], "Jev, and the model when it goes through OpenRouter"),
     () => this.passwords.vault.state === "open",
   );
-  /** The realtime voice (ADR 0062), resolved from the settings above. */
+  /** The realtime voice (ADR 0063), resolved from the settings above. */
   private realtime = new MockRealtime(
     () => this.settings,
     (name) => this.passwords.vault.state === "open" && !!this.passwords.passwords.find((x) => x.name === name)?.set,
@@ -342,7 +342,7 @@ export class MockDaemon {
       }
     }
     if (scenario.realtime) {
-      // ADR 0062: the operator chose the realtime voice; its key is in the vault.
+      // ADR 0063: the operator chose the realtime voice; its key is in the vault.
       this.settings.values.GHOST_VOICE_MODE = "realtime";
       this.settings.values.GHOST_REALTIME_DAILY_CAP_USD = "2";
       this.keepPasswords(["OPENAI_API_KEY"], "The realtime voice");

@@ -471,7 +471,7 @@ pub struct SessionParams {
     /// Into the model's context before the greeting, without running it: why Ghost
     /// started this session itself (ADR 0032).
     pub context_note: Option<String>,
-    /// The realtime voice in front (ADR 0062): only when the operator chose it, for the
+    /// The realtime voice in front (ADR 0063): only when the operator chose it, for the
     /// desk with its microphone open. `None` builds exactly the local pipeline.
     pub realtime: Option<crate::realtime::stage::RealtimeParams>,
 }
@@ -736,7 +736,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     // that, not the pieces it was heard in (`crate::tap::TurnRecord`). The pieces still go
     // out as they come, to whatever shows them (`UserTap`).
     let on_heard = p.hooks.on_heard.clone();
-    // The realtime voice's shared state (ADR 0062): its gate learns each spoken turn here.
+    // The realtime voice's shared state (ADR 0063): its gate learns each spoken turn here.
     let rt_shared = realtime
         .as_ref()
         .map(|_| Arc::new(crate::realtime::stage::Shared::default()));
@@ -1008,7 +1008,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 settings.barge_in_min_words,
                 Some(analyzer),
                 settings.turn_grace_secs,
-                // With the realtime voice in front the agent never answers early (ADR 0062).
+                // With the realtime voice in front the agent never answers early (ADR 0063).
                 settings.turn_speculate && rt_shared.is_none(),
                 turns.clone(),
             )
@@ -1050,7 +1050,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     };
     // The reply's first clause is rendered while the reply is held (ADR 0049): with the
     // local voice unless set otherwise, never behind a paid one.
-    // Not behind the realtime voice, which says the reply itself (ADR 0062).
+    // Not behind the realtime voice, which says the reply itself (ADR 0063).
     let prerender = (settings.prerender()
         && settings.tts_engine != "elevenlabs"
         && rt_shared.is_none())

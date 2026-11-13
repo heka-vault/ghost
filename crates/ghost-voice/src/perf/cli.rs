@@ -141,7 +141,7 @@ pub fn main(argv: &[String]) -> i32 {
         return 0;
     }
     if args.cmd == "realtime" {
-        // Its own arguments; the key only from the variable named (ADR 0062).
+        // Its own arguments; the key only from the variable named (ADR 0063).
         return realtime(&argv[1..], &root, &scratch);
     }
     if args.cmd == "providers" {

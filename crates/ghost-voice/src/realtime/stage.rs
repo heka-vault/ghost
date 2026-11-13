@@ -1,4 +1,4 @@
-//! The realtime voice in a session's pipeline (ADR 0062): four stages added to the local
+//! The realtime voice in a session's pipeline (ADR 0063): four stages added to the local
 //! pipeline, which stays whole underneath so a session can fall back to it at any moment.
 //!
 //! ```text

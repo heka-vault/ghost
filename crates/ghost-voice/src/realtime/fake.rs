@@ -1,5 +1,5 @@
 //! A scripted realtime provider on a local WebSocket, speaking the subset of OpenAI's
-//! Realtime protocol Ghost uses (ADR 0062): the tests' and the harness's stand-in, so every
+//! Realtime protocol Ghost uses (ADR 0063): the tests' and the harness's stand-in, so every
 //! path is exercised with no key and no network. It checks the key Ghost sends, records
 //! every client event but the audio (which it only counts), answers `response.create` by
 //! saying the instructions' words back (or a misreading of them, when told to), and plays

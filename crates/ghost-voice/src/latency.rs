@@ -52,7 +52,7 @@ pub const TTS: &str = "tts";
 /// Durations Ghost's stages measure themselves. Every method is a no-op by default, so a
 /// stage built without a session (tests, the wake listener) needs no checks.
 pub trait LatencyProbe: Send + Sync {
-    /// One exchange of the realtime voice (ADR 0062), kept as its own record: what it was
+    /// One exchange of the realtime voice (ADR 0063), kept as its own record: what it was
     /// (`talk`, `answer`, `line`, `connect`, `fallback`), its timings and numbers only.
     fn realtime(&self, _record: Value) {}
     /// The turn model said done and the grace hold ran `secs` before the turn ended.
@@ -275,7 +275,7 @@ pub struct LatencyObserver {
     log_line: bool,
     built: Instant,
     state: Mutex<State>,
-    /// `realtime` in a session with the realtime voice in front (ADR 0062): every record
+    /// `realtime` in a session with the realtime voice in front (ADR 0063): every record
     /// says so, so the local voice's numbers are never mixed with its.
     voice: Option<&'static str>,
 }

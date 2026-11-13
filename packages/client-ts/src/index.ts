@@ -431,7 +431,7 @@ export class GhostClient {
   modelCheckLatest() {
     return unwrap(this.api.GET("/model/check"));
   }
-  // --- the realtime voice (ADR 0062) ---------------------------------------------------------
+  // --- the realtime voice (ADR 0063) ---------------------------------------------------------
   /** The voice mode (local by default), the realtime provider, what turning it on changes,
    *  whether its password is set (never the key), today's spend and the latest check. Its
    *  settings are saved like any other, through `updateSettings`. */

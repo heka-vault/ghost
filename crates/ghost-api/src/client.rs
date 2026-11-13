@@ -187,12 +187,12 @@ impl GhostClient {
         Ok(reply.body)
     }
 
-    /// The realtime voice's settings view (ADR 0062).
+    /// The realtime voice's settings view (ADR 0063).
     pub async fn realtime(&self) -> Result<Value, ClientError> {
         self.expect_ok(Method::GET, "/voice/realtime", None).await
     }
 
-    /// The realtime connection's check with the saved settings (ADR 0062).
+    /// The realtime connection's check with the saved settings (ADR 0063).
     pub async fn check_realtime(&self) -> Result<Value, ClientError> {
         let reply = self
             .request_with(

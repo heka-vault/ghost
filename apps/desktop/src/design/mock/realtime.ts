@@ -1,5 +1,5 @@
 /**
- * The mock daemon's realtime voice (ADR 0062): the view resolved from the mock's settings the
+ * The mock daemon's realtime voice (ADR 0063): the view resolved from the mock's settings the
  * way the daemon resolves them, the provider list as ghost_core offers it, a spend that grows
  * in the `realtime` scenario, and a check that answers after a moment. Nothing leaves the window.
  */

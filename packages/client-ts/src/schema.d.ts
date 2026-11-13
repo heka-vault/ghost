@@ -1647,7 +1647,7 @@ export interface paths {
         };
         /**
          * Realtime Voice
-         * @description The realtime voice (ADR 0062): the mode (local by default), the provider, model,
+         * @description The realtime voice (ADR 0063): the mode (local by default), the provider, model,
          *     voice and password's name, whether the vault holds it, the daily cap, what turning it on
          *     changes in plain words, today's spend estimate and the latest check. Saved through
          *     PUT /settings; the key through the passwords.
@@ -1672,7 +1672,7 @@ export interface paths {
         put?: never;
         /**
          * Realtime Voice Check
-         * @description Check the realtime connection with the saved settings (ADR 0062): whether it
+         * @description Check the realtime connection with the saved settings (ADR 0063): whether it
          *     answers, the time to its first audio for a fixed line, and whether a fixed request is
          *     handed to Ghost's agent. Nothing of the operator's is sent; the key is read from the
          *     vault by the daemon and never shown. Costs a fraction of a cent.

@@ -67,7 +67,7 @@ export interface Scenario {
    * voice after 8 s), and the goodbye. One loop is about 50 seconds.
    */
   floating?: boolean;
-  /** The realtime voice chosen (ADR 0062), its key in the vault, a day of use and a check. */
+  /** The realtime voice chosen (ADR 0063), its key in the vault, a day of use and a check. */
   realtime?: boolean;
 }
 

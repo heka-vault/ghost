@@ -1,4 +1,4 @@
-//! OpenAI's Realtime API over a WebSocket (ADR 0062), the first realtime provider.
+//! OpenAI's Realtime API over a WebSocket (ADR 0063), the first realtime provider.
 //!
 //! `wss://api.openai.com/v1/realtime?model=<model>` with the key as `Authorization: Bearer`,
 //! sent there and nowhere else, never logged, never in an error. After `session.created`

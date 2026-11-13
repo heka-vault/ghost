@@ -1,4 +1,4 @@
-//! The realtime voice in a whole session (ADR 0062), against the scripted provider on a
+//! The realtime voice in a whole session (ADR 0063), against the scripted provider on a
 //! local WebSocket (`ghost_voice::realtime::fake`), with no key and no network: small talk
 //! the voice answers itself, a lookup the agent answers and the voice says exactly, a
 //! change that asks and is confirmed by the operator's own yes, a blocked change and a

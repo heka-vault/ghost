@@ -82,7 +82,7 @@ pub trait Controller: Send + Sync {
     fn last_model_check(&self) -> Option<ModelCheckRun> {
         None
     }
-    /// The realtime voice's check with the saved settings (ADR 0062), run where the vault
+    /// The realtime voice's check with the saved settings (ADR 0063), run where the vault
     /// is. None when the daemon can't check it now.
     async fn check_realtime(&self) -> Option<crate::realtime::RealtimeCheckView> {
         None
