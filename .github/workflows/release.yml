@@ -2,22 +2,26 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # A dry run from any branch: the same bundle, signed and checked, kept as the run's
+  # artifact and published nowhere (docs/releasing.md).
   workflow_dispatch:
 
 # The bundle (ADR 0038): one .deb and one AppImage carrying the desktop app and ghostd,
-# built the way CI builds them, installed into a clean Ubuntu 26.04, and attached to the
-# release. Nothing here bumps a version or makes a tag (docs/releasing.md).
+# built the way CI builds them, each signed for the app's updater (ADR 0066), installed
+# into a clean Ubuntu 24.04 and 26.04, and, for a tag only, published as a GitHub release
+# with the update manifest (latest.json) the installed apps read. Nothing here bumps a
+# version or makes a tag.
 jobs:
   bundle:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     permissions: { contents: write }
     steps:
       - uses: actions/checkout@v4
       # `make release` tagged this commit; the tag must name the version its files say.
       - name: the tag is the version
         if: startsWith(github.ref, 'refs/tags/')
-        run: python3 scripts/version.py check-tag "$GITHUB_REF_NAME"
+        run: python3 tools/version.py check-tag "$GITHUB_REF_NAME"
       - name: system libraries
         run: |
           sudo apt-get update -qq
@@ -25,43 +29,100 @@ jobs:
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
             libxdo-dev libssl-dev clang libclang-dev lld patchelf \
             libpipewire-0.3-dev libspa-0.2-dev libpulse-dev libasound2-dev \
-            libespeak-ng-dev libopus-dev
+            libespeak-ng-dev libopus-dev minisign
       - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - name: the bundle
-        run: pnpm tauri build --ci
+      # The updater's artifacts are signed with the repository's key (ADR 0066); the key
+      # has no password. Never printed: the bundler reads it from the environment.
+      - name: the bundle, signed
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::the repository secret TAURI_SIGNING_PRIVATE_KEY is not set (docs/releasing.md, The update key)"
+            exit 1
+          fi
+          pnpm tauri build --ci --config src-tauri/tauri.release.conf.json
       - name: collect
         run: |
           mkdir -p dist/bundle
-          cp target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage dist/bundle/
+          cp target/release/bundle/deb/*.deb target/release/bundle/deb/*.deb.sig \
+             target/release/bundle/appimage/*.AppImage target/release/bundle/appimage/*.AppImage.sig \
+             dist/bundle/
           ls -la dist/bundle
+      # Each signature checks against the public key the app carries (tauri.conf.json), so
+      # a key that does not match the app's is caught here and not on a person's machine.
+      - name: the signatures match the app's key
+        run: |
+          python3 -I -c 'import json,base64,sys; print(base64.b64decode(json.load(open(sys.argv[1]))["plugins"]["updater"]["pubkey"]).decode())' \
+            apps/desktop/src-tauri/tauri.conf.json > "$RUNNER_TEMP/ghost.pub"
+          for f in dist/bundle/*.deb dist/bundle/*.AppImage; do
+            base64 -d < "$f.sig" > "$RUNNER_TEMP/one.minisig"
+            minisign -V -q -p "$RUNNER_TEMP/ghost.pub" -m "$f" -x "$RUNNER_TEMP/one.minisig"
+            echo "signed: $(basename "$f")"
+          done
       # The way the Python package's `make deb-test` ran it: in /usr/bin, with nothing set,
       # the daemon must say the commit the bundle recorded (ghost-build.json in its
       # resources) and find ONNX Runtime and the four model files in the bundle's
       # /usr/lib/heka-ghost-desktop/ on its own (W10 of #39). Parakeet and Kokoro are not
-      # in a clean container, so `ghostd check` names their steps and exits 1; what it
-      # must not name is either fetch script, which would mean the bundle's own copies
-      # were not found.
-      - name: install test in a clean Ubuntu 26.04
+      # in the bundle: the app downloads them in its first run (ADR 0066), so `ghostd
+      # check` names them and exits 1; what it must not name is a script from the
+      # checkout, which a person with the .deb does not have.
+      - name: install test in a clean Ubuntu 24.04 and 26.04
         run: |
-          docker run --rm -e COMMIT="$(git rev-parse HEAD)" -v "$PWD/dist/bundle":/bundle:ro ubuntu:26.04 bash -ec '
-            apt-get update -qq && apt-get install -y -qq /bundle/*.deb >/dev/null
-            ghostd version | tee /dev/stderr | grep -qF "release ${COMMIT:0:7}"
-            ghostd restore-volumes
-            ghost-mock-github --help >/dev/null && ghost-scripts --help >/dev/null
-            out=$(ANTHROPIC_BASE_URL=http://x ghostd check 2>&1) || true
-            printf "%s\n" "$out"
-            grep -q "^onnxruntime: /usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4$" <<<"$out"
-            grep -q "^models: /usr/lib/heka-ghost-desktop/models$" <<<"$out"
-            grep -q "^Parakeet: .* is not there" <<<"$out"
-            ! grep -q "scripts/onnxruntime.sh\|scripts/models.sh" <<<"$out"'
-      - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+          for image in ubuntu:24.04 ubuntu:26.04; do
+            echo "::group::$image"
+            docker run --rm -e COMMIT="$(git rev-parse HEAD)" -v "$PWD/dist/bundle":/bundle:ro "$image" bash -ec '
+              apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /bundle/*.deb >/dev/null
+              ghostd version | tee /dev/stderr | grep -qF "release ${COMMIT:0:7}"
+              ghostd restore-volumes
+              ghost-mock-github --help >/dev/null && ghost-scripts --help >/dev/null
+              out=$(ANTHROPIC_BASE_URL=http://x ghostd check 2>&1) || true
+              printf "%s\n" "$out"
+              grep -q "^onnxruntime: /usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4$" <<<"$out"
+              grep -q "^models: /usr/lib/heka-ghost-desktop/models$" <<<"$out"
+              grep -q "Parakeet: .* is not there" <<<"$out"
+              ! grep -q "scripts/onnxruntime.sh\|scripts/models.sh\|make models" <<<"$out"
+              ldd /usr/bin/heka-ghost-desktop /usr/bin/ghostd | { ! grep "not found"; }'
+            echo "::endgroup::"
+          done
+      # The AppImage carries the same daemon and record.
+      - name: the AppImage carries the daemon
+        run: |
+          cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE"/dist/bundle/*.AppImage --appimage-extract >/dev/null
+          squashfs-root/usr/bin/ghostd version | tee /dev/stderr | grep -qF "release $(git -C "$GITHUB_WORKSPACE" rev-parse --short=7 HEAD)"
+      # The notes: GitHub's own from the merged pull requests for a tag; a dry run says it is one.
+      - name: release notes
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          version=$(python3 -I -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body > "$RUNNER_TEMP/notes.md"
+          else
+            printf 'A dry run of the release workflow (run %s, %s); not a release.\n' "$GITHUB_RUN_ID" "${GITHUB_SHA:0:7}" > "$RUNNER_TEMP/notes.md"
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+      - name: the update manifest
+        run: |
+          python3 -I tools/release_manifest.py dist/bundle "$VERSION" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION" "$RUNNER_TEMP/notes.md" \
+            > dist/bundle/latest.json
+          cat dist/bundle/latest.json
+      - uses: actions/upload-artifact@v4
         with:
-          files: |
-            dist/bundle/*.deb
-            dist/bundle/*.AppImage
-          generate_release_notes: true
+          name: ghost-${{ env.VERSION }}-${{ github.sha }}
+          path: dist/bundle/
+          retention-days: 14
+      # A tag only. The release is published whole: the files and latest.json together, so
+      # an installed app never reads a manifest whose files are not there yet.
+      - name: publish
+        if: startsWith(github.ref, 'refs/tags/')
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Ghost $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" dist/bundle/*

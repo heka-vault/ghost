@@ -204,8 +204,8 @@ pub fn check_models(
         let _ = writeln!(out, "parakeet: {}", dir.display());
     } else {
         problems.push(format!(
-            "Parakeet: {} is not there (make models fetches it, docs/releasing.md under \
-             \"The speech models\"; GHOST_STT_DIR names its folder)",
+            "Parakeet: {} is not there (the app downloads it in its first run, or `ghostd \
+             models fetch`; GHOST_STT_DIR names its folder)",
             paths.encoder.display()
         ));
     }
@@ -216,8 +216,8 @@ pub fn check_models(
         let _ = writeln!(out, "kokoro: {}", dir.display());
     } else {
         problems.push(format!(
-            "Kokoro's files are not there ({}, {}); make models fetches them \
-             (scripts/models.sh kokoro), or set GHOST_TTS_MODEL_PATH and GHOST_TTS_VOICES_PATH",
+            "Kokoro's files are not there ({}, {}); the app downloads them in its first run, \
+             or `ghostd models fetch`, or set GHOST_TTS_MODEL_PATH and GHOST_TTS_VOICES_PATH",
             kokoro.model.display(),
             kokoro.voices.display()
         ));
@@ -827,13 +827,15 @@ mod tests {
             problems[0]
         );
         assert!(
-            problems[1].starts_with("Parakeet: ") && problems[1].contains("GHOST_STT_DIR"),
+            problems[1].starts_with("Parakeet: ")
+                && problems[1].contains("ghostd models fetch")
+                && problems[1].contains("GHOST_STT_DIR"),
             "{}",
             problems[1]
         );
         assert!(
             problems[2].starts_with("Kokoro's files are not there")
-                && problems[2].contains("scripts/models.sh kokoro"),
+                && problems[2].contains("ghostd models fetch"),
             "{}",
             problems[2]
         );
