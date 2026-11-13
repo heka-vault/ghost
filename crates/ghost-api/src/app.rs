@@ -1485,7 +1485,18 @@ async fn setup_echo_cancel(
     State(deps): State<SharedDeps>,
     Qs(q): Qs<EchoCancelQuery>,
 ) -> ApiResult<Json<Ack>> {
-    let (ok, detail) = crate::echo_cancel::run(&deps.infra_dir, q.uninstall.unwrap_or(false)).await;
+    let uninstall = q.uninstall.unwrap_or(false);
+    // What the sound server is, from the devices port: the daemon's asks pactl, a test's
+    // says (ADR 0066). Removing never needs it.
+    let server = if uninstall {
+        crate::echo_cancel::SoundServer::Unknown
+    } else {
+        let devices = deps.devices.clone();
+        tokio::task::spawn_blocking(move || devices.sound_server())
+            .await
+            .unwrap_or(crate::echo_cancel::SoundServer::Unknown)
+    };
+    let (ok, detail) = crate::echo_cancel::run(&deps.infra_dir, uninstall, server).await;
     Ok(Json(Ack {
         ok,
         detail: Some(detail),

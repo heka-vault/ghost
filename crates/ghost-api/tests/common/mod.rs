@@ -611,6 +611,27 @@ impl DevicesPort for FakeDevices {
     fn echo_cancel_active(&self) -> bool {
         false
     }
+
+    fn sound_server(&self) -> ghost_api::echo_cancel::SoundServer {
+        ghost_api::echo_cancel::SoundServer::PipeWire
+    }
+}
+
+/// A machine whose sound runs on PulseAudio: the echo canceller can't be set up there.
+pub struct PulseAudioDevices;
+
+impl DevicesPort for PulseAudioDevices {
+    fn devices(&self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+
+    fn echo_cancel_active(&self) -> bool {
+        false
+    }
+
+    fn sound_server(&self) -> ghost_api::echo_cancel::SoundServer {
+        ghost_api::echo_cancel::SoundServer::PulseAudio
+    }
 }
 
 // --- the world -------------------------------------------------------------------------------------

@@ -163,6 +163,9 @@ pub trait DevicesPort: Send + Sync {
     fn echo_cancel_active(&self) -> bool {
         unit_active("ghost-echo-cancel.service")
     }
+    /// What the sound server is, for the echo canceller's installer (ADR 0066). No live
+    /// default: the daemon's own port asks `pactl`; a test's says.
+    fn sound_server(&self) -> crate::echo_cancel::SoundServer;
 }
 
 /// No sound stack: no devices.
@@ -172,6 +175,9 @@ pub struct NoDevices;
 impl DevicesPort for NoDevices {
     fn devices(&self) -> Vec<DeviceInfo> {
         Vec::new()
+    }
+    fn sound_server(&self) -> crate::echo_cancel::SoundServer {
+        crate::echo_cancel::SoundServer::Unknown
     }
 }
 

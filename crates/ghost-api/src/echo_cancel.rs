@@ -22,6 +22,15 @@ pub enum SoundServer {
     None,
     /// `pactl` is not installed.
     NoPactl,
+    /// Not asked: a daemon with no sound stack of its own (`NoDevices`). The installer
+    /// speaks for itself.
+    Unknown,
+}
+
+/// The live answer: `pactl info`, run now. Only the daemon's own devices port and the
+/// command line call it; a test's port answers for itself.
+pub fn probe_sound_server() -> SoundServer {
+    sound_server(tool("pactl", &["info"]).as_deref())
 }
 
 /// From `pactl info`'s output, or None when `pactl` could not be run.
@@ -43,7 +52,7 @@ pub fn sound_server(info: Option<&str>) -> SoundServer {
 /// Why the canceller can't be installed on this sound server, in the operator's words.
 pub fn refusal(server: &SoundServer) -> Option<&'static str> {
     match server {
-        SoundServer::PipeWire => None,
+        SoundServer::PipeWire | SoundServer::Unknown => None,
         SoundServer::PulseAudio => Some(
             "This computer's sound runs on PulseAudio, and Ghost's echo canceller is a PipeWire \
              module, so it can't be set up here. Use headphones, or a microphone that cancels \
@@ -79,9 +88,10 @@ fn tool(cmd: &str, args: &[&str]) -> Option<String> {
     Some(text)
 }
 
-/// Install (or, `uninstall`, remove) the canceller. (ok, what happened in words, at most
-/// 2,000 characters of the installer's own output).
-pub async fn run(infra_dir: &Path, uninstall: bool) -> (bool, String) {
+/// Install (or, `uninstall`, remove) the canceller on `server` (what the sound server is,
+/// asked by the caller's devices port). (ok, what happened in words, at most 2,000
+/// characters of the installer's own output).
+pub async fn run(infra_dir: &Path, uninstall: bool, server: SoundServer) -> (bool, String) {
     let script = installer(infra_dir);
     if !script.is_file() {
         return (
@@ -93,14 +103,8 @@ pub async fn run(infra_dir: &Path, uninstall: bool) -> (bool, String) {
             ),
         );
     }
-    if !uninstall {
-        let info = tokio::task::spawn_blocking(|| tool("pactl", &["info"]))
-            .await
-            .ok()
-            .flatten();
-        if let Some(why) = refusal(&sound_server(info.as_deref())) {
-            return (false, why.to_string());
-        }
+    if !uninstall && let Some(why) = refusal(&server) {
+        return (false, why.to_string());
     }
     // Through bash, so a bundle that lost the file's executable bit still runs it.
     let mut cmd = tokio::process::Command::new("bash");
@@ -172,11 +176,42 @@ mod tests {
     #[tokio::test]
     async fn a_missing_installer_is_said_in_words() {
         let tmp = tempfile::tempdir().unwrap();
-        let (ok, why) = run(tmp.path(), false).await;
+        let (ok, why) = run(tmp.path(), false, SoundServer::PipeWire).await;
         assert!(!ok);
         assert!(
             why.starts_with("Ghost's echo canceller installer is missing"),
             "{why}"
         );
+    }
+
+    #[test]
+    fn a_daemon_with_no_sound_stack_of_its_own_lets_the_installer_speak() {
+        assert_eq!(refusal(&SoundServer::Unknown), None);
+    }
+
+    /// No host involved: the installer is a script in a temp folder, and the sound server
+    /// is what the caller says.
+    #[tokio::test]
+    async fn a_pulseaudio_machine_is_told_why_and_the_installer_never_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pw = tmp.path().join("pipewire");
+        std::fs::create_dir_all(&pw).unwrap();
+        let ran = tmp.path().join("ran");
+        std::fs::write(
+            pw.join("install.sh"),
+            format!("touch {}\necho installed\n", ran.display()),
+        )
+        .unwrap();
+        let (ok, why) = run(tmp.path(), false, SoundServer::PulseAudio).await;
+        assert!(!ok);
+        assert!(why.contains("PulseAudio"), "{why}");
+        assert!(!ran.exists(), "the installer must not run");
+        let (ok, why) = run(tmp.path(), false, SoundServer::PipeWire).await;
+        assert!(ok && why == "installed", "{why}");
+        assert!(ran.exists());
+        // Removing never asks the sound server.
+        std::fs::remove_file(&ran).unwrap();
+        let (ok, _) = run(tmp.path(), true, SoundServer::NoPactl).await;
+        assert!(ok && ran.exists());
     }
 }

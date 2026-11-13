@@ -3016,6 +3016,10 @@ impl AppReader for ReadFor {
 pub struct PwDevices;
 
 impl DevicesPort for PwDevices {
+    fn sound_server(&self) -> ghost_api::echo_cancel::SoundServer {
+        ghost_api::echo_cancel::probe_sound_server()
+    }
+
     fn devices(&self) -> Vec<ghost_api::models::DeviceInfo> {
         let nodes = ghost_audio::Session::connect("ghostd").and_then(|s| s.nodes());
         match nodes {

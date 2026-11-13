@@ -6,7 +6,7 @@ mod common;
 use std::sync::Arc;
 
 use chrono::Utc;
-use common::{FakeDevices, World, by, pend, strings};
+use common::{FakeDevices, PulseAudioDevices, World, by, pend, strings};
 use futures::StreamExt;
 use ghost_api::models::{Build, BuildKind, DeviceInfo, Launcher, PhoneDevice, SessionOrigin};
 use ghost_api::{Phase, pending_view};
@@ -320,6 +320,20 @@ async fn setup_endpoints() {
     assert_eq!(m["ready"], false);
     assert_eq!(m["kokoro_present"], false);
     assert_eq!(m["stt_model"], "parakeet");
+}
+
+/// ADR 0066: the endpoint asks the devices port what the sound server is; a PulseAudio
+/// machine is told why in a sentence and the installer never runs. No host tool is run.
+#[tokio::test]
+async fn the_echo_canceller_is_refused_on_pulseaudio_in_words() {
+    let mut w = World::new();
+    w.devices = Some(Arc::new(PulseAudioDevices));
+    let c = w.client();
+    let out = c.post("/setup/echo-cancel", None).await;
+    assert_eq!(out["ok"], false, "{}", out.text);
+    let detail = out["detail"].as_str().unwrap();
+    assert!(detail.contains("PulseAudio"), "{detail}");
+    assert!(!detail.contains("installed"), "{detail}");
 }
 
 #[tokio::test]

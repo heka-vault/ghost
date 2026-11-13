@@ -356,7 +356,12 @@ async fn echo_cancel(args: &[String], infra_dir: &std::path::Path) -> i32 {
             0
         }
         Some(word @ ("on" | "off")) => {
-            let (ok, detail) = ghost_api::echo_cancel::run(infra_dir, word == "off").await;
+            let server = if word == "off" {
+                ghost_api::echo_cancel::SoundServer::Unknown
+            } else {
+                ghost_api::echo_cancel::probe_sound_server()
+            };
+            let (ok, detail) = ghost_api::echo_cancel::run(infra_dir, word == "off", server).await;
             println!("{detail}");
             if ok { 0 } else { 1 }
         }

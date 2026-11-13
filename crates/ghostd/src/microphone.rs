@@ -849,8 +849,11 @@ impl Repairer for LiveRepairer {
     }
 
     fn install_canceller(&self, infra_dir: &Path) -> Result<String, String> {
-        let (ok, detail) = tokio::runtime::Handle::current()
-            .block_on(ghost_api::echo_cancel::run(infra_dir, false));
+        let (ok, detail) = tokio::runtime::Handle::current().block_on(ghost_api::echo_cancel::run(
+            infra_dir,
+            false,
+            ghost_api::echo_cancel::probe_sound_server(),
+        ));
         if !ok {
             return Err(detail);
         }
