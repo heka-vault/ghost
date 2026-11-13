@@ -430,7 +430,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   // two seconds pass. The watch survives re-runs of the effect (StrictMode, a reload) until
   // one of those ends it. An old link to the Apps or Skills section lands on that page.
   // `?settings=pairing` opens on Phone. Each happens once: the query stays, the operator moves on.
-  const target = params.get("section");
+  // ?section=voice, or /settings/sound/audio (a waiting note's place)
+  const target = params.get("section") ?? route.section ?? null;
   const sentOnce = useRef(false);
   useEffect(() => {
     if (sentOnce.current) return;

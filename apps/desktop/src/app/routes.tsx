@@ -208,7 +208,8 @@ export const ROUTES: RouteDef[] = [
     // General, Model, Passwords, Sound, Phone and Outside tools: one screen, so moving between them keeps
     // one draft (a typed password included) and one save bar.
     id: "settings",
-    patterns: ["/settings/:page"],
+    // `/settings/sound/audio` lands on a section, as `?section=audio` does: a waiting note's place.
+    patterns: ["/settings/:page/:section?"],
     path: "/settings/general",
     owner: "settings",
     title: "Settings",
@@ -217,7 +218,7 @@ export const ROUTES: RouteDef[] = [
     needsDaemon: true,
     nav: { label: "Settings", icon: Settings2, group: "footer" },
     area: "settings",
-    accept: (p) => SETTINGS_SCREEN_PAGES.includes(p.page),
+    accept: (p) => SETTINGS_SCREEN_PAGES.includes(p.page) && (!p.section || /^[a-z-]+$/.test(p.section)),
     component: lazy(() => import("../screens/settings")),
   },
   {
