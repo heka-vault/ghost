@@ -170,3 +170,27 @@ item and the time of day; the log has everything around it.
 Also seen: Ghost said goodbye twice after a model `hang_up` (#56); the echo canceller's
 `ghost.mic` node accumulated 111 xruns over 30 minutes while the wake scores fell (#58), and a canceller restart moved the
 graph to 48 kHz until `clock.force-rate 16000` brought it back (output silent meanwhile).
+
+### 2026-11-12 morning, main at 3c89efeb (PR #72), reSpeaker XVF3800 as mic and speakers, `ghost.mic`, the operator's connection through OpenRouter
+
+| Item | Result | Note |
+|---|---|---|
+| A1 | pass | the checker, before anyone spoke |
+| A2, A3, B, C | not run | |
+| D1 | pass on turns, fail on speed | four of five questions; every head start kept; replies began after 4.6 s (small talk), 5.7 s (recall), 6.3 s (three model calls for an app that isn't connected) and about 8 s (an issue read); the bench had said 1.7 s (#111) |
+| D2 | pass on the second try | voice 0.44 s after the model's first words, no hitch at the join; the first try lost the sentence's second half to an empty read (#52) |
+| D3 | fail | the triage question right in 3.2 s; the fast model asked which repository twice where it should have looked; no label changed |
+| D4 to D7, E, F, G, H | not run | |
+
+Also seen: four of nine wakes scored 0.34 to 0.59 and were refused when Parakeet's check read "A ghost" (two more at 0.50 and 0.59 in a quiet room); a whole-turn read ended a sentence with a comma and held it 3 s; a turn heard as "I ghost." got an empty reply; fragments were stored as separate turns; a goodbye took up to 3.5 s; the operator's own words appeared on screen at a pause mid-sentence. Fixed the same day: captions held to the turn's close (PR #73), the empty piece re-read, the comma rule, one stored turn, the name alone and the goodbye (PR #74), Parakeet's spelling accepted by the check (PR #75), an acknowledgment at a lookup's start, the warm-up and the recently used tools kept (PR #79).
+
+### 2026-11-12 evening, main at ed64dd26 (PR #87), the same desk, a fast model in front
+
+| Item | Result | Note |
+|---|---|---|
+| A1 | pass | the checker |
+| D1 | pass on turns, fail on speed | five questions: 2.1 s (small talk), 2.9 s (one call), 4.4 s (recall), 9.9 s (an issue read that found nothing), 12.2 s (a count, four model calls); first sound 1.7 to 2.3 s against 1.3 s on the bench (#111) |
+| C3, C4 | pass | every goodbye hung up in 0.8 s |
+| the rest | not run | |
+
+Also seen: "A ghost." accepted three times by the check that refused it in the morning, and four more wakes refused at 0.32 to 0.51; the name said mid-session answered with no model call; a pause after "Read me issue" joined into one turn; two sessions opened by reading the slow-connection note aloud (PR #91: shown, never said); the issue read failed because only the first of two GitHub connections was tried (PR #94, the twin read); the prompt cache was lost after every tool call (PR #94). The wake's misses were traced that night to the host canceller deleting the onset (#100, ADR 0064: the desk now hears the array's own channel) and the detector's own limit to data (#101, ADR 0065). Neither change has had a live run.
