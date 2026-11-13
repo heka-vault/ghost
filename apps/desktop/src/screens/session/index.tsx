@@ -24,6 +24,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { notListening, notListeningSub } from "../../app/listening";
 import { useListening } from "../../app/ListeningSwitch";
+import { usePosture } from "../../app/PostureContext";
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
@@ -32,10 +33,11 @@ import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
 import { useAnnounced, useHeld, useSaying, useSessionActivity, useSessionQuestions } from "./live";
-import { RoomView, Stage, stageState, useRoomView } from "./Stage";
+import { RoomView, Stage, stageState } from "./Stage";
 import { activityItems, type ExtraItem, weave, withGaps } from "./timeline";
 import { Transcript } from "./Transcript";
 import { buildHistory, buildTranscript } from "./transcript";
+import { Follow, scrollsUp } from "./follow";
 import "./session.css";
 
 /**
@@ -45,8 +47,6 @@ import "./session.css";
  * brace: nothing may ever read half-erased under the dock.
  */
 const MIN_SCROLL_PX = 48;
-/** Within this of the end, the transcript counts as followed and new turns keep it there. */
-const PINNED_PX = 64;
 
 type Action = "send" | "wake" | "sleep" | "confirm" | "cancel";
 const FAILED: Record<Action, string> = {
@@ -69,6 +69,8 @@ export default function SessionScreen(_: RouteProps) {
   const end = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const own = useRef<OwnSettle>(null);
+  // Whether the record follows its newest turn (`follow.ts`).
+  const [follow] = useState(() => new Follow());
 
   const sessionId = status?.session_id ?? null;
   const inSession = !!sessionId;
@@ -113,11 +115,15 @@ export default function SessionScreen(_: RouteProps) {
   const micOffText = micOff ? notListeningSub(micOff) : null;
   const listenAgain = () => void listening.set(true);
   const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
-  const { room, toggle: toggleRoom, leave: leaveRoom } = useRoomView(inSession && !onPhone);
+  // Room view is the room posture on this screen (app/posture.ts): one rule, one switch.
+  const posture = usePosture();
+  const room = posture.posture === "room" && inSession && !onPhone;
+  const toggleRoom = () => posture.hold(room ? "auto" : "room");
+  const leaveRoom = () => posture.hold("auto");
   // Room view fills the panel from its top; leaving it goes back to the end of the record.
   useEffect(() => {
     if (room) scrollPanelToTop();
-    else if (pinned.current) scrollIntoPanel(end.current, { block: "panel-end" });
+    else if (follow.pinned) scrollIntoPanel(end.current, { block: "panel-end", smooth: false });
   }, [room]);
   const lastReply = [...turns].reverse().find((t) => t.role === "assistant") ?? null;
   const lastHeard = [...turns].reverse().find((t) => t.role === "user") ?? null;
@@ -140,11 +146,11 @@ export default function SessionScreen(_: RouteProps) {
   const thinking = inSession && online && phase === "thinking";
 
   // ---------------------------------------------------------------- following the transcript
-  // New turns keep the transcript at its end only while the operator is there (or has just
-  // sent something, or a change arrives for their okay). Scrolled up to re-read, it stays put
-  // and a “New reply” pill offers the way back.
-  const pinned = useRef(true);
-  const follow = useRef(false);
+  // New turns keep the transcript at its end while the operator is there, and during a spoken
+  // session by default. Only their own scroll up lets go (`follow.ts`): then a “New reply”
+  // pill offers the way back. The room view's scroll to the top, the browser clamping as
+  // content above shrinks and a smooth scroll cut short never do.
+  const sentNow = useRef(false);
   const [unseen, setUnseen] = useState(false);
   // Rows, not only turns: a call, a question or a change arriving is something new to see.
   const shownTurns = items.length;
@@ -153,44 +159,78 @@ export default function SessionScreen(_: RouteProps) {
   useEffect(() => {
     const panel = document.getElementById("main");
     if (!panel) return;
-    let lastTop = panel.scrollTop;
+    const mine = () => follow.intent(performance.now());
+    const onWheel = (e: WheelEvent) => e.deltaY < 0 && mine();
+    const onKey = (e: KeyboardEvent) => scrollsUp(e) && !(e.target as HTMLElement | null)?.closest("textarea, input") && mine();
+    // A press on the panel itself (its scrollbar) or a touch: whatever scroll follows is theirs.
+    const onPointer = (e: PointerEvent) => (e.target === panel || e.pointerType === "touch") && mine();
     const onScroll = () => {
-      const near = panel.scrollHeight - panel.scrollTop - panel.clientHeight < PINNED_PX;
-      // Scrolling up lets go; content growing or our own scroll down never does.
-      pinned.current = near || (pinned.current && panel.scrollTop >= lastTop);
-      lastTop = panel.scrollTop;
-      if (near) setUnseen(false);
+      follow.scrolled({ top: panel.scrollTop, height: panel.scrollHeight, client: panel.clientHeight }, performance.now());
+      if (follow.pinned) setUnseen(false);
     };
+    panel.addEventListener("wheel", onWheel, { passive: true });
+    panel.addEventListener("touchmove", mine, { passive: true });
+    panel.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
     panel.addEventListener("scroll", onScroll, { passive: true });
-    return () => panel.removeEventListener("scroll", onScroll);
-  }, []);
+    return () => {
+      panel.removeEventListener("wheel", onWheel);
+      panel.removeEventListener("touchmove", mine);
+      panel.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+      panel.removeEventListener("scroll", onScroll);
+    };
+  }, [follow]);
+
+  // A session is followed from its first turn.
+  useEffect(() => {
+    if (!sessionId) return;
+    follow.newSession();
+    setUnseen(false);
+  }, [sessionId, follow]);
+
+  // A reply growing word by word, a call row opening, the stage's band: the content changes
+  // size with no new row. While followed, the end stays in view.
+  useEffect(() => {
+    const panel = document.getElementById("main");
+    const content = end.current?.parentElement;
+    if (!panel || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (!follow.pinned || room) return;
+      const gap = panel.scrollHeight - panel.scrollTop - panel.clientHeight;
+      if (gap > 1 && panel.scrollHeight - panel.clientHeight >= MIN_SCROLL_PX) scrollIntoPanel(end.current, { block: "panel-end", smooth: false });
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [follow, room]);
 
   useEffect(() => {
     const was = seen.current;
     seen.current = { turns: shownTurns, pending: pending?.id ?? null };
     if (!hasTranscript) {
-      pinned.current = true;
+      follow.newSession();
       setUnseen(false);
       return;
     }
-    const arrived = !!pending && pending.id !== was.pending;
-    if (!pinned.current && !follow.current && !arrived) {
+    const asked = !!pending && pending.id !== was.pending;
+    const sent = sentNow.current;
+    sentNow.current = false;
+    if (follow.onNew({ sent, asked }) === "mark") {
       if (shownTurns > was.turns) setUnseen(true);
       return;
     }
-    follow.current = false;
     // Not scrollIntoView: in Chrome that moves the Tab starting point to the composer.
     // A few pixels of overflow isn't worth it (any scroll raises the compact bar over the
     // header), unless the newest item has reached the fade above the dock: Ghost's question
     // is the one line the operator must read before pressing Confirm.
     const panel = document.getElementById("main");
     if (panel && panel.scrollHeight - panel.clientHeight < MIN_SCROLL_PX && !underFade(end.current, dock.current)) return;
-    pinned.current = true;
+    if (room) return; // the room view holds the top; leaving it comes back to the end
     scrollIntoPanel(end.current, { block: "panel-end" });
   }, [hasTranscript, shownTurns, thinking, pending, decisions.length]);
 
   const toLatest = () => {
-    pinned.current = true;
+    follow.newSession();
     setUnseen(false);
     scrollIntoPanel(end.current, { block: "panel-end" });
   };
@@ -220,7 +260,7 @@ export default function SessionScreen(_: RouteProps) {
     const t = text.trim();
     if (!t || !canType || busy) return;
     setText("");
-    follow.current = true; // the operator's own words always bring the transcript to its end
+    sentNow.current = true; // the operator's own words always bring the transcript to its end
     const r = await run("send", () => client.say(t));
     if (!r.ok) setText((now) => now || t); // give the words back if they didn't go
     composer.current?.focus();

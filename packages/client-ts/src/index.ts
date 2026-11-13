@@ -155,6 +155,12 @@ export type HeardView = Schemas["HeardView"];
 export type SayingView = Schemas["SayingView"];
 /** What one call of the live session returned, as the model was given it (ADR 0058). */
 export type CallPreview = Schemas["CallPreview"];
+/** How much Ghost read and did (ADR 0060): one call's counts and sizes, and totals over a stretch of time. Never contents. */
+export type ReachCall = Schemas["ReachCall"];
+export type ReachTotalView = Schemas["ReachTotalView"];
+export type ReachView = Schemas["ReachView"];
+/** A run started or ended (ADR 0060). */
+export type RunPhase = Schemas["RunEvent"]["phase"];
 /** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
 export type HearChannel = "aec" | "raw";
 
@@ -179,7 +185,13 @@ export type GhostEvent =
   /** Which words of Ghost's reply are heard now (ADR 0058). Desktop only. */
   | Schemas["SayingEvent"]
   /** The Hearing test's recorder, ~20/s while it is open: its view, the mic's level 0..1, whether the VAD hears speech; then one `closed`. */
-  | Schemas["HearEvent"];
+  | Schemas["HearEvent"]
+  /** A run with nobody there started or has ended, with its row as it is now (ADR 0060). Desktop only. */
+  | Schemas["RunEvent"]
+  /** One tool call an agent made came back, as counts and sizes, never contents (ADR 0060). Desktop only. */
+  | Schemas["ReachEvent"]
+  /** "Ghost, open the app" in a session (ADR 0059): the desktop brings its window to the operator. */
+  | Schemas["ShowAppEvent"];
 
 export type Unsubscribe = () => void;
 
@@ -288,8 +300,24 @@ export class GhostClient {
   call(id: string) {
     return unwrap(this.api.GET("/calls/{id}", { params: { path: { id } } }));
   }
+  /** Proposals, newest first; `since`/`until` (RFC 3339) narrow them to a stretch of time (ADR 0060). */
   audit(query: paths["/audit"]["get"]["parameters"]["query"] = {}) {
     return unwrap(this.api.GET("/audit", { params: { query } }));
+  }
+  /** How much Ghost read and did between two times, by app, agent and session or run (ADR 0060). */
+  reach(since: Date | string, until?: Date | string, sessions?: readonly string[]) {
+    const iso = (t: Date | string) => (typeof t === "string" ? t : t.toISOString());
+    return unwrap(
+      this.api.GET("/reach", {
+        params: {
+          query: {
+            since: iso(since),
+            until: until === undefined ? undefined : iso(until),
+            sessions: sessions && sessions.length ? sessions.join(",") : undefined,
+          },
+        },
+      }),
+    );
   }
 
   // --- configuration ---------------------------------------------------------------
@@ -535,8 +563,11 @@ export class GhostClient {
     return unwrap(this.api.GET("/schedules/{schedule_id}/runs", { params: { path: { schedule_id: id }, query: { limit } } }));
   }
   /** The latest runs of every agent, newest first: scheduled, for a watch, or asked for. */
-  runs(limit = 20) {
-    return unwrap(this.api.GET("/runs", { params: { query: { limit } } }));
+  runs(limit = 20, range?: { since?: Date | string; until?: Date | string }) {
+    const iso = (t?: Date | string) => (t === undefined ? undefined : typeof t === "string" ? t : t.toISOString());
+    return unwrap(
+      this.api.GET("/runs", { params: { query: { limit, since: iso(range?.since), until: iso(range?.until) } } }),
+    );
   }
   /** Stop a run that is waiting or going. */
   cancelRun(id: string) {

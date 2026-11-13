@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MockSchedules } from "../src/design/mock/schedules";
-import { OUTCOME, intervalWords, madeBy, untilWords, whenWords } from "../src/screens/watching/model";
+import { OUTCOME, cronWords, intervalWords, madeBy, untilWords, whenWords } from "../src/screens/watching/model";
 
 describe("a schedule in the operator's words", () => {
   const now = Date.parse("2026-11-11T14:00:00Z");
@@ -25,8 +25,10 @@ describe("a schedule in the operator's words", () => {
     expect(whenWords({ ...base, kind: "every", every: "2h" }, "America/Detroit")).toEqual({ text: "Every 2 hours" });
     expect(whenWords({ ...base, kind: "every", every: "1d" }, "America/Detroit")).toEqual({ text: "Every day" });
     // A cron expression is shown as written, and its zone only when it isn't this machine's.
-    expect(whenWords({ ...base, kind: "cron", cron: "0 9 * * 1-5" }, "America/Detroit")).toEqual({ text: "On", mono: "0 9 * * 1-5" });
-    expect(whenWords({ ...base, kind: "cron", cron: "0 9 * * 1-5", time_zone: "Europe/London" }, "America/Detroit")).toEqual({ text: "In Europe/London, on", mono: "0 9 * * 1-5" });
+    // A cron in plain words, the expression kept as detail; one Ghost can't read is shown as written.
+    expect(whenWords({ ...base, kind: "cron", cron: "0 9 * * 1-5" }, "America/Detroit")).toEqual({ text: "Weekdays at 9 AM", detail: "0 9 * * 1-5" });
+    expect(whenWords({ ...base, kind: "cron", cron: "0 9 * * 1-5", time_zone: "Europe/London" }, "America/Detroit")).toEqual({ text: "Weekdays at 9 AM, Europe/London time", detail: "0 9 * * 1-5" });
+    expect(whenWords({ ...base, kind: "cron", cron: "0 9 1-7 * 1" }, "America/Detroit")).toEqual({ text: "On", mono: "0 9 1-7 * 1" });
     expect(whenWords({ ...base, kind: "at", at: "2031-12-01T14:00:00Z" }, "America/Detroit").text).toMatch(/^Once, Dec 1, 2031 at /);
   });
 
@@ -89,3 +91,22 @@ describe("the mock daemon's schedules", () => {
 function m_handles_nothing_else(call: (method: string, path: string) => unknown): boolean {
   return call("GET", "/watches") === undefined;
 }
+
+describe("cronWords", () => {
+  it("reads the common shapes in words", () => {
+    expect(cronWords("0 9 * * *")).toBe("Every day at 9 AM");
+    expect(cronWords("30 17 * * 1-5")).toBe("Weekdays at 5:30 PM");
+    expect(cronWords("0 15 * * 5")).toBe("Fridays at 3 PM");
+    expect(cronWords("0 8 * * 1,3")).toBe("Mondays and Wednesdays at 8 AM");
+    expect(cronWords("0 10 * * 0,6")).toBe("Weekends at 10 AM");
+    expect(cronWords("0 9 1 * *")).toBe("The 1st of every month at 9 AM");
+    expect(cronWords("*/15 * * * *")).toBe("Every 15 minutes");
+    expect(cronWords("0 */2 * * *")).toBe("Every 2 hours");
+    expect(cronWords("5 * * * *")).toBe("Every hour at :05");
+  });
+  it("gives up on anything else rather than guess", () => {
+    expect(cronWords("0 9 1-7 * 1")).toBeNull();
+    expect(cronWords("0 9 * 6 *")).toBeNull();
+    expect(cronWords("nonsense")).toBeNull();
+  });
+});

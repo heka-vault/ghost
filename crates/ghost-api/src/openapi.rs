@@ -159,6 +159,36 @@ pub struct HearEvent {
     pub speaking: bool,
 }
 
+/// A run with nobody there started or has ended (ADR 0060), with its row as it is now.
+#[derive(ToSchema)]
+pub struct RunEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "run")]
+    pub r#type: String,
+    pub run: crate::schedules::ScheduleRunInfo,
+    #[schema(inline)]
+    pub phase: crate::models::RunPhase,
+}
+
+/// One tool call an agent made came back, as counts and sizes (ADR 0060).
+#[derive(ToSchema)]
+pub struct ReachEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "reach")]
+    pub r#type: String,
+    pub reach: crate::models::ReachCall,
+}
+
+/// The operator asked by voice to see Ghost's window (ADR 0059): the desktop brings its main
+/// window to the workspace they are on and to the front. Inside a session only.
+#[derive(ToSchema)]
+pub struct ShowAppEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "show_app")]
+    pub r#type: String,
+    pub session_id: String,
+}
+
 /// What the event stream carries, discriminated by `type`.
 #[derive(ToSchema)]
 #[serde(untagged)]
@@ -177,6 +207,9 @@ pub struct HearEvent {
     ("heard" = "#/components/schemas/HeardEvent"),
     ("saying" = "#/components/schemas/SayingEvent"),
     ("hear" = "#/components/schemas/HearEvent"),
+    ("run" = "#/components/schemas/RunEvent"),
+    ("reach" = "#/components/schemas/ReachEvent"),
+    ("show_app" = "#/components/schemas/ShowAppEvent"),
 )))]
 pub enum Event {
     Status(StatusEvent),
@@ -193,6 +226,9 @@ pub enum Event {
     Heard(HeardEvent),
     Saying(SayingEvent),
     Hear(HearEvent),
+    Run(RunEvent),
+    Reach(ReachEvent),
+    ShowApp(ShowAppEvent),
 }
 
 /// `POST /conversations/{slug}/notes` takes a free object with `text` in it.
@@ -235,7 +271,15 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("SayingView", crate::models::SayingView::schema()),
         ("HearEvent", HearEvent::schema()),
         ("HearView", crate::hear::HearView::schema()),
+        ("ShowAppEvent", ShowAppEvent::schema()),
         ("ActivityView", crate::models::ActivityView::schema()),
+        ("RunEvent", RunEvent::schema()),
+        ("ReachEvent", ReachEvent::schema()),
+        ("ReachCall", crate::models::ReachCall::schema()),
+        (
+            "ScheduleRunInfo",
+            crate::schedules::ScheduleRunInfo::schema(),
+        ),
     ] {
         components.schemas.entry(name.to_string()).or_insert(schema);
     }

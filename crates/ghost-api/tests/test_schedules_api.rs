@@ -331,6 +331,20 @@ async fn run_now_starts_a_run_and_its_runs_say_what_it_answered() {
     // Every schedule's runs, and a watch's, in one list.
     let all = c.get("/runs").await;
     assert_eq!(all["runs"][0]["id"], run["id"]);
+    // And by the day they were due (ADR 0060): today's has it, the day before does not.
+    let day = |offset: i64| {
+        (chrono::Utc::now() + chrono::Duration::days(offset))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    let today = c
+        .get(&format!("/runs?since={}&until={}", day(-1), day(1)))
+        .await;
+    assert_eq!(today.status, 200, "{}", today.text);
+    assert_eq!(today["runs"][0]["id"], run["id"]);
+    let before = c
+        .get(&format!("/runs?since={}&until={}", day(-3), day(-2)))
+        .await;
+    assert_eq!(before["runs"].as_array().unwrap().len(), 0);
 
     assert_eq!(c.post("/schedules/nope/run", None).await.status, 404);
     assert_eq!(c.get("/schedules/nope/runs").await.status, 404);

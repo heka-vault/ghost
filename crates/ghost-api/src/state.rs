@@ -360,6 +360,15 @@ impl DaemonState {
         self.bus.publish(&Event::Heard { heard });
     }
 
+    /// The operator asked to see Ghost's window (`Event::ShowApp`, ADR 0059); dropped outside
+    /// a session.
+    pub fn publish_show_app(&self) {
+        let Some(session_id) = self.session_id() else {
+            return;
+        };
+        self.bus.publish(&Event::ShowApp { session_id });
+    }
+
     /// Which words of the reply are heard now (`Event::Saying`, ADR 0058); dropped outside
     /// a session.
     pub fn publish_saying(&self, reply: u32, from: u32, to: u32) {
@@ -420,6 +429,23 @@ impl DaemonState {
         };
         activity.session_id = id;
         self.bus.publish(&Event::Activity { activity });
+    }
+
+    /// A run started or has ended (`Event::Run`, ADR 0060).
+    pub fn publish_run(
+        &self,
+        run: crate::schedules::ScheduleRunInfo,
+        phase: crate::models::RunPhase,
+    ) {
+        self.bus.publish(&Event::Run { run, phase });
+    }
+
+    /// One call's counts and sizes (`Event::Reach`, ADR 0060). Only built when someone
+    /// is listening.
+    pub fn publish_reach(&self, row: &ghost_core::reach::ReachRow) {
+        if self.bus.subscribers() > 0 {
+            self.bus.publish(&Event::Reach { reach: row.into() });
+        }
     }
 
     pub fn set_pending(&self, pending: Option<PendingProposal>) {
@@ -548,6 +574,23 @@ mod tests {
         ));
         let v: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
         assert_eq!(v["count"], 3);
+    }
+
+    #[test]
+    fn showing_the_app_is_a_sessions_own() {
+        // ADR 0059: "open the app" outside a session is nobody's; inside, it names the session.
+        let st = DaemonState::new("test", "file");
+        let mut rx = st.bus.subscribe();
+        st.publish_show_app();
+        assert!(rx.try_recv().is_err());
+        st.set_phase(Phase::Listening, Some("s1"), Some(SessionOrigin::Desk));
+        let mut rx = st.bus.subscribe();
+        st.publish_show_app();
+        let v: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"type": "show_app", "session_id": "s1"})
+        );
     }
 
     #[test]

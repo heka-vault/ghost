@@ -147,6 +147,9 @@ pub enum Action {
     /// "Ghost, stop listening" (ADR 0057): the microphone closes once the line is said, and
     /// the session ends. There is no spoken way back: Ghost cannot hear it.
     StopListening,
+    /// "Ghost, open the app" (ADR 0059): the desktop brings its window to the operator. The
+    /// session goes on.
+    ShowApp,
 }
 
 /// An interceptor took the turn. The model never sees it.
@@ -198,6 +201,8 @@ pub enum EventKind {
     Quiet,
     /// The operator said to stop listening (ADR 0057); the daemon closes the microphone.
     StopListening,
+    /// The operator asked to see Ghost's window (ADR 0059); the daemon tells the desktop.
+    ShowApp,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -190,3 +190,18 @@ export async function openExternal(url: string): Promise<boolean> {
   window.open(url, "_blank", "noopener,noreferrer");
   return true;
 }
+
+/**
+ * Why an app isn't connected, in a few plain words for its row; the app's own message stays
+ * on its page and in the row's tooltip. App text is untrusted and long: never the subtitle.
+ */
+export function problemWords(problem: string | null | undefined): string {
+  const p = (problem ?? "").toLowerCase();
+  if (!p) return "Not connected";
+  if (/command not found|no such file|not found on path|enoent/.test(p)) return "Its command isn’t installed";
+  if (/timed out|timeout/.test(p)) return "It didn’t answer in time";
+  if (/401|403|unauthori[sz]ed|forbidden|sign in|token/.test(p)) return "It turned down Ghost’s sign-in";
+  if (/refused|can.t reach|connecterror|unreachable|dns|resolve/.test(p)) return "Ghost can’t reach it";
+  if (/exited|crash|killed|signal/.test(p)) return "It stopped when Ghost started it";
+  return "It couldn’t start";
+}

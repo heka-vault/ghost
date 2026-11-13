@@ -2,6 +2,8 @@
 //! hides it; Quit in the tray is the one off switch (ADR 0038). Stop listening closes
 //! Ghost's microphone (ADR 0057): the item turns into Listen again, and the tray's icon
 //! is struck through in red, as a smart speaker's mic-off light, until it is turned back on.
+//! Float over the desktop turns the floating room on and off (ADR 0059): the quick way to hide
+//! it, where a screen share can't be seen.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +27,10 @@ pub struct ListenTray {
     shown: Mutex<Option<bool>>,
 }
 
-pub fn build(app: &App) -> tauri::Result<()> {
+/// The floating room's item, where the desktop has it.
+pub struct FloatTray(CheckMenuItem<Wry>);
+
+pub fn build(app: &App, floating: &crate::floating::Status) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Open Ghost", true, None::<&str>)?;
     let wake = MenuItem::with_id(app, "wake", "Wake", true, None::<&str>)?;
     let listen = MenuItem::with_id(app, "listen", "Stop listening", true, None::<&str>)?;
@@ -39,11 +44,26 @@ pub fn build(app: &App) -> tauri::Result<()> {
     )?;
     let quit = MenuItem::with_id(app, "quit", "Quit Ghost", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = if autostart::managed() {
-        Menu::with_items(app, &[&show, &wake, &listen, &sep, &login, &quit])?
-    } else {
-        Menu::with_items(app, &[&show, &wake, &listen, &sep, &quit])?
-    };
+    let float = CheckMenuItem::with_id(
+        app,
+        "float",
+        "Float over the desktop",
+        true,
+        floating.settings.on,
+        None::<&str>,
+    )?;
+    let floats = !matches!(floating.support, crate::floating::Support::No { .. });
+    let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = vec![&show, &wake, &listen];
+    if floats {
+        items.push(&float);
+    }
+    items.push(&sep);
+    if autostart::managed() {
+        items.push(&login);
+    }
+    items.push(&quit);
+    let menu = Menu::with_items(app, &items)?;
+    app.manage(FloatTray(float.clone()));
     let icon = app.default_window_icon().unwrap().clone().to_owned();
     app.manage(ListenTray {
         item: listen,
@@ -70,6 +90,12 @@ pub fn build(app: &App) -> tauri::Result<()> {
                 tauri::async_runtime::spawn(async move {
                     let _ = api_request("PUT".into(), "/listening".into(), Some(body)).await;
                 });
+            }
+            "float" => {
+                let on = float.is_checked().unwrap_or(false);
+                if let Some(h) = app.try_state::<std::sync::Arc<crate::floating::Host>>() {
+                    h.set_on(on);
+                }
             }
             "login" => {
                 let on = login.is_checked().unwrap_or(true);
@@ -136,8 +162,31 @@ pub fn struck(icon: &Image<'_>) -> Image<'static> {
     Image::new_owned(px, w as u32, h as u32)
 }
 
+/// The floating room's switch moved (from Settings or here): the item follows it.
+pub fn show_floating(app: &AppHandle, on: bool) {
+    if let Some(item) = app.try_state::<FloatTray>() {
+        let _ = item.0.set_checked(on);
+    }
+}
+
+/// Bring the main window to the operator: onto the workspace they are on and to the front.
+///
+/// A window that is showing but not focused may be on another workspace or behind others.
+/// Raising it in place would, on GNOME, either switch the operator's workspace to it or, with
+/// no activation token, only flash "Ghost is ready". Unmapping it and mapping it again makes
+/// it a new window to the compositor, which puts it on the current workspace and gives it the
+/// focus (docs/floating-room.md, Workspaces). Its page, scroll and drafts are kept: a
+/// hidden window keeps its webview.
 pub fn show_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        let visible = w.is_visible().unwrap_or(false);
+        let focused = w.is_focused().unwrap_or(false);
+        if visible && focused {
+            return;
+        }
+        if visible {
+            let _ = w.hide();
+        }
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();

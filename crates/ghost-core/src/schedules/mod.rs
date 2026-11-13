@@ -37,7 +37,7 @@ use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
 pub use jobs::{JobEdit, Jobs, ScheduleError};
-pub use scheduler::{Scheduler, SchedulerParts};
+pub use scheduler::{OnRun, RunPhase, Scheduler, SchedulerParts};
 pub use turns::{ASK_WAIT, AgentTurns, Busy, Turn};
 pub use when::{ActiveHours, Schedule, Written};
 
