@@ -4110,6 +4110,11 @@ export interface components {
             /** Format: int64 */
             bytes: number;
             /**
+             * @description The take begins where the passive listener started (after a session): shorter than
+             *     asked, since what came before was not passive audio.
+             */
+            cut_at_start: boolean;
+            /**
              * Format: double
              * @description Where in the take the frame that scored ended, in seconds.
              */

@@ -201,7 +201,7 @@ export const ROUTES: RouteDef[] = [
     chrome: "app",
     needsDaemon: true,
     nav: { label: "Hearing test", icon: AudioWaveform, group: "main" },
-    accept: (p) => !p.tab || (["sessions", "runs", "plan"].includes(p.tab) && (!p.id || p.tab === "runs")),
+    accept: (p) => !p.tab || (["sessions", "runs", "plan", "wake"].includes(p.tab) && (!p.id || p.tab === "runs")),
     component: lazy(() => import("../screens/hear")),
   },
   {

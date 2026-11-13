@@ -19,6 +19,7 @@ function take(id: string, extra: Partial<WakeTakeView> = {}): WakeTakeView {
     scores_end: 12,
     reading: null,
     label: null,
+    cut_at_start: false,
     bytes: 1000,
     ...extra,
   };

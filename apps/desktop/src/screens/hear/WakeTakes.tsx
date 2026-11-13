@@ -151,7 +151,7 @@ export function WakeTakesTab() {
         </div>
         <div className="wt-actions">
           <Switch checked={view.choice.unlabelled_accepted_are_me ?? false} onChange={(on) => void setUnlabelled(on)} label="Count unlabelled wakes as me" />
-          <Button variant="danger" size="sm" leadingIcon={<Trash2 size={14} />} onClick={() => void removeAll()} disabled={!view.count}>
+          <Button variant="danger-ghost" size="sm" leadingIcon={<Trash2 size={14} />} onClick={() => void removeAll()} disabled={!view.count}>
             Delete all
           </Button>
         </div>
@@ -183,7 +183,14 @@ export function WakeTakesTab() {
                 <Tooltip content="Play through Ghost’s speaker">
                   <IconButton size="sm" label="Play" icon={<Play size={14} />} onClick={() => play(k)} />
                 </Tooltip>
-                <span className="wt-when">{relativeTime(k.at)}</span>
+                <span className="wt-when">
+                  {relativeTime(k.at)}
+                  {k.cut_at_start && (
+                    <Tooltip content="It began where Ghost started listening, right after a conversation, so it holds less than the usual 12 s before.">
+                      <span className="wt-cut">Cut short</span>
+                    </Tooltip>
+                  )}
+                </span>
                 <Badge tone={k.outcome === "accepted" ? "ok" : "neutral"} size="sm">
                   {outcomeText(k)}
                 </Badge>
@@ -192,7 +199,7 @@ export function WakeTakesTab() {
                 <span className="wt-reading">{k.reading ? `“${k.reading}”` : ""}</span>
                 <span className="wt-input">{k.array ? `${k.input} + array` : k.input}</span>
                 {k.label ? (
-                  <Badge tone={k.label === "not" ? "warn" : "info"} size="sm">
+                  <Badge tone={k.label === "not" ? "neutral" : "info"} size="sm">
                     {LABEL_TEXT[k.label]}
                   </Badge>
                 ) : (

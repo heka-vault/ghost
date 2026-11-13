@@ -74,10 +74,10 @@ export function WakeTakesRow() {
         }
         meta={
           <span className="set-wake-takes">
-            <Switch checked={keep} onChange={(on) => void toggle(on)} aria-label="Keep wake takes" label={keep ? "On" : "Off"} />
-            <Button size="sm" variant="secondary" onClick={() => void removeAll()} disabled={!view?.count}>
-              Delete
+            <Button size="sm" variant="danger-ghost" onClick={() => void removeAll()} disabled={!view?.count}>
+              Delete all
             </Button>
+            <Switch checked={keep} onChange={(on) => void toggle(on)} aria-label="Keep wake takes" />
           </span>
         }
       />

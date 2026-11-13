@@ -139,16 +139,17 @@ function FloatingSettings() {
                   ? "Without Ghost’s GNOME helper, Ghost can’t see which monitor you’re working on, so “the other monitor” is the one that isn’t primary. docs/floating-room.md says how to add the helper."
                   : "With one monitor, Ghost comes forward on the side away from your work when it can tell where that is."
             }
-            trailing={<Select size="sm" aria-label="Ghost appears on" value={value} options={options} onChange={(e) => void set({ ...status.settings, monitor: prefOf(e.target.value) })} />}
+            trailing={<Select size="sm" className="room-select" aria-label="Ghost appears on" value={value} options={options} onChange={(e) => void set({ ...status.settings, monitor: prefOf(e.target.value) })} />}
           />
         )}
         {on && (
           <ListRow
             title="Where on the screen"
-            description="Beside your work keeps Ghost in a column at the edge away from what you’re doing. The corner is the smallest. The centre is the whole stage."
+            description="Beside your work is a column at the edge away from what you’re doing; the corner is the smallest; the centre is the whole stage."
             trailing={
               <Select
                 size="sm"
+                className="room-select"
                 aria-label="Where on the screen"
                 value={status.settings.placement ?? "beside"}
                 options={[
@@ -164,10 +165,11 @@ function FloatingSettings() {
         {on && (
           <ListRow
             title="Captions"
-            description="Ghost is a voice: by default nothing it says is written over your desktop. Captions show the words being said, two lines at the bottom. “When the sound is off” means muted or turned down too far to hear."
+            description="Ghost is a voice, so by default nothing it says is written on your desktop. “When the sound is off” means muted or too quiet to hear."
             trailing={
               <Select
                 size="sm"
+                className="room-select"
                 aria-label="Captions"
                 value={status.settings.captions ?? "off"}
                 options={[
@@ -183,10 +185,11 @@ function FloatingSettings() {
         {on && (
           <ListRow
             title="While my screen is shared"
-            description="When a meeting or a recording takes your whole screen, Ghost floating over it would be in it. Hide Ghost keeps it out until the share ends. Show Ghost puts it in, with a “Screen shared” mark on it so you know. Ask each time shows a small Show or Hide card when a share starts. Whatever you pick, the tray’s Show Ghost in this share changes it for that share only. Sharing a single window never includes the floating room."
+            description="When a meeting or recording takes your whole screen. Shown, Ghost is marked “Screen shared”; the tray changes it for one share. Sharing a single window never includes it."
             trailing={
               <Select
                 size="sm"
+                className="room-select"
                 aria-label="While my screen is shared"
                 value={status.settings.while_shared ?? "hide"}
                 options={[

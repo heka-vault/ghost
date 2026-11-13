@@ -153,6 +153,21 @@ export default function settings(s: Scenario): SettingsFixture {
       // so it still listens on the USB microphone. Settings shows the difference.
       input_device: !configured ? null : s.data === "busy" ? "Shure MV7+: USB Audio (hw:2,0)" : "ghost.mic",
       output_device: s.data === "busy" ? "Shure MV7+: USB Audio (hw:2,0)" : null,
+      // How Ghost hears you (ADR 0064): the canceller over the USB microphone, in the daemon's words.
+      microphone: configured
+        ? {
+            case: "host-canceller",
+            summary: "Ghost’s echo canceller cleans Shure MV7+ against what the speakers play, and Ghost listens to it (ghost.mic).",
+            advice: null,
+            suggest: [],
+            session_input: "ghost.mic",
+            wake_input: "ghost.mic",
+            problem: null,
+            fell_back: null,
+            repair: "ask",
+            can_repair: true,
+          }
+        : null,
       devices: [
         { index: 0, name: "HDA Intel PCH: ALC1220 Analog (hw:0,0)", max_input_channels: 2, max_output_channels: 0, default_samplerate: 44100, is_default_input: false, is_default_output: false },
         { index: 2, name: "HDA Intel PCH: HDMI 0 (hw:0,3)", max_input_channels: 0, max_output_channels: 8, default_samplerate: 44100, is_default_input: false, is_default_output: false },
