@@ -63,7 +63,7 @@ operator makes, and automatic signals are a later, advanced feature.
 
 **One ability, several credentials.** An ability may need a credential per scope owner
 (a token per GitHub organisation). The ability declares a credential map in its settings
-(`GHOST_GITHUB_TOKENS="heka-vault=HEKA_ORG_TOKEN,quotient=QUOTIENT_ORG_TOKEN"`, each value
+(`GHOST_GITHUB_TOKENS="heka-vault=HEKA_ORG_TOKEN,acme=ACME_ORG_TOKEN"`, each value
 the name of an environment variable holding the secret) and picks by owner, falling back
 to `GITHUB_TOKEN`. Secrets still come only from the environment and are never written to a
 file or a log.

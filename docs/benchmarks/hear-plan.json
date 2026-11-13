@@ -26,7 +26,7 @@
       "title": "At the desk, a pause mid-sentence",
       "instruction": "Where the line shows '...', stop for about a second, the way you do when you're thinking of the next word, then carry on. Don't rush the pause and don't stretch it.",
       "takes": [
-        {"id": "B01", "kind": "speech", "text": "Read me issue four one three ... from the quotient research project.", "tags": ["pause", "numbers", "terms"], "terms": ["quotient"]},
+        {"id": "B01", "kind": "speech", "text": "Read me issue four one three ... from the acme research project.", "tags": ["pause", "numbers", "terms"], "terms": ["acme"]},
         {"id": "B02", "kind": "speech", "text": "What's waiting for triage ... in the app repo?", "tags": ["pause"]},
         {"id": "B03", "kind": "speech", "text": "Can you read issue ... four oh three?", "tags": ["pause", "numbers"]},
         {"id": "B04", "kind": "speech", "text": "I noticed that when I pause ... in the middle of a sentence ... you cut me off.", "tags": ["pause"]},

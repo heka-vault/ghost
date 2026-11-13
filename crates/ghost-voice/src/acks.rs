@@ -10,7 +10,7 @@
 //! [`READ`], a change one of [`CHANGE`], picked at random and never the same twice in a
 //! row. They are rendered once per voice into the cache (`~/.cache/ghost/acks-v1/`) and
 //! played as they are, so nothing is synthesized on the turn's path. The model's own
-//! narration ("let me check the Quotient projects first") is still dropped by
+//! narration ("let me check the Acme projects first") is still dropped by
 //! `narration`; this is what is said in its place.
 //!
 //! The acknowledgment is not a turn: not in the transcript, the context, or the last reply
@@ -979,10 +979,10 @@ mod tests {
             vec![
                 Frame::UserStopped,
                 Frame::LlmStart,
-                calls(&["github_quotient_search_issues"]),
+                calls(&["github_acme_search_issues"]),
                 Frame::LlmEnd,
                 Frame::LlmStart,
-                calls(&["github_quotient_issue_read"]), // a second round: no second ack
+                calls(&["github_acme_issue_read"]), // a second round: no second ack
                 Frame::LlmEnd,
             ],
         )
@@ -993,7 +993,7 @@ mod tests {
         // the next turn is acknowledged again, with other words
         let next = run(
             &mut s,
-            vec![Frame::UserStopped, calls(&["github_quotient_issue_read"])],
+            vec![Frame::UserStopped, calls(&["github_acme_issue_read"])],
         )
         .await;
         assert_eq!(next.len(), 1);
@@ -1007,7 +1007,7 @@ mod tests {
             &mut s,
             vec![
                 Frame::ThinkingStart, // the wake's own request
-                calls(&["github_quotient_search_issues", "github_issue_write"]),
+                calls(&["github_acme_search_issues", "github_issue_write"]),
             ],
         )
         .await;
@@ -1033,7 +1033,7 @@ mod tests {
                 // a reply already being spoken when it reaches for an app
                 Frame::UserStopped,
                 Frame::LlmText("Here are the three. ".into()),
-                calls(&["github_quotient_issue_read"]),
+                calls(&["github_acme_issue_read"]),
             ],
         )
         .await;
@@ -1132,7 +1132,7 @@ mod tests {
             vec![
                 Frame::UserStopped,
                 Frame::ReplyTurn(token),
-                calls(&["github_quotient_search_issues"]),
+                calls(&["github_acme_search_issues"]),
             ],
         )
         .await;

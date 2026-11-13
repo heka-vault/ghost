@@ -487,7 +487,7 @@ async fn small_talk_is_the_voices_own_and_never_reaches_the_agent() {
 #[tokio::test]
 async fn a_lookup_is_the_agents_and_its_answer_is_said_exactly() {
     let w = world(Setup::new(
-        &["anything critical in quotient"],
+        &["anything critical in acme"],
         vec![vec![
             ScriptedModel::call("", "github_search_issues", Map::new()),
             ScriptedModel::say("Two are critical: 3 and 7."),
@@ -497,10 +497,10 @@ async fn a_lookup_is_the_agents_and_its_answer_is_said_exactly() {
     opened(&w).await;
     turn(
         &w,
-        "anything critical in quotient",
+        "anything critical in acme",
         Some(Reply::Consult {
             ack: "One sec.".into(),
-            request: "critical issues in quotient".into(),
+            request: "critical issues in acme".into(),
         }),
     )
     .await;
@@ -511,12 +511,9 @@ async fn a_lookup_is_the_agents_and_its_answer_is_said_exactly() {
     // The agent got the operator's own words and the voice's reading, marked as that.
     let asked = w.asked.lock().unwrap().clone();
     let first = &asked[0][0];
+    assert!(first.starts_with("anything critical in acme"), "{first}");
     assert!(
-        first.starts_with("anything critical in quotient"),
-        "{first}"
-    );
-    assert!(
-        first.contains("passed this on as: \"critical issues in quotient\""),
+        first.contains("passed this on as: \"critical issues in acme\""),
         "{first}"
     );
     // The consult was answered, and the answer was asked for word for word.

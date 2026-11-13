@@ -133,7 +133,7 @@ describe("the take list", () => {
   });
 
   it("splits a line at its pauses", () => {
-    expect(lineParts("Read me issue four one three ... from the quotient research project.")).toEqual(["Read me issue four one three", "from the quotient research project."]);
+    expect(lineParts("Read me issue four one three ... from the acme research project.")).toEqual(["Read me issue four one three", "from the acme research project."]);
     expect(lineParts("I noticed that when I pause ... in the middle ... you cut me off.")).toHaveLength(3);
     expect(lineParts("Stop.")).toEqual(["Stop."]);
     expect(lineParts("")).toEqual([]);

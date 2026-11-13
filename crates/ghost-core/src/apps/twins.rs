@@ -142,14 +142,14 @@ mod tests {
         let apps = [
             seen("github", "api.githubcopilot.com", &gh),
             seen("mobbin", "mobbin.com", &["search"]),
-            seen("github_quotient", "api.githubcopilot.com", &gh),
+            seen("github_acme", "api.githubcopilot.com", &gh),
             seen("github_other", "api.githubcopilot.com", &gh),
         ];
         let t = twins(&apps);
         assert_eq!(t.len(), 2, "{t:?}");
-        let line = &t["github_quotient"];
+        let line = &t["github_acme"];
         assert!(
-            line.contains("github_quotient and github are two connections"),
+            line.contains("github_acme and github are two connections"),
             "{line}"
         );
         assert!(line.contains("Ghost reads it through the other"), "{line}");
@@ -163,11 +163,11 @@ mod tests {
         let apps = [
             seen("github", "api.githubcopilot.com", &gh),
             seen("mobbin", "mobbin.com", &["search"]),
-            seen("github_quotient", "api.githubcopilot.com", &gh),
+            seen("github_acme", "api.githubcopilot.com", &gh),
         ];
         let s = sets(&apps);
-        assert_eq!(s["github"], ["github_quotient"]);
-        assert_eq!(s["github_quotient"], ["github"]);
+        assert_eq!(s["github"], ["github_acme"]);
+        assert_eq!(s["github_acme"], ["github"]);
         assert!(!s.contains_key("mobbin"));
     }
 
