@@ -565,9 +565,15 @@ mod tests {
         assert_eq!(load(&path).monitor, MonitorPref::Here);
         // A file from before the placement and captions: beside the work, no captions.
         let old = load(&path);
-        assert_eq!((old.placement, old.captions), (Placement::Beside, Captions::Off));
+        assert_eq!(
+            (old.placement, old.captions),
+            (Placement::Beside, Captions::Off)
+        );
         let line = serde_json::to_string(&s).unwrap();
-        assert!(line.contains(r#""placement":"corner""#) && line.contains(r#""captions":"muted""#), "{line}");
+        assert!(
+            line.contains(r#""placement":"corner""#) && line.contains(r#""captions":"muted""#),
+            "{line}"
+        );
     }
 
     #[test]
@@ -600,7 +606,13 @@ mod tests {
     #[test]
     fn the_output_reads_as_muted_or_too_low_only_when_pipewire_says_so() {
         let s = parse_wpctl("Volume: 0.40\n").unwrap();
-        assert_eq!(s, Sound { volume: 0.40, muted: false });
+        assert_eq!(
+            s,
+            Sound {
+                volume: 0.40,
+                muted: false
+            }
+        );
         assert!(!s.inaudible());
         assert!(parse_wpctl("Volume: 0.40 [MUTED]").unwrap().inaudible());
         assert!(parse_wpctl("Volume: 0.05").unwrap().inaudible());
